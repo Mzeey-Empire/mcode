@@ -1625,7 +1625,8 @@ function validLiveEventAssociation(
   execution: ExecutionIdentity,
 ): boolean {
   if (mutation.message) {
-    return mutation.text.kind === "unchanged" && validLiveMessageAssociation(mutation.message, event, execution);
+    return mutation.text.kind === "unchanged"
+      && validLiveMessageAssociation(mutation.message, event, execution, mutation.planOutput !== undefined);
   }
   return event.type !== AgentEventType.Message && validLiveTextAssociation(mutation.text, event);
 }
@@ -1634,9 +1635,10 @@ function validLiveMessageAssociation(
   message: DataOnlyParentLiveMessageInput,
   event: ExecutionLivePublicationIntent["event"],
   execution: ExecutionIdentity,
+  hasPlan: boolean,
 ): boolean {
   return event.type === AgentEventType.Message && validLiveMessageIdentity(message)
-    && validLiveMessageBody(message) && event.threadId === execution.threadId
+    && validLiveMessageBody(message, hasPlan) && event.threadId === execution.threadId
     && event.messageId === message.messageId && event.content === message.content
     && (event.model ?? null) === message.model
     && JSON.stringify(event.attachments ?? []) === JSON.stringify(message.attachments);
@@ -1647,10 +1649,10 @@ function validLiveMessageIdentity(message: DataOnlyParentLiveMessageInput): bool
     && typeof message.messageId === "string" && /^[0-9a-f]{64}$/.test(message.messageId);
 }
 
-function validLiveMessageBody(message: DataOnlyParentLiveMessageInput): boolean {
+function validLiveMessageBody(message: DataOnlyParentLiveMessageInput, hasPlan: boolean): boolean {
   if (typeof message.content !== "string" || !Array.isArray(message.attachments)) return false;
   return (message.model === null || typeof message.model === "string")
-    && (message.content.trim().length > 0 || message.attachments.length > 0);
+    && (message.content.trim().length > 0 || message.attachments.length > 0 || hasPlan);
 }
 
 function validNarrativeEvent(event: ExecutionLivePublicationIntent["event"]): boolean {

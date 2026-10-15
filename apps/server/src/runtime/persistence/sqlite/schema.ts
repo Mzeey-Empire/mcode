@@ -1036,14 +1036,16 @@ export const planComments = sqliteTable("plan_comments", {
 export const planQuestionAnswers = sqliteTable(
   "plan_question_answers",
   {
+    id: text("id").primaryKey().notNull(),
     assistantMessageId: text("assistant_message_id")
-      .primaryKey()
-      .notNull()
+      .unique()
       .references(() => messages.id, { onDelete: "cascade" }),
     threadId: text("thread_id")
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),
     answeredAt: text("answered_at").notNull().default(timestampDefault),
+    nativeBatchJson: text("native_batch_json"),
+    status: text("status").notNull().default("answered"),
   },
   (table) => [
     index("idx_plan_question_answers_thread_answered_at").on(table.threadId, table.answeredAt),

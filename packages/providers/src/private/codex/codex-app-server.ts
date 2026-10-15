@@ -19,6 +19,7 @@ import { listCodexModels } from "./codex-models.js";
 import { codexIgnoredNotificationReason } from "./codex-notification-policy.js";
 import { parseCodexNotification } from "./codex-notification-validation.js";
 import { mapDecisionToCodexResponse } from "./codex-permission-mapper.js";
+import type { CodexQuestionRequest } from "./codex-plan-questions.js";
 import type {
   ThreadStartParams,
   ThreadStartResult,
@@ -117,7 +118,13 @@ function createCodexTurnStartParams(
   if (turnOptions?.model) params.model = turnOptions.model;
   if (turnOptions?.effort) params.effort = turnOptions.effort;
   if (turnOptions?.serviceTier) params.serviceTier = turnOptions.serviceTier;
+  Object.assign(params, nativePlanTurnOptions(turnOptions));
   return params;
+}
+
+function nativePlanTurnOptions(options: CodexTurnOptions | undefined): Partial<TurnStartParams> {
+  if (!options?.collaborationMode) return {};
+  return { collaborationMode: options.collaborationMode, additionalContext: options.additionalContext ?? {} };
 }
 
 function fulfilledCodexResult<T>(result: PromiseSettledResult<T>): T | undefined {
@@ -254,6 +261,8 @@ export interface CodexAppServerOptions {
    * Ignored when approvalPolicy === "never" (full-access still auto-approves).
    */
   approvalHandler?: CodexApprovalHandler;
+  questionHandler?: (request: CodexQuestionRequest) => Promise<void>;
+  questionResolved?: (params: unknown) => Promise<void>;
   /**
    * Optional Windows Job Object to attach the spawned child to.
    * When set, the codex process dies with the server on crash.
@@ -337,6 +346,8 @@ export async function routeCodexServerRequest(args: {
   approvalPolicy: AskForApproval | undefined;
   approvalHandler: CodexApprovalHandler | undefined;
   sendResponse: (id: number, result: unknown) => void | Promise<void>;
+  questionHandler?: (request: CodexQuestionRequest) => Promise<void>;
+  cancelRequest?: (id: number) => Promise<void>;
 }): Promise<void> {
   const { msg, approvalPolicy, approvalHandler, sendResponse } = args;
   if (typeof msg.id !== "number") return;
@@ -344,23 +355,14 @@ export async function routeCodexServerRequest(args: {
   const method = msg.method ?? "";
   const diagnosticMethod = boundProtocolIdentifier(method);
   const params = msg.params ?? {};
+  if (method === "item/tool/requestUserInput") {
+    return routeCodexQuestionRequest(msg.id, params, args);
+  }
   const autoApprove = approvalPolicy === "never";
 
   if (autoApprove) {
     logger.info("Codex serverRequest auto-approved", { id: msg.id, method: diagnosticMethod });
-    if (method === "item/permissions/requestApproval") {
-      await sendResponse(msg.id, {
-        permissions: {
-          fileSystem: { read: [], write: [] },
-          network: { enabled: true },
-        },
-        scope: "session",
-      });
-    } else if (method === "applyPatchApproval" || method === "execCommandApproval") {
-      await sendResponse(msg.id, { decision: "approved_for_session" });
-    } else {
-      await sendResponse(msg.id, { decision: "acceptForSession" });
-    }
+    await sendResponse(msg.id, autoApprovedResponse(method));
     return;
   }
 
@@ -390,6 +392,38 @@ export async function routeCodexServerRequest(args: {
     method: diagnosticMethod,
   });
   await sendResponse(msg.id, mapDecisionToCodexResponse(method, "deny", params));
+}
+
+function autoApprovedResponse(method: string): unknown {
+  if (method === "item/permissions/requestApproval") {
+    return {
+      permissions: { fileSystem: { read: [], write: [] }, network: { enabled: true } },
+      scope: "session",
+    };
+  }
+  if (method === "applyPatchApproval" || method === "execCommandApproval") {
+    return { decision: "approved_for_session" };
+  }
+  return { decision: "acceptForSession" };
+}
+
+async function routeCodexQuestionRequest(
+  requestId: number,
+  params: unknown,
+  transport: Pick<Parameters<typeof routeCodexServerRequest>[0], "cancelRequest" | "questionHandler" | "sendResponse">,
+): Promise<void> {
+  const cancelRequest = transport.cancelRequest;
+  if (!cancelRequest) throw new Error("Question cancellation transport is unavailable");
+  const cancel = () => cancelRequest(requestId);
+  if (!transport.questionHandler) return cancel();
+  await transport.questionHandler({
+    rpcId: requestId,
+    params,
+    respond: async result => {
+      await transport.sendResponse(requestId, result);
+    },
+    cancel,
+  });
 }
 
 
@@ -1085,6 +1119,9 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     }
     if (this.handleThreadStartedNotification(message.params, method, diagnosticMethod)) return;
     this.trackTurnNotification(message.params, method);
+    if (method === "serverRequest/resolved") {
+      void this.options.questionResolved?.(message.params).catch(() => logger.warn("Codex question resolution was not recorded"));
+    }
     const ignoredReason = codexIgnoredNotificationReason(method);
     if (ignoredReason) {
       this.emit("activity");
@@ -1135,6 +1172,8 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       approvalPolicy: this.options.approvalPolicy,
       approvalHandler: this.options.approvalHandler,
       sendResponse: (id, result) => this.rpc.sendResponse(id, result),
+      questionHandler: this.options.questionHandler,
+      cancelRequest: id => this.rpc.sendRequestCancelled(id),
     }).catch(() => {
       this.emitFatal("Could not deliver the approval response", "retryable");
     }).finally(() => {

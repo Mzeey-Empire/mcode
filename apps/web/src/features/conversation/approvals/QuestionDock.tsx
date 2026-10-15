@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { CircleHelp } from "lucide-react";
-import { getCatalogEntry, type PlanAnswer, type PlanQuestion, type ProviderId } from "@mcode/contracts";
+import { getCatalogEntry, isNativePlanQuestionId, type PlanAnswer, type PlanQuestion, type ProviderId } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useThreadRecord } from "@/stores/thread-selectors";
@@ -121,7 +121,9 @@ function QuestionPanel({ threadId, providerId, composerContainerRef, isAgentRunn
   const selectedRow = selectedRowOf(question, answer);
   const focusedRow = focus.questionId === question.id ? focus.row : Math.max(selectedRow, 0);
   const isLast = activeIndex === questions.length - 1;
-  const canAdvance = isAnswered(answer) && !(isLast && isAgentRunning);
+  // A native turn is paused on this very question, so it is running by design and Submit must stay live.
+  const submitHeldByRun = isAgentRunning && !isNativePlanQuestionId(question.id);
+  const canAdvance = isAnswered(answer) && !(isLast && submitHeldByRun);
   const arm = () => { guardUntilRef.current = Date.now() + APPROVAL_ARM_DELAY_MS; };
 
   const focusedRowRef = useRef(focusedRow);

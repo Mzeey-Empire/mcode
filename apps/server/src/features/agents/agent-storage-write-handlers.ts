@@ -102,6 +102,8 @@ function planAndTurnHandlers(db: Database): ReadonlyMap<string, (input: unknown)
     [implement.fail.name, databaseWriteHandler(implement.fail, input => implementsStore.fail(input.requestId, input.code))],
     [implement.preparing.name, databaseWriteHandler(implement.preparing, () => implementsStore.preparing())],
     [answer.markAnswered.name, databaseWriteHandler(answer.markAnswered, input => answers.markAnswered(...input))],
+    [answer.createNative.name, databaseWriteHandler(answer.createNative, input => answers.createNative(input))],
+    [answer.settleNative.name, databaseWriteHandler(answer.settleNative, input => answers.settleNative(input.batch, input.status))],
     [snapshot.create.name, databaseWriteHandler(snapshot.create, input => snapshots.create(...input))],
     [snapshot.deleteExpired.name, databaseWriteHandler(snapshot.deleteExpired, input => snapshots.deleteExpired(...input))],
     [diff.create.name, databaseWriteHandler(diff.create, input => diffs.create(...input))],

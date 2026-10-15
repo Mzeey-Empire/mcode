@@ -61,6 +61,8 @@ import {
 } from "@mcode/contracts";
 import { checkCodexVersion, currentCodexVersion, clearVersionCache } from "./codex-version.js";
 import { meetsMinVersion } from "../../version-policy.js";
+import { CodexPlanQuestions } from "./codex-plan-questions.js";
+import type { PlanAnswer, PlanQuestionHandler } from "@mcode/contracts";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
@@ -111,6 +113,8 @@ const STOP_SETTLE_TIMEOUT_MS = 10_000;
 const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
 const USAGE_WARMUP_RETRY_MS = 60_000;
 const CODEX_MIN_VERSION = "0.37.0";
+/** S07-00 captured native plan items and question responses on this CLI version. */
+const CODEX_NATIVE_PLAN_MIN_VERSION = "0.161.0";
 /** First CLI whose app-server answers `turn/steer` with `expectedTurnId`; older ones declare `turn-steer` unsupported. */
 const CODEX_TURN_STEER_MIN_VERSION = "0.99.0";
 // The installed 0.153.4 app-server exposes approvalsReviewer plus the gated
@@ -693,6 +697,39 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private readonly canonicalEventPublisher: CodexCanonicalEventPublisher;
+  private readonly planQuestions = new CodexPlanQuestions();
+  /**
+   * Sessions whose last turn that sent a collaboration mode sent plan. It outlives session close,
+   * because an idle eviction between the plan and the build must not leave the thread in plan mode.
+   */
+  private readonly planModeSessions = new Set<string>();
+  /**
+   * Sessions whose collaboration mode this process has set. Codex keeps plan mode across a thread
+   * resume, so a resumed thread with no entry here may still be planning after a server restart.
+   */
+  private readonly collaborationModeSetSessions = new Set<string>();
+
+  /** Native plan mode requires the durable question handler as well as a compatible CLI. */
+  async supportsNativePlanQuestions(): Promise<boolean> {
+    const { cliPath } = await this.codexPorts.settings.get();
+    const version = checkCodexVersion(cliPath);
+    return this.planQuestions.enabled && version.ok && meetsMinVersion(version.version, CODEX_NATIVE_PLAN_MIN_VERSION);
+  }
+
+  /** Install the server callbacks before any native planning turn is admitted. */
+  bindPlanQuestions(handler: PlanQuestionHandler): void {
+    this.planQuestions.bind(handler);
+  }
+
+  /** Resume the exact question request without dispatching another turn. */
+  async respondToPlanQuestions(threadId: string, requestId: string, answers: PlanAnswer[] | "dismiss"): Promise<boolean> {
+    try {
+      return await this.planQuestions.answer(threadId, requestId, answers);
+    } catch (error) {
+      if (!this.planQuestions.hasPending(`mcode-${threadId}`)) await this.stopSession(`mcode-${threadId}`);
+      throw error;
+    }
+  }
 
   private drainApprovalsAtTurnEnd(routing: CodexCanonicalEventRouting, runtimeEvent: ProviderRuntimeEvent): void {
     // A sub-agent finishing shares the parent's routing but leaves the parent turn, and its approvals, live.
@@ -1201,6 +1238,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private async prepareCodexTurn(request: TurnRequest<"codex">, signal: AbortSignal): Promise<PreparedCodexTurn | undefined> {
     const settings = await this.codexPorts.settings.get();
+    const nativePlan = this.mayUseCollaborationMode(request) && await this.supportsNativePlanQuestions();
     signal.throwIfAborted();
     if (request.resumeFrom !== undefined) this.sdkSessionIds.set(request.sessionId, request.resumeFrom);
     const threadId = this.threadIdForSession(request.sessionId);
@@ -1215,7 +1253,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       cliPath: settings.cliPath,
       sandbox: request.permissionMode === "full" ? "danger-full-access" : "workspace-write",
       browserPermissionCapability: providerBrowserPermissionCapability(request.permissionMode, request.interactionMode),
-      turnOptions: this.codexTurnOptions(request, settings.fastMode),
+      turnOptions: this.codexTurnOptions(request, settings.fastMode, nativePlan),
       threadControlEligible: request.threadControlEligible === true,
     };
   }
@@ -1246,7 +1284,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return [...nativeSkills, ...prompts];
   }
 
-  private codexTurnOptions(request: TurnRequest<"codex">, defaultFastMode: boolean): CodexTurnOptions {
+  private codexTurnOptions(request: TurnRequest<"codex">, defaultFastMode: boolean, nativePlan: boolean): CodexTurnOptions {
     const fastMode = request.providerOptions.fastMode ?? defaultFastMode;
     const effort = request.reasoningLevel;
     return {
@@ -1254,6 +1292,32 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       approvalsReviewer: request.approvalReviewMode === "automatic" ? "auto_review" : "user",
       ...(effort ? { effort } : {}),
       ...(fastMode ? { serviceTier: "priority" } : {}),
+      ...this.codexCollaborationOptions(request, nativePlan),
+    };
+  }
+
+  private recordCollaborationMode(sessionId: string, mode: "plan" | "default" | undefined): void {
+    if (!mode) return;
+    this.collaborationModeSetSessions.add(sessionId);
+    if (mode === "plan") this.planModeSessions.add(sessionId);
+    else this.planModeSessions.delete(sessionId);
+  }
+
+  /** Other turns skip the version gate, so each send still checks the CLI exactly once. */
+  private mayUseCollaborationMode(request: TurnRequest<"codex">): boolean {
+    return Boolean(request.planTurn)
+      || this.planModeSessions.has(request.sessionId)
+      || (request.resumeFrom !== undefined && !this.collaborationModeSetSessions.has(request.sessionId));
+  }
+
+  private codexCollaborationOptions(request: TurnRequest<"codex">, nativePlan: boolean): Pick<CodexTurnOptions, "collaborationMode" | "additionalContext"> {
+    if (!nativePlan || !this.mayUseCollaborationMode(request)) return {};
+    return {
+      collaborationMode: {
+        mode: request.planTurn ? "plan" : "default",
+        settings: { model: request.model, reasoning_effort: request.reasoningLevel ?? null, developer_instructions: null },
+      },
+      additionalContext: {},
     };
   }
 
@@ -1566,6 +1630,14 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       resumeThreadId: context.resumeFrom || undefined,
       requireResume: context.pendingSpawn?.resumeRequired === true,
       developerInstructions,
+      questionResolved: params => this.planQuestions.resolved(context.sessionId, params),
+      questionHandler: async request => {
+        const state = this.runtime.get(context.sessionId);
+        const nativeThreadId = state?.server.threadId;
+        const nativeTurnId = state?.currentNativeTurnId;
+        if (!nativeThreadId || !nativeTurnId) return request.cancel();
+        await this.planQuestions.request(context.sessionId, context.threadId, nativeThreadId, nativeTurnId, request);
+      },
       approvalHandler: context.approvalPolicy === "on-request"
         ? (request) => this.handleApprovalRequest(context.sessionId, context.threadId, request)
         : undefined,
@@ -1618,7 +1690,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
           method: notification.method, errorType: error instanceof Error ? error.name : "unknown" });
       }
     });
-    server.on("fatal", (error: string) => this.handleCodexServerFatal(context, server, mapper, error, { kind: server.lastFatalKind }));
+    server.on("fatal", (error: string) => {
+      void this.handleCodexServerFatal(context, server, mapper, error, { kind: server.lastFatalKind }).catch((failure: unknown) => {
+        logger.error("Codex fatal event handling failed", { errorType: failure instanceof Error ? failure.name : "unknown" });
+      });
+    });
     this.attachFatalDrain(context.sessionId, server);
     server.on("exit", () => {
       // Only evict when this server is still the pooled one — a drained
@@ -1701,25 +1777,50 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     } satisfies ProviderTurnDiffUpdate);
   }
 
-  private handleCodexServerFatal(
+  private async handleCodexServerFatal(
     context: CodexSpawnContext,
     server: CodexAppServer,
     mapper: CodexEventMapper,
     error: string,
     failure: TurnFailure,
-  ): void {
+  ): Promise<void> {
     if (this.activeCodexServers.get(context.sessionId) !== server) return;
     logger.error("CodexAppServer fatal", { sessionId: context.sessionId, error, breadcrumb: server.lastTransportBreadcrumb });
     const entry = this.runtime.get(context.sessionId);
     const executionId = entry?.activeParentTurnExecutionId ?? context.stagedExecutionId;
-    this.projectCodexAssistantBoundary(mapper, context.sessionId, (event) => {
-      const runtimeEvent = providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event);
-      this.emitRuntimeEvent(entry ? this.withCodexTurnAttempt(entry, runtimeEvent, executionId) : runtimeEvent);
-    });
-    this.emitCodexTransportFailure(context.threadId, error, failure, entry, executionId);
+    const emit = this.codexFatalEmitter(entry, executionId);
+    const questionsExpired = this.planQuestions.hasPending(context.sessionId);
+    // runtime.stop defers its work by a microtask and its interrupt reports provider_lost on a
+    // dead transport, so the terminal event must be emitted before any await to win.
+    const expiry = questionsExpired ? this.expireNativeQuestions(context.sessionId) : undefined;
+    this.projectCodexAssistantBoundary(mapper, context.sessionId, emit);
+    if (questionsExpired && entry && executionId) {
+      emit({ type: AgentEventType.Ended, threadId: context.threadId, turnExecutionId: executionId, outcome: "interrupted" });
+    } else {
+      this.emitCodexTransportFailure(context.threadId, error, failure, executionId, emit);
+    }
     if (this.runtime.get(context.sessionId)?.server === server) {
       void this.runtime.stop(context.sessionId);
     }
+    await expiry;
+  }
+
+  private codexFatalEmitter(entry: CodexSessionState | undefined, executionId: string | undefined): (event: AgentEvent) => void {
+    const attempt = entry ? this.nativeTurnAttempt(entry, entry.currentNativeTurnId) : undefined;
+    const deliveryAttempt = attempt?.executionId === executionId ? attempt?.deliveryAttempt : undefined;
+    return event => {
+      const runtimeEvent = providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event);
+      this.emitRuntimeEvent({ ...runtimeEvent, ...(deliveryAttempt !== undefined ? { deliveryAttempt } : {}) });
+    };
+  }
+
+  private emitCodexTransportFailure(threadId: string, error: string, failure: TurnFailure, executionId: string | undefined, emit: (event: AgentEvent) => void): void {
+    if (!executionId) {
+      this.emitTurnFailure(threadId, error, failure, "errored", true, executionId);
+      return;
+    }
+    emit({ type: AgentEventType.Error, threadId, error, failure });
+    emit({ type: AgentEventType.Ended, threadId, turnExecutionId: executionId, outcome: "errored" });
   }
 
   private projectCodexAssistantBoundary(mapper: CodexEventMapper, sessionId: string, emit: (event: AgentEvent) => void): void {
@@ -1730,16 +1831,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       logger.warn("Codex assistant boundary projection failed", { sessionId,
         errorType: error instanceof Error ? error.name : typeof error });
     }
-  }
-
-  private emitCodexTransportFailure(threadId: string, error: string, failure: TurnFailure, entry: CodexSessionState | undefined, executionId: string | undefined): void {
-    if (!entry || !executionId) {
-      this.emitTurnFailure(threadId, error, failure, "errored", true, executionId);
-      return;
-    }
-    // Confirmed process failure must retain the active attempt's terminal routing.
-    this.emitCodexTurnEvent(entry, { type: AgentEventType.Error, threadId, error, failure }, executionId);
-    this.emitCodexTurnEvent(entry, { type: AgentEventType.Ended, threadId, turnExecutionId: executionId, outcome: "errored" }, executionId);
   }
 
   private async startCodexAppServer(
@@ -1956,6 +2047,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): ProviderRuntimeEvent[] {
     const generatedImageEvents = this.mapGeneratedImageEvents(threadId, notification).map((event) => providerRuntimeEvent(event));
     const mapperEvents = mapper.mapValidatedNotification(notification).events;
+    for (const event of mapperEvents) {
+      if (event.planCapture) this.emit("plan_captured", { threadId, ...event.planCapture });
+    }
     const events = [...generatedImageEvents, ...mapperEvents];
     traceCodexIngest(threadId, rawNotification.method, rawNotification.params, events.map((event) => event.event));
     return events;
@@ -2778,6 +2872,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): Promise<void> {
     try {
       const turnId = Array.isArray(input) ? await server.sendTurn(input, turnOptions) : await server.startCompaction();
+      if (Array.isArray(input)) this.recordCollaborationMode(run.entry.sessionId, turnOptions?.collaborationMode?.mode);
       if (run.seq !== run.entry.runTurnSeq) return;
       run.entry.turnStartResponsePending = false;
       run.entry.pendingTurnStartNotification = undefined;
@@ -2998,6 +3093,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * A stop before spawn prevents the staged turn from starting.
    */
   async stopSession(sessionId: string): Promise<void> {
+    if (this.planQuestions.hasPending(sessionId)) await this.cancelPlanQuestions(sessionId);
     const pending = this.pendingTurnRequests.get(sessionId);
     pending?.controller.abort();
     if (pending) this.releaseStagedCodexTurn(sessionId, pending.controller.signal);
@@ -3018,10 +3114,22 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       }
       this.runtime.recordUsage(sessionId);
     } else {
-      this.pendingSpawnTurns.delete(sessionId);
-      const stagedBrowser = this.pendingBrowserAccess.get(sessionId);
-      this.pendingBrowserAccess.delete(sessionId);
-      if (stagedBrowser) this.host.browser.release(stagedBrowser.stage.leaseId);
+      this.releaseUnspawnedStop(sessionId);
+    }
+  }
+
+  private releaseUnspawnedStop(sessionId: string): void {
+    this.pendingSpawnTurns.delete(sessionId);
+    const stagedBrowser = this.pendingBrowserAccess.get(sessionId);
+    this.pendingBrowserAccess.delete(sessionId);
+    if (stagedBrowser) this.host.browser.release(stagedBrowser.stage.leaseId);
+  }
+
+  private async cancelPlanQuestions(sessionId: string): Promise<void> {
+    try {
+      await this.planQuestions.drain(sessionId, "dismissed");
+    } catch (error) {
+      logger.warn("Codex question cancellation failed; interrupting the turn", { sessionId, error: String(error) });
     }
   }
 
@@ -3068,17 +3176,28 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * leaving goals and pending permissions intact for the retry turn.
    */
   async discardSession(sessionId: string): Promise<void> {
+    if (this.planQuestions.hasPending(sessionId)) await this.expireNativeQuestions(sessionId);
     if (this.runtime.get(sessionId) === undefined) return;
     await this.runtime.stop(sessionId);
   }
 
+  /** A failed receipt write must not keep a dead session pooled or a turn open. */
+  private async expireNativeQuestions(sessionId: string): Promise<void> {
+    try {
+      await this.planQuestions.drain(sessionId, "expired");
+    } catch (error) {
+      logger.warn("Codex question expiry failed", { sessionId, errorType: error instanceof Error ? error.name : "unknown" });
+    }
+  }
+
   /** Tears down all sessions, drains pending permissions, and stops the eviction timer. */
   async shutdown(): Promise<void> {
+    const results: PromiseSettledResult<unknown>[] = await Promise.allSettled([...this.liveSessionIds].map(sessionId => this.planQuestions.drain(sessionId, "expired")));
     // Drain everything up front: `runtime.shutdown` stops each session
     // (close drains per-session), but draining all here also clears any
     // permissions whose session never landed in the pool.
     this.drainPending(() => true);
-    const results = await Promise.allSettled([this.runtime.shutdown(), this.codexPorts.catalog.shutdown()]);
+    results.push(...await Promise.allSettled([this.runtime.shutdown(), this.codexPorts.catalog.shutdown()]));
     results.push(...await Promise.allSettled([this.canonicalEventPublisher.stopAdmissionAndDrain()]));
     this.sdkSessionIds.clear();
     this.pendingSpawnTurns.clear();
@@ -3086,6 +3205,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.liveSessionIds.clear();
     this.activeCodexServers.clear();
     this.canonicalTurnRoutingsByThread.clear();
+    this.planModeSessions.clear();
+    this.collaborationModeSetSessions.clear();
     const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
     if (failures.length > 0) throw new AggregateError(failures, "Codex provider shutdown failed");
     logger.info("CodexProvider shutdown complete");

@@ -1,7 +1,7 @@
 import * as NodeEvents from "node:events";
 import * as NodeStream from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentEventType, isTurnSteerCapable, type ProviderRuntimeEvent, type TurnRequest } from "@mcode/contracts";
+import { AgentEventType, isTurnSteerCapable, type NativePlanQuestionBatch, type ProviderRuntimeEvent, type TurnRequest } from "@mcode/contracts";
 import { CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
 import { checkCodexVersion, clearVersionCache } from "../../private/codex/codex-version.js";
@@ -84,6 +84,7 @@ function createProvider() {
   const settings = { provider: { cli: { codex: "codex" } } };
   const getSettings = vi.fn(async () => settings);
   const child = new NativeProcess();
+  const catalogShutdown = vi.fn(async () => {});
   spawn.mockImplementation(() => {
     setImmediate(() => child.emit("spawn"));
     return child;
@@ -93,7 +94,7 @@ function createProvider() {
     { persistGeneratedImageFromPath: () => { throw new Error("Unexpected image"); } },
     {
       listModels: async () => [], currentSkills: () => [], currentPrompts: () => [],
-      refreshCustomPrompts: async () => ({ prompts: [] }), shutdown: async () => undefined,
+      refreshCustomPrompts: async () => ({ prompts: [] }), shutdown: catalogShutdown,
     },
   );
   const events: ProviderRuntimeEvent[] = [];
@@ -106,7 +107,21 @@ function createProvider() {
       type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: executionId, outcome: "completed",
     } }));
   };
-  return { provider, child, settings, getSettings, starts, complete, events };
+  return { provider, child, settings, getSettings, starts, complete, events, catalogShutdown };
+}
+
+async function pendingQuestion(f: ReturnType<typeof createProvider>, settled: () => Promise<void>) {
+  cli.version = "0.161.0";
+  const batches: NativePlanQuestionBatch[] = [];
+  f.provider.bindPlanQuestions({ requested: async batch => { batches.push(batch); }, settled });
+  await f.provider.sendTurn({ ...request, deliveryAttempt: 3, planTurn: { kind: "planning", planFilePath: null } });
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  f.child.stdout.write(JSON.stringify({ id: 90, method: "item/tool/requestUserInput", params: {
+    threadId: "native-thread", turnId: "native-turn-1", itemId: "item",
+    questions: [{ id: "tone", header: "Tone", question: "Which greeting?", isOther: true, isSecret: false,
+      options: [{ label: "Brief", description: "One sentence" }, { label: "Detailed", description: "A paragraph" }] }],
+  } }) + "\n");
+  await vi.waitFor(() => expect(batches).toHaveLength(1));
 }
 
 afterEach(() => {
@@ -118,6 +133,33 @@ afterEach(() => {
 const STEER_ID = "1d7f7a1e-58a1-4d0b-9a55-4f4b3c0f6a10";
 
 describe("Codex provider lifecycle through native transport", () => {
+  it("ends a crashed question turn with its attempt even when durable expiry fails", async () => {
+    const f = createProvider();
+    const drain = Promise.withResolvers<void>();
+    try {
+      await pendingQuestion(f, () => drain.promise);
+      f.child.emit("exit", 1, null);
+      await vi.waitFor(() => expect(f.child.kill).toHaveBeenCalled());
+      drain.reject(new Error("Question persistence unavailable"));
+      await vi.waitFor(() => expect(f.events.filter(({ event }) => event.type === AgentEventType.Ended)).toEqual([
+        { deliveryAttempt: 3, event: { type: AgentEventType.Ended, threadId: request.threadId,
+          turnExecutionId: request.turnExecutionId, outcome: "interrupted" } },
+      ]));
+    } finally { drain.resolve(); await f.provider.shutdown(); }
+  });
+
+  it("still tears down sessions and the catalog when question expiry fails during shutdown", async () => {
+    const f = createProvider();
+    try {
+      await pendingQuestion(f, async () => { throw new Error("Question persistence unavailable"); });
+      await expect(f.provider.shutdown()).rejects.toBeInstanceOf(AggregateError);
+      expect(f.child.kill).toHaveBeenCalledTimes(1);
+      expect(f.catalogShutdown).toHaveBeenCalledTimes(1);
+      expect(f.child.requests.filter(({ method, params }) => method === "turn/interrupt" && params?.turnId).map(({ params }) => params?.turnId))
+        .toEqual(["native-turn-1"]);
+    } finally { await f.provider.shutdown(); }
+  });
+
   it("keeps a silent turn active without model-list probes until native completion", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
     const { provider, child, starts, complete, events } = createProvider();
@@ -137,12 +179,15 @@ describe("Codex provider lifecycle through native transport", () => {
   it("still settles an active turn when the native process exits unexpectedly", async () => {
     const { provider, child, starts, events } = createProvider();
     try {
-      await provider.sendTurn(request);
+      await provider.sendTurn({ ...request, deliveryAttempt: 3 });
       await vi.waitFor(() => expect(starts()).toHaveLength(1));
       child.emit("exit", 1, null);
-      await vi.waitFor(() => expect(events).toContainEqual({ deliveryAttempt: 1, event: {
+      await vi.waitFor(() => expect(events).toContainEqual({ deliveryAttempt: 3, event: {
         type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "errored",
       } }));
+      expect(events.filter(({ event }) => event.type === AgentEventType.Error)).toMatchObject([
+        { deliveryAttempt: 3, event: { type: AgentEventType.Error, turnExecutionId: request.turnExecutionId } },
+      ]);
     } finally {
       await provider.shutdown();
     }

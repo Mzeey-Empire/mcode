@@ -190,6 +190,16 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
     });
   }
 
+  /** Cancel a server request before interrupting its owning turn. */
+  async sendRequestCancelled(id: number): Promise<void> {
+    if (this.disposed) throw new CodexTransportError("Codex connection is closed");
+    const message = JSON.stringify({ jsonrpc: "2.0", id,
+      error: { code: -32800, message: "Questions cancelled" } }) + "\n";
+    await new Promise<void>((resolve, reject) => {
+      this.stdin.write(message, error => error ? reject(new CodexTransportError(error.message)) : resolve());
+    });
+  }
+
   /**
    * Disposes the client by rejecting all pending requests and removing stream listeners.
    * After disposal, calling `sendRequest` throws immediately.

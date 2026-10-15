@@ -30,6 +30,7 @@ import { readCodexRateLimits } from "./codex-input-mapper.js";
 
 type CodexMappedEvent = AgentEvent & {
   codexChild?: CodexChildEvidence;
+  planCapture?: ProviderRuntimeEvent["planCapture"];
 };
 interface CodexAssistantTextItem {
   text: string;
@@ -100,7 +101,7 @@ const SILENT_ITEM_TYPES = new Set([
  *
  * Thinking stream: `item/reasoning/*` maps to `AgentEventType.ReasoningDelta` keyed by the
  * native reasoning item id, and `item/completed` for that item emits the unstreamed suffix
- * with `done: true`. Experimental `item/plan/delta` stays a non-final text delta (narration).
+ * with `done: true`. Plan text is captured only from the completed native item.
  *
  * Native phase classifies assistant text when available. Item completion closes
  * text immediately; phase-less items retain exact identity for later promotion.
@@ -251,6 +252,7 @@ export class CodexEventMapper {
   private readonly openCompactionItemIds = new Set<string>();
   /** Stable native review identities may repeat after reconnect; publish one terminal outcome. */
   private readonly completedApprovalReviewIds = new Set<string>();
+  private readonly capturedPlanItemIds = new Set<string>();
   /** A completion without this matching start belongs to an old dispatch attempt. */
   private readonly startedApprovalReviewIds = new Set<string>();
   /** Native review events are visible only for the frozen automatic supervised dispatch. */
@@ -1670,6 +1672,7 @@ export class CodexEventMapper {
     return {
       event: this.rendererEvent(event),
       ...(extension ? { extension } : {}),
+      ...(event.planCapture ? { planCapture: event.planCapture } : {}),
     };
   }
 
@@ -1706,7 +1709,7 @@ export class CodexEventMapper {
   }
 
   private rendererEvent(event: CodexMappedEvent): AgentEvent {
-    const { codexChild: _child, ...genericEvent } = event;
+    const { codexChild: _child, planCapture: _capture, ...genericEvent } = event;
     if (genericEvent.type !== AgentEventType.ToolUse && genericEvent.type !== AgentEventType.ToolResult) {
       return genericEvent;
     }
@@ -1921,7 +1924,7 @@ export class CodexEventMapper {
       "item/started": () => this.mapMainItemStarted(notification),
       "item/reasoning/textDelta": () => this.mapReasoningDelta(notification),
       "item/reasoning/summaryTextDelta": () => this.mapReasoningDelta(notification),
-      "item/plan/delta": () => this.mapPlanDelta(notification),
+      "item/plan/delta": () => [],
       "turn/plan/updated": () => this.mapPlanUpdated(notification),
       "item/agentMessage/delta": () => this.mapAssistantDelta(notification),
       "item/commandExecution/outputDelta": () => this.mapCommandOutputDelta(notification),
@@ -2080,12 +2083,6 @@ export class CodexEventMapper {
       ...(reasoningItemId ? { reasoningItemId } : {}),
       ...(done ? { done } : {}),
     };
-  }
-
-  private mapPlanDelta(notification: CodexNotification): CodexMappedEvent[] {
-    const delta = (notification.params as { delta?: unknown }).delta;
-    if (typeof delta !== "string" || !delta) return [];
-    return [...this.drainPendingAssistantBoundary(false), { type: AgentEventType.TextDelta, threadId: this.threadId, delta, isFinalResponse: false }];
   }
 
   private mapPlanUpdated(notification: CodexNotification): CodexMappedEvent[] {
@@ -2251,6 +2248,7 @@ export class CodexEventMapper {
 
   /** Resets per-turn accumulated state between turns. */
   reset(): void {
+    this.capturedPlanItemIds.clear();
     this.turnTokenUsage = undefined;
     this.turnRetriesMade = 0;
     this.turnTokenBaseline = undefined;
@@ -2316,6 +2314,7 @@ export class CodexEventMapper {
     const handlers: Partial<Record<CompletedItem["type"], () => CodexMappedEvent[]>> = {
       userMessage: () => [],
       agentMessage: () => this.recordAssistantCompletion(item, notification),
+      plan: () => route === "main" ? this.captureCompletedPlan(item) : [],
       message: () => this.recordAssistantCompletion(item, notification),
       reasoning: () => this.mapCompletedReasoning(item),
       subAgentActivity: () => this.mapCompletedSubAgentActivity(item, notification),
@@ -2330,6 +2329,19 @@ export class CodexEventMapper {
     const events = dispatchNativeHandler<CodexMappedEvent[]>(handlers, item.type);
     if (events !== undefined) return events;
     return this.consumeCompletedItem(item.type);
+  }
+
+  private captureCompletedPlan(item: CompletedItem): CodexMappedEvent[] {
+    if (!item.id || typeof item.text !== "string" || !item.text.trim()) return [];
+    if (this.capturedPlanItemIds.has(item.id)) return [];
+    this.capturedPlanItemIds.add(item.id);
+    return [{
+      type: AgentEventType.Message,
+      threadId: this.threadId,
+      content: "",
+      tokens: null,
+      planCapture: { markdown: item.text, source: "native" },
+    }];
   }
 
   /**

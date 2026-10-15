@@ -1,4 +1,5 @@
 import type { NativePlanFileOutcome } from "../models/plan.js";
+import type { PlanAnswer, PlanQuestionHandler } from "../models/plan-questions.js";
 import type { ProviderRuntimeEvent } from "../events/provider-runtime-event.js";
 import type { ApprovalReviewMode, DevinMode, InteractionMode, OrchestrationMode, PermissionMode } from "../models/enums.js";
 import type { AttachmentMeta } from "../models/attachment.js";
@@ -191,6 +192,12 @@ export interface PlanCapture {
 
 /** A pluggable agent backend that can run sessions and emit events. */
 export interface IAgentProvider {
+  /** Bind durable question handling before enabling a provider's native planning mode. */
+  bindPlanQuestions?(handler: PlanQuestionHandler): void;
+  /** Inspect the installed transport and handler without starting a turn. */
+  supportsNativePlanQuestions?(): Promise<boolean>;
+  /** False means no responder remains; an in-flight settlement rejects without expiring the batch. */
+  respondToPlanQuestions?(threadId: string, requestId: string, answers: PlanAnswer[] | "dismiss"): Promise<boolean>;
   readonly id: ProviderId;
   /** Static provider capabilities supplied to clients before dispatch. */
   readonly descriptor: Provider;

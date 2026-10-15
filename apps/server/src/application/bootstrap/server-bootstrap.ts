@@ -798,6 +798,7 @@ seedCiWatcher(allWorkspaces);
 
 /** Registers provider events that persist native plan output. */
 function registerProviderPlanListeners(): void {
+  planTurnService.bindNativeQuestions(event => canonicalSink.recordSynthesizedPublications(event.threadId, [event]));
   for (const provider of providerRegistry.resolveAll()) {
     provider.on("plan_captured", (data) => {
       planTurnService.handlePlanCaptured(data);
@@ -1051,6 +1052,7 @@ async function bootstrapServer(): Promise<void> {
       },
     });
     await recoverTurnsAtStartup();
+    await planTurnService.recoverNativeQuestions();
     await planService.recoverInterrupted();
     await turnResumeScheduler.start();
     recordStartupCheckpoint("turn recovery completed");

@@ -12,6 +12,88 @@ vi.mock("@mcode/shared", () => ({
  */
 import type { CodexApprovalRequest } from "../../private/codex/codex-app-server.js";
 import { routeCodexServerRequest } from "../../private/codex/codex-app-server.js";
+import { CodexPlanQuestions } from "../../private/codex/codex-plan-questions.js";
+import { logger } from "@mcode/shared";
+import type { NativePlanQuestionBatch, PlanQuestionSettlement } from "@mcode/contracts";
+
+const questionParams = {
+  threadId: "native-thread", turnId: "native-turn", itemId: "item",
+  questions: [{ id: "tone", header: "Tone", question: "Which greeting?", isOther: true, isSecret: false,
+    options: [{ label: "Brief", description: "One sentence" }, { label: "Detailed", description: "A paragraph" }] }],
+};
+
+function questionFixture(settlementGate?: Promise<void>) {
+  const questions = new CodexPlanQuestions();
+  const batches: NativePlanQuestionBatch[] = [];
+  const settlements: PlanQuestionSettlement[] = [];
+  const sendResponse = vi.fn(async (_id: number, _response: unknown) => {});
+  const cancelRequest = vi.fn(async (_id: number) => {});
+  questions.bind({ requested: async batch => { batches.push(batch); },
+    settled: async (_batch, status) => { await settlementGate; settlements.push(status); } });
+  const request = (params: unknown) => routeCodexServerRequest({
+    msg: { id: 90, method: "item/tool/requestUserInput", params }, approvalPolicy: "never",
+    approvalHandler: undefined, sendResponse, cancelRequest,
+    questionHandler: pending => questions.request("session", "thread", "native-thread", "native-turn", pending),
+  });
+  return { questions, batches, settlements, sendResponse, cancelRequest, request };
+}
+
+describe("native questions beside approval requests", () => {
+  it.each(["answer", "dismiss"])("keeps a concurrent %s from expiring an answer awaiting its durable receipt", async action => {
+    const receipt = Promise.withResolvers<void>();
+    const f = questionFixture(receipt.promise);
+    await f.request(questionParams);
+    const batch = f.batches[0]!;
+    const answers = [{ questionId: batch.questions[0]!.id, selectedOptionId: "0", freeText: null }];
+    const first = f.questions.answer("thread", batch.requestId, answers);
+    try {
+      await vi.waitFor(() => expect(f.sendResponse.mock.calls).toEqual([[90, { answers: { tone: { answers: ["Brief"] } } }]]));
+      await expect(f.questions.answer("thread", batch.requestId, action === "answer" ? answers : "dismiss"))
+        .rejects.toBeInstanceOf(Error);
+      expect(f.settlements).toEqual([]);
+    } finally { receipt.resolve(); await first; }
+    expect(f.settlements).toEqual(["answered"]);
+  });
+
+  it.each(["answer", "dismiss"])("keeps the first answer's settlement when a concurrent %s arrives", async action => {
+    const f = questionFixture();
+    const write = Promise.withResolvers<void>();
+    f.sendResponse.mockImplementation(() => write.promise);
+    await f.request(questionParams);
+    const batch = f.batches[0]!;
+    const answers = [{ questionId: batch.questions[0]!.id, selectedOptionId: "0", freeText: null }];
+    const first = f.questions.answer("thread", batch.requestId, answers);
+    try {
+      await expect(f.questions.answer("thread", batch.requestId, action === "answer" ? answers : "dismiss"))
+        .rejects.toBeInstanceOf(Error);
+      expect(f.settlements).toEqual([]);
+    } finally { write.resolve(); await first; }
+    expect(f.settlements).toEqual(["answered"]);
+    expect(f.sendResponse.mock.calls).toEqual([[90, { answers: { tone: { answers: ["Brief"] } } }]]);
+  });
+
+  it("cancels secret questions without publishing or logging their text", async () => {
+    const f = questionFixture();
+    vi.mocked(logger.warn).mockClear();
+    await f.request({ ...questionParams, questions: questionParams.questions.map(question => ({ ...question, isSecret: true })) });
+    expect(f.cancelRequest.mock.calls).toEqual([[90]]);
+    expect(f.batches).toEqual([]);
+    expect(f.sendResponse.mock.calls).toEqual([]);
+    expect(vi.mocked(logger.warn).mock.calls).toEqual([["Codex secret questions are unsupported"]]);
+  });
+
+  it("logs only validation paths and cancels a question without the required options", async () => {
+    const f = questionFixture();
+    vi.mocked(logger.warn).mockClear();
+    await f.request({ ...questionParams, questions: questionParams.questions.map(question => ({ ...question, options: [] })) });
+    expect(f.cancelRequest.mock.calls).toEqual([[90]]);
+    expect(f.batches).toEqual([]);
+    expect(f.sendResponse.mock.calls).toEqual([]);
+    expect(vi.mocked(logger.warn).mock.calls).toEqual([
+      ["Codex question request failed validation", { paths: [["questions", 0, "options"]] }],
+    ]);
+  });
+});
 
 describe("routeCodexServerRequest", () => {
   let sendResponse: Mock<(id: number, result: unknown) => void>;
