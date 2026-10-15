@@ -49,15 +49,42 @@ describe("useReviewScrollSpy", () => {
     expect(reports).toEqual(["a.ts", "c.ts"]);
   });
 
-  it("holds the jump target while the jump's own scroll events arrive, then follows the reader again", () => {
+  it("holds the jump target while the jump's own scroll events arrive", () => {
+    const { reports, spy } = setup();
+
+    spy.holdForJump("b.ts");
+    spy.onScroll(100, viewer);
+
+    expect(reports).toEqual(["a.ts", "b.ts"]);
+  });
+
+  it("follows a reader who scrolls elsewhere inside the hold once the hold ends", () => {
     const { reports, spy } = setup();
 
     spy.holdForJump("b.ts");
     spy.onScroll(10, viewer);
-    expect(reports).toEqual(["a.ts", "b.ts"]);
-
     vi.advanceTimersByTime(300);
-    spy.onScroll(10, viewer);
+
     expect(reports).toEqual(["a.ts", "b.ts", "a.ts"]);
+  });
+
+  it("re-reads a scrolled reader's file when the comparison refreshes in place", () => {
+    const reports: string[] = [];
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ReviewActiveFileContext.Provider value={(path) => reports.push(path)}>{children}</ReviewActiveFileContext.Provider>
+    );
+    const scroller = { scrollTop: 0, clientHeight: 100, scrollHeight: 1000 };
+    const scrollerRef = { current: scroller as HTMLElement };
+    const hook = renderHook(({ id }) => useReviewScrollSpy(FILES, scrollerRef, id), {
+      wrapper,
+      initialProps: { id: "cmp-1" },
+    });
+
+    scroller.scrollTop = 150;
+    hook.result.current.onScroll(150, viewer);
+    hook.rerender({ id: "cmp-2" });
+    vi.advanceTimersByTime(50);
+
+    expect(reports).toEqual(["a.ts", "b.ts", "b.ts"]);
   });
 });
