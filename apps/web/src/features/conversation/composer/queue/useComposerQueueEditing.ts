@@ -8,11 +8,8 @@ import {
 import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import { scheduleDrainAfterEdit } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
-import {
-  dropDraftContentInBundleWhenSettled,
-  queueHoldingDraftElements,
-  readDraftContentInBundle,
-} from "./queued-draft-holds";
+import { dropDraftContentInBundleWhenSettled, readDraftContentInBundle } from "./queued-draft-bundle";
+import { queueHoldingDraftElements } from "./queued-draft-holds";
 
 /** The queue slot currently restored into the Composer for editing. */
 export interface ComposerQueueEdit {
