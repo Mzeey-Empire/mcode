@@ -5,6 +5,7 @@ import { PLAN_MAX_CONTENT_CHARS, type NativePlanFileOutcome, type NativePlanFile
 
 type Skipped = Extract<NativePlanFileOutcome, { outcome: "skipped" }>;
 type PlanLocation = { path: string; planRoot: string; sessionId: string };
+const PLAN_MAX_CONTENT_BYTES = PLAN_MAX_CONTENT_CHARS * 4;
 
 function skipped(reason: Skipped["reason"]): Skipped { return { outcome: "skipped", reason }; }
 
@@ -17,7 +18,7 @@ function fileFailure(error: unknown): Skipped {
   if (error instanceof Error && "code" in error) {
     if (error.code === "ENOENT" || error.code === "ENOTDIR") return skipped("no-file");
     if (error.code === "ELOOP") return skipped("unsafe-path");
-    if (error.code === "EACCES" || error.code === "EPERM") return skipped("unproven");
+    if (["EACCES", "EPERM", "EBUSY", "EEXIST", "EROFS", "ENOSPC", "EDQUOT", "EISDIR", "ENOTEMPTY", "ETXTBSY"].includes(String(error.code))) return skipped("unproven");
   }
   throw error;
 }
@@ -41,7 +42,10 @@ export async function canWriteNativePlanFile(input: { path: string; expectedPath
   if (!NodePath.isAbsolute(input.path) || !NodePath.isAbsolute(input.expectedPath) || NodePath.resolve(input.path) !== NodePath.resolve(input.expectedPath)) return false;
   try {
     if (await validatePath(input.path, NodePath.dirname(input.expectedPath))) return false;
-    try { return (await NodeFSPromises.lstat(input.path)).isFile(); }
+    try {
+      const stat = await NodeFSPromises.lstat(input.path);
+      return stat.isFile() && stat.nlink === 1;
+    }
     catch (error) { return fileFailure(error).reason === "no-file"; }
   } catch (error) {
     fileFailure(error);
@@ -54,23 +58,29 @@ async function readPlan(input: PlanLocation): Promise<NativePlanFileRef | Skippe
     const invalid = await validatePath(input.path, input.planRoot);
     if (invalid) return invalid;
     const stat = await NodeFSPromises.lstat(input.path);
-    if (!stat.isFile() || stat.isSymbolicLink()) return skipped("unsafe-path");
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink > 1) return skipped("unsafe-path");
     const path = await NodeFSPromises.realpath(input.path);
     if (!isInside(await NodeFSPromises.realpath(input.planRoot), path)) return skipped("unsafe-path");
-    if (stat.size > PLAN_MAX_CONTENT_CHARS) return skipped("unproven");
-    const file = await NodeFSPromises.open(path, "r");
-    try {
-      const bytes = Buffer.alloc(PLAN_MAX_CONTENT_CHARS + 1);
-      let length = 0;
-      while (length < bytes.length) {
-        const { bytesRead } = await file.read(bytes, length, bytes.length - length, null);
-        if (bytesRead === 0) break;
-        length += bytesRead;
-      }
-      if (length > PLAN_MAX_CONTENT_CHARS) return skipped("unproven");
-      return { path, sessionId: input.sessionId, sha256: NodeCrypto.createHash("sha256").update(bytes.subarray(0, length)).digest("hex") };
-    } finally { await file.close(); }
+    if (stat.size > PLAN_MAX_CONTENT_BYTES) return skipped("unproven");
+    const bytes = await readPlanBytes(path);
+    if ("outcome" in bytes) return bytes;
+    return { path, sessionId: input.sessionId, sha256: NodeCrypto.createHash("sha256").update(bytes).digest("hex") };
   } catch (error) { return fileFailure(error); }
+}
+
+async function readPlanBytes(path: string): Promise<Buffer | Skipped> {
+  const file = await NodeFSPromises.open(path, "r");
+  try {
+    const bytes = Buffer.alloc(PLAN_MAX_CONTENT_BYTES + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const { bytesRead } = await file.read(bytes, length, bytes.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > PLAN_MAX_CONTENT_BYTES || bytes.toString("utf8", 0, length).length > PLAN_MAX_CONTENT_CHARS) return skipped("unproven");
+    return bytes.subarray(0, length);
+  } finally { await file.close(); }
 }
 
 /** Captures file identity only after proving containment and reading bounded bytes. */
@@ -89,15 +99,17 @@ export async function rewriteNativePlanFile(input: {
   const current = await readPlan({ path: ref.path, planRoot: input.planRoot, sessionId: input.sessionId });
   if ("outcome" in current) return current;
   if (current.sha256 !== ref.sha256) return skipped("changed");
-  if (Buffer.byteLength(input.markdown) > PLAN_MAX_CONTENT_CHARS) return skipped("unproven");
+  if (input.markdown.length > PLAN_MAX_CONTENT_CHARS || Buffer.byteLength(input.markdown) > PLAN_MAX_CONTENT_BYTES) return skipped("unproven");
   const temporary = NodePath.join(NodePath.dirname(current.path), `.mcode-plan-${NodeCrypto.randomUUID()}.tmp`);
-  await NodeFSPromises.writeFile(temporary, input.markdown, { flag: "wx", mode: 0o600 });
   try {
+    await NodeFSPromises.writeFile(temporary, input.markdown, { flag: "wx", mode: 0o600 });
     const checked = await readPlan({ path: ref.path, planRoot: input.planRoot, sessionId: input.sessionId });
     if ("outcome" in checked) return checked;
     if (checked.sha256 !== ref.sha256) return skipped("changed");
     await NodeFSPromises.rename(temporary, current.path);
     return { outcome: "synced" };
+  } catch (error) {
+    return fileFailure(error);
   } finally {
     await NodeFSPromises.rm(temporary, { force: true });
   }
