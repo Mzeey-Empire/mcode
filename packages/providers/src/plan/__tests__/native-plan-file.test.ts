@@ -20,7 +20,7 @@ describe("native plan file ownership", () => {
   afterEach(async () => { vi.restoreAllMocks(); await NodeFSPromises.rm(directory, { recursive: true, force: true }); });
 
   async function capture() {
-    const ref = await captureNativePlanFile({ path, planRoot, sessionId: "session" });
+    const ref = await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: await NodeFSPromises.readFile(path, "utf8") });
     if (!ref) throw new Error("Expected a captured file");
     return ref;
   }
@@ -55,7 +55,7 @@ describe("native plan file ownership", () => {
   it("does not recreate a file removed after capture", async () => {
     const nativePlanFile = await capture();
     await NodeFSPromises.unlink(path);
-    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session" })).toBeNull();
+    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: "abc" })).toBeNull();
     expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "no-file" });
     expect(await NodeFSPromises.readdir(planRoot)).toEqual([]);
   });
@@ -68,13 +68,13 @@ describe("native plan file ownership", () => {
       await NodeFSPromises.mkdir(NodePath.join(directory, "session-other"));
       await NodeFSPromises.writeFile(unsafePath, "abc");
     }
-    expect(await captureNativePlanFile({ path: unsafePath, planRoot, sessionId: "session" })).toBeNull();
+    expect(await captureNativePlanFile({ path: unsafePath, planRoot, sessionId: "session", markdown: "abc" })).toBeNull();
     expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile: { ...nativePlanFile, path: unsafePath }, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unsafe-path" });
     expect(await NodeFSPromises.readFile(path, "utf8")).toBe("abc");
     if (kind === "sibling") expect(await NodeFSPromises.readFile(unsafePath, "utf8")).toBe("abc");
   });
 
-  it.each(["file", "ancestor", "root"])("refuses a symlinked %s and preserves its target", async (kind) => {
+  it.each(["file", "ancestor"])("refuses a symlinked %s and preserves its target", async (kind) => {
     const nativePlanFile = await capture();
     const outside = NodePath.join(directory, "outside");
     await NodeFSPromises.mkdir(outside);
@@ -83,16 +83,23 @@ describe("native plan file ownership", () => {
     if (kind === "file") {
       await NodeFSPromises.unlink(path);
       await NodeFSPromises.symlink(NodePath.join(outside, "plan.md"), path, "file");
-    } else if (kind === "ancestor") {
+    } else {
       await NodeFSPromises.symlink(outside, NodePath.join(planRoot, "link"), "junction");
       linkedPath = NodePath.join(planRoot, "link", "plan.md");
-    } else {
-      await NodeFSPromises.rm(planRoot, { recursive: true });
-      await NodeFSPromises.symlink(outside, planRoot, "junction");
     }
-    expect(await captureNativePlanFile({ path: linkedPath, planRoot, sessionId: "session" })).toBeNull();
+    expect(await captureNativePlanFile({ path: linkedPath, planRoot, sessionId: "session", markdown: "abc" })).toBeNull();
     expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile: { ...nativePlanFile, path: linkedPath }, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unsafe-path" });
     expect(await NodeFSPromises.readFile(NodePath.join(outside, "plan.md"), "utf8")).toBe("abc");
+  });
+
+  it("follows a symlinked session root to its canonical directory", async () => {
+    const linkedRoot = NodePath.join(directory, "linked-session");
+    await NodeFSPromises.symlink(planRoot, linkedRoot, "junction");
+    const linkedPath = NodePath.join(linkedRoot, "plan.md");
+    const nativePlanFile = await captureNativePlanFile({ path: linkedPath, planRoot: linkedRoot, sessionId: "session", markdown: "abc" });
+    expect(nativePlanFile?.path).toBe(path);
+    expect(await rewriteNativePlanFile({ planRoot: linkedRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "synced" });
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("edit");
   });
 
   it("refuses a hard-linked plan before the CLI can overwrite another target", async () => {
@@ -100,7 +107,7 @@ describe("native plan file ownership", () => {
     const otherPath = NodePath.join(directory, "other.md");
     await NodeFSPromises.link(path, otherPath);
     expect(await canWriteNativePlanFile({ path, expectedPath: path })).toBe(false);
-    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session" })).toBeNull();
+    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: "abc" })).toBeNull();
     expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unsafe-path" });
     expect(await NodeFSPromises.readFile(otherPath, "utf8")).toBe("abc");
     expect(await NodeFSPromises.readFile(path, "utf8")).toBe("abc");
@@ -144,6 +151,11 @@ describe("native plan file ownership", () => {
     expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile: await capture(), markdown: "語".repeat(65_537) })).toEqual({ outcome: "skipped", reason: "unproven" });
   });
 
+  it("refuses to capture when the file no longer holds the text the CLI reported", async () => {
+    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: "abd" })).toBeNull();
+    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: "abc" })).toMatchObject({ sessionId: "session" });
+  });
+
   it("bounds capture and replacement characters, including the exact limit", async () => {
     await NodeFSPromises.writeFile(path, "x".repeat(65_536));
     const nativePlanFile = await capture();
@@ -152,7 +164,7 @@ describe("native plan file ownership", () => {
     expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "y".repeat(65_536) })).toEqual({ outcome: "synced" });
     expect(await NodeFSPromises.readFile(path, "utf8")).toBe("y".repeat(65_536));
     await NodeFSPromises.writeFile(path, "x".repeat(65_537));
-    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session" })).toBeNull();
+    expect(await captureNativePlanFile({ path, planRoot, sessionId: "session", markdown: "x".repeat(65_537) })).toBeNull();
     expect(await rewriteNativePlanFile({ planRoot, sessionId: "session", nativePlanFile, markdown: "edit" })).toEqual({ outcome: "skipped", reason: "unproven" });
   });
 });

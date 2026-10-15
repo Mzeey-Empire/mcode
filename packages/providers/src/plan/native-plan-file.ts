@@ -5,9 +5,15 @@ import { PLAN_MAX_CONTENT_CHARS, type NativePlanFileOutcome, type NativePlanFile
 
 type Skipped = Extract<NativePlanFileOutcome, { outcome: "skipped" }>;
 type PlanLocation = { path: string; planRoot: string; sessionId: string };
+type PlanRead = { ref: NativePlanFileRef; text: string };
 const PLAN_MAX_CONTENT_BYTES = PLAN_MAX_CONTENT_CHARS * 4;
 
 function skipped(reason: Skipped["reason"]): Skipped { return { outcome: "skipped", reason }; }
+
+/** path.relative folds case only where the file system does, so this is the platform's own equality. */
+function samePath(left: string, right: string): boolean {
+  return NodePath.relative(left, right) === "";
+}
 
 function isInside(root: string, path: string): boolean {
   const suffix = NodePath.relative(root, path);
@@ -39,7 +45,7 @@ async function validatePath(path: string, planRoot: string): Promise<Skipped | n
 
 /** Allows only the adapter's exact plan target, including its first creation. */
 export async function canWriteNativePlanFile(input: { path: string; expectedPath: string }): Promise<boolean> {
-  if (!NodePath.isAbsolute(input.path) || !NodePath.isAbsolute(input.expectedPath) || NodePath.resolve(input.path) !== NodePath.resolve(input.expectedPath)) return false;
+  if (!NodePath.isAbsolute(input.path) || !NodePath.isAbsolute(input.expectedPath) || !samePath(input.path, input.expectedPath)) return false;
   try {
     if (await validatePath(input.path, NodePath.dirname(input.expectedPath))) return false;
     try {
@@ -53,18 +59,29 @@ export async function canWriteNativePlanFile(input: { path: string; expectedPath
   }
 }
 
-async function readPlan(input: PlanLocation): Promise<NativePlanFileRef | Skipped> {
+/**
+ * The CLI may report the plan through a symlinked or differently cased config directory, so the
+ * path is rebased onto the canonical session root before it must be exactly that session's `plan.md`.
+ */
+async function locatePlan(input: PlanLocation): Promise<{ root: string; path: string } | Skipped> {
+  const root = await NodeFSPromises.realpath(input.planRoot);
+  const path = NodePath.isAbsolute(input.path) && isInside(input.planRoot, input.path) ? NodePath.join(root, NodePath.relative(input.planRoot, input.path)) : input.path;
+  if (!samePath(path, NodePath.join(root, "plan.md"))) return skipped("unsafe-path");
+  return await validatePath(path, root) ?? { root, path };
+}
+
+async function readPlan(input: PlanLocation): Promise<PlanRead | Skipped> {
   try {
-    const invalid = await validatePath(input.path, input.planRoot);
-    if (invalid) return invalid;
-    const stat = await NodeFSPromises.lstat(input.path);
+    const located = await locatePlan(input);
+    if ("outcome" in located) return located;
+    const stat = await NodeFSPromises.lstat(located.path);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink > 1) return skipped("unsafe-path");
-    const path = await NodeFSPromises.realpath(input.path);
-    if (!isInside(await NodeFSPromises.realpath(input.planRoot), path)) return skipped("unsafe-path");
+    const real = await NodeFSPromises.realpath(located.path);
+    if (!isInside(located.root, real)) return skipped("unsafe-path");
     if (stat.size > PLAN_MAX_CONTENT_BYTES) return skipped("unproven");
-    const bytes = await readPlanBytes(path);
+    const bytes = await readPlanBytes(real);
     if ("outcome" in bytes) return bytes;
-    return { path, sessionId: input.sessionId, sha256: NodeCrypto.createHash("sha256").update(bytes).digest("hex") };
+    return { ref: { path: real, sessionId: input.sessionId, sha256: NodeCrypto.createHash("sha256").update(bytes).digest("hex") }, text: bytes.toString("utf8") };
   } catch (error) { return fileFailure(error); }
 }
 
@@ -83,10 +100,13 @@ async function readPlanBytes(path: string): Promise<Buffer | Skipped> {
   } finally { await file.close(); }
 }
 
-/** Captures file identity only after proving containment and reading bounded bytes. */
-export async function captureNativePlanFile(input: PlanLocation): Promise<NativePlanFileRef | null> {
+/**
+ * Captures file identity only after proving containment and reading bounded bytes. The file must
+ * still hold `markdown`, the text the CLI reported, so a later rewrite never replaces bytes Mcode did not store.
+ */
+export async function captureNativePlanFile(input: PlanLocation & { markdown: string }): Promise<NativePlanFileRef | null> {
   const result = await readPlan(input);
-  return "outcome" in result ? null : result;
+  return "outcome" in result || result.text !== input.markdown ? null : result.ref;
 }
 
 /** Rewrites only a session-owned file whose bytes still match the captured digest. */
@@ -98,15 +118,17 @@ export async function rewriteNativePlanFile(input: {
   if (ref.sessionId !== input.sessionId) return skipped("unproven");
   const current = await readPlan({ path: ref.path, planRoot: input.planRoot, sessionId: input.sessionId });
   if ("outcome" in current) return current;
-  if (current.sha256 !== ref.sha256) return skipped("changed");
+  if (current.ref.sha256 !== ref.sha256) return skipped("changed");
   if (input.markdown.length > PLAN_MAX_CONTENT_CHARS || Buffer.byteLength(input.markdown) > PLAN_MAX_CONTENT_BYTES) return skipped("unproven");
-  const temporary = NodePath.join(NodePath.dirname(current.path), `.mcode-plan-${NodeCrypto.randomUUID()}.tmp`);
+  const temporary = NodePath.join(NodePath.dirname(current.ref.path), `.mcode-plan-${NodeCrypto.randomUUID()}.tmp`);
   try {
-    await NodeFSPromises.writeFile(temporary, input.markdown, { flag: "wx", mode: 0o600 });
+    // The rename swaps the inode, so the original permissions are carried over explicitly.
+    const { mode } = await NodeFSPromises.lstat(current.ref.path);
+    await NodeFSPromises.writeFile(temporary, input.markdown, { flag: "wx", mode: mode & 0o777 });
     const checked = await readPlan({ path: ref.path, planRoot: input.planRoot, sessionId: input.sessionId });
     if ("outcome" in checked) return checked;
-    if (checked.sha256 !== ref.sha256) return skipped("changed");
-    await NodeFSPromises.rename(temporary, current.path);
+    if (checked.ref.sha256 !== ref.sha256) return skipped("changed");
+    await NodeFSPromises.rename(temporary, current.ref.path);
     return { outcome: "synced" };
   } catch (error) {
     return fileFailure(error);

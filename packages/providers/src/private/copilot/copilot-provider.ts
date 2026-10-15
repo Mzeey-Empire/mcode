@@ -28,8 +28,6 @@ interface CopilotSessionState {
   sessionId: string;
   session: CopilotSession;
   planRoot: string;
-  // Unchanged native text must not supersede a plan the user edited in Mcode.
-  lastCapturedPlanHash?: string;
   cwd: string;
   request: TurnRequest<"copilot">;
   browserGrant: ProviderBrowserLeaseGrant | null;
@@ -127,23 +125,22 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   /** Reconciles the captured session's exact plan file, including after idle eviction. */
   async prepareImplement(input: Parameters<NonNullable<IAgentProvider["prepareImplement"]>>[0]): Promise<NativePlanFileOutcome> {
     if (!input.nativePlanFile) return { outcome: "skipped", reason: "no-file" };
-    const { sessionId, path } = input.nativePlanFile;
+    const { sessionId } = input.nativePlanFile;
     if (!sessionId || sessionId === "." || sessionId === ".." || /[\\/]/.test(sessionId)) return { outcome: "skipped", reason: "unsafe-path" };
-    const planRoot = NodePath.join(await this.resolveConfigDirectory(), "session-state", sessionId);
-    if (path !== NodePath.join(planRoot, "plan.md")) return { outcome: "skipped", reason: "unsafe-path" };
-    const outcome = await rewriteNativePlanFile({ ...input, planRoot, sessionId });
-    if (outcome.outcome === "synced") {
-      for (const state of this.runtime.states()) {
-        if (state.session.sessionId === sessionId) state.lastCapturedPlanHash = NodeCrypto.createHash("sha256").update(input.markdown).digest("hex");
-      }
-    }
-    return outcome;
+    // A sync is an optimisation, so an unresolved launch must not fail Implement.
+    const configDir = await this.resolveConfigDirectory().catch((error: unknown) => {
+      logger.warn("Copilot plan sync skipped: config directory unresolved", { error: toError(error).message });
+      return undefined;
+    });
+    if (!configDir) return { outcome: "skipped", reason: "unproven" };
+    return rewriteNativePlanFile({ ...input, planRoot: NodePath.join(configDir, "session-state", sessionId), sessionId });
   }
 
   private async resolveConfigDirectory(): Promise<string> {
     if (this.configDir) return this.configDir;
     const launch = await bounded(this.ports.launch.resolve(), 30_000, "Copilot launch resolution");
-    return copilotConfigDirectory(launch.env);
+    this.configDir = copilotConfigDirectory(launch.env);
+    return this.configDir;
   }
   private async applyControls(state: CopilotSessionState, request: TurnRequest<"copilot">): Promise<void> {
     if (state.request.model !== request.model || state.request.reasoningLevel !== request.reasoningLevel) {
@@ -265,7 +262,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     const instructions = renderMcodeInstructions(buildMcodeInstructionPlan({ sourceThreadId: request.threadId, threadControlGranted: Boolean(connection), browserAutomationGranted: Boolean(browser) }));
     return {
       configDir: await this.resolveConfigDirectory(),
-      onPermissionRequest: (permission: NativePermissionRequest, invocation: { sessionId: string }) => this.requestPermission(request.sessionId, permission, invocation.sessionId),
+      onPermissionRequest: (permission: NativePermissionRequest) => this.requestPermission(request.sessionId, permission),
       model: request.model || undefined,
       reasoningEffort: await this.reasoningEffort(request),
       workingDirectory: request.cwd,
@@ -294,9 +291,10 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     const unsubscribe = state.session.on((event) => this.acceptNativeEvent(state, turn, event));
     this.publish(state, { type: "system", threadId: request.threadId, subtype: `sdk_session_id:${state.session.sessionId}` });
     try {
+      const planBaseline = await this.readPlanBaseline(state);
       await bounded(state.session.send({ prompt: request.message, attachments: request.attachments?.map((attachment) => ({ type: "file" as const, path: attachment.sourcePath })) }), 30_000, "Copilot turn dispatch");
       await completed;
-      await this.publishPlanTurnMessage(state, turn);
+      await this.publishPlanTurnMessage(state, turn, planBaseline);
     } catch (error) {
       turn.settle("failed", toError(error));
       this.publishTurnError(state, turn, toError(error).message);
@@ -335,22 +333,44 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     }
   }
 
-  private async captureNativePlan(state: CopilotSessionState, turn: CopilotTurnState): Promise<void> {
-    const plan = await this.awaitNativeResource(state.session.rpc.plan.read(), 30_000, "Copilot plan capture");
-    if (!plan.exists || !plan.content?.trim() || plan.content.length > PLAN_MAX_CONTENT_CHARS) return;
-    const hash = NodeCrypto.createHash("sha256").update(plan.content).digest("hex");
-    if (hash === state.lastCapturedPlanHash) return;
-    const nativePlanFile = plan.path === NodePath.join(state.planRoot, "plan.md") ? await captureNativePlanFile({ path: plan.path, planRoot: state.planRoot, sessionId: state.session.sessionId }) : null;
+  /**
+   * Native capture is best effort because the planning prompt's fence is the fallback, so a failed
+   * read is logged and skipped. A deadline already retired the transport and still ends the turn.
+   */
+  private async readNativePlan(state: CopilotSessionState): Promise<{ content: string; path: string | null; hash: string } | undefined> {
+    try {
+      const plan = await this.awaitNativeResource(state.session.rpc.plan.read(), 30_000, "Copilot plan capture");
+      if (!plan.exists || !plan.content?.trim() || plan.content.length > PLAN_MAX_CONTENT_CHARS) return undefined;
+      return { content: plan.content, path: plan.path, hash: NodeCrypto.createHash("sha256").update(plan.content).digest("hex") };
+    } catch (error) {
+      if (error instanceof CopilotDeadlineError) throw error;
+      logger.warn("Copilot native plan read failed; using the fence", { threadId: state.request.threadId, error: toError(error).message });
+      return undefined;
+    }
+  }
+
+  private async readPlanBaseline(state: CopilotSessionState): Promise<string | undefined> {
+    return state.request.interactionMode === "plan" ? (await this.readNativePlan(state))?.hash : undefined;
+  }
+
+  /** Captures only a plan this turn changed, so an unchanged file cannot supersede a plan the user edited in Mcode. */
+  private async captureNativePlan(state: CopilotSessionState, turn: CopilotTurnState, baseline: string | undefined): Promise<void> {
+    const plan = await this.readNativePlan(state);
+    if (!plan || plan.hash === baseline) return;
+    const nativePlanFile = plan.path ? await captureNativePlanFile({ path: plan.path, planRoot: state.planRoot, sessionId: state.session.sessionId, markdown: plan.content })
+      .catch((error: unknown) => {
+        logger.warn("Copilot native plan file not captured", { threadId: state.request.threadId, error: toError(error).message });
+        return null;
+      }) : null;
     const capture = { markdown: plan.content, source: "native" as const, ...(nativePlanFile ? { nativePlanFile } : {}) };
     this.publisher.capturePlan(routingFor(state.request), capture);
-    state.lastCapturedPlanHash = hash;
     this.emit("plan_captured", { threadId: state.request.threadId, ...capture });
     if (!turn.pendingAssistantMessage) this.publish(state, { type: "message", threadId: state.request.threadId, content: plan.content, tokens: null });
   }
 
-  private async publishPlanTurnMessage(state: CopilotSessionState, turn: CopilotTurnState): Promise<void> {
+  private async publishPlanTurnMessage(state: CopilotSessionState, turn: CopilotTurnState, baseline: string | undefined): Promise<void> {
     if (turn.outcome !== "completed" || state.request.interactionMode !== "plan") return;
-    try { await this.captureNativePlan(state, turn); }
+    try { await this.captureNativePlan(state, turn, baseline); }
     catch (error) { turn.outcome = "failed"; throw error; }
     this.publishCompletedAssistantMessage(state, turn);
   }
@@ -398,11 +418,11 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     if (event.type === "error" && !childThread && state.turn) this.publishOpenChildEndings(state, state.turn);
   }
 
-  private requestPermission(sessionId: string, native: NativePermissionRequest, nativeSessionId: string): Promise<PermissionRequestResult> | PermissionRequestResult {
+  private requestPermission(sessionId: string, native: NativePermissionRequest): Promise<PermissionRequestResult> | PermissionRequestResult {
     const state = this.runtime.get(sessionId);
     const turn = state?.turn;
     if (!state || !turn || turn.outcome) return { kind: "denied-interactively-by-user" };
-    const policy = nativeApprovalPolicy(state.request, native, nativeSessionId, state.session.sessionId, NodePath.join(state.planRoot, "plan.md"));
+    const policy = nativeApprovalPolicy(state.request, native, NodePath.join(state.planRoot, "plan.md"));
     if (policy) return policy;
     if (this.consumePermissionGrant(state, native)) return { kind: "approved" };
     const scope = copilotSessionScope(native);
@@ -661,8 +681,7 @@ function copilotConfigDirectory(env: Record<string, string>): string {
   return env.COPILOT_HOME || NodePath.join(NodeOS.homedir(), ".copilot");
 }
 
-function nativeApprovalPolicy(request: TurnRequest<"copilot">, permission: NativePermissionRequest, nativeSessionId: string, expectedSessionId: string, planPath: string): PermissionRequestResult | Promise<PermissionRequestResult> | undefined {
-  if (nativeSessionId !== expectedSessionId) return { kind: "denied-by-rules", rules: [] };
+function nativeApprovalPolicy(request: TurnRequest<"copilot">, permission: NativePermissionRequest, planPath: string): PermissionRequestResult | Promise<PermissionRequestResult> | undefined {
   if (!["read", "write", "shell", "mcp", "url", "custom-tool"].includes(permission.kind)) return { kind: "denied-by-rules", rules: [] };
   if (request.interactionMode === "plan") {
     if (permission.kind === "read") return { kind: "approved" };

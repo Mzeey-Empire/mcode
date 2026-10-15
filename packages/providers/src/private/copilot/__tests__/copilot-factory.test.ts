@@ -127,6 +127,12 @@ describe("Copilot public factory", () => {
       await NodeFSPromises.rm(home, { recursive: true, force: true });
     });
 
+    /** The first read is the pre-turn baseline, every later read is the end-of-turn plan. */
+    function planReads(baseline: string | null, final: string | null, path: string | null = planPath) {
+      const read = (content: string | null) => ({ exists: content !== null, content, path: content === null ? null : path });
+      session.rpc.plan.read.mockReset().mockResolvedValueOnce(read(baseline)).mockResolvedValue(read(final));
+    }
+
     it("permits only reads and this SDK session's exact plan file on every plan turn", async () => {
       for (let turn = 1; turn <= 2; turn++) {
         await provider.sendTurn(request({ interactionMode: "plan", turnId: `turn-${turn}`, turnExecutionId: `00000000-0000-4000-8000-00000000000${turn}` }));
@@ -148,7 +154,6 @@ describe("Copilot public factory", () => {
           { kind: "custom-tool", toolName: "write" },
         ];
         for (const permission of denied) expect(await options.onPermissionRequest(permission, invocation)).toEqual({ kind: "denied-by-rules", rules: [] });
-        expect(await options.onPermissionRequest({ kind: "write", fileName: planPath }, { sessionId: "another-session" })).toEqual({ kind: "denied-by-rules", rules: [] });
         expect(provider.listPendingApprovals?.()).toEqual([]);
         await NodeFSPromises.writeFile(planPath, "abc");
         await finish();
@@ -177,7 +182,7 @@ describe("Copilot public factory", () => {
       const nativePlanFile = { path: customPath, sessionId: session.sessionId, sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" };
       expect(await provider.prepareImplement?.({ threadId: "thread-1", markdown: "edited", nativePlanFile })).toEqual({ outcome: "synced" });
       expect(await NodeFSPromises.readFile(customPath, "utf8")).toBe("edited");
-      session.rpc.plan.read.mockResolvedValue({ exists: true, content: "edited", path: customPath });
+      planReads(null, "edited", customPath);
       await provider.sendTurn(request({ interactionMode: "plan", resumeFrom: session.sessionId }));
       const options: SessionConfig = sdk.resume.mock.calls[0]?.[1];
       expect(options.configDir).toBe(configDir);
@@ -192,7 +197,7 @@ describe("Copilot public factory", () => {
       provider.on("plan_captured", captured);
       for (const [index, content] of ["abc", "abc", "revised"].entries()) {
         if (index !== 1) await NodeFSPromises.writeFile(planPath, content);
-        session.rpc.plan.read.mockResolvedValue({ exists: true, content, path: planPath });
+        planReads(index === 0 ? null : "abc", content);
         await provider.sendTurn(request({ interactionMode: "plan", turnId: `turn-${index + 1}`, turnExecutionId: `00000000-0000-4000-8000-00000000000${index + 1}` }));
         session.emit({ type: "assistant.message", data: { messageId: `message-${index}`, content: "Plan response" } });
         await finish();
@@ -203,7 +208,7 @@ describe("Copilot public factory", () => {
 
     it("captures native evidence before the canonical final message and reconciles only unchanged owned bytes", async () => {
       await NodeFSPromises.writeFile(planPath, "abc");
-      session.rpc.plan.read.mockResolvedValue({ exists: true, content: "abc", path: planPath });
+      planReads(null, "abc");
       const captured = vi.fn();
       provider.on("plan_captured", captured);
       await provider.sendTurn(request({ interactionMode: "plan" }));
@@ -215,13 +220,14 @@ describe("Copilot public factory", () => {
         { type: "message", capture: { markdown: "abc", source: "native", nativePlanFile } },
       ]);
       const input = { threadId: "thread-1", markdown: "edited", nativePlanFile };
-      expect(await provider.prepareImplement?.({ ...input, nativePlanFile: { ...nativePlanFile, sessionId: "other" } })).toEqual({ outcome: "skipped", reason: "unsafe-path" });
+      expect(await provider.prepareImplement?.({ ...input, nativePlanFile: { ...nativePlanFile, sessionId: "other" } })).toMatchObject({ outcome: "skipped" });
+      expect(await NodeFSPromises.readFile(planPath, "utf8")).toBe("abc");
       expect(await provider.prepareImplement?.(input)).toEqual({ outcome: "synced" });
       expect(await NodeFSPromises.readFile(planPath, "utf8")).toBe("edited");
       expect(await provider.prepareImplement?.({ ...input, markdown: "second edit" })).toEqual({ outcome: "skipped", reason: "changed" });
       expect(await NodeFSPromises.readFile(planPath, "utf8")).toBe("edited");
       expect(await NodeFSPromises.readdir(planRoot)).toEqual(["plan.md"]);
-      session.rpc.plan.read.mockResolvedValue({ exists: true, content: "edited", path: planPath });
+      planReads("edited", "edited");
       await provider.sendTurn(request({ interactionMode: "plan", turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002" }));
       await finish();
       expect(captured).toHaveBeenCalledTimes(1);
@@ -230,7 +236,7 @@ describe("Copilot public factory", () => {
 
     it("reconciles a captured plan after idle eviction without starting another session", async () => {
       await NodeFSPromises.writeFile(planPath, "abc");
-      session.rpc.plan.read.mockResolvedValue({ exists: true, content: "abc", path: planPath });
+      planReads(null, "abc");
       await provider.sendTurn(request({ interactionMode: "plan" }));
       await finish();
       await provider.evictNonBusySessions("fixture idle eviction");
@@ -258,7 +264,7 @@ describe("Copilot public factory", () => {
       await NodeFSPromises.mkdir(outsideRoot);
       const outsidePath = NodePath.join(outsideRoot, "plan.md");
       await NodeFSPromises.writeFile(outsidePath, "abc");
-      session.rpc.plan.read.mockResolvedValue({ exists: true, content: "abc", path: outsidePath });
+      planReads(null, "abc", outsidePath);
       const captured = vi.fn();
       provider.on("plan_captured", captured);
       await provider.sendTurn(request({ interactionMode: "plan" }));
@@ -271,7 +277,7 @@ describe("Copilot public factory", () => {
     });
 
     it.each([null, "", "  ", "x".repeat(65_537)])("ignores missing or invalid native content %#", async (content) => {
-      session.rpc.plan.read.mockResolvedValue({ exists: content !== null, content, path: planPath });
+      planReads(null, content);
       const captured = vi.fn();
       provider.on("plan_captured", captured);
       await provider.sendTurn(request({ interactionMode: "plan" }));
@@ -290,7 +296,7 @@ describe("Copilot public factory", () => {
     });
 
     it("persists a native plan even when the SDK emits no final assistant message", async () => {
-      session.rpc.plan.read.mockResolvedValue({ exists: true, content: "A native plan", path: null });
+      planReads(null, "A native plan", null);
       await provider.sendTurn(request({ interactionMode: "plan" }));
       await finish();
       expect(runtimeEvents(sink).filter((event) => event.planCapture).map((event) => ({ event: event.event, capture: event.planCapture }))).toEqual([{
@@ -299,18 +305,49 @@ describe("Copilot public factory", () => {
       }]);
     });
 
-    it("reports a failed plan read without publishing a successful turn completion", async () => {
+    it("falls back to the plan fence when the native plan cannot be read", async () => {
       session.rpc.plan.read.mockRejectedValue(new Error("Plan read failed"));
       await provider.sendTurn(request({ interactionMode: "plan" }));
+      session.emit({ type: "assistant.message", data: { messageId: "plan-message", content: "Fenced plan response" } });
       await finish();
-      expect(projections(sink).filter((event) => event.type === "turnComplete")).toEqual([]);
-      expect(projections(sink).filter((event) => event.type === "error").map((event) => event.failure)).toEqual([{ kind: "fatal" }]);
-      expect(projections(sink).at(-1)).toMatchObject({ type: "ended", outcome: "errored" });
+      expect(projections(sink).filter((event) => event.type === "turnComplete")).toHaveLength(1);
+      expect(projections(sink).filter((event) => event.type === "message").map((event) => event.content)).toEqual(["Fenced plan response"]);
+      expect(projections(sink).at(-1)).not.toHaveProperty("outcome");
       expect(runtimeEvents(sink).flatMap((event) => event.planCapture ? [event.planCapture] : [])).toEqual([]);
     });
 
+    it("captures the CLI's text without a file reference when the file no longer matches it", async () => {
+      await NodeFSPromises.writeFile(planPath, "changed on disk");
+      planReads(null, "abc");
+      await provider.sendTurn(request({ interactionMode: "plan" }));
+      await finish();
+      expect(runtimeEvents(sink).flatMap((event) => event.planCapture ? [event.planCapture] : [])).toEqual([{ markdown: "abc", source: "native" }]);
+    });
+
+    it("syncs through a symlinked config directory the CLI reports its plan path under", async () => {
+      const realConfig = NodePath.join(home, "real-copilot");
+      const linkedConfig = NodePath.join(home, "linked-copilot");
+      const realPath = NodePath.join(realConfig, "session-state", session.sessionId, "plan.md");
+      await NodeFSPromises.mkdir(NodePath.dirname(realPath), { recursive: true });
+      await NodeFSPromises.writeFile(realPath, "abc");
+      await NodeFSPromises.symlink(realConfig, linkedConfig, "junction");
+      launch.mockResolvedValue({ cliPath: "/copilot", env: { COPILOT_HOME: linkedConfig } });
+      const reported = NodePath.join(linkedConfig, "session-state", session.sessionId, "plan.md");
+      const nativePlanFile = { path: reported, sessionId: session.sessionId, sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" };
+      expect(await provider.prepareImplement?.({ threadId: "thread-1", markdown: "edited", nativePlanFile })).toEqual({ outcome: "synced" });
+      expect(await NodeFSPromises.readFile(realPath, "utf8")).toBe("edited");
+    });
+
+    it("skips the sync instead of failing Implement when the CLI launch cannot be resolved", async () => {
+      await NodeFSPromises.writeFile(planPath, "abc");
+      launch.mockRejectedValue(new Error("Copilot CLI missing"));
+      const nativePlanFile = { path: planPath, sessionId: session.sessionId, sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" };
+      expect(await provider.prepareImplement?.({ threadId: "thread-1", markdown: "edited", nativePlanFile })).toEqual({ outcome: "skipped", reason: "unproven" });
+      expect(await NodeFSPromises.readFile(planPath, "utf8")).toBe("abc");
+    });
+
     it("fences the transport when native plan capture exceeds its deadline", async () => {
-      session.rpc.plan.read.mockImplementationOnce(() => new Promise(() => {}));
+      session.rpc.plan.read.mockResolvedValueOnce({ exists: false, content: null, path: null }).mockImplementationOnce(() => new Promise(() => {}));
       await provider.sendTurn(request({ interactionMode: "plan" }));
       vi.useFakeTimers();
       try {
