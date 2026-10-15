@@ -78,6 +78,19 @@ describe("BrowserNotesTile", () => {
     expect(document.querySelector("img")).toBeNull();
   });
 
+  it("flags a page that is not at the front when its staged image is gone", async () => {
+    seedPage(SCOPE, PRODUCT_PAGE, "Product");
+    seedPage(SCOPE, BILLING_PAGE, "Billing");
+    const productImage = store().pages[SCOPE]![PRODUCT_PAGE]!.snapshot;
+    mockRead.mockImplementation(async (_scope: string, image: unknown) => (image === productImage ? null : new Uint8Array([1])));
+    renderTile();
+
+    const card = await openHoverCard();
+
+    expect(await within(card).findAllByText("Retake")).toHaveLength(1);
+    expect(within(within(card).getByText("Product").parentElement!).getByText("Retake")).toBeInTheDocument();
+  });
+
   it("renders nothing without Browser notes", () => {
     renderTile();
 

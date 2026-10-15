@@ -92,6 +92,13 @@ function Thumbnail({ page, scopeId }: { readonly page: PreviewPageRecord; readon
   );
 }
 
+/** Flags a page in the card whose image is gone, so a missing snapshot is visible on every page and not only the front one. */
+function RetakeFlag({ page, scopeId }: { readonly page: PreviewPageRecord; readonly scopeId: string }) {
+  return useThumbnail(page, scopeId) === "missing"
+    ? <span className="shrink-0 text-caption text-muted">Retake</span>
+    : null;
+}
+
 function NoteRow({
   page,
   note,
@@ -217,6 +224,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
                 <span className="text-fade min-w-0 grow text-xs font-medium text-muted">
                   {browserPageLabel(group.page)}
                 </span>
+                <RetakeFlag page={group.page} scopeId={scopeId} />
               </div>
               <ul>
                 {group.notes.map((note) => (
