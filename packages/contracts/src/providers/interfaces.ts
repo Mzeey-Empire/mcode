@@ -179,6 +179,8 @@ export type TurnSteerOutcome =
 export interface NativePlanFileRef {
   path: string;
   sessionId: string;
+  /** Plan root the file was proved under, so a later process can validate it without session state. */
+  root: string;
   sha256: string;
 }
 

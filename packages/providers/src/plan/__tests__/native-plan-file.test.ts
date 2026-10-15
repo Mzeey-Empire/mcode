@@ -2,15 +2,15 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PLAN_MAX_CONTENT_CHARS, type NativePlanFileRef } from "@mcode/contracts";
-import { captureNativePlanFile, syncNativePlanFile } from "../native-plan-file.js";
+import { captureNativePlanFile, isWritableNativePlanPath, syncNativePlanFile } from "../native-plan-file.js";
 
 let directory: string;
 let root: string;
 let path: string;
 const sha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
-const ref = (): NativePlanFileRef => ({ path, sessionId: "session", sha256 });
+const ref = (): NativePlanFileRef => ({ path, sessionId: "session", root, sha256 });
 const sync = (nativePlanFile: NativePlanFileRef | null = ref(), markdown = "# Edited\n") =>
-  syncNativePlanFile({ nativePlanFile, roots: [root], markdown });
+  syncNativePlanFile({ nativePlanFile, markdown });
 
 beforeEach(async () => {
   const scratch = NodePath.resolve(import.meta.dirname, "../../../../../.dev/native-plan-tests");
@@ -110,5 +110,66 @@ describe("native plan file validation and reconciliation", () => {
     expect(await sync()).toEqual({ outcome: "skipped", reason: "no-file" });
     await NodeFSPromises.mkdir(path);
     expect(await sync()).toEqual({ outcome: "skipped", reason: "unsafe-path" });
+  });
+
+  it("syncs from the root recorded in the ref without any session state", async () => {
+    const stored = JSON.parse(JSON.stringify(ref())) as NativePlanFileRef;
+    expect(await syncNativePlanFile({ nativePlanFile: stored, markdown: "# After restart\n" })).toEqual({ outcome: "synced" });
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("# After restart\n");
+  });
+
+  it("refuses a ref whose recorded root is not a plans directory", async () => {
+    const forged = { ...ref(), root: directory };
+    expect(await sync(forged)).toEqual({ outcome: "skipped", reason: "unproven" });
+    expect(await NodeFSPromises.readFile(path, "utf8")).toBe("abc");
+  });
+});
+
+describe("plan-turn write permission", () => {
+  const writable = (candidate: string) => isWritableNativePlanPath(candidate, [root], NodePath.join(directory, "unrelated-project"));
+
+  it("allows a new or existing markdown file inside the root", async () => {
+    expect(await writable(path)).toBe(true);
+    expect(await writable(NodePath.join(root, "fresh-plan.md"))).toBe(true);
+  });
+
+  it("refuses non-markdown files, the root itself and paths outside it", async () => {
+    expect(await writable(NodePath.join(root, "script.sh"))).toBe(false);
+    expect(await writable(root)).toBe(false);
+    expect(await writable(NodePath.join(directory, "elsewhere.md"))).toBe(false);
+  });
+
+  it("refuses a directory link that carries a new file out of the root", async () => {
+    const outside = NodePath.join(directory, "outside");
+    await NodeFSPromises.mkdir(outside);
+    await NodeFSPromises.symlink(outside, NodePath.join(root, "linked"), "junction");
+    expect(await writable(NodePath.join(root, "linked", "new.md"))).toBe(false);
+  });
+
+  it("refuses a project plan root that links out of the project but allows a linked config-home root", async () => {
+    const project = NodePath.join(directory, "project");
+    const outside = NodePath.join(directory, "outside-root");
+    await NodeFSPromises.mkdir(NodePath.join(project, ".claude"), { recursive: true });
+    await NodeFSPromises.mkdir(outside);
+    const projectRoot = NodePath.join(project, ".claude", "plans");
+    await NodeFSPromises.symlink(outside, projectRoot, "junction");
+    expect(await isWritableNativePlanPath(NodePath.join(projectRoot, "new.md"), [projectRoot], project)).toBe(false);
+    expect(await isWritableNativePlanPath(NodePath.join(projectRoot, "new.md"), [projectRoot], NodePath.join(directory, "other"))).toBe(true);
+  });
+
+  it("refuses a project .claude directory that links to the repository root", async () => {
+    const project = NodePath.join(directory, "project");
+    const elsewhere = NodePath.join(directory, "elsewhere");
+    await NodeFSPromises.mkdir(NodePath.join(elsewhere, "plans"), { recursive: true });
+    await NodeFSPromises.mkdir(project);
+    await NodeFSPromises.symlink(elsewhere, NodePath.join(project, ".claude"), "junction");
+    const projectRoot = NodePath.join(project, ".claude", "plans");
+    expect(await isWritableNativePlanPath(NodePath.join(projectRoot, "new.md"), [projectRoot], project)).toBe(false);
+  });
+
+  it("refuses a dangling file symlink that would create its target outside the root", async () => {
+    const link = NodePath.join(root, "dangling.md");
+    await NodeFSPromises.symlink(NodePath.join(directory, "created-outside.md"), link, "file");
+    expect(await writable(link)).toBe(false);
   });
 });

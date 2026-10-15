@@ -15,6 +15,46 @@ export function isNativePlanFilePath(path: string, roots: readonly string[]): bo
   });
 }
 
+async function resolveThroughExistingAncestor(path: string): Promise<string> {
+  let existing = NodePath.resolve(path);
+  const missing: string[] = [];
+  for (;;) {
+    try {
+      return NodePath.join(await NodeFSPromises.realpath(existing), ...missing.reverse());
+    } catch (error) {
+      const parent = NodePath.dirname(existing);
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT") || parent === existing) throw error;
+      missing.push(NodePath.basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+/**
+ * Decide whether a Plan turn may write this path: a markdown file whose resolved location,
+ * links included, stays inside a plan root. Lexical containment alone lets a committed symlink
+ * or junction under `.claude/plans` carry a write out of the root. The project root must also
+ * resolve to `<project>/.claude/plans`; a link there would turn the whole project into a plan
+ * root. The config-home root may be linked, since dotfile managers do that on purpose.
+ */
+export async function isWritableNativePlanPath(path: string, roots: readonly string[], projectDir: string): Promise<boolean> {
+  if (!isNativePlanFilePath(path, roots) || NodePath.extname(path).toLowerCase() !== ".md") return false;
+  try {
+    const leaf = await NodeFSPromises.lstat(path).catch(() => undefined);
+    if (leaf?.isSymbolicLink()) return false;
+    const projectRoot = NodePath.join(projectDir, ".claude", "plans");
+    const realProjectRoot = NodePath.join(await resolveThroughExistingAncestor(projectDir), ".claude", "plans");
+    const realRoots: string[] = [];
+    for (const root of roots.filter(NodePath.isAbsolute)) {
+      const real = await resolveThroughExistingAncestor(root);
+      if (root !== projectRoot || real === realProjectRoot) realRoots.push(real);
+    }
+    return isNativePlanFilePath(await resolveThroughExistingAncestor(path), realRoots);
+  } catch {
+    return false;
+  }
+}
+
 function fileFailure(error: unknown): Extract<NativePlanFileOutcome, { outcome: "skipped" }> {
   if (error instanceof Error && "code" in error && error.code === "ENOENT") {
     return { outcome: "skipped", reason: "no-file" };
@@ -24,7 +64,7 @@ function fileFailure(error: unknown): Extract<NativePlanFileOutcome, { outcome: 
 
 async function readPlanFile(path: string, roots: readonly string[]): Promise<FileRead> {
   try {
-    if (!isNativePlanFilePath(path, roots)) return { outcome: "skipped", reason: "unsafe-path" };
+    if (!isNativePlanFilePath(path, roots) || NodePath.extname(path).toLowerCase() !== ".md") return { outcome: "skipped", reason: "unsafe-path" };
     const stat = await NodeFSPromises.lstat(path);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > PLAN_MAX_CONTENT_CHARS) {
       return { outcome: "skipped", reason: "unsafe-path" };
@@ -64,20 +104,26 @@ export async function captureNativePlanFile(input: {
 }): Promise<NativePlanFileRef | undefined> {
   const file = await readPlanFile(input.path, input.roots);
   if (file.outcome !== "read") return undefined;
-  return { path: input.path, sessionId: input.sessionId, sha256: file.sha256 };
+  const root = input.roots.find(candidate => isNativePlanFilePath(input.path, [candidate]));
+  if (!root) return undefined;
+  return { path: input.path, sessionId: input.sessionId, root, sha256: file.sha256 };
 }
 
-/** Replace a proved, unchanged plan through a same-directory rename; refusals leave it untouched. */
+/**
+ * Replace a proved, unchanged plan through a same-directory rename; refusals leave it untouched.
+ * The ref names its own root so a stored ref still syncs after a restart or an idle eviction.
+ */
 export async function syncNativePlanFile(input: {
-  nativePlanFile: NativePlanFileRef | null; roots: readonly string[]; markdown: string;
+  nativePlanFile: NativePlanFileRef | null; markdown: string;
 }): Promise<NativePlanFileOutcome> {
   const ref = input.nativePlanFile;
-  if (!ref) return { outcome: "skipped", reason: "unproven" };
-  const file = await readPlanFile(ref.path, input.roots);
+  if (!ref || NodePath.basename(ref.root) !== "plans") return { outcome: "skipped", reason: "unproven" };
+  const roots = [ref.root];
+  const file = await readPlanFile(ref.path, roots);
   if (file.outcome !== "read") return file;
   if (file.sha256 !== ref.sha256) return { outcome: "skipped", reason: "changed" };
   if (Buffer.byteLength(input.markdown, "utf8") > PLAN_MAX_CONTENT_CHARS) return { outcome: "skipped", reason: "unsafe-path" };
-  return await replacePlanFile(ref, file.realPath, input.roots, input.markdown);
+  return await replacePlanFile(ref, file.realPath, roots, input.markdown);
 }
 
 async function replacePlanFile(ref: NativePlanFileRef, realPath: string, roots: readonly string[], markdown: string): Promise<NativePlanFileOutcome> {

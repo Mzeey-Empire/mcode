@@ -514,7 +514,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
   });
 
   it("passes the newest agent file proof with draft text and durably returns the adapter outcome", async () => {
-    const nativePlanFile = { path: NodePath.join(directory, "provider-plan.md"), sessionId: "provider-session", sha256: "a".repeat(64) };
+    const nativePlanFile = { path: NodePath.join(directory, "provider-plan.md"), sessionId: "provider-session", root: directory, sha256: "a".repeat(64) };
     ready = await plans.create(threadId, ready.messageId!, { title: "Native", contentMd: "# Native", captureSource: "native", nativePlanFile }, "codex");
     const edited = await draft();
     provider.prepareImplement = async input => {

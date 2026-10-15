@@ -209,14 +209,61 @@ describe("Claude native plan turns", () => {
     expect(decisions).toEqual([{}, {}, {}, {}]);
   });
 
-  it.each(["Write", "Read"])("allows approved plan %s without forwarding session permissions", async toolName => {
+  it("keeps the plan-file exemption inside the plan root: no links out, no non-markdown files", async () => {
+    const { cwd, parent, path } = await createNativePlanFixture("proved");
+    const outside = NodePath.join(cwd, "outside");
+    await NodeFSPromises.mkdir(outside);
+    await NodeFSPromises.symlink(outside, NodePath.join(parent, "linked"), "junction");
+    const decisions: Record<string, unknown>[] = [];
+    installTransport(async (_turn, options) => {
+      const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+      assert(hook);
+      for (const file_path of [path, NodePath.join(parent, "new-plan.md"), NodePath.join(parent, "run.sh"),
+        NodePath.join(parent, "linked", "escape.md")]) {
+        decisions.push(await hook({ hook_event_name: "PreToolUse", session_id: "NATIVE_PARENT", cwd, transcript_path: "fixture",
+          tool_use_id: "EDIT", tool_name: "Write", tool_input: { file_path } }, "EDIT", { signal: new AbortController().signal }));
+      }
+      return [result()];
+    });
+    const { provider, events } = fixture();
+    await provider.sendTurn(request({ cwd, permissionMode: "full", planTurn: { kind: "revise", planFilePath: null } }));
+    await completed(events, 1);
+    const deny = { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny",
+      permissionDecisionReason: "Plan mode is read-only. Describe the change in the plan instead." } };
+    expect(decisions).toEqual([{}, {}, deny, deny]);
+  });
+
+  it.each(["Edit", "MultiEdit"])("proves ownership of the plan file from a Revise turn's %s, which a new session after idle eviction relies on", async tool_name => {
+    const { cwd, parent, path } = await createNativePlanFixture("proved");
+    installTransport(async (_turn, options) => {
+      assert(options.canUseTool);
+      expect(options.hooks?.PostToolUse?.[0]?.matcher?.split("|")).toContain(tool_name);
+      const hook = options.hooks?.PostToolUse?.[0]?.hooks[0];
+      assert(hook);
+      await hook({ hook_event_name: "PostToolUse", session_id: "NATIVE_PARENT", cwd, transcript_path: "fixture", tool_use_id: "EDIT",
+        tool_name, tool_response: {}, tool_input: { file_path: path, old_string: "abc", new_string: "abd" } }, "EDIT", { signal: new AbortController().signal });
+      await options.canUseTool("ExitPlanMode", { plan: "# Revised", planFilePath: path }, { signal: new AbortController().signal, toolUseID: "EXIT" });
+      return [result()];
+    });
+    const { provider, events } = fixture();
+    const captures: PlanCapture[] = [];
+    provider.on("plan_captured", capture => captures.push(capture));
+    await provider.sendTurn(request({ cwd, planTurn: { kind: "revise", planFilePath: path } }));
+    await completed(events, 1);
+    expect(captures[0]?.nativePlanFile).toMatchObject({ path, sessionId: "NATIVE_PARENT", root: parent });
+  });
+
+  it.each([
+    ["Write", "plan file"], ["Read", "plan file"], ["mcp__mcode__thread_control", "MCP tool"],
+  ])("lets a plan turn approve %s like any turn, keeping rule suggestions but never a mode switch (%s)", async (toolName) => {
     const { cwd, path } = await createNativePlanFixture("proved");
-    const input = { file_path: path, content: "# Plan" };
+    const input = toolName.startsWith("mcp__") ? { action: "list" } : { file_path: path, content: "# Plan" };
+    const rule = { type: "addRules", rules: [{ toolName }], behavior: "allow", destination: "session" } as const;
     const replies: unknown[] = [];
     installTransport(async (_turn, options) => {
       assert(options.canUseTool);
       replies.push(await options.canUseTool(toolName, input, { signal: new AbortController().signal, toolUseID: "TOOL",
-        suggestions: [{ type: "addRules", rules: [{ toolName }], behavior: "allow", destination: "session" }] }));
+        suggestions: [rule, { type: "setMode", mode: "acceptEdits", destination: "session" }] }));
       return [result()];
     });
     const { provider, events } = fixture();
@@ -228,8 +275,8 @@ describe("Claude native plan turns", () => {
     });
     await provider.sendTurn(request({ cwd, permissionMode: "full", planTurn: { kind: "planning", planFilePath: null } }));
     await completed(events, 1);
-    expect(replies).toEqual([{ behavior: "allow", updatedInput: input }]);
-    expect(choices).toEqual([["allow", "deny"]]);
+    expect(replies).toEqual([{ behavior: "allow", updatedInput: input, updatedPermissions: [rule] }]);
+    expect(choices).toEqual([["allow", "allow-session", "deny"]]);
   });
 
   it.each(["planning", "revise", "questions", undefined] as const)("captures ExitPlanMode only for planning/revise: %s", async kind => {
@@ -278,14 +325,15 @@ describe("Claude native plan turns", () => {
     await provider.sendTurn(request({ cwd, planTurn: { kind: "planning", planFilePath: null } }));
     await completed(events, 1);
     const proved = proof === "proved" || proof === "config-root";
-    const nativePlanFile = { path, sessionId: "NATIVE_PARENT", sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" };
+    const nativePlanFile = { path, sessionId: "NATIVE_PARENT", root: parent, sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" };
     const expected = { markdown: "# Native plan", source: "native", ...(proved && { nativePlanFile }) };
     expect(captures).toEqual([{ threadId: "thread-1", ...expected }]);
     expect(events().flatMap(runtime => runtime.planCapture ? [runtime.planCapture] : [])).toEqual([expected]);
-    assert(provider.prepareImplement);
+    const { provider: restarted } = fixture();
+    assert(restarted.prepareImplement);
     const captured = captures[0];
     assert(captured);
-    expect(await provider.prepareImplement({ threadId: "thread-1", markdown: "# Edited", nativePlanFile: captured.nativePlanFile ?? null }))
+    expect(await restarted.prepareImplement({ threadId: "thread-1", markdown: "# Edited", nativePlanFile: captured.nativePlanFile ?? null }))
       .toEqual(proved ? { outcome: "synced" } : { outcome: "skipped", reason: "unproven" });
     if (proved) expect(await NodeFSPromises.readFile(path, "utf8")).toBe("# Edited");
   });

@@ -15,7 +15,7 @@ import { claudeApprovalBody } from "./claude-approval.js";
 type ClaudeApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled" | "auto-deny";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
-import { captureNativePlanFile, isNativePlanFilePath, syncNativePlanFile } from "../../plan/native-plan-file.js";
+import { captureNativePlanFile, isNativePlanFilePath, isWritableNativePlanPath, syncNativePlanFile } from "../../plan/native-plan-file.js";
 import { z } from "zod";
 import * as NodePath from "node:path";
 import which from "which";
@@ -431,18 +431,18 @@ function idlesWithUnansweredSteer(state: ClaudeStreamLoopState, message: Record<
     && message.state === "idle";
 }
 
-/** Convert a plain string message into an SDKUserMessage. */
 const PLAN_READ_ONLY_DENIED_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Monitor", "EnterWorktree"]);
 const PLAN_FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
 
 /** Returns the denial message for a tool call a Plan turn must not run, or undefined when the call may proceed. Claude's own plan file stays writable so a Revise turn can patch it. */
-function planMutationDenial(planRoots: readonly string[], toolName: string, input: Record<string, unknown>): string | undefined {
+async function planMutationDenial(session: Pick<ClaudeSessionState, "planRoots" | "cwd">, toolName: string, input: Record<string, unknown>): Promise<string | undefined> {
   if (!PLAN_READ_ONLY_DENIED_TOOLS.has(toolName)) return undefined;
   if (PLAN_FILE_EDIT_TOOLS.has(toolName) && typeof input.file_path === "string"
-    && isNativePlanFilePath(input.file_path, planRoots)) return undefined;
+    && await isWritableNativePlanPath(input.file_path, session.planRoots, session.cwd)) return undefined;
   return "Plan mode is read-only. Describe the change in the plan instead.";
 }
 
+/** Convert a plain string message into an SDKUserMessage. */
 function toUserMessage(text: string, sessionId: string): SDKUserMessage {
   return {
     type: "user" as const,
@@ -729,8 +729,6 @@ export class ClaudeProvider
    * recreation so the handoff stays invisible in the narrative timeline.
    */
   private readonly suppressSessionStartHooks = new Set<string>();
-  /** Keep declared roots after idle eviction so an already captured plan can still be synced. */
-  private nativePlanRoots = new Map<string, { threadId: string; roots: string[] }>();
   /** Pending permission requests awaiting user decision, keyed by requestId. */
   private pendingPermissions = new Map<
     string,
@@ -1209,9 +1207,9 @@ export class ClaudeProvider
         if (planExit) return planExit;
         const session = this.runtime.get(`mcode-${threadId}`);
         if (session?.planTurn) {
-          const denial = this.denyPlanMutation(session, toolName, input);
+          const denial = await this.denyPlanMutation(session, toolName, input);
           if (denial) return denial;
-          options = { ...options, suggestions: undefined };
+          options = { ...options, suggestions: options.suggestions?.filter(suggestion => suggestion.type !== "setMode") };
         }
         const preGrant = this.consumeScopedReadGrant(threadId, toolName, input);
         if (preGrant) return preGrant;
@@ -1235,12 +1233,12 @@ export class ClaudeProvider
     };
   }
 
-  private denyPlanMutation(
+  private async denyPlanMutation(
     session: ClaudeSessionState,
     toolName: string,
     input: Record<string, unknown>,
-  ): ClaudeToolPermissionResult | undefined {
-    const message = planMutationDenial(session.planRoots, toolName, input);
+  ): Promise<ClaudeToolPermissionResult | undefined> {
+    const message = await planMutationDenial(session, toolName, input);
     return message ? { behavior: "deny", message } : undefined;
   }
 
@@ -1281,7 +1279,7 @@ export class ClaudeProvider
       };
     }
     session.planCaptured = true;
-    const nativePlanFile = await this.captureClaudePlanFile(session, input.planFilePath, threadId);
+    const nativePlanFile = await this.captureClaudePlanFile(session, input.planFilePath);
     const capture = { markdown: planMarkdown, source: "native" as const, ...(nativePlanFile && { nativePlanFile }) };
     this.canonicalEventPublisher.capturePlan(session.executionRouting, capture);
     this.emit("plan_captured", { threadId, ...capture });
@@ -1297,19 +1295,15 @@ export class ClaudeProvider
     };
   }
 
-  private async captureClaudePlanFile(session: ClaudeSessionState, path: unknown, threadId: string): Promise<NativePlanFileRef | undefined> {
+  private async captureClaudePlanFile(session: ClaudeSessionState, path: unknown): Promise<NativePlanFileRef | undefined> {
     const sessionId = this.sdkSessionIds.get(session.sessionId);
     if (typeof path !== "string" || !sessionId || session.planWrites.get(path) !== sessionId) return undefined;
-    const ref = await captureNativePlanFile({ path, sessionId, roots: session.planRoots });
-    if (ref) this.nativePlanRoots.set(sessionId, { threadId, roots: session.planRoots });
-    return ref;
+    return await captureNativePlanFile({ path, sessionId, roots: session.planRoots });
   }
 
-  /** Reconcile only a native file whose session roots this adapter observed. */
+  /** Reconcile a native file from the root its captured ref names, so the proof outlives this process. */
   async prepareImplement(input: { threadId: string; markdown: string; nativePlanFile: NativePlanFileRef | null }): Promise<NativePlanFileOutcome> {
-    const owner = input.nativePlanFile ? this.nativePlanRoots.get(input.nativePlanFile.sessionId) : undefined;
-    if (!owner || owner.threadId !== input.threadId) return { outcome: "skipped", reason: "unproven" };
-    return await syncNativePlanFile({ ...input, roots: owner.roots });
+    return await syncNativePlanFile(input);
   }
 
   private consumeScopedReadGrant(
@@ -1792,7 +1786,7 @@ export class ClaudeProvider
       // Only hooks running inside a subagent report the effort it runs at, so read it from its tool calls and its stop.
       // The plan guard runs here as well as in canUseTool because an allow rule from user or project settings approves a tool before canUseTool is asked.
       PreToolUse: [{ hooks: [this.createPlanReadOnlyHook(context), this.createSubagentEffortHook(context)] }],
-      PostToolUse: [{ matcher: "Write", hooks: [this.createPlanWriteHook(context)] }],
+      PostToolUse: [{ matcher: "Write|Edit|MultiEdit", hooks: [this.createPlanWriteHook(context)] }],
       SubagentStop: [{ hooks: [this.createSubagentEffortHook(context)] }],
     };
   }
@@ -1804,7 +1798,7 @@ export class ClaudeProvider
       if (!session?.planTurn || session.spawnRouting !== context.routing) return {};
       const toolInput = typeof input.tool_input === "object" && input.tool_input !== null
         ? input.tool_input as Record<string, unknown> : {};
-      const reason = planMutationDenial(session.planRoots, input.tool_name, toolInput);
+      const reason = await planMutationDenial(session, input.tool_name, toolInput);
       if (!reason) return {};
       return { hookSpecificOutput: { hookEventName: "PreToolUse" as const, permissionDecision: "deny" as const, permissionDecisionReason: reason } };
     };
@@ -1812,7 +1806,7 @@ export class ClaudeProvider
 
   private createPlanWriteHook(context: ClaudeTurnContext) {
     return async (input: HookInput) => {
-      if (input.hook_event_name !== "PostToolUse" || input.tool_name !== "Write") return {};
+      if (input.hook_event_name !== "PostToolUse" || !PLAN_FILE_EDIT_TOOLS.has(input.tool_name)) return {};
       const write = claudePlanWriteSchema.safeParse(input.tool_input);
       const session = this.runtime.get(context.params.sessionId);
       if (session && session.spawnRouting === context.routing && write.success
@@ -3438,7 +3432,6 @@ export class ClaudeProvider
     this.pendingSpawnTurns.clear();
     this.pendingBrowserAccess.clear();
     this.sdkSessionIds.clear();
-    this.nativePlanRoots.clear();
     this.goalsBySession.clear();
     const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
     if (failures.length > 0) throw new AggregateError(failures, "Claude provider shutdown failed");

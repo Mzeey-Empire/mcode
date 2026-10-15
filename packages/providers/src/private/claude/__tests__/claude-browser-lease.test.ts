@@ -74,7 +74,6 @@ function makeProvider(lease: BrowserAutomationSessionLease) {
     pendingStops: new Set(),
     suppressEndedQueries: new Set(),
     suppressSessionStartHooks: new Set(),
-    nativePlanRoots: new Map(),
     pendingPermissions: new Map(),
     host: fixtureHost({ browser: lease }),
     configuration: { cliPath: process.execPath, idleSessionTtlMs: 600_000 },
