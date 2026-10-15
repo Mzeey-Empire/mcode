@@ -18,6 +18,7 @@ import { POPOVER_FADE_CLASS, POPOVER_SURFACE_CLASS } from "./overlay-surface"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip"
 
 const MENU_ITEM_ROW_CLASS = cn(MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS, "data-highlighted:bg-hover")
+const MENU_ITEM_DESCRIBED_CLASS = "h-auto min-h-row-default py-2"
 
 /**
  * Dropdown menu root that allows pointer interaction outside the popup by default.
@@ -115,6 +116,7 @@ export interface DropdownMenuItemProps extends MenuItemPrimitiveProps, MenuRowCo
  */
 function DropdownMenuItem({
   label,
+  description,
   icon,
   shortcut,
   trailing,
@@ -135,12 +137,13 @@ function DropdownMenuItem({
       label={label}
       disabled={disabled}
       aria-describedby={disabled ? reasonId : undefined}
-      className={cn(MENU_ITEM_ROW_CLASS, className)}
+      className={cn(MENU_ITEM_ROW_CLASS, description && MENU_ITEM_DESCRIBED_CLASS, className)}
       {...choiceProps}
       {...props}
     >
       <MenuRowBody
         label={label}
+        description={description}
         icon={icon}
         shortcut={shortcut}
         trailing={trailing}
@@ -176,7 +179,7 @@ function DisabledReasonTooltip({
 /** Props for {@link DropdownMenuCheckboxItem}. */
 export type DropdownMenuCheckboxItemProps =
   Omit<MenuPrimitive.CheckboxItem.Props, "children" | "label"> &
-  Omit<MenuRowContent, "checked" | "shortcut" | "trailing">
+  Omit<MenuRowContent, "checked" | "shortcut" | "trailing" | "description">
 
 /** A row that toggles on its own. The check sits on the right, matching checked rows. */
 function DropdownMenuCheckboxItem({
