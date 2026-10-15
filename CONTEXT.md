@@ -1172,7 +1172,8 @@ _Avoid_: treating draft annotations as sendable annotations
 The number on a Preview annotation marker. It counts from 1 on each page in
 creation order, so a page's markers never skip a number because of notes on
 other pages. Editing an annotation does not move it. The Annotation bundle
-still carries one thread-wide number per annotation.
+carries that per-page number, so two pages can each hold a note 1. A legacy v1
+bundle keeps the thread-wide numbers it was sent with.
 _Avoid_: treating the display number as the annotation identity
 
 ### Preview annotation snapshot
