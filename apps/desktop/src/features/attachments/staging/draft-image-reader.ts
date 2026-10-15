@@ -10,6 +10,23 @@ const SAFE_ID = /^[a-f0-9-]+$/;
 /** Reads one staged draft image by thread and staging id. */
 export type StagedDraftImageReader = (threadId: unknown, stagingId: unknown) => Promise<Uint8Array | null>;
 
+function isHexId(value: unknown): value is string {
+  return typeof value === "string" && SAFE_ID.test(value);
+}
+
+async function readContainedImage(draftDirectory: string, stagingId: string): Promise<Uint8Array | null> {
+  const fileName = (await NodeFSPromises.readdir(draftDirectory)).find(
+    (name) => name.startsWith(`${stagingId}.`) && !name.endsWith(".json"),
+  );
+  if (!fileName) return null;
+  const [realDirectory, realFile] = await Promise.all([
+    NodeFSPromises.realpath(draftDirectory),
+    NodeFSPromises.realpath(NodePath.join(draftDirectory, fileName)),
+  ]);
+  if (!isContainedPath(realDirectory, realFile) || !(await NodeFSPromises.stat(realFile)).isFile()) return null;
+  return new Uint8Array(await NodeFSPromises.readFile(realFile));
+}
+
 /**
  * Builds the reader behind {@link READ_STAGED_DRAFT_IMAGE_CHANNEL}. The renderer
  * cannot fetch the custom attachment scheme, and an image drawn from it would
@@ -19,23 +36,13 @@ export type StagedDraftImageReader = (threadId: unknown, stagingId: unknown) => 
  */
 export function createStagedDraftImageReader(attachmentsDirectory: string): StagedDraftImageReader {
   return async (threadId, stagingId) => {
-    if (typeof threadId !== "string" || typeof stagingId !== "string"
-      || !SAFE_ID.test(threadId) || !SAFE_ID.test(stagingId)) {
+    if (!isHexId(threadId) || !isHexId(stagingId)) {
       throw new Error("Staged draft image ids must be hex identifiers");
     }
     const draftDirectory = NodePath.resolve(attachmentsDirectory, threadId, "draft");
     if (!isContainedPath(NodePath.resolve(attachmentsDirectory), draftDirectory)) return null;
     try {
-      const fileName = (await NodeFSPromises.readdir(draftDirectory)).find(
-        (name) => name.startsWith(`${stagingId}.`) && !name.endsWith(".json"),
-      );
-      if (!fileName) return null;
-      const [realDirectory, realFile] = await Promise.all([
-        NodeFSPromises.realpath(draftDirectory),
-        NodeFSPromises.realpath(NodePath.join(draftDirectory, fileName)),
-      ]);
-      if (!isContainedPath(realDirectory, realFile) || !(await NodeFSPromises.stat(realFile)).isFile()) return null;
-      return new Uint8Array(await NodeFSPromises.readFile(realFile));
+      return await readContainedImage(draftDirectory, stagingId);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;

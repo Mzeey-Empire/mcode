@@ -40,7 +40,7 @@ describe("staged draft image reader", () => {
 
   it.each([
     ["a traversal thread id", "../outside", STAGING_ID],
-    ["a traversal staging id", THREAD_ID, "..\..\secret"],
+    ["a traversal staging id", THREAD_ID, "..\\..\\secret"],
     ["a non-string id", 42, STAGING_ID],
   ])("rejects %s", async (_label, threadId, stagingId) => {
     const { root } = await stagedRoot();
