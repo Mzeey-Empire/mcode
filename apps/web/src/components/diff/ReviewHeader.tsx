@@ -42,7 +42,8 @@ import { useDiffStore, type DiffRenderMode, type DiffViewMode } from "@/stores/d
 import { BranchOperandPickers } from "./BranchOperandPickers";
 import { CommitOperandPicker } from "./CommitOperandPicker";
 import { DiffStat } from "./DiffStat";
-import { FileJumpPopover } from "./FileList";
+import { FilesPopover } from "./FilesPopover";
+import type { FilesNavigatorModel } from "./FilesNavigator";
 import { TurnPicker } from "./TurnPicker";
 
 /** What the header shows about the comparison the panel body renders. */
@@ -55,6 +56,8 @@ export interface ReviewHeaderProps {
   readonly onRefresh: () => void;
   /** Whether the current view opens its files expanded, which seeds Expand/Collapse all. */
   readonly defaultFilesExpanded: boolean;
+  /** The changed-file navigator; `docked` is true when the panel is wide enough to hold it beside the diff. */
+  readonly filesNavigator: FilesNavigatorModel & { readonly docked: boolean };
 }
 
 /**
@@ -306,6 +309,7 @@ function ReviewControlsRow({
   refreshing,
   onRefresh,
   defaultFilesExpanded,
+  filesNavigator,
   view,
 }: ReviewHeaderProps & { readonly view: ReviewView }) {
   return (
@@ -317,8 +321,7 @@ function ReviewControlsRow({
         <WrapToggle />
         <WhitespaceToggle comparison={comparison} />
         <ToggleAllButton defaultFilesExpanded={defaultFilesExpanded} />
-        <FileJump scopeId={scopeId} comparison={comparison} />
-        <FilesToggle scopeId={scopeId} />
+        <FilesToggle scopeId={scopeId} navigator={filesNavigator} />
       </div>
     </div>
   );
@@ -497,30 +500,28 @@ function ToggleAllButton({ defaultFilesExpanded }: { readonly defaultFilesExpand
   );
 }
 
-function FileJump({ scopeId, comparison }: { readonly scopeId: string | null; readonly comparison: ReviewComparison | null }) {
-  const [open, setOpen] = usePanelHeaderMenuOpen();
-  const requestReviewFileJump = useDiffStore((s) => s.requestReviewFileJump);
-  const paths = useMemo(
-    () => (comparison?.files ?? []).map((file) => file.path).sort((a, b) => a.localeCompare(b)),
-    [comparison],
-  );
-  if (!scopeId || paths.length === 0) return null;
-  return (
-    <FileJumpPopover
-      open={open}
-      onOpenChange={setOpen}
-      files={paths}
-      onJumpToFile={(path) => {
-        setOpen(false);
-        requestReviewFileJump(scopeId, path);
-      }}
-    />
-  );
-}
-
-function FilesToggle({ scopeId }: { readonly scopeId: string | null }) {
+/**
+ * Docked, the button shows or hides the pane and the choice persists per scope.
+ * Narrower, it opens the same navigator as a popover that closes on a pick.
+ */
+function FilesToggle({
+  scopeId,
+  navigator,
+}: {
+  readonly scopeId: string | null;
+  readonly navigator: ReviewHeaderProps["filesNavigator"];
+}) {
   const filesVisible = useDiffStore((s) => (scopeId ? (s.reviewFilesVisibleByScope[scopeId] ?? false) : false));
   const setReviewFilesVisible = useDiffStore((s) => s.setReviewFilesVisible);
+  const [popoverOpen, setPopoverOpen] = usePanelHeaderMenuOpen();
+  const { docked } = navigator;
+  // Widening the panel docks the pane, so a popover left open would reappear on narrowing.
+  useEffect(() => {
+    if (docked) setPopoverOpen(false);
+  }, [docked, setPopoverOpen]);
+  if (!docked) {
+    return <FilesPopover open={popoverOpen} onOpenChange={setPopoverOpen} disabled={!scopeId} navigator={navigator} />;
+  }
   return (
     <IconButton
       shape="round"
