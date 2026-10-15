@@ -432,6 +432,17 @@ function idlesWithUnansweredSteer(state: ClaudeStreamLoopState, message: Record<
 }
 
 /** Convert a plain string message into an SDKUserMessage. */
+const PLAN_READ_ONLY_DENIED_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell"]);
+const PLAN_FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
+
+/** Returns the denial message for a tool call a Plan turn must not run, or undefined when the call may proceed. Claude's own plan file stays writable so a Revise turn can patch it. */
+function planMutationDenial(planRoots: readonly string[], toolName: string, input: Record<string, unknown>): string | undefined {
+  if (!PLAN_READ_ONLY_DENIED_TOOLS.has(toolName)) return undefined;
+  if (PLAN_FILE_EDIT_TOOLS.has(toolName) && typeof input.file_path === "string"
+    && isNativePlanFilePath(input.file_path, planRoots)) return undefined;
+  return "Plan mode is read-only. Describe the change in the plan instead.";
+}
+
 function toUserMessage(text: string, sessionId: string): SDKUserMessage {
   return {
     type: "user" as const,
@@ -1229,10 +1240,8 @@ export class ClaudeProvider
     toolName: string,
     input: Record<string, unknown>,
   ): ClaudeToolPermissionResult | undefined {
-    if (!["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell"].includes(toolName)) return undefined;
-    if (toolName === "Write" && typeof input.file_path === "string"
-      && isNativePlanFilePath(input.file_path, session.planRoots)) return undefined;
-    return { behavior: "deny", message: "Plan mode is read-only. Describe the change in the plan instead." };
+    const message = planMutationDenial(session.planRoots, toolName, input);
+    return message ? { behavior: "deny", message } : undefined;
   }
 
   private async handleExitPlanMode(
@@ -1781,9 +1790,23 @@ export class ClaudeProvider
       PostCompact: [{ hooks: [this.createPostCompactHook(context)] }],
       Stop: [{ hooks: [this.createGoalStopHook(context)] }],
       // Only hooks running inside a subagent report the effort it runs at, so read it from its tool calls and its stop.
-      PreToolUse: [{ hooks: [this.createSubagentEffortHook(context)] }],
+      // The plan guard runs here as well as in canUseTool because an allow rule from user or project settings approves a tool before canUseTool is asked.
+      PreToolUse: [{ hooks: [this.createPlanReadOnlyHook(context), this.createSubagentEffortHook(context)] }],
       PostToolUse: [{ matcher: "Write", hooks: [this.createPlanWriteHook(context)] }],
       SubagentStop: [{ hooks: [this.createSubagentEffortHook(context)] }],
+    };
+  }
+
+  private createPlanReadOnlyHook(context: ClaudeTurnContext) {
+    return async (input: HookInput) => {
+      if (input.hook_event_name !== "PreToolUse") return {};
+      const session = this.runtime.get(context.params.sessionId);
+      if (!session?.planTurn || session.spawnRouting !== context.routing) return {};
+      const toolInput = typeof input.tool_input === "object" && input.tool_input !== null
+        ? input.tool_input as Record<string, unknown> : {};
+      const reason = planMutationDenial(session.planRoots, input.tool_name, toolInput);
+      if (!reason) return {};
+      return { hookSpecificOutput: { hookEventName: "PreToolUse" as const, permissionDecision: "deny" as const, permissionDecisionReason: reason } };
     };
   }
 

@@ -180,6 +180,32 @@ describe("Claude native plan turns", () => {
     expect(transport.optionsSeen).toHaveLength(1);
   });
 
+  it("denies plan-turn mutations in the PreToolUse hook, which runs before allow rules, but leaves Claude's plan file and build turns alone", async () => {
+    const { cwd, path } = await createNativePlanFixture("proved");
+    const source = NodePath.join(cwd, "source.ts");
+    const decisions: Record<string, unknown>[] = [];
+    installTransport(async (_turn, options) => {
+      const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+      assert(hook);
+      for (const [tool_name, tool_input] of [["Edit", { file_path: source }], ["Bash", { command: "git checkout -- ." }],
+        ["Edit", { file_path: path }], ["Read", { file_path: source }]] as const) {
+        decisions.push(await hook({ hook_event_name: "PreToolUse", session_id: "NATIVE_PARENT", cwd, transcript_path: "fixture",
+          tool_use_id: tool_name, tool_name, tool_input }, tool_name, { signal: new AbortController().signal }));
+      }
+      return [result()];
+    });
+    const { provider, events } = fixture();
+    await provider.sendTurn(request({ cwd, permissionMode: "full", planTurn: { kind: "revise", planFilePath: null } }));
+    await completed(events, 1);
+    const deny = { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny",
+      permissionDecisionReason: "Plan mode is read-only. Describe the change in the plan instead." } };
+    expect(decisions).toEqual([deny, deny, {}, {}]);
+    decisions.length = 0;
+    await provider.sendTurn(request({ cwd, permissionMode: "full", turnId: "turn-2", turnExecutionId: execution2 }));
+    await completed(events, 2);
+    expect(decisions).toEqual([{}, {}, {}, {}]);
+  });
+
   it.each(["Write", "Read"])("allows approved plan %s without forwarding session permissions", async toolName => {
     const { cwd, path } = await createNativePlanFixture("proved");
     const input = { file_path: path, content: "# Plan" };
