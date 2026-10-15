@@ -95,6 +95,8 @@ export class PlanService {
     }
     if (queued) {
       this.waiting.set(input.requestId, { input, token });
+      // Preparation may have saved the carried draft, and other clients must see it before they lock on it.
+      await this.publishVersions(input.threadId);
       const pending = await this.pendingImplement(input.threadId);
       if (pending) broadcast("plan.implementPending", { threadId: input.threadId, pending });
       await this.settleStartup(input.requestId);

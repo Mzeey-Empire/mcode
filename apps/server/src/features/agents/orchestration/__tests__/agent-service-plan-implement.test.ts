@@ -333,6 +333,22 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     await agent.stopSession(target.id, { by: "user" });
   });
 
+  it("publishes the carried draft before announcing the held Implement", async () => {
+    await gitSource(true, true);
+    const versionId = NodeCrypto.randomUUID();
+    const input: PlanImplement = { ...request(), versionId, expectedRevision: 1, target: "new-worktree",
+      pending: { versionId, baseVersionId: ready.id, baseRevision: 0, contentMd: "# Carried\nDraft." } };
+    const mine = pushes.events.length;
+    const receipt = await service.implement(input);
+    const own = pushes.events.slice(mine);
+    const heldIndex = own.findIndex(event => event.channel === "plan.implementPending");
+    expect(heldIndex).toBeGreaterThan(-1);
+    expect(own.slice(0, heldIndex)).toContainEqual({
+      channel: "plan.versionUpserted", payload: { threadId, version: expect.objectContaining({ id: versionId }) },
+    });
+    await agent.stopSession(receipt.targetThreadId, { by: "user" });
+  });
+
   it("settles an admission rejection after Setup dispatch and releases the source", async () => {
     const { input, target, checkout, environment } = await waitingWorktree();
     database.run("CREATE TRIGGER fail_admission BEFORE INSERT ON canonical_agent_turns BEGIN SELECT RAISE(ABORT, 'injected admission failure'); END");
