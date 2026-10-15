@@ -7,14 +7,23 @@ const FILES = ["a.ts", "b.ts", "c.ts"].map((path) => ({ path }));
 /** Header tops of a ten-line-per-file diff, so file N starts at N * 100. */
 const viewer = { getTopForItem: (id: string) => ({ "a.ts": 0, "b.ts": 100, "c.ts": 200 })[id] };
 
-function setup(scroller: Partial<HTMLElement> = { scrollTop: 0, clientHeight: 100, scrollHeight: 1000 }) {
+/** A real element so the spy can listen for reader input; jsdom does no layout, so geometry is set by hand. */
+function makeScroller(geometry = { scrollTop: 0, clientHeight: 100, scrollHeight: 1000 }) {
+  const element = document.createElement("div");
+  for (const [key, value] of Object.entries(geometry)) {
+    Object.defineProperty(element, key, { value, writable: true, configurable: true });
+  }
+  return element as HTMLElement & { scrollTop: number };
+}
+
+function setup(scroller = makeScroller()) {
   const reports: string[] = [];
   const wrapper = ({ children }: { children: ReactNode }) => (
     <ReviewActiveFileContext.Provider value={(path) => reports.push(path)}>{children}</ReviewActiveFileContext.Provider>
   );
-  const scrollerRef = { current: scroller as HTMLElement };
+  const scrollerRef = { current: scroller };
   const hook = renderHook(() => useReviewScrollSpy(FILES, scrollerRef, "cmp-1"), { wrapper });
-  return { reports, scroller: scroller as { scrollTop: number }, spy: hook.result.current };
+  return { reports, scroller, spy: hook.result.current };
 }
 
 describe("useReviewScrollSpy", () => {
@@ -41,7 +50,7 @@ describe("useReviewScrollSpy", () => {
   });
 
   it("names the last file at the end of the range, though a short final file never reaches the top", () => {
-    const { reports, scroller, spy } = setup({ scrollTop: 0, clientHeight: 100, scrollHeight: 250 });
+    const { reports, scroller, spy } = setup(makeScroller({ scrollTop: 0, clientHeight: 100, scrollHeight: 250 }));
 
     scroller.scrollTop = 150;
     spy.onScroll(150, viewer);
@@ -58,14 +67,39 @@ describe("useReviewScrollSpy", () => {
     expect(reports).toEqual(["a.ts", "b.ts"]);
   });
 
-  it("follows a reader who scrolls elsewhere inside the hold once the hold ends", () => {
-    const { reports, spy } = setup();
+  it("lets a jump that clamps to the bottom keep its target after the hold ends", () => {
+    const { reports, scroller, spy } = setup(makeScroller({ scrollTop: 0, clientHeight: 100, scrollHeight: 250 }));
 
     spy.holdForJump("b.ts");
-    spy.onScroll(10, viewer);
+    scroller.scrollTop = 150;
+    spy.onScroll(150, viewer);
     vi.advanceTimersByTime(300);
 
-    expect(reports).toEqual(["a.ts", "b.ts", "a.ts"]);
+    expect(reports).toEqual(["a.ts", "b.ts"]);
+  });
+
+  it.each(["wheel", "keydown", "pointerdown", "touchstart"])(
+    "follows a reader who steps in with %s inside the hold",
+    (inputType) => {
+      const { reports, scroller, spy } = setup();
+
+      spy.holdForJump("b.ts");
+      scroller.dispatchEvent(new Event(inputType));
+      spy.onScroll(10, viewer);
+
+      expect(reports).toEqual(["a.ts", "b.ts", "a.ts"]);
+    },
+  );
+
+  it("lets a second jump replace the first one's hold", () => {
+    const { reports, scroller, spy } = setup();
+
+    spy.holdForJump("b.ts");
+    spy.holdForJump("c.ts");
+    spy.onScroll(10, viewer);
+    scroller.dispatchEvent(new Event("wheel"));
+
+    expect(reports).toEqual(["a.ts", "b.ts", "c.ts"]);
   });
 
   it("re-reads a scrolled reader's file when the comparison refreshes in place", () => {
@@ -73,8 +107,8 @@ describe("useReviewScrollSpy", () => {
     const wrapper = ({ children }: { children: ReactNode }) => (
       <ReviewActiveFileContext.Provider value={(path) => reports.push(path)}>{children}</ReviewActiveFileContext.Provider>
     );
-    const scroller = { scrollTop: 0, clientHeight: 100, scrollHeight: 1000 };
-    const scrollerRef = { current: scroller as HTMLElement };
+    const scroller = makeScroller();
+    const scrollerRef = { current: scroller };
     const hook = renderHook(({ id }) => useReviewScrollSpy(FILES, scrollerRef, id), {
       wrapper,
       initialProps: { id: "cmp-1" },
@@ -86,5 +120,27 @@ describe("useReviewScrollSpy", () => {
     vi.advanceTimersByTime(50);
 
     expect(reports).toEqual(["a.ts", "b.ts", "b.ts"]);
+  });
+
+  it("does not restore an older file when the reader moves on before the refresh frame runs", () => {
+    const reports: string[] = [];
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ReviewActiveFileContext.Provider value={(path) => reports.push(path)}>{children}</ReviewActiveFileContext.Provider>
+    );
+    const scroller = makeScroller();
+    const scrollerRef = { current: scroller };
+    const hook = renderHook(({ id }) => useReviewScrollSpy(FILES, scrollerRef, id), {
+      wrapper,
+      initialProps: { id: "cmp-1" },
+    });
+
+    scroller.scrollTop = 150;
+    hook.result.current.onScroll(150, viewer);
+    hook.rerender({ id: "cmp-2" });
+    scroller.scrollTop = 250;
+    hook.result.current.onScroll(250, viewer);
+    vi.advanceTimersByTime(50);
+
+    expect(reports.at(-1)).toBe("c.ts");
   });
 });

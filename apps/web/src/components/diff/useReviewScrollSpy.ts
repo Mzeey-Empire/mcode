@@ -5,9 +5,11 @@ export const ReviewActiveFileContext = createContext<(path: string) => void>(() 
 
 /** How far below the viewport top a file header counts as passed. Exceeds the jump's 8px offset so a jump lands on its target. */
 const PASSED_OFFSET_PX = 24;
-/** Scroll events this soon after a jump belong to the jump, not to the reader. */
+/** Scroll events this soon after a jump belong to the jump unless the reader steps in. */
 const JUMP_HOLD_MS = 250;
 const BOTTOM_TOLERANCE_PX = 2;
+/** Events only a reader produces on the scroller; a programmatic scroll fires none of them. */
+const READER_INPUTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
 
 interface ItemTopSource {
   getTopForItem(id: string): number | undefined;
@@ -53,7 +55,6 @@ export function useReviewScrollSpy(
   const filesRef = useRef(files);
   const reportRef = useRef(report);
   const heldUntil = useRef(0);
-  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSample = useRef<ScrollSample | null>(null);
   const lastReported = useRef<string | null>(null);
   filesRef.current = files;
@@ -75,28 +76,35 @@ export function useReviewScrollSpy(
     [emit, scrollerRef],
   );
 
-  // A scroll that lands inside the hold is kept and replayed when the hold ends,
-  // so a reader who moves on right after a jump is not left on the jump target.
   const onScroll = useCallback(
     (scrollTop: number, viewer: ItemTopSource) => {
       const sample = { scrollTop, viewer };
       lastSample.current = sample;
-      const remaining = heldUntil.current - Date.now();
-      if (remaining <= 0) return follow(sample);
-      if (holdTimer.current !== null) clearTimeout(holdTimer.current);
-      holdTimer.current = setTimeout(() => {
-        holdTimer.current = null;
-        follow(sample);
-      }, remaining);
+      if (Date.now() >= heldUntil.current) follow(sample);
     },
     [follow],
   );
 
-  /** Marks a scroll the app started, so the spy does not hand the active file back to a neighbour. */
+  const releaseHold = useRef<() => void>(() => {});
+  /**
+   * Marks a scroll the app started, so the spy does not hand the active file
+   * back to a neighbour. The hold ends early on reader input, since a scroll the
+   * reader makes right after a jump must win over the jump target.
+   */
   const holdForJump = useCallback((path: string) => {
+    releaseHold.current();
     heldUntil.current = Date.now() + JUMP_HOLD_MS;
     emit(path);
-  }, [emit]);
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const release = () => {
+      heldUntil.current = 0;
+      for (const type of READER_INPUTS) scroller.removeEventListener(type, release);
+      releaseHold.current = () => {};
+    };
+    for (const type of READER_INPUTS) scroller.addEventListener(type, release, { passive: true });
+    releaseHold.current = release;
+  }, [emit, scrollerRef]);
 
   const firstPath = files[0]?.path;
   // The scroller keeps its position when a comparison refreshes in place, so a
@@ -105,13 +113,14 @@ export function useReviewScrollSpy(
     lastReported.current = null;
     const sample = lastSample.current;
     if (!sample || !scrollerRef.current || scrollerRef.current.scrollTop <= 0) return emit(firstPath);
-    const frame = requestAnimationFrame(() => follow(sample));
+    const frame = requestAnimationFrame(() => {
+      const latest = lastSample.current;
+      if (latest && Date.now() >= heldUntil.current) follow(latest);
+    });
     return () => cancelAnimationFrame(frame);
   }, [comparisonId, emit, firstPath, follow, scrollerRef]);
 
-  useEffect(() => () => {
-    if (holdTimer.current !== null) clearTimeout(holdTimer.current);
-  }, []);
+  useEffect(() => () => releaseHold.current(), []);
 
   return useMemo(() => ({ onScroll, holdForJump }), [onScroll, holdForJump]);
 }
