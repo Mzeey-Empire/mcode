@@ -84,13 +84,14 @@ function pendingRedraw(threadId: string, pageIdentity: string): Promise<void> | 
 /**
  * Settles every page of a thread so each has a marked image that matches its notes. Rejects
  * with the first page that cannot be redrawn, so Send never carries a stale number. A redraw
- * that an edit supersedes mid-save leaves its replacement pending, so each page loops until none is.
+ * that an edit supersedes mid-save leaves its replacement pending, and an edit to one page can land
+ * while another saves, so the whole set is rechecked until nothing is pending.
  */
 export async function flushPageSnapshots(threadId: string): Promise<void> {
-  const pages = Object.values(usePreviewAnnotationStore.getState().pages[threadId] ?? {});
-  await Promise.all(pages.map(async ({ pageIdentity }) => {
-    for (let pending = pendingRedraw(threadId, pageIdentity); pending; pending = pendingRedraw(threadId, pageIdentity)) {
-      await pending;
-    }
-  }));
+  for (;;) {
+    const pageIdentities = Object.keys(usePreviewAnnotationStore.getState().pages[threadId] ?? {});
+    const pending = pageIdentities.flatMap((pageIdentity) => pendingRedraw(threadId, pageIdentity) ?? []);
+    if (pending.length === 0) return;
+    await Promise.all(pending);
+  }
 }

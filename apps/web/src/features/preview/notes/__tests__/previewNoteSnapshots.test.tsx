@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePreviewAnnotationStore } from "../../state/previewAnnotationStore";
 import { flushPageSnapshots, PAGE_SNAPSHOT_DEBOUNCE_MS, schedulePageSnapshot } from "../previewNoteSnapshots";
 import { removePreviewNote } from "../previewNotes";
-import { seedPage, draft, PRODUCT_PAGE } from "./fixtures";
+import { seedPage, draft, BILLING_PAGE, PRODUCT_PAGE } from "./fixtures";
 
 const { mockRender } = vi.hoisted(() => ({ mockRender: vi.fn() }));
 vi.mock("../renderPageSnapshot", () => ({ renderPageSnapshot: mockRender }));
@@ -112,6 +112,29 @@ describe("page snapshot redraws", () => {
     expect(mockRender).toHaveBeenCalledTimes(2);
     expect(mockRender.mock.calls[1]?.[1]).toHaveLength(1);
     expect(page()?.marked?.sourcePath).toBe("C:/tmp/redrawn.png");
+  });
+
+  it("flush rechecks a page that was edited again while another page was still saving", async () => {
+    seedPage(threadId, BILLING_PAGE, "Billing");
+    const productNotes = ["A", "B", "C"].map((note) => store().saveAnnotation(threadId, draft(threadId, { note })));
+    const billingNotes = ["D", "E"].map((note) =>
+      store().saveAnnotation(threadId, draft(threadId, { pageIdentity: BILLING_PAGE, note })));
+    let releaseBilling: (file: SavedFile) => void = () => {};
+    saveClipboardFile
+      .mockImplementationOnce(async () => savedFile("C:/tmp/product-1.png"))
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseBilling = resolve; }));
+    removePreviewNote(threadId, productNotes[0]!.id);
+    removePreviewNote(threadId, billingNotes[0]!.id);
+    const flushed = flushPageSnapshots(threadId);
+    await vi.advanceTimersByTimeAsync(0);
+
+    removePreviewNote(threadId, productNotes[1]!.id);
+    releaseBilling(savedFile("C:/tmp/billing.png"));
+    await flushed;
+
+    expect(page()?.marked?.sourcePath).toBe("C:/tmp/redrawn.png");
+    expect(mockRender.mock.calls.at(-1)?.[1]).toHaveLength(1);
+    expect(store().buildBundle(threadId)?.annotations).toHaveLength(2);
   });
 
   it("flush rejects when a stale page has no clean screenshot to redraw from", async () => {
