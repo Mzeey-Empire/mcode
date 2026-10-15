@@ -1651,7 +1651,6 @@ function validLiveMessageIdentity(message: DataOnlyParentLiveMessageInput): bool
 
 function validLiveMessageBody(message: DataOnlyParentLiveMessageInput, hasPlan: boolean): boolean {
   if (typeof message.content !== "string" || !Array.isArray(message.attachments)) return false;
-  // A plan-only native item needs a message identity without duplicating its markdown in chat.
   return (message.model === null || typeof message.model === "string")
     && (message.content.trim().length > 0 || message.attachments.length > 0 || hasPlan);
 }
