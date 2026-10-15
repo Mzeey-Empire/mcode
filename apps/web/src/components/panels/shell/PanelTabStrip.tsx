@@ -24,8 +24,6 @@ export interface PanelTabStripProps {
   readonly onSelect: (id: string) => void;
   readonly onClose: (id: string) => void;
   readonly onAdd: () => void;
-  /** Trailing content inside one tab, after its label (for example a status glyph). */
-  readonly renderAdornment?: (item: PanelTabStripItem) => ReactNode;
   /** Browser tabs shrink to 96px and omit scroll chevrons. Defaults to "default". */
   readonly appearance?: PanelTabStripAppearance;
 }
@@ -43,7 +41,6 @@ export function PanelTabStrip({
   onSelect,
   onClose,
   onAdd,
-  renderAdornment,
   appearance = "default",
 }: PanelTabStripProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -73,7 +70,6 @@ export function PanelTabStrip({
               appearance={appearance}
               onSelect={onSelect}
               onClose={onClose}
-              adornment={renderAdornment?.(item)}
             />
           ))}
         </div>
@@ -244,14 +240,12 @@ function PanelTab({
   item,
   active,
   appearance,
-  adornment,
   onSelect,
   onClose,
 }: {
   readonly item: PanelTabStripItem;
   readonly active: boolean;
   readonly appearance: PanelTabStripAppearance;
-  readonly adornment: ReactNode;
   readonly onSelect: (id: string) => void;
   readonly onClose: (id: string) => void;
 }) {
@@ -288,7 +282,6 @@ function PanelTab({
       >
         {item.label}
       </button>
-      {adornment}
     </div>
   );
 }

@@ -75,7 +75,12 @@ export function BrowserToolbar({ page, address, tools, control, focusRequest }: 
   return (
     <div data-testid="browser-toolbar" className="flex h-10 min-w-0 flex-1 items-center gap-2 px-2">
       {page.kind === "new" ? null : <NavigationGroup navigation={page.navigation} />}
-      <BrowserUrlPill address={address} newPage={page.kind === "new"} focusRequest={focusRequest} />
+      <BrowserUrlPill
+        address={address}
+        newPage={page.kind === "new"}
+        acting={control.kind === "agent-acting"}
+        focusRequest={focusRequest}
+      />
       {showPageActions ? <PageActions actions={page.pageActions} /> : null}
       {control.kind === "none" ? null : <BrowserControlPill control={control} />}
       <BrowserMoreMenu tools={tools} />

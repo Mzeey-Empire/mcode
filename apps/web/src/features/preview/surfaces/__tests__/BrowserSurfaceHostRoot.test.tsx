@@ -14,7 +14,7 @@ import {
 } from "../BrowserSurfaceHostRoot";
 import type { BrowserSurfaceIdentity } from "../../browser-surfaces";
 import { previewTabsScopeKey, usePreviewTabsStore } from "../../state/previewTabsStore";
-import { browserAutomationTargetKey, useBrowserAutomationStore } from "../../automation/browserAutomationStore";
+import { useBrowserAutomationStore } from "../../automation/browserAutomationStore";
 import type {
   PreviewPopupRequest,
   PreviewSurfaceDiscardRequest,
@@ -80,57 +80,6 @@ describe("BrowserSurfaceHostRoot", () => {
     expect(document.querySelector("[data-browser-surface-host]")).not.toHaveClass(
       "pointer-events-none",
     );
-  });
-
-  it("shows the edge blur above the hosted Browser surface only during agent control", () => {
-    render(<BrowserSurfaceHostRoot />);
-    browserSurfaceHost.create(IDENTITY, {
-      address: "https://example.test/controlled",
-    });
-    const zIndex = 31;
-    browserSurfaceHost.present(IDENTITY, {
-      left: 10,
-      top: 20,
-      width: 640,
-      height: 480,
-      zIndex,
-    });
-
-    const frame = screen.getByTestId("web-runtime-preview-iframe");
-    const indicator = screen.getByTestId("browser-surface-control-indicator");
-    expect(indicator).toHaveStyle({ visibility: "hidden" });
-
-    act(() => {
-      useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "web-preview");
-      useBrowserAutomationStore.getState().setControllerForTarget(
-        "workspace-1",
-        "thread-1",
-        "web-preview",
-        { tabId: "web-preview", controller: "agent", controlEpoch: 1 },
-      );
-    });
-
-    expect(indicator).toHaveStyle({ visibility: "hidden" });
-
-    act(() => {
-      useBrowserAutomationStore.setState({
-        actingTargets: new Set([browserAutomationTargetKey("workspace-1", "thread-1", "web-preview")]),
-      });
-    });
-
-    expect(indicator).toHaveStyle({ visibility: "visible", pointerEvents: "none" });
-    expect(Number(indicator.style.zIndex)).toBeGreaterThan(Number(frame.style.zIndex));
-
-    act(() => {
-      useBrowserAutomationStore.getState().setControllerForTarget(
-        "workspace-1",
-        "thread-1",
-        "web-preview",
-        { tabId: "web-preview", controller: "none", controlEpoch: 1 },
-      );
-    });
-
-    expect(indicator).toHaveStyle({ visibility: "hidden" });
   });
 
   it("discards only the exact current generation selected by Memory Saver", () => {

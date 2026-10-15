@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, use
 import { useShallow } from "zustand/shallow";
 import type { BrowserTabSet } from "@mcode/contracts";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useBrowserThreadActing } from "@/features/preview/state/useBrowserActing";
 import { useUiStore } from "@/stores/uiStore";
 import {
   useDiffStore,
@@ -847,6 +848,7 @@ function RightPanelActivityRail({
   // Only a rail holding subagent tabs needs their names, so other threads never fetch a roster.
   const rosterThreadId = renderedTabInstances.some(isSubagentTabInstance) ? activeThreadId ?? undefined : undefined;
   const subagentEntries = useSubagentRoster(rosterThreadId)?.entries;
+  const browserActing = useBrowserThreadActing(activeWorkspaceId, activeThreadId ?? activeWorkspaceId);
   return (
     <ActivityRail
       tabInstances={renderedTabInstances}
@@ -855,6 +857,7 @@ function RightPanelActivityRail({
       scope={panelScope}
       changesCount={changesCount}
       changesFresh={changesFresh}
+      browserActing={browserActing}
       captionAction={captionAction}
       onSelect={(instanceId) => setRightPanelTabInstance(activeWorkspaceId, activeThreadId, instanceId)}
       // Closing the Terminal entry hides the tool; its records keep running.

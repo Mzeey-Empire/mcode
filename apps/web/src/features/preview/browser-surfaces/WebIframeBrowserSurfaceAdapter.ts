@@ -7,7 +7,6 @@ import type {
   BrowserSurfaceIdentity,
   BrowserSurfacePresentation,
 } from "./BrowserSurfaceHost";
-import { BrowserSurfaceControlIndicator } from "./BrowserSurfaceControlIndicator";
 import { normalizeBrowserSurfaceAddress } from "./browserSurfaceAddress";
 
 /** Options for the web iframe Browser surface adapter factory. */
@@ -84,7 +83,6 @@ function sameOriginObservation(frame: HTMLIFrameElement): WebIframeBrowserSurfac
 export class WebIframeBrowserSurfaceAdapter implements BrowserSurfaceAdapter {
   private readonly listeners = new Set<(event: BrowserSurfaceAdapterEvent) => void>();
   private readonly frame: HTMLIFrameElement;
-  private readonly controlIndicator: BrowserSurfaceControlIndicator;
   private readonly documentRef: Document;
   private readonly onLoadObserved?: WebIframeBrowserSurfaceAdapterFactoryOptions["onLoad"];
   private disposed = false;
@@ -120,7 +118,6 @@ export class WebIframeBrowserSurfaceAdapter implements BrowserSurfaceAdapter {
     this.frame.addEventListener("error", this.onError);
     const root = options.root ?? this.documentRef.body;
     root?.appendChild(this.frame);
-    this.controlIndicator = new BrowserSurfaceControlIndicator(this.documentRef, root);
   }
 
   /** Returns the owned iframe for placement assertions and host integration. */
@@ -145,13 +142,6 @@ export class WebIframeBrowserSurfaceAdapter implements BrowserSurfaceAdapter {
     this.frame.style.visibility = "visible";
     this.frame.style.pointerEvents = presentation.inputEnabled === false ? "none" : "auto";
     this.frame.setAttribute("aria-hidden", presentation.accessible === false ? "true" : "false");
-    this.controlIndicator.present(presentation);
-  }
-
-  /** Updates the click-through edge indicator for agent control. */
-  public setControlled(controlled: boolean): void {
-    if (this.disposed) return;
-    this.controlIndicator.setControlled(controlled);
   }
 
   /** Hides the iframe without replacing its document. */
@@ -160,7 +150,6 @@ export class WebIframeBrowserSurfaceAdapter implements BrowserSurfaceAdapter {
     this.frame.style.visibility = "hidden";
     this.frame.style.pointerEvents = "none";
     this.frame.setAttribute("aria-hidden", "true");
-    this.controlIndicator.hide();
   }
 
   /** Navigates by assigning a bounded URL to the owned iframe. */
@@ -185,7 +174,6 @@ export class WebIframeBrowserSurfaceAdapter implements BrowserSurfaceAdapter {
     this.frame.removeEventListener("load", this.onLoad);
     this.frame.removeEventListener("error", this.onError);
     this.listeners.clear();
-    this.controlIndicator.dispose();
     this.frame.remove();
   }
 

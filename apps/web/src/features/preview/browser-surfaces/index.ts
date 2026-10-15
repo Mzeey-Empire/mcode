@@ -22,11 +22,6 @@ export type {
 } from "./BrowserSurfaceHost";
 export { normalizeBrowserSurfaceAddress } from "./browserSurfaceAddress";
 export {
-  BROWSER_CONTROL_EDGE_BACKGROUND_IMAGE,
-  BROWSER_CONTROL_EDGE_BOX_SHADOW,
-  BrowserSurfaceControlIndicator,
-} from "./BrowserSurfaceControlIndicator";
-export {
   ElectronWebviewBrowserSurfaceAdapter,
   createElectronWebviewBrowserSurfaceAdapterFactory,
   createElectronWebviewSurfaceAdapterFactory,

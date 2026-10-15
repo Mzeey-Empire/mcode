@@ -3,9 +3,10 @@
  */
 import type { RefObject, ReactNode } from "react";
 import type { PreviewPageError } from "@mcode/contracts";
-import { Check, MousePointer2 } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePreviewTabsStore } from "../state/previewTabsStore";
+import { BrowserActingOverlay } from "./BrowserActingOverlay";
 import { BrowserViewportCanvas } from "./BrowserViewportCanvas";
 import { LocalPortsEmptyState } from "./LocalPortsEmptyState";
 import { PreviewErrorPanel } from "./PreviewErrorPanel";
@@ -13,7 +14,6 @@ import { PreviewPerfHud } from "./PreviewPerfHud";
 import { PreviewWebview, type PreviewWebviewHandle } from "./PreviewWebview";
 import type { PreviewCaptureKind } from "../capture/usePreviewCapture";
 import { browserAutomationTargetKey } from "../automation/browserAutomationStore";
-import { BROWSER_CONTROL_EDGE_BACKGROUND_IMAGE, BROWSER_CONTROL_EDGE_BOX_SHADOW } from "../browser-surfaces";
 import type { usePreviewPage } from "./usePreviewPage";
 import type { usePreviewViewport } from "./usePreviewViewport";
 import { RenderWhen, RenderValue } from "./previewRender";
@@ -70,8 +70,6 @@ interface BrowserPageLayerProps {
   readonly viewportCanvasBounds: { width: number; height: number; };
   readonly responsiveViewportScale: number;
   readonly invalidateActiveViewportObservation: ReturnType<typeof usePreviewViewport>["invalidateActiveViewportObservation"];
-  readonly agentControlsBrowser: ReturnType<typeof usePreviewPage>["agentControlsBrowser"];
-  readonly automationPointer: ReturnType<typeof usePreviewPage>["automationPointer"];
   readonly pageError: PreviewPageError | undefined;
   readonly webviewInputUrl: ReturnType<typeof usePreviewPage>["webviewInputUrl"];
   readonly webviewCanBack: ReturnType<typeof usePreviewPage>["webviewCanBack"];
@@ -111,8 +109,6 @@ export function BrowserPageLayer({
   viewportCanvasBounds,
   responsiveViewportScale,
   invalidateActiveViewportObservation,
-  agentControlsBrowser,
-  automationPointer,
   pageError,
   webviewInputUrl,
   webviewCanBack,
@@ -245,31 +241,12 @@ export function BrowserPageLayer({
           </BrowserViewportCanvas>
           </div>
         </RenderWhen>
-        <RenderWhen condition={agentControlsBrowser}>
-          <div
-            data-testid="browser-automation-overlay"
-            className="pointer-events-none absolute inset-0 z-(--layer-dropdown) rounded-tr-md"
-            style={{
-              clipPath: coveredRight ? `inset(0 ${coveredRight}px 0 0)` : undefined,
-              backgroundImage: BROWSER_CONTROL_EDGE_BACKGROUND_IMAGE,
-              boxShadow: BROWSER_CONTROL_EDGE_BOX_SHADOW,
-            }}
-          >
-            <span className="sr-only" role="status" aria-live="polite">
-              Agent controls Browser
-            </span>
-            <MousePointer2
-              data-testid="browser-automation-pointer"
-              className="absolute size-5 fill-primary text-primary motion-reduce:transition-none"
-              style={{
-                left: automationPointer?.x ?? 24,
-                top: automationPointer?.y ?? 24,
-                filter: "drop-shadow(0 0 5px color-mix(in oklab, var(--primary) 72%, transparent))",
-              }}
-              aria-hidden
-            />
-          </div>
-        </RenderWhen>
+        <BrowserActingOverlay
+          workspaceId={browserWorkspaceId}
+          threadId={threadId}
+          tabId={activeWebviewTabId}
+          coveredRight={coveredRight ?? 0}
+        />
         {/* The hosted page paints later in the DOM from the Browser surface
             host root, so Design overlays need a higher layer to stay visible. */}
         <div

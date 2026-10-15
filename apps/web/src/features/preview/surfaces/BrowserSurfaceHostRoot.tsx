@@ -125,9 +125,7 @@ export function BrowserSurfaceHostRoot() {
     ): void => {
       const targetKeys = new Set([
         ...state.controllers.keys(),
-        ...state.actingTargets,
         ...(previous?.controllers.keys() ?? []),
-        ...(previous?.actingTargets ?? []),
       ]);
       for (const targetKey of targetKeys) {
         const target = parseBrowserAutomationTargetKey(targetKey);
@@ -138,7 +136,7 @@ export function BrowserSurfaceHostRoot() {
           tabId: target.tabId,
         };
         const agentHolds = state.controllers.get(targetKey)?.controller === "agent";
-        browserSurfaceHost.setControlled(identity, agentHolds, agentHolds && state.actingTargets.has(targetKey));
+        browserSurfaceHost.setControlled(identity, agentHolds);
       }
     };
     synchronizeControllers(useBrowserAutomationStore.getState());

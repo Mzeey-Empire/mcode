@@ -190,8 +190,6 @@ export function PreviewPanel({
     browserWorkspaceId,
     activeWebviewTabId,
     automationControllers,
-    actingTargets,
-    pendingAgentOpens,
     activeBrowserTargetKey,
     previewScopeKey,
     pendingNavError,
@@ -230,8 +228,6 @@ export function PreviewPanel({
     activeAutomationController,
     webviewNavError,
     lastCapture,
-    agentControlsBrowser,
-    automationPointer,
     onPreviewErrorRetry,
   } = usePreviewPage({
     threadId,
@@ -243,8 +239,6 @@ export function PreviewPanel({
     browserWorkspaceId,
     activeWebviewTabId,
     automationControllers,
-    actingTargets,
-    pendingAgentOpens,
     webviewRefs,
     activeBrowserTargetKey,
     previewScopeKey,
@@ -467,8 +461,6 @@ export function PreviewPanel({
         viewportCanvasBounds={viewportCanvasBounds}
         responsiveViewportScale={responsiveViewportScale}
         invalidateActiveViewportObservation={invalidateActiveViewportObservation}
-        agentControlsBrowser={agentControlsBrowser}
-        automationPointer={automationPointer}
         pageError={pageError}
         webviewInputUrl={webviewInputUrl}
         webviewCanBack={webviewCanBack}

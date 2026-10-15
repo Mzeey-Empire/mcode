@@ -61,7 +61,6 @@ class TestAdapter implements BrowserSurfaceAdapter {
   hidden = 0;
   navigations: string[] = [];
   disposed = 0;
-  indicated: boolean[] = [];
   readonly listeners = new Set<(event: BrowserSurfaceAdapterEvent) => void>();
 
   create(): void {
@@ -74,10 +73,6 @@ class TestAdapter implements BrowserSurfaceAdapter {
 
   hide(): void {
     this.hidden += 1;
-  }
-
-  setControlled(controlled: boolean): void {
-    this.indicated.push(controlled);
   }
 
   navigate(address: string): void {
@@ -363,16 +358,6 @@ describe("BrowserSurfaceHost", () => {
     expect(adapters[1]!.navigations).toEqual(["https://example.test/recovery"]);
     expect(host.inspect(IDENTITY)?.residency).toBe("warm");
     host.disposeHost();
-  });
-
-  it("keeps an idle agent hold protected from discard while the ring is off", () => {
-    const { host, adapter } = testHost();
-    const generation = host.getSnapshot(IDENTITY)!.generation;
-
-    host.setControlled(IDENTITY, true, false);
-
-    expect(adapter.indicated.at(-1)).toBe(false);
-    expect(host.discard(IDENTITY, generation)).toBe(false);
   });
 
   it("protects visible, controlled, operation-pinned, and capture-pinned surfaces from discard", () => {

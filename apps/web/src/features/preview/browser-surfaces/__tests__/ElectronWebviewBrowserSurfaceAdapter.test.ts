@@ -434,32 +434,6 @@ describe("ElectronWebviewBrowserSurfaceAdapter", () => {
     adapter.dispose();
   });
 
-  it("places the agent-control edge blur above the webview without catching input", () => {
-    const root = document.createElement("div");
-    document.body.appendChild(root);
-    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 9, {
-      root,
-      bridge: bridge(),
-    });
-    const zIndex = 31;
-    adapter.present({ left: 10, top: 20, width: 640, height: 480, zIndex });
-
-    adapter.setControlled(true);
-
-    const indicator = root.querySelector<HTMLElement>(
-      "[data-testid='browser-surface-control-indicator']",
-    );
-    expect(indicator).not.toBeNull();
-    expect(indicator).toHaveStyle({ visibility: "visible", pointerEvents: "none" });
-    expect(Number(indicator!.style.zIndex)).toBeGreaterThan(Number(adapter.element.style.zIndex));
-
-    adapter.setControlled(false);
-
-    expect(indicator).toHaveStyle({ visibility: "hidden" });
-    adapter.dispose();
-    root.remove();
-  });
-
   it("publishes renderer history state after address, history, and in-page commits", () => {
     const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 4, {
       root: document.body,

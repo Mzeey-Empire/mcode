@@ -5,10 +5,7 @@ import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { PanelTabStrip, type PanelTabStripItem } from "@/components/panels/shell/PanelTabStrip";
 import { useDiffStore } from "@/stores/diffStore";
 import { cn } from "@/lib/utils";
-import {
-  isBrowserAutomationAgentControlled,
-  useBrowserAutomationStore,
-} from "../automation/browserAutomationStore";
+import { useBrowserActing } from "../state/useBrowserActing";
 import { usePreviewTabsStore } from "../state/previewTabsStore";
 
 function browserPageLabel(page: Pick<BrowserTabInfo, "title" | "url">): string {
@@ -22,38 +19,31 @@ function browserPageLabel(page: Pick<BrowserTabInfo, "title" | "url">): string {
   }
 }
 
-function PageIcon({ faviconUrl, active }: { readonly faviconUrl: string | null; readonly active: boolean }) {
+interface PageIconProps {
+  readonly workspaceId: string;
+  readonly scopeId: string;
+  readonly page: Pick<BrowserTabInfo, "id" | "faviconUrl">;
+  readonly active: boolean;
+}
+
+/** The page favicon, swapped for a filled pointer while the agent acts on that page. */
+function PageIcon({ workspaceId, scopeId, page, active }: PageIconProps) {
+  const acting = useBrowserActing(workspaceId, scopeId, page.id);
+  if (acting) {
+    return (
+      <span className="grid place-items-center">
+        <MousePointer2 data-testid="browser-agent-control-indicator" size={14} className="fill-primary text-primary" aria-hidden />
+      </span>
+    );
+  }
   return (
     <span className={cn("grid place-items-center", !active && "opacity-60")}>
-      {faviconUrl ? (
-        <img src={faviconUrl} alt="" width={14} height={14} className="rounded-[3px]" />
+      {page.faviconUrl ? (
+        <img src={page.faviconUrl} alt="" width={14} height={14} className="rounded-[3px]" />
       ) : (
         <Globe aria-hidden />
       )}
     </span>
-  );
-}
-
-function AgentControlIndicator({
-  workspaceId,
-  scopeId,
-  pageId,
-}: {
-  readonly workspaceId: string;
-  readonly scopeId: string;
-  readonly pageId: string;
-}) {
-  const agentControlled = useBrowserAutomationStore((state) =>
-    isBrowserAutomationAgentControlled(state, workspaceId, scopeId, pageId),
-  );
-  if (!agentControlled) return null;
-  return (
-    <MousePointer2
-      data-testid="browser-agent-control-indicator"
-      size={14}
-      className="shrink-0 text-primary"
-      aria-hidden
-    />
   );
 }
 
@@ -74,9 +64,9 @@ export function BrowserTabStrip({ workspaceId, threadId, scopeId, tabSet }: Brow
     () => (pages ?? []).map((page) => ({
       id: page.id,
       label: browserPageLabel(page),
-      icon: <PageIcon faviconUrl={page.faviconUrl} active={page.id === activeId} />,
+      icon: <PageIcon workspaceId={workspaceId} scopeId={scopeId} page={page} active={page.id === activeId} />,
     })),
-    [pages, activeId],
+    [pages, activeId, workspaceId, scopeId],
   );
   const store = usePreviewTabsStore.getState;
   return (
@@ -93,9 +83,6 @@ export function BrowserTabStrip({ workspaceId, threadId, scopeId, tabSet }: Brow
             onLastClose: () => useDiffStore.getState().closeRightPanelTab(workspaceId, threadId, "preview"),
           })}
           onAdd={() => void store().openPage(workspaceId, scopeId)}
-          renderAdornment={(item) => (
-            <AgentControlIndicator workspaceId={workspaceId} scopeId={scopeId} pageId={item.id} />
-          )}
         />
       </div>
     </PanelHeaderSlot>

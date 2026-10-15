@@ -784,7 +784,7 @@ describe("PreviewPanel: full panel state", () => {
 
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" coveredRight={112} />);
 
-    const overlay = screen.getByTestId("browser-automation-overlay");
+    const overlay = screen.getByTestId("browser-acting-overlay");
     expect(overlay.parentElement).toBe(screen.getByTestId("preview-surface"));
     expect(overlay).toHaveStyle({ clipPath: "inset(0 112px 0 0)" });
   });
@@ -807,8 +807,29 @@ describe("PreviewPanel: full panel state", () => {
 
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
 
-    expect(screen.getByTestId("browser-automation-overlay")).toBeInTheDocument();
+    expect(screen.getByTestId("browser-acting-overlay")).toBeInTheDocument();
     expect(screen.getByTestId("browser-automation-pointer")).toBeInTheDocument();
+  });
+
+  it("paints no agent overlay while the agent holds the page but is idle", () => {
+    useBrowserAutomationStore.setState({
+      actingTargets: new Set(),
+      pendingAgentOpens: new Map(),
+      controllers: new Map([
+        [
+          browserAutomationTargetKey(
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            PREVIEW_WEBVIEW_FALLBACK_TAB_ID,
+          ),
+          { tabId: PREVIEW_WEBVIEW_FALLBACK_TAB_ID, controller: "agent", controlEpoch: 1 },
+        ],
+      ]),
+    });
+
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
+
+    expect(screen.queryByTestId("browser-acting-overlay")).not.toBeInTheDocument();
   });
 
   it("does not render the unavailable state when desktopBridge is present", () => {

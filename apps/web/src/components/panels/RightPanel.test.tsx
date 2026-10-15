@@ -44,9 +44,11 @@ vi.mock("./ActivityRail", () => ({
     onSelect,
     onExpandedChange,
     captionAction,
+    browserActing,
   }: {
     tabInstances: Array<{ id: string; type: string }>;
     activeTabId: string | null;
+    browserActing?: boolean;
     onClose?: (instanceId: string) => void;
     onSelect?: (instanceId: string) => void;
     onExpandedChange?: (expanded: boolean) => void;
@@ -56,6 +58,7 @@ vi.mock("./ActivityRail", () => ({
       data-testid="activity-rail"
       data-open-tabs={tabInstances.map((instance) => instance.type).join(",")}
       data-active-tab-id={activeTabId}
+      data-browser-acting={String(browserActing)}
     >
       <div data-testid="activity-rail-caption-strip">{captionAction}</div>
       <button type="button" data-testid="expand-activity-rail" onClick={() => onExpandedChange?.(true)} />
@@ -778,6 +781,7 @@ describe("RightPanel", () => {
     const agentTab = screen.getByRole("group", { name: "Browser pages" }).querySelector<HTMLElement>('[data-panel-tab="agent-browser-tab"]');
     expect(agentTab).not.toBeNull();
     expect(within(agentTab!).getByTestId("browser-agent-control-indicator")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-browser-acting", "true");
   });
 
   it("switches an already-open panel to an agent-created Browser page", () => {
