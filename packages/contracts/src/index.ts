@@ -911,6 +911,7 @@ export {
   PlanAnswerSchema,
   PlanQuestionBatchSchema,
   NativePlanQuestionBatchSchema,
+  isNativePlanQuestionId,
   PLAN_ANSWER_MESSAGE_PREFIX,
 } from "./models/plan-questions.js";
 export type {

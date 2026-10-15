@@ -145,6 +145,22 @@ describe("QuestionDock", () => {
     expect(screen.getByRole("button", { name: "Submit" }).hasAttribute("disabled")).toBe(true);
   });
 
+  it("keeps Submit live while a running native turn waits on the question", async () => {
+    const requestId = "0f8b2c1e-3a4d-4e5f-8a9b-1c2d3e4f5a6b";
+    const nativeQuestion: PlanQuestion = { ...QUESTIONS[0]!, id: `${requestId}:tone` };
+    act(() => useThreadStore.getState().setPlanQuestions(THREAD_ID, [nativeQuestion]));
+    const user = setup();
+    render(<DockHarness isAgentRunning />);
+    await elapseGuard();
+
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    expect(answerPlanQuestions).toHaveBeenCalledTimes(1);
+    expect(answerPlanQuestions.mock.calls[0]![1]).toEqual([
+      { questionId: nativeQuestion.id, selectedOptionId: "wide", freeText: null },
+    ]);
+  });
+
   it("needs text before the write-your-own row can advance", async () => {
     const user = setup();
     render(<DockHarness />);

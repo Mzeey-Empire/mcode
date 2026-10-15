@@ -23,7 +23,7 @@ import {
 import { PlanExecutionState, type PlanPersistenceReady } from "./plan-execution-state.js";
 import { PlanQuestionService, type PlanAnswerInput } from "./plan-question-service.js";
 import { PlanRepo } from "./persistence/plan-repo.js";
-import { ProviderIdSchema } from "@mcode/contracts";
+import { isNativePlanQuestionId, ProviderIdSchema } from "@mcode/contracts";
 import type { PlanFileWriter } from "./plan-file-writer.js";
 import type { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import type { SendMessageCommand } from "../turns/turn-admission-dispatch-coordinator.js";
@@ -257,7 +257,7 @@ ${userMessage}`;
       }
       return;
     }
-    if (answers.some(answer => /^[0-9a-f-]{36}:/.test(answer.questionId))) throw new Error("Questions expired");
+    if (answers.some(answer => isNativePlanQuestionId(answer.questionId))) throw new Error("Questions expired");
     const payload = this.questions.buildAnswerPayload(threadId, answers);
     await this.commands.sendMessage({
       threadId,
