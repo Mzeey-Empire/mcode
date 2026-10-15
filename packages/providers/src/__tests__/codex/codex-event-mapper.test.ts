@@ -3578,20 +3578,13 @@ describe("CodexEventMapper", () => {
     ]);
   });
 
-  it("maps item/plan/delta to non-final text deltas (live planning / thinking stream)", () => {
+  it("drops item/plan/delta so plan text only arrives through the completed plan item", () => {
     const events = mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/plan/delta",
       params: { threadId: "t1", turnId: "u1", itemId: "p1", delta: "Checking repo layout…" },
     } as never);
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([
-      {
-        type: "textDelta",
-        threadId: "test-thread",
-        delta: "Checking repo layout…",
-        isFinalResponse: false,
-      },
-    ]);
+    expect(events).toEqual([]);
   });
 
   it("maps reasoning stream notifications to reasoning deltas keyed by item", () => {
