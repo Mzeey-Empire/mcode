@@ -10,6 +10,7 @@ import {
   clearComposerAnnotations,
   restoreComposerAnnotations,
 } from "./composer-annotations";
+import { settlePageSnapshots } from "./prepare-composer-submission";
 import { useComposerHandoffDispatch } from "./useComposerHandoffDispatch";
 
 type HandoffStatus = "generating" | "ready" | "fallback" | "error" | undefined;
@@ -65,8 +66,13 @@ export function useComposerQueueController({
     [annotationScopeId, form],
   );
   const annotationsForQueueEdit = useMemo(
-    () => ({ restore: restoreAnnotations, clear: clearAnnotations }),
-    [clearAnnotations, restoreAnnotations],
+    () => ({
+      restore: restoreAnnotations,
+      clear: clearAnnotations,
+      settle: async () =>
+        !annotationScopeId || await settlePageSnapshots(annotationScopeId, "Could not switch queued message"),
+    }),
+    [annotationScopeId, clearAnnotations, restoreAnnotations],
   );
   const editing = useComposerQueueEditing({
     threadId,

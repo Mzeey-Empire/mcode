@@ -98,20 +98,21 @@ function isEmptySubmission(
 }
 
 /** Displays a payload-normalization failure without mutating the current draft. */
-function showPreparationFailure(error: unknown): void {
+function showPreparationFailure(error: unknown, title = "Could not send message"): void {
   useToastStore.getState().show({
     kind: "failed",
-    title: "Could not send message",
+    title,
     meta: error instanceof Error ? error.message : "Invalid page preview payload",
   });
 }
 
-async function settlePageSnapshots(scopeId: string): Promise<boolean> {
+/** Redraws any stale page snapshot of a scope. Returns false, after a toast titled `failureTitle`, when one cannot be. */
+export async function settlePageSnapshots(scopeId: string, failureTitle?: string): Promise<boolean> {
   try {
     await flushPageSnapshots(scopeId);
     return true;
   } catch (error) {
-    showPreparationFailure(error);
+    showPreparationFailure(error, failureTitle);
     return false;
   }
 }
