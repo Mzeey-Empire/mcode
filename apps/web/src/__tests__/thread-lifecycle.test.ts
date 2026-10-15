@@ -223,7 +223,7 @@ describe("Thread Lifecycle Behavior", () => {
     expect(getTestThreadMessages(threadId)[0]?.attachments).toEqual([
       {
         id: "annotation-shot-1",
-        name: "Annotation 1 screenshot.png",
+        name: "Notes on Google.png",
         mimeType: "image/png",
         sizeBytes: 2048,
       },
