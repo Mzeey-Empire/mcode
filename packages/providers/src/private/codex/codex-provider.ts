@@ -703,6 +703,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * because an idle eviction between the plan and the build must not leave the thread in plan mode.
    */
   private readonly planModeSessions = new Set<string>();
+  /**
+   * Sessions whose collaboration mode this process has set. Codex keeps plan mode across a thread
+   * resume, so a resumed thread with no entry here may still be planning after a server restart.
+   */
+  private readonly collaborationModeSetSessions = new Set<string>();
 
   /** Native plan mode requires the durable question handler as well as a compatible CLI. */
   async supportsNativePlanQuestions(): Promise<boolean> {
@@ -1291,9 +1296,18 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     };
   }
 
-  /** Ordinary turns skip the version gate, so each send still checks the CLI exactly once. */
+  private recordCollaborationMode(sessionId: string, mode: "plan" | "default" | undefined): void {
+    if (!mode) return;
+    this.collaborationModeSetSessions.add(sessionId);
+    if (mode === "plan") this.planModeSessions.add(sessionId);
+    else this.planModeSessions.delete(sessionId);
+  }
+
+  /** Other turns skip the version gate, so each send still checks the CLI exactly once. */
   private mayUseCollaborationMode(request: TurnRequest<"codex">): boolean {
-    return Boolean(request.planTurn) || this.planModeSessions.has(request.sessionId);
+    return Boolean(request.planTurn)
+      || this.planModeSessions.has(request.sessionId)
+      || (request.resumeFrom !== undefined && !this.collaborationModeSetSessions.has(request.sessionId));
   }
 
   private codexCollaborationOptions(request: TurnRequest<"codex">, nativePlan: boolean): Pick<CodexTurnOptions, "collaborationMode" | "additionalContext"> {
@@ -2858,11 +2872,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): Promise<void> {
     try {
       const turnId = Array.isArray(input) ? await server.sendTurn(input, turnOptions) : await server.startCompaction();
-      if (Array.isArray(input)) {
-        const mode = turnOptions?.collaborationMode?.mode;
-        if (mode === "plan") this.planModeSessions.add(run.entry.sessionId);
-        else if (mode === "default") this.planModeSessions.delete(run.entry.sessionId);
-      }
+      if (Array.isArray(input)) this.recordCollaborationMode(run.entry.sessionId, turnOptions?.collaborationMode?.mode);
       if (run.seq !== run.entry.runTurnSeq) return;
       run.entry.turnStartResponsePending = false;
       run.entry.pendingTurnStartNotification = undefined;
@@ -3196,6 +3206,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.activeCodexServers.clear();
     this.canonicalTurnRoutingsByThread.clear();
     this.planModeSessions.clear();
+    this.collaborationModeSetSessions.clear();
     const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
     if (failures.length > 0) throw new AggregateError(failures, "Codex provider shutdown failed");
     logger.info("CodexProvider shutdown complete");

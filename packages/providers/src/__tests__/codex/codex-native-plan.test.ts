@@ -306,4 +306,20 @@ describe("Codex native planning", () => {
       f.child.complete();
     } finally { await f.provider.shutdown(); }
   });
+
+  it("leaves plan mode once on the first resumed build turn after a server restart", async () => {
+    const f = fixture();
+    const resumedBuild = { ...turn, planTurn: undefined, interactionMode: "build" as const, resumeFrom: "thread-from-before-restart" };
+    try {
+      await f.provider.sendTurn(resumedBuild);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      expect(f.starts()[0]?.params?.collaborationMode).toMatchObject({ mode: "default" });
+      f.child.complete();
+      await vi.waitFor(() => expect(f.events.some(event => event.event.type === "ended")).toBe(true));
+      await f.provider.sendTurn({ ...resumedBuild, turnId: "build-again", turnExecutionId: "build-again-execution" });
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      expect(f.starts()[1]?.params).not.toHaveProperty("collaborationMode");
+      f.child.complete();
+    } finally { await f.provider.shutdown(); }
+  });
 });
