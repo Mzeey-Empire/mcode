@@ -339,11 +339,13 @@ export class PlanService {
 
   /** Read a serialized snapshot and preserve any later accepted status in memory. */
   async snapshot(input: { threadId: string }) {
+    // Read the hold first: admission accepts the version before the hold ends, so a snapshot that sees
+    // no hold also sees the accepted version, while the reverse order could pair a ready version with no hold.
+    const pendingImplement = await this.pendingImplement(input.threadId);
     const result = await this.writer.execute(planWriteOperations.snapshot, input);
     if (!result.ok) throw new PlanServiceError(result);
     return { versions: mergePlanVersions(result.versions, this.progress?.reloadPlans(input.threadId) ?? result.versions),
-      comments: result.comments, phase: result.phase, pendingQuestions: result.pendingQuestions,
-      pendingImplement: await this.pendingImplement(input.threadId) };
+      comments: result.comments, phase: result.phase, pendingQuestions: result.pendingQuestions, pendingImplement };
   }
 
   private async pendingImplement(threadId: string): Promise<PendingPlanImplement | null> {
