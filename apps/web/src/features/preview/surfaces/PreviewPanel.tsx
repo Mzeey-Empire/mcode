@@ -161,9 +161,6 @@ export function PreviewPanel({
     designPickerDispatch,
     setEditingAnnotationId,
     dismissBubbleSlash,
-    linkedVisualPairs,
-    setLinkedVisualPairs,
-    setColorFormats,
     bubbleRef,
     bubbleSlashOpen,
     onBubbleSlashSelect,
@@ -174,9 +171,6 @@ export function PreviewPanel({
     onBubbleSlashInputChange,
     onBubbleFileInputChange,
     setBubbleInputFocused,
-    colorFormats,
-    expandedVisualGroups,
-    setExpandedVisualGroups,
     bubbleSlashState,
     bubbleSlashAnchorRect,
     retryBubbleSlash,
@@ -253,20 +247,16 @@ export function PreviewPanel({
   const {
     openBubbleFocusKey,
     hasOpenBubble,
-    setBubbleAdvancedOpen,
     setOutsideWarned,
     openBubbleBase,
     canSaveOpenBubble,
     outsideWarned,
-    setBubbleVisuals,
-    bubbleVisuals,
     bubbleNote,
     pageAnnotations,
     savedAnnotations,
     editingSavedAnnotation,
     setBubbleNote,
     bubbleFilePopup,
-    bubbleAdvancedOpen,
     handleBubbleMentionSelect,
   } = useDesignAnnotationEditor({
     webviewPageStatus,
@@ -303,9 +293,6 @@ export function PreviewPanel({
 
   const {
     onToggleDesignMode,
-    updateBubbleVisualControl,
-    updateColorFormat,
-    toggleVisualLinkPair,
   } = useDesignPicker({
     openBubbleFocusKey,
     bubbleNoteInputRef,
@@ -313,18 +300,12 @@ export function PreviewPanel({
     hasOpenBubble,
     threadId,
     setEditingAnnotationId,
-    setBubbleAdvancedOpen,
     setOutsideWarned,
     dismissBubbleSlash,
     dismissBubbleFile,
     openBubbleBase,
     canSaveOpenBubble,
     outsideWarned,
-    linkedVisualPairs,
-    setBubbleVisuals,
-    setLinkedVisualPairs,
-    setColorFormats,
-    bubbleVisuals,
     bubbleRef,
     bubbleSlashOpen,
     bubbleFileOpen,
@@ -478,7 +459,6 @@ export function PreviewPanel({
         designLayer={
           <DesignLayer
             openBubbleBase={openBubbleBase}
-            bubbleVisuals={bubbleVisuals}
             bubbleNote={bubbleNote}
             setOutsideWarned={setOutsideWarned}
             capture={capture}
@@ -498,12 +478,10 @@ export function PreviewPanel({
             bubbleFileOpen={bubbleFileOpen}
             bubbleFilePopup={bubbleFilePopup}
             bubbleSlashOpen={bubbleSlashOpen}
-            setBubbleAdvancedOpen={setBubbleAdvancedOpen}
             designModeActive={designModeActive}
             bubbleRef={bubbleRef}
             outsideWarned={outsideWarned}
             bubbleInputFocused={bubbleInputFocused}
-            bubbleAdvancedOpen={bubbleAdvancedOpen}
             surfaceWidth={surfaceWidth}
             surfaceHeight={surfaceHeight}
             pageScroll={pageScroll}
@@ -511,13 +489,6 @@ export function PreviewPanel({
             onBubbleFileInputChange={onBubbleFileInputChange}
             setBubbleInputFocused={setBubbleInputFocused}
             canSaveOpenBubble={canSaveOpenBubble}
-            colorFormats={colorFormats}
-            updateBubbleVisualControl={updateBubbleVisualControl}
-            updateColorFormat={updateColorFormat}
-            linkedVisualPairs={linkedVisualPairs}
-            toggleVisualLinkPair={toggleVisualLinkPair}
-            expandedVisualGroups={expandedVisualGroups}
-            setExpandedVisualGroups={setExpandedVisualGroups}
             bubbleSlashState={bubbleSlashState}
             bubbleSlashAnchorRect={bubbleSlashAnchorRect}
             dismissBubbleSlash={dismissBubbleSlash}

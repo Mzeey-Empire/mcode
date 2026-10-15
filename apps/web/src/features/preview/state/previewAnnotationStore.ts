@@ -1,11 +1,9 @@
 import { create } from "zustand";
 import type {
   BrowserPreviewBounds,
-  BrowserPreviewElementStyle,
   McodeBrowserCaptureV2,
   PreviewAnnotationBundle,
   PreviewAnnotationPayload,
-  PreviewAnnotationVisualProposal,
 } from "@mcode/contracts";
 import { isPreviewAnnotationPayload, PreviewAnnotationBundleSchema } from "@mcode/contracts";
 
@@ -25,12 +23,8 @@ export interface PreviewDraftAnnotation {
   readonly snapshot?: PreviewAnnotationPayload["snapshot"];
   /** Full page context captured with the snapshot. */
   readonly pageContext: McodeBrowserCaptureV2;
-  /** Current computed visual style for the selected element. */
-  readonly elementStyle?: BrowserPreviewElementStyle;
   /** User note text. */
   readonly note: string;
-  /** Proposed visual style changes. */
-  readonly proposedChanges?: PreviewAnnotationVisualProposal;
 }
 
 /** Saved annotation with stable identity and creation ordering. */
@@ -68,14 +62,6 @@ function renumberAnnotations(preview: readonly SavedPreviewAnnotation[]): SavedP
     .map((annotation, index) => ({ ...annotation, displayNumber: index + 1 }));
 }
 
-function visualSummary(proposedChanges: PreviewAnnotationVisualProposal | undefined): string | undefined {
-  if (!proposedChanges) return undefined;
-  const labels = Object.keys(proposedChanges)
-    .map((key) => key.replace(/[A-Z]/g, (m) => ` ${m.toLowerCase()}`))
-    .join(", ");
-  return labels ? `Change ${labels}.` : undefined;
-}
-
 function savedPreviewAnnotation(
   existing: readonly SavedPreviewAnnotation[],
   draft: PreviewDraftAnnotation,
@@ -93,9 +79,7 @@ function savedPreviewAnnotation(
       selectorHint: draft.selectorHint ?? null,
       bounds: draft.bounds,
     },
-    note: note || undefined,
-    changeSummary: note ? undefined : visualSummary(draft.proposedChanges),
-    proposedChanges: draft.proposedChanges,
+    note,
     snapshot: draft.snapshot!,
   };
 }
@@ -130,6 +114,9 @@ export const usePreviewAnnotationStore = create<PreviewAnnotationStore>((set, ge
   },
 
   saveAnnotation(threadId, draft, id) {
+    if (!draft.note.trim()) {
+      throw new Error("annotation note is required");
+    }
     if (!draft.snapshot) {
       throw new Error("annotation snapshot is required");
     }

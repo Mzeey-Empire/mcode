@@ -1155,31 +1155,18 @@ Preview boundary.
 _Avoid_: exposing raw browser debugging protocol traffic to a provider
 
 ### Preview annotation
-A saved request anchored to part of the Preview page. It can carry note text,
-proposed changes for that page target, or both; the annotation bubble is only
-the editor, and an unsaved bubble is not a Preview annotation yet. Its delete
-control belongs inside the opened annotation bubble so passive markers are
+A saved note anchored to part of the Preview page. Every new annotation carries
+note text. The annotation bubble is the editor, and an unsaved bubble is not a
+Preview annotation yet. Its delete control belongs inside the opened annotation
+bubble so passive markers are
 harder to remove accidentally.
 _Avoid_: treating annotation-bubble styling as the requested page change
 
 ### Draft annotation
 An unsaved annotation bubble on the Preview page. It has no display number,
 does not belong to the Preview annotation set, and can become a Preview
-annotation once it has note text or proposed changes.
+annotation once it has note text.
 _Avoid_: treating draft annotations as sendable annotations
-
-### Annotation change summary
-The generated text that describes proposed changes on a Preview annotation
-when the user did not write note text. It lets visual-only annotations remain
-readable in the annotation bubble and Annotation bundle.
-_Avoid_: requiring note text merely to explain a visual change
-
-### Visual proposal
-The Preview-only rendering of proposed visual changes for a page target. It
-shows what the user is asking for without making the live page state the source
-of truth. When several saved annotations are visible, only the active annotation
-shows its full Visual proposal.
-_Avoid_: treating visual proposals as applied page edits
 
 ### Annotation display number
 The number on a Preview annotation marker. It counts from 1 on each page in
@@ -1222,7 +1209,8 @@ _Avoid_: showing each annotation snapshot as a separate composer attachment
 ### Annotation payload
 The structured information sent to the agent for an Annotation bundle. It pairs
 each Preview annotation with its display number, page context, target context,
-note or change summary, proposed changes, and snapshot.
+note text and snapshot. Historic messages may carry a generated change summary
+and style edits instead of note text.
 _Avoid_: relying on screenshots alone for annotation intent
 
 ### Preview annotation mode

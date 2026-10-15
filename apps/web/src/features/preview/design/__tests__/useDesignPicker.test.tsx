@@ -3,8 +3,6 @@ import { renderHook, act, cleanup } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { useDesignPicker } from "../useDesignPicker";
 import { useAnnotationBubbleEditor } from "../annotationBubble";
-import type { VisualLinkPairId, ColorVisualProposalKey } from "../visualProposalModel";
-import type { ColorFormat } from "../visualProposalColor";
 import { usePreviewCapture } from "../../capture/usePreviewCapture";
 import { usePreviewDesignModeStore } from "../../state/previewDesignModeStore";
 import { usePreviewAnnotationStore } from "../../state/previewAnnotationStore";
@@ -43,10 +41,6 @@ function useDesignPickerHarness(): void {
   const hasOpenBubble = usePreviewAnnotationStore((s) => Boolean(s.drafts[THREAD_ID]));
   const editor = useAnnotationBubbleEditor(undefined, undefined);
   const [, setEditingAnnotationId] = useState<string | null>(null);
-  const [linkedVisualPairs, setLinkedVisualPairs] = useState<
-    Partial<Record<VisualLinkPairId, boolean>>
-  >({});
-  const [, setColorFormats] = useState<Partial<Record<ColorVisualProposalKey, ColorFormat>>>({});
   const bubbleRef = useRef<HTMLDivElement | null>(null);
   const bubbleNoteInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -57,18 +51,12 @@ function useDesignPickerHarness(): void {
     hasOpenBubble,
     threadId: THREAD_ID,
     setEditingAnnotationId,
-    setBubbleAdvancedOpen: editor.setBubbleAdvancedOpen,
     setOutsideWarned: editor.setOutsideWarned,
     dismissBubbleSlash,
     dismissBubbleFile,
     openBubbleBase: undefined,
     canSaveOpenBubble: false,
     outsideWarned: editor.outsideWarned,
-    linkedVisualPairs,
-    setBubbleVisuals: editor.setBubbleVisuals,
-    setLinkedVisualPairs,
-    setColorFormats,
-    bubbleVisuals: editor.bubbleVisuals,
     bubbleRef,
     bubbleSlashOpen: false,
     bubbleFileOpen: false,

@@ -66,6 +66,20 @@ describe("PreviewAnnotationBundleSchema", () => {
     ).toBe(true);
   });
 
+  it("reads a stored v1 style-only annotation without note text", () => {
+    const { note: _note, ...storedAnnotation } = annotation;
+    const storedBundle = {
+      schemaVersion: 1,
+      annotations: [{
+        ...storedAnnotation,
+        changeSummary: "Change background, font weight.",
+        proposedChanges: { background: "#fff", fontWeight: "700" },
+      }],
+    };
+
+    expect(PreviewAnnotationBundleSchema().parse(storedBundle)).toEqual(storedBundle);
+  });
+
   it("accepts local code comments without creating screenshot attachments", () => {
     const bundle = {
       schemaVersion: 1 as const,

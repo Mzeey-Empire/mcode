@@ -1,20 +1,11 @@
 /**
- * Owns annotation dismissal, visual-control callbacks and picker effects. The parent invokes it after live-chrome publication to preserve effect order.
+ * Owns annotation dismissal and picker effects. The parent invokes it after live-chrome publication to preserve effect order.
  */
 import { useCallback, useEffect, useEffectEvent } from "react";
-import type { PreviewAnnotationVisualProposal } from "@mcode/contracts";
 import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
 import type { useDesignAnnotationEditor } from "./useDesignAnnotationEditor";
 import type { useDesignAnnotationState } from "./useDesignAnnotationState";
 import type { usePreviewPage } from "../surfaces/usePreviewPage";
-import {
-  type VisualProposalKey,
-  VISUAL_LINK_PAIRS,
-  encodeVisualControlValue,
-  type VisualLinkPairId,
-  type ColorVisualProposalKey,
-} from "./visualProposalModel";
-import { type ColorFormat, parseColorValue, formatColorValue } from "./visualProposalColor";
 import { isAnnotationBubbleInteractionTarget } from "./annotationBubble";
 
 interface DesignPickerOptions {
@@ -24,18 +15,12 @@ interface DesignPickerOptions {
   readonly hasOpenBubble: ReturnType<typeof useDesignAnnotationEditor>["hasOpenBubble"];
   readonly threadId: string;
   readonly setEditingAnnotationId: ReturnType<typeof useDesignAnnotationState>["setEditingAnnotationId"];
-  readonly setBubbleAdvancedOpen: ReturnType<typeof useDesignAnnotationEditor>["setBubbleAdvancedOpen"];
   readonly setOutsideWarned: ReturnType<typeof useDesignAnnotationEditor>["setOutsideWarned"];
   readonly dismissBubbleSlash: ReturnType<typeof useDesignAnnotationState>["dismissBubbleSlash"];
   readonly dismissBubbleFile: ReturnType<typeof useDesignAnnotationState>["dismissBubbleFile"];
   readonly openBubbleBase: ReturnType<typeof useDesignAnnotationEditor>["openBubbleBase"];
   readonly canSaveOpenBubble: ReturnType<typeof useDesignAnnotationEditor>["canSaveOpenBubble"];
   readonly outsideWarned: ReturnType<typeof useDesignAnnotationEditor>["outsideWarned"];
-  readonly linkedVisualPairs: ReturnType<typeof useDesignAnnotationState>["linkedVisualPairs"];
-  readonly setBubbleVisuals: ReturnType<typeof useDesignAnnotationEditor>["setBubbleVisuals"];
-  readonly setLinkedVisualPairs: ReturnType<typeof useDesignAnnotationState>["setLinkedVisualPairs"];
-  readonly setColorFormats: ReturnType<typeof useDesignAnnotationState>["setColorFormats"];
-  readonly bubbleVisuals: ReturnType<typeof useDesignAnnotationEditor>["bubbleVisuals"];
   readonly bubbleRef: ReturnType<typeof useDesignAnnotationState>["bubbleRef"];
   readonly bubbleSlashOpen: ReturnType<typeof useDesignAnnotationState>["bubbleSlashOpen"];
   readonly bubbleFileOpen: ReturnType<typeof useDesignAnnotationState>["bubbleFileOpen"];
@@ -53,18 +38,12 @@ export function useDesignPicker({
   hasOpenBubble,
   threadId,
   setEditingAnnotationId,
-  setBubbleAdvancedOpen,
   setOutsideWarned,
   dismissBubbleSlash,
   dismissBubbleFile,
   openBubbleBase,
   canSaveOpenBubble,
   outsideWarned,
-  linkedVisualPairs,
-  setBubbleVisuals,
-  setLinkedVisualPairs,
-  setColorFormats,
-  bubbleVisuals,
   bubbleRef,
   bubbleSlashOpen,
   bubbleFileOpen,
@@ -101,7 +80,6 @@ export function useDesignPicker({
   const closeOpenAnnotationBubble = useCallback((): void => {
     usePreviewAnnotationStore.getState().setDraft(threadId, undefined);
     setEditingAnnotationId(null);
-    setBubbleAdvancedOpen(false);
     setOutsideWarned(false);
     // Dismiss any open autocomplete popups so they don't linger after the
     // bubble closes (the hooks' own Escape handling only fires while the input
@@ -112,7 +90,6 @@ export function useDesignPicker({
     dismissBubbleFile,
     dismissBubbleSlash,
     setEditingAnnotationId,
-    setBubbleAdvancedOpen,
     setOutsideWarned,
     threadId,
   ]);
@@ -135,64 +112,6 @@ export function useDesignPicker({
     outsideWarned,
     setOutsideWarned,
   ]);
-
-  const linkedPeersForKey = useCallback(
-    (key: VisualProposalKey): VisualProposalKey[] => {
-      return VISUAL_LINK_PAIRS.flatMap((pair) => {
-        if (!linkedVisualPairs[pair.id]) return [];
-        if (!(pair.keys as readonly VisualProposalKey[]).includes(key)) return [];
-        return pair.keys.filter((candidate) => candidate !== key);
-      });
-    },
-    [linkedVisualPairs],
-  );
-
-  const updateBubbleVisualControl = useCallback(
-    (key: VisualProposalKey, rawValue: string | number): void => {
-      const nextValue =
-        typeof rawValue === "number"
-          ? rawValue
-          : encodeVisualControlValue(key, rawValue);
-      const linkedPeers = linkedPeersForKey(key);
-      setBubbleVisuals((prev) => {
-        const next: Record<string, string | number> = { ...prev, [key]: nextValue };
-        for (const peer of linkedPeers) next[peer] = nextValue;
-        return next as PreviewAnnotationVisualProposal;
-      });
-      setOutsideWarned(false);
-    },
-    [linkedPeersForKey, setBubbleVisuals, setOutsideWarned],
-  );
-
-  const toggleVisualLinkPair = useCallback(
-    (pairId: VisualLinkPairId): void => {
-      const pair = VISUAL_LINK_PAIRS.find((candidate) => candidate.id === pairId);
-      if (!pair) return;
-      const willEnable = !linkedVisualPairs[pairId];
-      setLinkedVisualPairs((prev) => ({ ...prev, [pairId]: willEnable }));
-      if (!willEnable) return;
-      setBubbleVisuals((prev) => {
-        const source = prev[pair.keys[0]];
-        if (source === undefined || String(source).trim() === "") return prev;
-        return {
-          ...prev,
-          [pair.keys[1]]: source,
-        };
-      });
-      setOutsideWarned(false);
-    },
-    [linkedVisualPairs, setBubbleVisuals, setLinkedVisualPairs, setOutsideWarned],
-  );
-
-  const updateColorFormat = useCallback(
-    (key: ColorVisualProposalKey, format: ColorFormat): void => {
-      setColorFormats((prev) => ({ ...prev, [key]: format }));
-      const parsed = parseColorValue(bubbleVisuals[key]);
-      if (!parsed) return;
-      updateBubbleVisualControl(key, formatColorValue(parsed, format));
-    },
-    [bubbleVisuals, setColorFormats, updateBubbleVisualControl],
-  );
 
   useEffect(() => {
     if (!openBubbleBase) return;
@@ -298,8 +217,5 @@ export function useDesignPicker({
 
   return {
     onToggleDesignMode,
-    updateBubbleVisualControl,
-    updateColorFormat,
-    toggleVisualLinkPair,
   };
 }
