@@ -108,7 +108,8 @@ describe("Claude native plan turns", () => {
       await completed(events, index + 2);
     }
     expect(transport.optionsSeen).toHaveLength(1);
-    expect(transport.optionsSeen[0]).toMatchObject({ permissionMode: "plan", allowDangerouslySkipPermissions: permissionMode === "full" });
+    expect(transport.optionsSeen[0]).toMatchObject({ permissionMode: "plan", ...(permissionMode === "full" && { allowDangerouslySkipPermissions: true }) });
+    expect(transport.optionsSeen[0]?.allowDangerouslySkipPermissions).toBe(permissionMode === "full" ? true : undefined);
     expect(transport.consumedModes).toEqual(["plan", "plan", "plan", permissionMode === "full" ? "bypassPermissions" : "default"]);
     await provider.sendTurn(request({ permissionMode, turnId: "turn-5", turnExecutionId: "00000000-0000-4000-8000-000000000005",
       planTurn: { kind: "planning", planFilePath: null } }));

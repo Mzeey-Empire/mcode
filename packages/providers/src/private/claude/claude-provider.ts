@@ -1760,7 +1760,7 @@ export class ClaudeProvider
         : {},
       disallowedTools: ["EnterPlanMode", "AskUserQuestion"],
       permissionMode,
-      allowDangerouslySkipPermissions: context.params.permissionMode === "full",
+      ...(context.params.permissionMode === "full" && { allowDangerouslySkipPermissions: true }),
       canUseTool: this.createCanUseTool(context.threadId, context.routing),
       ...buildReasoningOptions(
         context.params.reasoningLevel,
