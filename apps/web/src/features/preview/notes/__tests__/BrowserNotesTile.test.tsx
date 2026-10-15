@@ -18,8 +18,8 @@ const SCOPE = "thread-tile";
 const store = () => usePreviewAnnotationStore.getState();
 const firstNote = () => store().getThreadAnnotations(SCOPE)[0]!;
 
-function renderTile(onRemoveAll: () => void = vi.fn()) {
-  render(<BrowserNotesTile scopeId={SCOPE} workspaceId="workspace-1" threadId={SCOPE} onRemoveAll={onRemoveAll} />);
+function renderTile(onRemoveAll: () => void = vi.fn(), threadId: string | undefined = SCOPE) {
+  render(<BrowserNotesTile scopeId={SCOPE} workspaceId="workspace-1" threadId={threadId} onRemoveAll={onRemoveAll} />);
 }
 
 async function openHoverCard() {
@@ -45,6 +45,15 @@ describe("BrowserNotesTile", () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product");
 
     renderTile();
+
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe("blob:page"));
+    expect(mockRead).toHaveBeenCalledWith(SCOPE, store().pages[SCOPE]![PRODUCT_PAGE]!.snapshot);
+  });
+
+  it("shows the thumbnail before a thread exists, reading the images staged under the scope", async () => {
+    seedPage(SCOPE, PRODUCT_PAGE, "Product");
+
+    renderTile(vi.fn(), undefined);
 
     await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe("blob:page"));
     expect(mockRead).toHaveBeenCalledWith(SCOPE, store().pages[SCOPE]![PRODUCT_PAGE]!.snapshot);

@@ -20,7 +20,7 @@ export interface BrowserNotesTileProps {
   readonly scopeId: string;
   /** Workspace whose right panel hosts the Browser. */
   readonly workspaceId: string;
-  /** Thread that owns stored page images, when one exists. */
+  /** Thread the right panel is bound to, when one exists. */
   readonly threadId?: string;
   /** Drops every Browser note in the scope. Review and Files comments stay. */
   readonly onRemoveAll: () => void;
@@ -53,15 +53,14 @@ async function revealNotePage(
 type ThumbnailState = { readonly url: string } | "missing" | "loading";
 
 /** Loads the page's image from draft storage, falling back to the clean screenshot while a redraw is pending. */
-function useThumbnail(page: PreviewPageRecord, threadId: string | undefined): ThumbnailState {
+function useThumbnail(page: PreviewPageRecord, scopeId: string): ThumbnailState {
   const image = page.snapshot ?? page.clean?.image ?? null;
   const [state, setState] = useState<ThumbnailState>("loading");
-  const readable = Boolean(image && threadId);
   useEffect(() => {
-    if (!image || !threadId) return;
+    if (!image) return;
     let url: string | null = null;
     let cancelled = false;
-    void readStagedDraftImage(threadId, image).then((bytes) => {
+    void readStagedDraftImage(scopeId, image).then((bytes) => {
       if (cancelled) return;
       if (!bytes) {
         setState("missing");
@@ -76,12 +75,12 @@ function useThumbnail(page: PreviewPageRecord, threadId: string | undefined): Th
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [image, threadId]);
-  return readable ? state : "missing";
+  }, [image, scopeId]);
+  return image ? state : "missing";
 }
 
-function Thumbnail({ page, threadId }: { readonly page: PreviewPageRecord; readonly threadId?: string }) {
-  const thumbnail = useThumbnail(page, threadId);
+function Thumbnail({ page, scopeId }: { readonly page: PreviewPageRecord; readonly scopeId: string }) {
+  const thumbnail = useThumbnail(page, scopeId);
   return (
     <span className="block h-[98px] w-full shrink-0 overflow-clip bg-panel">
       {typeof thumbnail === "object"
@@ -187,7 +186,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
             onClick={() => void revealNotePage(workspaceId, scopeId, threadId, front.page, front.notes[0])}
             className="absolute bottom-0 left-0 flex h-[132px] w-[176px] flex-col overflow-clip rounded-lg border border-border bg-panel text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
-            <Thumbnail page={front.page} threadId={threadId} />
+            <Thumbnail page={front.page} scopeId={scopeId} />
             <span className="flex h-8 w-full shrink-0 items-center gap-2 bg-hover px-2">
               <MousePointer2 size={16} className="shrink-0 text-primary" aria-hidden />
               <span className="text-fade min-w-0 flex-1 text-body-small font-label text-ink">{label}</span>
