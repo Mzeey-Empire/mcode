@@ -200,6 +200,7 @@ export function WebRuntimePreview({
   onCloseViewportToolbar,
   automationOnly = false,
   presentationActive = true,
+  coveredRight = 0,
 }: {
   readonly threadId: string;
   readonly workspaceId?: string | null;
@@ -210,6 +211,7 @@ export function WebRuntimePreview({
   readonly onCloseViewportToolbar: () => void;
   readonly automationOnly?: boolean;
   readonly presentationActive?: boolean;
+  readonly coveredRight?: number;
 }) {
   const storedUrl = useDiffStore((state) => state.previewUrlByThread[threadId] ?? "");
   const fixtureUrl = `${window.location.origin}${WEB_AUTOMATION_FIXTURE_URL}`;
@@ -447,7 +449,7 @@ export function WebRuntimePreview({
           workspaceId={identity.workspaceId}
           threadId={threadId}
           tabId={WEB_RUNTIME_PREVIEW_TAB_ID}
-          coveredRight={0}
+          coveredRight={coveredRight}
         />
       </div>
     </div>

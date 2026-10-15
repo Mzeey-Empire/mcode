@@ -2,16 +2,9 @@ import { MousePointer2 } from "lucide-react";
 import { browserAutomationTargetKey, useBrowserAutomationStore } from "../automation/browserAutomationStore";
 import { useBrowserActing } from "../state/useBrowserActing";
 
-const EDGE_BACKGROUND_IMAGE = [
-  "linear-gradient(to right, color-mix(in oklab, var(--primary) 26%, transparent), transparent 32px)",
-  "linear-gradient(to left, color-mix(in oklab, var(--primary) 26%, transparent), transparent 32px)",
-  "linear-gradient(to bottom, color-mix(in oklab, var(--primary) 26%, transparent), transparent 32px)",
-  "linear-gradient(to top, color-mix(in oklab, var(--primary) 26%, transparent), transparent 32px)",
-].join(", ");
-
 const EDGE_BOX_SHADOW = [
-  "inset 0 0 40px color-mix(in oklab, var(--primary) 30%, transparent)",
-  "0 0 24px color-mix(in oklab, var(--primary) 28%, transparent)",
+  "inset 0 0 0 2px var(--primary)",
+  "inset 0 0 28px color-mix(in oklab, var(--primary) 35%, transparent)",
 ].join(", ");
 
 interface BrowserActingOverlayProps {
@@ -37,7 +30,6 @@ export function BrowserActingOverlay({ workspaceId, threadId, tabId, coveredRigh
       className="pointer-events-none absolute inset-0 z-(--layer-browser-overlay) rounded-tr-md"
       style={{
         clipPath: coveredRight ? `inset(0 ${coveredRight}px 0 0)` : undefined,
-        backgroundImage: EDGE_BACKGROUND_IMAGE,
         boxShadow: EDGE_BOX_SHADOW,
       }}
     >

@@ -342,8 +342,8 @@ describe("PreviewPanel: unavailable state", () => {
       actingTargets: new Set([key]),
     });
     try {
-      render(<PreviewPanel threadId={threadId} />);
-      expect(screen.getByTestId("browser-acting-overlay")).toBeInTheDocument();
+      render(<PreviewPanel threadId={threadId} coveredRight={112} />);
+      expect(screen.getByTestId("browser-acting-overlay")).toHaveStyle({ clipPath: "inset(0 112px 0 0)" });
       expect(screen.getByTestId("browser-automation-pointer")).toHaveStyle({ left: "40px", top: "50px" });
     } finally {
       useBrowserAutomationStore.setState({ controllers: new Map(), actingTargets: new Set() });

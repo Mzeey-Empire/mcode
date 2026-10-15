@@ -343,6 +343,7 @@ export function PreviewPanel({
         onCloseViewportToolbar={closeViewportToolbar}
         automationOnly={automationOnly}
         presentationActive={presentationActive}
+        coveredRight={coveredRight}
       />
     );
   }
