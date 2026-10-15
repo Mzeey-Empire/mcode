@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { MessageMention } from "@mcode/contracts";
+import type { DraftBrowserNotePage, MessageMention } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import {
@@ -14,9 +14,14 @@ import {
   freezeDraftSubmission,
   readSendableDraftContent,
   reconcilePendingSubmissions,
+  removeBrowserNote,
+  removeTakenBrowserNotes,
+  saveBrowserNote,
+  setBrowserPageSnapshot,
   saveDiffComment,
   saveFileComment,
   settleDraftSubmission,
+  visibleBrowserNotePages,
   visibleDiffComments,
   visibleFileComments,
   type NextMessageDraft,
@@ -202,7 +207,7 @@ describe("draft submission lifecycle", () => {
   function startSend(messageId = MESSAGE_ID) {
     saveDraftDiffComment(THREAD_ID, target, { note: "review note", mentions: [] });
     const comments = useComposerDraftStore.getState().drafts[THREAD_ID]!.diffComments!;
-    return beginDraftSubmission(THREAD_ID, { diffComments: comments, fileComments: [] }, messageId)!;
+    return beginDraftSubmission(THREAD_ID, { browserNotePages: [], diffComments: comments, fileComments: [] }, messageId)!;
   }
 
   beforeEach(() => {
@@ -331,5 +336,204 @@ describe("draft submission lifecycle", () => {
     handle.succeeded();
 
     expect(useComposerDraftStore.getState().drafts[THREAD_ID]?.diffCommentEditor?.note).toBe("next thought");
+  });
+});
+
+describe("draft submissions with Browser notes", () => {
+  const capture = {
+    schemaVersion: 2 as const,
+    pageUrl: "https://example.test/",
+    pageTitle: "Home",
+    capturedAt: "2026-05-08T12:00:00.000Z",
+    bounds: { x: 0, y: 0, width: 800, height: 600 },
+  };
+  const image = (stagingId: string) => ({ stagingId, name: "page.png", mimeType: "image/png", sizeBytes: 10 });
+
+  function note(index: number, revision = 1) {
+    return {
+      id: `00000000-0000-4000-8000-00000000000${index}`,
+      revision,
+      pageIdentity: "https://example.test/",
+      displayNumber: index,
+      pageContext: capture,
+      targetContext: { bounds: { x: 0, y: 0, width: 10, height: 10 } },
+      note: `note ${index}`,
+    };
+  }
+
+  function page(...notes: ReturnType<typeof note>[]): DraftBrowserNotePage {
+    return {
+      pageIdentity: "https://example.test/",
+      url: "https://example.test/",
+      title: "Home",
+      faviconUrl: null,
+      capture,
+      scroll: { x: 0, y: 0 },
+      cleanCapture: image("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+      snapshot: image("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+      notes,
+    };
+  }
+
+  function freeze(draft: NextMessageDraft) {
+    return freezeDraftSubmission(draft, MESSAGE_ID, readSendableDraftContent(draft));
+  }
+
+  it("holds only the snapshot staging id, never the clean capture, and hides the notes", () => {
+    const frozen = freeze({ browserNotePages: [page(note(1), note(2))] });
+
+    expect(frozen.submission.stagingIds).toEqual(["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]);
+    expect(frozen.submission.elements.map((element) => element.field)).toEqual(["browserNotePages", "browserNotePages"]);
+    expect(visibleBrowserNotePages(frozen.draft)).toEqual([]);
+  });
+
+  it("deletes sent notes on success and keeps a note edited during Send, renumbered, with a stale snapshot dropped", () => {
+    const frozen = freeze({ browserNotePages: [page(note(1), note(2))] });
+    const edited = {
+      ...frozen.draft,
+      browserNotePages: [page(note(1), note(2, 2))],
+      submissions: frozen.draft.submissions,
+    };
+
+    const settled = settleDraftSubmission(edited, MESSAGE_ID, "success");
+
+    expect(settled.browserNotePages).toHaveLength(1);
+    expect(settled.browserNotePages![0]!.notes.map((n) => [n.note, n.revision, n.displayNumber])).toEqual([["note 2", 2, 1]]);
+    expect(settled.browserNotePages![0]!.snapshot).toBeNull();
+    expect(settled.submissions).toEqual([]);
+  });
+
+  it("removes a page whose notes were all sent", () => {
+    const frozen = freeze({ browserNotePages: [page(note(1))] });
+
+    expect(settleDraftSubmission(frozen.draft, MESSAGE_ID, "success").browserNotePages).toEqual([]);
+  });
+
+  it("returns the notes untouched on failure and keeps a valid snapshot", () => {
+    const original = page(note(1), note(2));
+    const frozen = freeze({ browserNotePages: [original] });
+
+    const settled = settleDraftSubmission(frozen.draft, MESSAGE_ID, "failure");
+
+    expect(settled.browserNotePages).toEqual([original]);
+    expect(visibleBrowserNotePages(settled)).toEqual([original]);
+  });
+
+  it("drops the snapshot on failure when a note joined the page during Send", () => {
+    const frozen = freeze({ browserNotePages: [page(note(1))] });
+    const withLate = { ...frozen.draft, browserNotePages: [page(note(1), note(2))] };
+
+    const settled = settleDraftSubmission(withLate, MESSAGE_ID, "failure");
+
+    expect(settled.browserNotePages![0]!.snapshot).toBeNull();
+    expect(visibleBrowserNotePages(settled)[0]!.notes.map((n) => n.displayNumber)).toEqual([1, 2]);
+  });
+
+  it("shows a note added to a page while its earlier notes are held", () => {
+    const frozen = freeze({ browserNotePages: [page(note(1))] });
+    const withLate = { ...frozen.draft, browserNotePages: [page(note(1), note(2))] };
+
+    expect(visibleBrowserNotePages(withLate)[0]!.notes.map((n) => n.note)).toEqual(["note 2"]);
+  });
+
+  describe("editing", () => {
+    const { snapshot: _snapshot, notes: _notes, ...pageCapture } = page();
+    const empty: NextMessageDraft = {};
+    const content = (text: string) => {
+      const { id: _id, revision: _revision, displayNumber: _number, ...rest } = note(1);
+      return { ...rest, note: text };
+    };
+
+    it("saves a first note at revision 1 and numbers later notes on the page in order", () => {
+      const first = saveBrowserNote(empty, pageCapture, content("one"));
+      const second = saveBrowserNote(first, pageCapture, content("two"));
+
+      expect(second.browserNotePages).toHaveLength(1);
+      expect(second.browserNotePages![0]!.notes.map((n) => [n.note, n.revision, n.displayNumber])).toEqual([
+        ["one", 1, 1],
+        ["two", 1, 2],
+      ]);
+    });
+
+    it("bumps the revision when a note is edited and keeps its identity and number", () => {
+      const first = saveBrowserNote(empty, pageCapture, content("one"));
+      const [original] = first.browserNotePages![0]!.notes;
+
+      const edited = saveBrowserNote(first, pageCapture, content("one, clearer"), original!.id);
+
+      expect(edited.browserNotePages![0]!.notes).toEqual([
+        expect.objectContaining({ id: original!.id, revision: 2, displayNumber: 1, note: "one, clearer" }),
+      ]);
+    });
+
+    it("voids the page snapshot on every save", () => {
+      const drawn = { browserNotePages: [page(note(1))] };
+
+      expect(saveBrowserNote(drawn, pageCapture, content("again")).browserNotePages![0]!.snapshot).toBeNull();
+    });
+
+    it("moves the page just annotated to the end", () => {
+      const other = { ...page(note(2)), pageIdentity: "https://example.test/billing" };
+      const draft = { browserNotePages: [page(note(1)), other] };
+
+      const saved = saveBrowserNote(draft, pageCapture, content("late"));
+
+      expect(saved.browserNotePages!.map((p) => p.pageIdentity)).toEqual([
+        "https://example.test/billing",
+        "https://example.test/",
+      ]);
+    });
+
+    it("removes a note, renumbers the rest, and voids that page's snapshot only", () => {
+      const other = { ...page(note(2)), pageIdentity: "https://example.test/billing" };
+      const draft = { browserNotePages: [page(note(1), note(2)), other] };
+
+      const removed = removeBrowserNote(draft, note(1).id);
+
+      expect(visibleBrowserNotePages(removed)[0]!.notes.map((n) => [n.note, n.displayNumber])).toEqual([["note 2", 1]]);
+      expect(removed.browserNotePages![0]!.snapshot).toBeNull();
+      expect(removed.browserNotePages![1]!.snapshot).not.toBeNull();
+    });
+
+    it("drops a page when its last note is removed", () => {
+      expect(removeBrowserNote({ browserNotePages: [page(note(1))] }, note(1).id).browserNotePages).toEqual([]);
+    });
+
+    it("records a redrawn snapshot on its page only", () => {
+      const other = { ...page(note(2)), pageIdentity: "https://example.test/billing", snapshot: null };
+      const fresh = image("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+
+      const updated = setBrowserPageSnapshot({ browserNotePages: [page(note(1)), other] }, other.pageIdentity, fresh);
+
+      expect(updated.browserNotePages!.map((p) => p.snapshot?.stagingId)).toEqual([
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      ]);
+    });
+  });
+
+  describe("taken by a queued message", () => {
+    it("removes notes still at the revision the message took and renumbers the rest", () => {
+      const draft = { browserNotePages: [page(note(1), note(2))] };
+
+      const after = removeTakenBrowserNotes(draft, [{ id: note(1).id, revision: 1 }]);
+
+      expect(after.browserNotePages![0]!.notes.map((n) => [n.note, n.displayNumber])).toEqual([["note 2", 1]]);
+      expect(after.browserNotePages![0]!.snapshot).toBeNull();
+    });
+
+    it("keeps a note edited since, because the later revision is a new note", () => {
+      const draft = { browserNotePages: [page(note(1, 2))] };
+
+      const after = removeTakenBrowserNotes(draft, [{ id: note(1).id, revision: 1 }]);
+
+      expect(after.browserNotePages![0]!.notes.map((n) => n.revision)).toEqual([2]);
+    });
+
+    it("leaves the draft as it was when nothing was taken", () => {
+      const draft = { browserNotePages: [page(note(1))] };
+
+      expect(removeTakenBrowserNotes(draft, [])).toBe(draft);
+    });
   });
 });

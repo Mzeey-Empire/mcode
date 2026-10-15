@@ -42,8 +42,8 @@ import {
   readCliStatusVersion,
   resolveCliStatusBinary,
   describeOpenCodeAuth,
-  captureNativePlanFile,
-  deleteNativePlanFile,
+  captureOwnedPlanFile,
+  deleteOwnedPlanFile,
 } from "@mcode/providers";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
@@ -551,7 +551,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     if (!state?.sessionCwd || state.upstreamSessionId !== input.nativePlanFile.sessionId) {
       return { outcome: "skipped", reason: "unproven" };
     }
-    const outcome = await deleteNativePlanFile({ nativePlanFile: input.nativePlanFile,
+    const outcome = await deleteOwnedPlanFile({ nativePlanFile: input.nativePlanFile,
       sessionId: state.upstreamSessionId, planRoot: NodePath.join(state.sessionCwd, ".opencode", "plans") });
     // A recreated file under the same name is a different file and must not inherit this session's claim.
     if (outcome.outcome === "deleted") state.createdPlanPaths.delete(input.nativePlanFile.path);
@@ -1158,7 +1158,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
 
   private async readNativePlan(state: OpenCodeTurnState) {
     if (!state.nativePlanPath || !state.sessionCwd) return null;
-    return captureNativePlanFile({ path: state.nativePlanPath, sessionId: state.upstreamSessionId,
+    return captureOwnedPlanFile({ path: state.nativePlanPath, sessionId: state.upstreamSessionId,
       planRoot: NodePath.join(state.sessionCwd, ".opencode", "plans") });
   }
 

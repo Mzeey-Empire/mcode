@@ -77,7 +77,7 @@ describe("project lifecycle commands through the actual SQLite owner", () => {
     expect(cleanup.countByWorkspacePath(workspace.path)).toBe(0);
   });
 
-  it("commits cleanup before runtime teardown and removes direct attachments after durable deletion", async () => {
+  it("commits cleanup before runtime teardown and removes direct and workspace-scoped attachments after durable deletion", async () => {
     const { workspace, threads, workspaces, cleanup, service, teardownThread, removeForThread } = await harness();
     const direct = await threads.create(workspace.id, "Direct", "direct", "main");
     const worktree = await threads.create(workspace.id, "Worktree", "worktree", "feature/test");
@@ -91,7 +91,7 @@ describe("project lifecycle commands through the actual SQLite owner", () => {
     removeForThread.mockImplementation((threadId) => expect(threads.findById(threadId)).toBeNull());
     expect(await service.delete(workspace.id)).toBe(true);
     expect(teardownThread).toHaveBeenCalledTimes(2);
-    expect(removeForThread).toHaveBeenCalledExactlyOnceWith(direct.id);
+    expect(removeForThread.mock.calls.map(([id]) => id)).toEqual([direct.id, workspace.id]);
     expect(threads.findById(worktree.id)).not.toBeNull();
     expect(workspaces.findByIdIncludeDeleted(workspace.id)).not.toBeNull();
     expect(await service.delete(workspace.id)).toBe(false);
@@ -111,7 +111,7 @@ describe("project lifecycle commands through the actual SQLite owner", () => {
     expect(await service.forceDelete(workspace.id)).toBe(true);
     expect(workspaces.findById(workspace.id)).toBeNull();
     expect(cleanup.countByWorkspacePath(workspace.path)).toBe(0);
-    expect(removeForThread).toHaveBeenCalledExactlyOnceWith(thread.id);
+    expect(removeForThread.mock.calls.map(([id]) => id)).toEqual([thread.id, workspace.id]);
   });
 
   it("rolls back path and status together, then removes the uncommitted Git checkout", async () => {

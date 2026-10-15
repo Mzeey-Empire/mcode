@@ -1,66 +1,77 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { usePreviewAnnotationStore } from "../../state/previewAnnotationStore";
+import type { StagedDraftImage } from "@mcode/contracts";
+import { freezeDraftSubmission, readSendableDraftContent } from "@/features/conversation/composer/draft/draft-submission";
+import {
+  browserPagesToBundle,
+  clearVisibleBrowserNotes,
+  readVisibleBrowserNotePages,
+  removeTakenBrowserNotePages,
+} from "@/features/conversation/composer/draft/draft-browser-notes";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { flushPageSnapshots, PAGE_SNAPSHOT_DEBOUNCE_MS, schedulePageSnapshot } from "../previewNoteSnapshots";
 import { removePreviewNote } from "../previewNotes";
-import { seedPage, draft, BILLING_PAGE, PRODUCT_PAGE } from "./fixtures";
+import { BILLING_PAGE, PRODUCT_PAGE, seedPage, stagedImage } from "./fixtures";
 
-const { mockRender } = vi.hoisted(() => ({ mockRender: vi.fn() }));
+const { mockRender, mockRead, mockStage } = vi.hoisted(() => ({
+  mockRender: vi.fn(),
+  mockRead: vi.fn(),
+  mockStage: vi.fn(),
+}));
 vi.mock("../renderPageSnapshot", () => ({ renderPageSnapshot: mockRender }));
+vi.mock("../stagedDraftImages", () => ({ readStagedDraftImage: mockRead, stageDraftImage: mockStage }));
 
-type SavedFile = { id: string; name: string; sizeBytes: number; sourcePath: string };
-
-const store = () => usePreviewAnnotationStore.getState();
 let threadId = "";
 let counter = 0;
-let saveClipboardFile: ReturnType<typeof vi.fn<() => Promise<SavedFile>>>;
 
-const page = () => store().pages[threadId]?.[PRODUCT_PAGE];
-const savedFile = (sourcePath: string): SavedFile => ({
-  id: crypto.randomUUID(),
-  name: "page.png",
-  sizeBytes: 1,
-  sourcePath,
-});
+const pageOf = (pageIdentity = PRODUCT_PAGE) =>
+  readVisibleBrowserNotePages(threadId).find((candidate) => candidate.pageIdentity === pageIdentity);
+const noteIds = (pageIdentity = PRODUCT_PAGE) => pageOf(pageIdentity)?.notes.map((note) => note.id) ?? [];
+
+/** Saves each note onto its page, leaving the page without a snapshot as an edit does. */
+function addNotes(pageIdentity: string, title: string, notes: string[]) {
+  for (const note of notes) seedPage(threadId, pageIdentity, title, { snapshot: false, note });
+}
 
 describe("page snapshot redraws", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     threadId = `thread-snapshots-${counter++}`;
-    usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
+    useComposerDraftStore.setState({ drafts: {} });
     mockRender.mockReset().mockResolvedValue(new Uint8Array([9]));
-    saveClipboardFile = vi.fn(async () => savedFile("C:/tmp/redrawn.png"));
-    Object.assign(window, { desktopBridge: { saveClipboardFile } });
-    seedPage(threadId);
+    mockRead.mockReset().mockResolvedValue(new Uint8Array([1]));
+    mockStage.mockReset().mockImplementation(async () => stagedImage());
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    Object.assign(window, { desktopBridge: undefined });
   });
 
   it("removing a note renumbers its page and redraws the snapshot within 300 ms", async () => {
-    const first = store().saveAnnotation(threadId, draft(threadId, { note: "First" }));
-    store().saveAnnotation(threadId, draft(threadId, { note: "Second" }));
+    addNotes(PRODUCT_PAGE, "Product", ["First", "Second", "Third"]);
+    await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS);
+    mockRender.mockClear();
 
-    removePreviewNote(threadId, first.id);
+    removePreviewNote(threadId, noteIds()[0]!);
 
-    expect(page()?.marked).toBeNull();
+    expect(pageOf()?.snapshot).toBeNull();
     await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS - 1);
     expect(mockRender).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
 
     expect(PAGE_SNAPSHOT_DEBOUNCE_MS).toBeLessThanOrEqual(300);
     expect(mockRender).toHaveBeenCalledTimes(1);
-    expect(mockRender.mock.calls[0]?.[1]).toEqual([
-      { displayNumber: 1, bounds: store().getThreadAnnotations(threadId)[0]?.targetContext.bounds },
-    ]);
-    expect(page()?.marked?.sourcePath).toBe("C:/tmp/redrawn.png");
-    expect(page()?.markedPng).toEqual(new Uint8Array([9]));
+    expect(mockRender.mock.calls[0]?.[1]).toEqual(
+      pageOf()!.notes.map((note, index) => ({ displayNumber: index + 1, bounds: note.targetContext.bounds })),
+    );
+    expect(mockStage).toHaveBeenLastCalledWith(threadId, new Uint8Array([9]), expect.any(String));
+    expect(pageOf()?.snapshot).not.toBeNull();
   });
 
   it("restarts the wait when another edit lands before it elapses", async () => {
-    store().saveAnnotation(threadId, draft(threadId));
-    schedulePageSnapshot(threadId, PRODUCT_PAGE);
+    addNotes(PRODUCT_PAGE, "Product", ["A", "B"]);
+    await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS);
+    mockRender.mockClear();
+    removePreviewNote(threadId, noteIds()[0]!);
     await vi.advanceTimersByTimeAsync(200);
     schedulePageSnapshot(threadId, PRODUCT_PAGE);
     await vi.advanceTimersByTimeAsync(200);
@@ -71,88 +82,158 @@ describe("page snapshot redraws", () => {
   });
 
   it("discards a redraw that a later edit overtook while it was saving", async () => {
-    store().saveAnnotation(threadId, draft(threadId));
-    let release: (file: SavedFile) => void = () => {};
-    saveClipboardFile.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
-    schedulePageSnapshot(threadId, PRODUCT_PAGE);
+    addNotes(PRODUCT_PAGE, "Product", ["A"]);
+    let release: (image: StagedDraftImage) => void = () => {};
+    mockStage.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
     await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS);
 
     schedulePageSnapshot(threadId, PRODUCT_PAGE);
-    release({ ...savedFile("C:/tmp/stale.png"), id: "stale" });
+    release(stagedImage());
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(page()?.marked?.id).not.toBe("stale");
+    expect(pageOf()?.snapshot).toBeNull();
+  });
+
+  it("discards a redraw whose notes were cleared from the tile while an earlier Send still holds the page", async () => {
+    addNotes(PRODUCT_PAGE, "Product", ["Sent"]);
+    await flushPageSnapshots(threadId);
+    useComposerDraftStore.getState().updateNextMessage(threadId, (draft) =>
+      freezeDraftSubmission(draft, "message-1", readSendableDraftContent(draft)).draft);
+    addNotes(PRODUCT_PAGE, "Product", ["Added after Send"]);
+    let release: (image: StagedDraftImage) => void = () => {};
+    mockStage.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS);
+    const late = stagedImage("late.png");
+
+    clearVisibleBrowserNotes(threadId);
+    release(late);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const [page] = useComposerDraftStore.getState().drafts[threadId]!.browserNotePages!;
+    expect(page!.snapshot?.stagingId).not.toBe(late.stagingId);
   });
 
   it("flush redraws a pending page immediately so Send never carries a stale number", async () => {
-    const note = store().saveAnnotation(threadId, draft(threadId));
-    store().saveAnnotation(threadId, draft(threadId));
-    removePreviewNote(threadId, note.id);
+    addNotes(PRODUCT_PAGE, "Product", ["A", "B"]);
+    removePreviewNote(threadId, noteIds()[0]!);
 
     await flushPageSnapshots(threadId);
 
     expect(mockRender).toHaveBeenCalledTimes(1);
-    expect(page()?.marked).not.toBeNull();
+    expect(mockRender.mock.calls[0]?.[1]).toHaveLength(1);
+    expect(pageOf()?.snapshot).not.toBeNull();
   });
 
   it("flush waits for the redraw that replaces one an edit overtook", async () => {
-    const first = store().saveAnnotation(threadId, draft(threadId, { note: "A" }));
-    const second = store().saveAnnotation(threadId, draft(threadId, { note: "B" }));
-    store().saveAnnotation(threadId, draft(threadId, { note: "C" }));
-    let release: (file: SavedFile) => void = () => {};
-    saveClipboardFile.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
-    removePreviewNote(threadId, first.id);
+    addNotes(PRODUCT_PAGE, "Product", ["A", "B", "C", "D"]);
+    await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS);
+    mockRender.mockClear();
+    const [first, second] = noteIds();
+    let release: (image: StagedDraftImage) => void = () => {};
+    mockStage.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    removePreviewNote(threadId, first!);
     const flushed = flushPageSnapshots(threadId);
     await vi.advanceTimersByTimeAsync(0);
 
-    removePreviewNote(threadId, second.id);
-    release(savedFile("C:/tmp/stale.png"));
+    removePreviewNote(threadId, second!);
+    const stale = stagedImage();
+    release(stale);
     await flushed;
 
     expect(mockRender).toHaveBeenCalledTimes(2);
-    expect(mockRender.mock.calls[1]?.[1]).toHaveLength(1);
-    expect(page()?.marked?.sourcePath).toBe("C:/tmp/redrawn.png");
+    expect(mockRender.mock.calls[1]?.[1]).toHaveLength(2);
+    expect(pageOf()?.snapshot).not.toBeNull();
+    expect(pageOf()?.snapshot?.stagingId).not.toBe(stale.stagingId);
   });
 
   it("flush rechecks a page that was edited again while another page was still saving", async () => {
-    seedPage(threadId, BILLING_PAGE, "Billing");
-    const productNotes = ["A", "B", "C"].map((note) => store().saveAnnotation(threadId, draft(threadId, { note })));
-    const billingNotes = ["D", "E"].map((note) =>
-      store().saveAnnotation(threadId, draft(threadId, { pageIdentity: BILLING_PAGE, note })));
-    let releaseBilling: (file: SavedFile) => void = () => {};
-    saveClipboardFile
-      .mockImplementationOnce(async () => savedFile("C:/tmp/product-1.png"))
+    addNotes(PRODUCT_PAGE, "Product", ["A", "B", "C"]);
+    addNotes(BILLING_PAGE, "Billing", ["D", "E"]);
+    await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS);
+    mockRender.mockClear();
+    const productNotes = noteIds();
+    const billingNotes = noteIds(BILLING_PAGE);
+    let releaseBilling: (image: StagedDraftImage) => void = () => {};
+    mockStage
+      .mockImplementationOnce(async () => stagedImage())
       .mockImplementationOnce(() => new Promise((resolve) => { releaseBilling = resolve; }));
-    removePreviewNote(threadId, productNotes[0]!.id);
-    removePreviewNote(threadId, billingNotes[0]!.id);
+    removePreviewNote(threadId, productNotes[0]!);
+    removePreviewNote(threadId, billingNotes[0]!);
     const flushed = flushPageSnapshots(threadId);
     await vi.advanceTimersByTimeAsync(0);
 
-    removePreviewNote(threadId, productNotes[1]!.id);
-    releaseBilling(savedFile("C:/tmp/billing.png"));
+    removePreviewNote(threadId, productNotes[1]!);
+    releaseBilling(stagedImage());
     await flushed;
 
-    expect(page()?.marked?.sourcePath).toBe("C:/tmp/redrawn.png");
-    expect(mockRender.mock.calls.at(-1)?.[1]).toHaveLength(1);
-    expect(store().buildBundle(threadId)?.annotations).toHaveLength(2);
+    expect(pageOf()?.snapshot).not.toBeNull();
+    expect(pageOf(BILLING_PAGE)?.snapshot).not.toBeNull();
+    const drawn = browserPagesToBundle(readVisibleBrowserNotePages(threadId));
+    expect(drawn.annotations.map((annotation) => annotation.displayNumber)).toEqual([1, 1]);
   });
 
   it("flush rejects when a stale page has no clean screenshot to redraw from", async () => {
-    store().saveAnnotation(threadId, draft(threadId, { note: "A" }));
-    store().saveAnnotation(threadId, draft(threadId, { note: "B" }));
-    const bundle = store().buildBundle(threadId)!;
-    usePreviewAnnotationStore.setState({ byThread: {}, pages: {}, drafts: {} });
-    store().restoreBundle(threadId, bundle);
-    store().deleteAnnotation(threadId, store().getThreadAnnotations(threadId)[0]!.id);
+    addNotes(PRODUCT_PAGE, "Product", ["A", "B"]);
+    useComposerDraftStore.getState().updateNextMessage(threadId, (draft) => ({
+      ...draft,
+      browserNotePages: draft.browserNotePages?.map((page) => ({ ...page, cleanCapture: null, snapshot: null })),
+    }));
 
     await expect(flushPageSnapshots(threadId)).rejects.toThrow("to refresh its snapshot");
   });
 
+  it("flush rejects when the staged clean screenshot is gone", async () => {
+    addNotes(PRODUCT_PAGE, "Product", ["A"]);
+    mockRead.mockResolvedValue(null);
+
+    await expect(flushPageSnapshots(threadId)).rejects.toThrow("Add a note on it to retake it");
+    expect(pageOf()?.snapshot).toBeNull();
+  });
+
+  it("flush redraws a page restored without a snapshot before anything scheduled it", async () => {
+    vi.resetModules();
+    const { useComposerDraftStore: store } = await import("@/stores/composerDraftStore");
+    const { saveBrowserNote } = await import("@/features/conversation/composer/draft/draft-submission");
+    const { toBrowserNoteContent } = await import("../../state/previewAnnotationStore");
+    const { draft, capture, stagedImage: stage } = await import("./fixtures");
+    store.getState().updateNextMessage(threadId, (current) => saveBrowserNote(
+      current,
+      { pageIdentity: PRODUCT_PAGE, url: PRODUCT_PAGE, title: "Product", faviconUrl: null, capture, scroll: { x: 0, y: 0 }, cleanCapture: stage("clean.png") },
+      toBrowserNoteContent(draft(threadId)),
+    ));
+    const { flushPageSnapshots: flush } = await import("../previewNoteSnapshots");
+    let stages = 0;
+    mockStage.mockImplementation(async () => {
+      if (++stages > 3) throw new Error("Redraw never settled");
+      return stagedImage();
+    });
+
+    await flush(threadId);
+
+    expect(store.getState().drafts[threadId]?.browserNotePages?.[0]?.snapshot).not.toBeNull();
+  });
+
   it("flush leaves up-to-date pages alone", async () => {
-    store().saveAnnotation(threadId, draft(threadId));
+    seedPage(threadId);
+    await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS);
 
     await flushPageSnapshots(threadId);
 
     expect(mockRender).not.toHaveBeenCalled();
+  });
+
+  it("redraws a page a settled Send renumbered, without waiting for the next Send", async () => {
+    addNotes(PRODUCT_PAGE, "Product", ["A", "B"]);
+    await flushPageSnapshots(threadId);
+    mockRender.mockClear();
+    const [sent] = pageOf()!.notes;
+
+    removeTakenBrowserNotePages(threadId, [{ id: sent!.id, revision: sent!.revision }]);
+    expect(pageOf()?.snapshot).toBeNull();
+    await vi.advanceTimersByTimeAsync(PAGE_SNAPSHOT_DEBOUNCE_MS);
+
+    expect(mockRender).toHaveBeenCalledTimes(1);
+    expect(mockRender.mock.calls[0]?.[1]).toHaveLength(1);
+    expect(pageOf()?.snapshot).not.toBeNull();
   });
 });

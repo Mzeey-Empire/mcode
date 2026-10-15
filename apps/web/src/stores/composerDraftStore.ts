@@ -4,6 +4,7 @@ import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import type {
   ContextWindowMode,
   DevinMode,
+  DraftBrowserNotePage,
   DraftDiffComment,
   DraftFileComment,
   DraftSubmission,
@@ -107,6 +108,8 @@ export interface ComposerDraft {
   codexFastMode?: boolean | null;
   /** Per-thread Devin native mode (normal|accept-edits|smart|bypass|plan). */
   devinMode?: DevinMode | null;
+  /** Browser pages whose saved notes ride the next Send, with their staged captures. */
+  browserNotePages?: DraftBrowserNotePage[];
   /** Saved Review line comments riding the next Send. */
   diffComments?: DraftDiffComment[];
   /** Open Review comment editor, restored with this draft. */
@@ -124,11 +127,18 @@ export interface ComposerDraft {
 /** Fields that only {@link ComposerDraftState.updateNextMessage} writes. */
 export type NextMessageFields = Pick<
   ComposerDraft,
-  "diffComments" | "diffCommentEditor" | "fileComments" | "fileCommentEditor" | "planCommentEditor" | "submissions"
+  | "browserNotePages"
+  | "diffComments"
+  | "diffCommentEditor"
+  | "fileComments"
+  | "fileCommentEditor"
+  | "planCommentEditor"
+  | "submissions"
 >;
 
 function nextMessageFields(draft: ComposerDraft | undefined): NextMessageFields {
   return {
+    browserNotePages: draft?.browserNotePages,
     diffComments: draft?.diffComments,
     diffCommentEditor: draft?.diffCommentEditor,
     fileComments: draft?.fileComments,
@@ -147,6 +157,7 @@ function mergeNextMessageFields(stored: ComposerDraft | undefined, incoming: Com
   const kept = nextMessageFields(stored);
   const moved = nextMessageFields(incoming);
   return {
+    browserNotePages: kept.browserNotePages ?? moved.browserNotePages,
     diffComments: kept.diffComments ?? moved.diffComments,
     diffCommentEditor: kept.diffCommentEditor ?? moved.diffCommentEditor,
     fileComments: kept.fileComments ?? moved.fileComments,
@@ -246,6 +257,7 @@ function hasLineCommentContent(draft: ComposerDraft): boolean {
 
 function hasNextMessageContent(draft: ComposerDraft): boolean {
   return hasLineCommentContent(draft)
+    || (draft.browserNotePages?.length ?? 0) > 0
     || Boolean(draft.planCommentEditor)
     || (draft.submissions?.length ?? 0) > 0;
 }

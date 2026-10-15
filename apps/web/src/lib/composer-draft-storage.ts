@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import type {
+  DraftBrowserNotePage,
   DraftDiffComment,
   DraftFileComment,
   DraftSubmission,
@@ -10,6 +11,7 @@ import type {
 } from "@mcode/contracts";
 import {
   DiffAnnotationPayloadSchema,
+  DraftBrowserNotePageSchema,
   DraftDiffCommentSchema,
   DraftFileCommentSchema,
   DraftSubmissionSchema,
@@ -233,10 +235,21 @@ function parseStoredFileCommentEditor(
 
 function parseStoredNextMessageFields(candidate: Partial<ComposerDraft>): Pick<
   ComposerDraft,
-  "diffComments" | "diffCommentEditor" | "fileComments" | "fileCommentEditor" | "planCommentEditor" | "submissions"
+  | "browserNotePages"
+  | "diffComments"
+  | "diffCommentEditor"
+  | "fileComments"
+  | "fileCommentEditor"
+  | "planCommentEditor"
+  | "submissions"
 > {
   const counter: DropCounter = { dropped: 0 };
   const fields = {
+    browserNotePages: parseStoredElements<DraftBrowserNotePage>(
+      candidate.browserNotePages,
+      DraftBrowserNotePageSchema(),
+      counter,
+    ),
     diffComments: parseStoredElements<DraftDiffComment>(candidate.diffComments, DraftDiffCommentSchema(), counter),
     diffCommentEditor: parseStoredDiffCommentEditor(candidate.diffCommentEditor, counter),
     fileComments: parseStoredElements<DraftFileComment>(candidate.fileComments, DraftFileCommentSchema(), counter),

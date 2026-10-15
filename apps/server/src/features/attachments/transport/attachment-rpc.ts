@@ -6,6 +6,7 @@ import { getExtension, type WsMethodName, WS_METHODS } from "@mcode/contracts";
 import type { z } from "zod";
 import type { AttachmentService } from "../storage/attachment-service.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 
 type AttachmentRpcMethod = "clipboard.saveFile" | "attachments.stageDraft";
 
@@ -17,6 +18,7 @@ type AttachmentRpcParamsByMethod = {
 export interface AttachmentRouterDeps {
   attachmentService: Pick<AttachmentService, "stageDraft">;
   threadRepo: Pick<ThreadRepo, "findById">;
+  workspaceRepo: Pick<WorkspaceRepo, "findById">;
 }
 
 type AttachmentHandlerMap = {
@@ -30,8 +32,12 @@ const attachmentHandlers: AttachmentHandlerMap = {
   // JSON-RPC remains available for clients that cannot upload a binary frame.
   "clipboard.saveFile": saveClipboardFile,
   "attachments.stageDraft": ({ threadId, attachment }, deps) => {
+    // A new-thread draft has no thread row yet, so its images stage under the workspace id.
     const thread = deps.threadRepo.findById(threadId);
-    if (!thread || thread.deleted_at != null) throw new Error("Draft image thread does not exist");
+    const ownerExists = thread
+      ? thread.deleted_at == null
+      : deps.workspaceRepo.findById(threadId) != null;
+    if (!ownerExists) throw new Error("Draft image owner does not exist");
     return deps.attachmentService.stageDraft(threadId, attachment);
   },
 };

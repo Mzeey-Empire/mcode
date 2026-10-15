@@ -137,26 +137,39 @@ export class AttachmentService {
     };
   }
 
-  /** Copy leased draft images to fresh message attachments, rolling back partial copies. */
-  async persistDraftImages(threadId: string, stagingIds: readonly string[]): Promise<Awaited<ReturnType<AttachmentService["persist"]>>> {
+  /**
+   * Copy leased draft images to message attachments, rolling back partial copies. The staging id is
+   * the attachment id, so a copy that overwrote an admitted message's file is never rolled back.
+   * `reused` names the images whose file already existed; the caller must not delete those when its own admission fails.
+   */
+  async persistDraftImages(
+    threadId: string,
+    stagingIds: readonly string[],
+  ): Promise<Awaited<ReturnType<AttachmentService["persist"]>> & { readonly reused: readonly string[] }> {
     const stored: StoredAttachment[] = [];
     const persisted: AttachmentMeta[] = [];
+    const created: StoredAttachment[] = [];
+    const reused: string[] = [];
     try {
       for (const stagingId of new Set(stagingIds)) {
         assertSafeId("staging ID", stagingId);
         if (!this.draftLeases.has(`${threadId}/${stagingId}`)) throw new Error("Draft image must be leased before reading");
         const attachment = await this.readDraftImage(threadId, stagingId);
+        const destination = resolveStoredAttachmentPath(NodePath.join(getAttachmentsDir(), threadId), stagingId, attachment.mimeType);
+        const existed = NodeFS.existsSync(destination);
         const result = await this.persist(threadId, [attachment]).catch(async (error: unknown) => {
-          await this.removeStoredAttachments(threadId, [attachment]);
+          if (!existed) await this.removeStoredAttachments(threadId, [attachment]);
           if (!NodeFS.existsSync(attachment.sourcePath)) throw new DraftImageMissingError(stagingId);
           throw error;
         });
         stored.push(...result.stored);
         persisted.push(...result.persisted);
+        if (existed) reused.push(stagingId);
+        else created.push(...result.stored);
       }
-      return { stored, persisted };
+      return { stored, persisted, reused };
     } catch (error) {
-      await this.removeStoredAttachments(threadId, stored);
+      await this.removeStoredAttachments(threadId, created);
       throw error;
     }
   }
@@ -167,7 +180,8 @@ export class AttachmentService {
       const image = StagedDraftImageSchema().parse(JSON.parse(await NodeFSPromises.readFile(NodePath.join(directory, `${stagingId}.json`), "utf8")));
       const sourcePath = resolveStoredAttachmentPath(directory, stagingId, image.mimeType);
       await NodeFSPromises.access(sourcePath);
-      return { id: NodeCrypto.randomUUID(), name: image.name, mimeType: image.mimeType, sizeBytes: image.sizeBytes, sourcePath };
+      // The staging id stays the attachment id so a saved Browser note bundle can name its snapshot before Send.
+      return { id: stagingId, name: image.name, mimeType: image.mimeType, sizeBytes: image.sizeBytes, sourcePath };
     } catch (error) {
       if (isMissingFile(error)) throw new DraftImageMissingError(stagingId);
       throw error;

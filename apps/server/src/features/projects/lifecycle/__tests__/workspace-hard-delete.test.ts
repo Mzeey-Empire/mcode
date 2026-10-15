@@ -1048,8 +1048,10 @@ describe("Workspace delete - zero-worktree fast path", () => {
     expect(db.prepare("SELECT COUNT(*) AS c FROM threads WHERE workspace_id = ?").get(ws.id)).toEqual({ c: 0 });
     expect(db.prepare("SELECT COUNT(*) AS c FROM cleanup_jobs WHERE workspace_path = ?").get("/tmp/direct")).toEqual({ c: 0 });
 
-    // Attachments removed for each thread
-    expect(mockAttachmentService.removeForThread).toHaveBeenCalledTimes(3);
+    // Attachments removed for each thread, and for notes staged under the workspace id before any thread existed
+    const removedFor = vi.mocked(mockAttachmentService.removeForThread).mock.calls.map(([id]) => id);
+    expect(removedFor).toHaveLength(4);
+    expect(removedFor).toContain(ws.id);
   });
 
   it("completes without a cleanup worker", async () => {

@@ -147,7 +147,8 @@ vi.mock("@/stores/composerDraftStore", () => ({
     vi.fn((selector: (s: unknown) => unknown) =>
       selector({ drafts: {}, setPendingPrefill: chatViewSetPendingPrefillMock })
     ),
-    { getState: () => ({
+    { subscribe: () => () => {}, getState: () => ({
+      drafts: {},
       getDraft: chatViewGetDraftMock,
       setPendingPrefill: chatViewSetPendingPrefillMock,
       saveDraft: chatViewSaveDraftMock,
