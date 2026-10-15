@@ -416,7 +416,8 @@ export class WorkspaceEnvironmentService {
         await repository.cancelStartupTurns(thread.id);
         return { ...admission, snapshot: repository.snapshot(thread.id) };
       }
-      this.launchAutomaticSetup(thread);
+      if (input.submission.planImplement) await this.startAutomaticSetup(thread);
+      else this.launchAutomaticSetup(thread);
     }
     return admission;
   }

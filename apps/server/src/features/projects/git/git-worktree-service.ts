@@ -134,6 +134,15 @@ export class GitWorktreeService {
     return threadMode === "worktree" && worktreePath ? worktreePath : workspacePath;
   }
 
+  /** Read the source checkout's committed HEAD without changing its refs or files. */
+  async resolveHeadCommit(workspaceId: string, mode: string, worktreePath: string | null): Promise<string> {
+    const workspace = this.workspaceRepo.findById(workspaceId);
+    if (!workspace) throw new Error("Source workspace was not found");
+    const cwd = this.resolveWorkingDir(workspace.path, mode, worktreePath);
+    const { stdout } = await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--verify", "HEAD^{commit}"]);
+    return stdout.trim();
+  }
+
   /** List Git worktrees registered for an arbitrary repository path. */
   async listWorktreesAt(repoPath: string): Promise<WorktreeInfo[]> {
     const worktreesDirectory = normalizeWorktreePath(getManagedWorktreeBaseDir(repoPath));

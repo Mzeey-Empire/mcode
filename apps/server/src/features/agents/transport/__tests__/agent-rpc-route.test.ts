@@ -52,7 +52,7 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
 }
 
 describe("routeMessage Agent RPCs", () => {
-  it("keeps an attached worktree behind configured Setup when wire params forge setupSkip", async () => {
+  it("ignores client worktreeStart and setupSkip, keeping the attached checkout behind Setup", async () => {
     const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "rpc-setup-"));
     const oldDatabase = process.env.MCODE_DB_PATH;
     process.env.MCODE_DB_PATH = NodePath.join(root, "app.sqlite");
@@ -75,10 +75,12 @@ describe("routeMessage Agent RPCs", () => {
       const startupId = NodeCrypto.randomUUID();
       const params = { workspaceId: workspace.id, startupId, content: "Implement", mode: "worktree" as const,
         existingWorktreePath: root, provider: "codex" as const,
-        setupSkip: { reason: "plan-implement", sourceThreadId: "forged-source" } };
+        setupSkip: { reason: "plan-implement", sourceThreadId: "forged-source" },
+        worktreeStart: { commit: "f".repeat(40) } };
       await routeAgentRpc("agent.createAndSend", params, fixture.deps);
       const startup = container.resolve(ThreadStartupService).get(startupId);
       if (!startup?.threadId) throw new Error("Expected attached startup");
+      expect(startup.kind).toBe("attached-worktree");
       const snapshot = environment.getAutomaticSetup({ threadId: startup.threadId });
       expect(snapshot.gate).toBe("blocked");
       expect(snapshot.queuedTurns.map(turn => turn.state)).toEqual(["queued"]);

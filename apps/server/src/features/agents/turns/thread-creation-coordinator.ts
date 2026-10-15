@@ -48,6 +48,7 @@ export type CreateAndSendCommand = Omit<
 /** Trusted feature metadata, never populated from create-and-send wire params. */
 export interface CreateAndSendOptions {
   setupSkip?: { reason: "plan-implement"; sourceThreadId: string };
+  worktreeStart?: { commit: string };
   planImplement?: { requestId: string };
   messageId?: string;
 }
@@ -152,6 +153,7 @@ export class ThreadCreationCoordinator {
     const params = this.initialTurnParams(command);
     params.options = options;
     this.validateSetupSkip(params);
+    this.validateWorktreeStart(params);
     if (!command.startupId) return this.provisionInitialTurn(command, params);
 
     const fingerprint = NodeCrypto.createHash("sha256").update(JSON.stringify(params)).digest("hex");
@@ -179,6 +181,16 @@ export class ThreadCreationCoordinator {
       || normalizeWorktreePath(source.worktree_path, hostRuntime.platform)
         !== normalizeWorktreePath(params.existingWorktreePath, hostRuntime.platform)) {
       throw new Error("Plan implementation must attach to its source worktree");
+    }
+  }
+
+  private validateWorktreeStart(params: BranchedInitialTurnParams): void {
+    const start = params.options?.worktreeStart;
+    if (!start) return;
+    if (params.mode !== "worktree" || params.existingWorktreePath || params.parentThreadId
+      || params.startFromOrigin || params.worktreeBranchMode === "named"
+      || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(start.commit)) {
+      throw new Error("Plan implementation requires a detached worktree at a commit");
     }
   }
 
@@ -321,7 +333,7 @@ export class ThreadCreationCoordinator {
     };
     try {
       await this.fetchInitialBranch(params, startupId);
-      const startPoint = params.startFromOrigin ? await this.fetchOrigin(params, startupId) : undefined;
+      const startPoint = await this.resolveStartPoint(params, startupId);
       const thread = await this.createStandaloneThread(params, { ...creation, startPoint }, startupId);
       await this.startManagedSetup(startupId, startup?.kind);
       if (params.options?.setupSkip) {
@@ -343,6 +355,11 @@ export class ThreadCreationCoordinator {
       phase: "setup", skipReason: "plan-implement",
     });
     await this.cancelIfRequested(startupId);
+  }
+
+  private async resolveStartPoint(params: BranchedInitialTurnParams, startupId: string | undefined): Promise<string | undefined> {
+    return params.options?.worktreeStart?.commit
+      ?? (params.startFromOrigin ? await this.fetchOrigin(params, startupId) : undefined);
   }
 
   /** Create and configure a thread without starting a provider runtime. */

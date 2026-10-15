@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as NodeEvents from "node:events";
+import * as NodeChildProcess from "node:child_process";
 import { Database } from "bun:sqlite";
 import { container } from "tsyringe";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,12 +36,18 @@ import { PlanImplementStore } from "../../planning/persistence/plan-implement-st
 import { planImplementWriteOperations } from "../../planning/persistence/plan-implement-write-operations.js";
 import { PlanFileWriter } from "../../planning/plan-file-writer.js";
 import { PlanService, type PlanImplementRuntime } from "../../planning/plan-service.js";
+import { PlanImplementStartupObserver } from "../../planning/plan-implement-startup-observer.js";
+import { CleanupWorker } from "../../../thread-control/cleanup/cleanup-worker.js";
 import { ScopedPreGrantService } from "../../permissions/scoped-pre-grant.js";
 import { AgentService } from "../agent-service.js";
 import { AGENT_TURN_COMMAND_PORT } from "../agent-turn-command-port.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 
 const pushes = vi.hoisted(() => ({ versions: [] as Array<{ threadId: string; version: PlanVersion }> }));
+vi.mock("../../../../runtime/process/containment/process-kill.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../../runtime/process/containment/process-kill.js")>(),
+  killDescendantsByName: async () => undefined,
+}));
 vi.mock("../../../../application/transport/push.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../application/transport/push.js")>();
   return { ...actual, broadcast: (...args: Parameters<typeof actual.broadcast>) => {
@@ -65,6 +72,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
   let service: PlanService;
   let files: PlanFileWriter;
   let runtime: PlanImplementRuntime;
+  let observer: PlanImplementStartupObserver;
   let provider: IAgentProvider;
   let workspaceId: string;
   let threadId: string;
@@ -72,11 +80,13 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
   let sent: TurnRequest[];
   let atDispatch: Array<{ text: string; status: string | undefined }>;
   const oldDbPath = process.env.MCODE_DB_PATH;
+  const oldDataDir = process.env.MCODE_DATA_DIR;
 
   beforeAll(async () => {
     container.reset();
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-implement-"));
     process.env.MCODE_DB_PATH = NodePath.join(directory, "app.sqlite");
+    process.env.MCODE_DATA_DIR = NodePath.join(directory, "data");
     await openServiceSet();
     database = new Database(process.env.MCODE_DB_PATH);
     workspaceId = (await container.resolve(WorkspaceRepo).create("Implement fixture", directory, false)).id;
@@ -117,7 +127,12 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
       startups: container.resolve(ThreadStartupService), messages: container.resolve(MessageRepo),
       threadService: container.resolve(ThreadService),
       reservations: container.resolve(ThreadControlMutationReservationService),
-      commands: container.resolve(AGENT_TURN_COMMAND_PORT), grants: container.resolve(ScopedPreGrantService) };
+      commands: container.resolve(AGENT_TURN_COMMAND_PORT), grants: container.resolve(ScopedPreGrantService),
+      git: container.resolve(GitWorktreeService) };
+    container.resolve(WorkspaceEnvironmentService).setAutomaticSetupDispatcher({
+      dispatch: submission => agent.dispatchQueuedAutomaticTurn(submission),
+    });
+    container.registerInstance("CleanupHandleReleaseDelayMs", 0);
   }
 
   beforeEach(async () => {
@@ -131,6 +146,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     ready = await plans.create(threadId, message.id, { title: "Original", contentMd: "# Original\nExact plan text.", captureSource: "fence" }, "codex");
     await files.write(threadId);
     service = new PlanService(writer, workers.progress, files, runtime);
+    observer = new PlanImplementStartupObserver(service, container.resolve(ThreadStartupService));
+    observer.start();
   });
 
   afterEach(async () => {
@@ -138,6 +155,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     database.run("DROP TRIGGER IF EXISTS fail_admission");
     database.run("DROP TRIGGER IF EXISTS cancel_before_admission");
     await agent.stopSession(threadId, { by: "user" });
+    await agent.stopAll();
+    await observer.stop();
   });
 
   afterAll(async () => {
@@ -149,6 +168,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     container.reset();
     if (oldDbPath === undefined) delete process.env.MCODE_DB_PATH;
     else process.env.MCODE_DB_PATH = oldDbPath;
+    if (oldDataDir === undefined) delete process.env.MCODE_DATA_DIR;
+    else process.env.MCODE_DATA_DIR = oldDataDir;
     NodeFS.rmSync(directory, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
@@ -156,6 +177,212 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
   function request(version = ready): PlanImplement {
     return { requestId: NodeCrypto.randomUUID(), threadId, versionId: version.id, expectedRevision: version.revision, target: "thread" };
   }
+
+  function git(cwd: string, ...args: string[]): string {
+    return NodeChildProcess.execFileSync("git", ["-C", cwd, "-c", "commit.gpgSign=false", "-c", "core.hooksPath=", ...args], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15_000,
+      env: { ...process.env, GIT_AUTHOR_NAME: "Plan Test", GIT_AUTHOR_EMAIL: "plan@example.invalid",
+        GIT_COMMITTER_NAME: "Plan Test", GIT_COMMITTER_EMAIL: "plan@example.invalid" },
+    }).trim();
+  }
+
+  async function gitSource(setup: boolean, worktreeSource = false) {
+    const repo = NodePath.join(directory, NodeCrypto.randomUUID());
+    NodeFS.mkdirSync(repo);
+    git(repo, "init", "-b", "main");
+    git(repo, "config", "core.autocrlf", "false");
+    NodeFS.writeFileSync(NodePath.join(repo, "source.txt"), "committed main\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-m", "Base");
+    let source = repo;
+    if (worktreeSource) {
+      source = NodePath.join(directory, NodeCrypto.randomUUID());
+      git(repo, "worktree", "add", "-b", "source-feature", source);
+    }
+    NodeFS.writeFileSync(NodePath.join(source, "source.txt"), "committed source\n");
+    git(source, "commit", "-am", "Source tip");
+    NodeFS.writeFileSync(NodePath.join(source, "source.txt"), "uncommitted source\n");
+    const workspace = await container.resolve(WorkspaceRepo).create("Worktree plans", repo, false);
+    database.prepare("UPDATE threads SET workspace_id = ?, mode = ?, branch = ?, worktree_path = ? WHERE id = ?")
+      .run(workspace.id, worktreeSource ? "worktree" : "direct", worktreeSource ? "source-feature" : "main",
+        worktreeSource ? source : null, threadId);
+    if (setup) {
+      const environment = container.resolve(WorkspaceEnvironmentService);
+      await environment.setStorageMode({ workspaceId: workspace.id, storageMode: "shared" });
+      await environment.save({ workspaceId: workspace.id, threadId, sourceRevision: null,
+        document: { version: "0.0.1", setup: { windows: "exit 7", linux: "exit 7" }, actions: [] } });
+      git(source, "add", ".mcode/environment.json");
+      git(source, "commit", "-m", "Shared setup");
+    }
+    return { repo, source, head: git(source, "rev-parse", "HEAD"), branches: git(repo, "branch", "--list"),
+      status: git(source, "status", "--porcelain"), branch: git(source, "branch", "--show-current") };
+  }
+
+  async function waitingWorktree() {
+    const source = await gitSource(true, true);
+    const input: PlanImplement = { ...request(), target: "new-worktree" };
+    const receipt = await service.implement(input);
+    const target = runtime.threads.findById(receipt.targetThreadId);
+    if (!target?.worktree_path) throw new Error("Expected managed checkout");
+    const environment = container.resolve(WorkspaceEnvironmentService);
+    await expect.poll(() => environment.getAutomaticSetup({ threadId: target.id }).attempt?.state).toBe("awaiting-approval");
+    return { ...source, input, receipt, target, checkout: target.worktree_path, environment };
+  }
+
+  async function cleanTarget(thread: string, checkout: string) {
+    await container.resolve(CleanupWorker).poll();
+    expect(runtime.threads.findById(thread)).toBeNull();
+    expect(NodeFS.existsSync(checkout)).toBe(false);
+  }
+
+  it("creates one detached checkout at the direct source commit and preserves dirty files and branches", async () => {
+    const source = await gitSource(false);
+    const worktrees = container.resolve(GitWorktreeService);
+    const entered = deferred();
+    const release = deferred();
+    const create = worktrees.createWorktree.bind(worktrees);
+    const paused = vi.spyOn(worktrees, "createWorktree").mockImplementationOnce(async (...args) => {
+      entered.resolve();
+      await release.promise;
+      return create(...args);
+    });
+    const input: PlanImplement = { ...request(), target: "new-worktree" };
+    const first = service.implement(input);
+    await entered.promise;
+    const second = service.implement(input);
+    expect(second).toBe(first);
+    release.resolve();
+    const receipt = await first;
+    paused.mockRestore();
+    expect(receipt.state).toBe("admitted");
+    expect(await second).toEqual(receipt);
+    expect(await service.implement(input)).toEqual(receipt);
+    const target = runtime.threads.findById(receipt.targetThreadId);
+    if (!target?.worktree_path) throw new Error("Expected managed checkout");
+    expect(git(target.worktree_path, "rev-parse", "HEAD")).toBe(source.head);
+    expect(git(target.worktree_path, "branch", "--show-current")).toBe("");
+    expect(NodeFS.readFileSync(NodePath.join(target.worktree_path, "source.txt"), "utf8")).toBe("committed source\n");
+    expect(NodeFS.readFileSync(NodePath.join(source.source, "source.txt"), "utf8")).toBe("uncommitted source\n");
+    expect(git(source.source, "status", "--porcelain")).toBe(source.status);
+    expect(git(source.source, "rev-parse", "HEAD")).toBe(source.head);
+    expect(git(source.source, "branch", "--show-current")).toBe(source.branch);
+    expect(git(source.repo, "branch", "--list")).toBe(source.branches);
+    expect(new PlanImplementStore(database).read(input.requestId)?.sourceCommit).toBe(source.head);
+    expect(git(source.repo, "worktree", "list", "--porcelain").match(/^worktree /gm)).toHaveLength(2);
+    await untilDispatched();
+    await agent.stopSession(target.id, { by: "user" });
+  });
+
+  it("retains the reservation through failed Setup, then Skip admits the original queued Implement exactly once", async () => {
+    const { input, receipt, target, checkout, source, head, repo, branches, environment } = await waitingWorktree();
+    expect(receipt.state).toBe("waiting-for-setup");
+    expect(await service.implement(input)).toEqual(receipt);
+    await expect(service.implement({ ...input, target: "new-thread" })).rejects.toMatchObject({ code: "implement_request_conflict" });
+    expect(git(checkout, "rev-parse", "HEAD")).toBe(head);
+    expect(git(checkout, "branch", "--show-current")).toBe("");
+    expect(NodePath.basename(checkout)).toBe(`source-feature-${target.id.slice(0, 8)}`);
+    expect(NodeFS.readFileSync(NodePath.join(source, "source.txt"), "utf8")).toBe("uncommitted source\n");
+    expect(plans.getById(ready.id)?.status).toBe("ready");
+    expect(runtime.messages.hasMessages(target.id)).toBe(false);
+    expect(runtime.reservations.get(threadId)?.state).toBe("planImplement");
+    await expect(service.saveVersion({ threadId, versionId: NodeCrypto.randomUUID(), baseVersionId: ready.id,
+      baseRevision: 0, contentMd: "Blocked edit" })).rejects.toMatchObject({ code: "plan_busy" });
+    const queued = environment.getAutomaticSetup({ threadId: target.id });
+    const approval = queued.attempt?.snapshot?.approval;
+    if (!approval) throw new Error("Expected setup approval");
+    await environment.approveCommand({ threadId: target.id, ...approval });
+    await expect.poll(() => environment.getAutomaticSetup({ threadId: target.id }).attempt?.state).toBe("failed");
+    await environment.continueAutomaticSetup({ threadId: target.id });
+    await expect.poll(() => runtime.reservations.get(threadId)).toBeUndefined();
+    expect(await service.implement(input)).toEqual({ ...receipt, state: "admitted" });
+    expect(plans.getById(ready.id)?.status).toBe("accepted");
+    expect(plans.listByThread(target.id)).toMatchObject([{ status: "accepted", contentMd: ready.contentMd,
+      captureSource: "copy", baseVersionId: ready.id, acceptedMessageId: receipt.messageId }]);
+    expect(database.prepare("SELECT id, content FROM messages WHERE thread_id = ? AND role = 'user'").all(target.id))
+      .toEqual([{ id: receipt.messageId, content: "Implement plan v1" }]);
+    await untilDispatched();
+    expect(sent[0]?.message).toBe(`Implement plan v1: "Original".\n\nThis is the plan the user approved. It supersedes any earlier plan or plan file, including your own. Mcode keeps this text at ${files.path(threadId)}.\n\n# Original\nExact plan text.`);
+    expect(pushes.versions.filter(row => row.version.status === "accepted").map(row => row.threadId))
+      .toEqual(expect.arrayContaining([threadId, target.id]));
+    expect(git(repo, "branch", "--list")).toBe(branches);
+    expect(git(repo, "worktree", "list", "--porcelain").match(/^worktree /gm)).toHaveLength(3);
+    await agent.stopSession(target.id, { by: "user" });
+  });
+
+  it("Stop during Setup fails and compensates the empty target without creating or removing a branch", async () => {
+    const { input, receipt, target, checkout, repo, branches, environment } = await waitingWorktree();
+    await routeThreadStartupRpc("thread.startup.cancel", { startupId: input.requestId }, {
+      threadStartupService: container.resolve(ThreadStartupService),
+      threadStartupFetchDecisions: container.resolve(ThreadStartupFetchDecisions), workspaceEnvironmentService: environment, agentService: agent,
+    });
+    await expect.poll(() => runtime.reservations.get(threadId)).toBeUndefined();
+    await expect(service.implement(input)).rejects.toMatchObject({ code: "startup_cancelled" });
+    expect(new PlanImplementStore(database).read(input.requestId)).toMatchObject({ status: "failed", failureCode: "startup_cancelled", messageId: receipt.messageId });
+    await observer.stop();
+    await cleanTarget(target.id, checkout);
+    expect(plans.getById(ready.id)?.status).toBe("ready");
+    expect(git(repo, "branch", "--list")).toBe(branches);
+  });
+
+  it("recovers a crash while waiting for Setup and removes the abandoned checkout", async () => {
+    const { input, target, checkout, repo, branches } = await waitingWorktree();
+    await observer.stop();
+    await container.resolve(ThreadStartupService).interruptNonterminalOnStartup();
+    const restarted = new PlanService(writer, workers.progress, files, { ...runtime, reservations: new ThreadControlMutationReservationService() });
+    await restarted.recoverInterrupted();
+    await expect(restarted.implement(input)).rejects.toMatchObject({ code: "implement_interrupted" });
+    expect(new PlanImplementStore(database).read(input.requestId)).toMatchObject({ status: "failed", failureCode: "interrupted" });
+    await cleanTarget(target.id, checkout);
+    expect(plans.getById(ready.id)?.status).toBe("ready");
+    expect(git(repo, "branch", "--list")).toBe(branches);
+  });
+
+  it.each(["failed", "deleted"])("settles a waiting request when its startup is %s", async outcome => {
+    const { input, target, checkout } = await waitingWorktree();
+    if (outcome === "failed") {
+      await container.resolve(ThreadStartupService).fail(input.requestId, {
+        code: "startup_failed", message: "Cannot continue", retryable: false,
+      });
+      await observer.stop();
+    } else {
+      await runtime.threadService.delete(target.id, true);
+    }
+    await cleanTarget(target.id, checkout);
+    await observer.stop();
+    await expect(service.implement(input)).rejects.toMatchObject({ code: "implement_failed" });
+    expect(runtime.reservations.get(threadId)).toBeUndefined();
+    expect(plans.getById(ready.id)?.status).toBe("ready");
+  });
+
+  it("preserves a worktree target that gained a message before cancellation", async () => {
+    const { input, target, checkout, environment } = await waitingWorktree();
+    await container.resolve(MessageRepo).create(target.id, "user", "Keep this conversation", 1);
+    await routeThreadStartupRpc("thread.startup.cancel", { startupId: input.requestId }, {
+      threadStartupService: container.resolve(ThreadStartupService),
+      threadStartupFetchDecisions: container.resolve(ThreadStartupFetchDecisions), workspaceEnvironmentService: environment, agentService: agent,
+    });
+    await observer.stop();
+    await expect(service.implement(input)).rejects.toMatchObject({ code: "startup_cancelled" });
+    expect(runtime.threads.findById(target.id)?.deleted_at).toBeNull();
+    expect(NodeFS.existsSync(checkout)).toBe(true);
+    expect(database.prepare("SELECT content FROM messages WHERE thread_id = ?").all(target.id)).toEqual([{ content: "Keep this conversation" }]);
+    await runtime.threadService.delete(target.id, true);
+    await cleanTarget(target.id, checkout);
+  });
+
+  it.each([false, true])("refuses a source without a commit before creating anything, initialized: %s", async initialized => {
+    const repo = NodePath.join(directory, NodeCrypto.randomUUID());
+    NodeFS.mkdirSync(repo);
+    if (initialized) git(repo, "init", "-b", "main");
+    const workspace = await container.resolve(WorkspaceRepo).create("No commit", repo, false);
+    database.prepare("UPDATE threads SET workspace_id = ? WHERE id = ?").run(workspace.id, threadId);
+    const input: PlanImplement = { ...request(), target: "new-worktree" };
+    await expect(service.implement(input)).rejects.toMatchObject({ code: "implement_failed" });
+    expect(new PlanImplementStore(database).read(input.requestId)).toBeNull();
+    expect(runtime.startups.get(input.requestId)).toBeNull();
+    expect(container.resolve(ThreadRepo).listByWorkspace(workspace.id).map(thread => thread.id)).toEqual([threadId]);
+    expect(runtime.reservations.get(threadId)).toBeUndefined();
+  });
 
   async function providerEvent(request: TurnRequest, type: AgentEvent["type"], fields: Record<string, unknown> = {}) {
     const execution = { threadId, turnId: request.turnId, executionId: request.turnExecutionId };

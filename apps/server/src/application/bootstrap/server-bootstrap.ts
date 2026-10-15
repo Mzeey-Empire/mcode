@@ -124,6 +124,7 @@ import { PostTerminalHookCompletionEffect } from "../../features/agents/turns/po
 import { BackgroundToolSettlementEffect } from "../../features/agents/turns/background-tool-settlement-effect.js";
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
 import { PlanService, type PlanImplementRuntime } from "../../features/agents/planning/plan-service.js";
+import { PlanImplementStartupObserver } from "../../features/agents/planning/plan-implement-startup-observer.js";
 import { AGENT_TURN_COMMAND_PORT } from "../../features/agents/orchestration/agent-turn-command-port.js";
 import { ThreadControlMutationReservationService } from "../../features/thread-control/authority/thread-control-mutation-reservation-service.js";
 import { ScopedPreGrantService } from "../../features/agents/permissions/scoped-pre-grant.js";
@@ -518,7 +519,9 @@ const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, pl
   startups: threadStartupService, messages: messageRepo, threadService,
   reservations: container.resolve(ThreadControlMutationReservationService),
   grants: container.resolve(ScopedPreGrantService),
+  git: gitWorktrees,
 });
+const planImplementStartupObserver = new PlanImplementStartupObserver(planService, threadStartupService);
 const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undefined, {
   streamAssistant: (threadId) => agentReliability.streamAssistantText(threadId),
 });
@@ -1054,6 +1057,7 @@ async function bootstrapServer(): Promise<void> {
     await recoverTurnsAtStartup();
     await planTurnService.recoverNativeQuestions();
     await planService.recoverInterrupted();
+    planImplementStartupObserver.start();
     await turnResumeScheduler.start();
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();
@@ -1178,6 +1182,7 @@ async function shutdown(): Promise<void> {
   await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
   // Turns are drained, so no further turn facts arrive; finish startup writes before the writer closes.
   await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
+  await captureCleanupFailure(() => planImplementStartupObserver.stop());
   stopObservingSubagentRosters();
   shutdownCoordinator.setPhase("close application database writer");
   await captureCleanupFailure(() => databaseWriter.close());

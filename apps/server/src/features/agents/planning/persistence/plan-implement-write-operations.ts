@@ -29,7 +29,7 @@ export type PlanImplementPrepareResult = z.infer<typeof prepareResult>;
 /** Serialized Implement operations; acceptance belongs to canonical parent start. */
 export const planImplementWriteOperations = {
   prepare: databaseWriteOperation("plan.implement.prepare", z.object({ input: PlanImplementSchema(),
-    fingerprint: z.string(), planFilePath: z.string() }), prepareResult),
+    fingerprint: z.string(), planFilePath: z.string(), sourceCommit: z.string().optional() }), prepareResult),
   read: databaseWriteOperation("plan.implement.read", z.string().uuid(), PlanImplementRequestSchema.nullable()),
   nativeFile: databaseWriteOperation("plan.implement.nativeFile", z.object({ requestId: z.string().uuid(),
     outcome: NativePlanFileOutcomeSchema() }), z.void()),

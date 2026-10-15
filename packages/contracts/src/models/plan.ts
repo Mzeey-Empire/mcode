@@ -167,7 +167,7 @@ export const PlanImplementSchema = lazySchema(() => z.object({
   versionId: z.string().uuid(),
   expectedRevision: z.number().int().min(0),
   pending: PlanSaveVersionSchema().omit({ threadId: true }).optional(),
-  target: z.enum(["thread", "new-thread"]),
+  target: PlanImplementTargetSchema(),
 }).refine(input => !input.pending || input.pending.versionId === input.versionId, {
   message: "Pending version must match the implemented version", path: ["pending", "versionId"],
 }));
@@ -179,7 +179,7 @@ export type PlanImplement = z.infer<ReturnType<typeof PlanImplementSchema>>;
 export const PlanImplementReceiptSchema = lazySchema(() => z.object({
   requestId: z.string().uuid(), versionId: z.string().uuid(), version: z.number().int().min(1),
   targetThreadId: z.string(), messageId: z.string().uuid(),
-  nativePlanFile: NativePlanFileOutcomeSchema().nullable(), state: z.literal("admitted"),
+  nativePlanFile: NativePlanFileOutcomeSchema().nullable(), state: z.enum(["admitted", "waiting-for-setup"]),
 }));
 
 /** Implement admission receipt. */
