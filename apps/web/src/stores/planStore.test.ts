@@ -142,3 +142,33 @@ describe("planStore comments", () => {
     expect(bodies()).toEqual([]);
   });
 });
+
+describe("planStore pending Implement reads", () => {
+  const held = { targetThreadId: "target", version: 1 };
+
+  beforeEach(() => {
+    usePlanStore.setState({ pendingImplementByThread: {} });
+  });
+
+  it("applies a read that no push overtook", () => {
+    usePlanStore.getState().beginPendingImplementRead(THREAD)(held);
+
+    expect(usePlanStore.getState().pendingImplementByThread[THREAD]).toEqual(held);
+  });
+
+  it("drops a read begun before a clearing push so a settled hold is not restored", () => {
+    const applyReceipt = usePlanStore.getState().beginPendingImplementRead(THREAD);
+    usePlanStore.getState().setPendingImplement(THREAD, null);
+    applyReceipt(held);
+
+    expect(usePlanStore.getState().pendingImplementByThread[THREAD]).toBeUndefined();
+  });
+
+  it("drops a read begun before a holding push so a stale snapshot does not clear it", () => {
+    const applySnapshot = usePlanStore.getState().beginPendingImplementRead(THREAD);
+    usePlanStore.getState().setPendingImplement(THREAD, held);
+    applySnapshot(null);
+
+    expect(usePlanStore.getState().pendingImplementByThread[THREAD]).toEqual(held);
+  });
+});

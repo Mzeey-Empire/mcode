@@ -954,6 +954,7 @@ export {
   PlanVersionSchema,
   PlanSnapshotSchema,
   PendingPlanQuestionsSchema,
+  PendingPlanImplementSchema,
 } from "./models/plan.js";
 export type {
   NativePlanFileOutcome,
@@ -965,6 +966,7 @@ export type {
   PlanSaveError,
   PlanVersion,
   PlanSnapshot,
+  PendingPlanImplement,
 } from "./models/plan.js";
 
 // Permissions

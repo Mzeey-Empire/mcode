@@ -5,6 +5,8 @@ import { setContext } from "@/lib/context-tracker";
 import { usePlanStore } from "@/stores/planStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { implementPlan, selectImplementTarget, usePlanImplementStore } from "./plan-implement";
+import { useSourceCheckout } from "./use-source-checkout";
+import { useWaitingForSetup } from "./use-waiting-for-setup";
 
 const EMPTY_PLANS: readonly PlanVersion[] = [];
 
@@ -19,7 +21,10 @@ export function usePlanCommands(threadId: string | null): void {
   const versions = usePlanStore((s) => (threadId ? (s.plansByThread[threadId] ?? EMPTY_PLANS) : EMPTY_PLANS));
   const activeVersion = usePlanStore((s) => (threadId ? (s.activeVersionByThread[threadId] ?? null) : null));
   const onScreen = usePlanImplementStore((s) => threadId !== null && s.panelsOnScreen[threadId] === true);
-  const executing = useThreadStore((s) => threadId !== null && isThreadExecuting(threadId, s));
+  const running = useThreadStore((s) => threadId !== null && isThreadExecuting(threadId, s));
+  const waiting = useWaitingForSetup(threadId ?? "") !== null;
+  const executing = running || waiting;
+  const { isGitRepo } = useSourceCheckout(threadId);
   const version = threadId && !executing ? (selectImplementTarget(versions, activeVersion, onScreen)?.version ?? null) : null;
 
   useEffect(() => {
@@ -37,10 +42,19 @@ export function usePlanCommands(threadId: string | null): void {
       category: "Plan",
       handler: () => void implementPlan(threadId, "new-thread"),
     });
+    const disposeNewWorktree = isGitRepo
+      ? registerCommand({
+          id: "plan.implementInNewWorktree",
+          title: `Implement v${version} in a new worktree`,
+          category: "Plan",
+          handler: () => void implementPlan(threadId, "new-worktree"),
+        })
+      : undefined;
     return () => {
       dispose();
       disposeNewThread();
+      disposeNewWorktree?.();
       setContext("planImplementable", false);
     };
-  }, [threadId, version]);
+  }, [threadId, version, isGitRepo]);
 }

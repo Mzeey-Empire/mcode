@@ -7,6 +7,7 @@ import { WorkspaceEnvironmentService } from "../../projects/environment/workspac
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { ThreadTeardownService } from "./thread-teardown-service.js";
 import { TurnResumeScheduler } from "../../agents/recovery/turn-resume-scheduler.js";
+import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 
 /** Stops every runtime resource that belongs to one thread before deletion. */
 @injectable()
@@ -41,6 +42,7 @@ export class ThreadDeletionTeardownService {
     @inject(ThreadTeardownService) private readonly threadTeardownService: ThreadTeardownService,
     @inject(GitWatcherService) private readonly gitWatcherService: GitWatcherService,
     @inject(TurnResumeScheduler, { isOptional: true }) private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
+    @inject(ThreadStartupService, { isOptional: true }) private readonly startups?: Pick<ThreadStartupService, "findByThreadId" | "fail">,
   ) {}
 
   /** Stop thread work and detach its file watcher before persistent data is removed. */
@@ -52,6 +54,12 @@ export class ThreadDeletionTeardownService {
       releaseActionAdmission = await this.projectActionService.beginThreadTeardown(threadId);
       const thread = this.threadRepo.findById(threadId);
       await this.workspaceEnvironmentService.cancelSetupForThread(threadId);
+      const startup = this.startups?.findByThreadId(threadId);
+      if (startup && ["pending", "running", "blocked"].includes(startup.state)) {
+        await this.startups?.fail(startup.startupId, {
+          code: "thread_deleted", message: "Thread was deleted before startup completed", retryable: false,
+        });
+      }
       await this.projectActionService.stopForThread(threadId);
       if (thread?.worktree_path) {
         await this.githubService.cancelForRepoPath(thread.worktree_path);

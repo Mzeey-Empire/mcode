@@ -26,8 +26,13 @@ export const MENU_ROW_DISABLED_CLASS = "data-disabled:cursor-default data-disabl
 
 /** The content every menu row shares, named so callers never hand-build row layout. */
 export interface MenuRowContent {
-  /** The row's name. Menus list names only, without descriptions. */
+  /** The row's name. */
   readonly label: string
+  /**
+   * A muted second line for a row whose consequence depends on current state, such as
+   * uncommitted changes that stay behind. Menus otherwise list names only; the row grows to fit.
+   */
+  readonly description?: string
   /** A Lucide icon, drawn at 16px in a 20px leading lane. */
   readonly icon?: ReactNode
   /** Keys of the command's shortcut, shown as one muted keycap on the right, e.g. `["Ctrl", "Shift", "M"]`. */
@@ -53,9 +58,23 @@ function MenuRowShortcut({ keys }: { readonly keys: readonly string[] }) {
   )
 }
 
+function MenuRowLabel({ label, description, destructive }: Pick<MenuRowContent, "label" | "description" | "destructive">) {
+  const name = (
+    <span className={cn("min-w-0 text-fade", !description && "flex-1", destructive && "text-error")}>{label}</span>
+  )
+  if (!description) return name
+  return (
+    <span className="flex min-w-0 flex-1 flex-col">
+      {name}
+      <span className="min-w-0 text-fade text-caption text-muted">{description}</span>
+    </span>
+  )
+}
+
 /** Lays out a row's icon lane, fading label and trailing slot. */
 export function MenuRowBody({
   label,
+  description,
   icon,
   shortcut,
   trailing,
@@ -77,7 +96,7 @@ export function MenuRowBody({
           {icon}
         </span>
       ) : null}
-      <span className={cn("min-w-0 flex-1 text-fade", destructive && "text-error")}>{label}</span>
+      <MenuRowLabel label={label} description={description} destructive={destructive} />
       {trailingContent ? (
         <span className="flex h-[2rem] min-w-[2.4rem] shrink-0 items-center justify-end gap-2">
           {trailingContent}

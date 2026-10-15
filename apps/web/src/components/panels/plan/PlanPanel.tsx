@@ -6,6 +6,7 @@ import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { Button } from "@/components/ui/button";
 import { PlanCommentLayer } from "./PlanCommentLayer";
 import { createPlanCommentBinding } from "./plan-comment-extension";
 import { PlanConflictNotice } from "./PlanConflictNotice";
@@ -14,6 +15,7 @@ import { PlanPanelHeader } from "./PlanPanelHeader";
 import { planSaveScheduler } from "./plan-draft-sessions";
 import type { PlanDraftState } from "./plan-save-scheduler";
 import { dismissImplementNotice, showPlanPanel, usePlanImplementStore } from "./plan-implement";
+import { useWaitingForSetup, type PlanWaitingForSetup } from "./use-waiting-for-setup";
 
 /** Stable empty array to avoid new-reference-per-render in Zustand selectors. */
 const EMPTY_PLANS: readonly PlanVersion[] = [];
@@ -31,11 +33,14 @@ interface PlanPanelProps {
 export function PlanPanel({ threadId }: PlanPanelProps) {
   const versions = usePlanStore((s) => s.plansByThread[threadId] ?? EMPTY_PLANS);
   const activeVersion = usePlanStore((s) => s.activeVersionByThread[threadId] ?? null);
-  const executing = useThreadStore((s) => isThreadExecuting(threadId, s));
+  const turnRunning = useThreadStore((s) => isThreadExecuting(threadId, s));
   const scheduler = planSaveScheduler(threadId);
   const draft = useSyncExternalStore(scheduler.subscribe, scheduler.getSnapshot);
   const viewed = selectViewedPlanVersion(versions, activeVersion);
   const latest = versions.at(-1) ?? null;
+  const waiting = useWaitingForSetup(threadId);
+  // Setup holds the source's reservation, so the server refuses plan writes exactly as during a run.
+  const executing = turnRunning || waiting !== null;
   const [commentBinding] = useState(createPlanCommentBinding);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
 
@@ -56,6 +61,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
         <PlanConflictNotice canKeep={draft.canKeep} onKeepMine={() => scheduler.keepMine()} onUseSaved={() => scheduler.useSaved()} />
       )}
       <PlanImplementNotice threadId={threadId} />
+      {waiting && <PlanWaitingNotice waiting={waiting} />}
       <PlanEditor
         contentMd={heldText ?? viewed.contentMd}
         editable={editable}
@@ -123,6 +129,17 @@ function PlanImplementNotice({ threadId }: { readonly threadId: string }) {
   return (
     <div role="status" data-testid="plan-implement-notice" className="shrink-0 border-b border-border px-6 py-2 text-sm text-ink">
       {notice}
+    </div>
+  );
+}
+
+function PlanWaitingNotice({ waiting }: { readonly waiting: PlanWaitingForSetup }) {
+  return (
+    <div role="status" data-testid="plan-waiting-notice" className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-2 text-sm text-muted">
+      <span className="min-w-0 flex-1 text-fade">Waiting for Setup in {waiting.folder ?? "the new worktree"}</span>
+      <Button variant="outline" size="compact" onClick={() => useWorkspaceStore.getState().setActiveThread(waiting.targetThreadId)}>
+        Open thread
+      </Button>
     </div>
   );
 }

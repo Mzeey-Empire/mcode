@@ -23,16 +23,17 @@ export class PlanImplementStore {
   }
 
   /** Atomically save pending text and capture exactly the revision the user saw. */
-  prepare({ input, fingerprint, planFilePath }: { input: PlanImplement; fingerprint: string; planFilePath: string }): PlanImplementPrepareResult {
+  prepare({ input, fingerprint, planFilePath, sourceCommit = null }: { input: PlanImplement; fingerprint: string; planFilePath: string; sourceCommit?: string | null }): PlanImplementPrepareResult {
+    if (input.target === "new-worktree" && !sourceCommit) return { ok: false, code: "implement_failed", latestVersion: null };
     try {
-      return this.db.transaction(() => this.prepareInTransaction(input, fingerprint, planFilePath))();
+      return this.db.transaction(() => this.prepareInTransaction(input, fingerprint, planFilePath, sourceCommit))();
     } catch (error) {
       if (!(error instanceof PreparationRefused)) throw error;
       return { ok: false, ...error.failure };
     }
   }
 
-  private prepareInTransaction(input: PlanImplement, fingerprint: string, planFilePath: string): PlanImplementPrepareResult {
+  private prepareInTransaction(input: PlanImplement, fingerprint: string, planFilePath: string, sourceCommit: string | null): PlanImplementPrepareResult {
     const latest = this.versions.listByThread(input.threadId).at(-1) ?? null;
     const refuse = (code: PlanImplementError["code"]): never => {
       throw new PreparationRefused({ code, latestVersion: latest });
@@ -50,7 +51,7 @@ export class PlanImplementStore {
     const wireText = `Implement plan v${version.version}: "${version.title}".\n\nThis is the plan the user approved. It supersedes any earlier plan or plan file, including your own. Mcode keeps this text at ${planFilePath}.\n\n${version.contentMd}`;
     const request: PlanImplementRequest = { requestId: input.requestId, sourceThreadId: input.threadId, fingerprint,
       versionId: version.id, version: version.version, revision: version.revision, title: version.title, wireText,
-      target: input.target, sourceCommit: null,
+      target: input.target, sourceCommit,
       ...this.targetIdentity(input),
       messageId: NodeCrypto.randomUUID(), status: "preparing", failureCode: null, nativePlanFile: null,
       turnId: null, executionId: null, createdAt: now, updatedAt: now };
@@ -118,7 +119,7 @@ export class PlanImplementStore {
       .run(now, request.sourceThreadId, version.id);
     this.orm.update(plans).set({ status: "accepted", acceptedAt: now, updatedAt: now }).where(eq(plans.id, version.id)).run();
     this.orm.update(threads).set({ interactionMode: "build", planPhase: null, updatedAt: now }).where(eq(threads.id, request.sourceThreadId)).run();
-    if (request.target === "new-thread") {
+    if (request.target !== "thread") {
       this.versions.insert({ ...version, id: NodeCrypto.randomUUID(), threadId: input.threadId,
         messageId: input.messageId, status: "accepted", acceptedAt: now, captureSource: "copy",
         baseVersionId: version.id, createdAt: now, updatedAt: now });

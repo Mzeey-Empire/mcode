@@ -117,10 +117,19 @@ export const PendingPlanQuestionsSchema = lazySchema(() => z.object({
   assistantMessageId: z.string(), questions: z.array(PlanQuestionSchema()).min(1).max(15),
 }));
 
+/** Implement reserved on the source while its target waits for Setup. */
+export const PendingPlanImplementSchema = lazySchema(() => z.object({
+  targetThreadId: z.string(), version: z.number().int().min(1),
+}));
+
+/** Source reservation presented to every client viewing the plan. */
+export type PendingPlanImplement = z.infer<ReturnType<typeof PendingPlanImplementSchema>>;
+
 /** Durable planning state returned when opening or reloading a thread. */
 export const PlanSnapshotSchema = lazySchema(() => z.object({
   versions: z.array(PlanVersionSchema()), comments: z.array(PlanCommentSchema()), phase: PlanPhaseSchema.nullable(),
   pendingQuestions: PendingPlanQuestionsSchema().nullable(),
+  pendingImplement: PendingPlanImplementSchema().nullable(),
 }));
 
 /** Durable planning state returned when opening or reloading a thread. */
@@ -168,7 +177,7 @@ export const PlanImplementSchema = lazySchema(() => z.object({
   versionId: z.string().uuid(),
   expectedRevision: z.number().int().min(0),
   pending: PlanSaveVersionSchema().omit({ threadId: true }).optional(),
-  target: z.enum(["thread", "new-thread"]),
+  target: PlanImplementTargetSchema(),
 }).refine(input => !input.pending || input.pending.versionId === input.versionId, {
   message: "Pending version must match the implemented version", path: ["pending", "versionId"],
 }));
@@ -180,7 +189,7 @@ export type PlanImplement = z.infer<ReturnType<typeof PlanImplementSchema>>;
 export const PlanImplementReceiptSchema = lazySchema(() => z.object({
   requestId: z.string().uuid(), versionId: z.string().uuid(), version: z.number().int().min(1),
   targetThreadId: z.string(), messageId: z.string().uuid(),
-  nativePlanFile: NativePlanFileOutcomeSchema().nullable(), state: z.literal("admitted"),
+  nativePlanFile: NativePlanFileOutcomeSchema().nullable(), state: z.enum(["admitted", "waiting-for-setup"]),
 }));
 
 /** Implement admission receipt. */

@@ -56,6 +56,22 @@ async function originHarness(withStartupService = true) {
 }
 
 describe("ThreadCreationCoordinator start from origin", { timeout: 20_000 }, () => {
+  it("uses a trusted commit for a detached worktree and includes it in replay identity", async () => {
+    const { coordinator, command, localSha, originSha, repoPath, threads } = await originHarness();
+    const input = { ...command, startFromOrigin: false };
+    git(repoPath, "fetch", "origin", "main");
+    const branches = git(repoPath, "branch", "--list");
+    const created = await coordinator.createInitialTurn(input, { worktreeStart: { commit: originSha } });
+    expect(git(created.thread.worktree_path ?? "", "rev-parse", "HEAD")).toBe(originSha);
+    expect(git(created.thread.worktree_path ?? "", "rev-parse", "--abbrev-ref", "HEAD")).toBe("HEAD");
+    expect(git(repoPath, "rev-parse", "HEAD")).toBe(localSha);
+    expect(git(repoPath, "branch", "--list")).toBe(branches);
+    expect(threads.findById(created.thread.id)).toMatchObject({ checkout_state: "branchless", base_branch: "main" });
+    expect((await coordinator.createInitialTurn(input, { worktreeStart: { commit: originSha } })).thread.id).toBe(created.thread.id);
+    await expect(coordinator.createInitialTurn(input, { worktreeStart: { commit: localSha } }))
+      .rejects.toMatchObject({ name: "ThreadStartupConflictError" });
+  });
+
   it("records origin fetch and starts the worktree at its tip with the local base preserved", async () => {
     const { coordinator, command, startups, threads, repoPath, localSha, originSha } = await originHarness();
     const created = await coordinator.createInitialTurn(command);

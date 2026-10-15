@@ -104,18 +104,39 @@ function isConnectionDrop(error: unknown): boolean {
   return error instanceof Error && !(error instanceof RpcError) && error.message === "WebSocket disconnected";
 }
 
+/*
+ * A new-worktree Implement ends its hold through a push, a snapshot read or never reaches this client
+ * as a push at all, so the source's switch to Build follows the store transition rather than any one
+ * of those paths. Only the initiating press mirrors an immediate admission.
+ */
+usePlanStore.subscribe((state, previous) => {
+  if (state.pendingImplementByThread === previous.pendingImplementByThread) return;
+  for (const [threadId, held] of Object.entries(previous.pendingImplementByThread)) {
+    if (state.pendingImplementByThread[threadId]) continue;
+    const version = state.plansByThread[threadId]?.find((candidate) => candidate.version === held.version);
+    if (version?.status === "accepted") mirrorAdmittedBuildMode(threadId);
+  }
+});
+
 function mayReplay(target: PlanImplement["target"], alreadyReplayed: boolean): boolean {
   return target === "thread" || !alreadyReplayed;
 }
 
-type ImplementResult = Exclude<ImplementOutcome, { kind: "admitted" }> | { kind: "admitted"; targetThreadId: string };
+type ImplementResult =
+  | Exclude<ImplementOutcome, { kind: "admitted" }>
+  | { kind: "admitted"; targetThreadId: string; version: number; waitingForSetup: boolean };
 
 async function sendImplementWithReplay(request: PlanImplement): Promise<ImplementResult> {
   let replayed = false;
   while (true) {
     try {
       const receipt = await getTransport().implementPlan(request);
-      return { kind: "admitted", targetThreadId: receipt.targetThreadId };
+      return {
+        kind: "admitted",
+        targetThreadId: receipt.targetThreadId,
+        version: receipt.version,
+        waitingForSetup: receipt.state === "waiting-for-setup",
+      };
     } catch (error) {
       if (!isConnectionDrop(error) || !mayReplay(request.target, replayed)) return classifyImplementFailure(error);
     }
@@ -142,11 +163,17 @@ export async function implementPlan(threadId: string, target: PlanImplement["tar
     const basis = await scheduler.beginImplement(() => currentTarget(threadId));
     if (!basis) return;
     const carried = basis.pending !== undefined;
+    const applyReceiptHold = usePlanStore.getState().beginPendingImplementRead(threadId);
     const outcome = await sendImplementWithReplay({ requestId: crypto.randomUUID(), threadId, target, ...basis });
     scheduler.finishImplement(outcome);
     if (outcome.kind === "admitted") {
-      mirrorAdmittedBuildMode(threadId);
-      if (target === "new-thread") await openImplementedThread(threadId, outcome.targetThreadId);
+      // The source stays in Plan until the target's first turn is admitted behind Setup.
+      if (outcome.waitingForSetup) {
+        applyReceiptHold({ targetThreadId: outcome.targetThreadId, version: outcome.version });
+      } else {
+        mirrorAdmittedBuildMode(threadId);
+      }
+      if (target !== "thread") await openImplementedThread(threadId, outcome.targetThreadId);
     } else if (outcome.kind === "conflict" && !carried) {
       usePlanStore.getState().setActiveVersion(threadId, null);
       setNotice(threadId, PLAN_CHANGED_NOTICE);

@@ -163,6 +163,7 @@ function handleTerminalData(data: unknown): void {
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
  * - `plan.answered` -- server committed an answered marker; dismisses the wizard on this client
  * - `plan.versionUpserted` -- merges the version into planStore
+ * - `plan.implementPending` -- a new-worktree Implement began or stopped waiting for the target's Setup
  * - `approval.requested` -- approval awaiting a user decision
  * - `approval.resolved` -- an approval was settled
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
@@ -598,6 +599,13 @@ export function startPushListeners(): void {
       const { threadId, version: plan } = WS_CHANNELS["plan.versionUpserted"].parse(data);
 
       usePlanStore.getState().addPlan(threadId, plan);
+    }),
+  );
+
+  unsubs.push(
+    pushEmitter.on("plan.implementPending", (data) => {
+      const { threadId, pending } = WS_CHANNELS["plan.implementPending"].parse(data);
+      usePlanStore.getState().setPendingImplement(threadId, pending);
     }),
   );
 

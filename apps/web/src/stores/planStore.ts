@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { getCatalogEntry, type PlanComment, type PlanVersion, type PlanVersionStatus } from "@mcode/contracts";
+import { getCatalogEntry, type PendingPlanImplement, type PlanComment, type PlanVersion, type PlanVersionStatus } from "@mcode/contracts";
 
 const statusOrder: Record<PlanVersionStatus, number> = { draft: 0, ready: 0, superseded: 1, accepted: 2 };
 
@@ -90,6 +90,18 @@ interface PlanState {
   /** Apply a `plan.commentsChanged` push, or the result of a comment write. */
   applyCommentsChanged: (threadId: string, upserted: readonly PlanComment[], deletedIds: readonly string[]) => void;
 
+  /** Source threads whose new-worktree Implement waits behind the target's Setup, as the server reports it. */
+  pendingImplementByThread: Record<string, PendingPlanImplement>;
+
+  /** Replace a thread's pending Implement from a push. Reads that began earlier are then dropped as stale. */
+  setPendingImplement: (threadId: string, pending: PendingPlanImplement | null) => void;
+
+  /**
+   * Starts a read of the server's pending Implement, a snapshot or an Implement receipt. The returned
+   * apply is ignored when a push changed the state after the read began, since the push is newer.
+   */
+  beginPendingImplementRead: (threadId: string) => (pending: PendingPlanImplement | null) => void;
+
   /** Clear plan state for a thread. */
   clearPlans: (threadId: string) => void;
 }
@@ -110,6 +122,20 @@ function upsertComments(
   return [...byId.values()];
 }
 
+function withPending(
+  current: Record<string, PendingPlanImplement>,
+  threadId: string,
+  pending: PendingPlanImplement | null,
+): Record<string, PendingPlanImplement> {
+  const next = { ...current };
+  if (pending === null) delete next[threadId];
+  else next[threadId] = pending;
+  return next;
+}
+
+// Counts pushes per thread, outside the state because no component renders it.
+const pendingPushRevisions = new Map<string, number>();
+
 /** Zustand store for per-thread plan versions. */
 export const usePlanStore = create<PlanState>((set) => ({
   plansByThread: {},
@@ -127,6 +153,21 @@ export const usePlanStore = create<PlanState>((set) => ({
     }),
 
   commentsByThread: {},
+
+  pendingImplementByThread: {},
+
+  setPendingImplement: (threadId, pending) => {
+    pendingPushRevisions.set(threadId, (pendingPushRevisions.get(threadId) ?? 0) + 1);
+    set((state) => ({ pendingImplementByThread: withPending(state.pendingImplementByThread, threadId, pending) }));
+  },
+
+  beginPendingImplementRead: (threadId) => {
+    const started = pendingPushRevisions.get(threadId) ?? 0;
+    return (pending) => {
+      if ((pendingPushRevisions.get(threadId) ?? 0) !== started) return;
+      set((state) => ({ pendingImplementByThread: withPending(state.pendingImplementByThread, threadId, pending) }));
+    };
+  },
 
   setComments: (threadId, comments) =>
     set((state) => ({ commentsByThread: { ...state.commentsByThread, [threadId]: comments } })),
@@ -155,6 +196,11 @@ export const usePlanStore = create<PlanState>((set) => ({
       const { [threadId]: _omitVersion, ...restVersions } = state.activeVersionByThread;
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [threadId]: _omitComments, ...restComments } = state.commentsByThread;
-      return { plansByThread: rest, activeVersionByThread: restVersions, commentsByThread: restComments };
+      return {
+        plansByThread: rest,
+        activeVersionByThread: restVersions,
+        commentsByThread: restComments,
+        pendingImplementByThread: withPending(state.pendingImplementByThread, threadId, null),
+      };
     }),
 }));

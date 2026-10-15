@@ -39,6 +39,7 @@ export const QueuedTurnSubmissionSchema = z.object({
     id: z.string().min(1), name: z.string().min(1), mimeType: z.string().min(1), sizeBytes: z.number().int().nonnegative(), sourcePath: z.string().min(1),
   }).strict()),
   markPlanAnswerForMessageId: z.string().uuid().optional(),
+  planImplement: z.object({ requestId: z.string().uuid() }).optional(),
   sourceTurnId: z.string().uuid().optional(),
   sourceThreadId: z.string().min(1).max(256).optional(),
   sourceProviderId: z.string().min(1).max(256).optional(),
@@ -127,7 +128,8 @@ export class WorkspaceEnvironmentAutomaticStore {
     this.ensureBlockedSetupGate(input.threadId, gate, now);
     const sequence = this.nextMessageSequence(input.threadId);
     const queuePosition = this.nextQueuedTurnPosition(input.threadId);
-    this.insertQueuedTurnMessage(input, now, sequence);
+    // Implement's user message and Accepted version must commit together at admission.
+    if (!input.submission.planImplement) this.insertQueuedTurnMessage(input, now, sequence);
     this.insertQueuedTurn(input, submissionId, now, queuePosition);
     this.pruneTerminalTurns(input.threadId);
     return true;

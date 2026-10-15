@@ -1,5 +1,5 @@
 import type { Message, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
-import type { TurnSnapshot, ApprovalReceiptRecord, PlanComment, PlanSnapshot, PlanVersion, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
+import type { TurnSnapshot, ApprovalReceiptRecord, PendingPlanImplement, PlanComment, PlanSnapshot, PlanVersion, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
 import type { TaskItem } from "@/stores/taskStore";
 import type { PlanQuestion } from "@mcode/contracts";
 import type { ThreadRecord } from "@/stores/thread-record";
@@ -99,6 +99,7 @@ export interface ThreadHydratorDeps {
   ) => void;
   getPlanQuestionsRevision: (threadId: string) => number;
   setPlanCommentsForThread: (threadId: string, comments: readonly PlanComment[]) => void;
+  beginPendingImplementRead: (threadId: string) => (pending: PendingPlanImplement | null) => void;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
   getWorkspaceThreadSettings: (threadId: string) => import("@/stores/thread-record").ThreadSettings;

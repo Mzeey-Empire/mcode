@@ -5,6 +5,10 @@ import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-man
 import { isMac } from "@/lib/platform";
 import { usePlanCommentChip } from "@/features/conversation/composer/usePlanCommentChip";
 import { implementPlan, isPlanVersionImplementable, usePlanImplementStore } from "./plan-implement";
+import { useSourceCheckout } from "./use-source-checkout";
+
+/** Shown under the new-worktree item when the source has changes the worktree will not carry. */
+export const UNCOMMITTED_STAY_NOTE = "Starts from the last commit. Uncommitted changes stay here.";
 
 interface PlanImplementSplitProps {
   readonly threadId: string;
@@ -47,10 +51,27 @@ export function PlanImplementSplit({ threadId, viewed, executing }: PlanImplemen
             onClick={implement}
           />
           <DropdownMenuItem label={`${label} in a new thread`} onClick={() => void implementPlan(threadId, "new-thread")} />
+          <NewWorktreeItem threadId={threadId} label={`${label} in a new worktree`} />
         </>
       }
     >
       {label}
     </SplitButton>
+  );
+}
+
+/**
+ * Mounts with the open menu, so the checkout is read when the menu opens. Absent outside a git
+ * repository, where there is no commit to start the worktree at.
+ */
+function NewWorktreeItem({ threadId, label }: { readonly threadId: string; readonly label: string }) {
+  const { isGitRepo, isDirty } = useSourceCheckout(threadId);
+  if (!isGitRepo) return null;
+  return (
+    <DropdownMenuItem
+      label={label}
+      description={isDirty ? UNCOMMITTED_STAY_NOTE : undefined}
+      onClick={() => void implementPlan(threadId, "new-worktree")}
+    />
   );
 }

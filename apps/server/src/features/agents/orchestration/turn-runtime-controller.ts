@@ -2190,7 +2190,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Provision a thread through its coordinator, then start its generic first-turn command. */
-  async createAndSend(command: CreateAndSendCommand, options?: CreateAndSendOptions): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[] }> {
+  async createAndSend(command: CreateAndSendCommand, options?: CreateAndSendOptions): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[]; queued?: boolean }> {
     const created = await this.threadCreation.createInitialTurn(command, options);
     if (created.kind === "replay") {
       return {
@@ -2201,6 +2201,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (created.kind === "queued") {
       return {
         ...created.thread,
+        queued: true,
         runtimeSnapshot: { threadId: created.thread.id, turnExecutionId: null, phase: "idle" },
         ...(created.thread.warnings?.length ? { warnings: created.thread.warnings } : {}),
       };
@@ -2257,7 +2258,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     let cancellationWon = false;
     const send = this.sendMessage({
       ...this.turnAdmissions.queuedCommand(submission),
-      onTurnStarted: () => resolveStarted(),
+      onTurnStarted: () => {
+        if (!submission.planImplement) resolveStarted();
+      },
+      onAdmissionComplete: () => {
+        if (submission.planImplement) resolveStarted();
+      },
       onRuntimeReleased: resolveCompletion,
     }, () => {
       const canReserve = this.threadCreation.canAdmitQueuedAgent(submission.threadId, startupId);

@@ -335,9 +335,11 @@ export class TurnAdmissionDispatchCoordinator {
 
   /** Rehydrate an automatic-gate submission as one complete turn command. */
   queuedCommand(submission: WorkspaceEnvironmentQueuedTurnSubmission): SendMessageCommand {
-    const message = this.queuedMessage(submission.threadId, submission.messageId);
+    const message = submission.planImplement ? null : this.queuedMessage(submission.threadId, submission.messageId);
     return {
       threadId: submission.threadId,
+      messageId: submission.messageId,
+      planImplement: submission.planImplement,
       content: submission.content,
       displayContent: submission.displayContent,
       model: submission.model,
@@ -364,12 +366,12 @@ export class TurnAdmissionDispatchCoordinator {
       originSourceTurnId: submission.originSourceTurnId,
       mentions: [...submission.mentions],
       previewAnnotations: submission.previewAnnotations,
-      persistedUserMessage: {
+      persistedUserMessage: message ? {
         id: message.id,
         sequence: message.sequence,
         attachments: submission.attachments,
         persistedAttachments: submission.persistedAttachments,
-      },
+      } : undefined,
     };
   }
 
@@ -810,6 +812,7 @@ export class TurnAdmissionDispatchCoordinator {
         selectedTextComments: command.selectedTextComments,
         planCommentIds: command.planCommentIds,
         markPlanAnswerForMessageId: command.markPlanAnswerForMessageId,
+        planImplement: command.planImplement,
         sourceTurnId: command.sourceTurnId,
         sourceThreadId: command.sourceThreadId,
         sourceProviderId: command.sourceProviderId,

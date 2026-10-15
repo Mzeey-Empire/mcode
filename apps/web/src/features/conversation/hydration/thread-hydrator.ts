@@ -343,6 +343,7 @@ export class ThreadHydrator {
       reconcilePlanQuestions: deps.reconcilePlanQuestions,
       getPlanQuestionsRevision: deps.getPlanQuestionsRevision,
       setPlanCommentsForThread: deps.setPlanCommentsForThread,
+      beginPendingImplementRead: deps.beginPendingImplementRead,
       shallowEqualBy: deps.shallowEqualBy,
       coerceTaskStatus: deps.coerceTaskStatus,
     });

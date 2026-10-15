@@ -367,7 +367,7 @@ export const mockTransport: McodeTransport = {
   listNarrative: vi.fn().mockResolvedValue({ tools: [], thoughts: [], hooks: [] }),
   loadTurn: vi.fn().mockResolvedValue([]),
   getThreadTasks: vi.fn().mockResolvedValue(null),
-  getPlanSnapshot: vi.fn().mockResolvedValue({ versions: [], comments: [], phase: null, pendingQuestions: null }),
+  getPlanSnapshot: vi.fn().mockResolvedValue({ versions: [], comments: [], phase: null, pendingQuestions: null, pendingImplement: null }),
   createPlanComment: vi.fn(),
   updatePlanComment: vi.fn(),
   setPlanCommentStatus: vi.fn(),

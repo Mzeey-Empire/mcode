@@ -20,6 +20,19 @@ export type { ThreadStartupThreadCreation };
 /** Publishes startup snapshots only after their complete transition commits. */
 @injectable()
 export class ThreadStartupService {
+  private readonly listeners = new Set<(startup: ThreadStartup) => void>();
+
+  /** Observe committed lifecycle transitions independently of client push delivery. */
+  subscribe(listener: (startup: ThreadStartup) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private publish(startup: ThreadStartup): void {
+    broadcast("thread.startup.updated", startup);
+    for (const listener of this.listeners) listener(startup);
+  }
+
   constructor(
     @inject(ThreadStartupRepo) private readonly startupRepo: ThreadStartupRepo,
     @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter,
@@ -39,7 +52,7 @@ export class ThreadStartupService {
   async createAndBindThread(startupId: string, input: ThreadStartupThreadCreation): Promise<Thread> {
     try {
       const committed = await this.writer.execute(threadStartupStateWriteOperations.createAndBindThread, [startupId, input, this.timestamp()]);
-      if (committed.changed) broadcast("thread.startup.updated", committed.startup);
+      if (committed.changed) this.publish(committed.startup);
       return committed.thread;
     } catch (error) {
       this.rethrowConflict(error, startupId);
@@ -139,7 +152,7 @@ export class ThreadStartupService {
     let cursor: string | undefined;
     for (;;) {
       const batch = await this.writer.execute(threadStartupStateWriteOperations.interruptBatch, [cursor, this.timestamp()]);
-      for (const startup of batch.records) broadcast("thread.startup.updated", startup);
+      for (const startup of batch.records) this.publish(startup);
       interrupted.push(...batch.records);
       if (batch.nextCursor === null) return interrupted;
       cursor = batch.nextCursor;
@@ -152,7 +165,7 @@ export class ThreadStartupService {
 
   private async commit<Input>(operation: DatabaseWriteOperation<Input, ThreadStartupCommittedTransition>, input: Input): Promise<ThreadStartup> {
     const committed = await this.writer.execute(operation, input);
-    if (committed.changed) broadcast("thread.startup.updated", committed.startup);
+    if (committed.changed) this.publish(committed.startup);
     return committed.startup;
   }
 
