@@ -23,7 +23,6 @@ import { useProviderStatusStore } from "@/stores/providerStatusStore";
 import { useProviderCatalogStore } from "@/stores/providerCatalogStore";
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { usePlanStore } from "@/stores/planStore";
-import { applyPendingImplement } from "@/components/panels/plan/plan-implement";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { emitPtyData, emitPtyExit } from "@/features/terminal/adapters/pty-data-registry";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
@@ -606,7 +605,7 @@ export function startPushListeners(): void {
   unsubs.push(
     pushEmitter.on("plan.implementPending", (data) => {
       const { threadId, pending } = WS_CHANNELS["plan.implementPending"].parse(data);
-      applyPendingImplement(threadId, pending);
+      usePlanStore.getState().setPendingImplement(threadId, pending);
     }),
   );
 

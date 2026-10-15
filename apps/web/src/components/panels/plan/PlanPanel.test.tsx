@@ -14,7 +14,7 @@ import { executeCommand, getCommand } from "@/lib/command-registry";
 import { usePlanCommands } from "./use-plan-commands";
 import { PlanPanel, planEditorAccess } from "./PlanPanel";
 import { planSaveScheduler } from "./plan-draft-sessions";
-import { IMPLEMENT_FAILED_NOTICE, PLAN_CHANGED_NOTICE, applyPendingImplement, implementPlan as implementPlanAction, usePlanImplementStore } from "./plan-implement";
+import { IMPLEMENT_FAILED_NOTICE, PLAN_CHANGED_NOTICE, implementPlan as implementPlanAction, usePlanImplementStore } from "./plan-implement";
 
 const savePlanVersion = vi.hoisted(() => vi.fn<(payload: PlanSaveVersion) => Promise<PlanVersion>>());
 const implementPlan = vi.hoisted(() => vi.fn<(payload: PlanImplement) => Promise<PlanImplementReceipt>>());
@@ -448,7 +448,7 @@ describe("PlanPanel", () => {
 
         act(() => {
           usePlanStore.setState({ plansByThread: { [SOURCE]: [makePlan(2, { id: READY_ID, status: "accepted" })] } });
-          applyPendingImplement(SOURCE, null);
+          usePlanStore.getState().setPendingImplement(SOURCE, null);
         });
         await waitFor(() => expect(screen.queryByTestId("plan-waiting-notice")).toBeNull());
         expect(interactionMode(SOURCE)).toBe("build");
@@ -474,10 +474,25 @@ describe("PlanPanel", () => {
 
         act(() => {
           usePlanStore.setState({ plansByThread: { [SOURCE]: [makePlan(1, { id: "plan-1", status: "accepted" }), makePlan(2, { id: READY_ID, status: "superseded" })] } });
-          applyPendingImplement(SOURCE, null);
+          usePlanStore.getState().setPendingImplement(SOURCE, null);
         });
 
         expect(screen.queryByTestId("plan-waiting-notice")).toBeNull();
+        expect(interactionMode(SOURCE)).toBe("build");
+      });
+
+      it("switches the source to Build when a snapshot ends the hold before the clearing push arrives", () => {
+        startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+        seedThreads();
+        usePlanStore.getState().setPendingImplement(SOURCE, { targetThreadId: TARGET, version: 2 });
+        const applySnapshot = usePlanStore.getState().beginPendingImplementRead(SOURCE);
+
+        act(() => {
+          usePlanStore.setState({ plansByThread: { [SOURCE]: [makePlan(2, { id: READY_ID, status: "accepted" })] } });
+          applySnapshot(null);
+          usePlanStore.getState().setPendingImplement(SOURCE, null);
+        });
+
         expect(interactionMode(SOURCE)).toBe("build");
       });
 
@@ -488,7 +503,7 @@ describe("PlanPanel", () => {
         render(<PlanPanel threadId={SOURCE} />);
         act(() => {
           usePlanStore.setState({ plansByThread: { [SOURCE]: [makePlan(2, { id: READY_ID, status: "accepted" })] } });
-          applyPendingImplement(SOURCE, null);
+          usePlanStore.getState().setPendingImplement(SOURCE, null);
         });
 
         act(() => usePlanStore.getState().addPlan(SOURCE, makePlan(3, { id: "plan-3" })));
@@ -505,7 +520,7 @@ describe("PlanPanel", () => {
         await pressImplement("Implement v2");
         await screen.findByTestId("plan-waiting-notice");
 
-        act(() => applyPendingImplement(SOURCE, null));
+        act(() => usePlanStore.getState().setPendingImplement(SOURCE, null));
 
         await waitFor(() => expect(screen.queryByTestId("plan-waiting-notice")).toBeNull());
         expect(isEditable()).toBe(true);

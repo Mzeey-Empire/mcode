@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PlanVersionSchema, type PendingPlanImplement, type PlanImplement, type PlanVersion } from "@mcode/contracts";
+import { PlanVersionSchema, type PlanImplement, type PlanVersion } from "@mcode/contracts";
 import { getTransport, INTERACTION_MODES } from "@/transport";
 import { RpcError } from "@/transport/ws-transport";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -104,18 +104,19 @@ function isConnectionDrop(error: unknown): boolean {
   return error instanceof Error && !(error instanceof RpcError) && error.message === "WebSocket disconnected";
 }
 
-/**
- * Applies the server's report of a held new-worktree Implement. The source switches to Build when the
- * hold ends on its version being accepted, since only the initiating press mirrors an immediate admission.
+/*
+ * A new-worktree Implement ends its hold through a push, a snapshot read or never reaches this client
+ * as a push at all, so the source's switch to Build follows the store transition rather than any one
+ * of those paths. Only the initiating press mirrors an immediate admission.
  */
-export function applyPendingImplement(threadId: string, pending: PendingPlanImplement | null): void {
-  const planStore = usePlanStore.getState();
-  const held = planStore.pendingImplementByThread[threadId];
-  planStore.setPendingImplement(threadId, pending);
-  if (pending !== null || !held) return;
-  const version = planStore.plansByThread[threadId]?.find((candidate) => candidate.version === held.version);
-  if (version?.status === "accepted") mirrorAdmittedBuildMode(threadId);
-}
+usePlanStore.subscribe((state, previous) => {
+  if (state.pendingImplementByThread === previous.pendingImplementByThread) return;
+  for (const [threadId, held] of Object.entries(previous.pendingImplementByThread)) {
+    if (state.pendingImplementByThread[threadId]) continue;
+    const version = state.plansByThread[threadId]?.find((candidate) => candidate.version === held.version);
+    if (version?.status === "accepted") mirrorAdmittedBuildMode(threadId);
+  }
+});
 
 function mayReplay(target: PlanImplement["target"], alreadyReplayed: boolean): boolean {
   return target === "thread" || !alreadyReplayed;
