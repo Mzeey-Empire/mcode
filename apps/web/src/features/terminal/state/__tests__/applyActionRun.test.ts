@@ -67,6 +67,17 @@ describe("applyActionRun", () => {
     expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("pty-1");
   });
 
+  it("still focuses the tab when the push event beats the start response", () => {
+    useTerminalStore.getState().addTerminal("thread-1", "shell", "pwsh");
+    applyActionRun(actionRun({ revision: 1 }), { focus: false });
+    expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("shell");
+
+    applyActionRun(actionRun({ revision: 0 }), { focus: true });
+
+    expect(recordIds()).toEqual(["shell", "pty-1"]);
+    expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("pty-1");
+  });
+
   it("keeps one record across a restart in the same terminal", () => {
     applyActionRun(actionRun({ status: "failed", exitCode: 1 }), { focus: true });
 

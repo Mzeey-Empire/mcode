@@ -7,9 +7,10 @@ interface ApplyActionRunOptions {
 }
 
 /** A newer run already owns the action's slot, so this one must not resurrect its record. */
-function isSuperseded(run: WorkspaceEnvironmentActionRun): boolean {
+function newerRun(run: WorkspaceEnvironmentActionRun): WorkspaceEnvironmentActionRun | null {
   const latest = useProjectActionStore.getState().runsByThread[run.threadId]?.[run.actionId];
-  return latest !== undefined && (latest.runId !== run.runId || latest.revision > run.revision);
+  if (latest === undefined) return null;
+  return latest.runId !== run.runId || latest.revision > run.revision ? latest : null;
 }
 
 function removeStaleRecords(run: WorkspaceEnvironmentActionRun): void {
@@ -49,7 +50,14 @@ function showRecord(run: WorkspaceEnvironmentActionRun, terminalId: string, focu
  */
 export function applyActionRun(run: WorkspaceEnvironmentActionRun, { focus }: ApplyActionRunOptions): void {
   useProjectActionStore.getState().applyRun(run);
-  if (isSuperseded(run)) return;
+  const newer = newerRun(run);
+  if (newer) {
+    // The push event can beat the start response, which still carries the user's focus request.
+    if (focus && newer.runId === run.runId && newer.terminalSessionId !== null) {
+      showRecord(newer, newer.terminalSessionId, true);
+    }
+    return;
+  }
   removeStaleRecords(run);
   if (run.terminalSessionId !== null) showRecord(run, run.terminalSessionId, focus);
 }
