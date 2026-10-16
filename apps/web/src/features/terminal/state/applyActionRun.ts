@@ -22,12 +22,19 @@ function removeStaleRecords(run: WorkspaceEnvironmentActionRun): void {
   }
 }
 
-function showRecord(run: WorkspaceEnvironmentActionRun, terminalId: string, focus: boolean): void {
+interface ShowRecordOptions {
+  readonly focus: boolean;
+  /** A new run took over the terminal, as opposed to another update of the run already there. */
+  readonly relaunched: boolean;
+}
+
+function showRecord(run: WorkspaceEnvironmentActionRun, terminalId: string, { focus, relaunched }: ShowRecordOptions): void {
   const terminals = useTerminalStore.getState();
   const existing = (terminals.terminals[run.threadId] ?? []).find((record) => record.id === terminalId);
   if (existing) {
-    // The server reuses a terminal whose shell the user exited, so the retained exit no longer applies.
-    if (run.status === "running" && (existing.state === "exited" || existing.state === "failed")) {
+    // The server reuses a terminal whose shell the user exited. A delayed update of the run that was
+    // running when the shell exited must not undo that exit, so only a new run clears it.
+    if (relaunched && run.status === "running" && (existing.state === "exited" || existing.state === "failed")) {
       terminals.recordTerminalRestart(terminalId);
     }
     if (focus) terminals.setActiveTerminal(run.threadId, terminalId);
@@ -54,15 +61,19 @@ function showRecord(run: WorkspaceEnvironmentActionRun, terminalId: string, focu
  * same terminal, so they only change the run, never the record.
  */
 export function applyActionRun(run: WorkspaceEnvironmentActionRun, { focus }: ApplyActionRunOptions): void {
+  const previous = useProjectActionStore.getState().runsByThread[run.threadId]?.[run.actionId];
   useProjectActionStore.getState().applyRun(run);
   const newer = newerRun(run);
   if (newer) {
     // The push event can beat the start response, which still carries the user's focus request.
     if (focus && newer.runId === run.runId && newer.terminalSessionId !== null) {
-      showRecord(newer, newer.terminalSessionId, true);
+      showRecord(newer, newer.terminalSessionId, { focus: true, relaunched: false });
     }
     return;
   }
   removeStaleRecords(run);
-  if (run.terminalSessionId !== null) showRecord(run, run.terminalSessionId, focus);
+  if (run.terminalSessionId !== null) {
+    const relaunched = previous !== undefined && previous.runId !== run.runId;
+    showRecord(run, run.terminalSessionId, { focus, relaunched });
+  }
 }

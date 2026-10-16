@@ -97,6 +97,15 @@ describe("applyActionRun", () => {
     expect(useTerminalStore.getState().terminals["thread-1"]?.[0]?.exit).toBeUndefined();
   });
 
+  it("keeps the exit when a delayed update of the same run arrives after the shell exited", () => {
+    applyActionRun(actionRun({ revision: 1 }), { focus: false });
+    useTerminalStore.getState().recordTerminalExit("pty-1", { code: 0, signal: null, reason: "natural" });
+
+    applyActionRun(actionRun({ revision: 0 }), { focus: true });
+
+    expect(useTerminalStore.getState().terminals["thread-1"]?.[0]).toMatchObject({ id: "pty-1", state: "exited" });
+  });
+
   it("drops the record when the run no longer has a terminal", () => {
     applyActionRun(actionRun(), { focus: true });
 
