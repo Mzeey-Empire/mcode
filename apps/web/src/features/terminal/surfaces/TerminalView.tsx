@@ -721,7 +721,12 @@ export const TerminalView = memo(function TerminalView({
               continuesOnNextRow: term.buffer.active.getLine(bufferLineNumber)?.isWrapped === true,
             }).map((match) => ({
               match,
-              activate: () => openTerminalUrl(match, ownerScopeIdRef.current),
+              activate: () => {
+                openTerminalUrl(match, ownerScopeIdRef.current).catch(() => {
+                  setRecoveryAction(null);
+                  setRecoveryNotice("The link could not be opened.");
+                });
+              },
             })),
           ];
           const links = candidates.flatMap(({ match, activate }) => {
