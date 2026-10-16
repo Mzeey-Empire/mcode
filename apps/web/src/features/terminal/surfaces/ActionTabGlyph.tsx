@@ -22,6 +22,8 @@ export function ActionTabGlyph({ run }: { readonly run: WorkspaceEnvironmentActi
         <span
           data-testid="action-tab-badge"
           data-badge={badge}
+          role="img"
+          aria-label={badge === "running" ? "Running" : "Failed"}
           className={`absolute -right-[3px] -bottom-[3px] size-2 rounded-full ring-2 ring-page ${
             badge === "running" ? "bg-success" : "bg-error"
           }`}

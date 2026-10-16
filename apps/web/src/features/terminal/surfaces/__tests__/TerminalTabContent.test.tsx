@@ -298,13 +298,14 @@ describe("Terminal tool header", () => {
 
   describe("action tabs", () => {
     it.each([
-      ["running", { status: "running" as const }, "running"],
-      ["failed", { status: "failed" as const, exitCode: 1 }, "failed"],
-    ])("badges a %s run", (_name, overrides, badge) => {
+      ["running", { status: "running" as const }, "running", "Running"],
+      ["failed", { status: "failed" as const, exitCode: 1 }, "failed", "Failed"],
+    ])("badges a %s run", (_name, overrides, badge, label) => {
       seedAction(actionRun(overrides));
       renderTool();
 
       expect(screen.getByTestId("action-tab-badge")).toHaveAttribute("data-badge", badge);
+      expect(screen.getByRole("img", { name: label })).toBe(screen.getByTestId("action-tab-badge"));
     });
 
     it("shows no badge once the run completed", () => {

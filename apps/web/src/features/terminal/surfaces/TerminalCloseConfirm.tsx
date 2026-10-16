@@ -26,21 +26,21 @@ export function TerminalCloseConfirm({ name, anchor, command, onConfirm, onCance
         align="start"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
-        className="flex w-64 flex-col gap-3 p-3"
+        className="flex w-70 flex-col gap-3 p-3.5"
       >
         <div className="flex flex-col gap-1">
-          <p id={titleId} className="text-sm font-medium text-ink">Stop {name}?</p>
-          <p id={descriptionId} className="text-xs text-muted">
+          <p id={titleId} className="text-sm font-semibold text-ink">Stop {name}?</p>
+          <p id={descriptionId} className="text-[13px]/5 text-muted">
             {command === undefined
               ? "It is still running. Closing stops it and everything it started."
               : `${command} is still running. Closing the tab stops it.`}
           </p>
         </div>
         <div className="flex justify-end gap-2">
-          <Button variant="outline" size="compact" onClick={onCancel}>
+          <Button variant="subtle" shape="round" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="destructive" size="compact" autoFocus onClick={onConfirm}>
+          <Button variant="ink" shape="round" autoFocus onClick={onConfirm}>
             Stop and close
           </Button>
         </div>
