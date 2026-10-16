@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const terminalPause = vi.fn().mockResolvedValue(undefined);
 
@@ -6,47 +6,39 @@ vi.mock("@/transport", () => ({
   getTransport: () => ({ terminalPause }),
 }));
 
-import { useTerminalStore, TERMINAL_PANEL_DEFAULTS } from "../terminalStore";
+import { useTerminalStore } from "../terminalStore";
 
 describe("TerminalStore", () => {
   beforeEach(() => {
     terminalPause.mockClear();
-    // setTerminalPanelHeight is batched via rAF/setTimeout; fake timers
-    // let tests flush the queue synchronously with vi.runAllTimers().
-    vi.useFakeTimers();
     useTerminalStore.setState({
       terminals: {},
-      terminalPanelByThread: {},
+      activeTerminalByScope: {},
       ptyToThread: {},
       splitMode: false,
     });
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   describe("addTerminal", () => {
-    it("should add a terminal and set per-thread panel state", () => {
-      const { addTerminal, getTerminalPanel } = useTerminalStore.getState();
+    it("should add a terminal and make it the thread's active terminal", () => {
+      const { addTerminal } = useTerminalStore.getState();
       addTerminal("thread-1", "pty-1");
 
       const state = useTerminalStore.getState();
       expect(state.terminals["thread-1"]).toHaveLength(1);
       expect(state.terminals["thread-1"]![0]!.id).toBe("pty-1");
 
-      const panel = getTerminalPanel("thread-1");
-      expect(panel.visible).toBe(true);
-      expect(panel.activeTerminalId).toBe("pty-1");
+      expect(state.activeTerminalByScope["thread-1"]).toBe("pty-1");
     });
 
-    it("should isolate panel state between threads", () => {
-      const { addTerminal, getTerminalPanel } = useTerminalStore.getState();
+    it("should isolate the active terminal between threads", () => {
+      const { addTerminal } = useTerminalStore.getState();
       addTerminal("thread-1", "pty-1");
       addTerminal("thread-2", "pty-2");
 
-      expect(getTerminalPanel("thread-1").activeTerminalId).toBe("pty-1");
-      expect(getTerminalPanel("thread-2").activeTerminalId).toBe("pty-2");
+      const { activeTerminalByScope } = useTerminalStore.getState();
+      expect(activeTerminalByScope["thread-1"]).toBe("pty-1");
+      expect(activeTerminalByScope["thread-2"]).toBe("pty-2");
     });
 
     it("adds multiple terminals to the same thread", () => {
@@ -120,20 +112,20 @@ describe("TerminalStore", () => {
     });
 
     it("should set activeTerminalId to first remaining when active is removed", () => {
-      const { addTerminal, removeTerminal, getTerminalPanel } = useTerminalStore.getState();
+      const { addTerminal, removeTerminal } = useTerminalStore.getState();
       addTerminal("thread-1", "pty-1");
       addTerminal("thread-1", "pty-2");
       removeTerminal("pty-2");
 
-      expect(getTerminalPanel("thread-1").activeTerminalId).toBe("pty-1");
+      expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("pty-1");
     });
 
     it("should set activeTerminalId to null when last terminal removed", () => {
-      const { addTerminal, removeTerminal, getTerminalPanel } = useTerminalStore.getState();
+      const { addTerminal, removeTerminal } = useTerminalStore.getState();
       addTerminal("thread-1", "pty-1");
       removeTerminal("pty-1");
 
-      expect(getTerminalPanel("thread-1").activeTerminalId).toBeNull();
+      expect(useTerminalStore.getState().activeTerminalByScope["thread-1"] ?? null).toBeNull();
     });
 
     it("does nothing for unknown ptyId", () => {
@@ -146,12 +138,12 @@ describe("TerminalStore", () => {
     });
 
     it("should not affect other threads", () => {
-      const { addTerminal, removeTerminal, getTerminalPanel } = useTerminalStore.getState();
+      const { addTerminal, removeTerminal } = useTerminalStore.getState();
       addTerminal("thread-1", "pty-1");
       addTerminal("thread-2", "pty-2");
       removeTerminal("pty-1");
 
-      expect(getTerminalPanel("thread-2").activeTerminalId).toBe("pty-2");
+      expect(useTerminalStore.getState().activeTerminalByScope["thread-2"]).toBe("pty-2");
     });
 
     it("removes terminal from correct thread when multiple threads exist", () => {
@@ -166,27 +158,23 @@ describe("TerminalStore", () => {
   });
 
   describe("removeAllTerminals", () => {
-    it("should remove terminals but preserve panel config", () => {
-      const { addTerminal, removeAllTerminals, getTerminalPanel } = useTerminalStore.getState();
+    it("should remove terminals and clear the active terminal", () => {
+      const { addTerminal, removeAllTerminals } = useTerminalStore.getState();
       addTerminal("thread-1", "pty-1");
       removeAllTerminals("thread-1");
 
       const state = useTerminalStore.getState();
       expect(state.terminals["thread-1"]).toBeUndefined();
-      // Panel config preserved (height, visibility) but activeTerminalId nulled.
-      const panel = getTerminalPanel("thread-1");
-      expect(panel.visible).toBe(true);
-      expect(panel.activeTerminalId).toBeNull();
+      expect(state.activeTerminalByScope["thread-1"] ?? null).toBeNull();
     });
 
     it("should not affect other threads", () => {
-      const { addTerminal, removeAllTerminals, getTerminalPanel } = useTerminalStore.getState();
+      const { addTerminal, removeAllTerminals } = useTerminalStore.getState();
       addTerminal("thread-1", "pty-1");
       addTerminal("thread-2", "pty-2");
       removeAllTerminals("thread-1");
 
-      expect(getTerminalPanel("thread-2").visible).toBe(true);
-      expect(getTerminalPanel("thread-2").activeTerminalId).toBe("pty-2");
+      expect(useTerminalStore.getState().activeTerminalByScope["thread-2"]).toBe("pty-2");
     });
 
     it("removes all terminals for a thread", () => {
@@ -210,77 +198,37 @@ describe("TerminalStore", () => {
   });
 
   describe("clearThread", () => {
-    it("should remove both terminals and panel state", () => {
-      const { addTerminal, clearThread, getTerminalPanel } = useTerminalStore.getState();
+    it("should remove both terminals and the active terminal", () => {
+      const { addTerminal, clearThread } = useTerminalStore.getState();
       addTerminal("thread-1", "pty-1");
       clearThread("thread-1");
 
       const state = useTerminalStore.getState();
       expect(state.terminals["thread-1"]).toBeUndefined();
-      expect(state.terminalPanelByThread["thread-1"]).toBeUndefined();
-      expect(getTerminalPanel("thread-1")).toEqual(TERMINAL_PANEL_DEFAULTS);
+      expect(state.activeTerminalByScope["thread-1"]).toBeUndefined();
     });
 
     it("should not affect other threads", () => {
-      const { addTerminal, clearThread, getTerminalPanel } = useTerminalStore.getState();
+      const { addTerminal, clearThread } = useTerminalStore.getState();
       addTerminal("thread-1", "pty-1");
       addTerminal("thread-2", "pty-2");
       clearThread("thread-1");
 
-      expect(getTerminalPanel("thread-2").visible).toBe(true);
-      expect(getTerminalPanel("thread-2").activeTerminalId).toBe("pty-2");
+      expect(useTerminalStore.getState().activeTerminalByScope["thread-2"]).toBe("pty-2");
     });
   });
 
-  describe("per-thread panel actions", () => {
-    it("getTerminalPanel returns defaults for unknown thread", () => {
-      const { getTerminalPanel } = useTerminalStore.getState();
-      expect(getTerminalPanel("unknown")).toEqual(TERMINAL_PANEL_DEFAULTS);
-    });
-
-    it("toggleTerminalPanel flips visibility for one thread only", () => {
-      const { toggleTerminalPanel, getTerminalPanel } = useTerminalStore.getState();
-      toggleTerminalPanel("thread-1");
-      expect(getTerminalPanel("thread-1").visible).toBe(true);
-      toggleTerminalPanel("thread-1");
-      expect(getTerminalPanel("thread-1").visible).toBe(false);
-    });
-
-    it("showTerminalPanel sets visible true without affecting other fields", () => {
-      const { showTerminalPanel, setTerminalPanelHeight, getTerminalPanel } = useTerminalStore.getState();
-      setTerminalPanelHeight("thread-1", 450);
-      vi.runAllTimers(); // flush batched height update
-      showTerminalPanel("thread-1");
-      const panel = getTerminalPanel("thread-1");
-      expect(panel.visible).toBe(true);
-      expect(panel.height).toBe(450);
-    });
-
-    it("hideTerminalPanel sets visible false without affecting other fields", () => {
-      const { showTerminalPanel, hideTerminalPanel, setTerminalPanelHeight, getTerminalPanel } = useTerminalStore.getState();
-      showTerminalPanel("thread-1");
-      setTerminalPanelHeight("thread-1", 450);
-      vi.runAllTimers(); // flush batched height update
-      hideTerminalPanel("thread-1");
-      const panel = getTerminalPanel("thread-1");
-      expect(panel.visible).toBe(false);
-      expect(panel.height).toBe(450);
-    });
-
-    it("setTerminalPanelHeight updates height for one thread only", () => {
-      const { setTerminalPanelHeight, getTerminalPanel } = useTerminalStore.getState();
-      setTerminalPanelHeight("thread-1", 450);
-      vi.runAllTimers(); // flush batched height update
-      expect(getTerminalPanel("thread-1").height).toBe(450);
-      expect(getTerminalPanel("thread-2").height).toBe(300); // default
-    });
-
-    it("setActiveTerminal scoped to thread", () => {
-      const { addTerminal, setActiveTerminal, getTerminalPanel } = useTerminalStore.getState();
+  describe("setActiveTerminal", () => {
+    it("scopes the selection to one thread", () => {
+      const { addTerminal, setActiveTerminal } = useTerminalStore.getState();
       addTerminal("thread-1", "pty-1");
       addTerminal("thread-1", "pty-2");
+      addTerminal("thread-2", "pty-3");
       setActiveTerminal("thread-1", "pty-1");
-      expect(getTerminalPanel("thread-1").activeTerminalId).toBe("pty-1");
+
+      const { activeTerminalByScope } = useTerminalStore.getState();
+      expect(activeTerminalByScope["thread-1"]).toBe("pty-1");
+      expect(activeTerminalByScope["thread-2"]).toBe("pty-3");
     });
   });
 

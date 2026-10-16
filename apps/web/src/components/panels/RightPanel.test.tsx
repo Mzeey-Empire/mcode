@@ -148,7 +148,13 @@ vi.mock("@/features/preview/state/previewTabsStore", () => ({
 }));
 vi.mock("@/lib/ensure-terminal", () => ({ createTerminalForScope: vi.fn() }));
 vi.mock("@/lib/right-panel-layout", () => ({ toggleRightPanelAdaptive: vi.fn() }));
-vi.mock("@/transport", () => ({ getTransport: () => ({ terminalKill, getWorkspaceActionRun: vi.fn() }) }));
+vi.mock("@/transport", () => ({ getTransport: () => ({
+    terminalKill,
+    terminalPause: vi.fn().mockResolvedValue(undefined),
+    terminalHasChildren: vi.fn().mockResolvedValue({ hasChildren: false }),
+    listOpenInApps: vi.fn().mockResolvedValue([]),
+    getWorkspaceActionRun: vi.fn(),
+  }) }));
 
 import { reconcileWarmPreviewScopes, RightPanel } from "./RightPanel";
 import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
@@ -197,7 +203,7 @@ describe("RightPanel", () => {
       },
     });
     useWorkspaceStore.setState({ activeWorkspaceId: "workspace-1", activeThreadId: null });
-    useTerminalStore.setState({ terminals: {}, terminalPanelByThread: {}, ptyToThread: {}, hasHydrated: false });
+    useTerminalStore.setState({ terminals: {}, activeTerminalByScope: {}, ptyToThread: {}, hasHydrated: false });
     useBrowserAutomationStore.setState({
       activeRequests: new Map(),
       lifecycleTabs: new Map(),
@@ -249,7 +255,7 @@ describe("RightPanel", () => {
     ...overrides,
   });
   const actionRecord = { id: "pty-action", threadId: "thread-1", label: "build", kind: "action" as const, actionId: "build" };
-  const threadTerminalPanel = (overrides: Partial<Parameters<typeof createRightPanelState>[0]> = {}) =>
+  const terminalToolPanelState = (overrides: Partial<Parameters<typeof createRightPanelState>[0]> = {}) =>
     createRightPanelState({
       visible: true,
       width: 520,
@@ -267,7 +273,7 @@ describe("RightPanel", () => {
   it("lists two shells and an action run as one Terminal entry with three row-1 tabs", () => {
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
     useProjectActionStore.getState().applyRun(buildRun({}));
-    useDiffStore.setState({ rightPanelByThread: { "thread-1": threadTerminalPanel() } });
+    useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState() } });
     useTerminalStore.setState({
       terminals: {
         "thread-1": [
@@ -289,7 +295,7 @@ describe("RightPanel", () => {
     terminalKill.mockResolvedValue(undefined);
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
     useProjectActionStore.getState().applyRun(buildRun({}));
-    useDiffStore.setState({ rightPanelByThread: { "thread-1": threadTerminalPanel() } });
+    useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState() } });
     useTerminalStore.setState({ terminals: { "thread-1": [actionRecord] }, ptyToThread: { "pty-action": "thread-1" } });
 
     render(<RightPanel />);
@@ -297,7 +303,7 @@ describe("RightPanel", () => {
     expect(screen.getByTestId("action-terminal:build")).toHaveTextContent("done");
     fireEvent.click(within(terminalStrip()).getByRole("button", { name: "Close Build" }));
 
-    expect(terminalKill).toHaveBeenCalledWith("pty-action");
+    await waitFor(() => expect(terminalKill).toHaveBeenCalledWith("pty-action"));
     await waitFor(() =>
       expect(useDiffStore.getState().getRightPanel("workspace-1", "thread-1").tabInstances).toEqual([]),
     );
@@ -331,7 +337,7 @@ describe("RightPanel", () => {
       exitCode: null,
       transcript: "running output",
     }));
-    useDiffStore.setState({ rightPanelByThread: { "thread-1": threadTerminalPanel(panel) } });
+    useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState(panel) } });
     useTerminalStore.setState({ terminals: { "thread-1": [actionRecord] } });
 
     render(<RightPanel />);
@@ -358,7 +364,7 @@ describe("RightPanel", () => {
       label: `Shell ${index}`,
     }));
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
-    useDiffStore.setState({ rightPanelByThread: { "thread-1": threadTerminalPanel() } });
+    useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState() } });
     useTerminalStore.setState({
       terminals: { "thread-1": [...records, actionRecord] },
       ptyToThread: Object.fromEntries([...records, actionRecord].map((record) => [record.id, "thread-1"])),
@@ -383,7 +389,7 @@ describe("RightPanel", () => {
   it("closes the Terminal tool when its last tab closes", async () => {
     terminalKill.mockResolvedValue(undefined);
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
-    useDiffStore.setState({ rightPanelByThread: { "thread-1": threadTerminalPanel() } });
+    useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState() } });
     useTerminalStore.setState({
       terminals: { "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "zsh" }] },
       ptyToThread: { "pty-1": "thread-1" },
@@ -398,7 +404,7 @@ describe("RightPanel", () => {
 
   it("hides the Terminal tool from the rail without stopping its records", () => {
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
-    useDiffStore.setState({ rightPanelByThread: { "thread-1": threadTerminalPanel() } });
+    useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState() } });
     useTerminalStore.setState({ terminals: { "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "zsh" }] } });
 
     render(<RightPanel />);
@@ -619,7 +625,7 @@ describe("RightPanel", () => {
     await waitFor(() =>
       expect(useToastStore.getState().toasts[0]).toMatchObject({
         kind: "failed",
-        title: "Couldn't close terminal",
+        title: "Couldn't close Shell. Try again.",
         meta: "pty is gone",
       }),
     );

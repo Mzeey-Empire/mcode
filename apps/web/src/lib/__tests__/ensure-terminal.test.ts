@@ -13,6 +13,7 @@ vi.mock("@/transport", () => ({
   getTransport: () => ({
     terminalCreate,
     terminalKill,
+    terminalPause: vi.fn().mockResolvedValue(undefined),
   }),
 }));
 
@@ -40,7 +41,7 @@ describe("createTerminalForScope", () => {
       return { ptyId: "8", shell: "pwsh" };
     });
     createTerminalForScope(scopeId);
-    await vi.waitFor(() => expect(useTerminalStore.getState().terminalPanelByThread[scopeId]?.activeTerminalId).toBe("8"));
+    await vi.waitFor(() => expect(useTerminalStore.getState().activeTerminalByScope[scopeId]).toBe("8"));
     expect(terminalKill).not.toHaveBeenCalled();
     expect(useTerminalStore.getState().terminals[scopeId].map(({ id }) => id)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8"]);
     expect(useDiffStore.getState().getRightPanel(scopeId).activeTabId).toBe("singleton:terminal");

@@ -1,192 +1,60 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useToastStore } from "@/stores/toastStore";
-import { Terminal } from "lucide-react";
-import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
-import { getTransport } from "@/transport";
-import { Button } from "@/components/ui/button";
-import { TerminalList } from "./TerminalList";
-import { TerminalKillConfirmDialog } from "./TerminalKillConfirmDialog";
+import { useMemo } from "react";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
+import { ShellControls } from "./ShellControls";
+import { TerminalCloseConfirm } from "./TerminalCloseConfirm";
+import { TerminalTabStrip } from "./TerminalTabStrip";
+import { terminalTabLabels, useScopeTerminals } from "./terminalTabs";
+import { useTerminalClose } from "./useTerminalClose";
 
-const EMPTY_TERMINALS: readonly TerminalInstance[] = [];
-
-type PendingClose =
-  | { readonly kind: "one"; readonly ptyId: string; readonly name: string; readonly trigger: HTMLButtonElement }
-  | { readonly kind: "all"; readonly name: string; readonly trigger: HTMLButtonElement };
-
-const {
-  addTerminal: storeAddTerminal,
-  removeTerminal: storeRemoveTerminal,
-  removeAllTerminals,
-} = useTerminalStore.getState();
+const EMPTY_ACTION_RUNS: Readonly<Record<string, WorkspaceEnvironmentActionRun>> = {};
 
 /** Props for {@link TerminalTabContent}. */
 interface TerminalTabContentProps {
-  /** The thread whose terminals to display. */
-  readonly threadId: string;
+  readonly workspaceId: string;
+  readonly threadId: string | null;
+  readonly scopeId: string;
 }
 
 /**
- * Terminal chrome in the right panel (list, empty state, kill dialog).
- * xterm instances are rendered by {@link TerminalPoolHost} into the right-panel
- * {@link TerminalPoolSlot} (mounted by the right panel terminal tab layer).
+ * The Terminal tool's header chrome: row-1 terminal tabs, row-2 shell controls for
+ * the active shell, and the close confirmation. xterm instances render in the
+ * pooled slot, not here.
  */
-export function TerminalTabContent({ threadId }: TerminalTabContentProps) {
-  const terminals = useTerminalStore(
-    (s) => (s.terminals[threadId] ?? EMPTY_TERMINALS),
+export function TerminalTabContent({ workspaceId, threadId, scopeId }: TerminalTabContentProps) {
+  const { terminals, activeId } = useScopeTerminals(scopeId);
+  const actionRuns = useProjectActionStore((state) =>
+    threadId ? state.runsByThread[threadId] ?? EMPTY_ACTION_RUNS : EMPTY_ACTION_RUNS,
   );
-  const hasTerminals = terminals.length > 0;
-
-  const [pendingKill, setPendingKill] = useState<PendingClose | null>(null);
-  const [isClosing, setIsClosing] = useState(false);
-  /** Bumped on thread change so stale async kill confirmations are ignored. */
-  const opGenRef = useRef(0);
-
-  useEffect(() => {
-    opGenRef.current += 1;
-    // oxlint-disable-next-line react/set-state-in-effect -- A global thread change invalidates pending terminal actions.
-    setPendingKill(null);
-    setIsClosing(false);
-  }, [threadId]);
-
-  /** Creates a new terminal for the thread. */
-  const createTerminal = useCallback(async () => {
-    try {
-      const transport = getTransport();
-      const { ptyId, shell } = await transport.terminalCreate(threadId);
-      storeAddTerminal(threadId, ptyId, shell);
-    } catch (err) {
-      console.error("[terminal] Failed to create terminal", err);
-      const message =
-        err instanceof Error ? err.message : "Could not create terminal";
-      useToastStore.getState().show({
-        kind: "failed",
-        title: "Failed to create terminal",
-        meta: message,
-      });
-    }
-  }, [threadId]);
-
-  /** Immediate kill without guard. Waits for server RPC before evicting local state. */
-  const doCloseTerminal = useCallback(async (ptyId: string): Promise<boolean> => {
-    try {
-      await getTransport().terminalKill(ptyId);
-      storeRemoveTerminal(ptyId);
-      return true;
-    } catch (err) {
-      console.error("[terminal] Failed to kill terminal", ptyId, err);
-      return false;
-    }
-  }, []);
-
-  /** Kill with optional confirmation. */
-  const closeTerminal = useCallback(
-    (ptyId: string, trigger: HTMLButtonElement) => {
-      const terminal = terminals.find((candidate) => candidate.id === ptyId);
-      if (!terminal) return;
-      const opGen = opGenRef.current;
-      getTransport()
-        .terminalHasChildren(ptyId)
-        .then(({ hasChildren }) => {
-          if (opGen !== opGenRef.current) return;
-          if (!hasChildren) {
-            void doCloseTerminal(ptyId);
-            return;
-          }
-          setPendingKill({ kind: "one", ptyId, name: terminal.label, trigger });
-        })
-        .catch(() => {
-          if (opGen !== opGenRef.current) return;
-          setPendingKill({ kind: "one", ptyId, name: terminal.label, trigger });
-        });
-    },
-    [terminals, doCloseTerminal],
-  );
-
-  /** Immediate kill-all without guard. Waits for server RPC before evicting local state. */
-  const doCloseAllTerminals = useCallback(async (): Promise<boolean> => {
-    try {
-      await getTransport().terminalKillByThread(threadId);
-      removeAllTerminals(threadId);
-      return true;
-    } catch (err) {
-      console.error("[terminal] Failed to kill terminals for thread", threadId, err);
-      return false;
-    }
-  }, [threadId]);
-
-  /** Kill-all with optional confirmation. */
-  const closeAllTerminals = useCallback((trigger: HTMLButtonElement) => {
-    if (terminals.length === 0) {
-      void doCloseAllTerminals();
-      return;
-    }
-    const transport = getTransport();
-    const opGen = opGenRef.current;
-    void Promise.all(
-      terminals.map((term) =>
-        transport
-          .terminalHasChildren(term.id)
-          .then(({ hasChildren }) => hasChildren)
-          .catch(() => true),
-      ),
-    ).then((results) => {
-      if (opGen !== opGenRef.current) return;
-      if (!results.some(Boolean)) {
-        void doCloseAllTerminals();
-        return;
-      }
-      setPendingKill({ kind: "all", name: `${terminals.length} terminals`, trigger });
-    });
-  }, [terminals, doCloseAllTerminals]);
-
-  const confirmKill = useCallback(async () => {
-    if (!pendingKill || isClosing) return;
-    const operation = pendingKill;
-    setIsClosing(true);
-    try {
-      const closed = operation.kind === "one"
-        ? await doCloseTerminal(operation.ptyId)
-        : await doCloseAllTerminals();
-      if (closed) {
-        setPendingKill((current) => current === operation ? null : current);
-      }
-    } finally {
-      setIsClosing(false);
-    }
-  }, [pendingKill, isClosing, doCloseTerminal, doCloseAllTerminals]);
-
-  const cancelKill = useCallback(() => {
-    const trigger = pendingKill?.trigger ?? null;
-    setPendingKill(null);
-    window.setTimeout(() => trigger?.focus(), 0);
-  }, [pendingKill]);
-
+  const labels = useMemo(() => terminalTabLabels(terminals, actionRuns), [terminals, actionRuns]);
+  const closeScope = useMemo(() => ({ workspaceId, threadId, scopeId }), [workspaceId, threadId, scopeId]);
+  const { pending, requestClose, confirmClose, cancelClose } = useTerminalClose(closeScope, terminals, labels);
+  const activeShell = terminals.find((terminal) => terminal.id === activeId && terminal.kind !== "action") ?? null;
   return (
     <>
-      <TerminalKillConfirmDialog
-        open={pendingKill !== null}
-        targetName={pendingKill?.name ?? "terminal"}
-        pending={isClosing}
-        onConfirm={confirmKill}
-        onCancel={cancelKill}
+      <TerminalTabStrip
+        scopeId={scopeId}
+        terminals={terminals}
+        activeId={activeId}
+        labels={labels}
+        onClose={(ptyId) => void requestClose(ptyId)}
       />
-
-      {hasTerminals ? (
-        <TerminalList
+      {activeShell ? (
+        <ShellControls
+          workspaceId={workspaceId}
           threadId={threadId}
-          onClose={closeTerminal}
-          onAdd={createTerminal}
-          onDeleteAll={closeAllTerminals}
+          terminal={activeShell}
+          onClose={(ptyId) => void requestClose(ptyId)}
         />
-      ) : (
-        <div className="absolute inset-0 z-(--layer-sticky) flex flex-col items-center justify-center gap-3 bg-background text-muted">
-          <Terminal className="h-10 w-10 opacity-40" />
-          <p className="text-sm">No terminals</p>
-          <Button variant="outline" size="compact" onClick={createTerminal}>
-            New terminal
-          </Button>
-        </div>
-      )}
+      ) : null}
+      {pending ? (
+        <TerminalCloseConfirm
+          name={pending.name}
+          anchor={pending.anchor}
+          onConfirm={confirmClose}
+          onCancel={cancelClose}
+        />
+      ) : null}
     </>
   );
 }

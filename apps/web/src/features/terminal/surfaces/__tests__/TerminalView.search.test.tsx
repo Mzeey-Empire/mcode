@@ -159,7 +159,7 @@ async function settle(): Promise<void> {
 function resetTerminalSearchState(): void {
   useTerminalStore.setState({
     terminals: {},
-    terminalPanelByThread: {},
+    activeTerminalByScope: {},
     ptyToThread: {},
     terminalSearchByPty: {},
     splitMode: false,

@@ -1,9 +1,9 @@
 /** Public Terminal feature surface for workbench composition. */
 export {
-  TerminalPanel,
   TerminalPoolHost,
   TerminalTabContent,
   TerminalView,
+  useScopeTerminals,
 } from "./surfaces";
 export {
   TerminalPoolSlot,
@@ -11,10 +11,7 @@ export {
 } from "./surfaces/TerminalPoolSlotContext";
 export { TerminalSection } from "./settings/TerminalSection";
 export { useTerminalSettingsStore } from "./settings/terminalSettingsStore";
-export {
-  TERMINAL_PANEL_DEFAULTS,
-  useTerminalStore,
-} from "./state/terminalStore";
+export { useTerminalStore } from "./state/terminalStore";
 export { useHomeTerminalPresented } from "./state/useHomeTerminalPresented";
 export type {
   ActiveTerminalSession,

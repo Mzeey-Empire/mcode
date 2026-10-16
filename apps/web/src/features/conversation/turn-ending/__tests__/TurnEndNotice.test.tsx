@@ -13,7 +13,7 @@ vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
 afterEach(() => {
   cleanup();
   useProviderStatusStore.setState({ statuses: [] });
-  useTerminalStore.setState({ terminals: {}, ptyToThread: {}, terminalPanelByThread: {} });
+  useTerminalStore.setState({ terminals: {}, ptyToThread: {}, activeTerminalByScope: {} });
 });
 
 const FAILED: FilledNotice = {

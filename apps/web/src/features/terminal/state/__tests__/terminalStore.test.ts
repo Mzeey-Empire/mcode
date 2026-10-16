@@ -18,7 +18,7 @@ describe("terminalStore pause/resume wiring", () => {
     useTerminalStore.setState({
       hasHydrated: false,
       terminals: {},
-      terminalPanelByThread: {},
+      activeTerminalByScope: {},
       ptyToThread: {},
       terminalSearchByPty: {},
       splitMode: false,
@@ -38,7 +38,7 @@ describe("terminalStore pause/resume wiring", () => {
       { id: "second", label: "bash", state: "running", exitCode: undefined, kind: "action", cwd: "/repo", createdAt: "2026-10-08T12:01:00.000Z" },
     ]);
     expect(state.terminals.workspace.map(({ id, label, state }) => [id, label, state])).toEqual([["other", "zsh", "pending"]]);
-    expect(state.terminalPanelByThread.thread.activeTerminalId).toBe("first");
+    expect(state.activeTerminalByScope.thread).toBe("first");
     expect(state.hasHydrated).toBe(true);
   });
 
@@ -55,7 +55,7 @@ describe("terminalStore pause/resume wiring", () => {
     store.replaceTerminal("2", { ptyId: "replacement", threadId: "thread", shell: "bash", state: "running" });
     expect(useTerminalStore.getState().terminals.thread.map((terminal) => terminal.id)).toEqual(["1", "replacement", "3", "4", "5", "6", "7", "8"]);
     expect(useTerminalStore.getState().ptyToThread["2"]).toBeUndefined();
-    expect(useTerminalStore.getState().terminalPanelByThread.thread.activeTerminalId).toBe("replacement");
+    expect(useTerminalStore.getState().activeTerminalByScope.thread).toBe("replacement");
     store.removeTerminal("1");
     store.addTerminal("thread", "9", "pwsh");
     expect(useTerminalStore.getState().terminals.thread.map((terminal) => terminal.id)).toEqual(["replacement", "3", "4", "5", "6", "7", "8", "9"]);
@@ -69,21 +69,12 @@ describe("terminalStore pause/resume wiring", () => {
     });
   });
 
-  it("pauses only the selected PTY and leaves resume to the mounted view", () => {
+  it("pauses the shell a new one replaces and leaves resume to the mounted view", () => {
     const store = useTerminalStore.getState();
     store.addTerminal("thread-1", "pty-a");
     store.addTerminal("thread-1", "pty-b");
-    // Selecting the new shell pauses the renderer that is about to unmount.
-    expect(terminalPause).toHaveBeenCalledWith("pty-a");
-    expect(terminalResume).not.toHaveBeenCalled();
-    terminalPause.mockClear();
-
-    store.hideTerminalPanel("thread-1");
     expect(terminalPause).toHaveBeenCalledOnce();
-    expect(terminalPause).toHaveBeenCalledWith("pty-b");
-    expect(terminalResume).not.toHaveBeenCalled();
-
-    store.showTerminalPanel("thread-1");
+    expect(terminalPause).toHaveBeenCalledWith("pty-a");
     expect(terminalResume).not.toHaveBeenCalled();
   });
 
@@ -99,20 +90,25 @@ describe("terminalStore pause/resume wiring", () => {
     expect(terminalResume).not.toHaveBeenCalled();
   });
 
-  it("no-ops when hiding an already-hidden panel", () => {
-    useTerminalStore.getState().hideTerminalPanel("unknown-thread");
+  it("does not pause the terminal it is asked to keep showing", () => {
+    const store = useTerminalStore.getState();
+    store.addTerminal("thread-1", "pty-a");
+    terminalPause.mockClear();
+
+    store.setActiveTerminal("thread-1", "pty-a");
+
     expect(terminalPause).not.toHaveBeenCalled();
   });
 
-  it("toggleTerminalPanel pauses on hide without resuming from the store", () => {
+  it("keeps a shell flowing while an action record is shown, because no view resumes it on return", () => {
     const store = useTerminalStore.getState();
-    store.addTerminal("thread-2", "pty-c");
-    // Panel is visible after addTerminal. Toggle → hide → pause.
-    store.toggleTerminalPanel("thread-2");
-    expect(terminalPause).toHaveBeenCalledOnce();
-    // Toggle again → show; TerminalView reattaches before it resumes.
-    store.toggleTerminalPanel("thread-2");
-    expect(terminalResume).not.toHaveBeenCalled();
+    store.addTerminal("thread-1", "shell", "pwsh");
+    store.addTerminal("thread-1", "action", "pwsh", { kind: "action", actionId: "build" });
+    store.setActiveTerminal("thread-1", "shell");
+    store.setActiveTerminal("thread-1", "action");
+    store.setActiveTerminal("thread-1", "shell");
+
+    expect(terminalPause).not.toHaveBeenCalled();
   });
 
   it("reconciles stale client PTYs when the restarted server reports none", () => {
@@ -138,9 +134,7 @@ describe("terminalStore pause/resume wiring", () => {
     expect(next.terminals["thread-2"]?.map((terminal) => terminal.id)).toEqual([
       "server-pty",
     ]);
-    expect(next.terminalPanelByThread["thread-2"]?.activeTerminalId).toBe(
-      "server-pty",
-    );
+    expect(next.activeTerminalByScope["thread-2"]).toBe("server-pty");
   });
 
   it("keeps search state per PTY and removes it with the PTY", () => {

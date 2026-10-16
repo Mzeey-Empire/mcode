@@ -79,7 +79,7 @@ vi.mock("@/transport", async (importOriginal) => {
 
 vi.mock("@/features/terminal", () => ({
   useTerminalStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ terminalPanelByThread: {}, toggleTerminalPanel: vi.fn() }),
+    selector({ activeTerminalByScope: {} }),
   ),
 }));
 

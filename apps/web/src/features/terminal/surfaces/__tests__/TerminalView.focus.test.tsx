@@ -231,9 +231,7 @@ function retainTerminal(
         exit: { code: 1, signal: null, reason: "natural" },
       }],
     },
-    terminalPanelByThread: {
-      [threadId]: { visible: true, height: 300, activeTerminalId: ptyId },
-    },
+    activeTerminalByScope: { [threadId]: ptyId },
     ptyToThread: { [ptyId]: threadId },
   });
 }
@@ -297,7 +295,7 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     }
     useTerminalStore.setState({
       terminals: {},
-      terminalPanelByThread: {},
+      activeTerminalByScope: {},
       ptyToThread: {},
       terminalSearchByPty: {},
     });

@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { TERMINAL_MAX_PER_SCOPE, type LegacyTerminalRecord, type TerminalExitMetadata, type TerminalSessionState } from "@mcode/contracts";
 import { getTransport } from "@/transport";
-import { createBatchedUpdater } from "@/stores/batchMiddleware";
 
 /** A single PTY-backed terminal instance displayed in the terminal panel. */
 export interface TerminalInstance {
@@ -53,34 +52,15 @@ export const TERMINAL_SEARCH_STATE_DEFAULT: TerminalSearchState = {
   resultCount: 0,
 } as const;
 
-/** Per-thread terminal panel state (visibility, height, active terminal). */
-export type TerminalPanelState = {
-  readonly visible: boolean;
-  readonly height: number;
-  readonly activeTerminalId: string | null;
-};
-
-/** Default state for threads with no panel record. Panels start closed. */
-export const TERMINAL_PANEL_DEFAULTS: TerminalPanelState = {
-  visible: false,
-  height: 300,
-  activeTerminalId: null,
-} as const;
-
 interface TerminalState {
   readonly hasHydrated: boolean;
   readonly terminals: Record<string, readonly TerminalInstance[]>;
-  readonly terminalPanelByThread: Record<string, TerminalPanelState>;
+  readonly activeTerminalByScope: Record<string, string | null>;
   /** Reverse index: ptyId → threadId for O(1) owner lookup in removeTerminal. */
   readonly ptyToThread: Record<string, string>;
   readonly terminalSearchByPty: Record<string, TerminalSearchState>;
   readonly splitMode: boolean;
 
-  getTerminalPanel: (threadId: string) => TerminalPanelState;
-  toggleTerminalPanel: (threadId: string) => void;
-  showTerminalPanel: (threadId: string) => void;
-  hideTerminalPanel: (threadId: string) => void;
-  setTerminalPanelHeight: (threadId: string, height: number) => void;
   setActiveTerminal: (threadId: string, ptyId: string | null) => void;
   openTerminalSearch: (ptyId: string) => void;
   closeTerminalSearch: (ptyId: string) => void;
@@ -108,20 +88,24 @@ interface TerminalState {
   toggleSplit: () => void;
 }
 
+function isActionRecord(terminals: readonly TerminalInstance[] | undefined, ptyId: string | null): boolean {
+  return terminals?.find((terminal) => terminal.id === ptyId)?.kind === "action";
+}
+
 /**
- * Pause the selected PTY bound to a thread.
- * Resume belongs to TerminalView after its listener and reattach gate exist.
+ * Pauses the shell a different shell replaces; TerminalView resumes the new one
+ * once its listener is attached. An action record never mounts a pooled view, so
+ * a shell kept warm behind it must keep flowing (nothing would resume it), and
+ * pausing the action record would stall its script.
  */
-function setPtyPaused(
-  state: Pick<TerminalState, "terminalPanelByThread">,
-  threadId: string,
+function pauseReplacedShell(
+  terminals: readonly TerminalInstance[] | undefined,
+  previous: string | null,
+  next: string | null,
 ): void {
-  const ptyId = state.terminalPanelByThread[threadId]?.activeTerminalId;
-  if (!ptyId) return;
-  const transport = getTransport();
-  transport.terminalPause(ptyId).catch(() => {
-    // Best-effort. The next visibility toggle will reconcile state.
-  });
+  if (!previous || previous === next) return;
+  if (isActionRecord(terminals, previous) || isActionRecord(terminals, next)) return;
+  getTransport().terminalPause(previous).catch(() => {});
 }
 
 function generateLabel(existing: readonly TerminalInstance[]): string {
@@ -137,7 +121,7 @@ function generateLabel(existing: readonly TerminalInstance[]): string {
 }
 
 function reconcileActiveTerminalSessions(
-  state: Pick<TerminalState, "terminals" | "ptyToThread" | "terminalPanelByThread" | "terminalSearchByPty">,
+  state: Pick<TerminalState, "terminals" | "ptyToThread" | "activeTerminalByScope" | "terminalSearchByPty">,
   sessions: readonly ActiveTerminalSession[],
 ) {
   const existingById = new Map(
@@ -147,7 +131,7 @@ function reconcileActiveTerminalSessions(
   return {
     terminals,
     ptyToThread,
-    terminalPanelByThread: reconcileTerminalPanels(state, terminals),
+    activeTerminalByScope: reconcileActiveTerminals(state, terminals),
     terminalSearchByPty: reconcileTerminalSearch(state.terminalSearchByPty, sessions),
   };
 }
@@ -192,29 +176,20 @@ function reconcileTerminalInstance(
   };
 }
 
-function reconcileTerminalPanels(
-  state: Pick<TerminalState, "terminals" | "terminalPanelByThread">,
+function reconcileActiveTerminals(
+  state: Pick<TerminalState, "terminals" | "activeTerminalByScope">,
   terminals: Record<string, readonly TerminalInstance[]>,
-): Record<string, TerminalPanelState> {
-  const terminalPanelByThread = { ...state.terminalPanelByThread };
+): Record<string, string | null> {
+  const activeTerminalByScope = { ...state.activeTerminalByScope };
   const scopeIds = new Set([...Object.keys(state.terminals), ...Object.keys(terminals)]);
   for (const scopeId of scopeIds) {
-    const current = terminalPanelByThread[scopeId] ?? TERMINAL_PANEL_DEFAULTS;
-    terminalPanelByThread[scopeId] = {
-      ...current,
-      activeTerminalId: resolveReconciledActiveTerminalId(current, terminals[scopeId] ?? []),
-    };
+    const scopeTerminals = terminals[scopeId] ?? [];
+    const active = activeTerminalByScope[scopeId] ?? null;
+    activeTerminalByScope[scopeId] = scopeTerminals.some((terminal) => terminal.id === active)
+      ? active
+      : scopeTerminals[0]?.id ?? null;
   }
-  return terminalPanelByThread;
-}
-
-function resolveReconciledActiveTerminalId(
-  panel: TerminalPanelState,
-  terminals: readonly TerminalInstance[],
-): string | null {
-  return terminals.some((terminal) => terminal.id === panel.activeTerminalId)
-    ? panel.activeTerminalId
-    : terminals[0]?.id ?? null;
+  return activeTerminalByScope;
 }
 
 function reconcileTerminalSearch(
@@ -229,74 +204,20 @@ function reconcileTerminalSearch(
   return next;
 }
 
-/** Zustand store for terminal instances and per-thread panel state. */
-export const useTerminalStore = create<TerminalState>((set, get) => ({
+/** Zustand store for terminal instances and the active terminal per scope. */
+export const useTerminalStore = create<TerminalState>((set) => ({
   hasHydrated: false,
   terminals: {},
-  terminalPanelByThread: {},
+  activeTerminalByScope: {},
   ptyToThread: {},
   terminalSearchByPty: {},
   splitMode: true,
 
-  getTerminalPanel: (threadId) =>
-    get().terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS,
-
-  toggleTerminalPanel: (threadId) =>
-    set((state) => {
-      const current = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
-      const nextVisible = !current.visible;
-      if (!nextVisible) setPtyPaused(state, threadId);
-      return {
-        terminalPanelByThread: {
-          ...state.terminalPanelByThread,
-          [threadId]: { ...current, visible: nextVisible },
-        },
-      };
-    }),
-
-  showTerminalPanel: (threadId) =>
-    set((state) => {
-      const current = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
-      return {
-        terminalPanelByThread: {
-          ...state.terminalPanelByThread,
-          [threadId]: { ...current, visible: true },
-        },
-      };
-    }),
-
-  hideTerminalPanel: (threadId) =>
-    set((state) => {
-      const current = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
-      if (current.visible) setPtyPaused(state, threadId);
-      return {
-        terminalPanelByThread: {
-          ...state.terminalPanelByThread,
-          [threadId]: { ...current, visible: false },
-        },
-      };
-    }),
-
-  setTerminalPanelHeight: () => {
-    // Replaced post-creation with a batched version below.
-    throw new Error("setTerminalPanelHeight not yet initialised");
-  },
-
   setActiveTerminal: (threadId, ptyId) =>
     set((state) => {
-      const current = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
-      if (current.visible && current.activeTerminalId !== ptyId) {
-        const transport = getTransport();
-        if (current.activeTerminalId) {
-          transport.terminalPause(current.activeTerminalId).catch(() => {});
-        }
-      }
-      return {
-        terminalPanelByThread: {
-          ...state.terminalPanelByThread,
-          [threadId]: { ...current, activeTerminalId: ptyId },
-        },
-      };
+      const previous = state.activeTerminalByScope[threadId] ?? null;
+      pauseReplacedShell(state.terminals[threadId], previous, ptyId);
+      return { activeTerminalByScope: { ...state.activeTerminalByScope, [threadId]: ptyId } };
     }),
 
   openTerminalSearch: (ptyId) =>
@@ -393,20 +314,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const existing = state.terminals[threadId] ?? [];
       if (existing.some((terminal) => terminal.id === ptyId) || existing.length >= TERMINAL_MAX_PER_SCOPE) return state;
       const instance = reconcileTerminalInstance({ ...metadata, ptyId, threadId, shell }, undefined, existing);
-      const currentPanel = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
-      if (currentPanel.visible && currentPanel.activeTerminalId) {
-        getTransport().terminalPause(currentPanel.activeTerminalId).catch(() => {});
-      }
+      const previous = state.activeTerminalByScope[threadId] ?? null;
+      if (instance.kind !== "action") pauseReplacedShell(existing, previous, ptyId);
       return {
         terminals: {
           ...state.terminals,
           [threadId]: [...existing, instance],
         },
         ptyToThread: { ...state.ptyToThread, [ptyId]: threadId },
-        terminalPanelByThread: {
-          ...state.terminalPanelByThread,
-          [threadId]: { ...currentPanel, visible: true, activeTerminalId: ptyId },
-        },
+        activeTerminalByScope: { ...state.activeTerminalByScope, [threadId]: ptyId },
       };
     }),
 
@@ -442,7 +358,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       ptyToThread[replacement.ptyId] = scopeId;
       const terminalSearchByPty = { ...state.terminalSearchByPty };
       delete terminalSearchByPty[ptyId];
-      const panel = state.terminalPanelByThread[scopeId] ?? TERMINAL_PANEL_DEFAULTS;
       return {
         ptyToThread,
         terminalSearchByPty,
@@ -452,10 +367,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             ? reconcileTerminalInstance(replacement, undefined, [])
             : terminal),
         },
-        terminalPanelByThread: {
-          ...state.terminalPanelByThread,
-          [scopeId]: { ...panel, activeTerminalId: replacement.ptyId },
-        },
+        activeTerminalByScope: { ...state.activeTerminalByScope, [scopeId]: replacement.ptyId },
       };
     }),
 
@@ -489,18 +401,14 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const remainingPtyToThread = { ...state.ptyToThread };
       delete remainingPtyToThread[ptyId];
 
-      const currentPanel = state.terminalPanelByThread[ownerThreadId] ?? TERMINAL_PANEL_DEFAULTS;
-      const needsNewActive = currentPanel.activeTerminalId === ptyId;
-      const nextActive = needsNewActive ? (filtered[0]?.id ?? null) : currentPanel.activeTerminalId;
+      const active = state.activeTerminalByScope[ownerThreadId] ?? null;
+      const nextActive = active === ptyId ? (filtered[0]?.id ?? null) : active;
 
       return {
         terminals: updatedTerminals,
         ptyToThread: remainingPtyToThread,
         terminalSearchByPty,
-        terminalPanelByThread: {
-          ...state.terminalPanelByThread,
-          [ownerThreadId]: { ...currentPanel, activeTerminalId: nextActive },
-        },
+        activeTerminalByScope: { ...state.activeTerminalByScope, [ownerThreadId]: nextActive },
       };
     }),
 
@@ -518,30 +426,24 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const terminalSearchByPty = { ...state.terminalSearchByPty };
       for (const t of threadTerminals) delete terminalSearchByPty[t.id];
 
-      const currentPanel = state.terminalPanelByThread[threadId];
       return {
         terminals: remainingTerminals,
         ptyToThread: remainingPtyToThread,
         terminalSearchByPty,
-        ...(currentPanel
-          ? {
-              terminalPanelByThread: {
-                ...state.terminalPanelByThread,
-                [threadId]: { ...currentPanel, activeTerminalId: null },
-              },
-            }
+        ...(threadId in state.activeTerminalByScope
+          ? { activeTerminalByScope: { ...state.activeTerminalByScope, [threadId]: null } }
           : {}),
       };
     }),
 
   clearThread: (threadId) =>
     set((state) => {
-      if (!state.terminals[threadId] && !state.terminalPanelByThread[threadId]) return state;
+      if (!state.terminals[threadId] && !(threadId in state.activeTerminalByScope)) return state;
       const threadTerminals = state.terminals[threadId];
       const remainingTerminals = { ...state.terminals };
       delete remainingTerminals[threadId];
-      const remainingPanels = { ...state.terminalPanelByThread };
-      delete remainingPanels[threadId];
+      const remainingActive = { ...state.activeTerminalByScope };
+      delete remainingActive[threadId];
 
       // Clean up reverse index for all removed PTYs.
       const remainingPtyToThread = { ...state.ptyToThread };
@@ -558,30 +460,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         terminals: remainingTerminals,
         ptyToThread: remainingPtyToThread,
         terminalSearchByPty,
-        terminalPanelByThread: remainingPanels,
+        activeTerminalByScope: remainingActive,
       };
     }),
 
   toggleSplit: () => set((state) => ({ splitMode: !state.splitMode })),
 }));
-
-// Wire setTerminalPanelHeight through a rAF-batched updater so rapid
-// mousemove events during drag-to-resize produce at most one React
-// re-render per animation frame instead of one per pixel.
-const batchedSet = createBatchedUpdater<TerminalState>(
-  useTerminalStore.setState.bind(useTerminalStore),
-);
-
-useTerminalStore.setState({
-  setTerminalPanelHeight: (threadId: string, height: number) => {
-    batchedSet((state) => {
-      const current = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
-      return {
-        terminalPanelByThread: {
-          ...state.terminalPanelByThread,
-          [threadId]: { ...current, height },
-        },
-      };
-    });
-  },
-});

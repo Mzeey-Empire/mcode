@@ -4,10 +4,7 @@ import type { TerminalBackendCapabilities } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
-import {
-  TERMINAL_PANEL_DEFAULTS,
-  useTerminalStore,
-} from "@/features/terminal/state/terminalStore";
+import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { TerminalView, loadXtermModules } from "./TerminalView";
 import { useTerminalPoolSlot } from "./TerminalPoolSlotContext";
 import { resolvePoolPresentation } from "./resolvePoolPresentation";
@@ -59,9 +56,7 @@ function useResolvedActiveTerminal(
 ) {
   const terminals = useTerminalStore((state) => state.terminals);
   const storedActiveTerminalId = useTerminalStore((state) =>
-    terminalScopeId
-      ? (state.terminalPanelByThread[terminalScopeId] ?? TERMINAL_PANEL_DEFAULTS).activeTerminalId
-      : null,
+    terminalScopeId ? state.activeTerminalByScope[terminalScopeId] ?? null : null,
   );
   const activeTerminalId = useMemo(
     () => resolveActiveTerminalId(terminalScopeId, storedActiveTerminalId, terminals),
