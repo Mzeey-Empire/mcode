@@ -284,6 +284,7 @@ describe("ws-events Project Actions", () => {
       startedAt: "2026-08-22T12:00:00.000Z",
       finishedAt: "2026-08-22T12:00:01.000Z",
       exitCode: 0,
+      port: null,
     };
     useProjectActionStore.setState({ runsByThread: {} });
     startPushListeners();
