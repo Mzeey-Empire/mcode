@@ -212,7 +212,7 @@ class StartupActionTail {
   ) {}
 
   header(line: string): void {
-    this.pending.push(line.slice(0, 4096));
+    this.pending.push(line.slice(0, 4095) + "\n");
     this.schedule();
   }
 

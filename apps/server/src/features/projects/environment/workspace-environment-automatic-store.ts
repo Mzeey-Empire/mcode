@@ -353,6 +353,7 @@ export class WorkspaceEnvironmentAutomaticStore {
       } : undefined,
       steps: startup.steps.map((step) => step.phase === "setup" ? {
         ...step, state: blocked ? "blocked" : "running", endedAt: undefined,
+        startedAt: !blocked && startup.state !== "running" ? now : step.startedAt,
         detail: { phase: "setup", actions: input.actions, exitCode: input.exitCode },
       } : step),
     };

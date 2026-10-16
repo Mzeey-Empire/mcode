@@ -145,6 +145,12 @@ function entries(f: Awaited<ReturnType<typeof harness>>): ThreadStartupAction[] 
   return detail?.phase === "setup" ? detail.actions ?? [] : [];
 }
 
+function setupStartedAt(f: Awaited<ReturnType<typeof harness>>): number {
+  const startedAt = f.startups.get(f.startupId)?.steps.find((step) => step.phase === "setup")?.startedAt;
+  if (!startedAt) throw new Error("Setup has not started");
+  return Date.parse(startedAt);
+}
+
 async function listener(host = "127.0.0.1") {
   const server = NodeNet.createServer((socket) => socket.end());
   await new Promise<void>((resolve, reject) => {
@@ -254,6 +260,7 @@ describe("startup actions through the real action service and port probe", () =>
     const setupSlot = { ...slot, actionId: "setup" };
     await eventually(() => expect(f.gate().attempt?.state).toBe("awaiting-approval"));
     expect(f.startups.get(f.startupId)?.block?.code).toBe("SETUP_APPROVAL_REQUIRED");
+    const beforeApproval = setupStartedAt(f);
     expect(await NodeFSPromises.readFile(f.file, "utf8")).toBe(f.bytes);
     const approval = f.projectActions.get(setupSlot)?.snapshot.approval;
     if (!approval) throw new Error("Expected shared approval");
@@ -262,6 +269,7 @@ describe("startup actions through the real action service and port probe", () =>
     expect(f.gate().attempt?.state).toBe("awaiting-approval");
     await f.projectActions.start(setupSlot);
     await eventually(() => expect(f.gate().attempt?.state).toBe("running"));
+    expect(setupStartedAt(f)).toBeGreaterThan(beforeApproval);
     expect(f.projectActions.get(setupSlot)?.trigger).toBe("startup");
     f.host.emitExit(f.commandId(), 1);
     await eventually(() => expect(f.gate().attempt?.state).toBe("failed"));
@@ -319,6 +327,29 @@ describe("startup actions through the real action service and port probe", () =>
     expect(f.dispatched).toEqual(["first-message"]);
   });
 
+  it("restarts the setup clock on retry and preserves it between running actions", async () => {
+    const f = await harness({ actions: [action("install"), action("check")] });
+    const id = await start(f);
+    const originalStart = setupStartedAt(f);
+    f.host.emitOutput(id, Buffer.from("failed attempt\n"));
+    f.host.emitExit(id, 3);
+    await eventually(() => expect(f.gate().attempt?.state).toBe("failed"));
+    const transcript = f.startups.get(f.startupId)?.transcript ?? [];
+    expect(transcript.map((entry) => entry.content)).toEqual(["$ echo ready\n", "failed attempt\n"]);
+    const lastOutputAt = Math.max(...transcript.map((entry) => Date.parse(entry.createdAt)));
+    await eventually(() => expect(Date.now()).toBeGreaterThan(lastOutputAt));
+
+    await f.service.retryAutomaticSetup({ threadId: ACTION_TEST_THREAD });
+    const retryStart = setupStartedAt(f);
+    expect(retryStart).toBeGreaterThan(originalStart);
+    expect(retryStart).toBeGreaterThan(lastOutputAt);
+    expect(entries(f).map((entry) => entry.outcome)).toEqual(["running", "pending"]);
+    await eventually(() => expect(Date.now()).toBeGreaterThan(retryStart));
+    f.host.emitExit(f.commandId(), 0);
+    await eventually(() => expect(entries(f).map((entry) => entry.outcome)).toEqual(["ready", "running"]));
+    expect(setupStartedAt(f)).toBe(retryStart);
+  });
+
   it("persists decoded output within 32 entries and 16 KB and retains it after reload", async () => {
     const f = await harness();
     const id = await start(f);
@@ -327,7 +358,7 @@ describe("startup actions through the real action service and port probe", () =>
     f.host.emitExit(id, 3);
     await eventually(() => expect(f.gate().attempt?.state).toBe("failed"));
     const record = new ThreadStartupRepo(f.reader, f.owned.writer).findById(f.startupId);
-    expect(record?.transcript.map((entry) => entry.content)).toEqual(["$ echo ready", "first\n", "link\n"]);
+    expect(record?.transcript.map((entry) => entry.content)).toEqual(["$ echo ready\n", "first\n", "link\n"]);
     await f.service.retryAutomaticSetup({ threadId: ACTION_TEST_THREAD });
     const next = f.commandId();
     for (let index = 0; index < 60; index++) f.host.emitOutput(next, Buffer.from(`${"é".repeat(1000)}-${index}\n`));

@@ -218,12 +218,23 @@ describe("StartupActionRunner", () => {
     await vi.advanceTimersByTimeAsync(249);
     expect(h.output).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
-    expect(h.output).toEqual([["$ echo install", "ready\n", "link"]]);
+    expect(h.output).toEqual([["$ echo install\n", "ready\n", "link"]]);
     h.projectActions.output("install", " done");
     h.projectActions.exit("install", 0);
     await vi.advanceTimersByTimeAsync(0);
-    expect(h.output).toEqual([["$ echo install", "ready\n", "link"], [" done"]]);
+    expect(h.output).toEqual([["$ echo install\n", "ready\n", "link"], [" done"]]);
     expect(h.passes()).toBe(1);
+  });
+
+  it("separates headers from output and caps each header at 4096 characters", async () => {
+    const h = harness();
+    const actionId = "x".repeat(4096);
+    await h.runner.start([{ actionId, script: `echo ${actionId}` }], []);
+    h.projectActions.output(actionId, "ready\n");
+    h.projectActions.exit(actionId, 0);
+    await eventually(() => expect(h.passes()).toBe(1));
+    expect(h.output.flat()).toEqual([`$ echo ${"x".repeat(4088)}\n`, "ready\n"]);
+    expect(h.output.flat().join("")).toBe(`$ echo ${"x".repeat(4088)}\nready\n`);
   });
 
   it("turns launch failures into a blocked action with the error detail", async () => {
