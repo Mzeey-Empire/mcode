@@ -48,22 +48,25 @@ export const { Provider: OverviewProjectActionsState, useEntryState: useProjectA
 function ProjectActions({ thread }: { thread: Thread }) {
   const { projectSetup, openProjectSettings } = useOverviewContext();
   const projectActions = useProjectActionsState();
-  const startProjectAction = useCallback(async (actionId: string) => {
-    const run = await projectActions.start(actionId);
-    useDiffStore.getState().ensureRightPanelTab(thread.workspace_id, thread.id, "terminal");
-    return run;
-  }, [projectActions, thread.id, thread.workspace_id]);
-  const approveProjectAction = useCallback(async (actionId: string, approval: import("@mcode/contracts").WorkspaceEnvironmentCommandApproval) => {
-    const run = await projectActions.approve(actionId, approval);
-    useDiffStore.getState().ensureRightPanelTab(thread.workspace_id, thread.id, "terminal");
-    return run;
-  }, [projectActions, thread.id, thread.workspace_id]);
-  const focusProjectAction = useCallback((actionId: string) => {
+  const revealTerminal = useCallback(() => {
     showRightPanelAdaptive(thread.workspace_id, thread.id);
     useDiffStore.getState().setRightPanelTab(thread.workspace_id, thread.id, "terminal");
+  }, [thread.id, thread.workspace_id]);
+  const startProjectAction = useCallback(async (actionId: string) => {
+    const run = await projectActions.start(actionId);
+    revealTerminal();
+    return run;
+  }, [projectActions, revealTerminal]);
+  const approveProjectAction = useCallback(async (actionId: string, approval: import("@mcode/contracts").WorkspaceEnvironmentCommandApproval) => {
+    const run = await projectActions.approve(actionId, approval);
+    revealTerminal();
+    return run;
+  }, [projectActions, revealTerminal]);
+  const focusProjectAction = useCallback((actionId: string) => {
+    revealTerminal();
     const ptyId = findActionTerminalId(thread.id, actionId);
     if (ptyId) useTerminalStore.getState().setActiveTerminal(thread.id, ptyId);
-  }, [thread.id, thread.workspace_id]);
+  }, [revealTerminal, thread.id]);
   const canRunManualSetup = canRunManualProjectSetup(thread);
   return (<ProjectActionMenu
     actions={projectActions.actions}
