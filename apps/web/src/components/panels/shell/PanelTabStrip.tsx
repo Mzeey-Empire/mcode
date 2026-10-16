@@ -9,6 +9,8 @@ export interface PanelTabStripItem {
   readonly label: string;
   /** A 14px glyph; hovering the tab swaps it for the close button. */
   readonly icon: ReactNode;
+  /** Spoken after the label, because the icon is hidden while the tab has focus or hover. */
+  readonly status?: string;
 }
 
 /** Props for {@link PanelTabStrip}. */
@@ -281,6 +283,7 @@ function PanelTab({
         className="text-fade min-w-0 text-left outline-none after:absolute after:inset-0 after:rounded-control focus-visible:after:outline-2 focus-visible:after:outline-focus"
       >
         {item.label}
+        {item.status ? <span className="sr-only">, {item.status}</span> : null}
       </button>
     </div>
   );

@@ -9,6 +9,13 @@ function badgeFor(run: WorkspaceEnvironmentActionRun | undefined): RunBadge | nu
   return null;
 }
 
+/** Spoken form of the tab badge, which is colour only. */
+export function actionBadgeLabel(run: WorkspaceEnvironmentActionRun | undefined): string | undefined {
+  const badge = badgeFor(run);
+  if (badge === null) return undefined;
+  return badge === "running" ? "Running" : "Failed";
+}
+
 /**
  * Project Action tab icon with badges for running and failed runs.
  * The play mark is a placeholder until the action icon set lands.
@@ -22,8 +29,7 @@ export function ActionTabGlyph({ run }: { readonly run: WorkspaceEnvironmentActi
         <span
           data-testid="action-tab-badge"
           data-badge={badge}
-          role="img"
-          aria-label={badge === "running" ? "Running" : "Failed"}
+          aria-hidden
           className={`absolute -right-[3px] -bottom-[3px] size-2 rounded-full ring-2 ring-page ${
             badge === "running" ? "bg-success" : "bg-error"
           }`}

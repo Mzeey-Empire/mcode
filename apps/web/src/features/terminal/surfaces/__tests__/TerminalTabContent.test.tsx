@@ -305,7 +305,7 @@ describe("Terminal tool header", () => {
       renderTool();
 
       expect(screen.getByTestId("action-tab-badge")).toHaveAttribute("data-badge", badge);
-      expect(screen.getByRole("img", { name: label })).toBe(screen.getByTestId("action-tab-badge"));
+      expect(screen.getByRole("button", { name: `web, ${label}` })).toHaveAttribute("aria-pressed");
     });
 
     it("shows no badge once the run completed", () => {

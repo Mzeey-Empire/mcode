@@ -5,7 +5,7 @@ import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { PanelTabStrip, type PanelTabStripItem } from "@/components/panels/shell/PanelTabStrip";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
 import { createTerminalForScope } from "@/lib/ensure-terminal";
-import { ActionTabGlyph } from "./ActionTabGlyph";
+import { ActionTabGlyph, actionBadgeLabel } from "./ActionTabGlyph";
 import { TERMINAL_CAP_REASON } from "./terminalTabs";
 
 interface TerminalTabStripProps {
@@ -22,16 +22,15 @@ interface TerminalTabStripProps {
 export function TerminalTabStrip({ scopeId, terminals, activeId, labels, actionRuns, onClose }: TerminalTabStripProps) {
   const items = useMemo<readonly PanelTabStripItem[]>(
     () =>
-      terminals.map((terminal) => ({
-        id: terminal.id,
-        label: labels.get(terminal.id) ?? terminal.label,
-        icon:
-          terminal.kind === "action" ? (
-            <ActionTabGlyph run={terminal.actionId ? actionRuns[terminal.actionId] : undefined} />
-          ) : (
-            <Terminal aria-hidden />
-          ),
-      })),
+      terminals.map((terminal) => {
+        const run = terminal.kind === "action" && terminal.actionId ? actionRuns[terminal.actionId] : undefined;
+        return {
+          id: terminal.id,
+          label: labels.get(terminal.id) ?? terminal.label,
+          icon: terminal.kind === "action" ? <ActionTabGlyph run={run} /> : <Terminal aria-hidden />,
+          status: actionBadgeLabel(run),
+        };
+      }),
     [actionRuns, labels, terminals],
   );
   return (
