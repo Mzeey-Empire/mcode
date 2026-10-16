@@ -37,6 +37,7 @@ function actionRun(overrides: Partial<WorkspaceEnvironmentActionRun> = {}): Work
     revision: 0,
     terminalSessionId: "pty-1",
     trigger: "manual",
+    port: null,
     actionName: "web",
     status: "running",
     snapshot: {

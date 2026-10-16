@@ -468,6 +468,7 @@ export const projectActionRuns = sqliteTable(
     revision: integer("revision").notNull().default(0),
     terminalSessionId: text("terminal_session_id"),
     trigger: text("trigger").notNull().default("manual"),
+    portJson: text("port_json"),
     actionName: text("action_name").notNull(),
     status: text("status").notNull(),
     snapshotJson: text("snapshot_json").notNull(),

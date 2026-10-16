@@ -3,6 +3,7 @@ import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import type {
   WorkspaceEnvironmentActionRun,
+  WorkspaceEnvironmentActionPort,
   WorkspaceEnvironmentActionLaunchSnapshot,
   WorkspaceEnvironmentActionSlotInput,
 } from "@mcode/contracts";
@@ -35,6 +36,7 @@ import {
 import { WorkspaceEnvironmentService } from "./workspace-environment-service.js";
 import { WorkspaceEnvironmentServiceError } from "./workspace-environment-errors.js";
 import { ProjectActionRunRepo } from "./persistence/project-action-run-repo.js";
+import { ActionPortMonitor } from "./action-port-monitor.js";
 
 /** Clock used to timestamp Project Action lifecycle transitions. */
 export type ProjectActionClock = () => Date;
@@ -326,13 +328,27 @@ export class ProjectActionService {
     this.active.set(context.slot, active);
     await this.publisher.persistAndPublish(active.run);
     const runId = active.run.runId;
-    const unsubscribe = [
-      session.onCommandExit((exit) => this.finishAction(context.slot, runId, exit.exitCode)),
-    ];
+    const monitor = new ActionPortMonitor(runId, () => this.runFactory.timestamp(), (port) => {
+      void this.publishPort(context.slot, active, port).catch((error: unknown) => {
+        logger.error("Project Action port publication failed", { runId, error: String(error) });
+      });
+    });
+    const unsubscribe = [() => monitor.stop()];
     const tracked = this.terminals.get(context.slot);
     if (tracked) tracked.unsubscribe = unsubscribe;
+    unsubscribe.push(session.onCommandOutput((bytes) => monitor.write(bytes)));
+    unsubscribe.push(session.onCommandExit((exit) => this.finishAction(context.slot, runId, exit.exitCode)));
+    if (active.state !== "running") for (const remove of unsubscribe) remove();
     this.settleStartingReservation(context);
     return active.run;
+  }
+
+  private async publishPort(slot: string, active: ActiveProjectAction, port: WorkspaceEnvironmentActionPort): Promise<void> {
+    if (this.active.get(slot) !== active || active.state !== "running") return;
+    const run = { ...active.run, revision: active.run.revision + 1, port };
+    active.run = run;
+    const persisted = await this.runs.updateIfCurrent(run);
+    if (persisted && active.run === run && active.state === "running") this.publisher.publish(run);
   }
 
   private async handleLaunchFailure(
@@ -389,17 +405,22 @@ export class ProjectActionService {
     readonly actionId: string;
     readonly actionName: string;
     readonly snapshot: ProjectActionResolution["snapshot"];
+    readonly port: WorkspaceEnvironmentActionPort | null;
   } {
+    const previousPort = this.runs.get(context.thread.id, context.actionId)?.port;
     return {
       threadId: context.thread.id,
       workspaceId: context.thread.workspace_id,
       actionId: resolved.action.id,
       actionName: resolved.action.name,
       snapshot: resolved.snapshot,
+      port: previousPort ? { ...previousPort, reachable: false } : null,
     };
   }
 
   private finishAction(slot: string, runId: string, exitCode: number | null): void {
+    const active = this.active.get(slot);
+    if (active?.state === "running" && active.run.runId === runId) this.clearRunListeners(slot);
     void this.runLifecycle.finish(slot, runId, exitCode).catch((error: unknown) => {
       logger.error("Project Action completion publication failed", { runId, error: error instanceof Error ? error.message : String(error) });
     });

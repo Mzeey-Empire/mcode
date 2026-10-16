@@ -1,6 +1,7 @@
 import type {
   WorkspaceEnvironmentActionLaunchSnapshot,
   WorkspaceEnvironmentActionRun,
+  WorkspaceEnvironmentActionPort,
   WorkspaceEnvironmentPlatform,
 } from "@mcode/contracts";
 import type { ActionTerminal } from "../../terminal/backends/terminal-backend.js";
@@ -64,6 +65,7 @@ export class ProjectActionRunFactory {
       runId: this.createRunId(),
       revision: 0,
       trigger: "manual",
+      port: input.port,
       terminalSessionId: input.session.terminalSessionId,
       actionName: input.actionName,
       status: "running",
@@ -84,7 +86,7 @@ export class ProjectActionRunFactory {
 
   private base(
     input: ProjectActionRunInput,
-    values: Omit<WorkspaceEnvironmentActionRun, "threadId" | "workspaceId" | "actionId" | "runId" | "revision" | "trigger" | "actionName" | "snapshot">,
+    values: Omit<WorkspaceEnvironmentActionRun, "threadId" | "workspaceId" | "actionId" | "runId" | "revision" | "trigger" | "port" | "actionName" | "snapshot">,
   ): WorkspaceEnvironmentActionRun {
     return {
       threadId: input.threadId,
@@ -93,6 +95,7 @@ export class ProjectActionRunFactory {
       runId: this.createRunId(),
       revision: 0,
       trigger: "manual",
+      port: input.port,
       actionName: input.actionName,
       snapshot: input.snapshot,
       ...values,
@@ -102,6 +105,7 @@ export class ProjectActionRunFactory {
 
 /** Shared facts for one retained Project Action run. */
 export interface ProjectActionRunInput {
+  readonly port: WorkspaceEnvironmentActionPort | null;
   readonly threadId: string;
   readonly workspaceId: string;
   readonly actionId: string;
@@ -117,6 +121,7 @@ export interface ProjectActionFailedRunInput extends Omit<ProjectActionRunInput,
 
 /** Facts for a running Action terminal session. */
 export interface ProjectActionActiveRunInput {
+  readonly port: WorkspaceEnvironmentActionPort | null;
   readonly threadId: string;
   readonly workspaceId: string;
   readonly actionId: string;

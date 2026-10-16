@@ -326,6 +326,19 @@ export type WorkspaceEnvironmentActionLaunchSnapshot = z.infer<
 /** Whether a user or thread startup initiated an action run. */
 export const WorkspaceEnvironmentActionRunTriggerSchema = z.enum(["manual", "startup"]);
 
+/** TCP reachability observed for a URL printed by an action run. */
+export const WorkspaceEnvironmentActionPortSchema = lazySchema(() => z.object({
+  runId: z.string().min(1).max(256),
+  port: z.number().int().min(1).max(65_535),
+  host: z.enum(["localhost", "127.0.0.1", "::1", "0.0.0.0", "::"]),
+  url: z.string().url().max(2_048),
+  reachable: z.boolean(),
+  detectedAt: z.string().datetime(),
+}).strict());
+
+/** A confirmed action URL, retained as history after its run ends. */
+export type WorkspaceEnvironmentActionPort = z.infer<ReturnType<typeof WorkspaceEnvironmentActionPortSchema>>;
+
 /** Latest retained result for the stable {threadId, actionId} Project Action slot. */
 export const WorkspaceEnvironmentActionRunSchema = lazySchema(() =>
   z.object({
@@ -336,6 +349,7 @@ export const WorkspaceEnvironmentActionRunSchema = lazySchema(() =>
     revision: z.number().int().nonnegative().max(2_147_483_647),
     terminalSessionId: z.string().min(1).max(256).nullable(),
     trigger: WorkspaceEnvironmentActionRunTriggerSchema,
+    port: WorkspaceEnvironmentActionPortSchema().nullable(),
     actionName: z.string().min(1).max(256),
     status: WorkspaceEnvironmentActionRunStatusSchema,
     snapshot: WorkspaceEnvironmentActionLaunchSnapshotSchema(),
@@ -351,6 +365,8 @@ export type WorkspaceEnvironmentActionRun = z.infer<
 >;
 
 type WorkspaceActionRunValidationInput = {
+  readonly runId: string;
+  readonly port: WorkspaceEnvironmentActionPort | null;
   readonly status: WorkspaceEnvironmentActionRunStatus;
   readonly snapshot: { readonly approval?: unknown | null };
   readonly startedAt: string | null;
@@ -359,12 +375,17 @@ type WorkspaceActionRunValidationInput = {
 };
 
 function validateWorkspaceActionRun(run: WorkspaceActionRunValidationInput, context: z.RefinementCtx): void {
+  reportValidation(hasInvalidLivePort(run), context, ["port"], "Reachable ports must belong to the current running Action");
   reportValidation(run.status === "running" && hasInvalidRunningActionLifecycle(run), context, [], "Running Action runs require an active lifecycle");
   reportValidation(run.status === "awaiting-approval" && hasInvalidApprovalActionLifecycle(run), context, [], "Approval-waiting Action runs require an approved command snapshot");
   reportValidation(!isActiveActionRun(run.status) && run.finishedAt === null, context, ["finishedAt"], "Completed Action runs require a finish time");
   reportValidation(run.status === "completed" && run.exitCode !== 0, context, ["exitCode"], "Completed Action runs require exit code zero");
   reportValidation(["interrupted", "unavailable"].includes(run.status) && run.exitCode !== null, context, ["exitCode"], "Interrupted and unavailable Action runs cannot include an exit code");
   reportValidation(["failed", "completed"].includes(run.status) && run.startedAt === null, context, ["startedAt"], "Exited Action runs require a start time");
+}
+
+function hasInvalidLivePort(run: WorkspaceActionRunValidationInput): boolean {
+  return run.port?.reachable === true && (run.status !== "running" || run.port.runId !== run.runId);
 }
 
 function hasInvalidRunningActionLifecycle(run: WorkspaceActionRunValidationInput): boolean {

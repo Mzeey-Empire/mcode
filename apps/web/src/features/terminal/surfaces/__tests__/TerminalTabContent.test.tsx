@@ -66,6 +66,7 @@ function actionRun(overrides: Partial<WorkspaceEnvironmentActionRun> = {}): Work
     revision: 0,
     terminalSessionId: "pty-action",
     trigger: "manual",
+    port: null,
     actionName: "web",
     status: "running",
     snapshot: { platform: "linux", script: "bun run dev", checkoutPath: "/repo", terminal: null, environmentNames: [] },

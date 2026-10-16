@@ -11,6 +11,7 @@ function run(runId: string, createdAt: string): WorkspaceEnvironmentActionRun {
     revision: 0,
     terminalSessionId: `${runId}-terminal`,
     trigger: "manual",
+    port: null,
     actionName: "Build",
     status: "running",
     snapshot: {
