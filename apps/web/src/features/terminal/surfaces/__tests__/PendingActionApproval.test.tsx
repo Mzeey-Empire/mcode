@@ -93,7 +93,7 @@ describe("PendingActionApproval", () => {
 
     await waitFor(() => expect(useTerminalStore.getState().terminals["thread-1"]?.[0]?.state).toBe("running"));
     expect(approveWorkspaceEnvironmentCommand).toHaveBeenCalledWith("thread-1", approval.target, approval.fingerprint);
-    expect(startWorkspaceAction).toHaveBeenCalledWith("thread-1", "web");
+    expect(startWorkspaceAction).toHaveBeenCalledWith("thread-1", "web", "run-1");
     expect(order).toEqual(["approve", "start"]);
     expect(useTerminalStore.getState().terminals["thread-1"]).toHaveLength(1);
   });
@@ -126,9 +126,10 @@ describe("PendingActionApproval", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
   });
 
-  it("does not start the action when the tab is closed while the approval is in flight", async () => {
+  it("stays quiet when the server reports the tab was closed while the approval was in flight", async () => {
     let finishApproval: () => void = () => {};
     approveWorkspaceEnvironmentCommand.mockReturnValue(new Promise<void>((resolve) => (finishApproval = resolve)));
+    startWorkspaceAction.mockRejectedValue({ code: "WORKSPACE_ENVIRONMENT_RUN_CLOSED" });
     seed(run());
     render(surface);
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
@@ -136,7 +137,9 @@ describe("PendingActionApproval", () => {
     act(() => useTerminalStore.getState().removeTerminal("pty-1"));
     await act(async () => finishApproval());
 
-    expect(startWorkspaceAction).not.toHaveBeenCalled();
+    expect(startWorkspaceAction).toHaveBeenCalledWith("thread-1", "web", "run-1");
+    expect(useToastStore.getState().toasts).toEqual([]);
+    expect(useTerminalStore.getState().terminals["thread-1"] ?? []).toEqual([]);
   });
 
   it("keeps a request in flight for one pending tab from disabling the next tab's card", async () => {

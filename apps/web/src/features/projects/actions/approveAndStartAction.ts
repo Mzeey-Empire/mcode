@@ -1,15 +1,11 @@
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { applyActionRun } from "@/features/terminal/state/applyActionRun";
-import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { isProjectCommandApprovalInvalid } from "@/features/projects/environment/ProjectCommandApprovalDialog";
-import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { getTransport } from "@/transport";
 
-/** True while the run still waits in its own terminal, so approving it is still what the user wants. */
-function isStillAwaiting(run: WorkspaceEnvironmentActionRun): boolean {
-  if (run.terminalSessionId === null || !useTerminalStore.getState().ptyToThread[run.terminalSessionId]) return false;
-  const current = useProjectActionStore.getState().runsByThread[run.threadId]?.[run.actionId];
-  return current?.runId === run.runId && current.status === "awaiting-approval";
+function isRunClosed(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error
+    && (error as { readonly code?: unknown }).code === "WORKSPACE_ENVIRONMENT_RUN_CLOSED";
 }
 
 /**
@@ -19,8 +15,8 @@ function isStillAwaiting(run: WorkspaceEnvironmentActionRun): boolean {
  * decide, and a changed command comes back as a renewed `awaiting-approval` run that the card
  * shows again with the new script.
  *
- * Returns `null` without starting when the user closed the pending tab while the approval was in
- * flight, because starting then would run the command in a new terminal after the user cancelled.
+ * The start is bound to the run the user approved. Returns `null` when the server reports that run's
+ * pending tab closed meanwhile, because the user cancelled and the command must not run elsewhere.
  */
 export async function approveAndStartAction(run: WorkspaceEnvironmentActionRun): Promise<WorkspaceEnvironmentActionRun | null> {
   const transport = getTransport();
@@ -32,8 +28,12 @@ export async function approveAndStartAction(run: WorkspaceEnvironmentActionRun):
       if (!isProjectCommandApprovalInvalid(error)) throw error;
     }
   }
-  if (!isStillAwaiting(run)) return null;
-  const started = await transport.startWorkspaceAction(run.threadId, run.actionId);
-  applyActionRun(started, { focus: true });
-  return started;
+  try {
+    const started = await transport.startWorkspaceAction(run.threadId, run.actionId, run.runId);
+    applyActionRun(started, { focus: true });
+    return started;
+  } catch (error) {
+    if (isRunClosed(error)) return null;
+    throw error;
+  }
 }

@@ -142,7 +142,11 @@ approval card over that terminal and, on Run, approves the fingerprint then
 starts the Action. Starting creates a new run with a later `createdAt` on the
 same terminal, never a status change on the awaiting run. The client's
 retained-run store depends on this and rejects a same-run move to `running`.
-Closing the terminal while it waits interrupts the run.
+Closing the terminal while it waits interrupts the run. The client passes the
+approved `runId` as `expectedRunId`, and the server refuses with
+`WORKSPACE_ENVIRONMENT_RUN_CLOSED` instead of opening a fresh terminal when that
+run is no longer waiting on an open one. Without it, a tab closed while Run was
+in flight would be replaced by a new terminal running the approved command.
 
 The terminal replay includes a synthesized command echo and both processes'
 output and is the output record for the Action's terminal tab. Retained runs
