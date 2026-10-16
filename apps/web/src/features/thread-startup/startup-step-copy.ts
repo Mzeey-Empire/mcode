@@ -96,7 +96,7 @@ export function setupCommandLine(script: string | null | undefined): string | un
 
 /** What the setup step shows of its startup actions, read from the retained action runs. */
 export interface StartupSetupView {
-  /** First script line of each action that has launched, in sequence order. */
+  /** First script line of each launched action in sequence order, or the slot's action name once a manual rerun replaced its run. */
   readonly commands: readonly string[];
   /** The action run waiting for the user's approval, if any. */
   readonly pending: WorkspaceEnvironmentActionRun | undefined;
@@ -120,9 +120,11 @@ export function startupSetupView(
   const terminalOf = (outcome: ThreadStartupAction["outcome"]) =>
     launched.find(({ entry }) => entry.outcome === outcome)?.run.terminalSessionId ?? null;
   return {
-    commands: launched
-      .filter(({ entry }) => entry.outcome !== "pending")
-      .map(({ run }) => setupCommandLine(run.snapshot.script) ?? run.actionName),
+    commands: actions.flatMap((entry) => {
+      const run = runs[entry.actionId];
+      if (!run || entry.outcome === "pending") return [];
+      return [isLaunchedBySequence(entry, run) ? setupCommandLine(run.snapshot.script) ?? run.actionName : run.actionName];
+    }),
     pending: launched.find(({ run }) => run.status === "awaiting-approval")?.run,
     terminalSessionId: terminalOf("running") ?? terminalOf("failed"),
   };

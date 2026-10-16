@@ -221,9 +221,10 @@ bun other`, checkoutPath: "/repo", terminal: null, environmentNames: [] },
     expect(view.terminalSessionId).toBe("check-pty");
   });
 
-  it("drops a run the sequence did not launch, since a manual restart replaces the retained run", () => {
-    const view = startupSetupView([action("install", "running", "install-run")], { install: run("install", { runId: "manual-run" }) });
-    expect(view).toEqual({ commands: [], pending: undefined, terminalSessionId: null });
+  it("names a replaced run by its action and keeps it out of approval and terminal selection", () => {
+    const replaced = run("install", { runId: "manual-run", status: "awaiting-approval", actionName: "Install" });
+    const view = startupSetupView([action("install", "running", "install-run")], { install: replaced });
+    expect(view).toEqual({ commands: ["Install"], pending: undefined, terminalSessionId: null });
   });
 
   it("exposes the run waiting for approval and points Open terminal at the failed action", () => {

@@ -197,6 +197,18 @@ function SetupApprovalActions({ threadId, view }: { readonly threadId: string; r
   );
 }
 
+/** A startup action that never exits (a dev server, a watcher) holds the first turn until the user skips it. */
+function SetupRunningActions({ threadId, view }: { readonly threadId: string; readonly view: StartupSetupView }) {
+  const decision = useStartupSetupDecision(threadId, view.pending);
+  return (
+    <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} loading={decision.pending === "skip"} onClick={() => decision.run("skip")}>Skip setup</Button>
+  );
+}
+
+function runsSetup(startup: ThreadStartup | undefined): startup is ThreadStartup & { readonly threadId: string } {
+  return startup?.state === "running" && startup.phase === "setup" && startup.threadId !== undefined;
+}
+
 function FetchFailedActions({ startup }: { readonly startup: ThreadStartup }) {
   const decision = useStartupFetchDecision(startup);
   return decision ? <OriginFetchActions decision={decision} /> : null;
@@ -212,6 +224,7 @@ function StartupDecisionActions({ startup, view, outputOpen, onToggleOutput }: {
   const decision = startupDecision(startup);
   if (decision === "fetch-failed") return <FetchFailedActions startup={startup} />;
   if (!startup.threadId) return null;
+  if (runsSetup(startup)) return <SetupRunningActions threadId={startup.threadId} view={view} />;
   if (decision === "setup-failed") return <SetupFailedActions threadId={startup.threadId} view={view} outputOpen={outputOpen} onToggleOutput={onToggleOutput} />;
   if (decision === "setup-approval") return <SetupApprovalActions threadId={startup.threadId} view={view} />;
   return null;
@@ -219,7 +232,7 @@ function StartupDecisionActions({ startup, view, outputOpen, onToggleOutput }: {
 
 function offersOwnDecision(startup: ThreadStartup | undefined): startup is ThreadStartup {
   const decision = startupDecision(startup);
-  if (decision === "fetch-failed") return true;
+  if (decision === "fetch-failed" || runsSetup(startup)) return true;
   return (decision === "setup-failed" || decision === "setup-approval") && startup?.threadId !== undefined;
 }
 

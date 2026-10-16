@@ -232,6 +232,20 @@ describe("StartupStepsTrail", () => {
     expect(startupTransport.continueAutomaticSetup).toHaveBeenCalledWith("thread-1");
   });
 
+  it("lets the user skip a running setup that never exits, beside Cancel", async () => {
+    seedRun("bun run dev", { status: "running" });
+    renderTrail({ startup: startup(), kind: "managed-worktree" });
+
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Skip setup" }));
+    expect(startupTransport.continueAutomaticSetup).toHaveBeenCalledWith("thread-1");
+  });
+
+  it("offers no Skip setup before setup starts", () => {
+    renderTrail({ startup: startup({ phase: "worktree", steps: [{ phase: "thread", state: "completed" }, { phase: "worktree", state: "running", startedAt: at(0) }, { phase: "setup", state: "pending" }, { phase: "agent", state: "pending" }] }), kind: "managed-worktree" });
+    expect(screen.queryByRole("button", { name: "Skip setup" })).toBeNull();
+  });
+
   it("asks to run a shared setup with its command, then approves and starts the action", async () => {
     const pending = seedRun("bun install\nbun run build", {
       status: "awaiting-approval",
