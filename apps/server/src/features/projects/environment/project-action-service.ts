@@ -321,14 +321,12 @@ export class ProjectActionService {
         snapshot,
       }),
       pendingFinalization: null,
-      outputRemainder: new Uint8Array(),
       stopping: false,
     };
     this.active.set(context.slot, active);
     await this.publisher.persistAndPublish(active.run);
     const runId = active.run.runId;
     const unsubscribe = [
-      session.onCommandOutput((data) => this.runLifecycle.recordOutput(context.slot, runId, data)),
       session.onCommandExit((exit) => this.finishAction(context.slot, runId, exit.exitCode)),
     ];
     const tracked = this.terminals.get(context.slot);

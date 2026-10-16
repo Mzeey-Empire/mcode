@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentActionRun, WorkspaceEnvironmentReadResult } from "@mcode/contracts";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { ProjectActionMenu, ProjectActionTerminalView, useProjectActions } from "../ProjectActionControl";
+import { ProjectActionMenu, useProjectActions } from "../ProjectActionControl";
 import { useProjectActionStore } from "../state/project-action-store";
 
 const { transport } = vi.hoisted(() => ({
@@ -40,8 +40,6 @@ const completedRun: WorkspaceEnvironmentActionRun = {
   startedAt: "2026-08-22T12:00:00.000Z",
   finishedAt: "2026-08-22T12:00:01.000Z",
   exitCode: 0,
-  transcript: "done",
-  transcriptTruncated: false,
 };
 
 function ActionHydrationHarness() {
@@ -248,158 +246,6 @@ describe("ProjectAction controls", () => {
     expect(running).not.toHaveTextContent("Running");
   });
 
-  it("keeps the completed icon for two seconds, then exposes Restart", () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-08-22T12:00:01.000Z"));
-      act(() => useProjectActionStore.getState().applyRun(completedRun));
-      render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
-      const completed = screen.getByRole("status", { name: "Completed" });
-      expect(completed).not.toHaveTextContent("Completed");
-      act(() => { vi.advanceTimersByTime(2_000); });
-      expect(screen.getByRole("button", { name: "Restart Build" })).toBeInTheDocument();
-      expect(screen.getByText("done")).toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("does not restart the completed icon when an old result remounts", () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-08-22T12:00:01.000Z"));
-      act(() => useProjectActionStore.getState().applyRun(completedRun));
-
-      const first = render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
-      expect(screen.getByRole("status", { name: "Completed" })).toBeInTheDocument();
-      first.unmount();
-      act(() => { vi.advanceTimersByTime(2_000); });
-
-      render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
-      expect(screen.getByRole("button", { name: "Restart Build" })).toBeInTheDocument();
-      expect(screen.queryByRole("status", { name: "Completed" })).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("restarts a running Action from its retained terminal after the server stop barrier", async () => {
-    const user = userEvent.setup();
-    const running = { ...completedRun, status: "running" as const, finishedAt: null, exitCode: null };
-    const restarted = {
-      ...running,
-      runId: "run-2",
-      revision: 0,
-      terminalSessionId: "terminal-2",
-      createdAt: "2026-08-22T12:00:02.000Z",
-      startedAt: "2026-08-22T12:00:02.000Z",
-    };
-    transport.restartWorkspaceAction.mockResolvedValue(restarted);
-    act(() => useProjectActionStore.getState().applyRun(running));
-
-    render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
-    await user.click(screen.getByRole("button", { name: "Restart Build" }));
-
-    await waitFor(() => expect(transport.restartWorkspaceAction).toHaveBeenCalledWith("thread-1", "build"));
-    expect(useProjectActionStore.getState().runsByThread["thread-1"]?.build).toMatchObject({
-      runId: "run-2",
-      terminalSessionId: "terminal-2",
-      status: "running",
-    });
-  });
-
-  it("restarts a completed Action from its retained terminal header", async () => {
-    const user = userEvent.setup();
-    const restarted = {
-      ...completedRun,
-      runId: "run-2",
-      revision: 0,
-      terminalSessionId: "terminal-2",
-      status: "running" as const,
-      exitCode: null,
-      finishedAt: null,
-      createdAt: "2026-08-22T12:00:02.000Z",
-      startedAt: "2026-08-22T12:00:02.000Z",
-    };
-    transport.restartWorkspaceAction.mockResolvedValue(restarted);
-    act(() => useProjectActionStore.getState().applyRun(completedRun));
-
-    render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
-    await user.click(screen.getByRole("button", { name: "Restart Build" }));
-
-    await waitFor(() => expect(transport.restartWorkspaceAction).toHaveBeenCalledWith("thread-1", "build"));
-    expect(useProjectActionStore.getState().runsByThread["thread-1"]?.build).toMatchObject({
-      runId: "run-2",
-      terminalSessionId: "terminal-2",
-      status: "running",
-    });
-  });
-
-  it("reports a failed stop without removing the running Action result", async () => {
-    const user = userEvent.setup();
-    const running = { ...completedRun, status: "running" as const, finishedAt: null, exitCode: null };
-    transport.stopWorkspaceAction.mockRejectedValue(new Error("cleanup failed"));
-    act(() => useProjectActionStore.getState().applyRun(running));
-
-    render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
-    await user.click(screen.getByRole("button", { name: "Stop Build" }));
-
-    await waitFor(() => expect(transport.stopWorkspaceAction).toHaveBeenCalledWith("thread-1", "build"));
-    expect(await screen.findByText("Project Action could not stop.")).toBeInTheDocument();
-    expect(useProjectActionStore.getState().runsByThread["thread-1"]?.build).toMatchObject({
-      runId: "run-1",
-      status: "running",
-    });
-  });
-
-  it("keeps the failed icon for two seconds, then exposes Restart", () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-08-22T12:00:01.000Z"));
-      act(() => useProjectActionStore.getState().applyRun({ ...completedRun, status: "failed", exitCode: 1 }));
-      render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
-
-      const failed = screen.getByRole("status", { name: "Failed" });
-      expect(failed).not.toHaveTextContent("Failed");
-      act(() => { vi.advanceTimersByTime(2_000); });
-      expect(screen.getByRole("button", { name: "Restart Build" })).toBeInTheDocument();
-      expect(screen.queryByRole("status", { name: "Failed" })).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it.each([
-    ["interrupted", "Interrupted"],
-    ["unavailable", "Unavailable"],
-  ] as const)("keeps the %s status after the result display window", (status, label) => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-08-22T12:00:01.000Z"));
-      act(() => useProjectActionStore.getState().applyRun({ ...completedRun, status, exitCode: 1 }));
-      render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
-
-      act(() => { vi.advanceTimersByTime(2_000); });
-      const result = screen.getByRole("status", { name: label });
-      expect(result).not.toHaveTextContent(label);
-      expect(screen.queryByLabelText("Play")).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("renders ANSI transcript text without exposing control sequences", () => {
-    act(() => useProjectActionStore.getState().applyRun({
-      ...completedRun,
-      transcript: "\u001b[32mgreen output\u001b[0m",
-    }));
-
-    render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
-
-    expect(screen.getByText("green output")).toHaveClass("text-success");
-    expect(screen.getByLabelText("Build output").textContent).not.toContain("\u001b[");
-  });
-
   it("does not expose stale Setup availability after its scope changes", async () => {
     const configuredEnvironment = {
       document: { version: "0.0.1" as const, setup: { default: "bun run setup" }, actions: [] },
@@ -446,7 +292,6 @@ describe("ProjectAction controls", () => {
     act(() => useProjectActionStore.getState().applyRun({
       ...completedRun,
       revision: 2,
-      transcript: "completed after the request began",
     }));
     act(() => resolveList([{
       ...completedRun,
@@ -454,7 +299,6 @@ describe("ProjectAction controls", () => {
       status: "running",
       finishedAt: null,
       exitCode: null,
-      transcript: "stale list result",
     }]));
 
     await waitFor(() => {

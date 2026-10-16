@@ -266,7 +266,7 @@ describe("workspace environment contracts", () => {
     }).success).toBe(false);
   });
 
-  it("accepts the retained latest Action result and rejects an unbounded transcript", () => {
+  it("accepts the retained latest Action result and rejects obsolete transcript data", () => {
     const run = WorkspaceEnvironmentActionRunSchema().parse({
       threadId: "thread-1",
       workspaceId: "workspace-1",
@@ -291,8 +291,6 @@ describe("workspace environment contracts", () => {
       startedAt: "2026-08-22T12:00:00.000Z",
       finishedAt: "2026-08-22T12:00:05.000Z",
       exitCode: 0,
-      transcript: "done",
-      transcriptTruncated: false,
     });
 
     expect(run.status).toBe("completed");
@@ -301,7 +299,7 @@ describe("workspace environment contracts", () => {
     expect(WorkspaceEnvironmentActionRunSchema().safeParse({ ...run, trigger: "scheduled" }).success).toBe(false);
     expect(WorkspaceEnvironmentActionRunSchema().safeParse({
       ...run,
-      transcript: "x".repeat(WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES * 9),
+      transcript: "obsolete output",
     }).success).toBe(false);
     expect(WorkspaceEnvironmentActionRunSchema().safeParse({
       ...run,

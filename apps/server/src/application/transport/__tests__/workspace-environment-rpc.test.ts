@@ -20,6 +20,7 @@ describe("workspace environment RPC", () => {
     runId: "run-1",
     revision: 0,
     terminalSessionId: "terminal-1",
+    trigger: "manual",
     actionName: "Run app",
     status: "running",
     snapshot: {
@@ -33,8 +34,6 @@ describe("workspace environment RPC", () => {
     startedAt: "2026-08-30T00:00:00.000Z",
     finishedAt: null,
     exitCode: null,
-    transcript: "",
-    transcriptTruncated: false,
   };
 
   it("serves valid read/save calls and reports malformed payloads structurally", async () => {

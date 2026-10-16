@@ -736,11 +736,12 @@ export interface McodeTransport {
     lastSeq: number,
     cold?: boolean,
   ): Promise<
-    | { mode: "delta" }
+    | { mode: "delta"; replayThrough?: number }
     | {
         mode: "checkpoint";
         checkpoint: string;
         checkpointThrough: number;
+        replayThrough?: number;
       }
     | { mode: "reset"; discardThrough: number }
   >;

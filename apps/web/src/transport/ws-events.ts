@@ -26,6 +26,7 @@ import { usePlanStore } from "@/stores/planStore";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { emitPtyData, emitPtyExit } from "@/features/terminal/adapters/pty-data-registry";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
+import { applyActionRun } from "@/features/terminal/state/applyActionRun";
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 import { invalidateReviewOperandLists } from "@/components/diff/review-operand-lists";
@@ -294,7 +295,7 @@ export function startPushListeners(): void {
     pushEmitter.on("workspace.environment.action.updated", (data) => {
       const parsed = WS_CHANNELS["workspace.environment.action.updated"].safeParse(data);
       if (!parsed.success) return;
-      useProjectActionStore.getState().applyRun(parsed.data.run);
+      applyActionRun(parsed.data.run, { focus: false });
     }),
   );
 

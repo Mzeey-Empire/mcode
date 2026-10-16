@@ -25,8 +25,6 @@ export class ProjectActionRunFactory {
       startedAt: null,
       finishedAt: timestamp,
       exitCode: null,
-      transcript: "",
-      transcriptTruncated: false,
     });
   }
 
@@ -40,8 +38,6 @@ export class ProjectActionRunFactory {
       startedAt: timestamp,
       finishedAt: timestamp,
       exitCode: null,
-      transcript: "",
-      transcriptTruncated: false,
     });
   }
 
@@ -55,8 +51,6 @@ export class ProjectActionRunFactory {
       startedAt: null,
       finishedAt: null,
       exitCode: null,
-      transcript: "",
-      transcriptTruncated: false,
     });
   }
 
@@ -78,8 +72,6 @@ export class ProjectActionRunFactory {
       startedAt: timestamp,
       finishedAt: null,
       exitCode: null,
-      transcript: "",
-      transcriptTruncated: false,
     };
   }
 

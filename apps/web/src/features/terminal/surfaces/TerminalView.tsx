@@ -219,6 +219,9 @@ export function loadXtermModules(): Promise<XtermModules> {
  */
 export const TERMINAL_REMOUNT_BUDGET_MS = 150;
 
+/** Longest the replay gate waits for in-flight replay frames after the reattach response. */
+const REPLAY_ARRIVAL_TIMEOUT_MS = 2000;
+
 type MountTimingWindow = Window & { __mcodeTerminalMountMs?: number };
 
 /** Dev-only: record mount→first-paint latency for the remount-speed assertion. */
@@ -438,7 +441,10 @@ async function loadRenderer(
 interface TerminalViewProps {
   /** The PTY session ID this view is bound to. */
   readonly ptyId: string;
-  /** Scope used to create a replacement session after a failed tombstone. */
+  /**
+   * Scope used to create a replacement session after a failed tombstone.
+   * Omitted for action terminals, whose Run again relaunches in the same terminal.
+   */
   readonly ownerScopeId?: string;
   /** Server-authoritative lifecycle state for the rendered PTY. */
   readonly sessionState?: TerminalSessionState;
@@ -615,6 +621,7 @@ export const TerminalView = memo(function TerminalView({
   const [termReady, setTermReady] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [recoveryAction, setRecoveryAction] = useState<"reload" | null>(null);
+  const exitedRef = useRef(false);
   const sessionEndedRef = useRef(sessionState === "exited" || sessionState === "failed");
   sessionEndedRef.current = sessionState === "exited" || sessionState === "failed";
   /** Cancels in-flight {@link loadRenderer} when the thread goes dormant or the effect cleans up. */
@@ -683,8 +690,8 @@ export const TerminalView = memo(function TerminalView({
       term.open(el);
       applyTerminalSettings(term, terminalSettingsRef.current);
       incrementLiveTerminalCount();
-      let exited = sessionEndedRef.current;
-      if (exited) term.options.disableStdin = true;
+      exitedRef.current = sessionEndedRef.current;
+      if (exitedRef.current) term.options.disableStdin = true;
       const shortcutPlatform = detectTerminalShortcutPlatform();
 
       const openFileLink = (target: TerminalLinkTarget) => {
@@ -756,7 +763,7 @@ export const TerminalView = memo(function TerminalView({
       };
 
       const selectionDisposable = term.onSelectionChange(() => {
-        if (!copyOnSelectRef.current || exited || sessionEndedRef.current) return;
+        if (!copyOnSelectRef.current || exitedRef.current || sessionEndedRef.current) return;
         const selection = term.getSelection();
         if (selection) {
           navigator.clipboard.writeText(selection).catch(() => {});
@@ -782,7 +789,7 @@ export const TerminalView = memo(function TerminalView({
         }
         if (isTerminalPasteShortcut(event, shortcutPlatform)) {
           event.preventDefault();
-          if (!exited && !sessionEndedRef.current) {
+          if (!exitedRef.current && !sessionEndedRef.current) {
             navigator.clipboard.readText().then(pasteText).catch(() => {});
           }
           return false;
@@ -820,7 +827,7 @@ export const TerminalView = memo(function TerminalView({
       // paste mode when the shell requests it, preventing embedded newlines from auto-executing commands.
       const handleContextMenu = (e: MouseEvent) => {
         e.preventDefault();
-        if (exited || sessionEndedRef.current) return;
+        if (exitedRef.current || sessionEndedRef.current) return;
         navigator.clipboard
           .readText()
           .then((text) => {
@@ -832,7 +839,7 @@ export const TerminalView = memo(function TerminalView({
       const handleAuxClick = (e: MouseEvent) => {
         if (!isTerminalMiddleClickPaste(e, shortcutPlatform)) return;
         e.preventDefault();
-        if (exited || sessionEndedRef.current) return;
+        if (exitedRef.current || sessionEndedRef.current) return;
         navigator.clipboard.readText().then(pasteText).catch(() => {});
       };
       el.addEventListener("auxclick", handleAuxClick);
@@ -847,8 +854,13 @@ export const TerminalView = memo(function TerminalView({
       el.addEventListener("paste", handlePaste, true);
 
       // Forward keystrokes to the backend via WS RPC
+      // xterm answers terminal queries (device attributes, cursor position) in
+      // the same stream as keystrokes. Retained history holds queries that were
+      // answered long ago, and answering them again types the reply into
+      // whatever is reading the live PTY now, such as "[?1;2c" at a shell prompt.
+      let repliesSilenced = false;
       const dataDisposable = term.onData((data) => {
-        if (exited || sessionEndedRef.current) return;
+        if (repliesSilenced || exitedRef.current || sessionEndedRef.current) return;
         resizeControllerRef.current?.flushBeforeInput();
         transport.terminalWrite(ptyId, data).catch(() => {});
       });
@@ -920,24 +932,40 @@ export const TerminalView = memo(function TerminalView({
         });
       };
 
-      const flushReplayGate = () => {
+      // Writes frames in one pass. A silenced write is output that earlier views
+      // already answered, so xterm's replies to its queries are dropped; the flag
+      // clears in the write callback, before the next queued chunk is parsed.
+      const writeReplayFrames = (frames: Uint8Array[], silenced: boolean, onWritten: () => void) => {
+        const totalBytes = frames.reduce((sum, frame) => sum + frame.length, 0);
+        fc.written(totalBytes);
+        if (silenced) repliesSilenced = true;
+        trackedWrite(concatChunks(frames, totalBytes), () => {
+          if (silenced) repliesSilenced = false;
+          fc.acked(totalBytes);
+          onWritten();
+        });
+      };
+
+      /**
+       * Closes the replay gate. Frames up to `silenceThrough` are history whose
+       * queries must not be answered again; later frames are written normally.
+       */
+      const flushReplayGate = (silenceThrough = -1) => {
         replaying = false;
         // Replayed frames (lower seq) and any live frames buffered during the
         // reattach (higher seq) are merged here; sort restores wire order and
         // the lastWrittenSeq guard drops anything already painted.
         replayPending.sort((a, b) => a.seq - b.seq);
-        const frames: Uint8Array[] = [];
-        let totalBytes = 0;
+        const history: Uint8Array[] = [];
+        const live: Uint8Array[] = [];
         if (replayPrefix) {
-          frames.push(replayPrefix);
-          totalBytes += replayPrefix.length;
+          history.push(replayPrefix);
           replayPrefix = null;
         }
         for (const detail of replayPending) {
           if (detail.seq <= lastWrittenSeq) continue;
           lastWrittenSeq = detail.seq;
-          frames.push(detail.payload);
-          totalBytes += detail.payload.length;
+          (detail.seq <= silenceThrough ? history : live).push(detail.payload);
         }
         replayPending.length = 0;
 
@@ -954,18 +982,47 @@ export const TerminalView = memo(function TerminalView({
           recordMountTiming(performance.now() - mountStart);
         };
 
-        if (frames.length === 0) {
-          follow();
-          return;
-        }
-        // #749: write the whole replay in one pass instead of one main-thread
-        // task per chunk, so a large scrollback replay paints quickly.
-        fc.written(totalBytes);
-        trackedWrite(concatChunks(frames, totalBytes), () => {
-          fc.acked(totalBytes);
+        const finish = () => {
           transport.ptySetLastSeq(ptyId, lastWrittenSeq);
           follow();
-        });
+        };
+        // #749: write the replay in one pass per group instead of one main-thread
+        // task per chunk, so a large scrollback replay paints quickly.
+        if (history.length === 0 && live.length === 0) {
+          follow();
+        } else if (live.length === 0) {
+          writeReplayFrames(history, silenceThrough >= 0, finish);
+        } else if (history.length === 0) {
+          writeReplayFrames(live, false, finish);
+        } else {
+          writeReplayFrames(history, silenceThrough >= 0, () => {});
+          writeReplayFrames(live, false, finish);
+        }
+      };
+
+      // Desktop relays terminal.data over IPC, a separate path from the reattach
+      // response, so replay frames can still be in flight when the RPC resolves.
+      // The gate holds until the last replayed seq arrives, bounded so a dropped
+      // frame cannot leave the view hidden.
+      let awaitedReplay: { readonly throughSeq: number; readonly release: () => void } | null = null;
+      let awaitedReplayTimer: ReturnType<typeof setTimeout> | undefined;
+      const releaseAwaitedReplay = () => {
+        clearTimeout(awaitedReplayTimer);
+        const awaited = awaitedReplay;
+        awaitedReplay = null;
+        awaited?.release();
+      };
+      const releaseReplayWhenArrived = (throughSeq: number | undefined, release: () => void) => {
+        const arrived =
+          throughSeq === undefined ||
+          throughSeq <= lastWrittenSeq ||
+          replayPending.some((frame) => frame.seq >= throughSeq);
+        if (arrived) {
+          release();
+          return;
+        }
+        awaitedReplay = { throughSeq, release };
+        awaitedReplayTimer = setTimeout(releaseAwaitedReplay, REPLAY_ARRIVAL_TIMEOUT_MS);
       };
 
       // Listen for PTY output via the direct callback registry. Attached BEFORE
@@ -975,6 +1032,7 @@ export const TerminalView = memo(function TerminalView({
       const unsubPtyData = transport.terminalSubscribe(ptyId, { onData: (detail) => {
         if (replaying) {
           replayPending.push(detail);
+          if (awaitedReplay && detail.seq >= awaitedReplay.throughSeq) releaseAwaitedReplay();
           return;
         }
         writeChunk(detail);
@@ -998,7 +1056,7 @@ export const TerminalView = memo(function TerminalView({
       // pre-renderer for the same reason as pty-data: an early exit should
       // not be silently lost).
       const unsubPtyExit = transport.terminalSubscribe(ptyId, { onExit: (detail) => {
-        exited = true;
+        exitedRef.current = true;
         term.options.disableStdin = true;
         trackedWrite(
           `\r\n\x1b[90m[Process ${detail.state === "failed" ? "failed" : "exited"} with code ${detail.code}]\x1b[0m\r\n`,
@@ -1029,7 +1087,7 @@ export const TerminalView = memo(function TerminalView({
         fitAddon,
         term,
         isActive: () => shownRef.current && threadActiveRef.current,
-        isDisposed: () => disposed || exited || sessionEndedRef.current,
+        isDisposed: () => disposed || exitedRef.current || sessionEndedRef.current,
         shouldDeferFit: () => terminalScroll.shouldDeferFitRefresh(ptyId),
         runProgrammatic: (fn) => terminalScroll.runProgrammatic(ptyId, fn),
         captureScrollIntent: () => captureScrollAnchor(term),
@@ -1049,6 +1107,7 @@ export const TerminalView = memo(function TerminalView({
         if (cleanupStarted) return;
         cleanupStarted = true;
         disposed = true;
+        clearTimeout(awaitedReplayTimer);
         resizeController.dispose();
         resizeControllerRef.current = null;
         flushResizeRpcRef.current = null;
@@ -1127,9 +1186,9 @@ export const TerminalView = memo(function TerminalView({
       }
 
       // #748: replay retained scrollback into this fresh xterm, then follow the
-      // tail. The reattach resolves after all replay frames have been sent (WS
-      // ordering puts the data frames ahead of the RPC response), at which point
-      // the gate flushes. lastSeq = -1 requests the full retained window.
+      // tail. The response reports the last replayed seq (replayThrough) and the
+      // gate flushes once that frame has arrived. lastSeq = -1 requests the full
+      // retained window.
       const reattach = (lastSeq: number, mode: "cold" | "warm") => {
         replaying = true;
         replayMode = mode;
@@ -1155,7 +1214,13 @@ export const TerminalView = memo(function TerminalView({
               "\r\n[Earlier output beyond the scrollback limit was trimmed]\r\n",
             );
           }
-          flushReplayGate();
+          // A full cold replay is history that an earlier view already answered. A checkpoint
+          // tail and a warm delta are output this view never saw, so their queries still need answers.
+          const silenceThrough = mode === "cold" && result.mode === "delta" ? (result.replayThrough ?? -1) : -1;
+          releaseReplayWhenArrived(
+            result.mode === "reset" ? undefined : result.replayThrough,
+            () => flushReplayGate(silenceThrough),
+          );
         })
         .catch(() => {
           // Release the gate so any buffered live frames still paint, while
@@ -1166,14 +1231,14 @@ export const TerminalView = memo(function TerminalView({
           flushReplayGate();
         })
         .finally(() => {
-          if (!disposed && !exited && !sessionEndedRef.current && shownRef.current) {
+          if (!disposed && !exitedRef.current && !sessionEndedRef.current && shownRef.current) {
             transport.terminalResume(ptyId).catch(() => {});
           }
         });
       };
 
       resumeWarmViewRef.current = () => {
-        if (disposed || exited || sessionEndedRef.current || replaying) return;
+        if (disposed || exitedRef.current || sessionEndedRef.current || replaying) return;
         const lastSeq = Number.isFinite(lastWrittenSeq) ? lastWrittenSeq : -1;
         void reattach(lastSeq, "warm");
       };
@@ -1396,10 +1461,12 @@ export const TerminalView = memo(function TerminalView({
     }
   }, [terminalSettings]);
 
+  // An Action rerun can relaunch a command in an exited terminal, so input must follow the state both ways.
   useEffect(() => {
-    if (sessionState !== "exited" && sessionState !== "failed") return;
+    const ended = terminalSessionEnded(sessionState);
+    if (!ended) exitedRef.current = false;
     const term = termRef.current;
-    if (term) term.options.disableStdin = true;
+    if (term) term.options.disableStdin = ended;
   }, [sessionState]);
 
   useEffect(() => {

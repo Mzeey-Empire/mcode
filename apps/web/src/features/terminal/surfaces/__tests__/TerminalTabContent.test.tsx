@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const terminalKill = vi.fn();
 const terminalHasChildren = vi.fn();
 const terminalCreate = vi.fn();
+const getWorkspaceActionRun = vi.fn();
 
 vi.mock("@/transport", () => ({
   getTransport: () => ({
@@ -14,10 +15,14 @@ vi.mock("@/transport", () => ({
     terminalDiagnostics: vi.fn(),
     openIn: vi.fn(),
     listOpenInApps: vi.fn().mockResolvedValue([]),
+    getWorkspaceActionRun,
+    restartWorkspaceAction: vi.fn(),
+    stopWorkspaceAction: vi.fn(),
   }),
 }));
 
-import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
+import { TERMINAL_MAX_PER_SCOPE, type WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useDiffStore } from "@/stores/diffStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useToastStore } from "@/stores/toastStore";
@@ -52,6 +57,31 @@ function renderTool() {
   return render(<TerminalTabContent workspaceId="workspace-1" threadId="thread-1" scopeId="thread-1" />);
 }
 
+function actionRun(overrides: Partial<WorkspaceEnvironmentActionRun> = {}): WorkspaceEnvironmentActionRun {
+  return {
+    threadId: "thread-1",
+    workspaceId: "workspace-1",
+    actionId: "web",
+    runId: "run-1",
+    revision: 0,
+    terminalSessionId: "pty-action",
+    trigger: "manual",
+    actionName: "web",
+    status: "running",
+    snapshot: { platform: "linux", script: "bun run dev", checkoutPath: "/repo", terminal: null, environmentNames: [] },
+    createdAt: "2026-08-22T12:00:00.000Z",
+    startedAt: "2026-08-22T12:00:00.000Z",
+    finishedAt: null,
+    exitCode: null,
+    ...overrides,
+  };
+}
+
+function seedAction(run: WorkspaceEnvironmentActionRun): void {
+  useProjectActionStore.getState().applyRun(run);
+  seed([shell("pty-action", { kind: "action", actionId: "web", label: "web" })]);
+}
+
 const closeTab = (name: string) => fireEvent.click(screen.getByRole("button", { name: `Close ${name}` }));
 
 describe("Terminal tool header", () => {
@@ -62,6 +92,8 @@ describe("Terminal tool header", () => {
     terminalKill.mockResolvedValue(undefined);
     terminalHasChildren.mockResolvedValue({ hasChildren: false });
     terminalCreate.mockResolvedValue({ ptyId: "new", shell: "pwsh" });
+    getWorkspaceActionRun.mockResolvedValue(null);
+    useProjectActionStore.setState({ runsByThread: {} });
     useToastStore.setState({ toasts: [] });
     setConfirmOnKill("withChildProcesses");
     seed([shell("pty-1")]);
@@ -264,6 +296,80 @@ describe("Terminal tool header", () => {
     });
   });
 
+  describe("action tabs", () => {
+    it.each([
+      ["running", { status: "running" as const }, "running", "Running"],
+      ["failed", { status: "failed" as const, exitCode: 1 }, "failed", "Failed"],
+    ])("badges a %s run", (_name, overrides, badge, label) => {
+      seedAction(actionRun(overrides));
+      renderTool();
+
+      expect(screen.getByTestId("action-tab-badge")).toHaveAttribute("data-badge", badge);
+      expect(screen.getByRole("button", { name: `web, ${label}` })).toHaveAttribute("aria-pressed");
+    });
+
+    it("shows no badge once the run completed", () => {
+      seedAction(actionRun({ status: "completed", exitCode: 0 }));
+      renderTool();
+
+      expect(screen.queryByTestId("action-tab-badge")).not.toBeInTheDocument();
+    });
+
+    it("asks to stop a running action without probing for children, and names its command", async () => {
+      seedAction(actionRun());
+      renderTool();
+
+      closeTab("web");
+
+      expect(await screen.findByText("Stop web?")).toBeInTheDocument();
+      expect(screen.getByText("bun run dev is still running. Closing the tab stops it.")).toBeInTheDocument();
+      expect(terminalHasChildren).not.toHaveBeenCalled();
+      expect(terminalKill).not.toHaveBeenCalled();
+    });
+
+    it("kills the terminal when the user confirms Stop and close", async () => {
+      seedAction(actionRun());
+      renderTool();
+
+      closeTab("web");
+      fireEvent.click(await screen.findByRole("button", { name: "Stop and close" }));
+
+      await waitFor(() => expect(terminalKill).toHaveBeenCalledWith("pty-action"));
+    });
+
+    it("keeps a running action when the user cancels", async () => {
+      seedAction(actionRun());
+      renderTool();
+
+      closeTab("web");
+      fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+      await waitFor(() => expect(screen.queryByText("Stop web?")).not.toBeInTheDocument());
+      expect(terminalKill).not.toHaveBeenCalled();
+    });
+
+    it("does not ask about a running action when confirmOnKill is never", async () => {
+      setConfirmOnKill("never");
+      seedAction(actionRun());
+      renderTool();
+
+      closeTab("web");
+
+      await waitFor(() => expect(terminalKill).toHaveBeenCalledWith("pty-action"));
+      expect(screen.queryByText("Stop web?")).not.toBeInTheDocument();
+    });
+
+    it("treats an action whose command ended like any shell and skips the question without children", async () => {
+      seedAction(actionRun({ status: "completed", exitCode: 0 }));
+      renderTool();
+
+      closeTab("web");
+
+      await waitFor(() => expect(terminalKill).toHaveBeenCalledWith("pty-action"));
+      expect(terminalHasChildren).toHaveBeenCalledWith("pty-action");
+    });
+  });
+
   describe("row 2", () => {
     it("shows the active shell's working folder with the last segment emphasised", () => {
       seed([shell("pty-1", { cwd: "/work/repo" })]);
@@ -284,10 +390,11 @@ describe("Terminal tool header", () => {
       expect(screen.getByTestId("working-folder-pill")).toHaveTextContent("/work/two");
     });
 
-    it("offers no shell controls for an action record", () => {
-      seed([shell("pty-1", { kind: "action", actionId: "act", label: "action" })]);
+    it("offers action controls, not shell controls, for an action record", () => {
+      seedAction(actionRun());
       renderTool();
 
+      expect(screen.getByTestId("action-command-pill")).toHaveTextContent("bun run dev");
       expect(screen.queryByTestId("working-folder-pill")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Clear terminal" })).not.toBeInTheDocument();
     });

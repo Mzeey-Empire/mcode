@@ -63,12 +63,12 @@ describe("project and terminal database owner", () => {
     const workspace = await new WorkspaceRepo(owned.db, owned.writer).create("Action", "/action");
     const thread = new ThreadStore(owned.db).create(workspace.id, "Action", "direct", "main");
     const runs = new ProjectActionRunRepo(owned.db, owned.writer);
-    const run: WorkspaceEnvironmentActionRun = { threadId: thread.id, workspaceId: workspace.id, actionId: "build", runId: "run", revision: 1, terminalSessionId: "terminal", trigger: "manual", actionName: "Build", status: "running", snapshot: { platform: "windows", script: "build", checkoutPath: "/action", terminal: null, environmentNames: [] }, createdAt: "2026-10-01T10:00:00.000Z", startedAt: "2026-10-01T10:00:00.000Z", finishedAt: null, exitCode: null, transcript: "", transcriptTruncated: false };
+    const run: WorkspaceEnvironmentActionRun = { threadId: thread.id, workspaceId: workspace.id, actionId: "build", runId: "run", revision: 1, terminalSessionId: "terminal", trigger: "manual", actionName: "Build", status: "running", snapshot: { platform: "windows", script: "build", checkoutPath: "/action", terminal: null, environmentNames: [] }, createdAt: "2026-10-01T10:00:00.000Z", startedAt: "2026-10-01T10:00:00.000Z", finishedAt: null, exitCode: null };
     await runs.replace(run);
-    expect(await runs.updateIfCurrent({ ...run, revision: 2, transcript: "saved" })).toBe(true);
-    expect(await runs.updateIfCurrent({ ...run, revision: 2, transcript: "stale" })).toBe(false);
+    expect(await runs.updateIfCurrent({ ...run, revision: 2, terminalSessionId: null })).toBe(true);
+    expect(await runs.updateIfCurrent({ ...run, revision: 2, terminalSessionId: "stale-terminal" })).toBe(false);
     expect(await runs.updateIfCurrent({ ...run, runId: "old", revision: 3 })).toBe(false);
-    expect(runs.get(thread.id, "build")?.transcript).toBe("saved");
+    expect(runs.get(thread.id, "build")?.terminalSessionId).toBeNull();
     const interrupted = await runs.interruptRunning("2026-10-01T10:01:00.000Z");
     expect(interrupted).toMatchObject([{ status: "interrupted", revision: 3 }]);
   });

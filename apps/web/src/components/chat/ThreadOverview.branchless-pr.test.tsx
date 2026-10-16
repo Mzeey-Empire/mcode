@@ -280,8 +280,6 @@ function runningActionRun(): WorkspaceEnvironmentActionRun {
     startedAt: "2026-08-22T12:00:00.000Z",
     finishedAt: null,
     exitCode: null,
-    transcript: "",
-    transcriptTruncated: false,
   };
 }
 
@@ -468,7 +466,7 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(useOverviewStore.getState().requestedSubject).toBeNull();
   });
 
-  it("launches an idle Action in the background, then focuses its terminal tab", async () => {
+  it("starting an idle Action reveals the panel and selects its terminal tab", async () => {
     const user = userEvent.setup();
     useDiffStore.setState({
       rightPanelByThread: {
@@ -488,14 +486,6 @@ describe("ThreadOverview branchless Create PR", () => {
     await user.click(action);
 
     await waitFor(() => expect(mockStartWorkspaceAction).toHaveBeenCalledWith("thread-1", "success"));
-    await waitFor(() => expect(useDiffStore.getState().getRightPanel("ws-1", "thread-1")).toMatchObject({
-      visible: true,
-      activeTabId: "singleton:preview",
-      tabInstances: expect.arrayContaining([{ id: "singleton:terminal", type: "terminal" }]),
-    }));
-
-    await user.click(action);
-
     await waitFor(() => expect(useDiffStore.getState().getRightPanel("ws-1", "thread-1")).toMatchObject({
       visible: true,
       activeTabId: "singleton:terminal",

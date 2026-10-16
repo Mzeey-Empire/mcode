@@ -68,8 +68,8 @@ let onSelectionListener: (() => void) | null = null;
 let serializedScreen = "serialized-screen";
 let lastTerminalOptions: Record<string, unknown> | undefined;
 type RestoreResult =
-  | { mode: "delta" }
-  | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number }
+  | { mode: "delta"; replayThrough?: number }
+  | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number; replayThrough?: number }
   | { mode: "reset"; discardThrough: number };
 
 const term = {
@@ -838,6 +838,81 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     expect(terminalRoot.style.visibility).toBe("visible");
   });
 
+  describe("terminal query replies during replay", () => {
+    // Built in the test realm: jsdom's TextEncoder returns a Uint8Array that fails the mock's instanceof check.
+    const DEVICE_ATTRIBUTES_QUERY = new Uint8Array([0x1b, 0x5b, 0x63]);
+    const DEVICE_ATTRIBUTES_REPLY = "\u001b[?1;2c";
+
+    // xterm answers a query while it parses it, before the write callback.
+    beforeEach(() => {
+      term.write.mockImplementation((data: string | Uint8Array, cb?: () => void) => {
+        if (data instanceof Uint8Array && new TextDecoder().decode(data).includes("\u001b[c")) {
+          onDataListener?.(DEVICE_ATTRIBUTES_REPLY);
+        }
+        cb?.();
+      });
+    });
+
+    const sentReplies = () =>
+      transport.terminalWrite.mock.calls.filter(
+        (call) => (call as unknown as [string, string])[1] === DEVICE_ATTRIBUTES_REPLY,
+      );
+
+    async function mountColdReattach(result: RestoreResult, frames: readonly number[]) {
+      let resolveReattach: (value: RestoreResult) => void = () => {};
+      transport.terminalReattach.mockReturnValueOnce(new Promise((resolve) => { resolveReattach = resolve; }));
+      render(<TerminalView ptyId="pty-cold" visible={true} threadActive={true} />);
+      await settle();
+      await act(async () => {
+        resolveReattach(result);
+      });
+      for (const seq of frames) {
+        await act(async () => {
+          emitPtyData({ ptyId: "pty-cold", seq, payload: DEVICE_ATTRIBUTES_QUERY });
+        });
+      }
+      await settle();
+    }
+
+    it("does not answer retained queries that reach the view after the reattach response", async () => {
+      await mountColdReattach({ mode: "delta", replayThrough: 3 }, [1, 2, 3]);
+
+      expect(term.write.mock.calls.filter(([data]) => data instanceof Uint8Array)).toHaveLength(1);
+      expect(sentReplies()).toHaveLength(0);
+    });
+
+    it("still answers a query newer than the replay", async () => {
+      await mountColdReattach({ mode: "delta", replayThrough: 2 }, [1, 2, 3]);
+
+      expect(sentReplies()).toHaveLength(1);
+    });
+
+    it("answers the tail that follows a checkpoint", async () => {
+      await mountColdReattach(
+        { mode: "checkpoint", checkpoint: "screen", checkpointThrough: 4, replayThrough: 5 },
+        [5],
+      );
+
+      expect(sentReplies()).toHaveLength(1);
+    });
+
+    it("writes what arrived when a replay frame never does", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        await mountColdReattach({ mode: "delta", replayThrough: 9 }, [1]);
+        expect(term.write.mock.calls.filter(([data]) => data instanceof Uint8Array)).toHaveLength(0);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(2000);
+        });
+
+        expect(term.write.mock.calls.filter(([data]) => data instanceof Uint8Array)).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it("stops forwarding input as soon as the PTY exits", async () => {
     render(<TerminalView ptyId="pty-exit" visible={true} threadActive={true} />);
     await settle();
@@ -850,6 +925,22 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
 
     expect(transport.terminalWrite).not.toHaveBeenCalled();
     expect(term.options.disableStdin).toBe(true);
+  });
+
+  it("accepts input again when a rerun relaunches a command in an exited terminal", async () => {
+    const { rerender } = render(<TerminalView ptyId="pty-exit" visible={true} threadActive={true} sessionState="exited" />);
+    await settle();
+    expect(term.options.disableStdin).toBe(true);
+
+    rerender(<TerminalView ptyId="pty-exit" visible={true} threadActive={true} sessionState="running" />);
+    await settle();
+    transport.terminalWrite.mockClear();
+    await act(async () => {
+      onDataListener?.("echo after rerun\r");
+    });
+
+    expect(term.options.disableStdin).toBe(false);
+    expect(transport.terminalWrite).toHaveBeenCalledWith("pty-exit", "echo after rerun\r");
   });
 
   // Regression: an exited PTY must remain mounted so its completed output and
@@ -876,6 +967,24 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     expect(within(status).queryByRole("button")).toBeNull();
     expect(screen.getByTestId("terminal-render-content")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry terminal" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close terminal" })).toBeInTheDocument();
+  });
+
+  it("offers no shell retry for an exited terminal that has no owner scope, such as an action's", async () => {
+    retainTerminal("pty-exit");
+
+    render(
+      <TerminalView
+        ptyId="pty-exit"
+        sessionState="exited"
+        exit={{ code: 1, signal: null, reason: "natural" }}
+        visible={true}
+        threadActive={true}
+      />,
+    );
+    await settle();
+
+    expect(screen.queryByRole("button", { name: "Retry terminal" })).toBeNull();
     expect(screen.getByRole("button", { name: "Close terminal" })).toBeInTheDocument();
   });
 

@@ -220,7 +220,7 @@ describe("TerminalService host ownership", () => {
       expect(() => service.resize(created.ptyId, 100, 30)).toThrow(/PTY not found/);
       await expect(service.hasChildren(created.ptyId)).resolves.toEqual({ hasChildren: false });
       data.mockClear();
-      expect(service.reattach(created.ptyId, -1, true)).toEqual({ mode: "delta" });
+      expect(service.reattach(created.ptyId, -1, true)).toEqual({ mode: "delta", replayThrough: 1 });
       expect(data.mock.calls).toEqual([[created.ptyId, 1, Buffer.from("retained output\r\n")]]);
       await service.kill(created.ptyId);
       expect(service.listActiveSessions()).toEqual([]);
@@ -358,7 +358,7 @@ describe("TerminalService host ownership", () => {
     service.resume(created.ptyId);
     host.emit(output(created.ptyId, "one"));
 
-    expect(service.reattach(created.ptyId, 0)).toEqual({ mode: "delta" });
+    expect(service.reattach(created.ptyId, 0)).toEqual({ mode: "delta", replayThrough: 1 });
     expect(data).toHaveBeenCalledWith(created.ptyId, 1, expect.any(Uint8Array));
   });
 
@@ -377,6 +377,7 @@ describe("TerminalService host ownership", () => {
       mode: "checkpoint",
       checkpoint: "screen",
       checkpointThrough: 1,
+      replayThrough: 2,
     });
     expect(data).toHaveBeenCalledWith(created.ptyId, 2, expect.any(Uint8Array));
   });
@@ -591,6 +592,26 @@ describe("TerminalService host ownership", () => {
     await service.shutdown();
   });
 
+  it("clears the previous run's screen before a rerun echoes its command, but not before the first run", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const create = vi.spyOn(host, "create");
+    const { service, launch } = createService({ host });
+    const data = vi.fn();
+    service.setSender({ data, json: vi.fn() });
+    const action = await openAction(service, launch, "00000000-0000-4000-8000-000000000001", "first");
+    host.emitExit(create.mock.calls[0][0].sessionId, 0);
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    await action.run({ script: "second" });
+
+    service.reattach(action.terminalSessionId, -1);
+    const frames = data.mock.calls.map(([, , bytes]) => Buffer.from(bytes).toString());
+    const clear = "\u001b[2J\u001b[3J\u001b[H";
+    expect(frames.filter((frame) => frame.includes(clear))).toHaveLength(1);
+    expect(frames[0]).not.toContain(clear);
+    expect(frames.find((frame) => frame.includes(clear))).toContain("second");
+    await service.shutdown();
+  });
+
   it("counts action records toward the cap and closes them during thread teardown", async () => {
     const host = new InMemoryPtyHostAdapter("1");
     const { service, launch } = createService({ host });
@@ -645,7 +666,7 @@ describe("TerminalService host ownership", () => {
     expect(Buffer.concat(output).toString()).toBe("command output\r\n");
     expect(exits).toEqual([2]);
     expect(data.mock.calls).toEqual([]);
-    expect(service.reattach(action.terminalSessionId, -1)).toEqual({ mode: "delta" });
+    expect(service.reattach(action.terminalSessionId, -1)).toEqual({ mode: "delta", replayThrough: 3 });
     expect(data.mock.calls.map((call) => call[1])).toEqual([1, 2, 3]);
     expect(Buffer.concat(data.mock.calls.map((call) => call[2])).toString()).toBe(
       `\u001b[90mPS ${process.cwd()}> \u001b[39mvite --open http://localhost:5173/\r\n  next\u001b[0m\r\ncommand output\r\nPS> `,

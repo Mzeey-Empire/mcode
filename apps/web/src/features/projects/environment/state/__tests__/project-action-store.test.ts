@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES,
-  type WorkspaceEnvironmentActionRun,
-} from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { useProjectActionStore } from "../project-action-store";
 
 function run(runId: string, createdAt: string): WorkspaceEnvironmentActionRun {
@@ -27,8 +24,6 @@ function run(runId: string, createdAt: string): WorkspaceEnvironmentActionRun {
     startedAt: createdAt,
     finishedAt: null,
     exitCode: null,
-    transcript: "",
-    transcriptTruncated: false,
   };
 }
 
@@ -71,7 +66,6 @@ describe("Project Action renderer state", () => {
       revision: 1,
       finishedAt: "2026-08-22T12:00:01.000Z",
       exitCode: 0,
-      transcript: "done",
     };
     const store = useProjectActionStore.getState();
 
@@ -88,7 +82,6 @@ describe("Project Action renderer state", () => {
       status: "completed" as const,
       finishedAt: "2026-08-22T12:00:01.000Z",
       exitCode: 0,
-      transcript: "complete output",
     };
     const delayedRunning = {
       ...completed,
@@ -96,7 +89,6 @@ describe("Project Action renderer state", () => {
       status: "running" as const,
       finishedAt: null,
       exitCode: null,
-      transcript: "",
     };
     const store = useProjectActionStore.getState();
 
@@ -105,12 +97,12 @@ describe("Project Action renderer state", () => {
 
     expect(useProjectActionStore.getState().runsByThread["thread-1"]?.build).toMatchObject({
       status: "completed",
-      transcript: "complete output",
+      exitCode: 0,
     });
   });
 
   it("replaces a Thread map with the authoritative Action list", () => {
-    const pushed = { ...run("run-2", "2026-08-22T12:01:00.000Z"), revision: 1, transcript: "new output" };
+    const pushed = { ...run("run-2", "2026-08-22T12:01:00.000Z"), revision: 1 };
     const delayedList = run("run-1", "2026-08-22T12:00:00.000Z");
     const store = useProjectActionStore.getState();
 
@@ -119,7 +111,7 @@ describe("Project Action renderer state", () => {
 
     expect(useProjectActionStore.getState().runsByThread["thread-1"]?.build).toMatchObject({
       runId: "run-1",
-      transcript: "",
+      revision: 0,
     });
   });
 
@@ -133,26 +125,6 @@ describe("Project Action renderer state", () => {
     expect(useProjectActionStore.getState().runsByThread["thread-1"]).toEqual({
       build: expect.objectContaining({ runId: "run-build" }),
     });
-  });
-
-  it("rejects a delayed capped transcript with the same byte length", () => {
-    const current = {
-      ...run("run-1", "2026-08-22T12:00:00.000Z"),
-      revision: 2,
-      transcript: "n".repeat(WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES),
-      transcriptTruncated: true,
-    };
-    const delayed = {
-      ...current,
-      revision: 1,
-      transcript: "o".repeat(WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES),
-    };
-    const store = useProjectActionStore.getState();
-
-    store.applyRun(current);
-    store.applyRun(delayed);
-
-    expect(useProjectActionStore.getState().runsByThread["thread-1"]?.build?.transcript.slice(0, 1)).toBe("n");
   });
 
   it("releases invalidated hydration lifecycles after many cleared requests settle", () => {

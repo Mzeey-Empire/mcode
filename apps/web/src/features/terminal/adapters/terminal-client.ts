@@ -11,8 +11,8 @@ export const TERMINAL_CLEANUP_TIMEOUT_MS = 2_000;
 
 /** Reattachment result returned by the legacy Terminal transport. */
 export type TerminalClientReattachResult =
-  | { mode: "delta" }
-  | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number }
+  | { mode: "delta"; replayThrough?: number }
+  | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number; replayThrough?: number }
   | { mode: "reset"; discardThrough: number };
 
 /** Raw JSON RPC function used by Terminal client adapters. */

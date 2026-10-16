@@ -1,10 +1,11 @@
 import { useMemo } from "react";
-import { Play, Terminal } from "lucide-react";
-import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
+import { Terminal } from "lucide-react";
+import { TERMINAL_MAX_PER_SCOPE, type WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { PanelTabStrip, type PanelTabStripItem } from "@/components/panels/shell/PanelTabStrip";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
 import { createTerminalForScope } from "@/lib/ensure-terminal";
+import { ActionTabGlyph, actionBadgeLabel } from "./ActionTabGlyph";
 import { TERMINAL_CAP_REASON } from "./terminalTabs";
 
 interface TerminalTabStripProps {
@@ -12,19 +13,25 @@ interface TerminalTabStripProps {
   readonly terminals: readonly TerminalInstance[];
   readonly activeId: string | null;
   readonly labels: ReadonlyMap<string, string>;
+  /** Keyed by action id within this scope's thread. */
+  readonly actionRuns: Readonly<Record<string, WorkspaceEnvironmentActionRun>>;
   readonly onClose: (ptyId: string) => void;
 }
 
 /** Row 1 of the Terminal tool: one tab per terminal record and a + capped at {@link TERMINAL_MAX_PER_SCOPE}. */
-export function TerminalTabStrip({ scopeId, terminals, activeId, labels, onClose }: TerminalTabStripProps) {
+export function TerminalTabStrip({ scopeId, terminals, activeId, labels, actionRuns, onClose }: TerminalTabStripProps) {
   const items = useMemo<readonly PanelTabStripItem[]>(
     () =>
-      terminals.map((terminal) => ({
-        id: terminal.id,
-        label: labels.get(terminal.id) ?? terminal.label,
-        icon: terminal.kind === "action" ? <Play aria-hidden /> : <Terminal aria-hidden />,
-      })),
-    [labels, terminals],
+      terminals.map((terminal) => {
+        const run = terminal.kind === "action" && terminal.actionId ? actionRuns[terminal.actionId] : undefined;
+        return {
+          id: terminal.id,
+          label: labels.get(terminal.id) ?? terminal.label,
+          icon: terminal.kind === "action" ? <ActionTabGlyph run={run} /> : <Terminal aria-hidden />,
+          status: actionBadgeLabel(run),
+        };
+      }),
+    [actionRuns, labels, terminals],
   );
   return (
     <PanelHeaderSlot slot="leading">

@@ -11,6 +11,7 @@ export {
 } from "./surfaces/TerminalPoolSlotContext";
 export { TerminalSection } from "./settings/TerminalSection";
 export { useTerminalSettingsStore } from "./settings/terminalSettingsStore";
+export { applyActionRun } from "./state/applyActionRun";
 export { useTerminalStore } from "./state/terminalStore";
 export { useHomeTerminalPresented } from "./state/useHomeTerminalPresented";
 export type {

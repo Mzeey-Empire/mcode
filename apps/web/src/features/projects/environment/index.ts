@@ -6,9 +6,5 @@ export {
   ProjectSetupMenuItem,
   useProjectSetupAttempt,
 } from "./ProjectSetupControl";
-/** Project Action controls and retained terminal-style output. */
-export {
-  ProjectActionMenu,
-  ProjectActionTerminalView,
-  useProjectActions,
-} from "./ProjectActionControl";
+/** Project Action menu and the hook that starts runs. */
+export { ProjectActionMenu, useProjectActions } from "./ProjectActionControl";

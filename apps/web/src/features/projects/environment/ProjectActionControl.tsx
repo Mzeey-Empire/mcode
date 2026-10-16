@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { CircleCheck, CircleSlash, CircleStop, CircleX, Pencil, Play, RotateCcw } from "lucide-react";
+import { CircleCheck, CircleSlash, CircleStop, CircleX, Pencil, Play } from "lucide-react";
 import { MoreIcon } from "@/components/ui/icon-map";
 import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun, WorkspaceEnvironmentCommandApproval } from "@mcode/contracts";
 import { Badge } from "@/components/ui/badge";
@@ -21,10 +21,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getTransport } from "@/transport";
+import { applyActionRun } from "@/features/terminal/state/applyActionRun";
 import { useProjectActionStore } from "./state/project-action-store";
 import { isProjectCommandApprovalInvalid, ProjectCommandApprovalDialog } from "./ProjectCommandApprovalDialog";
 
@@ -40,13 +39,6 @@ interface ProjectActionMenuProps {
   readonly setupMenuItem?: ReactNode;
   readonly loadError?: string | null;
 }
-
-interface ProjectActionTerminalViewProps {
-  readonly threadId: string;
-  readonly actionId: string;
-}
-
-type ProjectActionCommand = "stop" | "restart";
 
 interface ProjectActionActivation {
   readonly actionId: string;
@@ -350,129 +342,6 @@ function ProjectActionApprovalDialog({
   );
 }
 
-/** Renders one retained Project Action transcript inside the dedicated Action terminal panel. */
-export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionTerminalViewProps) {
-  const run = useProjectActionStore((state) =>
-    (state.runsByThread[threadId] ?? EMPTY_ACTION_RUNS)[actionId] ?? null,
-  );
-  const applyRun = useProjectActionStore.getState().applyRun;
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [command, setCommand] = useState<ProjectActionCommand | null>(null);
-  const [commandError, setCommandError] = useState<string | null>(null);
-
-  const stopAction = useCallback(async () => {
-    setCommandError(null);
-    setCommand("stop");
-    try {
-      const stopped = await getTransport().stopWorkspaceAction(threadId, actionId);
-      if (stopped) applyRun(stopped);
-    } catch {
-      setCommandError("Project Action could not stop.");
-    } finally {
-      setCommand(null);
-    }
-  }, [actionId, applyRun, threadId]);
-
-  const restartAction = useCallback(async () => {
-    setCommandError(null);
-    setCommand("restart");
-    try {
-      applyRun(await getTransport().restartWorkspaceAction(threadId, actionId));
-    } catch {
-      setCommandError("Project Action could not restart.");
-    } finally {
-      setCommand(null);
-    }
-  }, [actionId, applyRun, threadId]);
-
-  useEffect(() => {
-    if (run) {
-      // oxlint-disable-next-line react/set-state-in-effect -- A store update supplies the action transcript, so any stale load error must clear.
-      setLoadError(null);
-      return;
-    }
-    let current = true;
-    setLoadError(null);
-    void getTransport().getWorkspaceActionRun(threadId, actionId).then(
-      (hydrated) => {
-        if (!current) return;
-        if (hydrated) applyRun(hydrated);
-        else setLoadError("This Project Action result is unavailable.");
-      },
-      () => {
-        if (current) setLoadError("This Project Action result is unavailable.");
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [actionId, applyRun, run, threadId]);
-
-  if (!run && loadError) {
-    return <section data-testid={`action-terminal:${actionId}`} className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-sm text-muted" aria-label="Project Action result unavailable">{loadError}</section>;
-  }
-
-  if (!run) {
-    return <div data-testid={`action-terminal:${actionId}`} className="flex min-h-0 flex-1 items-center justify-center"><Spinner size={16} /></div>;
-  }
-
-  return (
-    <section
-      data-testid={`action-terminal:${run.actionId}`}
-      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
-      aria-label={`${run.actionName} terminal`}
-    >
-      <div className="flex h-9 items-center gap-2 border-b border-border/50 px-3 text-xs">
-        <span className="min-w-0 flex-1 text-fade font-medium text-ink">{run.actionName}</span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-compact"
-                aria-label={`Restart ${run.actionName}`}
-                disabled={command !== null}
-                onClick={restartAction}
-              >
-                {command === "restart" ? <Spinner size={16} aria-hidden /> : <RotateCcw size={14} aria-hidden />}
-              </Button>
-            }
-          />
-          <TooltipContent>Restart Action</TooltipContent>
-        </Tooltip>
-        {run.status === "running" ? (
-          <>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-compact"
-                    aria-label={`Stop ${run.actionName}`}
-                    disabled={command !== null}
-                    onClick={stopAction}
-                  >
-                    {command === "stop" ? <Spinner size={16} aria-hidden /> : <CircleStop size={14} aria-hidden />}
-                  </Button>
-                }
-              />
-              <TooltipContent>Stop Action</TooltipContent>
-            </Tooltip>
-          </>
-        ) : null}
-        <ActionStatus status={run.status} finishedAt={run.finishedAt} showIdlePlay={false} />
-      </div>
-      {commandError ? <p role="status" className="border-b border-border/50 px-3 py-2 text-xs text-destructive">{commandError}</p> : null}
-      <ScrollArea className="min-h-0 flex-1" viewportProps={{ tabIndex: 0, "aria-label": `${run.actionName} output` }}>
-        <ProjectActionTerminalTranscript transcript={run.transcript} />
-      </ScrollArea>
-      {run.exitCode !== null ? <p className="border-t border-border/50 px-3 py-2 font-mono text-xs text-muted">Exit code: {run.exitCode}</p> : null}
-    </section>
-  );
-}
-
 /** Loads configured Actions and reads retained runs from renderer-owned action state. */
 export function useProjectActions(workspaceId: string, threadId: string): {
   readonly actions: readonly WorkspaceEnvironmentAction[];
@@ -497,7 +366,6 @@ export function useProjectActions(workspaceId: string, threadId: string): {
   const hydrateRuns = useProjectActionStore.getState().hydrateRuns;
   const beginHydration = useProjectActionStore.getState().beginHydration;
   const endHydration = useProjectActionStore.getState().endHydration;
-  const applyRun = useProjectActionStore.getState().applyRun;
   const generation = useRef(0);
   const runsByActionId = useMemo(
     () => new Map(Object.entries(runsByAction)),
@@ -541,9 +409,9 @@ export function useProjectActions(workspaceId: string, threadId: string): {
 
   const start = useCallback(async (actionId: string) => {
     const run = await getTransport().startWorkspaceAction(threadId, actionId);
-    applyRun(run);
+    applyActionRun(run, { focus: true });
     return run;
-  }, [applyRun, threadId]);
+  }, [threadId]);
 
   const approve = useCallback(async (actionId: string, approval: WorkspaceEnvironmentCommandApproval) => {
     try {
@@ -557,72 +425,6 @@ export function useProjectActions(workspaceId: string, threadId: string): {
 
   return { actions, hasSetup, runsByActionId, start, approve, loadError };
 }
-
-function ProjectActionTerminalTranscript({ transcript }: { readonly transcript: string }) {
-  const segments = useMemo(() => parseAnsiTranscript(transcript || "No output"), [transcript]);
-  return (
-    <pre className="min-w-max whitespace-pre p-3 font-mono text-xs leading-5 text-ink">
-      {segments.map((segment, index) => (
-        <span key={`${index}:${segment.text}`} className={segment.className}>{segment.text}</span>
-      ))}
-    </pre>
-  );
-}
-
-interface AnsiTranscriptSegment {
-  readonly text: string;
-  readonly className: string | undefined;
-}
-
-const ANSI_ESCAPE = String.fromCharCode(27);
-const ANSI_BELL = String.fromCharCode(7);
-const ANSI_SEQUENCE = new RegExp(
-  `${ANSI_ESCAPE}\\[([0-9;]*)m|${ANSI_ESCAPE}(?:\\][^${ANSI_BELL}]*(?:${ANSI_BELL}|${ANSI_ESCAPE}\\\\)|\\[[0-?]*[ -/]*[@-~]|[@-_])`,
-  "g",
-);
-
-function parseAnsiTranscript(transcript: string): readonly AnsiTranscriptSegment[] {
-  const segments: AnsiTranscriptSegment[] = [];
-  let color: string | undefined;
-  let cursor = 0;
-  for (const match of transcript.matchAll(ANSI_SEQUENCE)) {
-    if (match.index! > cursor) segments.push({ text: transcript.slice(cursor, match.index), className: color });
-    if (match[1] !== undefined) color = ansiColor(match[1]);
-    cursor = match.index! + match[0].length;
-  }
-  if (cursor < transcript.length) segments.push({ text: transcript.slice(cursor), className: color });
-  return segments.length > 0 ? segments : [{ text: "", className: color }];
-}
-
-function ansiColor(sequence: string): string | undefined {
-  let color: string | undefined;
-  for (const code of sequence.split(";").map((value) => Number(value || "0"))) {
-    const nextColor = ANSI_COLORS[code];
-    if (nextColor !== undefined) color = nextColor ?? undefined;
-  }
-  return color;
-}
-
-const ANSI_COLORS: Readonly<Record<number, string | null>> = {
-  0: null,
-  30: "text-ink",
-  31: "text-error",
-  32: "text-success",
-  33: "text-primary",
-  34: "text-link",
-  35: "text-ink",
-  36: "text-ink",
-  37: "text-ink",
-  39: null,
-  90: "text-ink",
-  91: "text-error",
-  92: "text-success",
-  93: "text-primary",
-  94: "text-link",
-  95: "text-ink",
-  96: "text-ink",
-  97: "text-ink",
-};
 
 function ActionStatus({
   status,

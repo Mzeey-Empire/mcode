@@ -58,7 +58,6 @@ export {
   WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES,
   WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES,
   WORKSPACE_ENVIRONMENT_SETUP_OUTPUT_MAX_BYTES,
-  WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES,
   WorkspaceEnvironmentValidationReasonSchema,
   WorkspaceEnvironmentValidationIssueSchema,
   WorkspaceEnvironmentCommandSchema,
