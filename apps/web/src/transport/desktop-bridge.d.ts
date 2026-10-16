@@ -2,6 +2,7 @@ import type { AttachmentMeta, OpenInApp } from "./types";
 import type {
   BrowserAutomationControllerState,
   BrowserHistory,
+  BrowserCertificateState,
   BrowserAutomationHostDispatch,
   BrowserAutomationHostDispatchTarget,
   BrowserAutomationResponse,
@@ -187,6 +188,15 @@ interface PreviewBridge {
   reload(): Promise<void>;
   /** Hard reload that bypasses the guest's HTTP cache (Force reload). */
   forceReload(): Promise<void>;
+  /** User-controlled certificate trust for an exact adopted Browser surface. */
+  certificate: {
+    /** Reads the latest main-frame warning and active host trust. */
+    state(surfaceId: PreviewSurfaceRef): Promise<BrowserCertificateState>;
+    /** Trusts only the certificate recorded for this surface's failed navigation. */
+    proceed(surfaceId: PreviewSurfaceRef, fingerprint: string): Promise<boolean>;
+    /** Stops trusting the active HTTPS host and closes existing profile connections. */
+    revoke(surfaceId: PreviewSurfaceRef): Promise<void>;
+  };
   /** Recent pages and server thumbnails stored in the workspace's local profile. */
   history: {
     /** Lists bounded recent pages and local server thumbnails. */

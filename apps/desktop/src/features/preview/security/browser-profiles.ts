@@ -5,6 +5,7 @@ import { browserPartitionFor, isBrowserWorkspaceId } from "@mcode/shared/browser
 import { installBrowserSessionPolicy } from "./electron-session-policy.js";
 import { disposePreviewSurfacesForWorkspace } from "../surfaces/registry.js";
 import { BrowserHistoryStore } from "../profiles/history-store.js";
+import { BrowserCertificateExceptions } from "./certificate-exceptions.js";
 
 /** Injectable Electron boundaries; file operations stay inside the supplied data directories. */
 export interface BrowserProfilesOptions {
@@ -36,6 +37,8 @@ function profileIds(directory: string, prefix = ""): string[] {
 export class BrowserProfiles {
   /** History shares this owner's removal tombstones and user-data directory. */
   public readonly history: BrowserHistoryStore;
+  /** Certificate trust shares the profile's removal lifetime. */
+  public readonly certificates = new BrowserCertificateExceptions((profile) => this.workspaceForSession(profile));
   private readonly sessions = new Map<string, Session>();
   private readonly removals = new Map<string, Promise<void>>();
   private readonly removed = new Set<string>();
@@ -89,6 +92,14 @@ export class BrowserProfiles {
     return profile;
   }
 
+  /** Resolves live Browser profiles by exact Electron session identity. */
+  public workspaceForSession(profile: Session): string | null {
+    for (const [id, candidate] of this.sessions) {
+      if (candidate === profile && !this.removed.has(id)) return id;
+    }
+    return null;
+  }
+
   /** Reports whether this workspace was removed during this launch. */
   public isRemoved(workspaceId: string): boolean {
     return this.removed.has(canonicalWorkspaceId(workspaceId));
@@ -108,6 +119,7 @@ export class BrowserProfiles {
     const pending = this.removals.get(id);
     if (pending) return pending;
     this.removed.add(id);
+    this.certificates.forget(id);
     this.history.forget(id);
     const removal = this.removeProfile(id);
     this.removals.set(id, removal);

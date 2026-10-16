@@ -17,6 +17,7 @@ vi.mock("electron", () => ({
   },
 }));
 vi.mock("../browser-profiles.js", () => ({ browserProfiles: fake.profiles }));
+vi.mock("../../surfaces/registry.js", () => ({ resolveAdoptedPreviewSurfaceForWindow: () => null }));
 
 import { registerBrowserProfileHandlers } from "../profile-handlers.js";
 
