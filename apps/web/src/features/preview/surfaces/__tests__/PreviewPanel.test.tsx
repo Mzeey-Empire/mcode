@@ -886,9 +886,9 @@ describe("PreviewPanel: full panel state", () => {
     expect(screen.queryByLabelText("Forward")).not.toBeInTheDocument();
   });
 
-  it("shows the localhost-ports empty state when no page is loaded", () => {
+  it("shows the new page when no page is loaded", () => {
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
-    expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
+    expect(screen.getByTestId("browser-new-page")).toBeInTheDocument();
   });
 
   it("accepts an optional workspaceId prop without error", () => {
@@ -909,7 +909,7 @@ describe("PreviewPanel: full panel state", () => {
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(screen.queryByTestId("preview-webview-surface")).not.toBeInTheDocument();
     expect(screen.queryByTestId("preview-webview")).not.toBeInTheDocument();
-    expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
+    expect(screen.getByTestId("browser-new-page")).toBeInTheDocument();
     expect(screen.getByTestId("browser-chrome")).toContainElement(screen.getByTestId("browser-toolbar"));
     expect(mockUsePreviewBridge).toHaveBeenLastCalledWith(
       expect.objectContaining({ threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }),
@@ -959,7 +959,7 @@ describe("PreviewPanel: full panel state", () => {
       expect(
         (await screen.findByTestId("electron-browser-surface-webview")).getAttribute("src"),
       ).toMatch(/^about:blank/);
-      expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
+      expect(screen.getByTestId("browser-new-page")).toBeInTheDocument();
       await waitFor(() => expect(screen.getByTestId("electron-browser-surface-webview")).toHaveStyle({
         visibility: "hidden",
         pointerEvents: "none",
@@ -985,7 +985,7 @@ describe("PreviewPanel: full panel state", () => {
       expect(webview).toHaveAttribute("src", "https://example.com");
       expect(screen.getByTestId("preview-panel")).toHaveClass("pointer-events-none");
       expect(screen.getByTestId("preview-surface")).toHaveClass("pointer-events-none");
-      expect(screen.queryByTestId("browser-local-ports")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("browser-new-page")).not.toBeInTheDocument();
       expect(await screen.findByTestId("electron-browser-surface-webview")).toHaveStyle({
         visibility: "visible",
         pointerEvents: "auto",
