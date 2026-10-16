@@ -354,7 +354,7 @@ describe("RightPanel", () => {
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-active-tab-id", "singleton:terminal");
   });
 
-  it("disables the round + at the record cap and explains why, counting action records", () => {
+  it("disables the round + at the record cap and explains why, counting action records", async () => {
     const capReason = `${TERMINAL_MAX_PER_SCOPE} terminals are open. Close one to open another.`;
     const records = Array.from({ length: TERMINAL_MAX_PER_SCOPE - 1 }, (_, index) => ({
       id: `pty-${index}`,
@@ -370,7 +370,9 @@ describe("RightPanel", () => {
 
     render(<RightPanel />);
 
-    const add = within(screen.getByTestId("panel-header-leading")).getByRole("button", { name: "New terminal" });
+    const findAdd = () => within(screen.getByTestId("panel-header-leading")).getByRole("button", { name: "New terminal" });
+    await waitFor(() => expect(findAdd()).not.toHaveAttribute("aria-haspopup"));
+    const add = findAdd();
     expect(add).toHaveAttribute("aria-disabled", "true");
     expect(add).toHaveAccessibleDescription(capReason);
     fireEvent.click(add);
