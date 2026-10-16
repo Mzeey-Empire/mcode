@@ -134,7 +134,7 @@ function TerminalsSection({ thread }: { readonly thread: Thread }) {
           onClick={() => setExpanded((value) => !value)}
           className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start gap-2 text-sm/5 text-muted")}
         >
-          {expanded ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+          {expanded ? <ChevronUp className="size-3.5" aria-hidden /> : <ChevronDown className="size-3.5" aria-hidden />}
           {expanded ? "Show less" : `${hidden} more`}
         </Button>
       ) : null}
