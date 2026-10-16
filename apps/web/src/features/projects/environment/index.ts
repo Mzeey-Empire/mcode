@@ -6,5 +6,3 @@ export {
   ProjectSetupMenuItem,
   useProjectSetupAttempt,
 } from "./ProjectSetupControl";
-/** Project Action menu and the hook that starts runs. */
-export { ProjectActionMenu, useProjectActions } from "./ProjectActionControl";

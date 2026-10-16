@@ -1,85 +1,41 @@
-import { Button } from "@/components/ui/button";
+import { Button, IconButton } from "@/components/ui/button";
+import { MoreIcon } from "@/components/ui/icon-map";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ProjectActionMenu, ProjectSetupMenuItem, useProjectActions } from "@/features/projects/environment";
+import { ThreadActionRunMenu } from "@/features/projects/actions/ThreadActionRunMenu";
+import { useProjectActions } from "@/features/projects/actions/useProjectActions";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
-import { useTerminalStore } from "@/features/terminal";
-import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { newThreadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import { type Thread } from "@/transport";
 import { Settings } from "lucide-react";
-import { useCallback } from "react";
-
-/** Returns the setup action only when this checkout supports manual setup. */
-function getThreadOverviewSetupMenuItem(
-  canRunManualSetup: boolean,
-  hasSetup: boolean,
-  props: React.ComponentProps<typeof ProjectSetupMenuItem>,
-): React.ReactNode {
-  if (!canRunManualSetup || !hasSetup) return null;
-  return <ProjectSetupMenuItem {...props} />;
-}
-
-function canRunManualProjectSetup(thread: Thread): boolean {
-  return thread.mode === "direct" || (
-    thread.mode === "worktree" && thread.worktree_managed === false
-  );
-}
-
-/** The record a Project Action runs in, matched by owner first and by the run's session as a fallback. */
-function findActionTerminalId(threadId: string, actionId: string): string | null {
-  const records = useTerminalStore.getState().terminals[threadId] ?? [];
-  const owned = records.find((terminal) => terminal.actionId === actionId);
-  if (owned) return owned.id;
-  return useProjectActionStore.getState().runsByThread[threadId]?.[actionId]?.terminalSessionId ?? null;
-}
 
 function useThreadProjectActions(thread: Thread) {
   return useProjectActions(thread.workspace_id, thread.id);
 }
 
-/** Keeps loaded project actions and Setup across popover close, as the parent-owned hook did. */
+/** Keeps loaded project actions across popover close, as the parent-owned hook did. */
 export const { Provider: OverviewProjectActionsState, useEntryState: useProjectActionsState } =
   createOverviewEntryState(useThreadProjectActions);
 
 function ProjectActions({ thread }: { thread: Thread }) {
-  const { projectSetup, openProjectSettings } = useOverviewContext();
+  const { openProjectSettings } = useOverviewContext();
   const projectActions = useProjectActionsState();
-  const revealTerminal = useCallback(() => {
-    showRightPanelAdaptive(thread.workspace_id, thread.id);
-    useDiffStore.getState().setRightPanelTab(thread.workspace_id, thread.id, "terminal");
-  }, [thread.id, thread.workspace_id]);
-  const startProjectAction = useCallback(async (actionId: string) => {
-    const run = await projectActions.start(actionId);
-    revealTerminal();
-    return run;
-  }, [projectActions, revealTerminal]);
-  const focusProjectAction = useCallback((actionId: string) => {
-    revealTerminal();
-    const ptyId = findActionTerminalId(thread.id, actionId);
-    if (ptyId) useTerminalStore.getState().setActiveTerminal(thread.id, ptyId);
-  }, [revealTerminal, thread.id]);
-  const canRunManualSetup = canRunManualProjectSetup(thread);
-  return (<ProjectActionMenu
-    actions={projectActions.actions}
-    runsByActionId={projectActions.runsByActionId}
-    loadError={projectActions.loadError}
-    onStart={startProjectAction}
-    onFocus={focusProjectAction}
-    onEdit={openProjectSettings}
-    setupMenuItem={getThreadOverviewSetupMenuItem(
-      canRunManualSetup,
-      projectActions.hasSetup,
-      {
-        attempt: projectSetup.attempt,
-        starting: projectSetup.starting,
-        onStart: projectSetup.start,
-      },
-    )}
-  />);
+  return (
+    <ThreadActionRunMenu
+      workspaceId={thread.workspace_id}
+      threadId={thread.id}
+      projectActions={projectActions}
+      onEdit={openProjectSettings}
+      trigger={
+        <IconButton aria-label="Actions" className="aria-expanded:bg-selected">
+          <MoreIcon size={14} aria-hidden />
+        </IconButton>
+      }
+    />
+  );
 }
 function ProjectSettingsButton({ onOpen }: { onOpen: () => void }) {
   return (<Tooltip>

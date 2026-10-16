@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode, type WheelEvent } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement, type ReactNode, type WheelEvent } from "react";
 import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { IconButton } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,11 @@ export interface PanelTabStripProps {
   readonly onSelect: (id: string) => void;
   readonly onClose: (id: string) => void;
   readonly onAdd: () => void;
+  /**
+   * Wraps the + button in a menu that opens from it. The button then only opens the menu, so
+   * `onAdd` and `addDisabledReason` stop applying and each menu row explains its own limits.
+   */
+  readonly addMenu?: (trigger: ReactElement) => ReactElement;
   /** Browser tabs shrink to 96px and omit scroll chevrons. Defaults to "default". */
   readonly appearance?: PanelTabStripAppearance;
 }
@@ -43,6 +48,7 @@ export function PanelTabStrip({
   onSelect,
   onClose,
   onAdd,
+  addMenu,
   appearance = "default",
 }: PanelTabStripProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -79,7 +85,7 @@ export function PanelTabStrip({
           <PanelTabScrollButton direction="end" disabled={!overflow.end} scrollerRef={scrollerRef} />
         ) : null}
       </div>
-      <PanelTabAddButton label={addLabel} disabledReason={addDisabledReason} onAdd={onAdd} />
+      <PanelTabAddButton label={addLabel} disabledReason={addDisabledReason} onAdd={onAdd} menu={addMenu} />
     </div>
   );
 }
@@ -293,31 +299,36 @@ function PanelTabAddButton({
   label,
   disabledReason,
   onAdd,
+  menu,
 }: {
   readonly label: string;
   readonly disabledReason: string | undefined;
   readonly onAdd: () => void;
+  readonly menu: ((trigger: ReactElement) => ReactElement) | undefined;
 }) {
   const reasonId = useId();
-  const disabled = disabledReason !== undefined;
+  const disabled = menu === undefined && disabledReason !== undefined;
+  const button = (
+    <IconButton
+      shape="round"
+      aria-label={label}
+      tooltip={disabledReason ?? label}
+      aria-describedby={disabled ? reasonId : undefined}
+      // Stay hoverable while disabled so the tooltip can say why. The tooltip
+      // trigger drops Base UI's aria-disabled, so it is set here directly.
+      disabled={disabled}
+      focusableWhenDisabled
+      aria-disabled={disabled || undefined}
+      data-testid="panel-tab-add"
+      onClick={menu || disabled ? undefined : onAdd}
+      className="shrink-0 aria-disabled:opacity-50"
+    >
+      <Plus />
+    </IconButton>
+  );
   return (
     <>
-      <IconButton
-        shape="round"
-        aria-label={label}
-        tooltip={disabledReason ?? label}
-        aria-describedby={disabled ? reasonId : undefined}
-        // Stay hoverable while disabled so the tooltip can say why. The tooltip
-        // trigger drops Base UI's aria-disabled, so it is set here directly.
-        disabled={disabled}
-        focusableWhenDisabled
-        aria-disabled={disabled || undefined}
-        data-testid="panel-tab-add"
-        onClick={disabled ? undefined : onAdd}
-        className="shrink-0 aria-disabled:opacity-50"
-      >
-        <Plus />
-      </IconButton>
+      {menu ? menu(button) : button}
       {disabled ? <span id={reasonId} hidden>{disabledReason}</span> : null}
     </>
   );

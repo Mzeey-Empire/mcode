@@ -154,6 +154,10 @@ vi.mock("@/transport", () => ({ getTransport: () => ({
     terminalHasChildren: vi.fn().mockResolvedValue({ hasChildren: false }),
     listOpenInApps: vi.fn().mockResolvedValue([]),
     getWorkspaceActionRun: vi.fn(),
+    readWorkspaceEnvironment: vi.fn().mockResolvedValue({ document: { version: "0.0.1", actions: [] }, revision: null, status: "absent" }),
+    // Echo the seeded runs: hydration treats runs the server omits as deleted.
+    listWorkspaceActionRuns: vi.fn(async (threadId: string) =>
+      Object.values(useProjectActionStore.getState().runsByThread[threadId] ?? {})),
   }) }));
 
 import { reconcileWarmPreviewScopes, RightPanel } from "./RightPanel";

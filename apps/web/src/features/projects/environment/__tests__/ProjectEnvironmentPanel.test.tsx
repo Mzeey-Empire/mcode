@@ -31,7 +31,8 @@ vi.mock("@/features/projects/state/workspaceStore", () => ({
     selector({ workspaces: [{ id: "workspace-1", name: "Caravan" }] }),
 }));
 
-import { ProjectActionMenu, useProjectActions } from "../ProjectActionControl";
+import { ActionRunMenu } from "../../actions/ActionRunMenu";
+import { useProjectActions } from "../../actions/useProjectActions";
 import { ProjectEnvironmentPanel } from "../ProjectEnvironmentPanel";
 import { useProjectActionStore } from "../state/project-action-store";
 
@@ -41,15 +42,18 @@ const initialResult: WorkspaceEnvironmentReadResult = {
   status: "absent",
 };
 
-function MountedProjectActionMenu() {
+function MountedActionsMenu() {
   const projectActions = useProjectActions("workspace-1", "thread-1");
   return (
-    <ProjectActionMenu
+    <ActionRunMenu
+      trigger={<button type="button" aria-label="Actions" />}
       actions={projectActions.actions}
       runsByActionId={projectActions.runsByActionId}
       loadError={projectActions.loadError}
-      onStart={async () => undefined}
-      onFocus={() => undefined}
+      terminalCapReason={null}
+      onRun={() => undefined}
+      onOpen={() => undefined}
+      onNewTerminal={() => undefined}
       onEdit={() => undefined}
     />
   );
@@ -185,10 +189,10 @@ describe("ProjectEnvironmentPanel", () => {
       return persisted;
     });
 
-    render(<><ProjectEnvironmentPanel workspaceId="workspace-1" /><MountedProjectActionMenu /></>);
+    render(<><ProjectEnvironmentPanel workspaceId="workspace-1" /><MountedActionsMenu /></>);
 
     await screen.findByLabelText("Action name for Build");
-    await user.click(screen.getByRole("button", { name: "Project Actions" }));
+    await user.click(screen.getByRole("button", { name: "Actions" }));
     expect(await screen.findByRole("menuitem", { name: /Build/ })).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
@@ -199,7 +203,7 @@ describe("ProjectEnvironmentPanel", () => {
     await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledOnce());
     await waitFor(() => expect(transport.readWorkspaceEnvironment).toHaveBeenCalledTimes(3));
 
-    await user.click(screen.getByRole("button", { name: "Project Actions" }));
+    await user.click(screen.getByRole("button", { name: "Actions" }));
     expect(await screen.findByRole("menuitem", { name: /Test/ })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /Build/ })).not.toBeInTheDocument();
   });

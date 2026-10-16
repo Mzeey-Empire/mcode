@@ -16,6 +16,8 @@ vi.mock("@/transport", () => ({
     openIn: vi.fn(),
     listOpenInApps: vi.fn().mockResolvedValue([]),
     getWorkspaceActionRun,
+    readWorkspaceEnvironment: vi.fn().mockResolvedValue({ document: { version: "0.0.1", actions: [] }, revision: null, status: "absent" }),
+    listWorkspaceActionRuns: vi.fn().mockResolvedValue([]),
     restartWorkspaceAction: vi.fn(),
     stopWorkspaceAction: vi.fn(),
   }),
