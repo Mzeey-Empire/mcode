@@ -12,9 +12,12 @@ export function useProjectActions(workspaceId: string, threadId: string): {
   readonly runsByActionId: ReadonlyMap<string, WorkspaceEnvironmentActionRun>;
   readonly start: (actionId: string) => Promise<WorkspaceEnvironmentActionRun>;
   readonly loadError: string | null;
+  /** False until the Actions of the current thread have been read, so callers can tell "none yet" from "none". */
+  readonly loaded: boolean;
 } {
   const [actions, setActions] = useState<readonly WorkspaceEnvironmentAction[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const runsByAction = useProjectActionStore((state) => state.runsByThread[threadId] ?? EMPTY_ACTION_RUNS);
   const configurationEpoch = useProjectActionStore((state) =>
     state.configurationEpochByWorkspace[workspaceId] ?? 0,
@@ -37,6 +40,7 @@ export function useProjectActions(workspaceId: string, threadId: string): {
     let active = true;
     // oxlint-disable-next-line react/set-state-in-effect -- A new transport hydration must hide data from the previous Project Action context.
     setActions([]);
+    setLoaded(false);
     setLoadError(null);
     void Promise.all([
       getTransport().readWorkspaceEnvironment(workspaceId, threadId),
@@ -45,6 +49,7 @@ export function useProjectActions(workspaceId: string, threadId: string): {
       ([environment, runs]) => {
         if (!active || generation.current !== current) return;
         setActions(environment.document.actions);
+        setLoaded(true);
         hydrateRuns(threadId, runs, requestEpoch, hydrationGeneration);
       },
       () => {
@@ -62,5 +67,5 @@ export function useProjectActions(workspaceId: string, threadId: string): {
     return run;
   }, [threadId]);
 
-  return { actions, runsByActionId, start, loadError };
+  return { actions, runsByActionId, start, loadError, loaded };
 }

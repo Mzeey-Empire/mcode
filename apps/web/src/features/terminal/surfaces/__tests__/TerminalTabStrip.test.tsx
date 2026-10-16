@@ -60,12 +60,35 @@ describe("TerminalTabStrip", () => {
   it("opens a shell straight from + when the thread has no Project Actions", async () => {
     const user = userEvent.setup();
     renderStrip("thread-1");
-    await waitFor(() => expect(transport.readWorkspaceEnvironment).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("panel-tab-add")).not.toHaveAttribute("aria-haspopup"));
 
     await user.click(screen.getByTestId("panel-tab-add"));
 
     expect(createTerminalForScope).toHaveBeenCalledWith("scope-1");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("opens the menu, not a shell, when + is clicked before the Actions have loaded", async () => {
+    const user = userEvent.setup();
+    transport.readWorkspaceEnvironment.mockReturnValue(new Promise(() => {}));
+    renderStrip("thread-1");
+
+    await user.click(screen.getByTestId("panel-tab-add"));
+
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    expect(createTerminalForScope).not.toHaveBeenCalled();
+  });
+
+  it("keeps the menu when the Actions fail to load", async () => {
+    const user = userEvent.setup();
+    transport.readWorkspaceEnvironment.mockRejectedValue(new Error("offline"));
+    renderStrip("thread-1");
+
+    await waitFor(() => expect(screen.getByTestId("panel-tab-add")).toHaveAttribute("aria-haspopup", "menu"));
+    await user.click(screen.getByTestId("panel-tab-add"));
+
+    expect(await screen.findByText("Project Actions are unavailable.")).toBeInTheDocument();
+    expect(createTerminalForScope).not.toHaveBeenCalled();
   });
 
   it("opens the Actions menu from + when the thread has Project Actions", async () => {

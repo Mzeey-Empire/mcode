@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
@@ -60,7 +60,11 @@ function seed(
   terminals: readonly TerminalInstance[],
   runs: Record<string, WorkspaceEnvironmentActionRun> = {},
 ): void {
-  useTerminalStore.setState({ terminals: { [thread.id]: terminals }, activeTerminalByScope: {} });
+  useTerminalStore.setState({
+    terminals: { [thread.id]: terminals },
+    ptyToThread: Object.fromEntries(terminals.map((terminal) => [terminal.id, thread.id])),
+    activeTerminalByScope: {},
+  });
   useProjectActionStore.setState({ runsByThread: { [thread.id]: runs } });
 }
 
@@ -93,6 +97,13 @@ describe("OverviewTerminalsSection", () => {
     expect(rows[1]).toHaveTextContent("pwshShell");
   });
 
+  it("shows a running action that announced no port without calling it a shell", () => {
+    seed([actionTerminal("term-dev", "dev", "2026-10-10T10:00:00.000Z")], { dev: run("dev", "running") });
+    renderSection();
+
+    expect(screen.getByTestId("thread-overview-terminal")).toHaveTextContent(/^Dev$/);
+  });
+
   it("omits a finished action, whose record stays behind as an idle shell", () => {
     seed([actionTerminal("term-dev", "dev", "2026-10-10T10:00:00.000Z")], { dev: run("dev", "completed") });
     const { container } = renderSection();
@@ -111,7 +122,7 @@ describe("OverviewTerminalsSection", () => {
     expect(screen.getAllByTestId("thread-overview-terminal")).toHaveLength(3);
   });
 
-  it("stops the terminal without removing its tab", async () => {
+  it("stops the terminal: the row leaves once it exits and the tab stays", async () => {
     const user = userEvent.setup();
     seed([shell("sh", "2026-10-10T10:00:00.000Z")]);
     renderSection();
@@ -119,6 +130,10 @@ describe("OverviewTerminalsSection", () => {
     await user.click(screen.getByRole("button", { name: "Stop pwsh" }));
 
     expect(mockTransport.terminalKill).toHaveBeenCalledWith("sh");
+
+    act(() => useTerminalStore.getState().recordTerminalExit("sh", { code: null, signal: null, reason: "natural" }));
+
+    expect(screen.queryByTestId("thread-overview-terminal")).not.toBeInTheDocument();
     expect(useTerminalStore.getState().terminals[thread.id]).toHaveLength(1);
   });
 

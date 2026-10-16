@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
@@ -22,6 +22,7 @@ interface TerminalRow {
   readonly id: string;
   readonly name: string;
   readonly icon: { readonly iconId: string | undefined; readonly command: string };
+  readonly kind: "shell" | "action";
   /** The port an action announced, or null for a shell and for an action that never announced one. */
   readonly port: number | null;
 }
@@ -34,12 +35,12 @@ function liveRow(
 ): TerminalRow | null {
   if ((terminal.state ?? "running") !== "running") return null;
   if (terminal.kind !== "action") {
-    return { id: terminal.id, name, icon: { iconId: shellActionIconId(terminal.label), command: "" }, port: null };
+    return { id: terminal.id, name, icon: { iconId: shellActionIconId(terminal.label), command: "" }, kind: "shell", port: null };
   }
   const run = runs[terminal.actionId ?? ""];
   if (run?.status !== "running") return null;
   const port = run.port?.runId === run.runId ? run.port.port : null;
-  return { id: terminal.id, name, icon: { iconId: undefined, command: run.snapshot.script ?? "" }, port };
+  return { id: terminal.id, name, icon: { iconId: undefined, command: run.snapshot.script ?? "" }, kind: "action", port };
 }
 
 /**
@@ -62,6 +63,11 @@ function liveTerminalRows(
     .reverse()
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map(({ row }) => row);
+}
+
+function rowMeta(row: TerminalRow): ReactNode {
+  if (row.port !== null) return <span className="font-mono">:{row.port}</span>;
+  return row.kind === "shell" ? "Shell" : null;
 }
 
 function stopTerminal(ptyId: string): void {
@@ -87,7 +93,7 @@ function TerminalRowItem({ row, onOpen }: { readonly row: TerminalRow; readonly 
         <ActionIcon iconId={row.icon.iconId} command={row.icon.command} size={16} />
         <span className="min-w-0 flex-1 text-fade text-sm/5 text-ink">{row.name}</span>
         <span className="shrink-0 text-xs/4 text-muted group-focus-within/terminal:invisible group-hover/terminal:invisible">
-          {row.port === null ? "Shell" : <span className="font-mono">:{row.port}</span>}
+          {rowMeta(row)}
         </span>
       </Button>
       <IconButton

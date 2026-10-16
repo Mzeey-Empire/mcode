@@ -37,7 +37,8 @@ export function TerminalTabStrip(props: TerminalTabStripProps) {
 function ThreadTerminalTabs(props: TerminalTabStripProps & { readonly threadId: string }) {
   const { workspaceId, threadId } = props;
   const projectActions = useProjectActions(workspaceId, threadId);
-  const addMenu = projectActions.actions.length > 0
+  // Until the Actions are known the + opens the menu, so an early click cannot start a shell the user meant to pick from it.
+  const addMenu = !projectActions.loaded || projectActions.loadError !== null || projectActions.actions.length > 0
     ? (trigger: ReactElement) => (
         <ThreadActionRunMenu workspaceId={workspaceId} threadId={threadId} projectActions={projectActions} trigger={trigger} />
       )
