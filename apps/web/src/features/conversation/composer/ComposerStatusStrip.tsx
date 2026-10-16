@@ -1,4 +1,3 @@
-import { TerminalStatusIndicator } from "@/components/chat/TerminalStatusIndicator";
 import { basename } from "@/lib/path";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/transport";
@@ -27,9 +26,6 @@ function ComposerStatusStripContent(props: ComposerStatusStripProps) {
           folder={props.workspacePath ? basename(props.workspacePath) : ""}
           onModeChange={props.onBranchModeChange}
         />
-        <div className="flex items-center gap-3">
-          <TerminalStatusIndicator />
-        </div>
         <div className="ml-auto flex items-center gap-1">
           {props.isGitRepo ? (
             <ComposerTargetSelection scope="branch" mode={props.branchExecMode} sourceThread={props.activeThread} />

@@ -43,7 +43,6 @@ vi.mock("@/features/conversation/composer/composer-capabilities", async () => {
 
 vi.mock("@/components/chat/ModelSelector", () => ({ ModelSelector: () => <div /> }));
 vi.mock("@/components/chat/SpellcheckContextMenu", () => ({ SpellcheckContextMenu: () => <div /> }));
-vi.mock("@/components/chat/TerminalStatusIndicator", () => ({ TerminalStatusIndicator: () => <div /> }));
 vi.mock("@/components/chat/ComposerQueueList", () => ({ ComposerQueueList: () => <div /> }));
 vi.mock("@/components/chat/ContextTracker", () => ({ ContextTracker: () => <div /> }));
 
