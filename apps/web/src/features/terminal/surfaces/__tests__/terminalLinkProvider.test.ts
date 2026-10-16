@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   findTerminalLinks,
+  findTerminalUrlLinks,
   parseTerminalLink,
   terminalLinkCellRange,
 } from "../terminalLinkProvider";
@@ -58,5 +59,68 @@ describe("parseTerminalLink", () => {
       start: 4 + links[0]!.text.length,
       end: 4 + links[0]!.text.length + links[1]!.text.length,
     });
+  });
+});
+
+describe("findTerminalUrlLinks", () => {
+  it("finds a web URL and flags loopback hosts for the Browser tab", () => {
+    expect(findTerminalUrlLinks("ready on http://localhost:5173/")).toEqual([
+      expect.objectContaining({ url: "http://localhost:5173/", loopback: true, text: "http://localhost:5173/" }),
+    ]);
+    expect(findTerminalUrlLinks("http://127.0.0.1:3000/a http://[::1]:8080/")).toEqual([
+      expect.objectContaining({ loopback: true }),
+      expect.objectContaining({ loopback: true }),
+    ]);
+    expect(findTerminalUrlLinks("docs at https://example.test/guide")).toEqual([
+      expect.objectContaining({ url: "https://example.test/guide", loopback: false }),
+    ]);
+  });
+
+  it("does not treat a lookalike host as loopback", () => {
+    expect(findTerminalUrlLinks("http://localhost.evil.test/")).toEqual([
+      expect.objectContaining({ loopback: false }),
+    ]);
+  });
+
+  it("leaves sentence punctuation out of the link and maps its columns", () => {
+    const [link] = findTerminalUrlLinks("(see https://example.test/a.)");
+
+    expect(link?.text).toBe("https://example.test/a");
+    expect(link).toMatchObject({ start: 5, end: 5 + "https://example.test/a".length });
+  });
+
+  it("keeps a closing bracket that pairs with one inside the URL", () => {
+    expect(findTerminalUrlLinks("http://[::1]:8080/")).toEqual([
+      expect.objectContaining({ loopback: true, text: "http://[::1]:8080/" }),
+    ]);
+    expect(findTerminalUrlLinks("http://[::1]")).toEqual([
+      expect.objectContaining({ loopback: true, text: "http://[::1]" }),
+    ]);
+    expect(findTerminalUrlLinks("see https://example.test/wiki/Foo_(bar).")).toEqual([
+      expect.objectContaining({ text: "https://example.test/wiki/Foo_(bar)" }),
+    ]);
+    expect(findTerminalUrlLinks("(https://example.test/a)")).toEqual([
+      expect.objectContaining({ text: "https://example.test/a" }),
+    ]);
+  });
+
+  it("ignores schemes that must never be opened from terminal output", () => {
+    expect(findTerminalUrlLinks("javascript:alert(1) file:///etc/passwd ftp://example.test/x")).toEqual([]);
+    expect(findTerminalUrlLinks("https://example.test/")).toEqual([]);
+  });
+
+  it("skips a URL that wraps onto another row instead of opening a truncated address", () => {
+    const row = "ready: http://localhost:5173/doc";
+    const none = { continuesPreviousRow: false, continuesOnNextRow: false };
+
+    expect(findTerminalUrlLinks(row, { ...none, continuesOnNextRow: true })).toEqual([]);
+    expect(findTerminalUrlLinks("s and more", { ...none, continuesPreviousRow: true })).toEqual([]);
+    expect(findTerminalUrlLinks("http://localhost:5173/ next", { ...none, continuesPreviousRow: true })).toEqual([]);
+    expect(findTerminalUrlLinks("see http://localhost:5173/ ok", { ...none, continuesOnNextRow: true })).toHaveLength(1);
+    expect(findTerminalUrlLinks("http://localhost:5173/    ", { ...none, continuesOnNextRow: true })).toHaveLength(1);
+  });
+
+  it("does not claim file paths", () => {
+    expect(findTerminalUrlLinks("error: /workspace/src/main.ts:8:2")).toEqual([]);
   });
 });

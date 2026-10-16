@@ -79,3 +79,19 @@ export function isTerminalSearchShortcut(event: KeyboardEvent): boolean {
     event.key.toLowerCase() === "f"
   );
 }
+
+/**
+ * Returns true for the terminal Clear shortcut: Cmd+K on macOS, Ctrl+K elsewhere.
+ * Only keydown counts, because xterm also calls the handler on keyup.
+ * On Windows and Linux this shadows readline's kill-to-end-of-line.
+ */
+export function isTerminalClearShortcut(
+  event: KeyboardEvent,
+  platform: TerminalShortcutPlatform = detectTerminalShortcutPlatform(),
+): boolean {
+  if (event.isComposing || event.type !== "keydown") return false;
+  return event.key.toLowerCase() === "k" &&
+    usesPlatformModifier(event, platform) &&
+    !event.altKey &&
+    !event.shiftKey;
+}
