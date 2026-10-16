@@ -62,16 +62,16 @@ function previewSurfaceState(
   pageError: PreviewPageError | undefined,
   warmTabCount: number,
 ): {
-  readonly showLocalPorts: boolean;
+  readonly showNewPage: boolean;
   readonly hasWebviewLayer: boolean;
   readonly webviewLayerInteractive: boolean;
 } {
-  const showLocalPorts = !hasLoadedPage && !isLoading && !pageError;
+  const showNewPage = !hasLoadedPage && !isLoading && !pageError;
   const hasWebviewLayer = warmTabCount > 0;
   return {
-    showLocalPorts,
+    showNewPage,
     hasWebviewLayer,
-    webviewLayerInteractive: hasWebviewLayer && !showLocalPorts && !pageError,
+    webviewLayerInteractive: hasWebviewLayer && !showNewPage && !pageError,
   };
 }
 
@@ -347,7 +347,7 @@ export function PreviewPanel({
   );
   const pageError = previewPageError(webviewPageStatus, pendingNavError);
   const {
-    showLocalPorts,
+    showNewPage,
     hasWebviewLayer,
     webviewLayerInteractive,
   } = previewSurfaceState(
@@ -432,7 +432,7 @@ export function PreviewPanel({
         setWebviewCanFwd={setWebviewCanFwd}
         webviewNavError={webviewNavError}
         surfaceRef={surfaceRef}
-        showLocalPorts={showLocalPorts}
+        showNewPage={showNewPage}
         webviewLoading={webviewLoading}
         lastCapture={lastCapture}
         hasWebviewLayer={hasWebviewLayer}
