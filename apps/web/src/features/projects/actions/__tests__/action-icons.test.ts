@@ -24,6 +24,15 @@ describe("defaultActionIconId", () => {
     expect(defaultActionIconId("NAME='a b' docker compose up")).toBe("docker");
   });
 
+  it("keeps an assignment value with escaped whitespace out of the command word", () => {
+    expect(defaultActionIconId(String.raw`FOO=hello\ world bun run dev`)).toBe("bun");
+  });
+
+  it("does not treat inherited object keys as command words", () => {
+    expect(defaultActionIconId("constructor")).toBe("play");
+    expect(defaultActionIconId("__proto__ --flag")).toBe("play");
+  });
+
   it("reads the word after an npx or bunx prefix", () => {
     expect(defaultActionIconId("npx vitest run")).toBe("vitest");
     expect(defaultActionIconId("FOO=1 bunx playwright test")).toBe("playwright");
@@ -73,6 +82,7 @@ describe("shellActionIconId", () => {
     ["cmd", "shell"],
     ["wsl", "shell"],
     ["nushell", "shell"],
+    ["constructor", "shell"],
   ])("maps %s to %s", (shell, expected) => {
     expect(shellActionIconId(shell)).toBe(expected);
   });

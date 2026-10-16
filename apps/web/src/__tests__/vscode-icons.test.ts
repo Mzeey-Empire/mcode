@@ -118,6 +118,18 @@ describe("resolveIconByName", () => {
     expect(await resolveIconByName("file_type_bun.svg", Package)).toEqual({ type: "lucide", icon: Package });
   });
 
+  it("is not satisfied by a file icon cached for a file with a look-alike name", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(svgResponse());
+
+    await resolveIcon("icon:file_type_bun.svg");
+    await resolveIconByName("file_type_bun.svg", Package);
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(globalThis.fetch).mock.calls[1]?.[0]).toBe(
+      "https://cdn.jsdelivr.net/gh/vscode-icons/vscode-icons/icons/file_type_bun.svg",
+    );
+  });
+
   it("does not retry a file that already failed", async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline"));
 

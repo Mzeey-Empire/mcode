@@ -63,7 +63,9 @@ describe("ActionIcon", () => {
     globalThis.fetch = vi.fn();
     render(<ActionIcon iconId="rocket" command="bun run dev" />);
 
-    expect(screen.getByTestId("action-icon")).toHaveAttribute("data-icon-id", "rocket");
+    const slot = screen.getByTestId("action-icon");
+    expect(slot).toHaveAttribute("data-icon-id", "rocket");
+    expect(slot.querySelector("svg")).not.toBeNull();
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });

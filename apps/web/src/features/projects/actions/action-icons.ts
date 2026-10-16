@@ -96,7 +96,7 @@ export function isActionIconId(id: string | undefined): id is ActionIconId {
   return id !== undefined && Object.prototype.hasOwnProperty.call(ACTION_ICONS, id);
 }
 
-const COMMAND_ICON: Readonly<Record<string, ActionIconId>> = {
+const COMMAND_ICON: ReadonlyMap<string, ActionIconId> = new Map(Object.entries({
   bun: "bun",
   npm: "npm",
   pnpm: "pnpm",
@@ -124,11 +124,11 @@ const COMMAND_ICON: Readonly<Record<string, ActionIconId>> = {
   turbo: "turbo",
   prisma: "prisma",
   git: "git",
-};
+} satisfies Record<string, ActionIconId>));
 
 const PACKAGE_RUNNERS = new Set(["npx", "bunx"]);
 
-const ENV_ASSIGNMENTS = /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+)*/;
+const ENV_ASSIGNMENTS = /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|(?:\\.|[^\s\\])*)\s+)*/;
 
 function firstCommandLine(command: string): string {
   for (const line of command.split(/\r?\n/)) {
@@ -152,7 +152,7 @@ export function defaultActionIconId(command: string): ActionIconId {
   const words = firstCommandLine(command).replace(ENV_ASSIGNMENTS, "").split(/\s+/);
   const runner = programName(words[0] ?? "");
   const word = PACKAGE_RUNNERS.has(runner) ? programName(words[1] ?? "") : runner;
-  return COMMAND_ICON[word] ?? "play";
+  return COMMAND_ICON.get(word) ?? "play";
 }
 
 /** The id to draw: the stored one when this build knows it, otherwise the command's default. */
@@ -160,7 +160,7 @@ export function resolveActionIconId(storedId: string | undefined, command: strin
   return isActionIconId(storedId) ? storedId : defaultActionIconId(command);
 }
 
-const SHELL_ICON: Readonly<Record<string, ActionIconId>> = {
+const SHELL_ICON: ReadonlyMap<string, ActionIconId> = new Map(Object.entries({
   pwsh: "powershell",
   powershell: "powershell",
   bash: "shell",
@@ -169,9 +169,9 @@ const SHELL_ICON: Readonly<Record<string, ActionIconId>> = {
   fish: "shell",
   cmd: "shell",
   wsl: "shell",
-};
+} satisfies Record<string, ActionIconId>));
 
 /** The icon for a shell terminal, from its program name or path. Unknown shells get the generic shell mark. */
 export function shellActionIconId(shell: string): ActionIconId {
-  return SHELL_ICON[programName(shell)] ?? "shell";
+  return SHELL_ICON.get(programName(shell)) ?? "shell";
 }

@@ -49,7 +49,7 @@ export function clearIconCache(): void {
  * Tries VSCode icon from CDN first, falls back to Lucide.
  */
 export async function resolveIcon(fileName: string): Promise<ResolvedIcon> {
-  return resolveFromCdn(fileName, getIconUrl(fileName), getFileIcon(fileName));
+  return resolveFromCdn(`file:${fileName}`, getIconUrl(fileName), getFileIcon(fileName));
 }
 
 /**
