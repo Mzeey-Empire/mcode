@@ -39,6 +39,8 @@ export function TerminalTabContent({ workspaceId, threadId, scopeId }: TerminalT
   return (
     <>
       <TerminalTabStrip
+        workspaceId={workspaceId}
+        threadId={threadId}
         scopeId={scopeId}
         terminals={terminals}
         activeId={activeId}

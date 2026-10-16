@@ -469,7 +469,7 @@ describe("ThreadOverview branchless Create PR", () => {
 
     render(<ThreadOverview thread={makeThread({ mode: "direct" })} threadPaneWidth={1400} />);
 
-    await user.click(screen.getByRole("button", { name: "Project Actions" }));
+    await user.click(screen.getByRole("button", { name: "Actions" }));
     const action = await screen.findByTestId("project-action-success");
     await user.click(action);
 
@@ -504,7 +504,7 @@ describe("ThreadOverview branchless Create PR", () => {
     render(<><ThreadOverview thread={makeThread({ mode: "direct" })} threadPaneWidth={1400} /><ProjectEnvironmentPanel workspaceId="ws-1" /></>);
 
     await screen.findByLabelText("Action name for Success");
-    await user.click(screen.getByRole("button", { name: "Project Actions" }));
+    await user.click(screen.getByRole("button", { name: "Actions" }));
     expect(await screen.findByRole("menuitem", { name: /Success/ })).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
@@ -515,7 +515,7 @@ describe("ThreadOverview branchless Create PR", () => {
     await waitFor(() => expect(mockSaveWorkspaceEnvironment).toHaveBeenCalledOnce());
     await waitFor(() => expect(mockReadWorkspaceEnvironment).toHaveBeenCalledTimes(3));
 
-    await user.click(screen.getByRole("button", { name: "Project Actions" }));
+    await user.click(screen.getByRole("button", { name: "Actions" }));
     expect(await screen.findByRole("menuitem", { name: /Renamed Action/ })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /Success/ })).not.toBeInTheDocument();
   });
@@ -649,7 +649,7 @@ describe("ThreadOverview branchless Create PR", () => {
     ["a Direct Thread", { mode: "direct" }],
     ["an unmanaged Existing worktree", { mode: "worktree", worktree_managed: false }],
     ["a managed New worktree", { mode: "worktree", worktree_managed: true }],
-  ] as const)("offers no manual Setup entry in Project Actions for %s", async (_label, thread) => {
+  ] as const)("offers no manual Setup entry in the Actions menu for %s", async (_label, thread) => {
     const user = userEvent.setup();
     mockReadWorkspaceEnvironment.mockResolvedValue({
       document: {
@@ -659,7 +659,7 @@ describe("ThreadOverview branchless Create PR", () => {
     });
     render(<ThreadOverview thread={makeThread(thread)} threadPaneWidth={1400} />);
 
-    await user.click(screen.getByRole("button", { name: "Project Actions" }));
+    await user.click(screen.getByRole("button", { name: "Actions" }));
     await screen.findByRole("menuitem", { name: /Success/ });
     expect(screen.queryByRole("menuitem", { name: "Run Setup" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open Project settings" })).toBeInTheDocument();

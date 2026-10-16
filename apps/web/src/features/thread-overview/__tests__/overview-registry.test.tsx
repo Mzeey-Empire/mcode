@@ -65,6 +65,7 @@ describe("overview registry", () => {
       ["create-branch", "lane", 60],
       ["branch", "lane", 70],
       ["commit", "lane", 80],
+      ["terminals", "terminals", 85],
       ["usage", "summary", 90],
       ["subagents", "activity", 100],
       ["pull-request", "lane", 110],

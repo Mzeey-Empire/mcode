@@ -7,8 +7,8 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePreviewTabsStore } from "../state/previewTabsStore";
 import { BrowserActingOverlay } from "./BrowserActingOverlay";
+import { BrowserNewPage } from "./BrowserNewPage";
 import { BrowserViewportCanvas } from "./BrowserViewportCanvas";
-import { LocalPortsEmptyState } from "./LocalPortsEmptyState";
 import { PreviewErrorPanel } from "./PreviewErrorPanel";
 import { PreviewPerfHud } from "./PreviewPerfHud";
 import { PreviewWebview, type PreviewWebviewHandle } from "./PreviewWebview";
@@ -28,7 +28,7 @@ const CAPTURE_KIND_LABEL: Record<PreviewCaptureKind, string> = {
 function previewSurfaceClassName(
   responsiveViewportSize: { readonly width: number; readonly height: number } | null,
   webviewLayerInteractive: boolean,
-  showLocalPorts: boolean,
+  showNewPage: boolean,
 ): string {
   // No z-index here: a stacking context on the surface would trap the Design
   // layer below the Browser surface host root, which paints the hosted page.
@@ -37,7 +37,7 @@ function previewSurfaceClassName(
     "rounded-tr-md",
     responsiveViewportSize ? "mx-2 mb-2 overflow-auto rounded-control bg-page" : "overflow-hidden",
     webviewLayerInteractive && "pointer-events-none",
-    showLocalPorts && "overflow-y-auto",
+    showNewPage && "overflow-y-auto",
   );
 }
 
@@ -61,7 +61,7 @@ interface BrowserPageLayerProps {
   readonly setWebviewCanFwd: ReturnType<typeof usePreviewPage>["setWebviewCanFwd"];
   readonly webviewNavError: ReturnType<typeof usePreviewPage>["webviewNavError"];
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
-  readonly showLocalPorts: boolean;
+  readonly showNewPage: boolean;
   readonly webviewLoading: ReturnType<typeof usePreviewPage>["webviewLoading"];
   readonly lastCapture: ReturnType<typeof usePreviewPage>["lastCapture"];
   readonly hasWebviewLayer: boolean;
@@ -100,7 +100,7 @@ export function BrowserPageLayer({
   setWebviewCanFwd,
   webviewNavError,
   surfaceRef,
-  showLocalPorts,
+  showNewPage,
   webviewLoading,
   lastCapture,
   hasWebviewLayer,
@@ -187,7 +187,7 @@ export function BrowserPageLayer({
         className={previewSurfaceClassName(
           responsiveViewportSize,
           webviewLayerInteractive,
-          showLocalPorts,
+          showNewPage,
         )}
       >
         {/* Loading: thin indeterminate progress bar at top of content area.
@@ -267,10 +267,13 @@ export function BrowserPageLayer({
           />
           )}
         </RenderValue>
-        <RenderWhen condition={showLocalPorts}>
-          <LocalPortsEmptyState
-            active={showLocalPorts}
-            onOpenPort={(port) => onWebviewNavigate(`http://localhost:${port}`)}
+        <RenderWhen condition={showNewPage}>
+          <BrowserNewPage
+            // A pending Start belongs to the tab that pressed it, so another tab must not inherit it.
+            key={activeWebviewTabId ?? ""}
+            threadId={threadId}
+            browserWorkspaceId={browserWorkspaceId}
+            onOpen={onWebviewNavigate}
           />
         </RenderWhen>
       </div>

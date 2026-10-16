@@ -229,9 +229,6 @@ vi.mock("@/components/chat/SpellcheckContextMenu", () => ({
   SpellcheckContextMenu: () => <div />,
 }));
 
-vi.mock("@/components/chat/TerminalStatusIndicator", () => ({
-  TerminalStatusIndicator: () => <div />,
-}));
 
 vi.mock("@/components/chat/ComposerQueueList", () => ({
   ComposerQueueList: ({

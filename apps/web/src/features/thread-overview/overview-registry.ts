@@ -14,6 +14,7 @@ import { RepositoryEntryBlock, RepositoryEntryState } from "./entries/repository
 import { SaveRecoveryEntryBlock } from "./entries/save-recovery";
 import { SourcesEntryBlock } from "./entries/sources";
 import { SubagentsEntryBlock } from "./entries/subagents";
+import { OverviewTerminalsSection } from "./entries/terminals";
 import { UsageEntryBlock } from "./entries/usage";
 import { OverviewProjectActions, OverviewProjectActionsState, OverviewProjectSettings } from "./header-actions";
 import type { OverviewSubject } from "./overview-subject";
@@ -60,6 +61,7 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "create-branch", section: "lane", order: 60, subjects: ["thread"], Entry: CreateBranchEntryBlock },
   { id: "branch", section: "lane", order: 70, subjects: ["thread"], Entry: BranchEntryBlock, State: BranchEntryState },
   { id: "commit", section: "lane", order: 80, subjects: ["thread"], Entry: CommitEntryBlock },
+  { id: "terminals", section: "terminals", order: 85, subjects: ["thread"], Entry: OverviewTerminalsSection },
   { id: "usage", section: "summary", order: 90, subjects: ["thread"], Entry: UsageEntryBlock },
   { id: "subagents", section: "activity", order: 100, subjects: ["thread"], Entry: SubagentsEntryBlock },
   { id: "pull-request", section: "lane", order: 110, subjects: ["thread"], Entry: PullRequestEntryBlock },
