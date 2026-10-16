@@ -250,7 +250,7 @@ function TerminalPoolPortal({
       <TerminalView
         key={mountedTerm.id}
         ptyId={mountedTerm.id}
-        ownerScopeId={mountedTerm.threadId}
+        ownerScopeId={mountedTerm.kind === "action" ? undefined : mountedTerm.threadId}
         sessionState={mountedTerm.state === "pending" ? "starting" : mountedTerm.state ?? "running"}
         exit={mountedTerm.exit}
         diagnosticsAvailable={terminalDiagnosticsAvailable(terminalCapabilities)}

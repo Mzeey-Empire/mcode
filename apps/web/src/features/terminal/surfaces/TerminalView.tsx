@@ -439,7 +439,10 @@ async function loadRenderer(
 interface TerminalViewProps {
   /** The PTY session ID this view is bound to. */
   readonly ptyId: string;
-  /** Scope used to create a replacement session after a failed tombstone. */
+  /**
+   * Scope used to create a replacement session after a failed tombstone.
+   * Omitted for action terminals, whose Run again relaunches in the same terminal.
+   */
   readonly ownerScopeId?: string;
   /** Server-authoritative lifecycle state for the rendered PTY. */
   readonly sessionState?: TerminalSessionState;
