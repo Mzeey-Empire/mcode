@@ -501,7 +501,7 @@ describe("ThreadOverview branchless Create PR", () => {
       activeTabId: "singleton:terminal",
       width: 600,
     }));
-    expect(useTerminalStore.getState().terminalPanelByThread["thread-1"]?.activeTerminalId).toBe("terminal-1");
+    expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("terminal-1");
   });
 
   it("refreshes the mounted Action menu after Project settings save", async () => {

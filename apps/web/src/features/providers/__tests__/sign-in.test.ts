@@ -18,12 +18,12 @@ beforeEach(() => {
   vi.mocked(mockTransport.terminalKill).mockReset().mockResolvedValue(undefined);
   vi.mocked(mockTransport.listProviderStatus).mockClear();
   useWorkspaceStore.setState({ activeWorkspaceId: null, activeThreadId: null, threads: [], workspaces: [] });
-  useTerminalStore.setState({ terminals: {}, ptyToThread: {}, terminalPanelByThread: {} });
+  useTerminalStore.setState({ terminals: {}, ptyToThread: {}, activeTerminalByScope: {} });
   useToastStore.setState({ toasts: [] });
 });
 
 afterEach(() => {
-  useTerminalStore.setState({ terminals: {}, ptyToThread: {}, terminalPanelByThread: {} });
+  useTerminalStore.setState({ terminals: {}, ptyToThread: {}, activeTerminalByScope: {} });
 });
 
 describe("signInToSignedOutProvider", () => {
@@ -64,7 +64,7 @@ describe("signInToProvider", () => {
     await vi.waitFor(() => expect(mockTransport.terminalWrite).toHaveBeenCalledWith("pty-home-1", "devin auth login\r"));
     expect(mockTransport.terminalCreate).toHaveBeenCalledWith("home");
     expect(useTerminalStore.getState().terminals.home?.map(({ id }) => id)).toEqual(["pty-home-1"]);
-    expect(useTerminalStore.getState().terminalPanelByThread.home?.activeTerminalId).toBe("pty-home-1");
+    expect(useTerminalStore.getState().activeTerminalByScope.home).toBe("pty-home-1");
   });
 
   it("starts one shell when clicked again while the first is still being created", async () => {

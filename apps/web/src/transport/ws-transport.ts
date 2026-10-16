@@ -261,12 +261,10 @@ export const ptyLastSeqMap = new Map<string, number>();
 export function resolveSelectedTerminalId(input: {
   readonly activeThreadId: string | null;
   readonly activeWorkspaceId: string | null;
-  readonly terminalPanelByThread: Readonly<
-    Record<string, { readonly activeTerminalId: string | null }>
-  >;
+  readonly activeTerminalByScope: Readonly<Record<string, string | null>>;
 }): string | null {
   const scopeId = input.activeThreadId ?? input.activeWorkspaceId;
-  return scopeId ? input.terminalPanelByThread[scopeId]?.activeTerminalId ?? null : null;
+  return scopeId ? input.activeTerminalByScope[scopeId] ?? null : null;
 }
 
 /** Returns whether reconnect may reattach the selected Terminal session for replay. */
@@ -436,7 +434,7 @@ export function createWsTransport(
     const selectedTerminalId = resolveSelectedTerminalId({
       activeThreadId: workspaceState.activeThreadId,
       activeWorkspaceId: workspaceState.activeWorkspaceId,
-      terminalPanelByThread: terminalState.terminalPanelByThread,
+      activeTerminalByScope: terminalState.activeTerminalByScope,
     });
     const selectedSessions = activePtys.filter((session) =>
       shouldReattachSelectedTerminal(session, selectedTerminalId),

@@ -15,7 +15,7 @@ describe("TerminalStatusIndicator", () => {
     executeCommandMock.mockClear();
     useTerminalStore.setState({
       terminals: {},
-      terminalPanelByThread: {},
+      activeTerminalByScope: {},
       ptyToThread: {},
       splitMode: false,
     });

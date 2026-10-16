@@ -5,6 +5,9 @@ const { createTerminalForScope } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/ensure-terminal", () => ({ createTerminalForScope }));
+vi.mock("@/transport", () => ({
+  getTransport: () => ({ terminalPause: vi.fn().mockResolvedValue(undefined) }),
+}));
 
 import { summonTab } from "@/lib/summon-tab";
 import { useDiffStore } from "@/stores/diffStore";
@@ -36,7 +39,7 @@ describe("summonTab", () => {
     });
     useTerminalStore.setState({
       terminals: {},
-      terminalPanelByThread: {},
+      activeTerminalByScope: {},
       ptyToThread: {},
     });
     useUiStore.setState({ primarySurface: "chat" });
@@ -85,6 +88,21 @@ describe("summonTab", () => {
       expect(panel().activeTab).toBe("preview");
       // No tab was closed — both remain open.
       expect(panel().openTabs).toEqual(["terminal", "preview"]);
+    });
+
+    it("returns to the last active terminal instead of creating another", () => {
+      const terminals = useTerminalStore.getState();
+      terminals.addTerminal(TID, "pty-1", "pwsh");
+      terminals.addTerminal(TID, "pty-2", "bash");
+      terminals.setActiveTerminal(TID, "pty-1");
+      summonTab("terminal");
+      summonTab("preview");
+
+      summonTab("terminal");
+
+      expect(panel().activeTab).toBe("terminal");
+      expect(useTerminalStore.getState().activeTerminalByScope[TID]).toBe("pty-1");
+      expect(createTerminalForScope).not.toHaveBeenCalled();
     });
 
     it("requests a replacement PTY after the final terminal tab closes", () => {

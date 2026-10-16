@@ -47,7 +47,7 @@ function makeSearchHarness() {
 beforeEach(() => {
   useTerminalStore.setState({
     terminals: {},
-    terminalPanelByThread: {},
+    activeTerminalByScope: {},
     ptyToThread: {},
     terminalSearchByPty: {},
     splitMode: false,

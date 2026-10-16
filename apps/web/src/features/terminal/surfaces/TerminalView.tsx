@@ -38,6 +38,7 @@ import {
   captureRemountAnchor,
   dropRemountAnchor,
 } from "./terminalRemountScroll";
+import { TERMINAL_CLEAR } from "./terminalClear";
 import { TERMINAL_POOL_REFIT } from "./terminalPoolRefit";
 import { claimWebglSlot, clearWebglSlot, releaseWebglSlot } from "./terminalWebglSlot";
 import {
@@ -1305,6 +1306,14 @@ export const TerminalView = memo(function TerminalView({
       window.removeEventListener(TERMINAL_POOL_REFIT, onPoolRefit);
     };
   }, [shown, ptyId]);
+
+  useEffect(() => {
+    const onClear = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === ptyId) termRef.current?.clear();
+    };
+    window.addEventListener(TERMINAL_CLEAR, onClear);
+    return () => window.removeEventListener(TERMINAL_CLEAR, onClear);
+  }, [ptyId]);
 
   // Repaint xterm when the browser window/tab regains visibility.
   // Long background stints leave the canvas half-painted; fit + refresh

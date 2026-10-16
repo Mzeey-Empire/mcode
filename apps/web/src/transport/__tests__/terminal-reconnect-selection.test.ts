@@ -9,10 +9,7 @@ describe("resolveSelectedTerminalId", () => {
     expect(resolveSelectedTerminalId({
       activeThreadId: "thread-1",
       activeWorkspaceId: "workspace-1",
-      terminalPanelByThread: {
-        "thread-1": { activeTerminalId: "pty-thread" },
-        "workspace-1": { activeTerminalId: "pty-workspace" },
-      },
+      activeTerminalByScope: { "thread-1": "pty-thread", "workspace-1": "pty-workspace" },
     })).toBe("pty-thread");
   });
 
@@ -20,7 +17,7 @@ describe("resolveSelectedTerminalId", () => {
     expect(resolveSelectedTerminalId({
       activeThreadId: "thread-1",
       activeWorkspaceId: "workspace-1",
-      terminalPanelByThread: {},
+      activeTerminalByScope: {},
     })).toBeNull();
   });
 

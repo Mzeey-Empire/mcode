@@ -13,7 +13,6 @@ vi.mock("@/features/terminal", () => ({
   useTerminalStore: vi.fn((selector: (s: unknown) => unknown) =>
     selector({
       terminals: { "thread-1": [{ id: "pty-1" }, { id: "pty-2" }] },
-      toggleTerminalPanel: vi.fn(),
     })
   ),
 }));

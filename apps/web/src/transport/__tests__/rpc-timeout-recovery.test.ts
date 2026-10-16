@@ -139,7 +139,7 @@ describe("interactive RPC timeout recovery", () => {
   });
 
   it("restores server records on the first connection and refreshes them after reconnect", async () => {
-    useTerminalStore.setState({ terminals: {}, ptyToThread: {}, terminalPanelByThread: {}, hasHydrated: false });
+    useTerminalStore.setState({ terminals: {}, ptyToThread: {}, activeTerminalByScope: {}, hasHydrated: false });
     useWorkspaceStore.setState({ activeWorkspaceId: null, activeThreadId: null });
     socket.respond(latestRequest(socket, "terminal.capabilities"), LEGACY_CAPABILITIES);
     await vi.advanceTimersByTimeAsync(0);

@@ -1,178 +1,318 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const terminalKill = vi.fn();
-const terminalKillByThread = vi.fn();
 const terminalHasChildren = vi.fn();
 const terminalCreate = vi.fn();
 
 vi.mock("@/transport", () => ({
   getTransport: () => ({
     terminalKill,
-    terminalKillByThread,
     terminalHasChildren,
     terminalCreate,
+    terminalPause: vi.fn().mockResolvedValue(undefined),
+    terminalDiagnostics: vi.fn(),
+    openIn: vi.fn(),
+    listOpenInApps: vi.fn().mockResolvedValue([]),
   }),
 }));
 
+import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
+import { useDiffStore } from "@/stores/diffStore";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { useToastStore } from "@/stores/toastStore";
+import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
+import { TERMINAL_CLEAR } from "../terminalClear";
 import { TerminalTabContent } from "../TerminalTabContent";
-import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 
-function seedTerminal(): void {
+type ConfirmOnKill = "never" | "withChildProcesses" | "always";
+
+function shell(id: string, overrides: Partial<TerminalInstance> = {}): TerminalInstance {
+  return { id, threadId: "thread-1", label: "pwsh", state: "running", kind: "shell", ...overrides } as TerminalInstance;
+}
+
+function seed(terminals: readonly TerminalInstance[], activeId: string | null = terminals[0]?.id ?? null): void {
   useTerminalStore.setState({
-    terminals: {
-      "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "PowerShell" }],
-    },
-    terminalPanelByThread: {
-      "thread-1": { visible: true, height: 300, activeTerminalId: "pty-1" },
-    },
-    ptyToThread: { "pty-1": "thread-1" },
+    terminals: { "thread-1": [...terminals] },
+    activeTerminalByScope: { "thread-1": activeId },
+    ptyToThread: Object.fromEntries(terminals.map((terminal) => [terminal.id, "thread-1"])),
+    terminalSearchByPty: {},
     splitMode: true,
   });
 }
 
-function seedTwoTerminals(): void {
-  useTerminalStore.setState({
-    terminals: {
-      "thread-1": [
-        { id: "pty-1", threadId: "thread-1", label: "PowerShell" },
-        { id: "pty-2", threadId: "thread-1", label: "Command Prompt" },
-      ],
-    },
-    terminalPanelByThread: {
-      "thread-1": { visible: true, height: 300, activeTerminalId: "pty-1" },
-    },
-    ptyToThread: { "pty-1": "thread-1", "pty-2": "thread-1" },
-    splitMode: true,
+function setConfirmOnKill(value: ConfirmOnKill): void {
+  const settings = useSettingsStore.getState().settings;
+  useSettingsStore.setState({
+    settings: { ...settings, terminal: { ...settings.terminal, behavior: { ...settings.terminal.behavior, confirmOnKill: value } } },
   });
 }
 
-describe("TerminalTabContent process-tree close", () => {
+function renderTool() {
+  return render(<TerminalTabContent workspaceId="workspace-1" threadId="thread-1" scopeId="thread-1" />);
+}
+
+const closeTab = (name: string) => fireEvent.click(screen.getByRole("button", { name: `Close ${name}` }));
+
+describe("Terminal tool header", () => {
+  const closeRightPanelTab = vi.spyOn(useDiffStore.getState(), "closeRightPanelTab");
+
   beforeEach(() => {
     vi.clearAllMocks();
     terminalKill.mockResolvedValue(undefined);
-    terminalKillByThread.mockResolvedValue(undefined);
-    terminalCreate.mockResolvedValue({ ptyId: "new", shell: "pwsh" });
-    useTerminalStore.setState({
-      terminals: {},
-      terminalPanelByThread: {},
-      ptyToThread: {},
-      splitMode: true,
-    });
-    seedTerminal();
-  });
-
-  it("closes an idle terminal without showing confirmation", async () => {
     terminalHasChildren.mockResolvedValue({ hasChildren: false });
-    render(<TerminalTabContent threadId="thread-1" />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Close PowerShell" }));
-
-    await waitFor(() => expect(terminalKill).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(useTerminalStore.getState().terminals["thread-1"]).toBeUndefined();
+    terminalCreate.mockResolvedValue({ ptyId: "new", shell: "pwsh" });
+    useToastStore.setState({ toasts: [] });
+    setConfirmOnKill("withChildProcesses");
+    seed([shell("pty-1")]);
   });
 
-  it("cancels an active-tree close and restores focus to its close control", async () => {
-    terminalHasChildren.mockResolvedValue({ hasChildren: true });
-    render(<TerminalTabContent threadId="thread-1" />);
-    const close = screen.getByRole("button", { name: "Close PowerShell" });
-
-    fireEvent.click(close);
-    expect(await screen.findByText("Close PowerShell?")).toBeInTheDocument();
-    expect(screen.getByText(/entire process tree/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-    await waitFor(() => expect(close).toHaveFocus());
-    expect(terminalKill).not.toHaveBeenCalled();
-    expect(screen.getByText("PowerShell")).toBeInTheDocument();
+  afterEach(() => {
+    useToastStore.setState({ toasts: [] });
   });
 
-  it("guards duplicate confirmation and removes the terminal once", async () => {
-    terminalHasChildren.mockResolvedValue({ hasChildren: true });
-    let resolveKill!: () => void;
-    terminalKill.mockReturnValue(new Promise<void>((resolve) => { resolveKill = resolve; }));
-    render(<TerminalTabContent threadId="thread-1" />);
+  describe("closing a terminal", () => {
+    it("closes an idle shell without asking and closes the tool with its last record", async () => {
+      renderTool();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close PowerShell" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Close process tree" }));
-    const pending = screen.getByRole("button", { name: "Closing..." });
-    expect(pending).toBeDisabled();
-    fireEvent.click(pending);
-    expect(terminalKill).toHaveBeenCalledOnce();
+      closeTab("pwsh");
 
-    await act(async () => resolveKill());
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(terminalKill).toHaveBeenCalledOnce();
-    expect(useTerminalStore.getState().terminals["thread-1"]).toBeUndefined();
+      await waitFor(() => expect(terminalKill).toHaveBeenCalledWith("pty-1"));
+      await waitFor(() => expect(useTerminalStore.getState().terminals["thread-1"]).toBeUndefined());
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(closeRightPanelTab).toHaveBeenCalledWith("workspace-1", "thread-1", "terminal");
+    });
+
+    it("keeps the tool open while other records remain", async () => {
+      seed([shell("pty-1"), shell("pty-2", { label: "bash" })]);
+      renderTool();
+
+      closeTab("pwsh");
+
+      await waitFor(() => expect(useTerminalStore.getState().terminals["thread-1"]).toHaveLength(1));
+      expect(closeRightPanelTab).not.toHaveBeenCalled();
+    });
+
+    it("asks before stopping a shell that has child processes, and Cancel keeps it running", async () => {
+      terminalHasChildren.mockResolvedValue({ hasChildren: true });
+      renderTool();
+
+      closeTab("pwsh");
+      expect(await screen.findByText("Stop pwsh?")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      await waitFor(() => expect(screen.queryByText("Stop pwsh?")).not.toBeInTheDocument());
+      expect(terminalKill).not.toHaveBeenCalled();
+      expect(useTerminalStore.getState().terminals["thread-1"]).toHaveLength(1);
+    });
+
+    it("stops the shell once when the user confirms", async () => {
+      terminalHasChildren.mockResolvedValue({ hasChildren: true });
+      renderTool();
+
+      closeTab("pwsh");
+      fireEvent.click(await screen.findByRole("button", { name: "Stop and close" }));
+
+      await waitFor(() => expect(useTerminalStore.getState().terminals["thread-1"]).toBeUndefined());
+      expect(terminalKill).toHaveBeenCalledOnce();
+    });
+
+    it("asks when the child-process check fails, because losing a process costs more than a click", async () => {
+      terminalHasChildren.mockRejectedValue(new Error("inspection unavailable"));
+      renderTool();
+
+      closeTab("pwsh");
+
+      expect(await screen.findByText("Stop pwsh?")).toBeInTheDocument();
+      expect(terminalKill).not.toHaveBeenCalled();
+    });
+
+    it("keeps the tab and says so when the kill fails", async () => {
+      terminalKill.mockRejectedValue(new Error("pty gone"));
+      renderTool();
+
+      closeTab("pwsh");
+
+      await waitFor(() =>
+        expect(useToastStore.getState().toasts[0]).toMatchObject({ kind: "failed", title: "Couldn't close pwsh. Try again." }),
+      );
+      expect(useTerminalStore.getState().terminals["thread-1"]).toHaveLength(1);
+      expect(closeRightPanelTab).not.toHaveBeenCalled();
+    });
+
+    it("never asks when confirmOnKill is never, even with child processes", async () => {
+      setConfirmOnKill("never");
+      terminalHasChildren.mockResolvedValue({ hasChildren: true });
+      renderTool();
+
+      closeTab("pwsh");
+
+      await waitFor(() => expect(terminalKill).toHaveBeenCalledOnce());
+      expect(screen.queryByText("Stop pwsh?")).not.toBeInTheDocument();
+    });
+
+    it("always asks about a live shell when confirmOnKill is always, without probing for children", async () => {
+      setConfirmOnKill("always");
+      renderTool();
+
+      closeTab("pwsh");
+
+      expect(await screen.findByText("Stop pwsh?")).toBeInTheDocument();
+      expect(terminalHasChildren).not.toHaveBeenCalled();
+    });
+
+    it("never asks about a shell that already exited, even when confirmOnKill is always", async () => {
+      setConfirmOnKill("always");
+      seed([shell("pty-1", { state: "exited" })]);
+      renderTool();
+
+      closeTab("pwsh");
+
+      await waitFor(() => expect(terminalKill).toHaveBeenCalledOnce());
+      expect(screen.queryByText("Stop pwsh?")).not.toBeInTheDocument();
+    });
+
+    it("names the confirmation after the tab it came from", async () => {
+      terminalHasChildren.mockResolvedValue({ hasChildren: true });
+      renderTool();
+
+      closeTab("pwsh");
+
+      expect(await screen.findByRole("dialog", { name: "Stop pwsh?" })).toBeInTheDocument();
+    });
+
+    it("keeps the newest question and its target when an older probe answers last", async () => {
+      seed([shell("pty-1"), shell("pty-2", { label: "bash" })]);
+      const answers = new Map<string, (value: { hasChildren: boolean }) => void>();
+      terminalHasChildren.mockImplementation(
+        (ptyId: string) => new Promise((resolve) => answers.set(ptyId, resolve)),
+      );
+      renderTool();
+
+      closeTab("pwsh");
+      closeTab("bash");
+      await waitFor(() => expect(answers.size).toBe(2));
+      answers.get("pty-2")?.({ hasChildren: true });
+      expect(await screen.findByText("Stop bash?")).toBeInTheDocument();
+      answers.get("pty-1")?.({ hasChildren: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      fireEvent.click(screen.getByRole("button", { name: "Stop and close" }));
+
+      expect(screen.queryByText("Stop pwsh?")).not.toBeInTheDocument();
+      await waitFor(() => expect(terminalKill).toHaveBeenCalledOnce());
+      expect(terminalKill).toHaveBeenCalledWith("pty-2");
+    });
+
+    it("closes without asking when the shell exits while its children are being checked", async () => {
+      let answer: (value: { hasChildren: boolean }) => void = () => {};
+      terminalHasChildren.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+      renderTool();
+
+      closeTab("pwsh");
+      await waitFor(() => expect(terminalHasChildren).toHaveBeenCalled());
+      act(() => useTerminalStore.getState().recordTerminalExit("pty-1", { code: 0, signal: null, reason: "natural" }));
+      answer({ hasChildren: true });
+
+      await waitFor(() => expect(terminalKill).toHaveBeenCalledWith("pty-1"));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("drops the question when its terminal goes away underneath it", async () => {
+      seed([shell("pty-1"), shell("pty-2", { label: "bash" })]);
+      terminalHasChildren.mockResolvedValue({ hasChildren: true });
+      renderTool();
+
+      closeTab("pwsh");
+      expect(await screen.findByText("Stop pwsh?")).toBeInTheDocument();
+      act(() => useTerminalStore.getState().removeTerminal("pty-1"));
+
+      await waitFor(() => expect(screen.queryByText("Stop pwsh?")).not.toBeInTheDocument());
+      expect(terminalKill).not.toHaveBeenCalled();
+    });
   });
 
-  it("blocks Escape and outside dismissal while termination is pending", async () => {
-    terminalHasChildren.mockResolvedValue({ hasChildren: true });
-    let resolveKill!: () => void;
-    terminalKill.mockReturnValue(new Promise<void>((resolve) => { resolveKill = resolve; }));
-    render(<TerminalTabContent threadId="thread-1" />);
+  describe("row 1", () => {
+    it("numbers shells that share a label and names action records after their action", () => {
+      seed([
+        shell("pty-1"),
+        shell("pty-2"),
+        shell("pty-3", { kind: "action", actionId: "unknown-action", label: "action" }),
+      ]);
+      renderTool();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close PowerShell" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Close process tree" }));
-    const dialog = screen.getByRole("dialog");
+      expect(screen.getByRole("button", { name: "Close pwsh (1)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Close pwsh (2)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Close Project Action" })).toBeInTheDocument();
+    });
 
-    fireEvent.keyDown(document, { key: "Escape" });
-    const backdrop = document.querySelector('[data-slot="dialog-overlay"]');
-    expect(backdrop).not.toBeNull();
-    fireEvent.pointerDown(backdrop!);
-    fireEvent.click(backdrop!);
+    it("selecting a tab makes it the scope's active terminal", () => {
+      seed([shell("pty-1"), shell("pty-2", { label: "bash" })], "pty-1");
+      renderTool();
 
-    expect(dialog).toBeInTheDocument();
-    expect(terminalKill).toHaveBeenCalledOnce();
+      fireEvent.click(screen.getByRole("button", { name: "bash" }));
 
-    await act(async () => resolveKill());
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("pty-2");
+    });
+
+    it("disables + at the server's record cap and explains why", () => {
+      seed(Array.from({ length: TERMINAL_MAX_PER_SCOPE }, (_, index) => shell(`pty-${index}`, { label: `sh${index}` })));
+      renderTool();
+
+      const add = screen.getByTestId("panel-tab-add");
+      expect(add).toHaveAttribute("aria-disabled", "true");
+      expect(add).toHaveAccessibleDescription(`${TERMINAL_MAX_PER_SCOPE} terminals are open. Close one to open another.`);
+    });
   });
 
-  it("restores focus to the kill-all control after cancellation", async () => {
-    seedTwoTerminals();
-    terminalHasChildren.mockResolvedValue({ hasChildren: true });
-    render(<TerminalTabContent threadId="thread-1" />);
-    const killAll = screen.getByRole("button", { name: "Kill all terminals" });
+  describe("row 2", () => {
+    it("shows the active shell's working folder with the last segment emphasised", () => {
+      seed([shell("pty-1", { cwd: "/work/repo" })]);
+      renderTool();
 
-    fireEvent.click(killAll);
-    expect(await screen.findByText("Close 2 terminals?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      const pill = screen.getByTestId("working-folder-pill");
+      expect(pill).toHaveTextContent("/work/repo");
+      expect(screen.getByText("repo")).toBeInTheDocument();
+    });
 
-    await waitFor(() => expect(killAll).toHaveFocus());
-    expect(terminalKillByThread).not.toHaveBeenCalled();
-  });
+    it("follows the active tab", () => {
+      seed([shell("pty-1", { cwd: "/work/one" }), shell("pty-2", { cwd: "/work/two", label: "bash" })], "pty-1");
+      renderTool();
+      expect(screen.getByTestId("working-folder-pill")).toHaveTextContent("/work/one");
 
-  it("confirms sequential active-child terminal closes", async () => {
-    seedTwoTerminals();
-    terminalHasChildren.mockResolvedValue({ hasChildren: true });
-    render(<TerminalTabContent threadId="thread-1" />);
+      fireEvent.click(screen.getByRole("button", { name: "bash" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Close PowerShell" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Close process tree" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByTestId("working-folder-pill")).toHaveTextContent("/work/two");
+    });
 
-    const secondClose = screen.getByRole("button", { name: "Close Command Prompt" });
-    expect(secondClose).toBeEnabled();
-    fireEvent.click(secondClose);
-    const secondConfirm = await screen.findByRole("button", { name: "Close process tree" });
-    expect(secondConfirm).toBeEnabled();
-    fireEvent.click(secondConfirm);
+    it("offers no shell controls for an action record", () => {
+      seed([shell("pty-1", { kind: "action", actionId: "act", label: "action" })]);
+      renderTool();
 
-    await waitFor(() => expect(terminalKill).toHaveBeenCalledTimes(2));
-    expect(terminalKill).toHaveBeenNthCalledWith(1, "pty-1");
-    expect(terminalKill).toHaveBeenNthCalledWith(2, "pty-2");
-    expect(useTerminalStore.getState().terminals["thread-1"]).toBeUndefined();
-  });
+      expect(screen.queryByTestId("working-folder-pill")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Clear terminal" })).not.toBeInTheDocument();
+    });
 
-  it("fails closed to confirmation when descendant inspection fails", async () => {
-    terminalHasChildren.mockRejectedValue(new Error("inspection unavailable"));
-    render(<TerminalTabContent threadId="thread-1" />);
+    it("Clear asks only the active terminal to clear its view", () => {
+      const cleared: string[] = [];
+      const listener = (event: Event) => cleared.push((event as CustomEvent<string>).detail);
+      window.addEventListener(TERMINAL_CLEAR, listener);
+      seed([shell("pty-1"), shell("pty-2", { label: "bash" })], "pty-2");
+      renderTool();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close PowerShell" }));
+      fireEvent.click(screen.getByRole("button", { name: "Clear terminal" }));
+      window.removeEventListener(TERMINAL_CLEAR, listener);
 
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    expect(terminalKill).not.toHaveBeenCalled();
+      expect(cleared).toEqual(["pty-2"]);
+    });
+
+    it("Search opens the shelf for the active terminal", () => {
+      seed([shell("pty-1"), shell("pty-2", { label: "bash" })], "pty-2");
+      renderTool();
+
+      fireEvent.click(screen.getByRole("button", { name: "Search terminal" }));
+
+      expect(useTerminalStore.getState().terminalSearchByPty["pty-2"]?.open).toBe(true);
+      expect(useTerminalStore.getState().terminalSearchByPty["pty-1"]).toBeUndefined();
+    });
   });
 });
