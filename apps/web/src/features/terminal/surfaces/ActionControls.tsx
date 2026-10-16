@@ -21,6 +21,10 @@ interface ActionControlsProps {
   readonly onClose: (ptyId: string) => void;
 }
 
+function showFailure(title: string, error: unknown): void {
+  useToastStore.getState().show({ kind: "failed", title, meta: error instanceof Error ? error.message : String(error) });
+}
+
 /**
  * Reconnect can restore a terminal before any action menu hydrates its run,
  * so these controls must be able to hydrate independently.
@@ -35,7 +39,9 @@ function useActionRun(threadId: string, actionId: string): WorkspaceEnvironmentA
       .then((hydrated) => {
         if (current && hydrated) applyActionRun(hydrated, { focus: false });
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (current) showFailure("Couldn't load the action run", error);
+      });
     return () => {
       current = false;
     };
@@ -69,14 +75,6 @@ function ExitPill({ run }: { readonly run: WorkspaceEnvironmentActionRun }) {
   );
 }
 
-function failCommand(command: ActionCommand, run: WorkspaceEnvironmentActionRun, error: unknown): void {
-  useToastStore.getState().show({
-    kind: "failed",
-    title: `Couldn't ${command} ${run.actionName}. Try again.`,
-    meta: error instanceof Error ? error.message : String(error),
-  });
-}
-
 /**
  * Project Action controls for row 2. Reruns reuse the terminal to preserve its tab.
  */
@@ -94,7 +92,7 @@ export function ActionControls({ workspaceId, threadId, terminal, onClose }: Act
         : await transport.restartWorkspaceAction(threadId, run.actionId);
       if (next) applyActionRun(next, { focus: false });
     } catch (error) {
-      failCommand(command, run, error);
+      showFailure(`Couldn't ${command} ${run.actionName}. Try again.`, error);
     } finally {
       setPending(null);
     }
@@ -103,11 +101,7 @@ export function ActionControls({ workspaceId, threadId, terminal, onClose }: Act
   const copyCommand = () => {
     if (script === null) return;
     void navigator.clipboard.writeText(script).catch((error: unknown) => {
-      useToastStore.getState().show({
-        kind: "failed",
-        title: "Couldn't copy command",
-        meta: error instanceof Error ? error.message : String(error),
-      });
+      showFailure("Couldn't copy command", error);
     });
   };
   const editAction = () => useDiffStore.getState().setRightPanelTab(workspaceId, threadId, "environment");

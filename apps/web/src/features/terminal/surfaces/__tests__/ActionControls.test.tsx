@@ -167,6 +167,14 @@ describe("ActionControls", () => {
     expect(transport.getWorkspaceActionRun).toHaveBeenCalledWith("thread-1", "web");
   });
 
+  it("reports a hydration failure instead of leaving row 2 empty without a reason", async () => {
+    transport.getWorkspaceActionRun.mockRejectedValue(new Error("offline"));
+    renderControls(null);
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0]).toMatchObject({ kind: "failed", meta: "offline" });
+  });
+
   it("Close terminal in the More menu asks the owner to close this record", async () => {
     const user = userEvent.setup();
     renderControls(actionRun());
