@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
+import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import {
   emitPtyData,
   emitPtyExit,
@@ -1041,6 +1042,58 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
 
     expect(transport.terminalReattach).toHaveBeenCalledWith("pty-gap", -1, true);
     expect(term.focus).toHaveBeenCalled();
+  });
+
+  describe("while an Action's run waits for approval", () => {
+    function seedActionTerminal(status: "awaiting-approval" | "running"): void {
+      useTerminalStore.setState({
+        terminals: {
+          "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "web", state: "running", kind: "action", actionId: "web" }],
+        },
+        activeTerminalByScope: { "thread-1": "pty-1" },
+        ptyToThread: { "pty-1": "thread-1" },
+      });
+      useProjectActionStore.setState({
+        runsByThread: {
+          "thread-1": {
+            web: {
+              threadId: "thread-1",
+              workspaceId: "workspace-1",
+              actionId: "web",
+              runId: "run-1",
+              revision: 0,
+              terminalSessionId: "pty-1",
+              trigger: "manual",
+              actionName: "web",
+              status,
+              snapshot: { platform: "linux", script: "bun run dev", checkoutPath: "/repo", terminal: null, environmentNames: [], approval: null },
+              createdAt: "2026-08-22T12:00:00.000Z",
+              startedAt: null,
+              finishedAt: null,
+              exitCode: null,
+              port: null,
+            },
+          },
+        },
+      });
+    }
+
+    // The approval card owns the keyboard until Run, so Enter must reach its button.
+    it("leaves keyboard focus with the approval card, even on a terminal reused for a changed command", async () => {
+      seedActionTerminal("awaiting-approval");
+      render(<TerminalView ptyId="pty-1" visible={true} threadActive={true} />);
+      await settle();
+
+      expect(term.focus).not.toHaveBeenCalled();
+    });
+
+    it("focuses the terminal once the run has started", async () => {
+      seedActionTerminal("running");
+      render(<TerminalView ptyId="pty-1" visible={true} threadActive={true} />);
+      await settle();
+
+      expect(term.focus).toHaveBeenCalled();
+    });
   });
 
   // Regression: legacy Terminal must not expose a diagnostics action whose
