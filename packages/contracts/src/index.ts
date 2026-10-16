@@ -96,7 +96,7 @@ export {
   WorkspaceEnvironmentSaveInputSchema,
   WorkspaceEnvironmentStorageSetInputSchema,
   WorkspaceEnvironmentCommandApproveInputSchema,
-  WorkspaceEnvironmentCommandApprovalClearInputSchema,
+  WorkspaceEnvironmentCommandForgetInputSchema,
   WorkspaceEnvironmentErrorSchema,
   workspaceEnvironmentValidationIssues,
 } from "./models/workspace-environment.js";
@@ -134,7 +134,7 @@ export type {
   WorkspaceEnvironmentSaveInput,
   WorkspaceEnvironmentStorageSetInput,
   WorkspaceEnvironmentCommandApproveInput,
-  WorkspaceEnvironmentCommandApprovalClearInput,
+  WorkspaceEnvironmentCommandForgetInput,
 } from "./models/workspace-environment.js";
 
 export {

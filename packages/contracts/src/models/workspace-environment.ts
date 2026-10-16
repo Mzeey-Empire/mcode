@@ -543,6 +543,7 @@ export const WorkspaceEnvironmentReadResultSchema = lazySchema(() =>
     revision: z.string().nullable(),
     status: z.enum(["present", "absent"]),
     storageMode: WorkspaceEnvironmentStorageModeSchema.optional(),
+    approvedActionIds: z.array(WorkspaceEnvironmentActionIdSchema).optional(),
   }).strict(),
 );
 export type WorkspaceEnvironmentReadResult = z.infer<
@@ -597,12 +598,16 @@ export type WorkspaceEnvironmentCommandApproveInput = z.infer<
   ReturnType<typeof WorkspaceEnvironmentCommandApproveInputSchema>
 >;
 
-/** Request to clear all stored shared-command approvals for one Project. */
-export const WorkspaceEnvironmentCommandApprovalClearInputSchema = lazySchema(() =>
-  z.object({ workspaceId: z.string().min(1).max(256) }).strict(),
+/** Request to forget the stored approval for one Project action. */
+export const WorkspaceEnvironmentCommandForgetInputSchema = lazySchema(() =>
+  z.object({
+    workspaceId: z.string().min(1).max(256),
+    actionId: z.string().min(1).max(256),
+  }).strict(),
 );
-export type WorkspaceEnvironmentCommandApprovalClearInput = z.infer<
-  ReturnType<typeof WorkspaceEnvironmentCommandApprovalClearInputSchema>
+/** Identifies the Project action whose approval should be forgotten. */
+export type WorkspaceEnvironmentCommandForgetInput = z.infer<
+  ReturnType<typeof WorkspaceEnvironmentCommandForgetInputSchema>
 >;
 
 /** Structured errors exposed by the workspace environment lifecycle boundary. */

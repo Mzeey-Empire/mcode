@@ -36,7 +36,7 @@ describe("project and terminal database owner", () => {
     await configuration.approve(workspace.id, "setup", "fingerprint");
     expect(configuration.storageMode(workspace.id)).toBe("shared");
     expect(configuration.hasApproval(workspace.id, "setup", "fingerprint")).toBe(true);
-    await configuration.clearApprovals(workspace.id);
+    await configuration.removeWorkspaceApprovals(workspace.id);
     expect(configuration.hasApproval(workspace.id, "setup", "fingerprint")).toBe(false);
   });
 

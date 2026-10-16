@@ -25,11 +25,22 @@ export class WorkspaceEnvironmentConfigurationRepo {
     return this.reader.hasApproval(workspaceId, commandId, fingerprint);
   }
 
+  /** Returns command identities with a persisted approval, including stale approvals. */
+  listApprovedCommandIds(workspaceId: string): string[] {
+    return this.reader.listApprovedCommandIds(workspaceId);
+  }
+
+  /** Commits removal of only one command's approval. */
+  forgetApproval(workspaceId: string, commandId: string): Promise<void> {
+    return this.writer.execute(workspaceEnvironmentConfigurationWriteOperations.forgetApproval, [workspaceId, commandId]);
+  }
+
   approve(workspaceId: Parameters<WorkspaceEnvironmentConfigurationStore["approve"]>[0], commandId: Parameters<WorkspaceEnvironmentConfigurationStore["approve"]>[1], fingerprint: Parameters<WorkspaceEnvironmentConfigurationStore["approve"]>[2]): Promise<ReturnType<WorkspaceEnvironmentConfigurationStore["approve"]>> {
     return this.writer.execute(workspaceEnvironmentConfigurationWriteOperations.approve, [workspaceId, commandId, fingerprint]);
   }
 
-  clearApprovals(workspaceId: Parameters<WorkspaceEnvironmentConfigurationStore["clearApprovals"]>[0]): Promise<ReturnType<WorkspaceEnvironmentConfigurationStore["clearApprovals"]>> {
-    return this.writer.execute(workspaceEnvironmentConfigurationWriteOperations.clearApprovals, [workspaceId]);
+  /** Removes all stored command approvals during Project deletion. */
+  removeWorkspaceApprovals(workspaceId: Parameters<WorkspaceEnvironmentConfigurationStore["removeWorkspaceApprovals"]>[0]): Promise<ReturnType<WorkspaceEnvironmentConfigurationStore["removeWorkspaceApprovals"]>> {
+    return this.writer.execute(workspaceEnvironmentConfigurationWriteOperations.removeWorkspaceApprovals, [workspaceId]);
   }
 }

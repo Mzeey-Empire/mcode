@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { routeMessage, type RouterDeps } from "../ws-router.js";
 import { WorkspaceEnvironmentService } from "../../../features/projects/environment/workspace-environment-service.js";
 import { createThreadPersistenceTestRuntime } from "../../../features/thread-control/testing/thread-persistence-test-runtime.js";
+import { WorkspaceEnvironmentConfigurationRepo } from "../../../features/projects/environment/persistence/workspace-environment-configuration-repo.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -77,13 +78,24 @@ describe("workspace environment RPC", () => {
     }));
   });
 
-  it("routes storage selection and approval clearing through the workspace environment boundary", async () => {
-    const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-environment-rpc-"));
+  it("forgets only the requested stored action approval and reports approvals across read, save and storage selection", async () => {
+    const fixture = NodePath.resolve("../..", ".dev/fixture-repo");
+    await NodeFSPromises.mkdir(fixture, { recursive: true });
+    const root = await NodeFSPromises.mkdtemp(NodePath.join(fixture, "mcode-environment-rpc-"));
     roots.push(root);
     const baseCheckout = NodePath.join(root, "base");
     const workspace = { id: "workspace-1", path: baseCheckout };
+    const persistence = createThreadPersistenceTestRuntime();
+    await persistence.writer.whenReady();
+    for (const id of [workspace.id, "workspace-2"]) {
+      persistence.database.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES (?, ?, ?, '{}')")
+        .run(id, id, NodePath.join(root, id));
+    }
+    const configuration = new WorkspaceEnvironmentConfigurationRepo(persistence.reader, persistence.writer);
     const workspaceEnvironmentService = new WorkspaceEnvironmentService({
       mcodeDir: root,
+      database: persistence.reader,
+      databaseWriter: persistence.writer,
       workspaces: { findById: (id) => id === workspace.id ? workspace : null },
     });
     const deps = {
@@ -96,22 +108,86 @@ describe("workspace environment RPC", () => {
       method: "workspace.environment.storage.set",
       params: { workspaceId: workspace.id, storageMode: "shared" },
     }), deps);
-    expect(selected.result).toMatchObject({ status: "absent", storageMode: "shared" });
+    expect(selected.result).toMatchObject({ status: "absent", storageMode: "shared", approvedActionIds: [] });
 
-    const cleared = await routeMessage(JSON.stringify({
-      id: "clear",
-      method: "workspace.environment.command.clearApprovals",
+    await configuration.approve(workspace.id, "action:build", "old-build-fingerprint");
+    await configuration.approve(workspace.id, "action:test", "old-test-fingerprint");
+    await configuration.approve(workspace.id, "action:deleted", "deleted-action-fingerprint");
+    await configuration.approve("workspace-2", "action:build", "other-workspace-fingerprint");
+    const saved = await routeMessage(JSON.stringify({
+      id: "save-approved-actions",
+      method: "workspace.environment.save",
+      params: {
+        workspaceId: workspace.id,
+        sourceRevision: null,
+        document: {
+          version: "0.1.0",
+          actions: [
+            { id: "build", name: "Build", command: { default: "new build command" } },
+            { id: "test", name: "Test", command: { default: "new test command" } },
+          ],
+        },
+      },
+    }), deps);
+    expect(saved.error).toBeUndefined();
+    expect(saved.result).toMatchObject({ approvedActionIds: ["build", "test"] });
+
+    const forgotten = await routeMessage(JSON.stringify({
+      id: "forget",
+      method: "workspace.environment.command.forget",
+      params: { workspaceId: workspace.id, actionId: "build" },
+    }), deps);
+    expect(forgotten.error).toBeUndefined();
+    expect(forgotten.result).toBeUndefined();
+    expect(configuration.hasApproval(workspace.id, "action:build", "old-build-fingerprint")).toBe(false);
+    expect(configuration.hasApproval(workspace.id, "action:test", "old-test-fingerprint")).toBe(true);
+    expect(configuration.hasApproval("workspace-2", "action:build", "other-workspace-fingerprint")).toBe(true);
+
+    const read = await routeMessage(JSON.stringify({
+      id: "read-approved-actions",
+      method: "workspace.environment.read",
       params: { workspaceId: workspace.id },
     }), deps);
-    expect(cleared.error).toBeUndefined();
-    expect(cleared.result).toBeUndefined();
+    expect(read.result).toMatchObject({ approvedActionIds: ["test"] });
 
-    const malformed = await routeMessage(JSON.stringify({
-      id: "clear-invalid",
-      method: "workspace.environment.command.clearApprovals",
-      params: { workspaceId: workspace.id, extra: true },
+    for (const storageMode of ["system", "shared"]) {
+      const switched = await routeMessage(JSON.stringify({
+        id: "switch",
+        method: "workspace.environment.storage.set",
+        params: { workspaceId: workspace.id, storageMode },
+      }), deps);
+      expect(switched.error).toBeUndefined();
+      expect(switched.result).toHaveProperty("approvedActionIds", storageMode === "shared" ? ["test"] : undefined);
+    }
+
+    const repeated = await routeMessage(JSON.stringify({
+      id: "forget-again",
+      method: "workspace.environment.command.forget",
+      params: { workspaceId: workspace.id, actionId: "build" },
     }), deps);
-    expect(malformed.error?.code).toBe("WORKSPACE_ENVIRONMENT_VALIDATION");
+    expect(repeated.error).toBeUndefined();
+    expect(repeated.result).toBeUndefined();
+
+    const missingWorkspace = await routeMessage(JSON.stringify({
+      id: "forget-missing-workspace",
+      method: "workspace.environment.command.forget",
+      params: { workspaceId: "missing", actionId: "build" },
+    }), deps);
+    expect(missingWorkspace.error?.code).toBe("WORKSPACE_ENVIRONMENT_NOT_FOUND");
+
+    for (const params of [
+      { workspaceId: workspace.id },
+      { workspaceId: workspace.id, actionId: "test", extra: true },
+      { workspaceId: workspace.id, actionId: "" },
+      { workspaceId: workspace.id, actionId: "a".repeat(257) },
+      { workspaceId: workspace.id, actionId: 1 },
+      { workspaceId: "", actionId: "test" },
+      { workspaceId: "w".repeat(257), actionId: "test" },
+    ]) {
+      const malformed = await routeMessage(JSON.stringify({ id: "forget-invalid", method: "workspace.environment.command.forget", params }), deps);
+      expect(malformed.error?.code).toBe("WORKSPACE_ENVIRONMENT_VALIDATION");
+    }
+    expect(configuration.hasApproval(workspace.id, "action:test", "old-test-fingerprint")).toBe(true);
   });
 
   it("routes command approval with the exact reviewed command", async () => {

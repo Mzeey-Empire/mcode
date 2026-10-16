@@ -464,18 +464,25 @@ export class WorkspaceEnvironmentService {
       const filePath = thread
         ? this.filePathForThread(thread, input.storageMode)
         : this.filePathForWorkspace(input.workspaceId, input.storageMode);
-      const result = await this.readAt(filePath, input.storageMode);
+      const result = await this.readAt(filePath, input.storageMode, input.workspaceId);
       await this.persistStorageMode(input.workspaceId, input.storageMode);
       return result;
     });
   }
 
-  /** Clear every persisted shared-command approval for one Project. */
-  async clearApprovals(workspaceId: string): Promise<void> {
-    await this.configuration?.clearApprovals(workspaceId);
+  /** Removes all command approvals when a Project is deleted. */
+  async removeWorkspaceApprovals(workspaceId: string): Promise<void> {
+    await this.configuration?.removeWorkspaceApprovals(workspaceId);
     for (const key of this.inMemoryApprovals.keys()) {
       if (key.startsWith(`${workspaceId}:`)) this.inMemoryApprovals.delete(key);
     }
+  }
+
+  /** Forgets only one action's approval, including any in-memory approval. */
+  async forgetApproval(workspaceId: string, actionId: string): Promise<void> {
+    const commandId = commandIdentity({ kind: "action", actionId });
+    await this.configuration?.forgetApproval(workspaceId, commandId);
+    this.inMemoryApprovals.delete(`${workspaceId}:${commandId}`);
   }
 
   /** Approve the current shared command only when it still matches the script the user reviewed. */
@@ -562,18 +569,19 @@ export class WorkspaceEnvironmentService {
     }
     const storageMode = await this.storageMode(workspaceId);
     const filePath = this.filePathForWorkspace(workspaceId, storageMode);
-    return await this.readAt(filePath, storageMode);
+    return await this.readAt(filePath, storageMode, workspaceId);
   }
 
   private async readForThread(thread: WorkspaceEnvironmentSetupThread): Promise<WorkspaceEnvironmentReadResult> {
     const storageMode = await this.storageMode(thread.workspace_id);
     const filePath = this.filePathForThread(thread, storageMode);
-    return await this.readAt(filePath, storageMode);
+    return await this.readAt(filePath, storageMode, thread.workspace_id);
   }
 
   private async readAt(
     filePath: string,
     storageMode: WorkspaceEnvironmentStorageMode,
+    workspaceId: string,
   ): Promise<WorkspaceEnvironmentReadResult> {
     const bounded = await this.readBounded(filePath);
     if (bounded.kind === "absent") {
@@ -582,6 +590,7 @@ export class WorkspaceEnvironmentService {
         revision: null,
         status: "absent",
         storageMode,
+        approvedActionIds: storageMode === "shared" ? [] : undefined,
       };
     }
     if (bounded.kind === "too_large") {
@@ -615,7 +624,20 @@ export class WorkspaceEnvironmentService {
       revision: revisionFor(bytes, storageMode, filePath),
       status: "present",
       storageMode,
+      approvedActionIds: this.approvedActionIds(workspaceId, document, storageMode),
     };
+  }
+
+  private approvedActionIds(
+    workspaceId: string,
+    document: WorkspaceEnvironmentReadResult["document"],
+    storageMode: WorkspaceEnvironmentStorageMode,
+  ): string[] | undefined {
+    if (storageMode !== "shared") return undefined;
+    const commandIds = new Set(this.configuration?.listApprovedCommandIds(workspaceId));
+    return document.actions
+      .filter((action) => commandIds.has(commandIdentity({ kind: "action", actionId: action.id })))
+      .map((action) => action.id);
   }
 
   private filePathForWorkspace(workspaceId: string, storageMode: WorkspaceEnvironmentStorageMode): string {
@@ -836,7 +858,13 @@ export class WorkspaceEnvironmentService {
       ? this.filePathForThread(thread, storageMode)
       : this.filePathForWorkspace(input.workspaceId, storageMode);
     const encoded = await this.writeEnvironmentDocument(filePath, document);
-    return { document: encoded.document, revision: revisionFor(encoded.bytes, storageMode, filePath), status: "present", storageMode: current.storageMode };
+    return {
+      document: encoded.document,
+      revision: revisionFor(encoded.bytes, storageMode, filePath),
+      status: "present",
+      storageMode,
+      approvedActionIds: this.approvedActionIds(input.workspaceId, encoded.document, storageMode),
+    };
   }
 
   private assertCurrentEnvironmentRevision(

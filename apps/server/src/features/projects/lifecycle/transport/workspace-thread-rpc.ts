@@ -54,7 +54,7 @@ export interface WorkspaceThreadRouterDeps {
   workspaceService: Pick<WorkspaceService, "create" | "delete" | "findById" | "forceDelete" | "list" | "rename" | "reorder">;
   workspaceEnvironmentService: Pick<
     WorkspaceEnvironmentService,
-    "beginThreadDeletion" | "beginWorkspaceDeletion" | "cancelSetupForThread" | "cancelSetupForWorkspace" | "clearApprovals" | "read"
+    "beginThreadDeletion" | "beginWorkspaceDeletion" | "cancelSetupForThread" | "cancelSetupForWorkspace" | "removeWorkspaceApprovals" | "read"
   >;
   projectActionService: Pick<ProjectActionService, "beginThreadTeardown" | "beginWorkspaceTeardown" | "reopenThread" | "stopForThread">;
   threadService: Pick<ThreadService, "create" | "delete" | "findById" | "linkPr" | "list" | "listRecent" | "search" | "updateSettings" | "updateTitle">;
@@ -193,7 +193,7 @@ async function deleteWorkspaceWithTeardown(
     await teardownWorkspaceThreads(deps, workspaceId);
     const deleted = await removeWorkspace(workspaceId);
     if (deleted) {
-      await deps.workspaceEnvironmentService.clearApprovals(workspaceId);
+      await deps.workspaceEnvironmentService.removeWorkspaceApprovals(workspaceId);
       deps.gitWatcherService.unwatchWorkspace(workspaceId);
       publishDeleted();
     }
