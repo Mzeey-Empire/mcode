@@ -26,6 +26,8 @@ describe("defaultActionIconId", () => {
 
   it("keeps an assignment value with escaped whitespace out of the command word", () => {
     expect(defaultActionIconId(String.raw`FOO=hello\ world bun run dev`)).toBe("bun");
+    expect(defaultActionIconId(String.raw`FOO=hello" world" bun run dev`)).toBe("bun");
+    expect(defaultActionIconId(String.raw`FOO="hello \" world" bun run dev`)).toBe("bun");
   });
 
   it("does not treat inherited object keys as command words", () => {

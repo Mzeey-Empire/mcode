@@ -39,7 +39,8 @@ interface GlyphIconEntry {
   readonly tint: string;
 }
 
-export type ActionIconEntry = ToolIconEntry | GlyphIconEntry;
+/** How one icon id is drawn: a tool mark fetched from vscode-icons, or a tinted Lucide glyph. */
+export type ActionIconEntry =ToolIconEntry | GlyphIconEntry;
 
 /**
  * Every icon an action can carry, keyed by the id stored in the environment document.
@@ -128,7 +129,7 @@ const COMMAND_ICON: ReadonlyMap<string, ActionIconId> = new Map(Object.entries({
 
 const PACKAGE_RUNNERS = new Set(["npx", "bunx"]);
 
-const ENV_ASSIGNMENTS = /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|(?:\\.|[^\s\\])*)\s+)*/;
+const ENV_ASSIGNMENTS = /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"(?:\\.|[^"\\])*"|'[^']*'|\\.|[^\s"'\\])*\s+)*/;
 
 function firstCommandLine(command: string): string {
   for (const line of command.split(/\r?\n/)) {
