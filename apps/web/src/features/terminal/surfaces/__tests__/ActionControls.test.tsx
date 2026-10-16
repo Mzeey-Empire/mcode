@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
@@ -248,6 +248,46 @@ describe("ActionControls", () => {
     await user.hover(screen.getByTestId("action-port-pill"));
 
     expect(await screen.findByText("Accepting connections on localhost:5173")).toBeInTheDocument();
+  });
+
+  it("follows a run from detection through exit and restart without remounting", () => {
+    renderControls(actionRun());
+    expect(screen.queryByTestId("action-port-pill")).not.toBeInTheDocument();
+
+    act(() => applyActionRun(actionRun({ revision: 1, port: actionPort() }), { focus: false }));
+    expect(screen.getByTestId("action-port-pill")).toHaveAttribute("data-live", "true");
+
+    act(() => applyActionRun(actionRun({ revision: 2, port: actionPort({ reachable: false }) }), { focus: false }));
+    expect(screen.getByTestId("action-port-pill")).toHaveAttribute("data-live", "false");
+
+    act(() =>
+      applyActionRun(
+        actionRun({
+          revision: 3,
+          status: "failed",
+          exitCode: 1,
+          finishedAt: "2026-08-22T12:00:03.000Z",
+          port: actionPort({ reachable: false }),
+        }),
+        { focus: false },
+      ),
+    );
+    expect(screen.getByTestId("action-port-pill")).toHaveTextContent(":5173");
+    expect(screen.getByTestId("action-exit-pill")).toHaveTextContent("Exit 1");
+
+    act(() =>
+      applyActionRun(
+        actionRun({
+          runId: "run-2",
+          revision: 0,
+          createdAt: "2026-08-22T12:00:04.000Z",
+          port: actionPort({ runId: "run-1", reachable: false }),
+        }),
+        { focus: false },
+      ),
+    );
+    expect(screen.getByTestId("action-port-pill")).toHaveAttribute("data-live", "false");
+    expect(screen.queryByTestId("action-exit-pill")).not.toBeInTheDocument();
   });
 
   it("Close terminal in the More menu asks the owner to close this record", async () => {
