@@ -75,10 +75,9 @@ provider-native identity and private child evidence.
 ## Workspaces and worktrees
 
 ### Platform command
-A Project environment command used by Setup or a Project action. It can define
-a default script and operating-system overrides. Mcode resolves one script for
-the current system and runs it from the active Thread's checkout root with the
-Project's configured terminal and its normal environment.
+A Project action's default script and optional operating-system overrides.
+Mcode resolves one script for the current system and runs it from the Thread's
+checkout root with the Project's configured terminal and normal environment.
 
 ### Workspace
 The top-level container that owns a set of threads. Anchored 1:1 to a local
@@ -306,18 +305,25 @@ elsewhere."
 ## Chat lifecycle
 
 ### Setup gate
-The Thread-owned decision that controls whether the first Turn can start while
-automatic Setup is required. A Setup pass or **Continue without setup** releases
-the gate permanently for that Thread. Manual Setup does not close a released
-gate.
+The Thread-owned decision that holds the first Turn while startup actions run
+in a worktree. All startup actions exiting 0, or **Skip setup**, releases the
+gate permanently for that Thread. A detected port never releases the gate.
 _Avoid_: Setup status
 
 ### Setup attempt
-One execution of a Project environment's Setup command for a Thread. A Thread
-can have many Setup attempts, and each attempt keeps its own result. The Setup
-gate and Setup attempts are separate concepts: an attempt records what happened,
-while the gate records whether the first Turn can start.
+One frozen, ordered sequence of startup actions for a Thread. The attempt
+records its state and failed action id; the startup step holds action ids,
+script hashes and run ids. Retry freezes the current configuration again,
+skipping earlier exit-zero actions whose scripts have not changed. The gate
+records whether the first Turn may start.
 _Avoid_: Setup gate, Setup run status
+
+### Startup action
+A Project action marked **Run on startup**, run before the first Turn of a
+Thread starting in a worktree. It is done only when its command exits 0.
+A detected port never counts as completion. An action that keeps running
+holds the gate until it exits or the user picks **Skip setup**, which leaves
+the action running.
 
 ### Turn
 One round of agent execution within a thread, bounded by a `TurnStarted`
