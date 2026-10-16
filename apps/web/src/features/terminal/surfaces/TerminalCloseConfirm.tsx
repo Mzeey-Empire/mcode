@@ -5,6 +5,8 @@ import { Popover, PopoverContent } from "@/components/ui/popover";
 interface TerminalCloseConfirmProps {
   readonly name: string;
   readonly anchor: HTMLElement | null;
+  /** The command of a Project Action run, which changes the wording to name what stops. */
+  readonly command?: string;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 }
@@ -13,7 +15,7 @@ interface TerminalCloseConfirmProps {
  * Popover under a terminal's tab asking whether to stop its running process.
  * Escape or an outside click cancels.
  */
-export function TerminalCloseConfirm({ name, anchor, onConfirm, onCancel }: TerminalCloseConfirmProps) {
+export function TerminalCloseConfirm({ name, anchor, command, onConfirm, onCancel }: TerminalCloseConfirmProps) {
   const titleId = useId();
   const descriptionId = useId();
   if (!anchor) return null;
@@ -29,7 +31,11 @@ export function TerminalCloseConfirm({ name, anchor, onConfirm, onCancel }: Term
       >
         <div className="flex flex-col gap-1">
           <p id={titleId} className="text-sm font-medium text-ink">Stop {name}?</p>
-          <p id={descriptionId} className="text-xs text-muted">It is still running. Closing stops it and everything it started.</p>
+          <p id={descriptionId} className="text-xs text-muted">
+            {command === undefined
+              ? "It is still running. Closing stops it and everything it started."
+              : `${command} is still running. Closing the tab stops it.`}
+          </p>
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" size="compact" onClick={onCancel}>

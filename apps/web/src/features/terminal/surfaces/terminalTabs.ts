@@ -54,6 +54,26 @@ export function useScopeTerminals(scopeId: string | null): {
   return { terminals, activeId };
 }
 
+/** First line of an action's command, which is all a one-line pill or a confirmation can show. */
+export function commandHeadline(run: WorkspaceEnvironmentActionRun): string {
+  return (run.snapshot.script ?? "").split(/\r?\n/, 1)[0] ?? "";
+}
+
+/**
+ * The command that closing `terminal` would stop, when it is an action record
+ * whose run is still going. The run owns the command phase, so the process
+ * probe is skipped: an action in its command phase always asks.
+ */
+export function runningActionCommand(
+  terminal: TerminalInstance,
+  actionRuns: Readonly<Record<string, WorkspaceEnvironmentActionRun>>,
+  confirmOnKill: ConfirmOnKill,
+): string | null {
+  if (terminal.kind !== "action" || confirmOnKill === "never") return null;
+  const run = actionRuns[terminal.actionId ?? ""];
+  return run?.status === "running" ? commandHeadline(run) : null;
+}
+
 /**
  * Whether closing `terminal` should ask first. An exited or failed record has no
  * process left to stop. If the child-process check itself fails, ask: stopping a

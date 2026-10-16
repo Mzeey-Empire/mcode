@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
+import { ActionControls } from "./ActionControls";
 import { ShellControls } from "./ShellControls";
 import { TerminalCloseConfirm } from "./TerminalCloseConfirm";
 import { TerminalTabStrip } from "./TerminalTabStrip";
@@ -28,8 +29,13 @@ export function TerminalTabContent({ workspaceId, threadId, scopeId }: TerminalT
   );
   const labels = useMemo(() => terminalTabLabels(terminals, actionRuns), [terminals, actionRuns]);
   const closeScope = useMemo(() => ({ workspaceId, threadId, scopeId }), [workspaceId, threadId, scopeId]);
-  const { pending, requestClose, confirmClose, cancelClose } = useTerminalClose(closeScope, terminals, labels);
-  const activeShell = terminals.find((terminal) => terminal.id === activeId && terminal.kind !== "action") ?? null;
+  const { pending, requestClose, confirmClose, cancelClose } = useTerminalClose(
+    closeScope,
+    terminals,
+    labels,
+    actionRuns,
+  );
+  const active = terminals.find((terminal) => terminal.id === activeId) ?? null;
   return (
     <>
       <TerminalTabStrip
@@ -37,13 +43,22 @@ export function TerminalTabContent({ workspaceId, threadId, scopeId }: TerminalT
         terminals={terminals}
         activeId={activeId}
         labels={labels}
+        actionRuns={actionRuns}
         onClose={(ptyId) => void requestClose(ptyId)}
       />
-      {activeShell ? (
+      {active?.kind === "action" && threadId ? (
+        <ActionControls
+          workspaceId={workspaceId}
+          threadId={threadId}
+          terminal={active}
+          onClose={(ptyId) => void requestClose(ptyId)}
+        />
+      ) : null}
+      {active && active.kind !== "action" ? (
         <ShellControls
           workspaceId={workspaceId}
           threadId={threadId}
-          terminal={activeShell}
+          terminal={active}
           onClose={(ptyId) => void requestClose(ptyId)}
         />
       ) : null}
@@ -51,6 +66,7 @@ export function TerminalTabContent({ workspaceId, threadId, scopeId }: TerminalT
         <TerminalCloseConfirm
           name={pending.name}
           anchor={pending.anchor}
+          command={pending.command}
           onConfirm={confirmClose}
           onCancel={cancelClose}
         />
