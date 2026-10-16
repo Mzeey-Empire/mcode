@@ -1,6 +1,7 @@
 // apps/web/src/__tests__/TerminalView.keyhandler.test.ts
 import { describe, it, expect } from "vitest";
 import {
+  isTerminalClearShortcut,
   isTerminalPasteShortcut,
   isTerminalMiddleClickPaste,
   isTerminalSearchShortcut,
@@ -150,5 +151,30 @@ describe("isTerminalSearchShortcut", () => {
     expect(isTerminalSearchShortcut(makeEvent({ key: "f", ctrlKey: true, shiftKey: true }))).toBe(false);
     expect(isTerminalSearchShortcut(makeEvent({ key: "f", metaKey: true, altKey: true }))).toBe(false);
     expect(isTerminalSearchShortcut(makeEvent({ key: "g", ctrlKey: true }))).toBe(false);
+  });
+});
+
+describe("isTerminalClearShortcut", () => {
+  it("uses Cmd+K on macOS and Ctrl+K elsewhere", () => {
+    expect(isTerminalClearShortcut(makeEvent({ key: "k", metaKey: true }), "mac")).toBe(true);
+    expect(isTerminalClearShortcut(makeEvent({ key: "K", ctrlKey: true }), "windows")).toBe(true);
+    expect(isTerminalClearShortcut(makeEvent({ key: "k", ctrlKey: true }), "linux")).toBe(true);
+  });
+
+  it("leaves the other platform's modifier and modified variants for the shell", () => {
+    expect(isTerminalClearShortcut(makeEvent({ key: "k", ctrlKey: true }), "mac")).toBe(false);
+    expect(isTerminalClearShortcut(makeEvent({ key: "k", metaKey: true }), "windows")).toBe(false);
+    expect(isTerminalClearShortcut(makeEvent({ key: "k", ctrlKey: true, shiftKey: true }), "linux")).toBe(false);
+    expect(isTerminalClearShortcut(makeEvent({ key: "k", ctrlKey: true, altKey: true }), "linux")).toBe(false);
+    expect(isTerminalClearShortcut(makeEvent({ key: "k" }), "linux")).toBe(false);
+    expect(isTerminalClearShortcut(makeEvent({ key: "l", ctrlKey: true }), "linux")).toBe(false);
+  });
+
+  it("ignores keyup so releasing the chord does not clear a second time", () => {
+    expect(isTerminalClearShortcut(makeEvent({ type: "keyup", key: "k", ctrlKey: true }), "linux")).toBe(false);
+  });
+
+  it("ignores the key while composing text", () => {
+    expect(isTerminalClearShortcut(makeEvent({ key: "k", ctrlKey: true, isComposing: true }), "linux")).toBe(false);
   });
 });

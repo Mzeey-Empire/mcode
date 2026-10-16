@@ -15,6 +15,7 @@ import { useTerminalStore, type TerminalSearchOptions } from "@/features/termina
 import {
   detectTerminalShortcutPlatform,
   isTerminalMiddleClickPaste,
+  isTerminalClearShortcut,
   isTerminalPasteShortcut,
   isTerminalSearchShortcut,
   shouldInterceptKeyEvent,
@@ -55,8 +56,16 @@ import {
 import { loadTerminalSearchAddon } from "./terminalSearchAddon";
 import {
   findTerminalLinks,
+  findTerminalUrlLinks,
   terminalLinkCellRange,
+  type TerminalLinkTarget,
 } from "./terminalLinkProvider";
+import { openTerminalUrl } from "./openTerminalUrl";
+import {
+  observeTerminalTheme,
+  resolveTerminalColor,
+  resolveTerminalTheme,
+} from "./terminalTheme";
 // Static import so bundler deduplicates the stylesheet
 import "@xterm/xterm/css/xterm.css";
 
@@ -67,16 +76,6 @@ type XtermModules = {
 };
 
 let xtermModulesPromise: Promise<XtermModules> | null = null;
-function resolveTerminalColor(token: string): string {
-  const color = getComputedStyle(document.documentElement)
-    .getPropertyValue(token)
-    .trim();
-  if (!color) {
-    throw new Error(`Terminal color token ${token} is unavailable`);
-  }
-  return color;
-}
-
 function resolveTerminalSearchDecorations() {
   return {
     matchBackground: resolveTerminalColor("--hover"),
@@ -570,7 +569,7 @@ function TerminalViewFrame({
   return (
     <div
       ref={containerRef}
-      className="flex h-full min-h-0 w-full flex-col overflow-hidden"
+      className="mx-[8px] mb-[8px] flex h-[calc(100%-8px)] min-h-0 w-[calc(100%-16px)] flex-col overflow-hidden rounded-[10px]"
       data-terminal-hydrated={hydrated}
       data-testid="terminal-render-content"
       role="region"
@@ -581,7 +580,7 @@ function TerminalViewFrame({
       }}
     >
       <TerminalStatus {...status} />
-      <div ref={fitHostRef} className="min-h-0 flex-1 w-full p-3" />
+      <div ref={fitHostRef} className="min-h-0 w-full flex-1 px-3.5 py-3" />
       {termReady ? <TerminalSearchShelf active={shown} {...search} /> : null}
     </div>
   );
@@ -610,6 +609,7 @@ export const TerminalView = memo(function TerminalView({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const searchResultDisposableRef = useRef<IDisposable | null>(null);
   const openSearchRef = useRef<() => void>(() => {});
+  const clearViewRef = useRef<() => void>(() => {});
   const [searchAddonState, setSearchAddonState] = useState<TerminalSearchAddonState>("loading");
   const [searchAddonRetry, setSearchAddonRetry] = useState(0);
   const [termReady, setTermReady] = useState(false);
@@ -621,6 +621,8 @@ export const TerminalView = memo(function TerminalView({
   const rendererInitCancelledRef = useRef(false);
   const onDisposedRef = useRef(onDisposed);
   onDisposedRef.current = onDisposed;
+  const ownerScopeIdRef = useRef(ownerScopeId);
+  ownerScopeIdRef.current = ownerScopeId;
   const shownRef = useRef(shown);
   shownRef.current = shown;
 
@@ -671,20 +673,7 @@ export const TerminalView = memo(function TerminalView({
       const term = new XTerminal({
         ...options,
         allowProposedApi: true,
-        // xterm resolves these concrete OKLCH values through its canvas colour parser.
-        theme: {
-          background: resolveTerminalColor("--page"),
-          foreground: resolveTerminalColor("--ink"),
-          cursor: resolveTerminalColor("--ink"),
-          green: resolveTerminalColor("--success"),
-          brightGreen: resolveTerminalColor("--success"),
-          yellow: resolveTerminalColor("--primary"),
-          brightYellow: resolveTerminalColor("--primary"),
-          red: resolveTerminalColor("--error"),
-          brightRed: resolveTerminalColor("--error"),
-          blue: resolveTerminalColor("--link"),
-          brightBlue: resolveTerminalColor("--link"),
-        },
+        theme: resolveTerminalTheme(),
       });
 
       const fitAddon = new XFitAddon();
@@ -698,37 +687,60 @@ export const TerminalView = memo(function TerminalView({
       if (exited) term.options.disableStdin = true;
       const shortcutPlatform = detectTerminalShortcutPlatform();
 
+      const openFileLink = (target: TerminalLinkTarget) => {
+        void getTransport()
+          .listOpenInApps()
+          .then((apps) => {
+            const defaultEditor = useSettingsStore.getState().settings.externalApps.defaultEditor || null;
+            const appId = resolveDefaultOpenInApp(null, defaultEditor, apps);
+            return getTransport().openIn(appId, target.path, target.line);
+          })
+          .catch(() => {
+            setRecoveryAction(null);
+            setRecoveryNotice("The file link could not be opened.");
+          });
+      };
+
       const linkDisposable = term.registerLinkProvider({
+        // xterm hands over a 1-based row, while buffer.getLine is 0-based.
         provideLinks: (bufferLineNumber, callback) => {
-          const line = term.buffer.active.getLine(bufferLineNumber);
+          const line = term.buffer.active.getLine(bufferLineNumber - 1);
           if (!line) {
             callback(undefined);
             return;
           }
-          const matches = findTerminalLinks(line.translateToString(true));
-          const links = matches.flatMap((match) => {
+          const text = line.translateToString(true);
+          const candidates = [
+            ...findTerminalLinks(text).map((match) => ({
+              match,
+              activate: () => openFileLink(match.target),
+            })),
+            // Trimmed text keeps typed spaces but drops the unwritten cell a wide character leaves
+            // at a wrap, so a URL cut by that wrap still reads as touching the row edge.
+            ...findTerminalUrlLinks(text, {
+              continuesPreviousRow: line.isWrapped,
+              continuesOnNextRow: term.buffer.active.getLine(bufferLineNumber)?.isWrapped === true,
+            }).map((match) => ({
+              match,
+              activate: () => {
+                openTerminalUrl(match, ownerScopeIdRef.current).catch(() => {
+                  setRecoveryAction(null);
+                  setRecoveryNotice("The link could not be opened.");
+                });
+              },
+            })),
+          ];
+          const links = candidates.flatMap(({ match, activate }) => {
             const cellRange = terminalLinkCellRange(line, match);
             if (!cellRange) return [];
             const inclusiveEnd = cellRange.end - 1;
             return [{
               text: match.text,
               range: {
-                start: { x: cellRange.start + 1, y: bufferLineNumber + 1 },
-                end: { x: inclusiveEnd + 1, y: bufferLineNumber + 1 },
+                start: { x: cellRange.start + 1, y: bufferLineNumber },
+                end: { x: inclusiveEnd + 1, y: bufferLineNumber },
               },
-              activate: () => {
-                void getTransport()
-                  .listOpenInApps()
-                  .then((apps) => {
-                    const defaultEditor = useSettingsStore.getState().settings.externalApps.defaultEditor || null;
-                    const appId = resolveDefaultOpenInApp(null, defaultEditor, apps);
-                    return getTransport().openIn(appId, match.target.path, match.target.line);
-                  })
-                .catch(() => {
-                  setRecoveryAction(null);
-                  setRecoveryNotice("The file link could not be opened.");
-                });
-              },
+              activate,
             }];
           });
           callback(links);
@@ -759,6 +771,13 @@ export const TerminalView = memo(function TerminalView({
         if (isTerminalSearchShortcut(event)) {
           event.preventDefault();
           openSearchRef.current();
+          return false;
+        }
+        if (isTerminalClearShortcut(event, shortcutPlatform)) {
+          // The app binds mod+k to the command palette on document; keep it from firing too.
+          event.preventDefault();
+          event.stopPropagation();
+          clearViewRef.current();
           return false;
         }
         if (isTerminalPasteShortcut(event, shortcutPlatform)) {
@@ -990,6 +1009,21 @@ export const TerminalView = memo(function TerminalView({
         useTerminalStore.getState().recordTerminalExit(ptyId, detail.exit);
       }});
 
+      // The clear is queued behind output already handed to xterm, so it also
+      // wipes what the shell printed before the click. The checkpoint stores the
+      // cleared screen at that same sequence, so a cold remount (thread switch)
+      // replays only newer output instead of resurrecting the old screen.
+      clearViewRef.current = () => {
+        if (disposed || replaying) return;
+        const throughSeq = Number.isFinite(lastWrittenSeq) ? lastWrittenSeq : -1;
+        trackedWrite("", () => {
+          term.clear();
+          // A rejected checkpoint only means the next cold mount may show the old
+          // screen; the detach checkpoint on unmount retries with the live state.
+          transport.terminalCheckpoint(ptyId, throughSeq, serializeAddon.serialize()).catch(() => {});
+        });
+      };
+
       const resizeController = createTerminalResizeController({
         container: el,
         fitAddon,
@@ -1021,6 +1055,7 @@ export const TerminalView = memo(function TerminalView({
         resumeWarmViewRef.current = null;
         retryRecoveryRef.current = null;
         openSearchRef.current = () => {};
+        clearViewRef.current = () => {};
         setTermReady(false);
         dataDisposable.dispose();
         scrollDisposable.dispose();
@@ -1309,11 +1344,20 @@ export const TerminalView = memo(function TerminalView({
 
   useEffect(() => {
     const onClear = (event: Event) => {
-      if ((event as CustomEvent<string>).detail === ptyId) termRef.current?.clear();
+      if ((event as CustomEvent<string>).detail === ptyId) clearViewRef.current();
     };
     window.addEventListener(TERMINAL_CLEAR, onClear);
     return () => window.removeEventListener(TERMINAL_CLEAR, onClear);
   }, [ptyId]);
+
+  // Reassigning options.theme repaints the open terminal in place, so a theme
+  // switch never remounts it or loses scrollback.
+  useEffect(() => {
+    if (!termReady) return;
+    return observeTerminalTheme(() => {
+      if (termRef.current) termRef.current.options.theme = resolveTerminalTheme();
+    });
+  }, [termReady]);
 
   // Repaint xterm when the browser window/tab regains visibility.
   // Long background stints leave the canvas half-painted; fit + refresh

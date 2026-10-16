@@ -13,6 +13,15 @@ export interface TerminalLinkMatch {
   readonly end: number;
 }
 
+/** A validated `http(s)` URL and its character range within one Terminal line. */
+export interface TerminalUrlMatch {
+  readonly url: string;
+  readonly loopback: boolean;
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+}
+
 /** A minimal xterm cell view used to translate text offsets to cell columns. */
 export interface TerminalLinkCell {
   readonly getChars: () => string;
@@ -89,6 +98,72 @@ export function findTerminalLinks(value: string): readonly TerminalLinkMatch[] {
     if (!target || match.index === undefined) continue;
     const start = match.index + (match[0].length - text.length);
     links.push({ target, text, start, end: start + text.length });
+  }
+  return links;
+}
+
+const URL_LENGTH_LIMIT = 2_048;
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+const URL_CLOSERS: Readonly<Record<string, string>> = { ")": "(", "]": "[", "}": "{" };
+
+function occurrences(value: string, char: string): number {
+  return value.split(char).length - 1;
+}
+
+/** Drops sentence punctuation after a URL, keeping a closing bracket that pairs with one inside it. */
+function trimUrlTrailingPunctuation(value: string): string {
+  let end = value.length;
+  while (end > 0) {
+    const last = value[end - 1]!;
+    const opener = URL_CLOSERS[last];
+    const closesOwnBracket = opener !== undefined &&
+      occurrences(value.slice(0, end), last) <= occurrences(value.slice(0, end), opener);
+    if (!TRAILING_PUNCTUATION.test(last) || closesOwnBracket) break;
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
+function parseTerminalUrl(candidate: string): Pick<TerminalUrlMatch, "url" | "loopback"> | null {
+  if (candidate.length > URL_LENGTH_LIMIT || containsControlCharacter(candidate)) return null;
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return { url: parsed.href, loopback: LOOPBACK_HOSTNAMES.has(parsed.hostname) };
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a Terminal row continues the previous row or runs on into the next one. */
+export interface TerminalRowWrap {
+  readonly continuesPreviousRow: boolean;
+  readonly continuesOnNextRow: boolean;
+}
+
+/**
+ * Finds `http(s)://` URLs in one Terminal line. Terminal output is untrusted, so
+ * other schemes (`javascript:`, `file:`) never become links.
+ *
+ * A URL that touches a wrapped edge of the row is skipped: only part of it is
+ * on this row, and opening the partial address would send the user somewhere
+ * else.
+ */
+export function findTerminalUrlLinks(
+  value: string,
+  wrap: TerminalRowWrap = { continuesPreviousRow: false, continuesOnNextRow: false },
+): readonly TerminalUrlMatch[] {
+  const links: TerminalUrlMatch[] = [];
+  for (const match of value.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
+    if (match.index === undefined) continue;
+    const runsPastRowStart = wrap.continuesPreviousRow && match.index === 0;
+    const runsPastRowEnd = wrap.continuesOnNextRow && match.index + match[0].length === value.length;
+    if (runsPastRowStart || runsPastRowEnd) continue;
+    const text = trimUrlTrailingPunctuation(match[0]);
+    const parsed = parseTerminalUrl(text);
+    if (!parsed) continue;
+    links.push({ ...parsed, text, start: match.index, end: match.index + text.length });
   }
   return links;
 }

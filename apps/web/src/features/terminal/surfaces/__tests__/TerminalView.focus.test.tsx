@@ -992,10 +992,11 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     await settle();
 
     let links: TerminalLink[] | undefined;
-    linkProvider?.provideLinks(0, (provided) => {
+    linkProvider?.provideLinks(1, (provided) => {
       links = provided;
     });
 
+    expect(bufferActive.getLine).toHaveBeenCalledWith(0);
     expect(links).toHaveLength(2);
     expect(links?.map((link) => link.range)).toEqual([
       { start: { x: 4, y: 1 }, end: { x: 24, y: 1 } },
@@ -1008,6 +1009,25 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     expect(transport.openIn).toHaveBeenCalledWith("code", "/workspace/src/a.ts", 8);
     expect(transport.openIn).toHaveBeenCalledTimes(1);
     expect(transport.openIn).not.toHaveBeenCalledWith("code", "../../evil.ts", 2);
+  });
+
+  it("links a web URL on the hovered row", async () => {
+    activeLine = makeLine("ready http://localhost:5173/");
+    render(<TerminalView ptyId="pty-links" visible={true} threadActive={true} />);
+    await settle();
+
+    let links: TerminalLink[] | undefined;
+    linkProvider?.provideLinks(3, (provided) => {
+      links = provided;
+    });
+
+    expect(bufferActive.getLine).toHaveBeenCalledWith(2);
+    expect(links).toEqual([
+      expect.objectContaining({
+        text: "http://localhost:5173/",
+        range: { start: { x: 7, y: 3 }, end: { x: 28, y: 3 } },
+      }),
+    ]);
   });
 
   it("keeps the warm view and requests only output after its last sequence", async () => {
