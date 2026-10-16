@@ -1,4 +1,4 @@
-import { TerminalPoolSlot, TerminalTabContent } from "@/features/terminal";
+import { PendingActionApproval, TerminalPoolSlot, TerminalTabContent } from "@/features/terminal";
 import { cn } from "@/lib/utils";
 
 interface TerminalToolProps {
@@ -28,6 +28,7 @@ export function TerminalTool({ active, workspaceId, threadId, scopeId }: Termina
         <TerminalTabContent key={scopeId} workspaceId={workspaceId} threadId={threadId} scopeId={scopeId} />
       ) : null}
       <TerminalPoolSlot className="relative min-h-0 min-w-0 flex-1 overflow-hidden" />
+      {active && scopeId ? <PendingActionApproval workspaceId={workspaceId} threadId={threadId} scopeId={scopeId} /> : null}
     </div>
   );
 }

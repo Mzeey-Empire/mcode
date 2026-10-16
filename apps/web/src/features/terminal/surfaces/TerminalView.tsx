@@ -11,6 +11,7 @@ import { getTransport } from "@/transport";
 import { Button } from "@/components/ui/button";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { resolveDefaultOpenInApp } from "@/lib/resolveDefaultOpenInApp";
+import { isAwaitingApproval } from "@/features/terminal/state/isAwaitingApproval";
 import { useTerminalStore, type TerminalSearchOptions } from "@/features/terminal/state/terminalStore";
 import {
   detectTerminalShortcutPlatform,
@@ -120,6 +121,14 @@ function getTerminalOptions(settings: TerminalSettings): {
     // accessibility signal, so it keeps xterm's default disabled state.
     screenReaderMode: settings.accessibility.screenReaderMode === "on",
   };
+}
+
+/**
+ * A pending Action terminal has no process, and its approval card owns focus so Enter reaches Run.
+ * Pulling focus into xterm after the card mounted would leave nothing to type into.
+ */
+function focusUnlessAwaitingApproval(term: Terminal, ptyId: string): void {
+  if (!isAwaitingApproval(ptyId)) term.focus();
 }
 
 function applyTerminalSettings(term: Terminal, settings: TerminalSettings): void {
@@ -1198,7 +1207,7 @@ export const TerminalView = memo(function TerminalView({
           if (disposed) return;
           setRecoveryAction(null);
           setRecoveryNotice(null);
-          if (shownRef.current) term.focus();
+          if (shownRef.current) focusUnlessAwaitingApproval(term, ptyId);
           if (result.mode === "checkpoint") {
             lastWrittenSeq = result.checkpointThrough;
             transport.ptySetLastSeq(ptyId, result.checkpointThrough);
@@ -1260,7 +1269,7 @@ export const TerminalView = memo(function TerminalView({
       // created terminals wouldn't receive focus. Pull focus here after
       // init when the terminal is visible.
       if (shownRef.current) {
-        term.focus();
+        focusUnlessAwaitingApproval(term, ptyId);
       }
     }
 
@@ -1377,7 +1386,7 @@ export const TerminalView = memo(function TerminalView({
         t.refresh(0, t.rows - 1);
       }
       if (!pinned) {
-        t.focus();
+        focusUnlessAwaitingApproval(t, ptyId);
       }
     };
 

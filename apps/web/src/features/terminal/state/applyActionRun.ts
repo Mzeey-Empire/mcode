@@ -28,24 +28,28 @@ interface ShowRecordOptions {
   readonly relaunched: boolean;
 }
 
+const REUSABLE_STATES: ReadonlySet<string | undefined> = new Set(["exited", "failed", "pending"]);
+
 function showRecord(run: WorkspaceEnvironmentActionRun, terminalId: string, { focus, relaunched }: ShowRecordOptions): void {
   const terminals = useTerminalStore.getState();
   const existing = (terminals.terminals[run.threadId] ?? []).find((record) => record.id === terminalId);
   if (existing) {
-    // The server reuses a terminal whose shell the user exited. A delayed update of the run that was
-    // running when the shell exited must not undo that exit, so only a new run clears it.
-    if (relaunched && run.status === "running" && (existing.state === "exited" || existing.state === "failed")) {
+    // The server reuses a terminal whose shell the user exited, and starts an approved run in the
+    // terminal that was waiting for it. A delayed update of the run that was running when the shell
+    // exited must not undo that exit, so only a new run clears it.
+    if (relaunched && run.status === "running" && REUSABLE_STATES.has(existing.state)) {
       terminals.recordTerminalRestart(terminalId);
     }
     if (focus) terminals.setActiveTerminal(run.threadId, terminalId);
     return;
   }
   // The terminal outlives the command: the shell phase keeps it running after the run settles.
+  // A run waiting for approval has no process yet.
   terminals.addTerminal(
     run.threadId,
     terminalId,
     run.actionName,
-    { kind: "action", actionId: run.actionId, state: "running", createdAt: run.startedAt ?? run.createdAt },
+    { kind: "action", actionId: run.actionId, state: run.status === "awaiting-approval" ? "pending" : "running", createdAt: run.startedAt ?? run.createdAt },
     focus,
   );
 }

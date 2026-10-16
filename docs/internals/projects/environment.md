@@ -137,6 +137,13 @@ reserves one slot per Thread and Action before resolution. Starting an Action
 whose terminal is already open returns its retained run. Pending approval,
 running and exited terminals all count toward the eight-record scope limit.
 
+A run waiting for approval has a terminal but no process. The client shows the
+approval card over that terminal and, on Run, approves the fingerprint then
+starts the Action. Starting creates a new run with a later `createdAt` on the
+same terminal, never a status change on the awaiting run. The client's
+retained-run store depends on this and rejects a same-run move to `running`.
+Closing the terminal while it waits interrupts the run.
+
 The terminal replay includes a synthesized command echo and both processes'
 output and is the output record for the Action's terminal tab. Retained runs
 store lifecycle metadata and confirmed port reachability. Command output only

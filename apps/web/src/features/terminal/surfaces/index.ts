@@ -1,3 +1,4 @@
+export { PendingActionApproval } from "./PendingActionApproval";
 export { TerminalTabContent } from "./TerminalTabContent";
 export { TerminalPoolHost } from "./TerminalPoolHost";
 export { TerminalPoolSlotProvider, TerminalPoolSlot } from "./TerminalPoolSlotContext";
