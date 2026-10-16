@@ -79,7 +79,7 @@
       }
     },
     {
-      "files": ["apps/web/src/**/EditorIcons.tsx", "apps/web/src/**/ProviderIcons.tsx", "apps/web/src/lib/file-icons.tsx", "apps/web/src/lib/vscode-icons.ts", "apps/web/src/components/chat/ImageAttachmentLightbox.tsx"],
+      "files": ["apps/web/src/**/EditorIcons.tsx", "apps/web/src/**/ProviderIcons.tsx", "apps/web/src/lib/file-icons.tsx", "apps/web/src/lib/vscode-icons.ts", "apps/web/src/features/projects/actions/action-icons.ts", "apps/web/src/components/chat/ImageAttachmentLightbox.tsx"],
       "rules": {
         "mcode/no-raw-color": "off"
       }

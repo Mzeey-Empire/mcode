@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getIconUrl, resolveIcon, clearIconCache } from "@/lib/vscode-icons";
+import { Package } from "lucide-react";
+import { getIconUrl, resolveIcon, resolveIconByName, clearIconCache } from "@/lib/vscode-icons";
 
 // jsdom doesn't provide URL.createObjectURL
 globalThis.URL.createObjectURL = vi.fn().mockReturnValue("blob:mock-url");
@@ -88,5 +89,41 @@ describe("resolveIcon", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     expect(r1.type).toBe("vscode");
     expect(r2.type).toBe("vscode");
+  });
+});
+
+describe("resolveIconByName", () => {
+  const svgResponse = () => ({
+    ok: true,
+    blob: () => Promise.resolve(new Blob(["<svg/>"], { type: "image/svg+xml" })),
+  });
+
+  it("fetches the exact vscode-icons file and reuses it from the cache", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(svgResponse());
+
+    const first = await resolveIconByName("file_type_bun.svg", Package);
+    const second = await resolveIconByName("file_type_bun.svg", Package);
+
+    expect(first).toEqual({ type: "vscode", url: "blob:mock-url" });
+    expect(second).toEqual(first);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).toBe(
+      "https://cdn.jsdelivr.net/gh/vscode-icons/vscode-icons/icons/file_type_bun.svg",
+    );
+  });
+
+  it("returns the caller's fallback glyph when the CDN is unreachable", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline"));
+
+    expect(await resolveIconByName("file_type_bun.svg", Package)).toEqual({ type: "lucide", icon: Package });
+  });
+
+  it("does not retry a file that already failed", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline"));
+
+    await resolveIconByName("file_type_bun.svg", Package);
+    await resolveIconByName("file_type_bun.svg", Package);
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 });
