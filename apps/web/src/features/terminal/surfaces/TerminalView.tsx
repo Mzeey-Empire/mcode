@@ -11,6 +11,7 @@ import { getTransport } from "@/transport";
 import { Button } from "@/components/ui/button";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { resolveDefaultOpenInApp } from "@/lib/resolveDefaultOpenInApp";
+import { isAwaitingApproval } from "@/features/terminal/state/isAwaitingApproval";
 import { useTerminalStore, type TerminalSearchOptions } from "@/features/terminal/state/terminalStore";
 import {
   detectTerminalShortcutPlatform,
@@ -127,9 +128,7 @@ function getTerminalOptions(settings: TerminalSettings): {
  * Pulling focus into xterm after the card mounted would leave nothing to type into.
  */
 function focusUnlessAwaitingApproval(term: Terminal, ptyId: string): void {
-  const { terminals } = useTerminalStore.getState();
-  const record = Object.values(terminals).flat().find((candidate) => candidate.id === ptyId);
-  if (record?.state !== "pending") term.focus();
+  if (!isAwaitingApproval(ptyId)) term.focus();
 }
 
 function applyTerminalSettings(term: Terminal, settings: TerminalSettings): void {
