@@ -10,6 +10,7 @@ import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
 import { applyActionRun } from "../state/applyActionRun";
 import type { TerminalInstance } from "../state/terminalStore";
+import { ActionPortPill } from "./ActionPortPill";
 import { commandHeadline } from "./terminalTabs";
 
 type ActionCommand = "stop" | "restart";
@@ -110,6 +111,7 @@ export function ActionControls({ workspaceId, threadId, terminal, onClose }: Act
   return (
     <PanelHeaderSlot slot="row2">
       <CommandPill run={run} />
+      <ActionPortPill run={run} threadId={threadId} />
       <ExitPill run={run} />
       {running ? (
         <>

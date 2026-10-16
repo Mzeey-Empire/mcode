@@ -3,6 +3,7 @@ import { logger } from "@mcode/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeNet from "node:net";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import {
   PreparedTerminalCommandApprovalMismatchError,
@@ -147,6 +148,180 @@ async function actionFixture(shared = false, script = "vite --open http://localh
 }
 
 const actionSlot = { threadId: ACTION_TEST_THREAD, actionId: "build" };
+
+async function portListener(host = "127.0.0.1", port = 0) {
+  const server = NodeNet.createServer((socket) => socket.end());
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen({ host, port, ipv6Only: host === "::1" }, resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing listener address");
+  const close = () => new Promise<void>((resolve) => server.close(() => resolve()));
+  integrationCleanups.push(close);
+  return { port: address.port, close };
+}
+
+function nextReachability(actions: ProjectActionService, reachable: boolean): Promise<void> {
+  return new Promise((resolve) => {
+    const unsubscribe = actions.onUpdate(({ run }) => {
+      if (run.port?.reachable !== reachable) return;
+      unsubscribe();
+      resolve();
+    });
+  });
+}
+
+describe("ProjectActionService port reachability", () => {
+  it("confirms the answering URL after a misleading dead URL and publishes failure history", async () => {
+    const dead = await portListener();
+    await dead.close();
+    const live = await portListener();
+    const f = await actionFixture();
+    const updates: WorkspaceEnvironmentActionRun[] = [];
+    f.actions.onUpdate(({ run }) => updates.push(run));
+    const run = await f.actions.start(actionSlot);
+    const commandId = f.creates.mock.calls[0][0].sessionId;
+    f.host.emitOutput(commandId, Buffer.from(`http://localhost:${dead.port}/help\n`));
+    f.host.emitOutput(commandId, Buffer.from(`http://127.0.0.1:${live.port}/\n`));
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.port).toMatchObject({
+      runId: run.runId, host: "127.0.0.1", port: live.port, reachable: true,
+    }));
+    f.host.emitOutput(commandId, Buffer.from("still serving\n"));
+    f.host.emitExit(commandId, 1);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)).toMatchObject({
+      status: "failed", exitCode: 1, port: { runId: run.runId, port: live.port, reachable: false },
+    }));
+    await vi.waitFor(() => expect(updates.map((value) => [value.status, value.port?.reachable ?? null])).toEqual([
+      ["running", null], ["running", true], ["failed", false],
+    ]));
+  });
+
+  it("retries a dead candidate each second, then publishes only reachability changes every five seconds", async () => {
+    const dead = await portListener();
+    await dead.close();
+    const f = await actionFixture();
+    const updates: WorkspaceEnvironmentActionRun[] = [];
+    f.actions.onUpdate(({ run }) => updates.push(run));
+    await f.actions.start(actionSlot);
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    f.host.emitOutput(f.creates.mock.calls[0][0].sessionId, Buffer.from(`http://127.0.0.1:${dead.port}/\n`));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(f.actions.get(actionSlot)?.port).toBeNull();
+    expect(updates).toHaveLength(1);
+    const live = await portListener("127.0.0.1", dead.port);
+    const confirmed = nextReachability(f.actions, true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await confirmed;
+    expect(updates).toHaveLength(2);
+    await live.close();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(f.actions.get(actionSlot)?.port?.reachable).toBe(true);
+    const unreachable = nextReachability(f.actions, false);
+    await vi.advanceTimersByTimeAsync(1);
+    await unreachable;
+    await portListener("127.0.0.1", dead.port);
+    const recovered = nextReachability(f.actions, true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await recovered;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(updates).toHaveLength(4);
+    f.host.emitExit(f.creates.mock.calls[0][0].sessionId, 0);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("completed"));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(updates.map((value) => value.port?.reachable ?? null)).toEqual([null, true, false, true, false]);
+  });
+
+  it("never detects a listening URL from command echo or the shell after exit", async () => {
+    const live = await portListener();
+    const url = `http://127.0.0.1:${live.port}/`;
+    const f = await actionFixture(false, `echo ${url}`);
+    const replay: Uint8Array[] = [];
+    f.backend.setSender({ data: (_id, _seq, data) => replay.push(data), json: () => undefined });
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const run = await f.actions.start(actionSlot);
+    if (!run.terminalSessionId) throw new Error("Missing action terminal");
+    f.backend.reattach(run.terminalSessionId, -1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(Buffer.concat(replay).toString()).toContain(url);
+    expect(f.actions.get(actionSlot)?.port).toBeNull();
+    f.host.emitExit(f.creates.mock.calls[0][0].sessionId, 0);
+    await vi.waitFor(() => expect(f.creates).toHaveBeenCalledTimes(2));
+    f.host.emitOutput(f.creates.mock.calls[1][0].sessionId, Buffer.from(`${url}\n`));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(f.actions.get(actionSlot)).toMatchObject({ runId: run.runId, status: "completed", port: null });
+  });
+
+  it.each(["restart", "start"] as const)("keeps an occupied old port as unreachable history on %s", async (method) => {
+    const live = await portListener();
+    const f = await actionFixture();
+    const first = await f.actions.start(actionSlot);
+    const commandId = f.creates.mock.calls[0][0].sessionId;
+    f.host.emitOutput(commandId, Buffer.from(`http://127.0.0.1:${live.port}/\n`));
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.port?.reachable).toBe(true));
+    f.host.emitExit(commandId, 0);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("completed"));
+    await live.close();
+    await portListener("127.0.0.1", live.port);
+    if (method === "start") {
+      if (!first.terminalSessionId) throw new Error("Missing action terminal");
+      await f.backend.kill(first.terminalSessionId);
+      await vi.waitFor(() => expect(f.actions.get(actionSlot)?.terminalSessionId).toBeNull());
+    }
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const next = await f.actions[method](actionSlot);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(f.actions.get(actionSlot)).toMatchObject({
+      runId: next.runId, status: "running", port: { runId: first.runId, port: live.port, reachable: false },
+    });
+    expect(next.runId).not.toBe(first.runId);
+  });
+
+  it.each(["[::1]", "localhost"])("confirms IPv6-only output using %s", async (host, context) => {
+    let live: Awaited<ReturnType<typeof portListener>>;
+    try { live = await portListener("::1"); }
+    catch (error) {
+      if (error instanceof Error && "code" in error && ["EAFNOSUPPORT", "EADDRNOTAVAIL", "EPROTONOSUPPORT"].includes(String(error.code))) {
+        context.skip(`IPv6 loopback unavailable: ${String(error.code)}`);
+        return;
+      }
+      throw error;
+    }
+    const f = await actionFixture();
+    const run = await f.actions.start(actionSlot);
+    f.host.emitOutput(f.creates.mock.calls[0][0].sessionId, Buffer.from(`http://${host}:${live.port}/\n`));
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.port).toMatchObject({
+      runId: run.runId, port: live.port, reachable: true, url: `http://${host}:${live.port}/`,
+    }));
+  });
+
+  it("stops a confirmed port and keeps its history while the other listener stays open", async () => {
+    const live = await portListener();
+    const f = await actionFixture();
+    f.host.interruptOnInput = true;
+    const run = await f.actions.start(actionSlot);
+    f.host.emitOutput(f.creates.mock.calls[0][0].sessionId, Buffer.from(`http://127.0.0.1:${live.port}/\n`));
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.port?.reachable).toBe(true));
+    const stopped = nextReachability(f.actions, false);
+    await f.actions.stop(actionSlot);
+    await stopped;
+    expect(f.actions.get(actionSlot)).toMatchObject({ status: "interrupted", port: { runId: run.runId, port: live.port, reachable: false } });
+  });
+
+  it("does not retain an unconfirmed candidate when its command exits", async () => {
+    const live = await portListener();
+    const f = await actionFixture();
+    const updates: WorkspaceEnvironmentActionRun[] = [];
+    f.actions.onUpdate(({ run }) => updates.push(run));
+    await f.actions.start(actionSlot);
+    const commandId = f.creates.mock.calls[0][0].sessionId;
+    f.host.emitOutput(commandId, Buffer.from(`http://127.0.0.1:${live.port}/\n`));
+    f.host.emitExit(commandId, 1);
+    await live.close();
+    await vi.waitFor(() => expect(updates.map((run) => [run.status, run.port])).toEqual([["running", null], ["failed", null]]));
+    expect(f.actions.get(actionSlot)).toMatchObject({ status: "failed", port: null });
+  });
+});
 
 describe("ProjectActionService with the in-memory PTY host", () => {
   it("keeps command output in terminal replay and publishes only lifecycle changes", async () => {
@@ -1118,6 +1293,7 @@ describe("ProjectActionService", () => {
   });
 
   it("ignores output delivered after finalization and after a replacement owns the slot", async () => {
+    const live = await portListener();
     const runs = new Runs();
     const first = session("terminal-1");
     const second = session("terminal-2");
@@ -1135,21 +1311,24 @@ describe("ProjectActionService", () => {
     const staleOutput = first.captureOutput();
     first.exit(0);
     await new Promise<void>((resolve) => setImmediate(resolve));
-    first.emit("after finalization");
+    first.emit(`http://127.0.0.1:${live.port}/\n`);
 
     expect(runs.get("thread-1", "build")).toMatchObject({
       runId: "run-1",
       status: "completed",
       revision: 1,
+      port: null,
     });
 
     await service.restart({ threadId: "thread-1", actionId: "build" });
-    staleOutput("after replacement");
+    staleOutput(`http://127.0.0.1:${live.port}/\n`);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(runs.get("thread-1", "build")).toMatchObject({
       runId: "run-2",
       status: "running",
       revision: 0,
+      port: null,
     });
   });
 

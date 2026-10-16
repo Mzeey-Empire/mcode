@@ -69,6 +69,7 @@ function finalRunFor(
     ...active.run,
     revision: active.run.revision + 1,
     status,
+    port: active.run.port ? { ...active.run.port, reachable: false } : null,
     finishedAt,
     exitCode: status === "interrupted" ? null : exitCode,
   };

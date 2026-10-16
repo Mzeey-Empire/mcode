@@ -275,6 +275,7 @@ describe("workspace environment contracts", () => {
       revision: 1,
       terminalSessionId: "terminal-1",
       trigger: "manual",
+      port: null,
       actionName: "Build",
       status: "completed",
       snapshot: {
@@ -295,6 +296,12 @@ describe("workspace environment contracts", () => {
 
     expect(run.status).toBe("completed");
     expect(run.trigger).toBe("manual");
+    const port = { runId: "earlier-run", host: "localhost", port: 5173, url: "http://localhost:5173/", reachable: false, detectedAt: "2026-08-22T11:00:00.000Z" };
+    expect(WorkspaceEnvironmentActionRunSchema().parse({ ...run, port }).port?.runId).toBe("earlier-run");
+    expect(WorkspaceEnvironmentActionRunSchema().safeParse({ ...run, port: { ...port, reachable: true } }).success).toBe(false);
+    const running = { ...run, status: "running", finishedAt: null, exitCode: null };
+    expect(WorkspaceEnvironmentActionRunSchema().safeParse({ ...running, port: { ...port, reachable: true } }).success).toBe(false);
+    expect(WorkspaceEnvironmentActionRunSchema().parse({ ...running, port: { ...port, runId: "run-1", reachable: true } }).port?.reachable).toBe(true);
     expect(WorkspaceEnvironmentActionRunSchema().parse({ ...run, trigger: "startup", terminalSessionId: null }).trigger).toBe("startup");
     expect(WorkspaceEnvironmentActionRunSchema().safeParse({ ...run, trigger: "scheduled" }).success).toBe(false);
     expect(WorkspaceEnvironmentActionRunSchema().safeParse({

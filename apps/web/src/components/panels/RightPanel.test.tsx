@@ -243,6 +243,7 @@ describe("RightPanel", () => {
     revision: 1,
     terminalSessionId: "pty-action",
     trigger: "manual",
+    port: null,
     actionName: "Build",
     status: "completed",
     snapshot: { platform: "windows", script: "bun run build", checkoutPath: "C:\\repo", terminal: null, environmentNames: [] },

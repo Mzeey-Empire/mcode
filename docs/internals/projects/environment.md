@@ -139,7 +139,8 @@ running and exited terminals all count toward the eight-record scope limit.
 
 The terminal replay includes a synthesized command echo and both processes'
 output and is the output record for the Action's terminal tab. Retained runs
-store lifecycle metadata only; command output never publishes run updates.
+store lifecycle metadata and confirmed port reachability. Command output only
+publishes a run update when a port is confirmed or its reachability changes.
 
 The initial running result must be saved before the service subscribes to
 exit events. If retention fails after launch, the

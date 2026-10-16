@@ -3,6 +3,8 @@ import { and, desc, eq, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   WorkspaceEnvironmentActionRunSchema,
+  WorkspaceEnvironmentActionPortSchema,
+  type WorkspaceEnvironmentActionPort,
   type WorkspaceEnvironmentActionRun,
 } from "@mcode/contracts";
 import { projectActionRuns } from "../../../../runtime/persistence/sqlite/schema.js";
@@ -68,6 +70,7 @@ export class ProjectActionRunStore {
           actionName: parsed.actionName,
           status: parsed.status,
           snapshotJson: JSON.stringify(parsed.snapshot),
+          portJson: parsed.port ? JSON.stringify(parsed.port) : null,
           createdAt: parsed.createdAt,
           startedAt: parsed.startedAt,
           finishedAt: parsed.finishedAt,
@@ -84,6 +87,7 @@ export class ProjectActionRunStore {
             actionName: parsed.actionName,
             status: parsed.status,
             snapshotJson: JSON.stringify(parsed.snapshot),
+            portJson: parsed.port ? JSON.stringify(parsed.port) : null,
             createdAt: parsed.createdAt,
             startedAt: parsed.startedAt,
             finishedAt: parsed.finishedAt,
@@ -109,6 +113,7 @@ export class ProjectActionRunStore {
           actionName: parsed.actionName,
           status: parsed.status,
           snapshotJson: JSON.stringify(parsed.snapshot),
+          portJson: parsed.port ? JSON.stringify(parsed.port) : null,
           createdAt: parsed.createdAt,
           startedAt: parsed.startedAt,
           finishedAt: parsed.finishedAt,
@@ -145,6 +150,7 @@ export class ProjectActionRunStore {
         ...run,
         revision: run.revision + 1,
         terminalSessionId: null,
+        port: run.port ? { ...run.port, reachable: false } : null,
         ...(run.status === "running" ? { status: "interrupted" as const, finishedAt, exitCode: null } : {}),
       }];
     });
@@ -185,11 +191,22 @@ function parseRow(row: ProjectActionRunRow): WorkspaceEnvironmentActionRun | nul
       actionName: row.actionName,
       status: row.status,
       snapshot,
+      port: parsePort(row.portJson),
       createdAt: row.createdAt,
       startedAt: row.startedAt,
       finishedAt: row.finishedAt,
       exitCode: row.exitCode,
     });
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function parsePort(json: string | null): WorkspaceEnvironmentActionPort | null {
+  if (!json) return null;
+  try {
+    const parsed = WorkspaceEnvironmentActionPortSchema().safeParse(JSON.parse(json));
     return parsed.success ? parsed.data : null;
   } catch {
     return null;

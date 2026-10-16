@@ -25,6 +25,7 @@ function run(
     revision: 1,
     terminalSessionId: status === "running" ? `terminal-${index}` : null,
     trigger: "manual",
+    port: null,
     actionName: `Deleted action ${index}`,
     status,
     snapshot: {
@@ -82,6 +83,28 @@ describe("ProjectActionRunStore retention", () => {
       { actionId: "startup", trigger: "startup", status: "interrupted", terminalSessionId: null },
     ]);
     expect(repo.get(threadId, "startup")).toMatchObject({ trigger: "startup", terminalSessionId: null });
+  });
+
+  it("persists confirmed ports, prevents stale reachability writes and retains history on recovery", () => {
+    const original = run(threadId, workspaceId, "web", 0, "running");
+    repo.replace(original);
+    const port = { runId: original.runId, host: "localhost" as const, port: 5173, url: "http://localhost:5173/", reachable: true, detectedAt: "2026-01-01T00:00:01.000Z" };
+    expect(repo.updateIfCurrent({ ...original, revision: 2, port })).toBe(true);
+    expect(db.prepare("SELECT json_extract(port_json, '$.port') AS port, json_extract(port_json, '$.reachable') AS reachable FROM project_action_runs WHERE action_id = ?").get("web"))
+      .toEqual({ port: 5173, reachable: 1 });
+    expect(repo.get(threadId, "web")?.port).toEqual({ runId: "run-0", host: "localhost", port: 5173, url: "http://localhost:5173/", reachable: true, detectedAt: "2026-01-01T00:00:01.000Z" });
+    repo.interruptRunning("2026-01-02T00:00:00.000Z");
+    expect(repo.updateIfCurrent({ ...original, revision: 2, port })).toBe(false);
+    expect(repo.get(threadId, "web")).toMatchObject({ status: "interrupted", revision: 3, port: { runId: "run-0", port: 5173, reachable: false } });
+    repo.replace({ ...original, runId: "run-new", port: { ...port, reachable: false } });
+    expect(repo.list(threadId)[0]).toMatchObject({ runId: "run-new", port: { runId: "run-0", reachable: false } });
+  });
+
+  it.each(["{broken", '{"port":5173}', "null"])("keeps a retained run readable with corrupt port JSON %s", (json) => {
+    repo.replace(run(threadId, workspaceId, "web", 0));
+    db.prepare("UPDATE project_action_runs SET port_json = ? WHERE action_id = ?").run(json, "web");
+    expect(repo.list(threadId).map((retained) => ({ actionId: retained.actionId, port: retained.port })))
+      .toEqual([{ actionId: "web", port: null }]);
   });
 
   it("defaults a pre-trigger insert to manual through the migrated database", () => {

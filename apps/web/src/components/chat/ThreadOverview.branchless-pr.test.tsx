@@ -267,6 +267,7 @@ function runningActionRun(): WorkspaceEnvironmentActionRun {
     revision: 0,
     terminalSessionId: "terminal-1",
     trigger: "manual",
+    port: null,
     actionName: "Success",
     status: "running",
     snapshot: {

@@ -21,6 +21,7 @@ describe("workspace environment RPC", () => {
     revision: 0,
     terminalSessionId: "terminal-1",
     trigger: "manual",
+    port: null,
     actionName: "Run app",
     status: "running",
     snapshot: {

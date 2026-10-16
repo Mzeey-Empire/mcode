@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
@@ -10,7 +10,10 @@ const transport = {
   terminalPause: vi.fn().mockResolvedValue(undefined),
 };
 
+const openUrlInPreview = vi.hoisted(() => vi.fn());
+
 vi.mock("@/transport", () => ({ getTransport: () => transport }));
+vi.mock("@/features/preview", () => ({ openUrlInPreview }));
 
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
@@ -37,6 +40,7 @@ function actionRun(overrides: Partial<WorkspaceEnvironmentActionRun> = {}): Work
     revision: 0,
     terminalSessionId: "pty-1",
     trigger: "manual",
+    port: null,
     actionName: "web",
     status: "running",
     snapshot: {
@@ -50,6 +54,18 @@ function actionRun(overrides: Partial<WorkspaceEnvironmentActionRun> = {}): Work
     startedAt: "2026-08-22T12:00:00.000Z",
     finishedAt: null,
     exitCode: null,
+    ...overrides,
+  };
+}
+
+function actionPort(overrides: Partial<NonNullable<WorkspaceEnvironmentActionRun["port"]>> = {}) {
+  return {
+    runId: "run-1",
+    port: 5173,
+    host: "localhost" as const,
+    url: "http://localhost:5173/",
+    reachable: true,
+    detectedAt: "2026-08-22T12:00:02.000Z",
     ...overrides,
   };
 }
@@ -173,6 +189,105 @@ describe("ActionControls", () => {
 
     await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
     expect(useToastStore.getState().toasts[0]).toMatchObject({ kind: "failed", meta: "offline" });
+  });
+
+  it("shows no port pill until the run's output announced a port", () => {
+    renderControls(actionRun());
+
+    expect(screen.queryByTestId("action-port-pill")).not.toBeInTheDocument();
+  });
+
+  it("shows a live port pill that opens the URL in the Browser tab", async () => {
+    const user = userEvent.setup();
+    renderControls(actionRun({ port: actionPort() }));
+
+    const pill = screen.getByTestId("action-port-pill");
+    expect(pill).toHaveTextContent(":5173");
+    expect(pill).toHaveAttribute("data-live", "true");
+    await user.click(pill);
+
+    await waitFor(() => expect(openUrlInPreview).toHaveBeenCalledWith({ url: "http://localhost:5173/", threadId: "thread-1" }));
+  });
+
+  it("says only that TCP accepts connections, never that the page works", async () => {
+    const user = userEvent.setup();
+    renderControls(actionRun({ port: actionPort() }));
+
+    await user.hover(screen.getByTestId("action-port-pill"));
+
+    expect(await screen.findByText("Accepting connections on localhost:5173")).toBeInTheDocument();
+  });
+
+  it("keeps the port as history once the run is stopped and nothing accepts connections", async () => {
+    const user = userEvent.setup();
+    renderControls(
+      actionRun({
+        status: "interrupted",
+        exitCode: 130,
+        finishedAt: "2026-08-22T12:00:03.000Z",
+        port: actionPort({ reachable: false }),
+      }),
+    );
+
+    const pill = screen.getByTestId("action-port-pill");
+    expect(pill).toHaveAttribute("data-live", "false");
+    await user.hover(pill);
+    expect(await screen.findByText("Not accepting connections on localhost:5173")).toBeInTheDocument();
+  });
+
+  it("treats a previous run's port as history even if it was last seen reachable", () => {
+    renderControls(actionRun({ runId: "run-2", port: actionPort({ runId: "run-1", reachable: true }) }));
+
+    expect(screen.getByTestId("action-port-pill")).toHaveAttribute("data-live", "false");
+  });
+
+  it("names the loopback address the URL printed, not the host the server listens on", async () => {
+    const user = userEvent.setup();
+    renderControls(actionRun({ port: actionPort({ host: "::", url: "http://localhost:5173/" }) }));
+
+    await user.hover(screen.getByTestId("action-port-pill"));
+
+    expect(await screen.findByText("Accepting connections on localhost:5173")).toBeInTheDocument();
+  });
+
+  it("follows a run from detection through exit and restart without remounting", () => {
+    renderControls(actionRun());
+    expect(screen.queryByTestId("action-port-pill")).not.toBeInTheDocument();
+
+    act(() => applyActionRun(actionRun({ revision: 1, port: actionPort() }), { focus: false }));
+    expect(screen.getByTestId("action-port-pill")).toHaveAttribute("data-live", "true");
+
+    act(() => applyActionRun(actionRun({ revision: 2, port: actionPort({ reachable: false }) }), { focus: false }));
+    expect(screen.getByTestId("action-port-pill")).toHaveAttribute("data-live", "false");
+
+    act(() =>
+      applyActionRun(
+        actionRun({
+          revision: 3,
+          status: "failed",
+          exitCode: 1,
+          finishedAt: "2026-08-22T12:00:03.000Z",
+          port: actionPort({ reachable: false }),
+        }),
+        { focus: false },
+      ),
+    );
+    expect(screen.getByTestId("action-port-pill")).toHaveTextContent(":5173");
+    expect(screen.getByTestId("action-exit-pill")).toHaveTextContent("Exit 1");
+
+    act(() =>
+      applyActionRun(
+        actionRun({
+          runId: "run-2",
+          revision: 0,
+          createdAt: "2026-08-22T12:00:04.000Z",
+          port: actionPort({ runId: "run-1", reachable: false }),
+        }),
+        { focus: false },
+      ),
+    );
+    expect(screen.getByTestId("action-port-pill")).toHaveAttribute("data-live", "false");
+    expect(screen.queryByTestId("action-exit-pill")).not.toBeInTheDocument();
   });
 
   it("Close terminal in the More menu asks the owner to close this record", async () => {
