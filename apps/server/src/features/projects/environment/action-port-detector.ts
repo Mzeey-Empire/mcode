@@ -15,10 +15,8 @@ export class ActionPortDetector {
   private scannedBytes = 0;
   private confirmed = false;
 
-  /** Stops parsing once a candidate has answered. */
   confirm(): void { this.confirmed = true; }
 
-  /** Returns only candidates not previously observed in this run. */
   write(bytes: Uint8Array): ActionPortCandidate[] {
     if (this.confirmed || this.scannedBytes >= OUTPUT_LIMIT || this.candidates.size >= CANDIDATE_LIMIT) return [];
     const bounded = bytes.subarray(0, OUTPUT_LIMIT - this.scannedBytes);

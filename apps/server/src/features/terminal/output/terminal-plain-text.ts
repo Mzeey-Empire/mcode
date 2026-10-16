@@ -8,7 +8,6 @@ export class TerminalPlainTextDecoder {
   private cursor = 0;
   private bellTerminatesString = false;
 
-  /** Returns newly completed lines and a snapshot of the still-open line. */
   write(bytes: Uint8Array): { completedLines: string[]; currentLine: string } {
     const completedLines: string[] = [];
     for (const character of this.decoder.decode(bytes, { stream: true })) {

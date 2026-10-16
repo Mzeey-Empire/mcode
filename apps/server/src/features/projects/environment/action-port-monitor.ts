@@ -27,7 +27,6 @@ export class ActionPortMonitor {
     if (!this.timer && this.candidates.length > 0) this.schedule(1_000);
   }
 
-  /** Cancels timers and invalidates in-flight probe results. */
   stop(): void {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
