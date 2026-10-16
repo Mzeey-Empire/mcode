@@ -269,6 +269,8 @@ export function BrowserPageLayer({
         </RenderValue>
         <RenderWhen condition={showNewPage}>
           <BrowserNewPage
+            // A pending Start belongs to the tab that pressed it, so another tab must not inherit it.
+            key={activeWebviewTabId ?? ""}
             threadId={threadId}
             browserWorkspaceId={browserWorkspaceId}
             onOpen={onWebviewNavigate}

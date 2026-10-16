@@ -519,6 +519,17 @@ describe("PreviewPanel: unavailable state", () => {
     });
   });
 
+  it("shows the new page in the web runtime when no target is loaded", () => {
+    vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
+    render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
+    const input = screen.getByLabelText("Preview URL");
+
+    fireEvent.change(input, { target: { value: "ftp://example.com" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(within(screen.getByTestId("web-runtime-unavailable")).getByTestId("browser-new-page")).toBeInTheDocument();
+  });
+
   it("hides and restores a warm web runtime panel from explicit presentation visibility", async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(

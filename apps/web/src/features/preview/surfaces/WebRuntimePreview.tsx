@@ -18,6 +18,7 @@ import { BrowserToolbar } from "./BrowserToolbar";
 import { useBrowserControl } from "./useBrowserControl";
 import { BrowserDeviceRow } from "./BrowserDeviceRow";
 import { BrowserActingOverlay } from "./BrowserActingOverlay";
+import { BrowserNewPage } from "./BrowserNewPage";
 import { BrowserViewportCanvas } from "./BrowserViewportCanvas";
 import type { BrowserAction, BrowserToolbarPage, BrowserTools } from "./browserToolbarModel";
 import { useBrowserCommands } from "./useBrowserCommands";
@@ -157,10 +158,16 @@ function RuntimePreviewContent({
   state,
   requestedAddress,
   dockRef,
+  threadId,
+  browserWorkspaceId,
+  onOpen,
 }: {
   readonly state: ReturnType<typeof resolveWebPreviewState> | "cross-origin";
   readonly requestedAddress: string | null;
   readonly dockRef: RefObject<HTMLDivElement | null>;
+  readonly threadId: string;
+  readonly browserWorkspaceId: string;
+  readonly onOpen: (url: string) => void;
 }): ReactNode {
   if (state === "same-origin" && requestedAddress) {
     return <div ref={dockRef} data-testid="web-runtime-preview-dock" className="absolute inset-0 h-full w-full" />;
@@ -175,11 +182,19 @@ function RuntimePreviewContent({
       </>
     );
   }
+  if (state === "unavailable") {
+    return (
+      <div data-testid="web-runtime-unavailable" className="h-full overflow-y-auto">
+        <p className="px-6 pt-6 text-center text-sm text-muted">
+          Web preview is unavailable until an HTTP(S) same-origin target is loaded.
+        </p>
+        <BrowserNewPage threadId={threadId} browserWorkspaceId={browserWorkspaceId} onOpen={onOpen} />
+      </div>
+    );
+  }
   return (
     <div data-testid={`web-runtime-${state}`} className="flex h-full items-center justify-center px-6 text-center text-sm text-muted">
-      {state === "disabled"
-        ? "Web preview automation is disabled. Set MCODE_WEB_AUTOMATION=1 and restart agent:up to enable it."
-        : "Web preview is unavailable until an HTTP(S) same-origin target is loaded."}
+      Web preview automation is disabled. Set MCODE_WEB_AUTOMATION=1 and restart agent:up to enable it.
     </div>
   );
 }
@@ -443,6 +458,9 @@ export function WebRuntimePreview({
             state={state}
             requestedAddress={requestedAddress}
             dockRef={dockRef}
+            threadId={threadId}
+            browserWorkspaceId={identity.workspaceId}
+            onOpen={navigate}
           />
         </BrowserViewportCanvas>
         <BrowserActingOverlay
