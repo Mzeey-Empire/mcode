@@ -67,8 +67,6 @@ vi.mock("@/transport", async (importOriginal) => {
         status: "absent",
       }),
       listWorkspaceActionRuns: vi.fn().mockResolvedValue([]),
-      getWorkspaceSetupAttempt: vi.fn().mockResolvedValue(null),
-      startWorkspaceSetup: vi.fn(),
     }),
   };
 });

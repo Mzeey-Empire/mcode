@@ -34,7 +34,6 @@ interface ProjectActionMenuProps {
   readonly onStart: (actionId: string) => Promise<void | WorkspaceEnvironmentActionRun>;
   readonly onFocus: (actionId: string) => void;
   readonly onEdit: () => void;
-  readonly setupMenuItem?: ReactNode;
   readonly loadError?: string | null;
 }
 
@@ -57,15 +56,8 @@ interface ProjectActionMenuRow {
 
 const EMPTY_ACTION_RUNS: Readonly<Record<string, WorkspaceEnvironmentActionRun>> = {};
 
-interface LoadedSetupAvailability {
-  readonly workspaceId: string;
-  readonly threadId: string;
-  readonly configurationEpoch: number;
-  readonly hasSetup: boolean;
-}
-
-/** Renders Project Actions and the eligible manual Setup command beside Project settings. */
-export function ProjectActionMenu({ actions, runsByActionId, onStart, onFocus, onEdit, setupMenuItem, loadError = null }: ProjectActionMenuProps) {
+/** Renders Project Actions beside Project settings. */
+export function ProjectActionMenu({ actions, runsByActionId, onStart, onFocus, onEdit, loadError = null }: ProjectActionMenuProps) {
   const [open, setOpen] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const pointerActivation = useRef<ProjectActionPointerActivation | null>(null);
@@ -82,7 +74,6 @@ export function ProjectActionMenu({ actions, runsByActionId, onStart, onFocus, o
     void onStart(actionId).catch(() => setStartError("Project Action could not start."));
   }, [onStart]);
   const hasActionGroup = rows.length > 0 || Boolean(loadError) || Boolean(startError);
-  const hasSetup = setupMenuItem !== null && setupMenuItem !== undefined;
   return (
     <>
       <ProjectActionMenuDropdown
@@ -96,10 +87,8 @@ export function ProjectActionMenu({ actions, runsByActionId, onStart, onFocus, o
         pointerActivation={pointerActivation}
         keyboardActivation={keyboardActivation}
         hasActionGroup={hasActionGroup}
-        hasSetup={hasSetup}
         loadError={loadError}
         startError={startError}
-        setupMenuItem={setupMenuItem}
       />
     </>
   );
@@ -116,10 +105,8 @@ function ProjectActionMenuDropdown({
   pointerActivation,
   keyboardActivation,
   hasActionGroup,
-  hasSetup,
   loadError,
   startError,
-  setupMenuItem,
 }: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
@@ -131,10 +118,8 @@ function ProjectActionMenuDropdown({
   readonly pointerActivation: MutableRefObject<ProjectActionPointerActivation | null>;
   readonly keyboardActivation: MutableRefObject<ProjectActionActivation | null>;
   readonly hasActionGroup: boolean;
-  readonly hasSetup: boolean;
   readonly loadError: string | null;
   readonly startError: string | null;
-  readonly setupMenuItem: ReactNode;
 }) {
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -153,7 +138,7 @@ function ProjectActionMenuDropdown({
       />
       <DropdownMenuContent align="end" sideOffset={4} className="min-w-52">
         <DropdownMenuItem label="Edit project actions" icon={<Pencil />} onClick={onEdit} />
-        {hasActionGroup || hasSetup ? <DropdownMenuSeparator /> : null}
+        {hasActionGroup ? <DropdownMenuSeparator /> : null}
         {loadError ? <p role="status" className="px-3 py-2 text-caption text-error">{loadError}</p> : null}
         {startError ? <p role="status" className="px-3 py-2 text-caption text-error">{startError}</p> : null}
         {rows.map((row) => (
@@ -167,8 +152,6 @@ function ProjectActionMenuDropdown({
             keyboardActivation={keyboardActivation}
           />
         ))}
-        {hasActionGroup && hasSetup ? <DropdownMenuSeparator /> : null}
-        {setupMenuItem}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -292,23 +275,16 @@ function isCurrentProjectActionPointer(
 /** Loads configured Actions and reads retained runs from renderer-owned action state. */
 export function useProjectActions(workspaceId: string, threadId: string): {
   readonly actions: readonly WorkspaceEnvironmentAction[];
-  readonly hasSetup: boolean;
   readonly runsByActionId: ReadonlyMap<string, WorkspaceEnvironmentActionRun>;
   readonly start: (actionId: string) => Promise<WorkspaceEnvironmentActionRun>;
   readonly loadError: string | null;
 } {
   const [actions, setActions] = useState<readonly WorkspaceEnvironmentAction[]>([]);
-  const [setupAvailability, setSetupAvailability] = useState<LoadedSetupAvailability | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const runsByAction = useProjectActionStore((state) => state.runsByThread[threadId] ?? EMPTY_ACTION_RUNS);
   const configurationEpoch = useProjectActionStore((state) =>
     state.configurationEpochByWorkspace[workspaceId] ?? 0,
   );
-  const hasSetup = setupAvailability !== null
-    && setupAvailability.workspaceId === workspaceId
-    && setupAvailability.threadId === threadId
-    && setupAvailability.configurationEpoch === configurationEpoch
-    && setupAvailability.hasSetup;
   const hydrateRuns = useProjectActionStore.getState().hydrateRuns;
   const beginHydration = useProjectActionStore.getState().beginHydration;
   const endHydration = useProjectActionStore.getState().endHydration;
@@ -327,7 +303,6 @@ export function useProjectActions(workspaceId: string, threadId: string): {
     let active = true;
     // oxlint-disable-next-line react/set-state-in-effect -- A new transport hydration must hide data from the previous Project Action context.
     setActions([]);
-    setSetupAvailability(null);
     setLoadError(null);
     void Promise.all([
       getTransport().readWorkspaceEnvironment(workspaceId, threadId),
@@ -336,12 +311,6 @@ export function useProjectActions(workspaceId: string, threadId: string): {
       ([environment, runs]) => {
         if (!active || generation.current !== current) return;
         setActions(environment.document.actions);
-        setSetupAvailability({
-          workspaceId,
-          threadId,
-          configurationEpoch,
-          hasSetup: environment.document.setup !== undefined,
-        });
         hydrateRuns(threadId, runs, requestEpoch, hydrationGeneration);
       },
       () => {
@@ -359,7 +328,7 @@ export function useProjectActions(workspaceId: string, threadId: string): {
     return run;
   }, [threadId]);
 
-  return { actions, hasSetup, runsByActionId, start, loadError };
+  return { actions, runsByActionId, start, loadError };
 }
 
 function ActionStatus({

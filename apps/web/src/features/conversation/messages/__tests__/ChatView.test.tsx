@@ -38,7 +38,6 @@ const {
       setThreadSubscriptions: vi.fn(),
       continueWithoutSaving: vi.fn(),
       stopAgent: vi.fn(),
-      getAutomaticSetup: vi.fn(),
       continueAutomaticSetup: vi.fn(),
       retryAutomaticSetup: vi.fn(),
       getThreadStartup: vi.fn(),
@@ -484,19 +483,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
         id: "attempt-1",
         state: "failed",
         reason: "setup_failed",
-        snapshot: {
-          platform: "windows",
-          script: "bun run setup",
-          checkoutPath: "C:\\repo",
-          terminal: { executable: "pwsh.exe", arguments: ["-Command", "bun run setup"] },
-        },
-        outcome: "command_failure",
+        failedActionId: "install",
         createdAt: "2026-09-02T12:00:00.000Z",
         startedAt: "2026-09-02T12:00:00.000Z",
         finishedAt: "2026-09-02T12:00:01.000Z",
-        exitCode: 1,
-        output: "command not found",
-        outputTruncated: false,
       },
       queuedTurns: [{
         id: "submission-1",
@@ -526,7 +516,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       createdAt: "2026-09-02T12:00:00.000Z",
       updatedAt: "2026-09-02T12:00:01.000Z",
     });
-    chatViewTransportMock.getAutomaticSetup.mockResolvedValue(automaticSetup);
     chatViewTransportMock.retryAutomaticSetup.mockResolvedValue(automaticSetup);
     chatViewTransportMock.continueAutomaticSetup.mockResolvedValue(automaticSetup);
     setupWorkspaceMock(defaultWorkspaceState({
@@ -752,7 +741,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
         selectedTextComments: null,
       },
     };
-    chatViewTransportMock.getAutomaticSetup.mockResolvedValue({ gate: "not-required", attempt: null, queuedTurns: [] });
     const showThread = (thread: typeof placeholder, pendingStartupByThreadId: Record<string, typeof pendingStartup>) => {
       setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread], pendingStartupByThreadId }));
       chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
@@ -805,7 +793,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       createdAt: "2026-09-02T12:00:00.000Z",
       updatedAt: "2026-09-02T12:00:01.000Z",
     }));
-    chatViewTransportMock.getAutomaticSetup.mockResolvedValue({ gate: "not-required", attempt: null, queuedTurns: [] });
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: thread.id,
       threads: [thread],

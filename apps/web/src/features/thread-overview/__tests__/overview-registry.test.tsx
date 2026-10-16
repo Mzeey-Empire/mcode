@@ -56,7 +56,6 @@ describe("overview registry", () => {
 
   it("orders thread entries globally, retaining section metadata for the later shell", () => {
     expect(getOverviewEntries(subject).map(({ id, section, order }) => [id, section, order])).toEqual([
-      ["setup", "lane", 0],
       ["save-recovery", "activity", 10],
       ["changes", "activity", 20],
       ["repository", "activity", 30],

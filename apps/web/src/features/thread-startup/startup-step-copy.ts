@@ -1,10 +1,12 @@
 import {
   getThreadStartupPhases,
   type ThreadStartup,
+  type ThreadStartupAction,
   type ThreadStartupKind,
   type ThreadStartupPhase,
   type ThreadStartupStep,
   type ThreadStartupStepState,
+  type WorkspaceEnvironmentActionRun,
 } from "@mcode/contracts";
 
 /** Startup phases the trail draws. The "thread" phase is bookkeeping and never renders. */
@@ -90,6 +92,40 @@ export function formatStartupDuration(ms: number): string {
 /** The first command line of a setup script, which stands in for the whole script in one row. */
 export function setupCommandLine(script: string | null | undefined): string | undefined {
   return script?.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0);
+}
+
+/** What the setup step shows of its startup actions, read from the retained action runs. */
+export interface StartupSetupView {
+  /** First script line of each action that has launched, in sequence order. */
+  readonly commands: readonly string[];
+  /** The action run waiting for the user's approval, if any. */
+  readonly pending: WorkspaceEnvironmentActionRun | undefined;
+  /** Terminal of the running action, else of the failed one, for the card's Open terminal. */
+  readonly terminalSessionId: string | null;
+}
+
+function isLaunchedBySequence(entry: ThreadStartupAction, run: WorkspaceEnvironmentActionRun): boolean {
+  return entry.runId !== null && run.runId === entry.runId;
+}
+
+/** Joins the frozen startup actions with the runs the Project Action store retains. */
+export function startupSetupView(
+  actions: readonly ThreadStartupAction[],
+  runs: Readonly<Record<string, WorkspaceEnvironmentActionRun>>,
+): StartupSetupView {
+  const launched = actions.flatMap((entry) => {
+    const run = runs[entry.actionId];
+    return run && isLaunchedBySequence(entry, run) ? [{ entry, run }] : [];
+  });
+  const terminalOf = (outcome: ThreadStartupAction["outcome"]) =>
+    launched.find(({ entry }) => entry.outcome === outcome)?.run.terminalSessionId ?? null;
+  return {
+    commands: launched
+      .filter(({ entry }) => entry.outcome !== "pending")
+      .map(({ run }) => setupCommandLine(run.snapshot.script) ?? run.actionName),
+    pending: launched.find(({ run }) => run.status === "awaiting-approval")?.run,
+    terminalSessionId: terminalOf("running") ?? terminalOf("failed"),
+  };
 }
 
 function opensWorktree(kind: ThreadStartupKind, step: ThreadStartupStep): boolean {

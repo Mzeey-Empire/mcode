@@ -1,5 +1,4 @@
 import { CreatePrDialog } from "@/components/chat/CreatePrDialog";
-import { useProjectSetupAttempt } from "@/features/projects/environment";
 import { usePullRequestReviewLink } from "@/features/pull-requests";
 import { useThreadGitActions } from "@/hooks/useThreadGitActions";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
@@ -44,13 +43,12 @@ export function getThreadOverviewCiDot(
   return null;
 }
 
-/** Keeps shared Git, setup and dialog state alive while the card is hidden. */
+/** Keeps shared Git and dialog state alive while the card is hidden. */
 export function useOverviewState(
   thread: Thread,
   open: boolean,
   closeOverlay: () => void,
 ) {
-  const projectSetup = useProjectSetupAttempt(thread.id);
   const branchCreation = useThreadOverviewBranchCreation(thread.id);
   const {
     prable,
@@ -83,7 +81,7 @@ export function useOverviewState(
     [checks, effectivePr],
   );
   return {
-    open, projectSetup, branchCreation, prable, effectivePr, hasCommitsAhead,
+    open, branchCreation, prable, effectivePr, hasCommitsAhead,
     checks, openPrDetail, dirPath, createPrOpen, setCreatePrOpen,
     handleCommit, handleOpenPr, branchlessCreatePr, createPrBranch,
     createBranchBaseBranch, openProjectSettings, ciDot,

@@ -1,9 +1,16 @@
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { applyActionRun } from "@/features/terminal/state/applyActionRun";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
-import { isProjectCommandApprovalInvalid } from "@/features/projects/environment/ProjectCommandApprovalDialog";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { getTransport } from "@/transport";
+
+function isApprovalInvalid(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? (error as { readonly code?: unknown }).code
+    : null;
+  return code === "WORKSPACE_ENVIRONMENT_APPROVAL_STALE"
+    || code === "WORKSPACE_ENVIRONMENT_APPROVAL_NOT_REQUIRED";
+}
 
 /** True while the run still waits in its own terminal, so approving it is still what the user wants. */
 function isStillAwaiting(run: WorkspaceEnvironmentActionRun): boolean {
@@ -29,7 +36,7 @@ export async function approveAndStartAction(run: WorkspaceEnvironmentActionRun):
     try {
       await transport.approveWorkspaceEnvironmentCommand(run.threadId, approval.target, approval.fingerprint);
     } catch (error) {
-      if (!isProjectCommandApprovalInvalid(error)) throw error;
+      if (!isApprovalInvalid(error)) throw error;
     }
   }
   if (!isStillAwaiting(run)) return null;

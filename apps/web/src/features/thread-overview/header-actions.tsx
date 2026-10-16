@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ProjectActionMenu, ProjectSetupMenuItem, useProjectActions } from "@/features/projects/environment";
+import { ProjectActionMenu, useProjectActions } from "@/features/projects/environment";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
@@ -12,22 +12,6 @@ import { newThreadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import { type Thread } from "@/transport";
 import { Settings } from "lucide-react";
 import { useCallback } from "react";
-
-/** Returns the setup action only when this checkout supports manual setup. */
-function getThreadOverviewSetupMenuItem(
-  canRunManualSetup: boolean,
-  hasSetup: boolean,
-  props: React.ComponentProps<typeof ProjectSetupMenuItem>,
-): React.ReactNode {
-  if (!canRunManualSetup || !hasSetup) return null;
-  return <ProjectSetupMenuItem {...props} />;
-}
-
-function canRunManualProjectSetup(thread: Thread): boolean {
-  return thread.mode === "direct" || (
-    thread.mode === "worktree" && thread.worktree_managed === false
-  );
-}
 
 /** The record a Project Action runs in, matched by owner first and by the run's session as a fallback. */
 function findActionTerminalId(threadId: string, actionId: string): string | null {
@@ -41,12 +25,12 @@ function useThreadProjectActions(thread: Thread) {
   return useProjectActions(thread.workspace_id, thread.id);
 }
 
-/** Keeps loaded project actions and Setup across popover close, as the parent-owned hook did. */
+/** Keeps loaded project actions across popover close. */
 export const { Provider: OverviewProjectActionsState, useEntryState: useProjectActionsState } =
   createOverviewEntryState(useThreadProjectActions);
 
 function ProjectActions({ thread }: { thread: Thread }) {
-  const { projectSetup, openProjectSettings } = useOverviewContext();
+  const { openProjectSettings } = useOverviewContext();
   const projectActions = useProjectActionsState();
   const revealTerminal = useCallback(() => {
     showRightPanelAdaptive(thread.workspace_id, thread.id);
@@ -62,7 +46,6 @@ function ProjectActions({ thread }: { thread: Thread }) {
     const ptyId = findActionTerminalId(thread.id, actionId);
     if (ptyId) useTerminalStore.getState().setActiveTerminal(thread.id, ptyId);
   }, [revealTerminal, thread.id]);
-  const canRunManualSetup = canRunManualProjectSetup(thread);
   return (<ProjectActionMenu
     actions={projectActions.actions}
     runsByActionId={projectActions.runsByActionId}
@@ -70,15 +53,6 @@ function ProjectActions({ thread }: { thread: Thread }) {
     onStart={startProjectAction}
     onFocus={focusProjectAction}
     onEdit={openProjectSettings}
-    setupMenuItem={getThreadOverviewSetupMenuItem(
-      canRunManualSetup,
-      projectActions.hasSetup,
-      {
-        attempt: projectSetup.attempt,
-        starting: projectSetup.starting,
-        onStart: projectSetup.start,
-      },
-    )}
   />);
 }
 function ProjectSettingsButton({ onOpen }: { onOpen: () => void }) {

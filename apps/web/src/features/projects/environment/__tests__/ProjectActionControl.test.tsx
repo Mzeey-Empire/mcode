@@ -1,8 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkspaceEnvironmentActionRun, WorkspaceEnvironmentReadResult } from "@mcode/contracts";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { ProjectActionMenu, useProjectActions } from "../ProjectActionControl";
 import { useProjectActionStore } from "../state/project-action-store";
 
@@ -50,11 +49,6 @@ function ActionHydrationHarness() {
   return <output data-testid="action-hydration-state">{`${build}:${phantom}`}</output>;
 }
 
-function SetupAvailabilityHarness({ workspaceId, threadId }: { readonly workspaceId: string; readonly threadId: string }) {
-  const { hasSetup } = useProjectActions(workspaceId, threadId);
-  return <output data-testid="setup-availability">{hasSetup ? "configured" : "absent"}</output>;
-}
-
 describe("ProjectAction controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -93,7 +87,7 @@ describe("ProjectAction controls", () => {
     expect(focus).toHaveBeenCalledWith("build");
   });
 
-  it("groups Edit, configured Actions, and Run Setup in visible menu order", async () => {
+  it("groups Edit and configured Actions in visible menu order", async () => {
     const user = userEvent.setup();
     render(
       <ProjectActionMenu
@@ -102,7 +96,6 @@ describe("ProjectAction controls", () => {
         onStart={vi.fn().mockResolvedValue(undefined)}
         onFocus={vi.fn()}
         onEdit={vi.fn()}
-        setupMenuItem={<DropdownMenuItem label="Run Setup" />}
       />,
     );
 
@@ -112,11 +105,10 @@ describe("ProjectAction controls", () => {
     expect(menuItems.map((item) => item.textContent)).toEqual([
       "Edit project actions",
       "Build",
-      "Run Setup",
     ]);
     expect(menuItems[1].lastElementChild?.querySelector('[aria-label="Play"]')).not.toBeNull();
     const content = menuItems[0].closest('[data-slot="dropdown-menu-content"]');
-    expect(content?.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
+    expect(content?.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(1);
   });
 
   it("does not create a blank Action group for an empty load error", async () => {
@@ -129,7 +121,6 @@ describe("ProjectAction controls", () => {
         onStart={vi.fn().mockResolvedValue(undefined)}
         onFocus={vi.fn()}
         onEdit={vi.fn()}
-        setupMenuItem={<DropdownMenuItem label="Run Setup" />}
       />,
     );
 
@@ -138,10 +129,9 @@ describe("ProjectAction controls", () => {
     const menuItems = await screen.findAllByRole("menuitem");
     expect(menuItems.map((item) => item.textContent)).toEqual([
       "Edit project actions",
-      "Run Setup",
     ]);
     const content = menuItems[0].closest('[data-slot="dropdown-menu-content"]');
-    expect(content?.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(1);
+    expect(content?.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(0);
   });
 
   it("reports a rejected launch instead of silently discarding it", async () => {
@@ -229,31 +219,6 @@ describe("ProjectAction controls", () => {
 
     const running = await screen.findByRole("status", { name: "Running" });
     expect(running).not.toHaveTextContent("Running");
-  });
-
-  it("does not expose stale Setup availability after its scope changes", async () => {
-    const configuredEnvironment = {
-      document: { version: "0.0.1" as const, setup: { default: "bun run setup" }, actions: [] },
-      revision: "revision-1",
-      status: "present" as const,
-    } satisfies WorkspaceEnvironmentReadResult;
-    let resolveCurrentB!: (result: WorkspaceEnvironmentReadResult) => void;
-    const currentB = new Promise<WorkspaceEnvironmentReadResult>((resolve) => {
-      resolveCurrentB = resolve;
-    });
-    transport.readWorkspaceEnvironment
-      .mockResolvedValueOnce(configuredEnvironment)
-      .mockReturnValueOnce(currentB);
-    transport.listWorkspaceActionRuns.mockResolvedValue([]);
-
-    const view = render(<SetupAvailabilityHarness workspaceId="workspace-a" threadId="thread-a" />);
-    await screen.findByText("configured");
-
-    view.rerender(<SetupAvailabilityHarness workspaceId="workspace-b" threadId="thread-b" />);
-    expect(screen.getByTestId("setup-availability")).toHaveTextContent("absent");
-
-    await act(async () => { resolveCurrentB(configuredEnvironment); });
-    await screen.findByText("configured");
   });
 
   it("retains a post-request push while pruning a pre-request omitted phantom", async () => {

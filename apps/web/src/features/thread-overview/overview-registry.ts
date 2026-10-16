@@ -12,7 +12,6 @@ import { PullRequestEntryBlock } from "./entries/pull-request";
 import { RecapEntryBlock, RecapEntryState } from "./entries/recap";
 import { RepositoryEntryBlock, RepositoryEntryState } from "./entries/repository";
 import { SaveRecoveryEntryBlock } from "./entries/save-recovery";
-import { SetupEntryBlock } from "./entries/setup";
 import { SourcesEntryBlock } from "./entries/sources";
 import { SubagentsEntryBlock } from "./entries/subagents";
 import { UsageEntryBlock } from "./entries/usage";
@@ -49,7 +48,6 @@ export interface OverviewHeaderAction {
 
 /** Body entries. The card groups them by section, then orders each section by `order`. */
 export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
-  { id: "setup", section: "lane", order: 0, subjects: ["thread"], Entry: SetupEntryBlock },
   { id: "save-recovery", section: "activity", order: 10, subjects: ["thread"], Entry: SaveRecoveryEntryBlock },
   { id: "changes", section: "activity", order: 20, subjects: ["thread"], Entry: ChangesEntryBlock, State: ChangesEntryState },
   { id: "repository", section: "activity", order: 30, subjects: ["thread"], Entry: RepositoryEntryBlock, State: RepositoryEntryState },

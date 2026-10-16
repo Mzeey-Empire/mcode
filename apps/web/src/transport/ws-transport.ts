@@ -23,7 +23,6 @@ import type {
   TerminalProfileList,
   TerminalWorkspacePreference,
   WorkspaceEnvironmentReadResult,
-  WorkspaceEnvironmentSetupAttempt,
   WorkspaceEnvironmentActionRun,
 } from "./types";
 import { TurnRuntimeSnapshotSchema, WS_CHANNELS, WS_METHODS } from "@mcode/contracts";
@@ -1052,18 +1051,6 @@ export function createWsTransport(
       rpc<void>("workspace.environment.command.approve", { threadId, target, fingerprint }),
     clearWorkspaceEnvironmentApprovals: (workspaceId) =>
       rpc<void>("workspace.environment.command.clearApprovals", { workspaceId }),
-    startWorkspaceSetup: (threadId) =>
-      rpc<WorkspaceEnvironmentSetupAttempt>("workspace.environment.setup.start", { threadId }),
-    getWorkspaceSetupAttempt: async (threadId) =>
-      (await rpc<{ attempt: WorkspaceEnvironmentSetupAttempt | null }>(
-        "workspace.environment.setup.get",
-        { threadId },
-      )).attempt,
-    getAutomaticSetup: (threadId) =>
-      rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
-        "workspace.environment.automaticSetup.get",
-        { threadId },
-      ),
     continueAutomaticSetup: (threadId) =>
       rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
         "workspace.environment.automaticSetup.continue",
@@ -1072,11 +1059,6 @@ export function createWsTransport(
     retryAutomaticSetup: (threadId) =>
       rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
         "workspace.environment.automaticSetup.retry",
-        { threadId },
-      ),
-    openAutomaticSetupTerminal: (threadId) =>
-      rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupTerminal>(
-        "workspace.environment.automaticSetup.openTerminal",
         { threadId },
       ),
     listWorkspaceActionRuns: async (threadId) =>
