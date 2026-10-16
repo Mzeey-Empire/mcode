@@ -1,5 +1,5 @@
-import { Play } from "lucide-react";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import { ActionIcon } from "@/features/projects/actions/ActionIcon";
 
 type RunBadge = "running" | "failed" | "pending";
 
@@ -20,8 +20,8 @@ export function actionBadgeLabel(run: WorkspaceEnvironmentActionRun | undefined)
 
 /**
  * Project Action tab icon with badges for running and failed runs.
- * The play mark is a placeholder until the action icon set lands. A run waiting for approval
- * has nothing to play yet, so its tab shows the hollow needs-you ring instead.
+ * A run waiting for approval has nothing to run yet, so its tab shows the hollow needs-you ring
+ * instead of the Action's icon.
  */
 export function ActionTabGlyph({ run }: { readonly run: WorkspaceEnvironmentActionRun | undefined }) {
   const badge = badgeFor(run);
@@ -34,7 +34,7 @@ export function ActionTabGlyph({ run }: { readonly run: WorkspaceEnvironmentActi
   }
   return (
     <span className="relative inline-flex">
-      <Play aria-hidden />
+      <ActionIcon command={run?.snapshot.script ?? ""} size={14} />
       {badge ? (
         <span
           data-testid="action-tab-badge"

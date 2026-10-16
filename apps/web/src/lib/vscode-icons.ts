@@ -49,21 +49,27 @@ export function clearIconCache(): void {
  * Tries VSCode icon from CDN first, falls back to Lucide.
  */
 export async function resolveIcon(fileName: string): Promise<ResolvedIcon> {
-  const cached = blobCache.get(fileName);
+  return resolveFromCdn(`file:${fileName}`, getIconUrl(fileName), getFileIcon(fileName));
+}
+
+/**
+ * Resolve a vscode-icons file by its exact name, such as `file_type_bun.svg`.
+ * Shares the blob cache with {@link resolveIcon}; `fallback` renders when the CDN is unreachable.
+ */
+export async function resolveIconByName(iconName: string, fallback: LucideIcon): Promise<ResolvedIcon> {
+  return resolveFromCdn(`icon:${iconName}`, `${CDN_BASE}/${iconName}`, fallback);
+}
+
+async function resolveFromCdn(cacheKey: string, cdnUrl: string | null, fallback: LucideIcon): Promise<ResolvedIcon> {
+  const cached = blobCache.get(cacheKey);
   if (cached) return { type: "vscode", url: cached };
 
-  if (failedCache.has(fileName)) {
-    return { type: "lucide", icon: getFileIcon(fileName) };
+  if (failedCache.has(cacheKey) || !cdnUrl) {
+    failedCache.add(cacheKey);
+    return { type: "lucide", icon: fallback };
   }
 
-  const cdnUrl = getIconUrl(fileName);
-  if (!cdnUrl) {
-    failedCache.add(fileName);
-    return { type: "lucide", icon: getFileIcon(fileName) };
-  }
-
-  // Deduplicate in-flight fetches for the same file
-  const inflight = inflightFetches.get(fileName);
+  const inflight = inflightFetches.get(cacheKey);
   if (inflight) return inflight;
 
   const fetchPromise = (async (): Promise<ResolvedIcon> => {
@@ -75,17 +81,17 @@ export async function resolveIcon(fileName: string): Promise<ResolvedIcon> {
       const blob = await response.blob();
       if (!blob.type.startsWith("image/")) throw new Error(`Unexpected MIME type: ${blob.type}`);
       const blobUrl = URL.createObjectURL(blob);
-      blobCache.set(fileName, blobUrl);
+      blobCache.set(cacheKey, blobUrl);
       return { type: "vscode", url: blobUrl };
     } catch {
-      failedCache.add(fileName);
-      return { type: "lucide", icon: getFileIcon(fileName) };
+      failedCache.add(cacheKey);
+      return { type: "lucide", icon: fallback };
     } finally {
       clearTimeout(timeout);
-      inflightFetches.delete(fileName);
+      inflightFetches.delete(cacheKey);
     }
   })();
 
-  inflightFetches.set(fileName, fetchPromise);
+  inflightFetches.set(cacheKey, fetchPromise);
   return fetchPromise;
 }
