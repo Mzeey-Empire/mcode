@@ -12,6 +12,11 @@ export type ConfirmOnKill = "never" | "withChildProcesses" | "always";
 /** Tooltip on the Terminal tool's disabled + once the scope holds the server's record cap. */
 export const TERMINAL_CAP_REASON = `${TERMINAL_MAX_PER_SCOPE} terminals are open. Close one to open another.`;
 
+/** {@link TERMINAL_CAP_REASON} once a scope holds `count` terminals, else null. */
+export function terminalCapReason(count: number): string | null {
+  return count >= TERMINAL_MAX_PER_SCOPE ? TERMINAL_CAP_REASON : null;
+}
+
 /**
  * Row-1 tab labels for a scope's terminal records. Shells that share a label get
  * " (n)" ordinals so each tab stays distinguishable; action records take their

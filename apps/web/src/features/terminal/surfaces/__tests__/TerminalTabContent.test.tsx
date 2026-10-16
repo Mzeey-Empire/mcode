@@ -16,6 +16,8 @@ vi.mock("@/transport", () => ({
     openIn: vi.fn(),
     listOpenInApps: vi.fn().mockResolvedValue([]),
     getWorkspaceActionRun,
+    readWorkspaceEnvironment: vi.fn().mockResolvedValue({ document: { version: "0.0.1", actions: [] }, revision: null, status: "absent" }),
+    listWorkspaceActionRuns: vi.fn().mockResolvedValue([]),
     restartWorkspaceAction: vi.fn(),
     stopWorkspaceAction: vi.fn(),
   }),
@@ -287,10 +289,11 @@ describe("Terminal tool header", () => {
       expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("pty-2");
     });
 
-    it("disables + at the server's record cap and explains why", () => {
+    it("disables + at the server's record cap and explains why", async () => {
       seed(Array.from({ length: TERMINAL_MAX_PER_SCOPE }, (_, index) => shell(`pty-${index}`, { label: `sh${index}` })));
       renderTool();
 
+      await waitFor(() => expect(screen.getByTestId("panel-tab-add")).not.toHaveAttribute("aria-haspopup"));
       const add = screen.getByTestId("panel-tab-add");
       expect(add).toHaveAttribute("aria-disabled", "true");
       expect(add).toHaveAccessibleDescription(`${TERMINAL_MAX_PER_SCOPE} terminals are open. Close one to open another.`);

@@ -1,4 +1,4 @@
-import { useDiffStore } from "@/stores/diffStore";
+import { useDiffStore, type RightPanelTool } from "@/stores/diffStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
@@ -47,6 +47,16 @@ export function showRightPanelAdaptive(
   useDiffStore.getState().showRightPanel(workspaceId, threadId);
   applyHalfWidthIfUntouched(workspaceId, threadId);
   applyMaximizeIfCramped(workspaceId, threadId);
+}
+
+/** Opens the right panel for a workspace/thread and selects `tab`. */
+export function openRightPanelTab(
+  workspaceId: string,
+  threadId: string | null | undefined,
+  tab: RightPanelTool,
+): void {
+  showRightPanelAdaptive(workspaceId, threadId);
+  useDiffStore.getState().setRightPanelTab(workspaceId, threadId, tab);
 }
 
 /**

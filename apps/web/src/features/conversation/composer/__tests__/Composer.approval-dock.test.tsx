@@ -83,7 +83,6 @@ vi.mock("@/components/chat/FileTagPopup", () => ({
 }));
 
 vi.mock("@/components/chat/SpellcheckContextMenu", () => ({ SpellcheckContextMenu: () => <div /> }));
-vi.mock("@/components/chat/TerminalStatusIndicator", () => ({ TerminalStatusIndicator: () => <div /> }));
 vi.mock("@/components/chat/ComposerQueueList", () => ({ ComposerQueueList: () => <div /> }));
 vi.mock("@/components/chat/ContextTracker", () => ({ ContextTracker: () => <div /> }));
 vi.mock("@/components/chat/SlashCommandTray", () => ({ SlashCommandTray: () => <div /> }));
