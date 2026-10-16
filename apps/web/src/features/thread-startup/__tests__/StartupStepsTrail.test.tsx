@@ -307,7 +307,7 @@ describe("StartupStepsTrail", () => {
     expect(screen.getByTestId("startup-detail").textContent).toBe("$ bun install\nbun run build");
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Run setup" }));
-    await waitFor(() => expect(startupTransport.startWorkspaceAction).toHaveBeenCalledWith("thread-1", "install"));
+    await waitFor(() => expect(startupTransport.startWorkspaceAction).toHaveBeenCalledWith("thread-1", "install", pending.runId));
     expect(startupTransport.approveWorkspaceEnvironmentCommand).toHaveBeenCalledWith("thread-1", approval.target, "fp-1");
     await userEvent.click(screen.getByRole("button", { name: "Skip setup" }));
     expect(startupTransport.continueAutomaticSetup).toHaveBeenCalledWith("thread-1");

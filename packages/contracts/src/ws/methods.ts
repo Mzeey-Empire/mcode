@@ -26,6 +26,7 @@ import {
   WorkspaceEnvironmentActionListResultSchema,
   WorkspaceEnvironmentActionRunSchema,
   WorkspaceEnvironmentActionSlotInputSchema,
+  WorkspaceEnvironmentActionStartInputSchema,
 } from "../models/workspace-environment.js";
 import type {
   WorkspaceEnvironmentReadResult,
@@ -42,6 +43,7 @@ import type {
   WorkspaceEnvironmentActionListResult,
   WorkspaceEnvironmentActionRun,
   WorkspaceEnvironmentActionSlotInput,
+  WorkspaceEnvironmentActionStartInput,
 } from "../models/workspace-environment.js";
 import { ThreadSchema, RecentThreadSchema } from "../models/thread.js";
 import { ApprovalReviewModeSchema, DevinModeSchema, ThreadModeSchema, PermissionModeSchema, InteractionModeSchema, OrchestrationModeSchema } from "../models/enums.js";
@@ -570,7 +572,7 @@ const workspaceEnvironmentActionMethods = (): Record<
     result: WorkspaceEnvironmentActionGetResultSchema() as z.ZodType<WorkspaceEnvironmentActionGetResult>,
   },
   "workspace.environment.action.start": {
-    params: WorkspaceEnvironmentActionSlotInputSchema() as z.ZodType<WorkspaceEnvironmentActionSlotInput>,
+    params: WorkspaceEnvironmentActionStartInputSchema() as z.ZodType<WorkspaceEnvironmentActionStartInput>,
     result: WorkspaceEnvironmentActionRunSchema() as z.ZodType<WorkspaceEnvironmentActionRun>,
   },
   "workspace.environment.action.stop": {

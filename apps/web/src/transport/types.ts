@@ -374,8 +374,12 @@ export interface McodeTransport {
   retryAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
   /** Lists retained Project Action results for the current Thread. */
   listWorkspaceActionRuns(threadId: string): Promise<WorkspaceEnvironmentActionRun[]>;
-  /** Starts one configured Project Action in its private terminal session. */
-  startWorkspaceAction(threadId: string, actionId: string): Promise<WorkspaceEnvironmentActionRun>;
+  /**
+   * Starts one configured Project Action in its private terminal session.
+   * With `expectedRunId`, the server refuses with `WORKSPACE_ENVIRONMENT_RUN_CLOSED` rather than
+   * open a new terminal once the run's pending terminal is gone.
+   */
+  startWorkspaceAction(threadId: string, actionId: string, expectedRunId?: string): Promise<WorkspaceEnvironmentActionRun>;
   /** Stops one running Project Action after its terminal close barrier completes. */
   stopWorkspaceAction(threadId: string, actionId: string): Promise<WorkspaceEnvironmentActionRun | null>;
   /** Restarts one Project Action only after its prior terminal fully closes. */

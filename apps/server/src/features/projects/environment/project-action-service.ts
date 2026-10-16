@@ -6,6 +6,7 @@ import type {
   WorkspaceEnvironmentActionPort,
   WorkspaceEnvironmentActionLaunchSnapshot,
   WorkspaceEnvironmentActionSlotInput,
+  WorkspaceEnvironmentActionStartInput,
 } from "@mcode/contracts";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import {
@@ -55,6 +56,7 @@ export type { ProjectActionRunUpdate };
 type ProjectActionStartOptions = { trigger: WorkspaceEnvironmentActionRun["trigger"]; expectedScriptHash?: string };
 
 interface ProjectActionStartContext {
+  readonly expectedRunId?: string;
   readonly slot: string;
   readonly thread: ProjectActionStartThread;
   readonly actionId: string;
@@ -118,13 +120,19 @@ export class ProjectActionService {
     return this.runs.get(input.threadId, input.actionId);
   }
 
-  /** Starts an Action or returns the run already owned by its open terminal. */
-  async start(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionStartOptions = { trigger: "manual" }): Promise<WorkspaceEnvironmentActionRun> {
+  /**
+   * Starts an Action or returns the run already owned by its open terminal.
+   *
+   * With `expectedRunId`, the start only continues the approval that run is waiting on. A closed
+   * terminal fails with `WORKSPACE_ENVIRONMENT_RUN_CLOSED` instead of opening a new one.
+   */
+  async start(input: WorkspaceEnvironmentActionStartInput, options: ProjectActionStartOptions = { trigger: "manual" }): Promise<WorkspaceEnvironmentActionRun> {
     const thread = this.threads.findById(input.threadId);
     if (!thread) throw threadNotFoundError();
     this.admission.assertThreadCanStart(thread, thread);
     const slot = slotKey(input.threadId, input.actionId);
     const retained = this.runs.get(input.threadId, input.actionId);
+    this.assertApprovalStillOpen(slot, retained, input.expectedRunId);
     if (this.terminals.has(slot) && retained?.status !== "awaiting-approval") {
       if (this.active.get(slot)?.state === "pending-finalization") throw actionAlreadyRunningError();
       if (retained) return retained;
@@ -132,7 +140,19 @@ export class ProjectActionService {
     return this.startNewRun(input, approvalStartOptions(retained, options));
   }
 
-  private async startNewRun(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionStartOptions): Promise<WorkspaceEnvironmentActionRun> {
+  private assertApprovalStillOpen(
+    slot: string,
+    retained: WorkspaceEnvironmentActionRun | null,
+    expectedRunId: string | undefined,
+  ): void {
+    if (expectedRunId === undefined) return;
+    const open = retained?.runId === expectedRunId
+      && retained.status === "awaiting-approval"
+      && this.terminals.has(slot);
+    if (!open) throw runClosedError();
+  }
+
+  private async startNewRun(input: WorkspaceEnvironmentActionStartInput, options: ProjectActionStartOptions): Promise<WorkspaceEnvironmentActionRun> {
     const context = { ...this.createStartContext(input), ...options };
     let releaseAdmission: (() => void) | null = null;
     try {
@@ -210,7 +230,7 @@ export class ProjectActionService {
     }
   }
 
-  private createStartContext(input: WorkspaceEnvironmentActionSlotInput): Omit<ProjectActionStartContext, "trigger" | "expectedScriptHash"> {
+  private createStartContext(input: WorkspaceEnvironmentActionStartInput): Omit<ProjectActionStartContext, "trigger" | "expectedScriptHash"> {
     const slot = slotKey(input.threadId, input.actionId);
     if (this.active.has(slot)) throw actionAlreadyRunningError();
     const thread = this.threads.findById(input.threadId);
@@ -218,7 +238,7 @@ export class ProjectActionService {
     this.admission.assertThreadCanStart(thread, this.threads.findById(thread.id));
     const reservation = createStartingProjectAction(thread.id, input.actionId);
     this.active.set(slot, reservation);
-    return { slot, thread, actionId: input.actionId, reservation };
+    return { slot, thread, actionId: input.actionId, reservation, expectedRunId: input.expectedRunId };
   }
 
   private async startAdmittedAction(context: ProjectActionStartContext): Promise<WorkspaceEnvironmentActionRun> {
@@ -251,6 +271,7 @@ export class ProjectActionService {
     resolved: Extract<ProjectActionResolution, { readonly kind: "launch" }>,
   ): Promise<WorkspaceEnvironmentActionRun> {
     let session: ActionTerminal | null = this.terminals.get(context.slot)?.terminal ?? null;
+    this.assertTerminalStillOpen(context, session);
     let launched = false;
     try {
       const launch = { script: resolved.script, expectedLaunch: { terminal: resolved.snapshot.terminal } };
@@ -278,6 +299,7 @@ export class ProjectActionService {
     resolved: Extract<ProjectActionResolution, { kind: "awaiting-approval" }>,
   ): Promise<WorkspaceEnvironmentActionRun> {
     let terminal = this.terminals.get(context.slot)?.terminal;
+    this.assertTerminalStillOpen(context, terminal ?? null);
     if (!terminal) {
       try {
         terminal = await this.terminal.openActionTerminal({
@@ -292,6 +314,11 @@ export class ProjectActionService {
     }
     const run = this.runFactory.createAwaitingApproval(this.runInput(context, resolved));
     return this.publisher.persistAndPublish({ ...run, terminalSessionId: terminal.terminalSessionId });
+  }
+
+  /** Environment resolution awaits, so the terminal an approval was bound to can close before the launch. */
+  private assertTerminalStillOpen(context: ProjectActionStartContext, terminal: ActionTerminal | null): void {
+    if (context.expectedRunId !== undefined && !terminal) throw runClosedError();
   }
 
   private trackTerminal(context: ProjectActionStartContext, terminal: ActionTerminal): void {
@@ -521,6 +548,13 @@ function actionAlreadyRunningError(): WorkspaceEnvironmentServiceError {
   return new WorkspaceEnvironmentServiceError(
     "WORKSPACE_ENVIRONMENT_ACTION_RUNNING",
     "This Project Action is already running for this Thread",
+  );
+}
+
+function runClosedError(): WorkspaceEnvironmentServiceError {
+  return new WorkspaceEnvironmentServiceError(
+    "WORKSPACE_ENVIRONMENT_RUN_CLOSED",
+    "The terminal waiting for approval was closed",
   );
 }
 

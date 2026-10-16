@@ -14,7 +14,8 @@ export class WorkspaceEnvironmentServiceError extends Error {
       | "WORKSPACE_ENVIRONMENT_TERMINAL_CAP"
       | "WORKSPACE_ENVIRONMENT_ACTION_NOT_FOUND"
       | "WORKSPACE_ENVIRONMENT_APPROVAL_STALE"
-      | "WORKSPACE_ENVIRONMENT_APPROVAL_NOT_REQUIRED",
+      | "WORKSPACE_ENVIRONMENT_APPROVAL_NOT_REQUIRED"
+      | "WORKSPACE_ENVIRONMENT_RUN_CLOSED",
     message: string,
     readonly issues?: readonly WorkspaceEnvironmentValidationIssue[],
   ) {
