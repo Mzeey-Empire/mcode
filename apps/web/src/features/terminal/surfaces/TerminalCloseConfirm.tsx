@@ -2,6 +2,9 @@ import { useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 
+/** The Paper confirm buttons are 14px padded with 13/18 type, between the shared compact and default sizes. */
+const CONFIRM_BUTTON = "px-3.5 text-[13px]/[18px]";
+
 interface TerminalCloseConfirmProps {
   readonly name: string;
   readonly anchor: HTMLElement | null;
@@ -37,10 +40,10 @@ export function TerminalCloseConfirm({ name, anchor, command, onConfirm, onCance
           </p>
         </div>
         <div className="flex justify-end gap-2">
-          <Button variant="subtle" shape="round" onClick={onCancel}>
+          <Button variant="subtle" shape="round" className={CONFIRM_BUTTON} onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="ink" shape="round" autoFocus onClick={onConfirm}>
+          <Button variant="ink" shape="round" autoFocus className={`${CONFIRM_BUTTON} font-semibold`} onClick={onConfirm}>
             Stop and close
           </Button>
         </div>
