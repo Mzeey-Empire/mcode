@@ -20,6 +20,7 @@ function run(overrides: Partial<WorkspaceEnvironmentActionRun> = {}): WorkspaceE
     startedAt: null,
     finishedAt: null,
     exitCode: null,
+    port: null,
     ...overrides,
   };
 }
