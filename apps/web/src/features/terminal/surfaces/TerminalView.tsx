@@ -122,6 +122,16 @@ function getTerminalOptions(settings: TerminalSettings): {
   };
 }
 
+/**
+ * A pending Action terminal has no process, and its approval card owns focus so Enter reaches Run.
+ * Pulling focus into xterm after the card mounted would leave nothing to type into.
+ */
+function focusUnlessAwaitingApproval(term: Terminal, ptyId: string): void {
+  const { terminals } = useTerminalStore.getState();
+  const record = Object.values(terminals).flat().find((candidate) => candidate.id === ptyId);
+  if (record?.state !== "pending") term.focus();
+}
+
 function applyTerminalSettings(term: Terminal, settings: TerminalSettings): void {
   const options = getTerminalOptions(settings);
   term.options.scrollback = options.scrollback;
@@ -1198,7 +1208,7 @@ export const TerminalView = memo(function TerminalView({
           if (disposed) return;
           setRecoveryAction(null);
           setRecoveryNotice(null);
-          if (shownRef.current) term.focus();
+          if (shownRef.current) focusUnlessAwaitingApproval(term, ptyId);
           if (result.mode === "checkpoint") {
             lastWrittenSeq = result.checkpointThrough;
             transport.ptySetLastSeq(ptyId, result.checkpointThrough);
@@ -1260,7 +1270,7 @@ export const TerminalView = memo(function TerminalView({
       // created terminals wouldn't receive focus. Pull focus here after
       // init when the terminal is visible.
       if (shownRef.current) {
-        term.focus();
+        focusUnlessAwaitingApproval(term, ptyId);
       }
     }
 
@@ -1377,7 +1387,7 @@ export const TerminalView = memo(function TerminalView({
         t.refresh(0, t.rows - 1);
       }
       if (!pinned) {
-        t.focus();
+        focusUnlessAwaitingApproval(t, ptyId);
       }
     };
 

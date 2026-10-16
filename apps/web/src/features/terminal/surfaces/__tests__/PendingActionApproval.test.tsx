@@ -126,6 +126,40 @@ describe("PendingActionApproval", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
   });
 
+  it("does not start the action when the tab is closed while the approval is in flight", async () => {
+    let finishApproval: () => void = () => {};
+    approveWorkspaceEnvironmentCommand.mockReturnValue(new Promise<void>((resolve) => (finishApproval = resolve)));
+    seed(run());
+    render(surface);
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    act(() => useTerminalStore.getState().removeTerminal("pty-1"));
+    await act(async () => finishApproval());
+
+    expect(startWorkspaceAction).not.toHaveBeenCalled();
+  });
+
+  it("keeps a request in flight for one pending tab from disabling the next tab's card", async () => {
+    approveWorkspaceEnvironmentCommand.mockReturnValue(new Promise<void>(() => {}));
+    const other = run({ actionId: "db", actionName: "db", runId: "run-db", terminalSessionId: "pty-2", snapshot: { ...run().snapshot, script: "bun run db" } });
+    seed(run());
+    useProjectActionStore.getState().applyRun(other);
+    const records = [
+      { id: "pty-1", threadId: "thread-1", label: "web", state: "pending", kind: "action", actionId: "web" },
+      { id: "pty-2", threadId: "thread-1", label: "db", state: "pending", kind: "action", actionId: "db" },
+    ] as TerminalInstance[];
+    act(() => useTerminalStore.setState({ terminals: { "thread-1": records }, ptyToThread: { "pty-1": "thread-1", "pty-2": "thread-1" } }));
+    render(surface);
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+
+    act(() => useTerminalStore.getState().setActiveTerminal("thread-1", "pty-2"));
+
+    expect(await screen.findByText("Run db?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  });
+
   it("Cancel kills the pending terminal and removes its record without approving", async () => {
     seed(run());
     render(surface);
