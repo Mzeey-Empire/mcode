@@ -87,6 +87,8 @@ interface TerminalState {
   replaceTerminal: (ptyId: string, replacement: LegacyTerminalRecord) => void;
   /** Retains terminal output metadata after a natural or failed session exit. */
   recordTerminalExit: (ptyId: string, exit: TerminalExitMetadata) => void;
+  /** Clears an exit once the server relaunches a command in the same terminal. */
+  recordTerminalRestart: (ptyId: string) => void;
   /** Replaces stale client identities with the server's active PTY set. */
   reconcileActiveSessions: (sessions: readonly ActiveTerminalSession[]) => void;
   removeTerminal: (ptyId: string) => void;
@@ -339,6 +341,23 @@ export const useTerminalStore = create<TerminalState>((set) => ({
           [ownerThreadId]: ownerInstances.map((terminal) =>
             terminal.id === ptyId
               ? { ...terminal, state: nextState, exit, exitCode: exit.code }
+              : terminal,
+          ),
+        },
+      };
+    }),
+
+  recordTerminalRestart: (ptyId) =>
+    set((state) => {
+      const ownerThreadId = state.ptyToThread[ptyId];
+      const ownerInstances = ownerThreadId ? state.terminals[ownerThreadId] : undefined;
+      if (!ownerThreadId || !ownerInstances) return state;
+      return {
+        terminals: {
+          ...state.terminals,
+          [ownerThreadId]: ownerInstances.map((terminal) =>
+            terminal.id === ptyId
+              ? { ...terminal, state: "running" as const, exit: undefined, exitCode: undefined }
               : terminal,
           ),
         },

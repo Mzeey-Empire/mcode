@@ -852,6 +852,22 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     expect(term.options.disableStdin).toBe(true);
   });
 
+  it("accepts input again when a rerun relaunches a command in an exited terminal", async () => {
+    const { rerender } = render(<TerminalView ptyId="pty-exit" visible={true} threadActive={true} sessionState="exited" />);
+    await settle();
+    expect(term.options.disableStdin).toBe(true);
+
+    rerender(<TerminalView ptyId="pty-exit" visible={true} threadActive={true} sessionState="running" />);
+    await settle();
+    transport.terminalWrite.mockClear();
+    await act(async () => {
+      onDataListener?.("echo after rerun\r");
+    });
+
+    expect(term.options.disableStdin).toBe(false);
+    expect(transport.terminalWrite).toHaveBeenCalledWith("pty-exit", "echo after rerun\r");
+  });
+
   // Regression: an exited PTY must remain mounted so its completed output and
   // recovery actions stay available to the user.
   it("retains exited output and exposes retry and close actions", async () => {

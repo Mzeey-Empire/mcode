@@ -87,6 +87,16 @@ describe("applyActionRun", () => {
     expect(useProjectActionStore.getState().runsByThread["thread-1"]?.web?.runId).toBe("run-2");
   });
 
+  it("clears the exit when a rerun reuses a terminal whose shell the user exited", () => {
+    applyActionRun(actionRun({ status: "failed", exitCode: 1 }), { focus: true });
+    useTerminalStore.getState().recordTerminalExit("pty-1", { code: 0, signal: null, reason: "natural" });
+
+    applyActionRun(actionRun({ runId: "run-2", createdAt: "2026-08-22T12:00:02.000Z" }), { focus: false });
+
+    expect(useTerminalStore.getState().terminals["thread-1"]?.[0]).toMatchObject({ id: "pty-1", state: "running" });
+    expect(useTerminalStore.getState().terminals["thread-1"]?.[0]?.exit).toBeUndefined();
+  });
+
   it("drops the record when the run no longer has a terminal", () => {
     applyActionRun(actionRun(), { focus: true });
 

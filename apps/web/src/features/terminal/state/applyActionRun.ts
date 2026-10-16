@@ -24,7 +24,12 @@ function removeStaleRecords(run: WorkspaceEnvironmentActionRun): void {
 
 function showRecord(run: WorkspaceEnvironmentActionRun, terminalId: string, focus: boolean): void {
   const terminals = useTerminalStore.getState();
-  if ((terminals.terminals[run.threadId] ?? []).some((record) => record.id === terminalId)) {
+  const existing = (terminals.terminals[run.threadId] ?? []).find((record) => record.id === terminalId);
+  if (existing) {
+    // The server reuses a terminal whose shell the user exited, so the retained exit no longer applies.
+    if (run.status === "running" && (existing.state === "exited" || existing.state === "failed")) {
+      terminals.recordTerminalRestart(terminalId);
+    }
     if (focus) terminals.setActiveTerminal(run.threadId, terminalId);
     return;
   }

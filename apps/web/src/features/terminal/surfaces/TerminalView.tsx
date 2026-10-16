@@ -615,6 +615,7 @@ export const TerminalView = memo(function TerminalView({
   const [termReady, setTermReady] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [recoveryAction, setRecoveryAction] = useState<"reload" | null>(null);
+  const exitedRef = useRef(false);
   const sessionEndedRef = useRef(sessionState === "exited" || sessionState === "failed");
   sessionEndedRef.current = sessionState === "exited" || sessionState === "failed";
   /** Cancels in-flight {@link loadRenderer} when the thread goes dormant or the effect cleans up. */
@@ -694,8 +695,8 @@ export const TerminalView = memo(function TerminalView({
       term.open(el);
       applyTerminalSettings(term, terminalSettingsRef.current);
       incrementLiveTerminalCount();
-      let exited = sessionEndedRef.current;
-      if (exited) term.options.disableStdin = true;
+      exitedRef.current = sessionEndedRef.current;
+      if (exitedRef.current) term.options.disableStdin = true;
       const shortcutPlatform = detectTerminalShortcutPlatform();
 
       const linkDisposable = term.registerLinkProvider({
@@ -744,7 +745,7 @@ export const TerminalView = memo(function TerminalView({
       };
 
       const selectionDisposable = term.onSelectionChange(() => {
-        if (!copyOnSelectRef.current || exited || sessionEndedRef.current) return;
+        if (!copyOnSelectRef.current || exitedRef.current || sessionEndedRef.current) return;
         const selection = term.getSelection();
         if (selection) {
           navigator.clipboard.writeText(selection).catch(() => {});
@@ -763,7 +764,7 @@ export const TerminalView = memo(function TerminalView({
         }
         if (isTerminalPasteShortcut(event, shortcutPlatform)) {
           event.preventDefault();
-          if (!exited && !sessionEndedRef.current) {
+          if (!exitedRef.current && !sessionEndedRef.current) {
             navigator.clipboard.readText().then(pasteText).catch(() => {});
           }
           return false;
@@ -801,7 +802,7 @@ export const TerminalView = memo(function TerminalView({
       // paste mode when the shell requests it, preventing embedded newlines from auto-executing commands.
       const handleContextMenu = (e: MouseEvent) => {
         e.preventDefault();
-        if (exited || sessionEndedRef.current) return;
+        if (exitedRef.current || sessionEndedRef.current) return;
         navigator.clipboard
           .readText()
           .then((text) => {
@@ -813,7 +814,7 @@ export const TerminalView = memo(function TerminalView({
       const handleAuxClick = (e: MouseEvent) => {
         if (!isTerminalMiddleClickPaste(e, shortcutPlatform)) return;
         e.preventDefault();
-        if (exited || sessionEndedRef.current) return;
+        if (exitedRef.current || sessionEndedRef.current) return;
         navigator.clipboard.readText().then(pasteText).catch(() => {});
       };
       el.addEventListener("auxclick", handleAuxClick);
@@ -829,7 +830,7 @@ export const TerminalView = memo(function TerminalView({
 
       // Forward keystrokes to the backend via WS RPC
       const dataDisposable = term.onData((data) => {
-        if (exited || sessionEndedRef.current) return;
+        if (exitedRef.current || sessionEndedRef.current) return;
         resizeControllerRef.current?.flushBeforeInput();
         transport.terminalWrite(ptyId, data).catch(() => {});
       });
@@ -979,7 +980,7 @@ export const TerminalView = memo(function TerminalView({
       // pre-renderer for the same reason as pty-data: an early exit should
       // not be silently lost).
       const unsubPtyExit = transport.terminalSubscribe(ptyId, { onExit: (detail) => {
-        exited = true;
+        exitedRef.current = true;
         term.options.disableStdin = true;
         trackedWrite(
           `\r\n\x1b[90m[Process ${detail.state === "failed" ? "failed" : "exited"} with code ${detail.code}]\x1b[0m\r\n`,
@@ -995,7 +996,7 @@ export const TerminalView = memo(function TerminalView({
         fitAddon,
         term,
         isActive: () => shownRef.current && threadActiveRef.current,
-        isDisposed: () => disposed || exited || sessionEndedRef.current,
+        isDisposed: () => disposed || exitedRef.current || sessionEndedRef.current,
         shouldDeferFit: () => terminalScroll.shouldDeferFitRefresh(ptyId),
         runProgrammatic: (fn) => terminalScroll.runProgrammatic(ptyId, fn),
         captureScrollIntent: () => captureScrollAnchor(term),
@@ -1131,14 +1132,14 @@ export const TerminalView = memo(function TerminalView({
           flushReplayGate();
         })
         .finally(() => {
-          if (!disposed && !exited && !sessionEndedRef.current && shownRef.current) {
+          if (!disposed && !exitedRef.current && !sessionEndedRef.current && shownRef.current) {
             transport.terminalResume(ptyId).catch(() => {});
           }
         });
       };
 
       resumeWarmViewRef.current = () => {
-        if (disposed || exited || sessionEndedRef.current || replaying) return;
+        if (disposed || exitedRef.current || sessionEndedRef.current || replaying) return;
         const lastSeq = Number.isFinite(lastWrittenSeq) ? lastWrittenSeq : -1;
         void reattach(lastSeq, "warm");
       };
@@ -1352,10 +1353,12 @@ export const TerminalView = memo(function TerminalView({
     }
   }, [terminalSettings]);
 
+  // An Action rerun can relaunch a command in an exited terminal, so input must follow the state both ways.
   useEffect(() => {
-    if (sessionState !== "exited" && sessionState !== "failed") return;
+    const ended = terminalSessionEnded(sessionState);
+    if (!ended) exitedRef.current = false;
     const term = termRef.current;
-    if (term) term.options.disableStdin = true;
+    if (term) term.options.disableStdin = ended;
   }, [sessionState]);
 
   useEffect(() => {
