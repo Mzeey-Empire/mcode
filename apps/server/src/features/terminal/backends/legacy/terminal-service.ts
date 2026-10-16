@@ -82,6 +82,8 @@ const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 const MAX_HOST_ENVIRONMENT_NAMES = 256;
 const MAX_HOST_ENVIRONMENT_BYTES = 65_536;
+/** Erases the screen and scrollback, then homes the cursor. */
+const RERUN_CLEAR_SCREEN = Buffer.from("\u001b[2J\u001b[3J\u001b[H");
 
 function shellBasename(shellPath: string): string {
   return (shellPath.split(/[\\/]/).pop() ?? shellPath).replace(/\.exe$/i, "").slice(0, 64);
@@ -343,7 +345,10 @@ export class TerminalService {
     await session.transition;
     this.assertOpen(session);
     session.action?.events.reset();
-    this.recordOutput(session, ++session.sequence, actionCommandEcho(session.shell, session.cwd, input.script));
+    // A rerun starts a new ConPTY/PTY that paints as if on a blank screen, so the previous run's rows must go first or the two overprint.
+    const isRerun = session.sequence > 0;
+    const echo = actionCommandEcho(session.shell, session.cwd, input.script);
+    this.recordOutput(session, ++session.sequence, isRerun ? Buffer.concat([RERUN_CLEAR_SCREEN, echo]) : echo);
     const environment = this.envService.getEnv();
     try {
       await this.launchProcess(session, "command", { ...prepared.launch, environment });
