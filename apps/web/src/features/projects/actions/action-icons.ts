@@ -40,7 +40,7 @@ interface GlyphIconEntry {
 }
 
 /** How one icon id is drawn: a tool mark fetched from vscode-icons, or a tinted Lucide glyph. */
-export type ActionIconEntry =ToolIconEntry | GlyphIconEntry;
+export type ActionIconEntry = ToolIconEntry | GlyphIconEntry;
 
 /**
  * Every icon an action can carry, keyed by the id stored in the environment document.
@@ -129,10 +129,13 @@ const COMMAND_ICON: ReadonlyMap<string, ActionIconId> = new Map(Object.entries({
 
 const PACKAGE_RUNNERS = new Set(["npx", "bunx"]);
 
-const ENV_ASSIGNMENTS = /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"(?:\\.|[^"\\])*"|'[^']*'|\\.|[^\s"'\\])*\s+)*/;
+const ENV_ASSIGNMENTS =
+  /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"(?:\\.|[^"\\])*"|'[^']*'|\$\((?:[^()]|\([^()]*\))*\)|\\.|[^\s"'\\])*\s+)*/;
+
+const WORD = /"[^"]*"|'[^']*'|\S+/g;
 
 function firstCommandLine(command: string): string {
-  for (const line of command.split(/\r?\n/)) {
+  for (const line of command.replace(/\\\r?\n/g, " ").split(/\r?\n/)) {
     const trimmed = line.trim();
     if (trimmed !== "" && !trimmed.startsWith("#")) return trimmed;
   }
@@ -140,7 +143,8 @@ function firstCommandLine(command: string): string {
 }
 
 function programName(word: string): string {
-  const base = word.slice(Math.max(word.lastIndexOf("/"), word.lastIndexOf("\\")) + 1);
+  const unquoted = word.replace(/^(["'])(.*)\1$/, "$2");
+  const base = unquoted.slice(Math.max(unquoted.lastIndexOf("/"), unquoted.lastIndexOf("\\")) + 1);
   return base.replace(/\.exe$/i, "").toLowerCase();
 }
 
@@ -150,7 +154,7 @@ function programName(word: string): string {
  * as `./run.sh`, get the play glyph.
  */
 export function defaultActionIconId(command: string): ActionIconId {
-  const words = firstCommandLine(command).replace(ENV_ASSIGNMENTS, "").split(/\s+/);
+  const words = firstCommandLine(command).replace(ENV_ASSIGNMENTS, "").match(WORD) ?? [];
   const runner = programName(words[0] ?? "");
   const word = PACKAGE_RUNNERS.has(runner) ? programName(words[1] ?? "") : runner;
   return COMMAND_ICON.get(word) ?? "play";

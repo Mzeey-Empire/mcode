@@ -30,6 +30,22 @@ describe("defaultActionIconId", () => {
     expect(defaultActionIconId(String.raw`FOO="hello \" world" bun run dev`)).toBe("bun");
   });
 
+  it("skips an unquoted command substitution in an assignment value", () => {
+    expect(defaultActionIconId("BUILD_SHA=$(git rev-parse --short HEAD) bun run dev")).toBe("bun");
+    expect(defaultActionIconId("X=$(echo $(date +%s)) cargo test")).toBe("rust");
+  });
+
+  it("reads a quoted program, including one with spaces in its path", () => {
+    expect(defaultActionIconId('"bun" run dev')).toBe("bun");
+    expect(defaultActionIconId(String.raw`"C:\Program Files\nodejs\node.exe" server.js`)).toBe("node");
+    expect(defaultActionIconId("npx 'vitest' run")).toBe("vitest");
+  });
+
+  it("joins backslash line continuations before reading the command", () => {
+    expect(defaultActionIconId("NODE_ENV=production \\\nbun run dev")).toBe("bun");
+    expect(defaultActionIconId("NODE_ENV=production \\\r\n  cargo test")).toBe("rust");
+  });
+
   it("does not treat inherited object keys as command words", () => {
     expect(defaultActionIconId("constructor")).toBe("play");
     expect(defaultActionIconId("__proto__ --flag")).toBe("play");
