@@ -100,15 +100,23 @@ describe("terminalStore pause/resume wiring", () => {
     expect(terminalPause).not.toHaveBeenCalled();
   });
 
-  it("keeps a shell flowing while an action record is shown, because no view resumes it on return", () => {
+  it("pauses the shell an action record replaces, because the record mounts in the same pooled view", () => {
     const store = useTerminalStore.getState();
     store.addTerminal("thread-1", "shell", "pwsh");
     store.addTerminal("thread-1", "action", "pwsh", { kind: "action", actionId: "build" });
-    store.setActiveTerminal("thread-1", "shell");
-    store.setActiveTerminal("thread-1", "action");
-    store.setActiveTerminal("thread-1", "shell");
+
+    expect(terminalPause).toHaveBeenCalledWith("shell");
+    expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("action");
+  });
+
+  it("adds a background record without taking the active tab or pausing the one on screen", () => {
+    const store = useTerminalStore.getState();
+    store.addTerminal("thread-1", "shell", "pwsh");
+    store.addTerminal("thread-1", "action", "pwsh", { kind: "action", actionId: "build" }, false);
 
     expect(terminalPause).not.toHaveBeenCalled();
+    expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("shell");
+    expect(useTerminalStore.getState().terminals["thread-1"]?.map((terminal) => terminal.id)).toEqual(["shell", "action"]);
   });
 
   it("reconciles stale client PTYs when the restarted server reports none", () => {

@@ -75,7 +75,14 @@ interface TerminalState {
     resultCount: number,
   ) => void;
   clearTerminalSearchResult: (ptyId: string) => void;
-  addTerminal: (threadId: string, ptyId: string, shell?: string, metadata?: Omit<LegacyTerminalRecord, "ptyId" | "threadId" | "shell">) => void;
+  /** Adds a record and makes it the scope's active terminal unless `activate` is false and another is already active. */
+  addTerminal: (
+    threadId: string,
+    ptyId: string,
+    shell?: string,
+    metadata?: Omit<LegacyTerminalRecord, "ptyId" | "threadId" | "shell">,
+    activate?: boolean,
+  ) => void;
   /** Replaces an exited terminal in its existing slot after Retry succeeds. */
   replaceTerminal: (ptyId: string, replacement: LegacyTerminalRecord) => void;
   /** Retains terminal output metadata after a natural or failed session exit. */
@@ -88,23 +95,9 @@ interface TerminalState {
   toggleSplit: () => void;
 }
 
-function isActionRecord(terminals: readonly TerminalInstance[] | undefined, ptyId: string | null): boolean {
-  return terminals?.find((terminal) => terminal.id === ptyId)?.kind === "action";
-}
-
-/**
- * Pauses the shell a different shell replaces; TerminalView resumes the new one
- * once its listener is attached. An action record never mounts a pooled view, so
- * a shell kept warm behind it must keep flowing (nothing would resume it), and
- * pausing the action record would stall its script.
- */
-function pauseReplacedShell(
-  terminals: readonly TerminalInstance[] | undefined,
-  previous: string | null,
-  next: string | null,
-): void {
+/** Pauses the terminal a different one replaces; TerminalView resumes the new one once its listener is attached. */
+function pauseReplacedTerminal(previous: string | null, next: string | null): void {
   if (!previous || previous === next) return;
-  if (isActionRecord(terminals, previous) || isActionRecord(terminals, next)) return;
   getTransport().terminalPause(previous).catch(() => {});
 }
 
@@ -216,7 +209,7 @@ export const useTerminalStore = create<TerminalState>((set) => ({
   setActiveTerminal: (threadId, ptyId) =>
     set((state) => {
       const previous = state.activeTerminalByScope[threadId] ?? null;
-      pauseReplacedShell(state.terminals[threadId], previous, ptyId);
+      pauseReplacedTerminal(previous, ptyId);
       return { activeTerminalByScope: { ...state.activeTerminalByScope, [threadId]: ptyId } };
     }),
 
@@ -309,20 +302,23 @@ export const useTerminalStore = create<TerminalState>((set) => ({
       };
     }),
 
-  addTerminal: (threadId, ptyId, shell, metadata) =>
+  addTerminal: (threadId, ptyId, shell, metadata, activate = true) =>
     set((state) => {
       const existing = state.terminals[threadId] ?? [];
       if (existing.some((terminal) => terminal.id === ptyId) || existing.length >= TERMINAL_MAX_PER_SCOPE) return state;
       const instance = reconcileTerminalInstance({ ...metadata, ptyId, threadId, shell }, undefined, existing);
       const previous = state.activeTerminalByScope[threadId] ?? null;
-      if (instance.kind !== "action") pauseReplacedShell(existing, previous, ptyId);
+      const keepsActive = !activate && previous !== null;
+      if (!keepsActive) pauseReplacedTerminal(previous, ptyId);
       return {
         terminals: {
           ...state.terminals,
           [threadId]: [...existing, instance],
         },
         ptyToThread: { ...state.ptyToThread, [ptyId]: threadId },
-        activeTerminalByScope: { ...state.activeTerminalByScope, [threadId]: ptyId },
+        activeTerminalByScope: keepsActive
+          ? state.activeTerminalByScope
+          : { ...state.activeTerminalByScope, [threadId]: ptyId },
       };
     }),
 

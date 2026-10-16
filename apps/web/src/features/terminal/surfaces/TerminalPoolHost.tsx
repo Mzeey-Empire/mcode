@@ -70,10 +70,7 @@ function useResolvedActiveTerminal(
 
   const visibleTerm = terminalTabVisible && terminalScopeId && activeTerminalId
     ? terminals[terminalScopeId]?.find(
-        // Action records render their own transcript view, so the shell pool skips them.
-        (terminal) => terminal.id === activeTerminalId
-          && terminal.kind !== "action"
-          && (terminal.state ?? "running") !== "starting",
+        (terminal) => terminal.id === activeTerminalId && (terminal.state ?? "running") !== "starting",
       )
     : undefined;
 

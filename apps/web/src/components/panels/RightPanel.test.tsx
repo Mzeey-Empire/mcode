@@ -250,8 +250,6 @@ describe("RightPanel", () => {
     startedAt: "2026-08-22T12:00:00.000Z",
     finishedAt: "2026-08-22T12:00:01.000Z",
     exitCode: 0,
-    transcript: "done",
-    transcriptTruncated: false,
     ...overrides,
   });
   const actionRecord = { id: "pty-action", threadId: "thread-1", label: "build", kind: "action" as const, actionId: "build" };
@@ -291,7 +289,7 @@ describe("RightPanel", () => {
     expect(tabLabels(terminalStrip())).toEqual(["zsh (1)", "zsh (2)", "Build"]);
   });
 
-  it("shows an action record's transcript and closing its tab stops it like any terminal", async () => {
+  it("closing an action tab after its command ends kills the terminal like any shell", async () => {
     terminalKill.mockResolvedValue(undefined);
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
     useProjectActionStore.getState().applyRun(buildRun({}));
@@ -300,7 +298,6 @@ describe("RightPanel", () => {
 
     render(<RightPanel />);
 
-    expect(screen.getByTestId("action-terminal:build")).toHaveTextContent("done");
     fireEvent.click(within(terminalStrip()).getByRole("button", { name: "Close Build" }));
 
     await waitFor(() => expect(terminalKill).toHaveBeenCalledWith("pty-action"));
@@ -335,7 +332,6 @@ describe("RightPanel", () => {
       status: "running",
       finishedAt: null,
       exitCode: null,
-      transcript: "running output",
     }));
     useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState(panel) } });
     useTerminalStore.setState({ terminals: { "thread-1": [actionRecord] } });
@@ -348,12 +344,9 @@ describe("RightPanel", () => {
     } else {
       expect(activityRail).toHaveAttribute("data-active-tab-id", activeTabId);
     }
-    expect(screen.queryByTestId("action-terminal:build")).not.toBeInTheDocument();
-
     fireEvent.click(screen.getByTestId("select-singleton:terminal"));
 
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-active-tab-id", "singleton:terminal");
-    expect(screen.getByTestId("action-terminal:build")).toHaveTextContent("running output");
   });
 
   it("disables the round + at the record cap and explains why, counting action records", () => {

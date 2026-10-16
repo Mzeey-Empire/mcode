@@ -280,8 +280,6 @@ function runningActionRun(): WorkspaceEnvironmentActionRun {
     startedAt: "2026-08-22T12:00:00.000Z",
     finishedAt: null,
     exitCode: null,
-    transcript: "",
-    transcriptTruncated: false,
   };
 }
 

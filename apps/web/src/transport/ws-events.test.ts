@@ -284,8 +284,6 @@ describe("ws-events Project Actions", () => {
       startedAt: "2026-08-22T12:00:00.000Z",
       finishedAt: "2026-08-22T12:00:01.000Z",
       exitCode: 0,
-      transcript: "done",
-      transcriptTruncated: false,
     };
     useProjectActionStore.setState({ runsByThread: {} });
     startPushListeners();
@@ -296,7 +294,7 @@ describe("ws-events Project Actions", () => {
       runId: run.runId,
       run,
     });
-    expect(useProjectActionStore.getState().runsByThread["thread-1"]?.build?.transcript).toBe("done");
+    expect(useProjectActionStore.getState().runsByThread["thread-1"]?.build?.status).toBe("completed");
 
     pushEmitter.emit("thread.deleted", { threadId: "thread-1" });
     expect(useProjectActionStore.getState().runsByThread["thread-1"]).toBeUndefined();
