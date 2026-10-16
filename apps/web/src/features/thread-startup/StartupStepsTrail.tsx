@@ -245,7 +245,7 @@ function TrailSteps({ startup, kind, view, outputOpen, onToggleOutput, onOpenTer
   readonly decision: ReactNode;
 }) {
   const now = useLiveNow(startupHasLiveStep(startup));
-  const rows = startup ? startupTrailRows(startup, { now, setupCommand: view.commands[0] }) : placeholderTrailRows(kind);
+  const rows = startup ? startupTrailRows(startup, { now, setupCommand: view.commands.at(-1) }) : placeholderTrailRows(kind);
   const { terminalSessionId } = view;
   const openTerminal = onOpenTerminal && terminalSessionId !== null ? () => onOpenTerminal(terminalSessionId) : undefined;
   const setupOutput = startup && outputOpen

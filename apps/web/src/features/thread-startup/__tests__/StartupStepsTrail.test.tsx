@@ -11,6 +11,7 @@ const startupTransport = {
   approveWorkspaceEnvironmentCommand: vi.fn(),
   startWorkspaceAction: vi.fn(),
   resolveThreadStartup: vi.fn(),
+  listWorkspaceActionRuns: vi.fn(),
 };
 
 vi.mock("@/transport", () => ({
@@ -18,6 +19,7 @@ vi.mock("@/transport", () => ({
 }));
 
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
 import { StartupStepsTrail } from "../StartupStepsTrail";
 import { useThreadStartupStore } from "../state/thread-startup-store";
@@ -114,6 +116,7 @@ describe("StartupStepsTrail", () => {
     useThreadStartupStore.setState({ recordsByStartupId: {}, startupIdByThreadId: {} });
     useProjectActionStore.setState({ runsByThread: {} });
     useTerminalStore.setState({ terminals: {}, activeTerminalByScope: {}, ptyToThread: {} });
+    useConnectionStore.setState({ status: "connecting" });
   });
 
   it("draws pending placeholder rows before the record arrives", () => {
@@ -136,6 +139,37 @@ describe("StartupStepsTrail", () => {
 
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
     expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("0:05");
+  });
+
+  it("labels the live row with the action now running, not the first one", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse(at(5)) });
+    seedRun("bun install", { status: "completed", exitCode: 0 });
+    seedRun("bun check", { actionId: "check", runId: "run-2", terminalSessionId: "pty-2" });
+    const actions = [installAction("ready"), { ...installAction("running"), actionId: "check", runId: "run-2" }];
+    const step = { ...setupStep("running", "running"), detail: { phase: "setup" as const, actions } };
+    renderTrail({ startup: startup({ steps: [{ phase: "thread", state: "completed" }, step, { phase: "agent", state: "pending" }] }), kind: "managed-worktree" });
+
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("bun check");
+  });
+
+  it("reads the retained runs again on reconnect so a missed approval can be run", async () => {
+    const waiting = { ...seedRun("bun install", { status: "awaiting-approval" }), runId: "run-1" };
+    useProjectActionStore.setState({ runsByThread: {} });
+    startupTransport.listWorkspaceActionRuns.mockResolvedValue([waiting]);
+    renderTrail({
+      startup: startup({
+        state: "blocked",
+        steps: [{ phase: "thread", state: "completed" }, setupStep("blocked", "pending"), { phase: "agent", state: "pending" }],
+        block: { code: "SETUP_APPROVAL_REQUIRED", message: "Setup needs approval", actions: ["retry", "continue"] },
+      }),
+      kind: "managed-worktree",
+    });
+    expect(startupTransport.listWorkspaceActionRuns).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Run setup" })).toBeDisabled();
+
+    act(() => useConnectionStore.setState({ status: "connected" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run setup" })).toBeEnabled());
+    expect(startupTransport.listWorkspaceActionRuns).toHaveBeenCalledWith("thread-1");
   });
 
   it("labels the row once the run reaches the store, and ignores a run the sequence did not launch", () => {

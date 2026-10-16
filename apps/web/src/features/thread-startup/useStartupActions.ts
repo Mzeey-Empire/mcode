@@ -1,18 +1,47 @@
-import { useCallback, useMemo, useState } from "react";
-import type { AgentModelState, ThreadStartup, ThreadStartupResolveInput, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { AgentModelState, ThreadStartup, ThreadStartupAction, ThreadStartupResolveInput, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { approveAndStartAction } from "@/features/projects/actions/approveAndStartAction";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useTerminalStore } from "@/features/terminal";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useThreadRecord } from "@/stores/thread-selectors";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
 import { type StartupCancelRequest, useThreadStartupStore } from "./state/thread-startup-store";
-import { startupSetupView, type StartupSetupView } from "./startup-step-copy";
+import { startupDecision, startupSetupView, type StartupSetupView } from "./startup-step-copy";
 
 const TERMINAL_STATES: ReadonlySet<ThreadStartup["state"]> = new Set(["completed", "failed", "cancelled", "interrupted"]);
 const NO_RUNS: Readonly<Record<string, WorkspaceEnvironmentActionRun>> = {};
+
+/**
+ * Reads the retained runs again when the startup names a run the store lacks, or waits on an
+ * approval no loaded run explains. A push missed while offline otherwise leaves Run setup disabled.
+ */
+function useHydrateStartupRuns(threadId: string | undefined, needed: boolean): void {
+  const connected = useConnectionStore((state) => state.status === "connected");
+  useEffect(() => {
+    if (!threadId || !needed || !connected) return;
+    const store = useProjectActionStore.getState();
+    const requestEpoch = store.updateEpochByThread[threadId] ?? 0;
+    const generation = store.beginHydration(threadId);
+    getTransport().listWorkspaceActionRuns(threadId).then(
+      (runs) => useProjectActionStore.getState().hydrateRuns(threadId, runs, requestEpoch, generation),
+      () => undefined,
+    ).finally(() => useProjectActionStore.getState().endHydration(threadId));
+  }, [threadId, needed, connected]);
+}
+
+function needsRunHydration(
+  startup: ThreadStartup | undefined,
+  actions: readonly ThreadStartupAction[],
+  runs: Readonly<Record<string, WorkspaceEnvironmentActionRun>>,
+  view: StartupSetupView,
+): boolean {
+  const missingRun = actions.some((entry) => entry.runId !== null && runs[entry.actionId] === undefined);
+  return missingRun || (startupDecision(startup) === "setup-approval" && view.pending === undefined);
+}
 
 /** The setup step's startup actions joined with their retained runs. */
 export function useStartupSetupView(startup: ThreadStartup | undefined): StartupSetupView {
@@ -20,7 +49,9 @@ export function useStartupSetupView(startup: ThreadStartup | undefined): Startup
   const detail = startup?.steps.find((step) => step.phase === "setup")?.detail;
   const actions = detail?.phase === "setup" ? detail.actions : undefined;
   const runs = useProjectActionStore((state) => (threadId ? state.runsByThread[threadId] : undefined)) ?? NO_RUNS;
-  return useMemo(() => startupSetupView(actions ?? [], runs), [actions, runs]);
+  const view = useMemo(() => startupSetupView(actions ?? [], runs), [actions, runs]);
+  useHydrateStartupRuns(threadId, needsRunHydration(startup, actions ?? [], runs, view));
+  return view;
 }
 
 /** One decision a startup stopped at setup can take. */
