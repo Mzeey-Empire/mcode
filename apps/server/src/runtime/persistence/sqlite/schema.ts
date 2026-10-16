@@ -475,8 +475,6 @@ export const projectActionRuns = sqliteTable(
     startedAt: text("started_at"),
     finishedAt: text("finished_at"),
     exitCode: integer("exit_code"),
-    transcript: text("transcript").notNull().default(""),
-    transcriptTruncated: integer("transcript_truncated", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     uniqueIndex("idx_project_action_runs_slot").on(table.threadId, table.actionId),

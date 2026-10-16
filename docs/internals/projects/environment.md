@@ -138,22 +138,21 @@ whose terminal is already open returns its retained run. Pending approval,
 running and exited terminals all count toward the eight-record scope limit.
 
 The terminal replay includes a synthesized command echo and both processes'
-output. The retained transcript temporarily feeds the existing Action view and
-contains only command-process output. Coalesced output writes publish run
-updates alongside lifecycle changes until the Action view uses terminal tabs.
+output and is the output record for the Action's terminal tab. Retained runs
+store lifecycle metadata only; command output never publishes run updates.
 
 The initial running result must be saved before the service subscribes to
-output and exit events. If retention fails after launch, the
+exit events. If retention fails after launch, the
 [launch compensation](../../../apps/server/src/features/projects/environment/project-action-launch-compensation.ts)
 stops the launched command and preserves the original failure. A cleanup
 failure preserves both errors rather than reporting a successful start.
 
 Process exit also has a persistence barrier. The
-[run lifecycle](../../../apps/server/src/features/projects/environment/project-action-run-lifecycle.ts#L33)
-waits for pending output writes and saves the final result before releasing the
-slot. If that save fails, the slot remains pending finalization. Stop or Restart
-can retry the save, but another Start cannot overtake it. Run identity checks
-ignore late output and exit events from a replaced session.
+[run lifecycle](../../../apps/server/src/features/projects/environment/project-action-run-lifecycle.ts)
+saves the final result before releasing the slot. If that save fails, the slot
+remains pending finalization. Stop or Restart can retry the save, but another
+Start cannot overtake it. Run identity checks ignore late exit events from a
+replaced session.
 
 Startup reaps stale terminals before it marks persisted running Action results
 interrupted. During shutdown, [server composition](../../../apps/server/src/application/bootstrap/server-bootstrap.ts#L990)

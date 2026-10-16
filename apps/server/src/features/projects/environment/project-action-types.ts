@@ -9,7 +9,6 @@ export interface ActiveProjectAction {
   readonly session: ActionTerminal;
   run: WorkspaceEnvironmentActionRun;
   pendingFinalization: WorkspaceEnvironmentActionRun | null;
-  outputRemainder: Uint8Array;
   stopping: boolean;
 }
 

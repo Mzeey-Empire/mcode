@@ -38,8 +38,6 @@ function run(
     startedAt: timestamp,
     finishedAt: status === "running" ? null : timestamp,
     exitCode: status === "running" ? null : 0,
-    transcript: "",
-    transcriptTruncated: false,
   };
 }
 
@@ -60,6 +58,17 @@ describe("ProjectActionRunStore retention", () => {
 
   afterEach(() => {
     db.close();
+  });
+
+  it.each(["manual", "startup"] as const)("round-trips a %s run without transcript columns", (trigger) => {
+    const original = { ...run(threadId, workspaceId, "build", 0), trigger };
+    repo.replace(original);
+
+    expect(repo.get(threadId, "build")).toEqual(original);
+    expect(db.prepare("SELECT trigger, exit_code FROM project_action_runs WHERE thread_id = ? AND action_id = ?")
+      .get(threadId, "build")).toEqual({ trigger, exit_code: 0 });
+    expect(db.prepare("SELECT name FROM pragma_table_info('project_action_runs') WHERE name LIKE 'transcript%'")
+      .all()).toEqual([]);
   });
 
   it("persists run triggers and clears terminal identity during startup recovery", () => {

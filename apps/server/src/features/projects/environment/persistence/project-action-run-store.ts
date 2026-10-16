@@ -72,8 +72,6 @@ export class ProjectActionRunStore {
           startedAt: parsed.startedAt,
           finishedAt: parsed.finishedAt,
           exitCode: parsed.exitCode,
-          transcript: parsed.transcript,
-          transcriptTruncated: parsed.transcriptTruncated,
         })
         .onConflictDoUpdate({
           target: [projectActionRuns.threadId, projectActionRuns.actionId],
@@ -90,8 +88,6 @@ export class ProjectActionRunStore {
             startedAt: parsed.startedAt,
             finishedAt: parsed.finishedAt,
             exitCode: parsed.exitCode,
-            transcript: parsed.transcript,
-            transcriptTruncated: parsed.transcriptTruncated,
           },
         })
         .run();
@@ -117,8 +113,6 @@ export class ProjectActionRunStore {
           startedAt: parsed.startedAt,
           finishedAt: parsed.finishedAt,
           exitCode: parsed.exitCode,
-          transcript: parsed.transcript,
-          transcriptTruncated: parsed.transcriptTruncated,
         })
         .where(
           and(
@@ -195,8 +189,6 @@ function parseRow(row: ProjectActionRunRow): WorkspaceEnvironmentActionRun | nul
       startedAt: row.startedAt,
       finishedAt: row.finishedAt,
       exitCode: row.exitCode,
-      transcript: row.transcript,
-      transcriptTruncated: row.transcriptTruncated,
     });
     return parsed.success ? parsed.data : null;
   } catch {

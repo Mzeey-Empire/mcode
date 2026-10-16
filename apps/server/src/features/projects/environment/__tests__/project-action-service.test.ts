@@ -3,11 +3,7 @@ import { logger } from "@mcode/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
-import {
-  WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES,
-  WorkspaceEnvironmentActionRunSchema,
-  type WorkspaceEnvironmentActionRun,
-} from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import {
   PreparedTerminalCommandApprovalMismatchError,
   PreparedTerminalCommandStartError,
@@ -39,13 +35,11 @@ function session(
   id: string,
   replay?: {
     readonly output?: string;
-    readonly outputChunks?: readonly Uint8Array[];
     readonly exitCode?: number | null;
   },
   stopAction?: () => Promise<void>,
 ): ActionTerminal & {
   emit(data: string): void;
-  emitBytes(data: Uint8Array): void;
   exit(code: number | null): void;
   close(): void;
   captureOutput(): (data: string) => void;
@@ -71,7 +65,6 @@ function session(
     onCommandOutput(listener) {
       outputs.add(listener);
       if (replay?.output !== undefined) listener(new TextEncoder().encode(replay.output));
-      for (const output of replay?.outputChunks ?? []) listener(output);
       return () => outputs.delete(listener);
     },
     onCommandExit(listener) {
@@ -85,7 +78,6 @@ function session(
     },
     captureOutput() { const listeners = [...outputs]; return (data) => { for (const listener of listeners) listener(Buffer.from(data)); }; },
     emit(data) { for (const listener of outputs) listener(new TextEncoder().encode(data)); },
-    emitBytes(data) { for (const listener of outputs) listener(data); },
     exit(exitCode) { for (const listener of exits) listener({ exitCode }); },
   };
 }
@@ -157,7 +149,7 @@ async function actionFixture(shared = false, script = "vite --open http://localh
 const actionSlot = { threadId: ACTION_TEST_THREAD, actionId: "build" };
 
 describe("ProjectActionService with the in-memory PTY host", () => {
-  it("attaches to the action terminal and publishes coalesced command output with lifecycle changes", async () => {
+  it("keeps command output in terminal replay and publishes only lifecycle changes", async () => {
     const f = await actionFixture();
     const updates: WorkspaceEnvironmentActionRun[] = [];
     f.actions.onUpdate((update) => updates.push(update.run));
@@ -171,10 +163,13 @@ describe("ProjectActionService with the in-memory PTY host", () => {
     if (!run.terminalSessionId) throw new Error("Action did not create a terminal");
     expect(f.backend.reattach(run.terminalSessionId, -1)).toEqual({ mode: "delta" });
     const commandId = f.creates.mock.calls[0][0].sessionId;
+    expect(updates.map(({ status, revision }) => ({ status, revision }))).toEqual([{ status: "running", revision: 0 }]);
     f.host.emitOutput(commandId, Buffer.from("ready\r\n"));
     f.host.emitOutput(commandId, Buffer.from("listening\r\n"));
-    await vi.waitFor(() => expect(f.runs.get(ACTION_TEST_THREAD, "build")?.transcript).toBe("ready\r\nlistening\r\n"));
-    await vi.waitFor(() => expect(updates.map((update) => update.transcript)).toEqual(["", "ready\r\n", "ready\r\nlistening\r\n"]));
+    f.host.emitOutput(commandId, Buffer.from("serving\r\n"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(updates.map(({ status, revision }) => ({ status, revision }))).toEqual([{ status: "running", revision: 0 }]);
+    expect(f.actions.get(actionSlot)).toEqual(run);
     f.host.emitExit(commandId, 2);
     await vi.waitFor(() => expect(f.actions.get(actionSlot)).toMatchObject({ status: "failed", exitCode: 2 }));
     await vi.waitFor(() => expect(f.creates).toHaveBeenCalledTimes(2));
@@ -182,10 +177,15 @@ describe("ProjectActionService with the in-memory PTY host", () => {
     bytes.length = 0;
     f.backend.reattach(run.terminalSessionId, -1);
     expect(Buffer.concat(bytes).toString()).toBe(
-      `\u001b[90mPS ${f.creates.mock.calls[0][0].cwd}> \u001b[39mvite --open http://localhost:5173/\u001b[0m\r\nready\r\nlistening\r\nPS> `,
+      `\u001b[90mPS ${f.creates.mock.calls[0][0].cwd}> \u001b[39mvite --open http://localhost:5173/\u001b[0m\r\nready\r\nlistening\r\nserving\r\nPS> `,
     );
-    expect(f.actions.get(actionSlot)?.transcript).toBe("ready\r\nlistening\r\n");
-    expect(updates.map((update) => update.status)).toEqual(["running", "running", "running", "failed"]);
+    await vi.waitFor(() => expect(updates.map(({ status, revision }) => ({ status, revision }))).toEqual([
+      { status: "running", revision: 0 },
+      { status: "failed", revision: 1 },
+    ]));
+    for (const update of updates) {
+      expect(Object.keys(update).filter((key) => key.startsWith("transcript"))).toEqual([]);
+    }
     expect(await f.actions.start(actionSlot)).toEqual(f.actions.get(actionSlot));
     expect(f.creates).toHaveBeenCalledTimes(2);
   });
@@ -199,6 +199,9 @@ describe("ProjectActionService with the in-memory PTY host", () => {
     }));
     await vi.waitFor(() => expect(f.creates).toHaveBeenCalledTimes(2));
     if (!run.terminalSessionId) throw new Error("Missing action terminal");
+    await vi.waitFor(() => expect(f.backend.listActiveSessions()).toEqual([
+      expect.objectContaining({ ptyId: run.terminalSessionId, state: "running" }),
+    ]));
     await f.backend.write(run.terminalSessionId, "echo alive\r");
   });
 
@@ -508,7 +511,7 @@ describe("ProjectActionService", () => {
     first.emit("old output");
     first.exit(0);
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(runs.get("thread-1", "build")).toMatchObject({ status: "completed", revision: 2 });
+    expect(runs.get("thread-1", "build")).toMatchObject({ status: "completed", revision: 1 });
     expect(runs.get("thread-1", "test")?.status).toBe("running");
   });
 
@@ -623,7 +626,6 @@ describe("ProjectActionService", () => {
 
     expect(runs.get("thread-1", "build")).toMatchObject({
       status: "completed",
-      transcript: "fast output",
       exitCode: 0,
     });
   });
@@ -876,7 +878,6 @@ describe("ProjectActionService", () => {
     expect(updateIfCurrent).toHaveBeenCalledWith(expect.objectContaining({
       runId: "run-1",
       status: "interrupted",
-      transcript: "",
     }));
   });
 
@@ -1078,152 +1079,6 @@ describe("ProjectActionService", () => {
     });
   });
 
-  it("keeps terminal output and final persistence alive after an output write failure", async () => {
-    const runs = new Runs();
-    const prepared = session("terminal-1");
-    const updateIfCurrent = vi.spyOn(runs, "updateIfCurrent");
-    const persist = Runs.prototype.updateIfCurrent.bind(runs);
-    updateIfCurrent
-      .mockImplementationOnce(() => { throw new Error("database unavailable"); })
-      .mockImplementation((run) => persist(run));
-    const service = new ProjectActionService(
-      runs as never,
-      projectActionEnvironment(async () => ({ document: { version: "0.0.1", actions: [
-        { id: "build", name: "Build", command: { default: "bun run build" } },
-      ] } })),
-      { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { openActionTerminal: async () => prepared } as never,
-      () => new Date("2026-08-22T12:00:00.000Z"),
-      () => "run-1",
-    );
-    await service.start({ threadId: "thread-1", actionId: "build" });
-
-    expect(() => prepared.emit("retained output")).not.toThrow();
-    prepared.exit(0);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    expect(runs.get("thread-1", "build")).toMatchObject({
-      status: "completed",
-      transcript: "retained output",
-      revision: 2,
-      exitCode: 0,
-    });
-  });
-
-  it("retains a valid UTF-8 suffix when a four-byte character crosses the transcript boundary", async () => {
-    const runs = new Runs();
-    const prepared = session("terminal-1");
-    const service = new ProjectActionService(
-      runs as never,
-      projectActionEnvironment(async () => ({ document: { version: "0.0.1", actions: [
-        { id: "build", name: "Build", command: { default: "bun run build" } },
-      ] } })),
-      { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { openActionTerminal: async () => prepared } as never,
-      () => new Date("2026-08-22T12:00:00.000Z"),
-      () => "run-1",
-    );
-    await service.start({ threadId: "thread-1", actionId: "build" });
-
-    prepared.emit(`x😀${"z".repeat(WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES - 3)}`);
-    prepared.exit(0);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    const run = runs.get("thread-1", "build");
-    expect(run).toMatchObject({
-      status: "completed",
-      revision: 2,
-      transcript: "z".repeat(WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES - 3),
-      transcriptTruncated: true,
-    });
-    expect(new TextEncoder().encode(run?.transcript).byteLength).toBeLessThanOrEqual(
-      WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES,
-    );
-    expect(run?.transcript).not.toContain("�");
-    expect(WorkspaceEnvironmentActionRunSchema().parse(run)).toEqual(run);
-  });
-
-  it("decodes a four-byte character split across output calls without persisting a replacement character", async () => {
-    const runs = new Runs();
-    const prepared = session("terminal-1");
-    const service = new ProjectActionService(
-      runs as never,
-      projectActionEnvironment(async () => ({ document: { version: "0.0.1", actions: [
-        { id: "build", name: "Build", command: { default: "bun run build" } },
-      ] } })),
-      { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { openActionTerminal: async () => prepared } as never,
-      () => new Date("2026-08-22T12:00:00.000Z"),
-      () => "run-1",
-    );
-    await service.start({ threadId: "thread-1", actionId: "build" });
-
-    prepared.emitBytes(new Uint8Array([0xf0, 0x9f]));
-    expect(runs.get("thread-1", "build")).toMatchObject({ revision: 0, transcript: "" });
-    prepared.emitBytes(new Uint8Array([0x98, 0x80]));
-    prepared.exit(0);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    const run = runs.get("thread-1", "build");
-    expect(run).toMatchObject({
-      status: "completed",
-      revision: 2,
-      transcript: "😀",
-      transcriptTruncated: false,
-    });
-    expect(run?.transcript).not.toContain("�");
-    expect(WorkspaceEnvironmentActionRunSchema().parse(run)).toEqual(run);
-  });
-
-  it("decodes replayed output chunks that split a four-byte character", async () => {
-    const runs = new Runs();
-    const replayed = session("terminal-1", {
-      outputChunks: [new Uint8Array([0xf0, 0x9f]), new Uint8Array([0x98, 0x80])],
-      exitCode: 0,
-    });
-    const service = new ProjectActionService(
-      runs as never,
-      projectActionEnvironment(async () => ({ document: { version: "0.0.1", actions: [
-        { id: "build", name: "Build", command: { default: "bun run build" } },
-      ] } })),
-      { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { openActionTerminal: async () => replayed } as never,
-      () => new Date("2026-08-22T12:00:00.000Z"),
-      () => "run-1",
-    );
-
-    await service.start({ threadId: "thread-1", actionId: "build" });
-
-    const run = runs.get("thread-1", "build");
-    expect(run).toMatchObject({ status: "completed", revision: 2, transcript: "😀" });
-    expect(run?.transcript).not.toContain("�");
-    expect(WorkspaceEnvironmentActionRunSchema().parse(run)).toEqual(run);
-  });
-
-  it("flushes an incomplete trailing output sequence during finalization", async () => {
-    const runs = new Runs();
-    const prepared = session("terminal-1");
-    const service = new ProjectActionService(
-      runs as never,
-      projectActionEnvironment(async () => ({ document: { version: "0.0.1", actions: [
-        { id: "build", name: "Build", command: { default: "bun run build" } },
-      ] } })),
-      { findById: () => ({ id: "thread-1", workspace_id: "workspace-1", deleted_at: null, user_completed_at: null }) } as never,
-      { openActionTerminal: async () => prepared } as never,
-      () => new Date("2026-08-22T12:00:00.000Z"),
-      () => "run-1",
-    );
-    await service.start({ threadId: "thread-1", actionId: "build" });
-
-    prepared.emitBytes(new Uint8Array([0xf0, 0x9f]));
-    prepared.exit(0);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    const run = runs.get("thread-1", "build");
-    expect(run).toMatchObject({ status: "completed", revision: 2, transcript: "�" });
-    expect(WorkspaceEnvironmentActionRunSchema().parse(run)).toEqual(run);
-  });
-
   it("releases a reserved slot when environment resolution fails before terminal launch", async () => {
     const runs = new Runs();
     const resolutionFailure = new Error("environment document unavailable");
@@ -1286,7 +1141,6 @@ describe("ProjectActionService", () => {
       runId: "run-1",
       status: "completed",
       revision: 1,
-      transcript: "",
     });
 
     await service.restart({ threadId: "thread-1", actionId: "build" });
@@ -1296,7 +1150,6 @@ describe("ProjectActionService", () => {
       runId: "run-2",
       status: "running",
       revision: 0,
-      transcript: "",
     });
   });
 

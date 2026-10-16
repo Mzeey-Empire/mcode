@@ -20,8 +20,6 @@ export const WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES = 64 * 1024;
 export const WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES = 128 * 1024;
 /** Maximum UTF-8 bytes retained from one manual Setup command. */
 export const WORKSPACE_ENVIRONMENT_SETUP_OUTPUT_MAX_BYTES = 512 * 1024;
-/** Maximum UTF-8 bytes retained from one Project Action terminal transcript. */
-export const WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES = 512 * 1024;
 
 /** Stable validation reasons returned by the workspace environment boundary. */
 export const WorkspaceEnvironmentValidationReasonSchema = z.enum([
@@ -160,15 +158,6 @@ const setupOutputSchema = z.string().superRefine((value, ctx) => {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: `Setup output must be at most ${WORKSPACE_ENVIRONMENT_SETUP_OUTPUT_MAX_BYTES} bytes`,
-    });
-  }
-});
-
-const actionTranscriptSchema = z.string().superRefine((value, ctx) => {
-  if (new TextEncoder().encode(value).byteLength > WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: `Action transcripts must be at most ${WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES} bytes`,
     });
   }
 });
@@ -354,8 +343,6 @@ export const WorkspaceEnvironmentActionRunSchema = lazySchema(() =>
     startedAt: z.string().datetime().nullable(),
     finishedAt: z.string().datetime().nullable(),
     exitCode: z.number().int().nullable(),
-    transcript: actionTranscriptSchema,
-    transcriptTruncated: z.boolean(),
   }).strict().superRefine(validateWorkspaceActionRun),
 );
 /** Latest retained result for one stable Project Action slot. */
