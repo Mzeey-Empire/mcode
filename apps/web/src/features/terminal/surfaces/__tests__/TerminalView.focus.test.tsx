@@ -970,6 +970,24 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     expect(screen.getByRole("button", { name: "Close terminal" })).toBeInTheDocument();
   });
 
+  it("offers no shell retry for an exited terminal that has no owner scope, such as an action's", async () => {
+    retainTerminal("pty-exit");
+
+    render(
+      <TerminalView
+        ptyId="pty-exit"
+        sessionState="exited"
+        exit={{ code: 1, signal: null, reason: "natural" }}
+        visible={true}
+        threadActive={true}
+      />,
+    );
+    await settle();
+
+    expect(screen.queryByRole("button", { name: "Retry terminal" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Close terminal" })).toBeInTheDocument();
+  });
+
   // Regression: retry must replace the retained PTY atomically, or the old
   // tombstone would continue consuming the session capacity.
   it("retries an exited PTY by sending its replacement ID and replacing store state", async () => {
