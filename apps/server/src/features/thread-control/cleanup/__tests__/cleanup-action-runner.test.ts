@@ -195,7 +195,7 @@ describe("CleanupActionRunner", () => {
     expect(terminal.prepare).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith("Cleanup actions unavailable", {
       threadId: "missing-thread",
-      error: "Thread was not found for manual Setup",
+      error: "Thread was not found for startup actions",
     });
   });
 });
