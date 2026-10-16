@@ -937,8 +937,12 @@ A row-1 tab inside the Terminal tool that represents one **terminal record**
 in the active **terminal scope** (a thread when one is active, otherwise the
 workspace root): a **shell session** or an **action terminal**. Selecting a
 Terminal tab shows only that record. Closing a Terminal tab terminates the
-entire process tree rooted at its shell; closing the last one closes the
-Terminal tool. Closing the Terminal tool from the rail hides it without
+entire process tree rooted at its shell, after asking when the user's
+`confirmOnKill` setting says so: by default only while the shell has child
+processes, and never for a shell that already exited. If the process tree
+cannot be inspected, it asks. A close that fails keeps the tab and reports
+it. Closing the last Terminal tab closes the Terminal tool. Closing the
+Terminal tool from the rail hides it without
 stopping its records. When a shell exits on its own, its Terminal tab keeps
 the exit status and retained output until the user closes it or deletes its
 scope.
