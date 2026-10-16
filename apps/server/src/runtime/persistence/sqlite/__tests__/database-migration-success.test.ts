@@ -265,8 +265,6 @@ describe("successful database migration recovery", () => {
         "started_at",
         "finished_at",
         "exit_code",
-        "transcript",
-        "transcript_truncated",
         "trigger",
       ]);
       expect(database.prepare("PRAGMA index_list(project_action_runs)").all()).toEqual(expect.arrayContaining([
