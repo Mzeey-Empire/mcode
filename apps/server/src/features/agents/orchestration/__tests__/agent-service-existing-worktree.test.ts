@@ -1,3 +1,4 @@
+import { startupEnvironmentFixture } from "../../../projects/environment/testing/startup-environment-fixture.js";
 import "reflect-metadata";
 import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
 import * as NodeFSPromises from "node:fs/promises";
@@ -185,7 +186,7 @@ describe("AgentService.createAndSend defaults", () => {
     roots.push(root);
     const prepare = vi.fn();
     const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups } = createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root,
         database: db,
         databaseWriter: persistenceRuntime.writer,
@@ -242,7 +243,7 @@ describe("AgentService.createAndSend defaults", () => {
     roots.push(root);
     const setupCompletion = deferred<TerminalCommandCompletion>();
     const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups } = createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root,
         database: db,
         databaseWriter: persistenceRuntime.writer,
@@ -276,7 +277,7 @@ describe("AgentService.createAndSend defaults", () => {
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
-      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+      document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { linux: "bun run setup" }, runOnStartup: true }] },
     });
 
     const creating = service.createAndSend({
@@ -312,7 +313,7 @@ describe("AgentService.createAndSend defaults", () => {
     const setupCompletion = deferred<TerminalCommandCompletion>();
     const setupRelease = deferred<void>();
     const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups } = createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root, database: db, databaseWriter: persistenceRuntime.writer,
         threads: { findById: (id) => threads.findById(id) },
         terminalCommands: {
@@ -344,7 +345,7 @@ describe("AgentService.createAndSend defaults", () => {
       return managed;
     });
     await automaticSetup.save({ workspaceId: workspace.id, sourceRevision: null,
-      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] } });
+      document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { linux: "bun run setup" }, runOnStartup: true }] } });
     const startupId = "00000000-0000-4000-8000-000000000024";
     const creating = service.createAndSend({ workspaceId: workspace.id, content: "Cancelled first prompt",
       mode: "worktree", branch: "feature/managed", startupId });
@@ -377,7 +378,7 @@ describe("AgentService.createAndSend defaults", () => {
     roots.push(root);
     const prepare = vi.fn();
     const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups, goals } = createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root,
         database: db,
         databaseWriter: persistenceRuntime.writer,
@@ -464,7 +465,7 @@ describe("AgentService.createAndSend defaults", () => {
     roots.push(root);
     const prepare = vi.fn();
     const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups, goalLifecycle } = createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root,
         database: db,
         databaseWriter: persistenceRuntime.writer,
@@ -511,7 +512,7 @@ describe("AgentService.createAndSend defaults", () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-turn-"));
     roots.push(root);
     const { db, threadRepo, workspaceRepo, service, automaticSetup } = createAgentServiceHarness(({ db, threadRepo: threads }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root,
         database: db,
         databaseWriter: persistenceRuntime.writer,
@@ -538,7 +539,7 @@ describe("AgentService.createAndSend defaults", () => {
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
-      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+      document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { linux: "bun run setup" }, runOnStartup: true }] },
     });
     (await environment.queueAutomaticFirstTurn({
       threadId: managed.id,
@@ -577,7 +578,7 @@ describe("AgentService.createAndSend defaults", () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-resend-"));
     roots.push(root);
     const { db, threadRepo, workspaceRepo, service, automaticSetup } = createAgentServiceHarness(({ db, threadRepo: threads }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root,
         database: db,
         databaseWriter: persistenceRuntime.writer,
@@ -594,7 +595,7 @@ describe("AgentService.createAndSend defaults", () => {
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
-      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+      document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { linux: "bun run setup" }, runOnStartup: true }] },
     });
     (await environment.queueAutomaticFirstTurn({
       threadId: managed.id,
@@ -630,7 +631,7 @@ describe("AgentService.createAndSend defaults", () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-turn-capacity-"));
     roots.push(root);
     const { threadRepo, workspaceRepo, service, attachmentService, automaticSetup } = createAgentServiceHarness(({ db, threadRepo: threads }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root,
         database: db,
         databaseWriter: persistenceRuntime.writer,
@@ -647,7 +648,7 @@ describe("AgentService.createAndSend defaults", () => {
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
-      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+      document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { linux: "bun run setup" }, runOnStartup: true }] },
     });
     for (let index = 1; index <= 64; index += 1) {
       (await environment.queueAutomaticFirstTurn({
@@ -689,7 +690,7 @@ describe("AgentService.createAndSend defaults", () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-turn-deletion-"));
     roots.push(root);
     const { threadRepo, workspaceRepo, service, attachmentService, automaticSetup } = createAgentServiceHarness(({ db, threadRepo: threads }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root,
         database: db,
         databaseWriter: persistenceRuntime.writer,
@@ -706,7 +707,7 @@ describe("AgentService.createAndSend defaults", () => {
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
-      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+      document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { linux: "bun run setup" }, runOnStartup: true }] },
     });
     (await environment.queueAutomaticFirstTurn({
       threadId: managed.id,
@@ -748,7 +749,7 @@ describe("AgentService.createAndSend defaults", () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-turn-handled-"));
     roots.push(root);
     const { threadRepo, workspaceRepo, messageRepo, service, attachmentService, goals, automaticSetup } = createAgentServiceHarness(({ db, threadRepo: threads }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root,
         database: db,
         databaseWriter: persistenceRuntime.writer,
@@ -765,7 +766,7 @@ describe("AgentService.createAndSend defaults", () => {
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
-      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+      document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { linux: "bun run setup" }, runOnStartup: true }] },
     });
     (await environment.queueAutomaticFirstTurn({
       threadId: managed.id,
@@ -811,7 +812,7 @@ describe("AgentService.createAndSend defaults", () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-turn-fidelity-"));
     roots.push(root);
     const { db, threadRepo, workspaceRepo, messageRepo, service, automaticSetup } = createAgentServiceHarness(({ db, threadRepo: threads }) =>
-      new WorkspaceEnvironmentService({
+      startupEnvironmentFixture({
         mcodeDir: root,
         database: db,
         databaseWriter: persistenceRuntime.writer,
@@ -829,7 +830,7 @@ describe("AgentService.createAndSend defaults", () => {
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
-      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+      document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { linux: "bun run setup" }, runOnStartup: true }] },
     });
     (await environment.queueAutomaticFirstTurn({
       threadId: managed.id,

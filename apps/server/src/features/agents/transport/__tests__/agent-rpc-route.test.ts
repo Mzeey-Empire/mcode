@@ -69,7 +69,7 @@ describe("routeMessage Agent RPCs", () => {
       await workers.whenReady();
       const workspace = await container.resolve(WorkspaceRepo).create("RPC fixture", root, false);
       await environment.save({ workspaceId: workspace.id, sourceRevision: null,
-        document: { version: "0.0.1", setup: { windows: "echo setup", linux: "echo setup" }, actions: [] } });
+        document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { windows: "echo setup", linux: "echo setup" }, runOnStartup: true }] } });
       const fixture = admissionFixture(async () => {});
       fixture.deps.agentService = container.resolve(AgentService);
       const startupId = NodeCrypto.randomUUID();

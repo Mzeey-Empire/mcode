@@ -64,7 +64,7 @@ export class ProjectActionRunFactory {
       actionId: input.actionId,
       runId: this.createRunId(),
       revision: 0,
-      trigger: "manual",
+      trigger: input.trigger,
       port: input.port,
       terminalSessionId: input.session.terminalSessionId,
       actionName: input.actionName,
@@ -94,7 +94,7 @@ export class ProjectActionRunFactory {
       actionId: input.actionId,
       runId: this.createRunId(),
       revision: 0,
-      trigger: "manual",
+      trigger: input.trigger,
       port: input.port,
       actionName: input.actionName,
       snapshot: input.snapshot,
@@ -105,6 +105,7 @@ export class ProjectActionRunFactory {
 
 /** Shared facts for one retained Project Action run. */
 export interface ProjectActionRunInput {
+  readonly trigger: WorkspaceEnvironmentActionRun["trigger"];
   readonly port: WorkspaceEnvironmentActionPort | null;
   readonly threadId: string;
   readonly workspaceId: string;
@@ -121,6 +122,7 @@ export interface ProjectActionFailedRunInput extends Omit<ProjectActionRunInput,
 
 /** Facts for a running Action terminal session. */
 export interface ProjectActionActiveRunInput {
+  readonly trigger: WorkspaceEnvironmentActionRun["trigger"];
   readonly port: WorkspaceEnvironmentActionPort | null;
   readonly threadId: string;
   readonly workspaceId: string;

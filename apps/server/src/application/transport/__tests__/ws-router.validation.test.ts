@@ -1552,8 +1552,8 @@ describe("routeMessage thread.delete teardown", () => {
   });
 });
 
-describe("routeMessage Setup deletion barriers", () => {
-  it("rejects Setup during a workspace deletion and falls back to not found after deletion", async () => {
+describe("routeMessage command approval deletion barriers", () => {
+  it("rejects action approval during a workspace deletion and falls back to not found after deletion", async () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-setup-workspace-delete-"));
     const thread = { id: "thread-1", workspace_id: "ws-1", mode: "direct", worktree_managed: true };
     let deleted = false;
@@ -1594,13 +1594,13 @@ describe("routeMessage Setup deletion barriers", () => {
       }), deps);
       await teardownEntered.promise;
 
-      await expect(environment.startSetup({ threadId: thread.id })).rejects.toMatchObject({
+      await expect(environment.approveCommand({ threadId: thread.id, target: { kind: "action", actionId: "install" }, fingerprint: "a".repeat(64) })).rejects.toMatchObject({
         code: "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
       });
 
       teardown.resolve();
       await expect(deletion).resolves.toMatchObject({ result: true });
-      await expect(environment.startSetup({ threadId: thread.id })).rejects.toMatchObject({
+      await expect(environment.approveCommand({ threadId: thread.id, target: { kind: "action", actionId: "install" }, fingerprint: "a".repeat(64) })).rejects.toMatchObject({
         code: "WORKSPACE_ENVIRONMENT_NOT_FOUND",
       });
     } finally {

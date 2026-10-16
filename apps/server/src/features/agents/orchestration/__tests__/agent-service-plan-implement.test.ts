@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { ProjectActionService } from "../../../projects/environment/project-action-service.js";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -216,7 +217,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
       const environment = container.resolve(WorkspaceEnvironmentService);
       await environment.setStorageMode({ workspaceId: workspace.id, storageMode: "shared" });
       await environment.save({ workspaceId: workspace.id, threadId, sourceRevision: null,
-        document: { version: "0.0.1", setup: { windows: "exit 7", linux: "exit 7" }, actions: [] } });
+        document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { windows: "exit 7", linux: "exit 7" }, runOnStartup: true }] } });
       git(source, "add", ".mcode/environment.json");
       git(source, "commit", "-m", "Shared setup");
     }
@@ -304,10 +305,11 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(runtime.reservations.get(threadId)?.state).toBe("planImplement");
     await expect(service.saveVersion({ threadId, versionId: NodeCrypto.randomUUID(), baseVersionId: ready.id,
       baseRevision: 0, contentMd: "Blocked edit" })).rejects.toMatchObject({ code: "plan_busy" });
-    const queued = environment.getAutomaticSetup({ threadId: target.id });
-    const approval = queued.attempt?.snapshot?.approval;
+    const actions = container.resolve(ProjectActionService);
+    const approval = actions.get({ threadId: target.id, actionId: "setup" })?.snapshot.approval;
     if (!approval) throw new Error("Expected setup approval");
     await environment.approveCommand({ threadId: target.id, ...approval });
+    await actions.start({ threadId: target.id, actionId: "setup" });
     await expect.poll(() => environment.getAutomaticSetup({ threadId: target.id }).attempt?.state).toBe("failed");
     await environment.continueAutomaticSetup({ threadId: target.id });
     await expect.poll(() => runtime.reservations.get(threadId)).toBeUndefined();
@@ -637,7 +639,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     const listed = await worktreeSource();
     const environment = container.resolve(WorkspaceEnvironmentService);
     await environment.save({ workspaceId, sourceRevision: null,
-      document: { version: "0.0.1", setup: { windows: "echo should-not-run", linux: "echo should-not-run" }, actions: [] } });
+      document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { windows: "echo should-not-run", linux: "echo should-not-run" }, runOnStartup: true }] } });
     const setup = vi.spyOn(environment, "admitAutomaticTurn");
     const input: PlanImplement = { ...request(), target: "new-thread" };
     const receipt = await service.implement(input);

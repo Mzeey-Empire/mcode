@@ -2,27 +2,26 @@ import { z } from "zod";
 import type { Database } from "bun:sqlite";
 import {
   StoredAttachmentSchema, MessageMentionsSchema, PreviewAnnotationBundleSchema,
-  WorkspaceEnvironmentAutomaticSetupSnapshotSchema, WorkspaceEnvironmentSetupLaunchSnapshotSchema,
-  WorkspaceEnvironmentAutomaticSetupReasonSchema, WorkspaceEnvironmentSetupOutcomeSchema,
+  WorkspaceEnvironmentAutomaticSetupSnapshotSchema, ThreadStartupSchema, ThreadStartupActionSchema, WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX,
 } from "@mcode/contracts";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { QueuedTurnSubmissionSchema, WorkspaceEnvironmentAutomaticStore } from "./workspace-environment-automatic-store.js";
 
 const snapshot = WorkspaceEnvironmentAutomaticSetupSnapshotSchema();
-const attempt = z.object({ threadId: z.string(), attemptId: z.string(), snapshot: WorkspaceEnvironmentSetupLaunchSnapshotSchema() }).strict();
-const completion = z.object({ threadId: z.string(), attemptId: z.string(), state: z.enum(["passed", "failed"]), reason: WorkspaceEnvironmentAutomaticSetupReasonSchema.nullable(), outcome: WorkspaceEnvironmentSetupOutcomeSchema, exitCode: z.number().nullable(), output: z.string(), outputTruncated: z.boolean() }).strict();
-const failure = attempt.extend({ reason: WorkspaceEnvironmentAutomaticSetupReasonSchema, outcome: WorkspaceEnvironmentSetupOutcomeSchema.exclude(["success"]) });
+const transition = z.object({
+  threadId: z.string(), attemptId: z.string(),
+  state: z.enum(["running", "awaiting-approval", "passed", "failed"]),
+  actions: z.array(ThreadStartupActionSchema()).max(WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX),
+  failedActionId: z.string().optional(), exitCode: z.number().int().optional(),
+  detail: z.string().min(1).max(2000).optional(),
+}).strict();
 const firstTurn = z.object({ threadId: z.string(), messageId: z.string(), content: z.string(), attachments: z.array(StoredAttachmentSchema()), mentions: MessageMentionsSchema(), previewAnnotations: PreviewAnnotationBundleSchema().optional(), submission: QueuedTurnSubmissionSchema }).strict();
 const clock = z.string();
 
 /** Complete Setup admission, CAS, cancellation and recovery transactions with a sampled clock. */
 export const workspaceEnvironmentAutomaticWriteOperations = {
+  transitionStartupActions: databaseWriteOperation("workspaceEnvironmentAutomatic.transitionStartupActions", z.tuple([z.tuple([transition]), clock]), z.object({ applied: z.boolean(), startup: ThreadStartupSchema().nullable() }).strict()),
   queueFirstTurn: databaseWriteOperation<[Parameters<WorkspaceEnvironmentAutomaticStore["queueFirstTurn"]>, string], ReturnType<WorkspaceEnvironmentAutomaticStore["queueFirstTurn"]>>("workspaceEnvironmentAutomatic.queueFirstTurn", z.tuple([z.tuple([firstTurn]), clock]), z.object({ snapshot, queued: z.boolean() }).strict()),
-  beginAttempt: databaseWriteOperation("workspaceEnvironmentAutomatic.beginAttempt", z.tuple([z.tuple([attempt]), clock]), z.string().nullable()),
-  awaitApproval: databaseWriteOperation("workspaceEnvironmentAutomatic.awaitApproval", z.tuple([z.tuple([attempt]), clock]), z.boolean()),
-  resumeAwaitingApproval: databaseWriteOperation("workspaceEnvironmentAutomatic.resumeAwaitingApproval", z.tuple([z.tuple([z.string()]), clock]), z.boolean()),
-  completeAttempt: databaseWriteOperation("workspaceEnvironmentAutomatic.completeAttempt", z.tuple([z.tuple([completion]), clock]), z.boolean()),
-  failQueuedAttempt: databaseWriteOperation("workspaceEnvironmentAutomatic.failQueuedAttempt", z.tuple([z.tuple([failure]), clock]), z.boolean()),
   releaseWithoutSetup: databaseWriteOperation<[Parameters<WorkspaceEnvironmentAutomaticStore["releaseWithoutSetup"]>, string], ReturnType<WorkspaceEnvironmentAutomaticStore["releaseWithoutSetup"]>>("workspaceEnvironmentAutomatic.releaseWithoutSetup", z.tuple([z.union([z.tuple([z.string()]), z.tuple([z.string(), z.string().optional()])]), clock]), snapshot),
   continueWithoutSetup: databaseWriteOperation("workspaceEnvironmentAutomatic.continueWithoutSetup", z.tuple([z.tuple([z.string()]), clock]), z.boolean()),
   cancelStartupTurns: databaseWriteOperation("workspaceEnvironmentAutomatic.cancelStartupTurns", z.tuple([z.tuple([z.string()]), clock]), z.void()),
@@ -38,12 +37,8 @@ export const workspaceEnvironmentAutomaticWriteOperations = {
 export function workspaceEnvironmentAutomaticWriteHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {
   const operations = workspaceEnvironmentAutomaticWriteOperations;
   return new Map([
+    [operations.transitionStartupActions.name, databaseWriteHandler(operations.transitionStartupActions, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).transitionStartupActions(...input[0]))],
     [operations.queueFirstTurn.name, databaseWriteHandler(operations.queueFirstTurn, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).queueFirstTurn(...input[0]))],
-    [operations.beginAttempt.name, databaseWriteHandler(operations.beginAttempt, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).beginAttempt(...input[0]))],
-    [operations.awaitApproval.name, databaseWriteHandler(operations.awaitApproval, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).awaitApproval(...input[0]))],
-    [operations.resumeAwaitingApproval.name, databaseWriteHandler(operations.resumeAwaitingApproval, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).resumeAwaitingApproval(...input[0]))],
-    [operations.completeAttempt.name, databaseWriteHandler(operations.completeAttempt, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).completeAttempt(...input[0]))],
-    [operations.failQueuedAttempt.name, databaseWriteHandler(operations.failQueuedAttempt, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).failQueuedAttempt(...input[0]))],
     [operations.releaseWithoutSetup.name, databaseWriteHandler(operations.releaseWithoutSetup, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).releaseWithoutSetup(...input[0]))],
     [operations.continueWithoutSetup.name, databaseWriteHandler(operations.continueWithoutSetup, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).continueWithoutSetup(...input[0]))],
     [operations.cancelStartupTurns.name, databaseWriteHandler(operations.cancelStartupTurns, (input) => new WorkspaceEnvironmentAutomaticStore(db, () => input[1]).cancelStartupTurns(...input[0]))],

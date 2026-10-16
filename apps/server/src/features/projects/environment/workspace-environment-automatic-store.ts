@@ -1,3 +1,6 @@
+import { ThreadStartupStore } from "../../thread-startup/persistence/thread-startup-store.js";
+import { ThreadStartupSchema, type ThreadStartup } from "@mcode/contracts";
+import type { StartupActionTransition } from "./startup-action-runner.js";
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
@@ -10,15 +13,12 @@ import type {
   WorkspaceEnvironmentAutomaticSetupReason,
   WorkspaceEnvironmentAutomaticSetupSnapshot,
   WorkspaceEnvironmentQueuedTurn,
-  WorkspaceEnvironmentSetupLaunchSnapshot,
-  WorkspaceEnvironmentSetupOutcome,
 } from "@mcode/contracts";
 import {
   MessageMentionsSchema,
   SelectedTextCommentsSchema,
   SendMessageSchema,
   StoredAttachmentSchema,
-  WorkspaceEnvironmentSetupLaunchSnapshotSchema,
 } from "@mcode/contracts";
 import { z } from "zod";
 import {
@@ -253,14 +253,10 @@ export class WorkspaceEnvironmentAutomaticStore {
           id: workspaceEnvironmentAutomaticSetupAttempts.id,
           state: workspaceEnvironmentAutomaticSetupAttempts.state,
           reason: workspaceEnvironmentAutomaticSetupAttempts.reason,
-          launchSnapshotJson: workspaceEnvironmentAutomaticSetupAttempts.launchSnapshotJson,
-          outcome: workspaceEnvironmentAutomaticSetupAttempts.outcome,
+          failedActionId: workspaceEnvironmentAutomaticSetupAttempts.failedActionId,
           createdAt: workspaceEnvironmentAutomaticSetupAttempts.createdAt,
           startedAt: workspaceEnvironmentAutomaticSetupAttempts.startedAt,
           finishedAt: workspaceEnvironmentAutomaticSetupAttempts.finishedAt,
-          exitCode: workspaceEnvironmentAutomaticSetupAttempts.exitCode,
-          output: workspaceEnvironmentAutomaticSetupAttempts.output,
-          outputTruncated: workspaceEnvironmentAutomaticSetupAttempts.outputTruncated,
         })
         .from(workspaceEnvironmentAutomaticSetupAttempts)
         .where(eq(workspaceEnvironmentAutomaticSetupAttempts.id, gate.attemptId))
@@ -286,16 +282,10 @@ export class WorkspaceEnvironmentAutomaticStore {
         id: attempt.id,
         state: attempt.state as WorkspaceEnvironmentAutomaticSetupAttempt["state"],
         reason: attempt.reason as WorkspaceEnvironmentAutomaticSetupReason | null,
-        snapshot: attempt.launchSnapshotJson
-          ? this.parseLaunchSnapshot(attempt.launchSnapshotJson)
-          : null,
-        outcome: attempt.outcome as WorkspaceEnvironmentSetupOutcome | null,
+        failedActionId: attempt.failedActionId,
         createdAt: attempt.createdAt,
         startedAt: attempt.startedAt,
         finishedAt: attempt.finishedAt,
-        exitCode: attempt.exitCode,
-        output: attempt.output,
-        outputTruncated: attempt.outputTruncated,
       } : null,
       queuedTurns: queued.map((queuedTurn) => ({
         id: queuedTurn.id,
@@ -307,131 +297,67 @@ export class WorkspaceEnvironmentAutomaticStore {
     };
   }
 
-  /** Claim an attempt queued for launch so concurrent automatic starts remain idempotent. */
-  beginAttempt(input: { readonly threadId: string; readonly attemptId: string; readonly snapshot: WorkspaceEnvironmentSetupLaunchSnapshot }): string | null {
-    const now = this.now();
-    const result = runChanges(this.orm
-      .update(workspaceEnvironmentAutomaticSetupAttempts)
-      .set({ state: "running", startedAt: now, launchSnapshotJson: JSON.stringify(input.snapshot) })
-      .where(and(
-        eq(workspaceEnvironmentAutomaticSetupAttempts.id, input.attemptId),
-        eq(workspaceEnvironmentAutomaticSetupAttempts.threadId, input.threadId),
-        eq(workspaceEnvironmentAutomaticSetupAttempts.state, "queued"),
-        sql`${workspaceEnvironmentAutomaticSetupAttempts.id} = (SELECT attempt_id FROM workspace_environment_setup_gates WHERE thread_id = ${input.threadId})`,
-      )));
-    if (result.changes !== 1) return null;
-    return input.attemptId;
-  }
-
-  /** Hold the current automatic Setup attempt until the exact shared command is approved. */
-  awaitApproval(input: {
-    readonly threadId: string;
-    readonly attemptId: string;
-    readonly snapshot: WorkspaceEnvironmentSetupLaunchSnapshot;
-  }): boolean {
-    const result = runChanges(this.orm
-      .update(workspaceEnvironmentAutomaticSetupAttempts)
-      .set({
-        state: "awaiting-approval",
-        reason: "setup_approval_required",
-        launchSnapshotJson: JSON.stringify(input.snapshot),
-      })
-      .where(and(
-        eq(workspaceEnvironmentAutomaticSetupAttempts.id, input.attemptId),
-        eq(workspaceEnvironmentAutomaticSetupAttempts.threadId, input.threadId),
-        eq(workspaceEnvironmentAutomaticSetupAttempts.state, "queued"),
-        sql`${workspaceEnvironmentAutomaticSetupAttempts.id} = (SELECT attempt_id FROM workspace_environment_setup_gates WHERE thread_id = ${input.threadId})`,
-      )));
-    return result.changes === 1;
-  }
-
-  /** Requeue an approval-waiting automatic Setup attempt after its exact command is approved. */
-  resumeAwaitingApproval(threadId: string): boolean {
-    const result = runChanges(this.orm
-      .update(workspaceEnvironmentAutomaticSetupAttempts)
-      .set({ state: "queued", reason: null, launchSnapshotJson: null })
-      .where(and(
-        eq(workspaceEnvironmentAutomaticSetupAttempts.threadId, threadId),
-        eq(workspaceEnvironmentAutomaticSetupAttempts.state, "awaiting-approval"),
-        sql`${workspaceEnvironmentAutomaticSetupAttempts.id} = (SELECT attempt_id FROM workspace_environment_setup_gates WHERE thread_id = ${threadId})`,
-      )));
-    return result.changes === 1;
-  }
-
-  /** Complete one automatic attempt and atomically release its queued Turns after a pass. */
-  completeAttempt(input: {
-    threadId: string;
-    attemptId: string;
-    state: "passed" | "failed";
-    reason: WorkspaceEnvironmentAutomaticSetupReason | null;
-    outcome: WorkspaceEnvironmentSetupOutcome;
-    exitCode: number | null;
-    output: string;
-    outputTruncated: boolean;
-  }): boolean {
-    const now = this.now();
+  /** Commit the attempt and its sole action projection together, releasing turns only after a pass. */
+  transitionStartupActions(input: StartupActionTransition): { applied: boolean; startup: ThreadStartup | null } {
     return this.db.transaction(() => {
-      const attempt = runChanges(this.orm
-        .update(workspaceEnvironmentAutomaticSetupAttempts)
-        .set({
-          state: input.state,
-          reason: input.reason,
-          outcome: input.outcome,
-          exitCode: input.exitCode,
-          output: input.output,
-          outputTruncated: input.outputTruncated,
-          finishedAt: now,
-        })
-        .where(and(
-          eq(workspaceEnvironmentAutomaticSetupAttempts.id, input.attemptId),
-          eq(workspaceEnvironmentAutomaticSetupAttempts.threadId, input.threadId),
-          eq(workspaceEnvironmentAutomaticSetupAttempts.state, "running"),
-        )));
-      if (attempt.changes !== 1) return false;
-      if (input.state !== "passed") return true;
-      this.orm.update(workspaceEnvironmentSetupGates)
-        .set({ state: "released-by-pass", updatedAt: now })
-        .where(and(
-          eq(workspaceEnvironmentSetupGates.threadId, input.threadId),
-          eq(workspaceEnvironmentSetupGates.state, "blocked"),
-        ))
-        .run();
-      this.orm.update(workspaceEnvironmentQueuedTurns)
-        .set({ state: "released", releasedAt: now })
-        .where(and(
-          eq(workspaceEnvironmentQueuedTurns.threadId, input.threadId),
-          eq(workspaceEnvironmentQueuedTurns.state, "queued"),
-        ))
-        .run();
-      return true;
+      const current = this.currentStartupAttempt(input);
+      if (!current) {
+        return { applied: false, startup: null };
+      }
+      const now = this.now();
+      this.orm.update(workspaceEnvironmentAutomaticSetupAttempts).set({
+        state: input.state,
+        reason: input.state === "failed" ? "setup_failed"
+          : input.state === "awaiting-approval" ? "setup_approval_required" : null,
+        failedActionId: input.failedActionId ?? null,
+        startedAt: current.startedAt ?? now,
+        finishedAt: input.state === "passed" || input.state === "failed" ? now : null,
+      }).where(eq(workspaceEnvironmentAutomaticSetupAttempts.id, input.attemptId)).run();
+      const startup = this.updateStartupActions(input);
+      if (input.state === "passed") {
+        this.orm.update(workspaceEnvironmentSetupGates)
+          .set({ state: "released-by-pass", updatedAt: now })
+          .where(eq(workspaceEnvironmentSetupGates.threadId, input.threadId)).run();
+        this.orm.update(workspaceEnvironmentQueuedTurns)
+          .set({ state: "released", releasedAt: now })
+          .where(and(eq(workspaceEnvironmentQueuedTurns.threadId, input.threadId),
+            eq(workspaceEnvironmentQueuedTurns.state, "queued"))).run();
+      }
+      return { applied: true, startup };
     })();
   }
 
-  /** Mark an automatic attempt as failed before the command can start. */
-  failQueuedAttempt(input: {
-    readonly threadId: string;
-    readonly attemptId: string;
-    readonly reason: WorkspaceEnvironmentAutomaticSetupReason;
-    readonly snapshot: WorkspaceEnvironmentSetupLaunchSnapshot;
-    readonly outcome: Exclude<WorkspaceEnvironmentSetupOutcome, "success">;
-  }): boolean {
+  private currentStartupAttempt(input: StartupActionTransition): WorkspaceEnvironmentAutomaticSetupAttempt | null {
+    const startup = new ThreadStartupStore(this.db).findByThreadId(input.threadId);
+    if (startup?.cancellation === "requested" || startup?.state === "cancelled") return null;
+    const current = this.snapshot(input.threadId);
+    if (current.gate !== "blocked" || current.attempt?.id !== input.attemptId) return null;
+    return ["queued", "running", "awaiting-approval"].includes(current.attempt.state) ? current.attempt : null;
+  }
+
+  private updateStartupActions(input: StartupActionTransition): ThreadStartup | null {
+    const store = new ThreadStartupStore(this.db);
+    const startup = store.findByThreadId(input.threadId);
+    if (!startup || startup.phase !== "setup" || startup.cancellation === "requested"
+      || !["running", "blocked", "interrupted"].includes(startup.state)) return null;
+    const blocked = input.state === "failed" || input.state === "awaiting-approval";
     const now = this.now();
-    const result = runChanges(this.orm
-      .update(workspaceEnvironmentAutomaticSetupAttempts)
-      .set({
-        state: "failed",
-        reason: input.reason,
-        launchSnapshotJson: JSON.stringify(input.snapshot),
-        outcome: input.outcome,
-        finishedAt: now,
-      })
-      .where(and(
-        eq(workspaceEnvironmentAutomaticSetupAttempts.id, input.attemptId),
-        eq(workspaceEnvironmentAutomaticSetupAttempts.threadId, input.threadId),
-        eq(workspaceEnvironmentAutomaticSetupAttempts.state, "queued"),
-        sql`${workspaceEnvironmentAutomaticSetupAttempts.id} = (SELECT attempt_id FROM workspace_environment_setup_gates WHERE thread_id = ${input.threadId})`,
-      )));
-    return result.changes === 1;
+    const next: ThreadStartup = {
+      ...startup, revision: startup.revision + 1, updatedAt: now,
+      state: blocked ? "blocked" : "running",
+      block: blocked ? {
+        code: input.state === "failed" ? "SETUP_FAILED" : "SETUP_APPROVAL_REQUIRED",
+        message: input.state === "failed" ? "Project Setup failed" : "Project Setup requires approval",
+        detail: input.detail,
+        actions: ["retry", "continue"],
+      } : undefined,
+      steps: startup.steps.map((step) => step.phase === "setup" ? {
+        ...step, state: blocked ? "blocked" : "running", endedAt: undefined,
+        detail: { phase: "setup", actions: input.actions, exitCode: input.exitCode },
+      } : step),
+    };
+    store.update(ThreadStartupSchema().parse(next));
+    return next;
   }
 
   /** Atomically release queued Turns when the workspace declares no automatic Setup. */
@@ -533,10 +459,6 @@ export class WorkspaceEnvironmentAutomaticStore {
         .set({
           state: "interrupted",
           reason: "setup_interrupted",
-          outcome: null,
-          exitCode: null,
-          output: "",
-          outputTruncated: false,
           finishedAt: now,
         })
         .where(and(
@@ -588,10 +510,6 @@ export class WorkspaceEnvironmentAutomaticStore {
         .set({
           state: "interrupted",
           reason: "setup_interrupted",
-          outcome: null,
-          exitCode: null,
-          output: "",
-          outputTruncated: false,
           finishedAt: now,
         })
         .where(inArray(workspaceEnvironmentAutomaticSetupAttempts.state, ["awaiting-approval", "queued", "running"]))
@@ -690,14 +608,6 @@ export class WorkspaceEnvironmentAutomaticStore {
       this.pruneTerminalTurns(row.threadId);
     }
     return result.changes === 1;
-  }
-
-  private parseLaunchSnapshot(raw: string): WorkspaceEnvironmentSetupLaunchSnapshot {
-    try {
-      return WorkspaceEnvironmentSetupLaunchSnapshotSchema().parse(JSON.parse(raw));
-    } catch {
-      throw new Error("Invalid persisted automatic Setup launch snapshot");
-    }
   }
 
   private parseSubmission(raw: string): WorkspaceEnvironmentQueuedTurnSubmission {

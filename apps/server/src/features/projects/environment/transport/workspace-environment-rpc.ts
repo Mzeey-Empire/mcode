@@ -2,15 +2,11 @@ import type {
   WorkspaceEnvironmentActionListInput,
   WorkspaceEnvironmentActionSlotInput,
   WorkspaceEnvironmentAutomaticSetupContinueInput,
-  WorkspaceEnvironmentAutomaticSetupGetInput,
   WorkspaceEnvironmentAutomaticSetupRetryInput,
-  WorkspaceEnvironmentAutomaticSetupTerminalInput,
   WorkspaceEnvironmentCommandApprovalClearInput,
   WorkspaceEnvironmentCommandApproveInput,
   WorkspaceEnvironmentReadInput,
   WorkspaceEnvironmentSaveInput,
-  WorkspaceEnvironmentSetupGetInput,
-  WorkspaceEnvironmentSetupStartInput,
   WorkspaceEnvironmentStorageSetInput,
   WsMethodName,
 } from "@mcode/contracts";
@@ -30,12 +26,8 @@ type WorkspaceEnvironmentParamsByMethod = {
   "workspace.environment.storage.set": WorkspaceEnvironmentStorageSetInput;
   "workspace.environment.command.approve": WorkspaceEnvironmentCommandApproveInput;
   "workspace.environment.command.clearApprovals": WorkspaceEnvironmentCommandApprovalClearInput;
-  "workspace.environment.setup.start": WorkspaceEnvironmentSetupStartInput;
-  "workspace.environment.setup.get": WorkspaceEnvironmentSetupGetInput;
-  "workspace.environment.automaticSetup.get": WorkspaceEnvironmentAutomaticSetupGetInput;
   "workspace.environment.automaticSetup.continue": WorkspaceEnvironmentAutomaticSetupContinueInput;
   "workspace.environment.automaticSetup.retry": WorkspaceEnvironmentAutomaticSetupRetryInput;
-  "workspace.environment.automaticSetup.openTerminal": WorkspaceEnvironmentAutomaticSetupTerminalInput;
   "workspace.environment.action.list": WorkspaceEnvironmentActionListInput;
   "workspace.environment.action.get": WorkspaceEnvironmentActionSlotInput;
   "workspace.environment.action.start": WorkspaceEnvironmentActionSlotInput;
@@ -76,18 +68,10 @@ const workspaceEnvironmentHandlers: WorkspaceEnvironmentHandlerMap = {
     requireWorkspace(deps, params.workspaceId);
     await deps.workspaceEnvironmentService.clearApprovals(params.workspaceId);
   },
-  "workspace.environment.setup.start": (deps, params) =>
-    deps.workspaceEnvironmentService.startSetup(params),
-  "workspace.environment.setup.get": (deps, params) =>
-    deps.workspaceEnvironmentService.getSetupAttempt(params),
-  "workspace.environment.automaticSetup.get": (deps, params) =>
-    deps.workspaceEnvironmentService.getAutomaticSetup(params),
   "workspace.environment.automaticSetup.continue": (deps, params) =>
     deps.workspaceEnvironmentService.continueAutomaticSetup(params),
   "workspace.environment.automaticSetup.retry": (deps, params) =>
     deps.workspaceEnvironmentService.retryAutomaticSetup(params),
-  "workspace.environment.automaticSetup.openTerminal": (deps, params) =>
-    deps.workspaceEnvironmentService.openAutomaticSetupTerminal(params),
   "workspace.environment.action.list": (deps, params) => ({
     runs: deps.projectActionService.list(params.threadId),
   }),

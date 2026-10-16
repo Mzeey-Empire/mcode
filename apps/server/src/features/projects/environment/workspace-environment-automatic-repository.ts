@@ -23,29 +23,9 @@ export class WorkspaceEnvironmentAutomaticRepository {
     return this.reader.snapshot(...input);
   }
 
-  /** Commit beginAttempt through its database owner. */
-  beginAttempt(...input: Parameters<WorkspaceEnvironmentAutomaticStore["beginAttempt"]>): Promise<ReturnType<WorkspaceEnvironmentAutomaticStore["beginAttempt"]>> {
-    return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.beginAttempt, [input, this.now()]);
-  }
-
-  /** Commit awaitApproval through its database owner. */
-  awaitApproval(...input: Parameters<WorkspaceEnvironmentAutomaticStore["awaitApproval"]>): Promise<ReturnType<WorkspaceEnvironmentAutomaticStore["awaitApproval"]>> {
-    return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.awaitApproval, [input, this.now()]);
-  }
-
-  /** Commit resumeAwaitingApproval through its database owner. */
-  resumeAwaitingApproval(...input: Parameters<WorkspaceEnvironmentAutomaticStore["resumeAwaitingApproval"]>): Promise<ReturnType<WorkspaceEnvironmentAutomaticStore["resumeAwaitingApproval"]>> {
-    return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.resumeAwaitingApproval, [input, this.now()]);
-  }
-
-  /** Commit completeAttempt through its database owner. */
-  completeAttempt(...input: Parameters<WorkspaceEnvironmentAutomaticStore["completeAttempt"]>): Promise<ReturnType<WorkspaceEnvironmentAutomaticStore["completeAttempt"]>> {
-    return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.completeAttempt, [input, this.now()]);
-  }
-
-  /** Commit failQueuedAttempt through its database owner. */
-  failQueuedAttempt(...input: Parameters<WorkspaceEnvironmentAutomaticStore["failQueuedAttempt"]>): Promise<ReturnType<WorkspaceEnvironmentAutomaticStore["failQueuedAttempt"]>> {
-    return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.failQueuedAttempt, [input, this.now()]);
+  /** Commit the startup action projection and attempt as one transition. */
+  transitionStartupActions(...input: Parameters<WorkspaceEnvironmentAutomaticStore["transitionStartupActions"]>): Promise<ReturnType<WorkspaceEnvironmentAutomaticStore["transitionStartupActions"]>> {
+    return this.writer.execute(workspaceEnvironmentAutomaticWriteOperations.transitionStartupActions, [input, this.now()]);
   }
 
   /** Commit releaseWithoutSetup through its database owner. */

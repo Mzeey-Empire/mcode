@@ -52,11 +52,15 @@ export const PROJECT_ACTION_RUN_ID_FACTORY_TOKEN = "ProjectActionRunIdFactory";
 
 export type { ProjectActionRunUpdate };
 
+type ProjectActionStartOptions = { trigger: WorkspaceEnvironmentActionRun["trigger"]; expectedScriptHash?: string };
+
 interface ProjectActionStartContext {
   readonly slot: string;
   readonly thread: ProjectActionStartThread;
   readonly actionId: string;
   readonly reservation: StartingProjectAction;
+  readonly trigger: WorkspaceEnvironmentActionRun["trigger"];
+  readonly expectedScriptHash?: string;
 }
 
 /** Owns Project Action slot exclusion, latest-run retention, and backend process lifecycle. */
@@ -65,6 +69,7 @@ export class ProjectActionService {
   private readonly terminals = new Map<string, {
     threadId: string; terminal: ActionTerminal; unsubscribe: (() => void)[]; closed: Promise<void>;
   }>();
+  private readonly outputListeners = new Set<(run: WorkspaceEnvironmentActionRun, bytes: Uint8Array) => void>();
   private readonly active = new Map<string, ProjectActionSlotState>();
   private readonly admission = new ProjectActionAdmissionGate();
   private readonly publisher: ProjectActionRunPublisher;
@@ -97,6 +102,12 @@ export class ProjectActionService {
     return this.publisher.onUpdate(listener);
   }
 
+  /** Observe command bytes only; synthesized command echoes and shell output are excluded. */
+  onCommandOutput(listener: (run: WorkspaceEnvironmentActionRun, bytes: Uint8Array) => void): () => void {
+    this.outputListeners.add(listener);
+    return () => { this.outputListeners.delete(listener); };
+  }
+
   /** Lists bounded retained Action results for one Thread. */
   list(threadId: string): WorkspaceEnvironmentActionRun[] {
     return this.runs.list(threadId);
@@ -108,7 +119,7 @@ export class ProjectActionService {
   }
 
   /** Starts an Action or returns the run already owned by its open terminal. */
-  async start(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun> {
+  async start(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionStartOptions = { trigger: "manual" }): Promise<WorkspaceEnvironmentActionRun> {
     const thread = this.threads.findById(input.threadId);
     if (!thread) throw threadNotFoundError();
     this.admission.assertThreadCanStart(thread, thread);
@@ -118,11 +129,11 @@ export class ProjectActionService {
       if (this.active.get(slot)?.state === "pending-finalization") throw actionAlreadyRunningError();
       if (retained) return retained;
     }
-    return this.startNewRun(input);
+    return this.startNewRun(input, approvalStartOptions(retained, options));
   }
 
-  private async startNewRun(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun> {
-    const context = this.createStartContext(input);
+  private async startNewRun(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionStartOptions): Promise<WorkspaceEnvironmentActionRun> {
+    const context = { ...this.createStartContext(input), ...options };
     let releaseAdmission: (() => void) | null = null;
     try {
       releaseAdmission = this.admission.reserveStart(context.thread.id, context.thread.workspace_id);
@@ -138,18 +149,24 @@ export class ProjectActionService {
     const active = await this.activeForSlot(slotKey(input.threadId, input.actionId));
     if (!active) {
       await this.terminals.get(slotKey(input.threadId, input.actionId))?.terminal.stopCommand();
-      return this.runs.get(input.threadId, input.actionId);
+      const pending = this.runs.get(input.threadId, input.actionId);
+      if (pending?.status === "awaiting-approval") {
+        return this.publisher.persistAndPublish({
+          ...pending, revision: pending.revision + 1, status: "interrupted", finishedAt: this.runFactory.timestamp(),
+        });
+      }
+      return pending;
     }
     if (active.state === "pending-finalization") return this.retryFinalization(input, active);
     return await this.stopRunningAction(input, active);
   }
 
   /** Creates a fresh run after the previous command settles, reusing its terminal. */
-  async restart(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun> {
+  async restart(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionStartOptions = { trigger: "manual" }): Promise<WorkspaceEnvironmentActionRun> {
     const active = await this.activeForSlot(slotKey(input.threadId, input.actionId));
     if (active?.state === "pending-finalization") await this.retryFinalization(input, active);
     else if (active) await this.stopRunningAction(input, active, "replace");
-    return await this.startNewRun(input);
+    return await this.startNewRun(input, options);
   }
 
   /** Closes every Action terminal owned by one Thread and persists its final state. */
@@ -193,7 +210,7 @@ export class ProjectActionService {
     }
   }
 
-  private createStartContext(input: WorkspaceEnvironmentActionSlotInput): ProjectActionStartContext {
+  private createStartContext(input: WorkspaceEnvironmentActionSlotInput): Omit<ProjectActionStartContext, "trigger" | "expectedScriptHash"> {
     const slot = slotKey(input.threadId, input.actionId);
     if (this.active.has(slot)) throw actionAlreadyRunningError();
     const thread = this.threads.findById(input.threadId);
@@ -206,6 +223,15 @@ export class ProjectActionService {
 
   private async startAdmittedAction(context: ProjectActionStartContext): Promise<WorkspaceEnvironmentActionRun> {
     const resolved = await resolveProjectAction(this.environment, context.thread.id, context.actionId);
+    if (context.expectedScriptHash && resolved.snapshot.script !== null
+      && NodeCrypto.createHash("sha256").update(resolved.snapshot.script).digest("hex") !== context.expectedScriptHash) {
+      const failed = this.runFactory.createFailed({
+        ...this.runInput(context, resolved), script: resolved.snapshot.script,
+      });
+      return this.publisher.persistAndPublish({
+        ...failed, terminalSessionId: this.terminals.get(context.slot)?.terminal.terminalSessionId ?? null,
+      });
+    }
     this.admission.assertThreadCanStart(context.thread, this.threads.findById(context.thread.id));
     return await this.startResolvedAction(context, resolved);
   }
@@ -336,7 +362,10 @@ export class ProjectActionService {
     const unsubscribe = [() => monitor.stop()];
     const tracked = this.terminals.get(context.slot);
     if (tracked) tracked.unsubscribe = unsubscribe;
-    unsubscribe.push(session.onCommandOutput((bytes) => monitor.write(bytes)));
+    unsubscribe.push(session.onCommandOutput((bytes) => {
+      monitor.write(bytes);
+      for (const listener of this.outputListeners) listener(active.run, bytes);
+    }));
     unsubscribe.push(session.onCommandExit((exit) => this.finishAction(context.slot, runId, exit.exitCode)));
     if (active.state !== "running") for (const remove of unsubscribe) remove();
     this.settleStartingReservation(context);
@@ -406,9 +435,11 @@ export class ProjectActionService {
     readonly actionName: string;
     readonly snapshot: ProjectActionResolution["snapshot"];
     readonly port: WorkspaceEnvironmentActionPort | null;
+    readonly trigger: WorkspaceEnvironmentActionRun["trigger"];
   } {
     const previousPort = this.runs.get(context.thread.id, context.actionId)?.port;
     return {
+      trigger: context.trigger,
       threadId: context.thread.id,
       workspaceId: context.thread.workspace_id,
       actionId: resolved.action.id,
@@ -506,4 +537,13 @@ function terminalCapError(actionName: string): WorkspaceEnvironmentServiceError 
     "WORKSPACE_ENVIRONMENT_TERMINAL_CAP",
     `8 terminals are open. Close one to run ${actionName}.`,
   );
+}
+
+function approvalStartOptions(retained: WorkspaceEnvironmentActionRun | null, options: ProjectActionStartOptions): ProjectActionStartOptions {
+  if (retained?.status !== "awaiting-approval") return options;
+  return {
+    ...options, trigger: retained.trigger,
+    expectedScriptHash: options.expectedScriptHash ?? (retained.trigger === "startup"
+      ? NodeCrypto.createHash("sha256").update(retained.snapshot.script ?? "").digest("hex") : undefined),
+  };
 }

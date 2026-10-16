@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_THREAD_SUBSCRIPTIONS, WS_METHODS, type WsMethodName } from "../methods.js";
 
-const automaticSetupMethod: WsMethodName = "workspace.environment.automaticSetup.get";
+const automaticSetupMethod: WsMethodName = "workspace.environment.automaticSetup.retry";
 // @ts-expect-error WebSocket method names remain a closed compile-time union.
 const unknownMethod: WsMethodName = "workspace.environment.automaticSetup.unknown";
 void automaticSetupMethod;
@@ -18,7 +18,7 @@ describe("thread switching WebSocket contracts", () => {
     for (const comparisonId of ["", "c".repeat(513)]) expect(file.safeParse({ ...valid, comparisonId }).success).toBe(false);
   });
   it("keeps WebSocket methods closed at runtime", () => {
-    expect(WS_METHODS()).toHaveProperty("workspace.environment.automaticSetup.get");
+    expect(WS_METHODS()).toHaveProperty("workspace.environment.automaticSetup.retry");
     expect(WS_METHODS()).not.toHaveProperty("workspace.environment.automaticSetup.unknown");
   });
 

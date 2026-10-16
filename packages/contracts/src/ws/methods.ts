@@ -18,16 +18,9 @@ import {
   WorkspaceEnvironmentStorageSetInputSchema,
   WorkspaceEnvironmentCommandApproveInputSchema,
   WorkspaceEnvironmentCommandApprovalClearInputSchema,
-  WorkspaceEnvironmentSetupAttemptSchema,
-  WorkspaceEnvironmentSetupGetInputSchema,
-  WorkspaceEnvironmentSetupGetResultSchema,
-  WorkspaceEnvironmentSetupStartInputSchema,
   WorkspaceEnvironmentAutomaticSetupSnapshotSchema,
-  WorkspaceEnvironmentAutomaticSetupGetInputSchema,
   WorkspaceEnvironmentAutomaticSetupContinueInputSchema,
   WorkspaceEnvironmentAutomaticSetupRetryInputSchema,
-  WorkspaceEnvironmentAutomaticSetupTerminalInputSchema,
-  WorkspaceEnvironmentAutomaticSetupTerminalSchema,
   WorkspaceEnvironmentActionGetResultSchema,
   WorkspaceEnvironmentActionListInputSchema,
   WorkspaceEnvironmentActionListResultSchema,
@@ -41,16 +34,9 @@ import type {
   WorkspaceEnvironmentStorageSetInput,
   WorkspaceEnvironmentCommandApproveInput,
   WorkspaceEnvironmentCommandApprovalClearInput,
-  WorkspaceEnvironmentSetupAttempt,
-  WorkspaceEnvironmentSetupGetInput,
-  WorkspaceEnvironmentSetupGetResult,
-  WorkspaceEnvironmentSetupStartInput,
   WorkspaceEnvironmentAutomaticSetupSnapshot,
-  WorkspaceEnvironmentAutomaticSetupGetInput,
   WorkspaceEnvironmentAutomaticSetupContinueInput,
   WorkspaceEnvironmentAutomaticSetupRetryInput,
-  WorkspaceEnvironmentAutomaticSetupTerminalInput,
-  WorkspaceEnvironmentAutomaticSetupTerminal,
   WorkspaceEnvironmentActionGetResult,
   WorkspaceEnvironmentActionListInput,
   WorkspaceEnvironmentActionListResult,
@@ -535,12 +521,8 @@ type WorkspaceEnvironmentSetupWsMethodName =
   | "workspace.environment.storage.set"
   | "workspace.environment.command.approve"
   | "workspace.environment.command.clearApprovals"
-  | "workspace.environment.setup.start"
-  | "workspace.environment.setup.get"
-  | "workspace.environment.automaticSetup.get"
   | "workspace.environment.automaticSetup.continue"
-  | "workspace.environment.automaticSetup.retry"
-  | "workspace.environment.automaticSetup.openTerminal";
+  | "workspace.environment.automaticSetup.retry";
 
 const workspaceEnvironmentSetupMethods = (): Record<
   WorkspaceEnvironmentSetupWsMethodName,
@@ -558,18 +540,6 @@ const workspaceEnvironmentSetupMethods = (): Record<
     params: WorkspaceEnvironmentCommandApprovalClearInputSchema() as z.ZodType<WorkspaceEnvironmentCommandApprovalClearInput>,
     result: z.void(),
   },
-  "workspace.environment.setup.start": {
-    params: WorkspaceEnvironmentSetupStartInputSchema() as z.ZodType<WorkspaceEnvironmentSetupStartInput>,
-    result: WorkspaceEnvironmentSetupAttemptSchema() as z.ZodType<WorkspaceEnvironmentSetupAttempt>,
-  },
-  "workspace.environment.setup.get": {
-    params: WorkspaceEnvironmentSetupGetInputSchema() as z.ZodType<WorkspaceEnvironmentSetupGetInput>,
-    result: WorkspaceEnvironmentSetupGetResultSchema() as z.ZodType<WorkspaceEnvironmentSetupGetResult>,
-  },
-  "workspace.environment.automaticSetup.get": {
-    params: WorkspaceEnvironmentAutomaticSetupGetInputSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupGetInput>,
-    result: WorkspaceEnvironmentAutomaticSetupSnapshotSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupSnapshot>,
-  },
   "workspace.environment.automaticSetup.continue": {
     params: WorkspaceEnvironmentAutomaticSetupContinueInputSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupContinueInput>,
     result: WorkspaceEnvironmentAutomaticSetupSnapshotSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupSnapshot>,
@@ -577,10 +547,6 @@ const workspaceEnvironmentSetupMethods = (): Record<
   "workspace.environment.automaticSetup.retry": {
     params: WorkspaceEnvironmentAutomaticSetupRetryInputSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupRetryInput>,
     result: WorkspaceEnvironmentAutomaticSetupSnapshotSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupSnapshot>,
-  },
-  "workspace.environment.automaticSetup.openTerminal": {
-    params: WorkspaceEnvironmentAutomaticSetupTerminalInputSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupTerminalInput>,
-    result: WorkspaceEnvironmentAutomaticSetupTerminalSchema() as z.ZodType<WorkspaceEnvironmentAutomaticSetupTerminal>,
   },
 });
 
