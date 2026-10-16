@@ -22,8 +22,8 @@ interface ActionControlsProps {
 }
 
 /**
- * The retained run for an action record. A reconnect rebuilds the record before
- * any action menu hydrates the run store, so the run is fetched on demand.
+ * Reconnect can restore a terminal before any action menu hydrates its run,
+ * so these controls must be able to hydrate independently.
  */
 function useActionRun(threadId: string, actionId: string): WorkspaceEnvironmentActionRun | null {
   const run = useProjectActionStore((state) => state.runsByThread[threadId]?.[actionId] ?? null);
@@ -55,7 +55,7 @@ function CommandPill({ run }: { readonly run: WorkspaceEnvironmentActionRun }) {
   );
 }
 
-/** Failed runs report their exit code; an interrupted run was stopped on purpose, so it shows none. */
+/** Intentional stops are not failures, so they have no exit-code pill. */
 function ExitPill({ run }: { readonly run: WorkspaceEnvironmentActionRun }) {
   if (run.status !== "failed" || run.exitCode === null) return null;
   return (
@@ -78,9 +78,7 @@ function failCommand(command: ActionCommand, run: WorkspaceEnvironmentActionRun,
 }
 
 /**
- * Row 2 for the active Project Action record: its command, an Exit pill after a
- * failure, then Restart and Stop while it runs or Run again once it ends. Both
- * reruns reuse the record's terminal, so the tab does not move.
+ * Project Action controls for row 2. Reruns reuse the terminal to preserve its tab.
  */
 export function ActionControls({ workspaceId, threadId, terminal, onClose }: ActionControlsProps) {
   const run = useActionRun(threadId, terminal.actionId ?? "");

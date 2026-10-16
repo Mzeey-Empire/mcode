@@ -3,7 +3,6 @@ import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 
 type RunBadge = "running" | "failed";
 
-/** Running and failed are the only runs worth a badge: a completed or stopped one has nothing to flag. */
 function badgeFor(run: WorkspaceEnvironmentActionRun | undefined): RunBadge | null {
   if (run?.status === "running") return "running";
   if (run?.status === "failed") return "failed";
@@ -11,8 +10,7 @@ function badgeFor(run: WorkspaceEnvironmentActionRun | undefined): RunBadge | nu
 }
 
 /**
- * Tab glyph for a Project Action record: a play mark with a status badge at its
- * bottom-right corner. The 2px ring in the page colour cuts the badge out of the glyph.
+ * Project Action tab icon with badges for running and failed runs.
  * The play mark is a placeholder until the action icon set lands.
  */
 export function ActionTabGlyph({ run }: { readonly run: WorkspaceEnvironmentActionRun | undefined }) {

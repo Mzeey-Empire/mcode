@@ -5,7 +5,6 @@ import { Popover, PopoverContent } from "@/components/ui/popover";
 interface TerminalCloseConfirmProps {
   readonly name: string;
   readonly anchor: HTMLElement | null;
-  /** The command of a Project Action run, which changes the wording to name what stops. */
   readonly command?: string;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;

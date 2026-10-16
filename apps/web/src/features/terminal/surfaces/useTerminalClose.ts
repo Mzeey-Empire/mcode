@@ -12,7 +12,7 @@ export interface PendingClose {
   readonly ptyId: string;
   readonly name: string;
   readonly anchor: HTMLElement | null;
-  /** Set when the close would stop a running Project Action, so the question names its command. */
+  /** Present only when closing would stop a running Project Action. */
   readonly command?: string;
 }
 
@@ -42,7 +42,6 @@ async function closeTerminalRecord(scope: CloseScope, ptyId: string, name: strin
   useDiffStore.getState().closeRightPanelTab(scope.workspaceId, scope.threadId, "terminal");
 }
 
-/** What a close must ask the user, or null when it can proceed without asking. */
 async function closeQuestion(
   terminal: TerminalInstance,
   actionRuns: Readonly<Record<string, WorkspaceEnvironmentActionRun>>,

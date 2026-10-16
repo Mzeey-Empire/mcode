@@ -75,7 +75,7 @@ interface TerminalState {
     resultCount: number,
   ) => void;
   clearTerminalSearchResult: (ptyId: string) => void;
-  /** Adds a record and makes it the scope's active terminal unless `activate` is false and another is already active. */
+  /** `activate: false` preserves an existing active tab for background updates. */
   addTerminal: (
     threadId: string,
     ptyId: string,
@@ -95,7 +95,7 @@ interface TerminalState {
   toggleSplit: () => void;
 }
 
-/** Pauses the terminal a different one replaces; TerminalView resumes the new one once its listener is attached. */
+/** Resume belongs to TerminalView: its data listener must be attached before output flows. */
 function pauseReplacedTerminal(previous: string | null, next: string | null): void {
   if (!previous || previous === next) return;
   getTransport().terminalPause(previous).catch(() => {});

@@ -13,7 +13,7 @@ interface TerminalTabStripProps {
   readonly terminals: readonly TerminalInstance[];
   readonly activeId: string | null;
   readonly labels: ReadonlyMap<string, string>;
-  /** Runs for this scope's thread, keyed by action id, so action tabs can show their status. */
+  /** Keyed by action id within this scope's thread. */
   readonly actionRuns: Readonly<Record<string, WorkspaceEnvironmentActionRun>>;
   readonly onClose: (ptyId: string) => void;
 }

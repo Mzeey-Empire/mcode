@@ -60,9 +60,8 @@ export function commandHeadline(run: WorkspaceEnvironmentActionRun): string {
 }
 
 /**
- * The command that closing `terminal` would stop, when it is an action record
- * whose run is still going. The run owns the command phase, so the process
- * probe is skipped: an action in its command phase always asks.
+ * Running action command requiring close confirmation, or null when none is required.
+ * Run state is authoritative for active commands, regardless of child-process probes.
  */
 export function runningActionCommand(
   terminal: TerminalInstance,
