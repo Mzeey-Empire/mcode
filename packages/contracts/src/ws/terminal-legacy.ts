@@ -75,11 +75,12 @@ export const LegacyTerminalMethods = lazySchema(() => ({
       cold: z.boolean().optional(),
     }),
     result: z.discriminatedUnion("mode", [
-      z.object({ mode: z.literal("delta") }),
+      z.object({ mode: z.literal("delta"), replayThrough: z.number().int().min(-1).optional() }),
       z.object({
         mode: z.literal("checkpoint"),
         checkpoint: z.string(),
         checkpointThrough: z.number().int().min(-1),
+        replayThrough: z.number().int().min(-1).optional(),
       }),
       z.object({
         mode: z.literal("reset"),

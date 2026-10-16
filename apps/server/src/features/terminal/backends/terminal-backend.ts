@@ -42,8 +42,8 @@ export class ActionTerminalClosedError extends Error {}
 
 /** Result of a legacy Terminal reattachment. */
 export type TerminalReattachResult =
-  | { mode: "delta" }
-  | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number }
+  | { mode: "delta"; replayThrough: number }
+  | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number; replayThrough: number }
   | { mode: "reset"; discardThrough: number };
 
 /** A Terminal create that completed after its owning WebSocket disconnected. */

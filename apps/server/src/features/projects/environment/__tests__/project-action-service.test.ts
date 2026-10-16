@@ -161,7 +161,7 @@ describe("ProjectActionService with the in-memory PTY host", () => {
       ptyId: run.terminalSessionId, kind: "action", actionId: "build", state: "running",
     })]);
     if (!run.terminalSessionId) throw new Error("Action did not create a terminal");
-    expect(f.backend.reattach(run.terminalSessionId, -1)).toEqual({ mode: "delta" });
+    expect(f.backend.reattach(run.terminalSessionId, -1)).toEqual({ mode: "delta", replayThrough: 1 });
     const commandId = f.creates.mock.calls[0][0].sessionId;
     expect(updates.map(({ status, revision }) => ({ status, revision }))).toEqual([{ status: "running", revision: 0 }]);
     f.host.emitOutput(commandId, Buffer.from("ready\r\n"));

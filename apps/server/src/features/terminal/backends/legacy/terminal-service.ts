@@ -550,9 +550,9 @@ export class TerminalService {
     lastSeq: number,
     cold = false,
   ):
-    | { mode: "delta" }
+    | { mode: "delta"; replayThrough: number }
     | { mode: "reset"; discardThrough: number }
-    | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number } {
+    | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number; replayThrough: number } {
     const replayBuffer = this.replayBuffers.get(ptyId);
     if (!replayBuffer) throw new Error(`PTY not found: ${ptyId}`);
     const replay = this.prepareReattachReplay(replayBuffer, lastSeq, cold);
@@ -592,19 +592,20 @@ export class TerminalService {
     restore: ReturnType<TerminalReplayBuffer["restoreCold"]> | null,
     gapped: boolean,
   ):
-    | { mode: "delta" }
+    | { mode: "delta"; replayThrough: number }
     | { mode: "reset"; discardThrough: number }
-    | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number } {
+    | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number; replayThrough: number } {
     if (restore?.mode === "checkpoint") {
       return {
         mode: "checkpoint",
         checkpoint: restore.checkpoint.data,
         checkpointThrough: restore.checkpoint.seq,
+        replayThrough: replayBuffer.latest,
       };
     }
     if (restore?.mode === "reset") return { mode: "reset", discardThrough: restore.discardThrough };
     if (gapped) return { mode: "reset", discardThrough: replayBuffer.latest };
-    return { mode: "delta" };
+    return { mode: "delta", replayThrough: replayBuffer.latest };
   }
 
   /** Saves a bounded serialized renderer state for a later cold mount. */
