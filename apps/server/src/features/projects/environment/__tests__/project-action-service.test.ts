@@ -572,6 +572,67 @@ describe("ProjectActionService with the in-memory PTY host", () => {
     expect(again.terminalSessionId).not.toBe(pending.terminalSessionId);
   });
 
+  it("starts the approved run in its own terminal when the start is bound to that run", async () => {
+    const f = await actionFixture(true);
+    const pending = await f.actions.start(actionSlot);
+    if (!pending.snapshot.approval) throw new Error("Missing shared approval");
+    await f.environment.approveCommand({ threadId: ACTION_TEST_THREAD, ...pending.snapshot.approval });
+
+    const started = await f.actions.start({ ...actionSlot, expectedRunId: pending.runId });
+
+    expect(started).toMatchObject({ status: "running", terminalSessionId: pending.terminalSessionId });
+    expect(f.backend.listActiveSessions()).toHaveLength(1);
+  });
+
+  it("refuses a bound start after the pending terminal was closed instead of opening a new one", async () => {
+    const f = await actionFixture(true);
+    const pending = await f.actions.start(actionSlot);
+    await f.backend.kill(pending.terminalSessionId!);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("interrupted"));
+
+    await expect(f.actions.start({ ...actionSlot, expectedRunId: pending.runId }))
+      .rejects.toMatchObject({ code: "WORKSPACE_ENVIRONMENT_RUN_CLOSED" });
+
+    expect(f.backend.listActiveSessions()).toEqual([]);
+    expect(f.creates.mock.calls).toEqual([]);
+  });
+
+  it("refuses a bound start whose terminal closes while the environment is still resolving", async () => {
+    const f = await actionFixture(true);
+    const pending = await f.actions.start(actionSlot);
+    if (!pending.snapshot.approval) throw new Error("Missing shared approval");
+    await f.environment.approveCommand({ threadId: ACTION_TEST_THREAD, ...pending.snapshot.approval });
+    const resolving = deferred<void>();
+    const release = deferred<void>();
+    const resolve = f.environment.resolveActionCommand.bind(f.environment);
+    vi.spyOn(f.environment, "resolveActionCommand").mockImplementationOnce(async (...args) => {
+      resolving.resolve();
+      await release.promise;
+      return resolve(...args);
+    });
+
+    const starting = f.actions.start({ ...actionSlot, expectedRunId: pending.runId });
+    const outcome = expect(starting).rejects.toMatchObject({ code: "WORKSPACE_ENVIRONMENT_RUN_CLOSED" });
+    await resolving.promise;
+    await f.backend.kill(pending.terminalSessionId!);
+    release.resolve();
+    await outcome;
+
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("interrupted"));
+    expect(f.backend.listActiveSessions()).toEqual([]);
+    expect(f.creates.mock.calls).toEqual([]);
+  });
+
+  it("refuses a bound start for a run that a newer approval replaced", async () => {
+    const f = await actionFixture(true);
+    const pending = await f.actions.start(actionSlot);
+    const renewed = await f.actions.start(actionSlot);
+    expect(renewed.runId).not.toBe(pending.runId);
+
+    await expect(f.actions.start({ ...actionSlot, expectedRunId: pending.runId }))
+      .rejects.toMatchObject({ code: "WORKSPACE_ENVIRONMENT_RUN_CLOSED" });
+  });
+
   it("clears a pending terminal closed while its initial run is still being saved", async () => {
     const f = await actionFixture(true);
     const saving = deferred<void>();

@@ -1084,8 +1084,8 @@ export function createWsTransport(
         "workspace.environment.action.list",
         { threadId },
       )).runs,
-    startWorkspaceAction: (threadId, actionId) =>
-      rpc<WorkspaceEnvironmentActionRun>("workspace.environment.action.start", { threadId, actionId }),
+    startWorkspaceAction: (threadId, actionId, expectedRunId) =>
+      rpc<WorkspaceEnvironmentActionRun>("workspace.environment.action.start", { threadId, actionId, expectedRunId }),
     stopWorkspaceAction: async (threadId, actionId) =>
       (await rpc<{ run: WorkspaceEnvironmentActionRun | null }>(
         "workspace.environment.action.stop",

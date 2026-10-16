@@ -1,6 +1,7 @@
 import type {
   WorkspaceEnvironmentActionListInput,
   WorkspaceEnvironmentActionSlotInput,
+  WorkspaceEnvironmentActionStartInput,
   WorkspaceEnvironmentAutomaticSetupContinueInput,
   WorkspaceEnvironmentAutomaticSetupGetInput,
   WorkspaceEnvironmentAutomaticSetupRetryInput,
@@ -38,7 +39,7 @@ type WorkspaceEnvironmentParamsByMethod = {
   "workspace.environment.automaticSetup.openTerminal": WorkspaceEnvironmentAutomaticSetupTerminalInput;
   "workspace.environment.action.list": WorkspaceEnvironmentActionListInput;
   "workspace.environment.action.get": WorkspaceEnvironmentActionSlotInput;
-  "workspace.environment.action.start": WorkspaceEnvironmentActionSlotInput;
+  "workspace.environment.action.start": WorkspaceEnvironmentActionStartInput;
   "workspace.environment.action.stop": WorkspaceEnvironmentActionSlotInput;
   "workspace.environment.action.restart": WorkspaceEnvironmentActionSlotInput;
 };

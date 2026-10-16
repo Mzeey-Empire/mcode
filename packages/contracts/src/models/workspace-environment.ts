@@ -430,6 +430,23 @@ export type WorkspaceEnvironmentActionSlotInput = z.infer<
   ReturnType<typeof WorkspaceEnvironmentActionSlotInputSchema>
 >;
 
+/**
+ * Request to start one Project Action slot.
+ *
+ * `expectedRunId` binds the start to a run the caller saw waiting for approval. The server then
+ * refuses to launch unless that run's terminal is still open, so a tab the user closed meanwhile
+ * is not replaced by a new terminal running the approved command.
+ */
+export const WorkspaceEnvironmentActionStartInputSchema = lazySchema(() =>
+  WorkspaceEnvironmentActionSlotInputSchema().extend({
+    expectedRunId: z.string().min(1).max(256).optional(),
+  }).strict(),
+);
+/** Request to start one Project Action slot, optionally bound to the run the caller approved. */
+export type WorkspaceEnvironmentActionStartInput = z.infer<
+  ReturnType<typeof WorkspaceEnvironmentActionStartInputSchema>
+>;
+
 /** Result for one retained Project Action slot request. */
 export const WorkspaceEnvironmentActionGetResultSchema = lazySchema(() =>
   z.object({ run: WorkspaceEnvironmentActionRunSchema().nullable() }).strict(),
@@ -825,6 +842,7 @@ export const WorkspaceEnvironmentErrorSchema = lazySchema(() => z.object({
     "WORKSPACE_ENVIRONMENT_ACTION_NOT_FOUND",
     "WORKSPACE_ENVIRONMENT_APPROVAL_STALE",
     "WORKSPACE_ENVIRONMENT_APPROVAL_NOT_REQUIRED",
+    "WORKSPACE_ENVIRONMENT_RUN_CLOSED",
   ]),
   message: z.string().min(1),
   issues: z.array(WorkspaceEnvironmentValidationIssueSchema()).optional(),
