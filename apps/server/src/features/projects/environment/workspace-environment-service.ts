@@ -889,12 +889,12 @@ export class WorkspaceEnvironmentService {
     }
   }
 
-  /** Blocks startup actions starts while a Thread deletion operation is active. */
+  /** Blocks startup action starts while a Thread deletion is active. */
   beginThreadDeletion(threadId: string): () => void {
     return this.beginDeletion(this.deletingThreadCounts, threadId);
   }
 
-  /** Blocks startup actions starts while a workspace deletion operation is active. */
+  /** Blocks startup action starts while a workspace deletion is active. */
   beginWorkspaceDeletion(workspaceId: string): () => void {
     return this.beginDeletion(this.deletingWorkspaceCounts, workspaceId);
   }

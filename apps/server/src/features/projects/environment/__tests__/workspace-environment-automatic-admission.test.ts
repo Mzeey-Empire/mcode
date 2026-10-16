@@ -50,8 +50,6 @@ function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value
 }
 
 async function eventually(assertion: () => void): Promise<void> {
-  // Bound by time, not timer ticks: Setup resolution reads the environment file from disk, and a
-  // loaded CI runner can need more than a few dozen ticks for that read to settle.
   await vi.waitFor(assertion, { timeout: 2_000, interval: 1 });
 }
 
@@ -895,8 +893,6 @@ describe("startup action gate admission and recovery", () => {
     await service.queueAutomaticFirstTurn(queuedInput(1, threadId));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
-    // Mirror a server restart: bootstrap interrupts the startup record first,
-    // then reconciles the automatic Setup attempt.
     await startups.interruptNonterminalOnStartup();
     await service.reconcileAutomaticSetup();
     expect(startups.findByThreadId(threadId)?.state).toBe("interrupted");
@@ -905,7 +901,6 @@ describe("startup action gate admission and recovery", () => {
 
     expect(snapshot.gate).toBe("released-by-continue");
     expect(dispatch).toHaveBeenCalledOnce();
-    // The dispatched Turn's first provider frame, not the drain, completes the startup.
     expect(startups.findByThreadId(threadId)).toMatchObject({ state: "running", phase: "agent" });
     expect(startups.findByThreadId(threadId)?.steps[2].detail).toMatchObject({ phase: "setup", skipReason: "user-skipped", actions: [{ actionId: "setup", outcome: "running" }] });
   });
@@ -982,8 +977,6 @@ describe("startup action gate admission and recovery", () => {
         return startups;
       },
     });
-    // A direct startup never opens a Setup gate; nothing can drive it past
-    // interrupted, so reconciliation must settle it instead of pinning the shell.
     await startups.start({ startupId, workspaceId: "workspace-1", kind: "direct" });
     await startups.advance(startupId, "thread");
     await startups.bindThread(startupId, threadId);
@@ -1018,8 +1011,6 @@ describe("startup action gate admission and recovery", () => {
     await startups.interruptNonterminalOnStartup();
     await service.reconcileAutomaticSetup();
 
-    // The interrupted attempt still offers Continue and Retry, so the startup
-    // must stay interrupted for the recovery card instead of completing early.
     expect(service.getAutomaticSetup({ threadId }).attempt?.state).toBe("interrupted");
     expect(startups.findByThreadId(threadId)?.state).toBe("interrupted");
   });
@@ -1046,14 +1037,10 @@ describe("startup action gate admission and recovery", () => {
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(service.getAutomaticSetup({ threadId }).attempt?.state).toBe("failed"));
 
-    // With no dispatcher wired, Continue releases the gate and Turn while the
-    // startup moves to the agent phase but cannot settle yet.
     await service.continueAutomaticSetup({ threadId });
     expect(service.getAutomaticSetup({ threadId }).gate).toBe("released-by-continue");
     expect(startups.findByThreadId(threadId)?.state).toBe("running");
 
-    // A second restart interrupts the startup while its gate is already
-    // released; the stale failed attempt must not keep the shell pinned.
     await startups.interruptNonterminalOnStartup();
     expect(startups.findByThreadId(threadId)?.state).toBe("interrupted");
     await service.reconcileAutomaticSetup();
