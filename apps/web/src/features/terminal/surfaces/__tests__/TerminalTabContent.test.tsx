@@ -77,9 +77,9 @@ function actionRun(overrides: Partial<WorkspaceEnvironmentActionRun> = {}): Work
   };
 }
 
-function seedAction(run: WorkspaceEnvironmentActionRun): void {
+function seedAction(run: WorkspaceEnvironmentActionRun, state: TerminalInstance["state"] = "running"): void {
   useProjectActionStore.getState().applyRun(run);
-  seed([shell("pty-action", { kind: "action", actionId: "web", label: "web" })]);
+  seed([shell("pty-action", { kind: "action", actionId: "web", label: "web", state })]);
 }
 
 const closeTab = (name: string) => fireEvent.click(screen.getByRole("button", { name: `Close ${name}` }));
@@ -308,6 +308,25 @@ describe("Terminal tool header", () => {
       expect(screen.getByRole("button", { name: `web, ${label}` })).toHaveAttribute("aria-pressed");
     });
 
+    it("shows the needs-you ring for a run awaiting approval", () => {
+      seedAction(actionRun({ status: "awaiting-approval", startedAt: null }), "pending");
+      renderTool();
+
+      expect(screen.getByTestId("action-tab-badge")).toHaveAttribute("data-badge", "pending");
+      expect(screen.getByRole("button", { name: "web, Approval required" })).toHaveAttribute("aria-pressed");
+    });
+
+    it("closes a pending action without asking, even when confirmOnKill is always, since nothing is running", async () => {
+      setConfirmOnKill("always");
+      seedAction(actionRun({ status: "awaiting-approval", startedAt: null }), "pending");
+      renderTool();
+
+      closeTab("web");
+
+      await waitFor(() => expect(terminalKill).toHaveBeenCalledWith("pty-action"));
+      expect(screen.queryByText("Stop web?")).not.toBeInTheDocument();
+    });
+
     it("shows no badge once the run completed", () => {
       seedAction(actionRun({ status: "completed", exitCode: 0 }));
       renderTool();
@@ -397,6 +416,17 @@ describe("Terminal tool header", () => {
       expect(screen.getByTestId("action-command-pill")).toHaveTextContent("bun run dev");
       expect(screen.queryByTestId("working-folder-pill")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Clear terminal" })).not.toBeInTheDocument();
+    });
+
+    it("offers only the command pill and More while the run awaits approval", () => {
+      seedAction(actionRun({ status: "awaiting-approval", startedAt: null }), "pending");
+      renderTool();
+
+      expect(screen.getByTestId("action-command-pill")).toHaveTextContent("bun run dev");
+      expect(screen.getByRole("button", { name: "More terminal actions" })).toBeInTheDocument();
+      for (const name of ["Restart", "Stop", "Run again"]) {
+        expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+      }
     });
 
     it("Clear asks only the active terminal to clear its view", () => {

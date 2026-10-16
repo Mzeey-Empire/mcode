@@ -11,7 +11,7 @@ import {
 } from "react";
 import { CircleCheck, CircleSlash, CircleStop, CircleX, Pencil, Play } from "lucide-react";
 import { MoreIcon } from "@/components/ui/icon-map";
-import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun, WorkspaceEnvironmentCommandApproval } from "@mcode/contracts";
+import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +25,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { getTransport } from "@/transport";
 import { applyActionRun } from "@/features/terminal/state/applyActionRun";
 import { useProjectActionStore } from "./state/project-action-store";
-import { isProjectCommandApprovalInvalid, ProjectCommandApprovalDialog } from "./ProjectCommandApprovalDialog";
 
 const ACTION_RESULT_DISPLAY_MS = 2_000;
 
@@ -33,7 +32,6 @@ interface ProjectActionMenuProps {
   readonly actions: readonly WorkspaceEnvironmentAction[];
   readonly runsByActionId: ReadonlyMap<string, WorkspaceEnvironmentActionRun>;
   readonly onStart: (actionId: string) => Promise<void | WorkspaceEnvironmentActionRun>;
-  readonly onApprove?: (actionId: string, approval: WorkspaceEnvironmentCommandApproval) => Promise<void | WorkspaceEnvironmentActionRun>;
   readonly onFocus: (actionId: string) => void;
   readonly onEdit: () => void;
   readonly setupMenuItem?: ReactNode;
@@ -67,10 +65,9 @@ interface LoadedSetupAvailability {
 }
 
 /** Renders Project Actions and the eligible manual Setup command beside Project settings. */
-export function ProjectActionMenu({ actions, runsByActionId, onStart, onApprove, onFocus, onEdit, setupMenuItem, loadError = null }: ProjectActionMenuProps) {
+export function ProjectActionMenu({ actions, runsByActionId, onStart, onFocus, onEdit, setupMenuItem, loadError = null }: ProjectActionMenuProps) {
   const [open, setOpen] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const [approvalRun, setApprovalRun] = useState<WorkspaceEnvironmentActionRun | null>(null);
   const pointerActivation = useRef<ProjectActionPointerActivation | null>(null);
   const keyboardActivation = useRef<ProjectActionActivation | null>(null);
   const configuredActionIds = useMemo(() => new Set(actions.map((action) => action.id)), [actions]);
@@ -82,12 +79,7 @@ export function ProjectActionMenu({ actions, runsByActionId, onStart, onApprove,
   ], [actions, configuredActionIds, runsByActionId]);
   const startAction = useCallback((actionId: string) => {
     setStartError(null);
-    void onStart(actionId).then(
-      (run) => {
-        if (run?.status === "awaiting-approval") setApprovalRun(run);
-      },
-      () => setStartError("Project Action could not start."),
-    );
+    void onStart(actionId).catch(() => setStartError("Project Action could not start."));
   }, [onStart]);
   const hasActionGroup = rows.length > 0 || Boolean(loadError) || Boolean(startError);
   const hasSetup = setupMenuItem !== null && setupMenuItem !== undefined;
@@ -108,12 +100,6 @@ export function ProjectActionMenu({ actions, runsByActionId, onStart, onApprove,
         loadError={loadError}
         startError={startError}
         setupMenuItem={setupMenuItem}
-      />
-      <ProjectActionApprovalDialog
-        approvalRun={approvalRun}
-        onApprove={onApprove}
-        onApprovalResolved={setApprovalRun}
-        onError={setStartError}
       />
     </>
   );
@@ -203,7 +189,7 @@ function ProjectActionMenuItem({
   readonly pointerActivation: MutableRefObject<ProjectActionPointerActivation | null>;
   readonly keyboardActivation: MutableRefObject<ProjectActionActivation | null>;
 }) {
-  const focusAction = run?.status === "running" || !row.configured;
+  const focusAction = run?.status === "running" || run?.status === "awaiting-approval" || !row.configured;
   return (
     <DropdownMenuItem
       data-testid={`project-action-${row.actionId}`}
@@ -214,7 +200,7 @@ function ProjectActionMenuItem({
       onPointerUp={(event) => recordProjectActionPointerUp(event, row, focusAction, pointerActivation, keyboardActivation)}
       onPointerCancel={(event) => cancelProjectActionPointer(event, pointerActivation)}
       onKeyDown={(event) => recordProjectActionKeyboard(event, row, focusAction, pointerActivation, keyboardActivation)}
-      onClick={() => activateProjectAction(row, run, focusAction, onStart, onFocus, pointerActivation, keyboardActivation)}
+      onClick={() => activateProjectAction(row, focusAction, onStart, onFocus, pointerActivation, keyboardActivation)}
     />
   );
 }
@@ -269,17 +255,12 @@ function recordProjectActionKeyboard(
 
 function activateProjectAction(
   row: ProjectActionMenuRow,
-  run: WorkspaceEnvironmentActionRun | null,
   focusAction: boolean,
   onStart: (actionId: string) => void,
   onFocus: (actionId: string) => void,
   pointerActivation: MutableRefObject<ProjectActionPointerActivation | null>,
   keyboardActivation: MutableRefObject<ProjectActionActivation | null>,
 ): void {
-  if (run?.status === "awaiting-approval") {
-    onStart(row.actionId);
-    return;
-  }
   if (consumeProjectActionActivation(keyboardActivation.current, row.actionId, onStart, onFocus)) return;
   const pointer = pointerActivation.current;
   if (pointer?.released && consumeProjectActionActivation(pointer, row.actionId, onStart, onFocus)) return;
@@ -308,47 +289,12 @@ function isCurrentProjectActionPointer(
   return activation?.actionId === actionId && activation.pointerId === pointerId;
 }
 
-function ProjectActionApprovalDialog({
-  approvalRun,
-  onApprove,
-  onApprovalResolved,
-  onError,
-}: {
-  readonly approvalRun: WorkspaceEnvironmentActionRun | null;
-  readonly onApprove: ProjectActionMenuProps["onApprove"];
-  readonly onApprovalResolved: (run: WorkspaceEnvironmentActionRun | null) => void;
-  readonly onError: (error: string) => void;
-}) {
-  if (!approvalRun) return null;
-  return (
-    <ProjectCommandApprovalDialog
-      approval={approvalRun.snapshot.approval ?? null}
-      script={approvalRun.snapshot.script}
-      onApprove={async () => {
-        try {
-          const approval = approvalRun.snapshot.approval;
-          if (!approval || !onApprove) return false;
-          const run = await onApprove(approvalRun.actionId, approval);
-          onApprovalResolved(run?.status === "awaiting-approval" ? run : null);
-          return run?.status !== "awaiting-approval";
-        } catch (error) {
-          onApprovalResolved(null);
-          onError("Project Action could not start.");
-          throw error;
-        }
-      }}
-      onCancel={() => onApprovalResolved(null)}
-    />
-  );
-}
-
 /** Loads configured Actions and reads retained runs from renderer-owned action state. */
 export function useProjectActions(workspaceId: string, threadId: string): {
   readonly actions: readonly WorkspaceEnvironmentAction[];
   readonly hasSetup: boolean;
   readonly runsByActionId: ReadonlyMap<string, WorkspaceEnvironmentActionRun>;
   readonly start: (actionId: string) => Promise<WorkspaceEnvironmentActionRun>;
-  readonly approve: (actionId: string, approval: WorkspaceEnvironmentCommandApproval) => Promise<WorkspaceEnvironmentActionRun>;
   readonly loadError: string | null;
 } {
   const [actions, setActions] = useState<readonly WorkspaceEnvironmentAction[]>([]);
@@ -413,17 +359,7 @@ export function useProjectActions(workspaceId: string, threadId: string): {
     return run;
   }, [threadId]);
 
-  const approve = useCallback(async (actionId: string, approval: WorkspaceEnvironmentCommandApproval) => {
-    try {
-      await getTransport().approveWorkspaceEnvironmentCommand(threadId, approval.target, approval.fingerprint);
-      return await start(actionId);
-    } catch (error) {
-      if (isProjectCommandApprovalInvalid(error)) return await start(actionId);
-      throw error;
-    }
-  }, [start, threadId]);
-
-  return { actions, hasSetup, runsByActionId, start, approve, loadError };
+  return { actions, hasSetup, runsByActionId, start, loadError };
 }
 
 function ActionStatus({

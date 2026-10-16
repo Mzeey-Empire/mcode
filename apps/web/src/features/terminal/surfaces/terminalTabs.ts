@@ -74,13 +74,13 @@ export function runningActionCommand(
 }
 
 /**
- * Whether closing `terminal` should ask first. An exited or failed record has no
- * process left to stop. If the child-process check itself fails, ask: stopping a
+ * Whether closing `terminal` should ask first. An exited, failed or pending-approval
+ * record has no process left to stop. If the child-process check itself fails, ask: stopping a
  * process the user did not expect to lose costs more than one extra click.
  */
 export async function closeNeedsConfirm(terminal: TerminalInstance, confirmOnKill: ConfirmOnKill): Promise<boolean> {
   if (confirmOnKill === "never") return false;
-  if (terminal.state === "exited" || terminal.state === "failed") return false;
+  if (terminal.state === "exited" || terminal.state === "failed" || terminal.state === "pending") return false;
   if (confirmOnKill === "always") return true;
   try {
     return (await getTransport().terminalHasChildren(terminal.id)).hasChildren;

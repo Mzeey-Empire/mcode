@@ -1,5 +1,6 @@
 /** Public Terminal feature surface for workbench composition. */
 export {
+  PendingActionApproval,
   TerminalPoolHost,
   TerminalTabContent,
   TerminalView,

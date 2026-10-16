@@ -16,7 +16,7 @@ export interface PendingClose {
   readonly command?: string;
 }
 
-interface CloseScope {
+export interface CloseScope {
   readonly workspaceId: string;
   readonly threadId: string | null;
   readonly scopeId: string;
@@ -26,7 +26,7 @@ interface CloseScope {
  * On failure the record stays: the process may still be running, and the user
  * needs to know closing it did not stop it.
  */
-async function closeTerminalRecord(scope: CloseScope, ptyId: string, name: string): Promise<void> {
+export async function closeTerminalRecord(scope: CloseScope, ptyId: string, name: string): Promise<void> {
   try {
     await getTransport().terminalKill(ptyId);
   } catch (error) {

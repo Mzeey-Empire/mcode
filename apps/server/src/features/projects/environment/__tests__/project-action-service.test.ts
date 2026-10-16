@@ -371,6 +371,32 @@ describe("ProjectActionService with the in-memory PTY host", () => {
     expect(await changed).toMatchObject({ status: "awaiting-approval", snapshot: { script: "vite --host" } });
   });
 
+  it("counts a pending approval terminal toward the eight-terminal cap", async () => {
+    const f = await actionFixture(true);
+    for (let i = 0; i < 7; i++) {
+      const terminal = await f.backend.create(ACTION_TEST_THREAD);
+      f.host.emitExit(terminal.ptyId, 0);
+    }
+    const pending = await f.actions.start(actionSlot);
+    expect(pending).toMatchObject({ status: "awaiting-approval" });
+    await expect(f.backend.create(ACTION_TEST_THREAD)).rejects.toThrow(/Maximum PTY limit/);
+  });
+
+  it("interrupts a cancelled pending approval and asks again in a new terminal", async () => {
+    const f = await actionFixture(true);
+    const pending = await f.actions.start(actionSlot);
+    await f.backend.kill(pending.terminalSessionId!);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)).toMatchObject({
+      status: "interrupted", terminalSessionId: null,
+    }));
+    expect(f.creates.mock.calls).toEqual([]);
+
+    const again = await f.actions.start(actionSlot);
+    expect(again).toMatchObject({ status: "awaiting-approval" });
+    expect(again.terminalSessionId).not.toBeNull();
+    expect(again.terminalSessionId).not.toBe(pending.terminalSessionId);
+  });
+
   it("clears a pending terminal closed while its initial run is still being saved", async () => {
     const f = await actionFixture(true);
     const saving = deferred<void>();

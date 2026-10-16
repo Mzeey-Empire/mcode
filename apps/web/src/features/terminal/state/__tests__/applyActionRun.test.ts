@@ -48,6 +48,25 @@ describe("applyActionRun", () => {
     expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("pty-1");
   });
 
+  it("adopts a run awaiting approval as a pending record, then starts it in the same record on approval", () => {
+    const pending = actionRun({ status: "awaiting-approval", startedAt: null });
+    applyActionRun(pending, { focus: true });
+    expect(useTerminalStore.getState().terminals["thread-1"]?.[0]?.state).toBe("pending");
+
+    applyActionRun(actionRun({ runId: "run-2", createdAt: "2026-08-22T12:00:01.000Z" }), { focus: true });
+
+    expect(recordIds()).toEqual(["pty-1"]);
+    expect(useTerminalStore.getState().terminals["thread-1"]?.[0]?.state).toBe("running");
+  });
+
+  it("removes the pending record when the run is cancelled", () => {
+    applyActionRun(actionRun({ status: "awaiting-approval", startedAt: null }), { focus: true });
+
+    applyActionRun(actionRun({ status: "interrupted", terminalSessionId: null, startedAt: null, revision: 1 }), { focus: false });
+
+    expect(recordIds()).toEqual([]);
+  });
+
   it("leaves the tab the user is on when a run starts in the background", () => {
     useTerminalStore.getState().addTerminal("thread-1", "shell", "pwsh");
 

@@ -161,41 +161,26 @@ describe("ProjectAction controls", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Project Action could not start.");
   });
 
-  it("re-resolves a configured Action awaiting approval before showing the command to review", async () => {
+  it("opens the pending tab of an Action awaiting approval instead of starting it again", async () => {
     const user = userEvent.setup();
-    const staleRun: WorkspaceEnvironmentActionRun = {
+    const pendingRun: WorkspaceEnvironmentActionRun = {
       ...completedRun,
       status: "awaiting-approval",
-      terminalSessionId: null,
       finishedAt: null,
       exitCode: null,
       snapshot: {
         ...completedRun.snapshot,
-        script: "bun run stale-build",
-        approval: {
-          target: { kind: "action", actionId: "build" },
-          fingerprint: "stale-fingerprint",
-        },
+        approval: { target: { kind: "action", actionId: "build" }, fingerprint: "fingerprint-1" },
       },
     };
-    const refreshedRun: WorkspaceEnvironmentActionRun = {
-      ...staleRun,
-      snapshot: {
-        ...staleRun.snapshot,
-        script: "bun run build --fresh",
-        approval: {
-          target: { kind: "action", actionId: "build" },
-          fingerprint: "fresh-fingerprint",
-        },
-      },
-    };
-    const start = vi.fn().mockResolvedValue(refreshedRun);
+    const start = vi.fn();
+    const focus = vi.fn();
     render(
       <ProjectActionMenu
         actions={[action]}
-        runsByActionId={new Map([["build", staleRun]])}
+        runsByActionId={new Map([["build", pendingRun]])}
         onStart={start}
-        onFocus={vi.fn()}
+        onFocus={focus}
         onEdit={vi.fn()}
       />,
     );
@@ -203,9 +188,8 @@ describe("ProjectAction controls", () => {
     await user.click(screen.getByRole("button", { name: "Project Actions" }));
     await user.click(await screen.findByRole("menuitem", { name: /Build/ }));
 
-    expect(start).toHaveBeenCalledWith("build");
-    expect(await screen.findByText("bun run build --fresh")).toBeInTheDocument();
-    expect(screen.queryByText("bun run stale-build")).not.toBeInTheDocument();
+    expect(focus).toHaveBeenCalledWith("build");
+    expect(start).not.toHaveBeenCalled();
   });
 
   it("keeps a deleted Action row available for retained result inspection", async () => {

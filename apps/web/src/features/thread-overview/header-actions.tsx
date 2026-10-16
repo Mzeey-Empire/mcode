@@ -57,11 +57,6 @@ function ProjectActions({ thread }: { thread: Thread }) {
     revealTerminal();
     return run;
   }, [projectActions, revealTerminal]);
-  const approveProjectAction = useCallback(async (actionId: string, approval: import("@mcode/contracts").WorkspaceEnvironmentCommandApproval) => {
-    const run = await projectActions.approve(actionId, approval);
-    revealTerminal();
-    return run;
-  }, [projectActions, revealTerminal]);
   const focusProjectAction = useCallback((actionId: string) => {
     revealTerminal();
     const ptyId = findActionTerminalId(thread.id, actionId);
@@ -73,7 +68,6 @@ function ProjectActions({ thread }: { thread: Thread }) {
     runsByActionId={projectActions.runsByActionId}
     loadError={projectActions.loadError}
     onStart={startProjectAction}
-    onApprove={approveProjectAction}
     onFocus={focusProjectAction}
     onEdit={openProjectSettings}
     setupMenuItem={getThreadOverviewSetupMenuItem(
