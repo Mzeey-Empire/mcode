@@ -1,9 +1,10 @@
 import { useMemo } from "react";
-import { Terminal } from "lucide-react";
 import { TERMINAL_MAX_PER_SCOPE, type WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { PanelTabStrip, type PanelTabStripItem } from "@/components/panels/shell/PanelTabStrip";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
+import { ActionIcon } from "@/features/projects/actions/ActionIcon";
+import { shellActionIconId } from "@/features/projects/actions/action-icons";
 import { createTerminalForScope } from "@/lib/ensure-terminal";
 import { ActionTabGlyph, actionBadgeLabel } from "./ActionTabGlyph";
 import { TERMINAL_CAP_REASON } from "./terminalTabs";
@@ -27,7 +28,7 @@ export function TerminalTabStrip({ scopeId, terminals, activeId, labels, actionR
         return {
           id: terminal.id,
           label: labels.get(terminal.id) ?? terminal.label,
-          icon: terminal.kind === "action" ? <ActionTabGlyph run={run} /> : <Terminal aria-hidden />,
+          icon: terminal.kind === "action" ? <ActionTabGlyph run={run} /> : <ActionIcon iconId={shellActionIconId(terminal.label)} command="" size={14} />,
           status: actionBadgeLabel(run),
         };
       }),
