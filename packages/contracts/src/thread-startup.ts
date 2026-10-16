@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { lazySchema } from "./utils/lazySchema.js";
+import { WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX, WorkspaceEnvironmentActionIdSchema } from "./models/workspace-environment.js";
 
 /** Maximum retained output entries for one thread startup. */
 export const THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES = 32;
@@ -67,6 +68,16 @@ const fetchFields = {
   branch: z.string().trim().min(1).max(256).optional(),
 };
 
+/** One frozen startup action; scripts remain in the document and launch snapshot. */
+export const ThreadStartupActionSchema = lazySchema(() => z.object({
+  actionId: WorkspaceEnvironmentActionIdSchema,
+  scriptHash: z.string().regex(/^[a-f0-9]{64}$/),
+  runId: z.string().min(1).max(256).nullable(),
+  outcome: z.enum(["pending", "running", "ready", "failed", "skipped"]),
+}).strict());
+/** One action's readiness within the current startup sequence. */
+export type ThreadStartupAction = z.infer<ReturnType<typeof ThreadStartupActionSchema>>;
+
 /** Arguments and outcomes retained for one startup phase, without script text. */
 export const ThreadStartupStepDetailSchema = lazySchema(() => z.discriminatedUnion("phase", [
   z.object({ phase: z.literal("fetch"), ...fetchFields }).strict(),
@@ -78,6 +89,7 @@ export const ThreadStartupStepDetailSchema = lazySchema(() => z.discriminatedUni
   }).strict(),
   z.object({
     phase: z.literal("setup"),
+    actions: z.array(ThreadStartupActionSchema()).max(WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX).optional(),
     exitCode: z.number().int().optional(),
     skipReason: z.enum(["not-configured", "thread-running-here", "user-skipped", "plan-implement"]).optional(),
   }).strict(),

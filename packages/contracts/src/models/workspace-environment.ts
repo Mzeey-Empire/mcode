@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TerminalExecutableSchema, TerminalProfileArgumentsSchema } from "./terminal.js";
+import { TERMINAL_MAX_PER_SCOPE, TerminalExecutableSchema, TerminalProfileArgumentsSchema } from "./terminal.js";
 import { lazySchema } from "../utils/lazySchema.js";
 
 /** Latest supported workspace environment document version. */
@@ -17,9 +17,9 @@ export const WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES = 32 * 1024;
 /** Maximum UTF-8 bytes accepted for one platform command object. */
 export const WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES = 64 * 1024;
 /** Maximum UTF-8 bytes accepted for the complete environment document. */
-export const WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES = 128 * 1024;
-/** Maximum UTF-8 bytes retained from one manual Setup command. */
-export const WORKSPACE_ENVIRONMENT_SETUP_OUTPUT_MAX_BYTES = 512 * 1024;
+export const WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES = 512 * 1024;
+/** Maximum startup actions that can each retain a terminal in one scope. */
+export const WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX = TERMINAL_MAX_PER_SCOPE;
 
 /** Stable validation reasons returned by the workspace environment boundary. */
 export const WorkspaceEnvironmentValidationReasonSchema = z.enum([
@@ -30,6 +30,7 @@ export const WorkspaceEnvironmentValidationReasonSchema = z.enum([
   "document_too_large",
   "null_byte",
   "duplicate_action_id",
+  "too_many_startup_actions",
   "invalid_value",
 ]);
 export type WorkspaceEnvironmentValidationReason = z.infer<
@@ -105,12 +106,9 @@ export type WorkspaceEnvironmentPlatform = z.infer<typeof WorkspaceEnvironmentPl
 export const WorkspaceEnvironmentStorageModeSchema = z.enum(["system", "shared"]);
 export type WorkspaceEnvironmentStorageMode = z.infer<typeof WorkspaceEnvironmentStorageModeSchema>;
 
-/** Identifies either the Project Setup command or one stable Project Action command. */
+/** Identifies one stable Project Action command. */
 export const WorkspaceEnvironmentCommandTargetSchema = lazySchema(() =>
-  z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("setup") }).strict(),
-    z.object({ kind: z.literal("action"), actionId: WorkspaceEnvironmentActionIdSchema }).strict(),
-  ]),
+  z.object({ kind: z.literal("action"), actionId: WorkspaceEnvironmentActionIdSchema }).strict(),
 );
 export type WorkspaceEnvironmentCommandTarget = z.infer<
   ReturnType<typeof WorkspaceEnvironmentCommandTargetSchema>
@@ -127,168 +125,9 @@ export type WorkspaceEnvironmentCommandApproval = z.infer<
   ReturnType<typeof WorkspaceEnvironmentCommandApprovalSchema>
 >;
 
-/** Public lifecycle states for one manual Setup attempt. */
-export const WorkspaceEnvironmentSetupStatusSchema = z.enum([
-  "awaiting-approval",
-  "running",
-  "passed",
-  "failed",
-  "unavailable",
-]);
-export type WorkspaceEnvironmentSetupStatus = z.infer<
-  typeof WorkspaceEnvironmentSetupStatusSchema
->;
-
-/** Stable terminal and configuration outcomes for manual Setup attempts. */
-export const WorkspaceEnvironmentSetupOutcomeSchema = z.enum([
-  "success",
-  "command_failure",
-  "launch_failure",
-  "configuration_failure",
-  "timeout",
-  "containment_failure",
-  "unavailable",
-]);
-export type WorkspaceEnvironmentSetupOutcome = z.infer<
-  typeof WorkspaceEnvironmentSetupOutcomeSchema
->;
-
-const setupOutputSchema = z.string().superRefine((value, ctx) => {
-  if (new TextEncoder().encode(value).byteLength > WORKSPACE_ENVIRONMENT_SETUP_OUTPUT_MAX_BYTES) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: `Setup output must be at most ${WORKSPACE_ENVIRONMENT_SETUP_OUTPUT_MAX_BYTES} bytes`,
-    });
-  }
-});
-
-/** Immutable launch details captured before a manual Setup process begins. */
-export const WorkspaceEnvironmentSetupLaunchSnapshotSchema = lazySchema(() =>
-  z.object({
-    platform: WorkspaceEnvironmentPlatformSchema,
-    script: scriptSchema.nullable(),
-    checkoutPath: z.string().min(1).max(32 * 1024).nullable(),
-    terminal: z.object({
-      executable: TerminalExecutableSchema(),
-      arguments: TerminalProfileArgumentsSchema(),
-    }).strict().nullable(),
-    approval: WorkspaceEnvironmentCommandApprovalSchema().nullable().optional(),
-  }).strict(),
-);
-export type WorkspaceEnvironmentSetupLaunchSnapshot = z.infer<
-  ReturnType<typeof WorkspaceEnvironmentSetupLaunchSnapshotSchema>
->;
-
-/** Immutable public result of a manual Setup command for one Thread. */
-export const WorkspaceEnvironmentSetupAttemptSchema = lazySchema(() =>
-  z.object({
-    id: z.string().min(1).max(256),
-    threadId: z.string().min(1).max(256),
-    workspaceId: z.string().min(1).max(256),
-    status: WorkspaceEnvironmentSetupStatusSchema,
-    outcome: WorkspaceEnvironmentSetupOutcomeSchema.nullable(),
-    snapshot: WorkspaceEnvironmentSetupLaunchSnapshotSchema(),
-    createdAt: z.string().datetime(),
-    startedAt: z.string().datetime().nullable(),
-    finishedAt: z.string().datetime().nullable(),
-    exitCode: z.number().int().nullable(),
-    output: setupOutputSchema,
-    outputTruncated: z.boolean(),
-    cleanupPending: z.boolean(),
-  }).strict().superRefine(validateManualSetupAttempt),
-);
-export type WorkspaceEnvironmentSetupAttempt = z.infer<
-  ReturnType<typeof WorkspaceEnvironmentSetupAttemptSchema>
->;
-
-type ManualSetupAttemptValidationInput = {
-  readonly status: WorkspaceEnvironmentSetupStatus;
-  readonly outcome: WorkspaceEnvironmentSetupOutcome | null;
-  readonly snapshot: { readonly approval?: unknown | null };
-  readonly startedAt: string | null;
-  readonly finishedAt: string | null;
-  readonly exitCode: number | null;
-  readonly cleanupPending: boolean;
-};
-
-function validateManualSetupAttempt(attempt: ManualSetupAttemptValidationInput, context: z.RefinementCtx): void {
-  reportValidation(activeSetupHasOutcome(attempt), context, ["outcome"], "Running Setup attempts cannot have an outcome");
-  reportValidation(completedSetupLacksOutcome(attempt), context, ["outcome"], "Completed Setup attempts require an outcome");
-  reportValidation(attempt.status === "passed" && attempt.outcome !== "success", context, ["outcome"], "Passed Setup attempts require a success outcome");
-  reportValidation(attempt.status === "failed" && !isManualSetupFailureOutcome(attempt.outcome), context, ["outcome"], "Failed Setup attempts require a failure outcome");
-  reportValidation(attempt.status === "unavailable" && attempt.outcome !== "unavailable", context, ["outcome"], "Unavailable Setup attempts require an unavailable outcome");
-  reportValidation(attempt.status === "running" && hasInvalidRunningSetupLifecycle(attempt), context, [], "Running Setup attempts require an active lifecycle");
-  reportValidation(attempt.status === "awaiting-approval" && hasInvalidApprovalSetupLifecycle(attempt), context, [], "Approval-waiting Setup attempts require an approved command snapshot");
-  reportValidation(completedSetupLacksFinishTime(attempt), context, ["finishedAt"], "Completed Setup attempts require a finish time");
-  reportValidation(manualSetupRequiresStartTime(attempt) && attempt.startedAt === null, context, ["startedAt"], "This Setup outcome requires a start time");
-  reportValidation(attempt.outcome === "success" && attempt.exitCode !== 0, context, ["exitCode"], "Successful Setup attempts require exit code zero");
-  reportValidation(manualSetupForbidsExitCode(attempt) && attempt.exitCode !== null, context, ["exitCode"], "This Setup outcome cannot include an exit code");
-  reportValidation(attempt.cleanupPending && attempt.outcome !== "containment_failure", context, ["cleanupPending"], "Only containment failures can require cleanup");
-}
-
 function reportValidation(condition: boolean, context: z.RefinementCtx, path: (string | number)[], message: string): void {
   if (condition) context.addIssue({ code: z.ZodIssueCode.custom, path, message });
 }
-
-function isActiveSetup(status: WorkspaceEnvironmentSetupStatus): boolean {
-  return ["running", "awaiting-approval"].includes(status);
-}
-
-function activeSetupHasOutcome(attempt: ManualSetupAttemptValidationInput): boolean {
-  return isActiveSetup(attempt.status) && attempt.outcome !== null;
-}
-
-function completedSetupLacksOutcome(attempt: ManualSetupAttemptValidationInput): boolean {
-  return !isActiveSetup(attempt.status) && attempt.outcome === null;
-}
-
-function isManualSetupFailureOutcome(outcome: WorkspaceEnvironmentSetupOutcome | null): boolean {
-  return ["command_failure", "launch_failure", "configuration_failure", "timeout", "containment_failure"].includes(outcome ?? "");
-}
-
-function hasInvalidRunningSetupLifecycle(attempt: ManualSetupAttemptValidationInput): boolean {
-  return attempt.startedAt === null || attempt.finishedAt !== null || attempt.exitCode !== null || attempt.cleanupPending;
-}
-
-function hasInvalidApprovalSetupLifecycle(attempt: ManualSetupAttemptValidationInput): boolean {
-  return attempt.startedAt !== null || attempt.finishedAt !== null || attempt.exitCode !== null || attempt.cleanupPending || attempt.snapshot.approval == null;
-}
-
-function completedSetupLacksFinishTime(attempt: ManualSetupAttemptValidationInput): boolean {
-  return !isActiveSetup(attempt.status) && attempt.finishedAt === null;
-}
-
-function manualSetupRequiresStartTime(attempt: ManualSetupAttemptValidationInput): boolean {
-  return attempt.status === "passed" || ["command_failure", "launch_failure", "timeout", "containment_failure"].includes(attempt.outcome ?? "");
-}
-
-function manualSetupForbidsExitCode(attempt: ManualSetupAttemptValidationInput): boolean {
-  return ["launch_failure", "configuration_failure", "timeout", "containment_failure", "unavailable"].includes(attempt.outcome ?? "");
-}
-
-/** Request to start a manual Setup attempt for a Thread. */
-export const WorkspaceEnvironmentSetupStartInputSchema = lazySchema(() =>
-  z.object({ threadId: z.string().min(1).max(256) }).strict(),
-);
-export type WorkspaceEnvironmentSetupStartInput = z.infer<
-  ReturnType<typeof WorkspaceEnvironmentSetupStartInputSchema>
->;
-
-/** Request to read the latest manual Setup attempt for a Thread. */
-export const WorkspaceEnvironmentSetupGetInputSchema = lazySchema(() =>
-  z.object({ threadId: z.string().min(1).max(256) }).strict(),
-);
-export type WorkspaceEnvironmentSetupGetInput = z.infer<
-  ReturnType<typeof WorkspaceEnvironmentSetupGetInputSchema>
->;
-
-/** Result of reading the latest manual Setup attempt for a Thread. */
-export const WorkspaceEnvironmentSetupGetResultSchema = lazySchema(() =>
-  z.object({ attempt: WorkspaceEnvironmentSetupAttemptSchema().nullable() }).strict(),
-);
-export type WorkspaceEnvironmentSetupGetResult = z.infer<
-  ReturnType<typeof WorkspaceEnvironmentSetupGetResultSchema>
->;
 
 /** Public lifecycle states for one retained Project Action run. */
 export const WorkspaceEnvironmentActionRunStatusSchema = z.enum([
@@ -502,82 +341,42 @@ export type WorkspaceEnvironmentAutomaticSetupReason = z.infer<
   typeof WorkspaceEnvironmentAutomaticSetupReasonSchema
 >;
 
-/** Public durable result for one automatic Setup attempt. */
+/** Public durable result for one startup action sequence. */
 export const WorkspaceEnvironmentAutomaticSetupAttemptSchema = lazySchema(() =>
   z.object({
     id: z.string().min(1).max(256),
     state: WorkspaceEnvironmentAutomaticSetupAttemptStateSchema,
     reason: WorkspaceEnvironmentAutomaticSetupReasonSchema.nullable(),
-    snapshot: WorkspaceEnvironmentSetupLaunchSnapshotSchema().nullable(),
-    outcome: WorkspaceEnvironmentSetupOutcomeSchema.nullable(),
+    failedActionId: WorkspaceEnvironmentActionIdSchema.nullable(),
     createdAt: z.string().datetime(),
     startedAt: z.string().datetime().nullable(),
     finishedAt: z.string().datetime().nullable(),
-    exitCode: z.number().int().nullable(),
-    output: setupOutputSchema,
-    outputTruncated: z.boolean(),
-  }).strict().superRefine(validateAutomaticSetupAttempt),
+  }).strict().superRefine((attempt, ctx) => {
+    const invalid = invalidAutomaticSetupLifecycle(attempt);
+    if (invalid) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid startup attempt lifecycle" });
+  }),
 );
+/** Durable startup action sequence, separate from its gate and action runs. */
 export type WorkspaceEnvironmentAutomaticSetupAttempt = z.infer<
   ReturnType<typeof WorkspaceEnvironmentAutomaticSetupAttemptSchema>
 >;
 
-type AutomaticSetupAttemptValidationInput = {
-  readonly state: WorkspaceEnvironmentAutomaticSetupAttemptState;
-  readonly reason: WorkspaceEnvironmentAutomaticSetupReason | null;
-  readonly snapshot: { readonly approval?: unknown | null } | null;
-  readonly outcome: WorkspaceEnvironmentSetupOutcome | null;
-  readonly startedAt: string | null;
-  readonly finishedAt: string | null;
-  readonly exitCode: number | null;
-  readonly output: string;
-  readonly outputTruncated: boolean;
-};
-
-function validateAutomaticSetupAttempt(attempt: AutomaticSetupAttemptValidationInput, context: z.RefinementCtx): void {
-  reportValidation(attempt.state === "queued" && hasQueuedSetupResult(attempt), context, [], "Pending automatic Setup attempts cannot have a result");
-  reportValidation(attempt.state === "awaiting-approval" && hasInvalidAutomaticApprovalSetup(attempt), context, [], "Approval-waiting automatic Setup attempts require the exact shared command snapshot");
-  reportValidation(attempt.state === "running" && hasInvalidAutomaticRunningSetup(attempt), context, [], "Running automatic Setup attempts require an active lifecycle");
-  reportValidation(attempt.state === "passed" && hasInvalidPassedAutomaticSetup(attempt), context, [], "Passed automatic Setup attempts require start and finish times");
-  reportValidation(["failed", "interrupted"].includes(attempt.state) && (attempt.finishedAt === null || attempt.reason === null), context, [], "Failed or interrupted automatic Setup attempts require a safe reason");
-  reportValidation(attempt.state === "failed" && hasInvalidFailedAutomaticSetup(attempt), context, [], "Failed automatic Setup attempts require a launch snapshot and failure outcome");
-  reportValidation(attempt.state === "interrupted" && hasInterruptedSetupResult(attempt), context, [], "Interrupted automatic Setup attempts cannot claim a terminal command result");
+function invalidAutomaticSetupLifecycle(attempt: WorkspaceEnvironmentAutomaticSetupAttempt): boolean {
+  const active = ["queued", "running", "awaiting-approval"].includes(attempt.state);
+  if (active && (attempt.finishedAt !== null || attempt.failedActionId !== null)) return true;
+  if (!active && attempt.finishedAt === null) return true;
+  return invalidAutomaticSetupState(attempt);
 }
 
-function hasQueuedSetupResult(attempt: AutomaticSetupAttemptValidationInput): boolean {
-  return attempt.startedAt !== null || attempt.finishedAt !== null || attempt.reason !== null || attempt.snapshot !== null || attempt.outcome !== null || attempt.exitCode !== null || hasAutomaticSetupOutput(attempt);
-}
-
-function hasInvalidAutomaticApprovalSetup(attempt: AutomaticSetupAttemptValidationInput): boolean {
-  return hasUnexpectedApprovalSetupState(attempt) || !hasAutomaticSetupApproval(attempt.snapshot);
-}
-
-function hasUnexpectedApprovalSetupState(attempt: AutomaticSetupAttemptValidationInput): boolean {
-  return attempt.startedAt !== null || attempt.finishedAt !== null || attempt.reason !== "setup_approval_required" || attempt.outcome !== null || attempt.exitCode !== null || hasAutomaticSetupOutput(attempt);
-}
-
-function hasAutomaticSetupApproval(snapshot: AutomaticSetupAttemptValidationInput["snapshot"]): boolean {
-  return snapshot?.approval != null;
-}
-
-function hasInvalidAutomaticRunningSetup(attempt: AutomaticSetupAttemptValidationInput): boolean {
-  return attempt.startedAt === null || attempt.finishedAt !== null || attempt.reason !== null || attempt.snapshot === null || attempt.outcome !== null || attempt.exitCode !== null || hasAutomaticSetupOutput(attempt);
-}
-
-function hasInvalidPassedAutomaticSetup(attempt: AutomaticSetupAttemptValidationInput): boolean {
-  return attempt.startedAt === null || attempt.finishedAt === null || attempt.reason !== null || attempt.snapshot === null || attempt.outcome !== "success" || attempt.exitCode !== 0;
-}
-
-function hasInvalidFailedAutomaticSetup(attempt: AutomaticSetupAttemptValidationInput): boolean {
-  return attempt.snapshot === null || attempt.outcome === null || attempt.outcome === "success";
-}
-
-function hasInterruptedSetupResult(attempt: AutomaticSetupAttemptValidationInput): boolean {
-  return attempt.outcome !== null || attempt.exitCode !== null || hasAutomaticSetupOutput(attempt);
-}
-
-function hasAutomaticSetupOutput(attempt: AutomaticSetupAttemptValidationInput): boolean {
-  return attempt.output !== "" || attempt.outputTruncated;
+function invalidAutomaticSetupState(attempt: WorkspaceEnvironmentAutomaticSetupAttempt): boolean {
+  switch (attempt.state) {
+    case "queued": return attempt.startedAt !== null || attempt.reason !== null;
+    case "running": return attempt.startedAt === null || attempt.reason !== null;
+    case "passed": return [attempt.startedAt === null, attempt.reason !== null, attempt.failedActionId !== null].includes(true);
+    case "awaiting-approval": return attempt.reason !== "setup_approval_required";
+    case "failed":
+    case "interrupted": return attempt.reason === null;
+  }
 }
 
 /** Public lifecycle record for one Turn held behind automatic Setup. */
@@ -613,14 +412,6 @@ export type WorkspaceEnvironmentAutomaticSetupSnapshot = z.infer<
   ReturnType<typeof WorkspaceEnvironmentAutomaticSetupSnapshotSchema>
 >;
 
-/** Request to read one automatic Setup lifecycle snapshot. */
-export const WorkspaceEnvironmentAutomaticSetupGetInputSchema = lazySchema(() =>
-  z.object({ threadId: z.string().min(1).max(256) }).strict(),
-);
-export type WorkspaceEnvironmentAutomaticSetupGetInput = z.infer<
-  ReturnType<typeof WorkspaceEnvironmentAutomaticSetupGetInputSchema>
->;
-
 /** Request to release queued Turns without rerunning Setup. */
 export const WorkspaceEnvironmentAutomaticSetupContinueInputSchema = lazySchema(() =>
   z.object({ threadId: z.string().min(1).max(256) }).strict(),
@@ -643,25 +434,6 @@ export const WorkspaceEnvironmentAutomaticSetupRetryInputSchema = lazySchema(() 
 );
 export type WorkspaceEnvironmentAutomaticSetupRetryInput = z.infer<
   ReturnType<typeof WorkspaceEnvironmentAutomaticSetupRetryInputSchema>
->;
-
-/** Request to open one interactive recovery Terminal for a managed Thread. */
-export const WorkspaceEnvironmentAutomaticSetupTerminalInputSchema = lazySchema(() =>
-  z.object({ threadId: z.string().min(1).max(256) }).strict(),
-);
-export type WorkspaceEnvironmentAutomaticSetupTerminalInput = z.infer<
-  ReturnType<typeof WorkspaceEnvironmentAutomaticSetupTerminalInputSchema>
->;
-
-/** Interactive recovery Terminal created for one automatic Setup gate. */
-export const WorkspaceEnvironmentAutomaticSetupTerminalSchema = lazySchema(() =>
-  z.object({
-    ptyId: z.string().min(1).max(256),
-    shell: z.string().min(1).max(1024),
-  }).strict(),
-);
-export type WorkspaceEnvironmentAutomaticSetupTerminal = z.infer<
-  ReturnType<typeof WorkspaceEnvironmentAutomaticSetupTerminalSchema>
 >;
 
 /** Stable action identity shared by documents and command targets. */
@@ -688,7 +460,6 @@ export type WorkspaceEnvironmentAction = z.infer<
 export const WorkspaceEnvironmentDocumentSchema = lazySchema(() =>
   z.object({
     version: z.string(),
-    setup: WorkspaceEnvironmentCommandSchema().optional(),
     actions: z.array(WorkspaceEnvironmentActionSchema()).max(256),
   }).passthrough().superRefine((document, ctx) => {
     if (!workspaceEnvironmentVersions.some((version) => version === document.version)) {
@@ -699,12 +470,18 @@ export const WorkspaceEnvironmentDocumentSchema = lazySchema(() =>
         params: { code: "UNSUPPORTED_VERSION", reason: "unsupported_version" },
       });
     }
-    if (document.version === WORKSPACE_ENVIRONMENT_VERSION && document.setup !== undefined) {
+    if ("setup" in document) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["setup"],
-        message: "Move Setup into an action first.",
+        code: z.ZodIssueCode.custom, path: ["setup"],
+        message: "Move Setup into a startup action.",
         params: { code: "INVALID_VALUE", reason: "invalid_value" },
+      });
+    }
+    if (document.actions.filter((action) => action.runOnStartup).length > WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom, path: ["actions"],
+        message: "At most 8 actions can run on startup.",
+        params: { code: "TOO_MANY_STARTUP_ACTIONS", reason: "too_many_startup_actions" },
       });
     }
     const seen = new Set<string>();
@@ -738,7 +515,7 @@ export function encodeEnvironmentDocument(document: WorkspaceEnvironmentDocument
   document: WorkspaceEnvironmentDocument;
   bytes: Uint8Array;
 } {
-  const hasNewFields = Object.keys(document).some((key) => !["version", "setup", "actions"].includes(key))
+  const hasNewFields = Object.keys(document).some((key) => !["version", "actions"].includes(key))
     || document.actions.some((action) => action.icon !== undefined
       || action.runOnStartup !== undefined
       || action.runOnCleanup !== undefined

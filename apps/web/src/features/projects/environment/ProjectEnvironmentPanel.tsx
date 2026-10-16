@@ -8,6 +8,7 @@ import type {
   WorkspaceEnvironmentStorageMode,
 } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,11 @@ const EMPTY_DOCUMENT: WorkspaceEnvironmentDocument = {
   version: "0.0.1",
   actions: [],
 };
+
+function withRunOnStartup(action: WorkspaceEnvironmentAction, runOnStartup: boolean): WorkspaceEnvironmentAction {
+  const { runOnStartup: _previous, ...rest } = action;
+  return runOnStartup ? { ...rest, runOnStartup } : rest;
+}
 
 function updateCommand(command: WorkspaceEnvironmentCommand, platform: Platform, script: string): WorkspaceEnvironmentCommand {
   const next = { ...command };
@@ -152,6 +158,13 @@ function ActionEditor({ action, onChange, onRemove, nameRef }: ActionEditorProps
           </Button>
         </div>
       </div>
+      <label className="flex items-center gap-2 text-xs text-muted">
+        <Checkbox
+          checked={action.runOnStartup === true}
+          onCheckedChange={(checked) => onChange(withRunOnStartup(action, checked))}
+        />
+        <span>{"Run on startup "}<span className="sr-only">{`for ${action.name}`}</span></span>
+      </label>
       <h3 id={`${action.id}-heading`} className="sr-only">{action.name} command</h3>
       <PlatformCommandEditor
         idPrefix={`action-${action.id}`}
@@ -265,19 +278,9 @@ function useEnvironmentPersistence({
 
 function useEnvironmentDraftActions(
   setDraft: Dispatch<SetStateAction<WorkspaceEnvironmentDocument>>,
-  setSetupEnabled: Dispatch<SetStateAction<boolean>>,
-  setupScriptRef: RefObject<HTMLTextAreaElement | null>,
   firstTaskRef: RefObject<HTMLButtonElement | null>,
   firstActionNameRef: RefObject<HTMLInputElement | null>,
 ) {
-  const setSetup = useCallback((enabled: boolean) => {
-    setSetupEnabled(enabled);
-    setDraft((current) => ({ ...current, setup: enabled ? current.setup ?? { default: "" } : undefined }));
-    requestAnimationFrame(() => {
-      if (enabled) setupScriptRef.current?.focus();
-      else firstTaskRef.current?.focus();
-    });
-  }, [firstTaskRef, setDraft, setSetupEnabled, setupScriptRef]);
   const addAction = useCallback(() => {
     const action = newAction();
     setDraft((current) => ({ ...current, actions: [...current.actions, action] }));
@@ -290,7 +293,7 @@ function useEnvironmentDraftActions(
     setDraft((current) => ({ ...current, actions: current.actions.filter((candidate) => candidate.id !== id) }));
     requestAnimationFrame(() => firstTaskRef.current?.focus());
   }, [firstTaskRef, setDraft]);
-  return { setSetup, addAction, updateAction, removeAction };
+  return { addAction, updateAction, removeAction };
 }
 
 function EnvironmentStorageSection({
@@ -314,7 +317,7 @@ function EnvironmentStorageSection({
     <section aria-labelledby="project-environment-storage-title" className="space-y-3">
       <div className="space-y-1">
         <h2 id="project-environment-storage-title" className="text-sm font-semibold">Environment storage</h2>
-        <p className="text-xs text-muted">Choose where Mcode saves this Project’s Setup and actions.</p>
+        <p className="text-xs text-muted">Choose where Mcode saves this Project’s actions.</p>
       </div>
       <RadioGroup
         aria-label="Environment storage"
@@ -369,54 +372,17 @@ function ClearSharedApprovals({ storageMode, saving, onClearApprovals }: { stora
   return <Button type="button" variant="ghost" size="compact" className="w-fit" disabled={saving} onClick={() => { void onClearApprovals(); }}>Clear shared command approvals</Button>;
 }
 
-function EnvironmentSetupSection({
-  draft,
-  setupEnabled,
-  firstTaskRef,
-  setupScriptRef,
-  onSetSetup,
-  onDraftChange,
-}: {
-  draft: WorkspaceEnvironmentDocument;
-  setupEnabled: boolean;
-  firstTaskRef: RefObject<HTMLButtonElement | null>;
-  setupScriptRef: RefObject<HTMLTextAreaElement | null>;
-  onSetSetup: (enabled: boolean) => void;
-  onDraftChange: Dispatch<SetStateAction<WorkspaceEnvironmentDocument>>;
-}) {
-  return (
-    <section aria-labelledby="project-environment-setup-title" className="space-y-3 border-t border-border/60 pt-6">
-      <div className="flex items-center justify-between gap-3">
-        <div><h2 id="project-environment-setup-title" className="text-base font-semibold">Setup</h2><p className="mt-1 text-xs text-muted">Optional setup command configuration for this Project.</p></div>
-        <Button ref={firstTaskRef} type="button" variant="outline" size="compact" onClick={() => onSetSetup(!setupEnabled)}>{setupEnabled ? "Remove Setup" : "Add Setup"}</Button>
-      </div>
-      <EnvironmentSetupEditor setup={setupEnabled ? draft.setup : undefined} setupScriptRef={setupScriptRef} onDraftChange={onDraftChange} />
-    </section>
-  );
-}
-
-function EnvironmentSetupEditor({
-  setup,
-  setupScriptRef,
-  onDraftChange,
-}: {
-  setup: WorkspaceEnvironmentCommand | undefined;
-  setupScriptRef: RefObject<HTMLTextAreaElement | null>;
-  onDraftChange: Dispatch<SetStateAction<WorkspaceEnvironmentDocument>>;
-}) {
-  if (!setup) return null;
-  return <PlatformCommandEditor idPrefix="setup" command={setup} onChange={(nextSetup) => onDraftChange((current) => ({ ...current, setup: nextSetup }))} firstControlRef={setupScriptRef} />;
-}
-
 function EnvironmentActionsSection({
   actions,
   firstActionNameRef,
+  firstTaskRef,
   onAddAction,
   onUpdateAction,
   onRemoveAction,
 }: {
   actions: WorkspaceEnvironmentAction[];
   firstActionNameRef: RefObject<HTMLInputElement | null>;
+  firstTaskRef: RefObject<HTMLButtonElement | null>;
   onAddAction: () => void;
   onUpdateAction: (id: string, action: WorkspaceEnvironmentAction) => void;
   onRemoveAction: (id: string) => void;
@@ -425,7 +391,7 @@ function EnvironmentActionsSection({
     <section aria-labelledby="project-environment-actions-title" className="space-y-3 border-t border-border/60 pt-6">
       <div className="flex items-center justify-between gap-3">
         <div><h2 id="project-environment-actions-title" className="text-base font-semibold">Project actions</h2><p className="mt-1 text-xs text-muted">Save named commands for this Project.</p></div>
-        <Button type="button" variant="outline" size="compact" aria-label="Add action" onClick={onAddAction}><Plus size={15} aria-hidden /> Add action</Button>
+        <Button ref={firstTaskRef} type="button" variant="outline" size="compact" aria-label="Add action" onClick={onAddAction}><Plus size={15} aria-hidden /> Add action</Button>
       </div>
       <EnvironmentActionList actions={actions} firstActionNameRef={firstActionNameRef} onUpdateAction={onUpdateAction} onRemoveAction={onRemoveAction} />
     </section>
@@ -437,7 +403,7 @@ function EnvironmentActionList({
   firstActionNameRef,
   onUpdateAction,
   onRemoveAction,
-}: Omit<Parameters<typeof EnvironmentActionsSection>[0], "onAddAction">) {
+}: Omit<Parameters<typeof EnvironmentActionsSection>[0], "onAddAction" | "firstTaskRef">) {
   if (actions.length === 0) return <p className="text-xs text-muted">No project actions configured.</p>;
   return (
     <div className="space-y-8">
@@ -475,18 +441,15 @@ export function ProjectEnvironmentPanel({ workspaceId, threadId, active = true }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [setupEnabled, setSetupEnabled] = useState(false);
   const [confirmSharedStorage, setConfirmSharedStorage] = useState(false);
   const draftRef = useRef(draft);
   const focusAfterRead = useRef(false);
   const firstTaskRef = useRef<HTMLButtonElement | null>(null);
-  const setupScriptRef = useRef<HTMLTextAreaElement | null>(null);
   const firstActionNameRef = useRef<HTMLInputElement | null>(null);
 
   const applyRead = useCallback((result: WorkspaceEnvironmentReadResult) => {
     draftRef.current = result.document;
     setDraft(result.document);
-    setSetupEnabled(Boolean(result.document.setup));
     setRevision(result.revision);
     setStorageMode(result.storageMode ?? "system");
     setLoadedScopeId(scopeId);
@@ -525,10 +488,8 @@ export function ProjectEnvironmentPanel({ workspaceId, threadId, active = true }
     requestAnimationFrame(() => firstTaskRef.current?.focus());
   }, [active, loading]);
 
-  const { setSetup, addAction, updateAction, removeAction } = useEnvironmentDraftActions(
+  const { addAction, updateAction, removeAction } = useEnvironmentDraftActions(
     setDraft,
-    setSetupEnabled,
-    setupScriptRef,
     firstTaskRef,
     firstActionNameRef,
   );
@@ -553,17 +514,10 @@ export function ProjectEnvironmentPanel({ workspaceId, threadId, active = true }
               onConfirmSharedStorage={setConfirmSharedStorage}
               onClearApprovals={clearApprovals}
             />
-            <EnvironmentSetupSection
-              draft={draft}
-              setupEnabled={setupEnabled}
-              firstTaskRef={firstTaskRef}
-              setupScriptRef={setupScriptRef}
-              onSetSetup={setSetup}
-              onDraftChange={setDraft}
-            />
             <EnvironmentActionsSection
               actions={draft.actions}
               firstActionNameRef={firstActionNameRef}
+              firstTaskRef={firstTaskRef}
               onAddAction={addAction}
               onUpdateAction={updateAction}
               onRemoveAction={removeAction}
@@ -588,7 +542,7 @@ export function ProjectEnvironmentPanel({ workspaceId, threadId, active = true }
               <p>
                 Save this Project environment in <code className="rounded bg-hover px-1 py-0.5 font-mono text-xs text-ink">.mcode/environment.json</code> in the {threadId ? "current checkout" : "base checkout"}.
               </p>
-              <p>Before a Setup command or Project action runs from this file, Mcode asks for your approval.</p>
+              <p>Before a Project action runs from this file, Mcode asks for your approval.</p>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -81,27 +81,26 @@ describe("ProjectEnvironmentPanel", () => {
     transport.clearWorkspaceEnvironmentApprovals.mockResolvedValue(undefined);
   });
 
-  it("shows the active project and system environment storage before setup is added", async () => {
+  it("shows the active project and system environment storage before an action is added", async () => {
     render(<ProjectEnvironmentPanel workspaceId="workspace-1" />);
 
-    await screen.findByRole("button", { name: "Add Setup" });
+    await screen.findByRole("button", { name: "Add action" });
     expect(screen.getByRole("heading", { name: "Project settings" })).toBeInTheDocument();
     expect(screen.getByText("Caravan")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Environment storage" })).toBeInTheDocument();
     expect(screen.getByText("Only available on this computer.")).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(screen.getByText("Optional setup command configuration for this Project.")).toBeInTheDocument();
+    expect(screen.getByText("No project actions configured.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Default command script")).not.toBeInTheDocument();
   });
 
-  it("moves focus into the setup script when setup is added", async () => {
+  it("moves focus into the new action name when an action is added", async () => {
     const user = userEvent.setup();
     render(<ProjectEnvironmentPanel workspaceId="workspace-1" />);
 
-    await user.click(await screen.findByRole("button", { name: "Add Setup" }));
+    await user.click(await screen.findByRole("button", { name: "Add action" }));
 
-    const setupScript = screen.getByLabelText("Default command script");
-    await waitFor(() => expect(setupScript).toHaveFocus());
+    await waitFor(() => expect(screen.getByLabelText("Action name for New action")).toHaveFocus());
   });
 
   it("requires confirmation before selecting shared storage and then exposes approval clearing", async () => {
@@ -112,7 +111,7 @@ describe("ProjectEnvironmentPanel", () => {
     await user.click(screen.getByRole("radio", { name: "Shared storage" }));
     expect(transport.setWorkspaceEnvironmentStorageMode).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Share this Project environment?" })).toBeInTheDocument();
-    expect(screen.getByText("Before a Setup command or Project action runs from this file, Mcode asks for your approval.")).toBeInTheDocument();
+    expect(screen.getByText("Before a Project action runs from this file, Mcode asks for your approval.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close dialog" }));
     expect(screen.getByRole("radio", { name: "System storage" })).toHaveAttribute("aria-checked", "true");
     expect(transport.setWorkspaceEnvironmentStorageMode).not.toHaveBeenCalled();
@@ -130,44 +129,58 @@ describe("ProjectEnvironmentPanel", () => {
     const user = userEvent.setup();
     render(<ProjectEnvironmentPanel workspaceId="workspace-1" threadId="thread-1" />);
 
-    await screen.findByRole("button", { name: "Add Setup" });
+    await screen.findByRole("button", { name: "Add action" });
     expect(transport.readWorkspaceEnvironment).toHaveBeenCalledWith("workspace-1", "thread-1");
-    await user.click(screen.getByRole("button", { name: "Add Setup" }));
-    await user.type(screen.getByLabelText("Default command script"), "bun run setup");
+    await user.click(screen.getByRole("button", { name: "Add action" }));
+    await user.type(screen.getByLabelText("Default command script"), "bun run install");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledWith(
       "workspace-1",
-      { version: "0.0.1", setup: { default: "bun run setup" }, actions: [] },
+      {
+        version: "0.0.1",
+        actions: [{ id: expect.any(String), name: "New action", command: { default: "bun run install" } }],
+      },
       null,
       "thread-1",
     ));
   });
 
-  it("edits setup and named actions, preserves action identity, and saves", async () => {
+  it("edits a named action, preserves its identity, and saves", async () => {
     const user = userEvent.setup();
     render(<ProjectEnvironmentPanel workspaceId="workspace-1" />);
 
-    await screen.findByRole("button", { name: "Add Setup" });
-    await user.click(screen.getByRole("button", { name: "Add Setup" }));
-    const setupScript = screen.getByLabelText("Default command script");
-    await user.type(setupScript, "npm run setup");
-
+    await screen.findByRole("button", { name: "Add action" });
     await user.click(screen.getByRole("button", { name: "Add action" }));
     const actionName = screen.getByLabelText("Action name for New action");
     await user.clear(actionName);
     await user.type(actionName, "Build");
-    const scripts = screen.getAllByLabelText("Default command script");
-    await user.type(scripts[1], "npm run build");
+    await user.type(screen.getByLabelText("Default command script"), "npm run build");
 
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledTimes(1));
     const savedDocument = transport.saveWorkspaceEnvironment.mock.calls[0][1] as WorkspaceEnvironmentDocument;
-    expect(savedDocument.setup?.default).toBe("npm run setup");
     expect(savedDocument.actions).toHaveLength(1);
     expect(savedDocument.actions[0].name).toBe("Build");
     expect(savedDocument.actions[0].id).toEqual(expect.any(String));
     expect(screen.getByRole("status")).toHaveTextContent("Environment saved");
+  });
+
+  it("saves the startup flag on an action and omits it when cleared", async () => {
+    const user = userEvent.setup();
+    render(<ProjectEnvironmentPanel workspaceId="workspace-1" />);
+
+    await user.click(await screen.findByRole("button", { name: "Add action" }));
+    await user.type(screen.getByLabelText("Default command script"), "bun install");
+    await user.click(screen.getByRole("checkbox", { name: /Run on startup\s*for New action/ }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledTimes(1));
+    expect((transport.saveWorkspaceEnvironment.mock.calls[0][1] as WorkspaceEnvironmentDocument).actions[0].runOnStartup).toBe(true);
+
+    await user.click(screen.getByRole("checkbox", { name: /Run on startup\s*for New action/ }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledTimes(2));
+    expect("runOnStartup" in (transport.saveWorkspaceEnvironment.mock.calls[1][1] as WorkspaceEnvironmentDocument).actions[0]).toBe(false);
   });
 
   it("refreshes a mounted Action menu after saving renamed Project configuration", async () => {
@@ -211,8 +224,8 @@ describe("ProjectEnvironmentPanel", () => {
   it("uses the prototype platform order and moves between editors with keyboard tabs", async () => {
     const user = userEvent.setup();
     render(<ProjectEnvironmentPanel workspaceId="workspace-1" />);
-    await screen.findByRole("button", { name: "Add Setup" });
-    await user.click(screen.getByRole("button", { name: "Add Setup" }));
+    await screen.findByRole("button", { name: "Add action" });
+    await user.click(screen.getByRole("button", { name: "Add action" }));
 
     const defaultTab = screen.getByRole("tab", { name: "Default" });
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
@@ -235,10 +248,10 @@ describe("ProjectEnvironmentPanel", () => {
     let resolveRead!: (result: WorkspaceEnvironmentReadResult) => void;
     transport.readWorkspaceEnvironment.mockReturnValueOnce(new Promise((resolve) => { resolveRead = resolve; }));
     render(<ProjectEnvironmentPanel workspaceId="workspace-1" active />);
-    expect(screen.queryByRole("button", { name: "Add Setup" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add action" })).not.toBeInTheDocument();
 
     resolveRead(initialResult);
-    const addSetup = await screen.findByRole("button", { name: "Add Setup" });
+    const addSetup = await screen.findByRole("button", { name: "Add action" });
     await waitFor(() => expect(addSetup).toHaveFocus());
   });
 
@@ -248,23 +261,23 @@ describe("ProjectEnvironmentPanel", () => {
     transport.saveWorkspaceEnvironment.mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve; }));
     render(<ProjectEnvironmentPanel workspaceId="workspace-1" />);
 
-    await screen.findByRole("button", { name: "Add Setup" });
-    await user.click(screen.getByRole("button", { name: "Add Setup" }));
-    const setupScript = screen.getByLabelText("Default command script");
-    await user.type(setupScript, "submitted");
+    await screen.findByRole("button", { name: "Add action" });
+    await user.click(screen.getByRole("button", { name: "Add action" }));
+    const script = screen.getByLabelText("Default command script");
+    await user.type(script, "submitted");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledTimes(1));
 
-    await user.clear(setupScript);
-    await user.type(setupScript, "local edit");
+    await user.clear(script);
+    await user.type(script, "local edit");
     resolveSave({
-      document: { version: "0.0.1", setup: { default: "server snapshot" }, actions: [] },
+      document: { version: "0.0.1", actions: [{ id: "build", name: "Build", command: { default: "server snapshot" } }] },
       revision: "revision-2",
       status: "present",
     });
 
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Environment saved"));
-    expect(setupScript).toHaveValue("local edit");
+    expect(script).toHaveValue("local edit");
   });
 
   it("replaces a draft on Reload and sends the new revision on Save", async () => {
@@ -275,17 +288,17 @@ describe("ProjectEnvironmentPanel", () => {
       return readCount === 1
         ? initialResult
         : {
-            document: { version: "0.0.1", setup: { default: "server setup" }, actions: [] },
+            document: { version: "0.0.1", actions: [{ id: "build", name: "Build", command: { default: "server setup" } }] },
             revision: "revision-2",
             status: "present",
           } satisfies WorkspaceEnvironmentReadResult;
     });
     render(<ProjectEnvironmentPanel workspaceId="workspace-1" />);
 
-    await screen.findByRole("button", { name: "Add Setup" });
-    await user.click(screen.getByRole("button", { name: "Add Setup" }));
-    const setupScript = screen.getByLabelText("Default command script");
-    await user.type(setupScript, "local draft");
+    await screen.findByRole("button", { name: "Add action" });
+    await user.click(screen.getByRole("button", { name: "Add action" }));
+    const script = screen.getByLabelText("Default command script");
+    await user.type(script, "local draft");
     await user.click(screen.getByRole("button", { name: "Reload" }));
 
     await waitFor(() => expect(screen.getByLabelText("Default command script")).toHaveValue("server setup"));
@@ -293,7 +306,7 @@ describe("ProjectEnvironmentPanel", () => {
     await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledTimes(1));
     expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledWith(
       "workspace-1",
-      { version: "0.0.1", setup: { default: "server setup" }, actions: [] },
+      { version: "0.0.1", actions: [{ id: "build", name: "Build", command: { default: "server setup" } }] },
       "revision-2",
     );
   });
@@ -305,7 +318,7 @@ describe("ProjectEnvironmentPanel", () => {
       "WORKSPACE_ENVIRONMENT_VALIDATION",
       {
         issues: [{
-          path: ["setup", "default"],
+          path: ["actions", 0, "command", "default"],
           code: "EMPTY_SCRIPT",
           reason: "empty_script",
           message: "A command must contain at least one non-empty script",
@@ -314,15 +327,15 @@ describe("ProjectEnvironmentPanel", () => {
     ));
     render(<ProjectEnvironmentPanel workspaceId="workspace-1" />);
 
-    await screen.findByRole("button", { name: "Add Setup" });
-    await user.click(screen.getByRole("button", { name: "Add Setup" }));
-    const setupScript = screen.getByLabelText("Default command script");
-    await user.type(setupScript, "preserve this draft");
+    await screen.findByRole("button", { name: "Add action" });
+    await user.click(screen.getByRole("button", { name: "Add action" }));
+    const script = screen.getByLabelText("Default command script");
+    await user.type(script, "preserve this draft");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert", { name: "Project environment errors" });
-    expect(alert).toHaveTextContent("setup.default");
+    expect(alert).toHaveTextContent("actions.0.command.default");
     expect(alert).toHaveTextContent("empty_script");
-    expect(setupScript).toHaveValue("preserve this draft");
+    expect(script).toHaveValue("preserve this draft");
   });
 });

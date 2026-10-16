@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS,
   ThreadStartupSchema,
+  ThreadStartupActionSchema,
   ThreadStartupStartInputSchema,
   ThreadStartupStepDetailSchema,
   ThreadStartupErrorSchema,
@@ -127,5 +128,30 @@ describe("ThreadStartupSchema", () => {
         createdAt: "2026-09-02T10:00:00.000Z",
       }],
     }).success).toBe(false);
+  });
+});
+describe("startup action projection", () => {
+  it("fits every one of eight full-size scripts without retaining command text", () => {
+    const actions = Array.from({ length: 8 }, (_, index) => ({
+      actionId: `action-${index}`, scriptHash: "a".repeat(64), runId: null, outcome: "pending",
+    }));
+    const detail = { phase: "setup", actions };
+    const record = {
+      ...directStartup(), kind: "managed-worktree",
+      steps: ["thread", "worktree", "setup", "agent"].map((phase) => ({
+        phase, state: "pending", ...(phase === "setup" ? { detail } : {}),
+      })),
+    };
+    expect(ThreadStartupSchema().parse(record)).toEqual(record);
+    expect(ThreadStartupStepDetailSchema().safeParse({ ...detail, actions: [...actions, actions[0]] }).success).toBe(false);
+    expect(ThreadStartupActionSchema().safeParse({ ...actions[0], script: "x".repeat(32768) }).success).toBe(false);
+  });
+
+  it("rejects invalid action ids, hashes, and oversized run identities", () => {
+    const action = { actionId: "install", scriptHash: "a".repeat(64), runId: "run-1", outcome: "ready" };
+    expect(ThreadStartupActionSchema().parse(action)).toEqual(action);
+    for (const invalid of [{ actionId: "" }, { actionId: "a".repeat(257) }, { scriptHash: "x".repeat(64) }, { runId: "x".repeat(257) }]) {
+      expect(ThreadStartupActionSchema().safeParse({ ...action, ...invalid }).success).toBe(false);
+    }
   });
 });

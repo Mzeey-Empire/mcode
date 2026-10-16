@@ -27,7 +27,6 @@ import { ProjectIconService } from "../icons/project-icon-service.js";
 import { WorktreeRepo } from "../persistence/worktree-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { TerminalCommandService } from "../../terminal/commands/terminal-command-service.js";
-import { TERMINAL_BACKEND_TOKEN, type TerminalBackend } from "../../terminal/backends/terminal-backend.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { TurnRuntimeController } from "../../agents/orchestration/turn-runtime-controller.js";
@@ -119,9 +118,7 @@ export function registerProjectServices(container: DependencyContainer): void {
           runtimePhase: (threadId) => c.resolve(TurnRuntimeController).snapshot(threadId)?.phase,
           workspaces: c.resolve(WorkspaceRepo),
           terminalCommands: c.resolve(TerminalCommandService),
-          terminalRecovery: c.isRegistered(TERMINAL_BACKEND_TOKEN)
-            ? c.resolve<TerminalBackend>(TERMINAL_BACKEND_TOKEN)
-            : undefined,
+          projectActions: () => c.resolve(ProjectActionService),
           attachmentStorage: c.resolve(AttachmentService),
           threadStartups: c.isRegistered(ThreadStartupService)
             ? c.resolve(ThreadStartupService)

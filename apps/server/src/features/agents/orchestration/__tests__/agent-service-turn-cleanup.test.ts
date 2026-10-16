@@ -1,3 +1,4 @@
+import { startupEnvironmentFixture } from "../../../projects/environment/testing/startup-environment-fixture.js";
 import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as NodeEvents from "node:events";
@@ -129,11 +130,11 @@ function makePreviewAnnotationBundle(): Extract<PreviewAnnotationBundle, { schem
 
 async function setupEnvironmentForTest(enabled: boolean, db: Database, cwd: string, workspaceId: string, threads: RealThreadRepo) {
   if (!enabled) return undefined;
-  const environment = new WorkspaceEnvironmentService({
+  const environment = startupEnvironmentFixture({
     mcodeDir: cwd, database: db, databaseWriter: agentStorageTestWriter(db), threads, platform: "linux",
   });
   await environment.save({ workspaceId, sourceRevision: null,
-    document: { version: "0.0.1", setup: { default: "bun run setup" }, actions: [] } });
+    document: { version: "0.1.0", actions: [{ id: "setup", name: "Setup", command: { default: "bun run setup" }, runOnStartup: true }] } });
   return environment;
 }
 

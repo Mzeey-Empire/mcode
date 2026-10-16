@@ -1,82 +1,57 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AgentModelState, ThreadStartup, ThreadStartupResolveInput, WorkspaceEnvironmentCommandApproval } from "@mcode/contracts";
+import type { AgentModelState, ThreadStartup, ThreadStartupAction, ThreadStartupResolveInput, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import { approveAndStartAction } from "@/features/projects/actions/approveAndStartAction";
+import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useTerminalStore } from "@/features/terminal";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
-import { useThreadRecord } from "@/stores/thread-selectors";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useThreadRecord } from "@/stores/thread-selectors";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
 import { type StartupCancelRequest, useThreadStartupStore } from "./state/thread-startup-store";
+import { startupDecision, startupSetupView, type StartupSetupView } from "./startup-step-copy";
 
 const TERMINAL_STATES: ReadonlySet<ThreadStartup["state"]> = new Set(["completed", "failed", "cancelled", "interrupted"]);
-/** What the trail reads from a thread's automatic setup gate: the script text and any pending approval. */
-export interface StartupSetupGate {
-  readonly script: string | undefined;
-  readonly approval: WorkspaceEnvironmentCommandApproval | undefined;
-  /** Reads the gate again, for Run setup when the approval did not load. */
-  readonly reload: () => void;
-}
-
-type LoadedSetupGate = Omit<StartupSetupGate, "reload"> & {
-  readonly threadId: string;
-  readonly setupState: string;
-  readonly revision: number | undefined;
-  readonly reads: number;
-};
-
-function setupStarted(setupState: string | undefined): setupState is string {
-  return setupState !== undefined && setupState !== "pending";
-}
+const NO_RUNS: Readonly<Record<string, WorkspaceEnvironmentActionRun>> = {};
 
 /**
- * A running step reads again until its script arrives, since the step turns running before the
- * attempt records it. A blocked step reads again on every revision, so the approval Run setup
- * sends always matches the script on screen.
+ * Reads the retained runs again when the startup names a run the store lacks, or waits on an
+ * approval no loaded run explains. A push missed while offline otherwise leaves Run setup disabled.
  */
-function gateIsCurrent(loaded: LoadedSetupGate | null, setupState: string | undefined, revision: number | undefined, reads: number): boolean {
-  if (loaded === null || loaded.setupState !== setupState || loaded.reads !== reads) return false;
-  if (setupState === "blocked") return loaded.revision === revision;
-  return setupState !== "running" || loaded.script !== undefined || loaded.revision === revision;
-}
-
-/**
- * Reads the setup script for the setup row and the approval behind a Setup needs approval block.
- *
- * The startup record carries neither, so this reads the automatic setup gate when the setup step
- * changes, when the connection returns after a failed read, and when the user asks again. Nothing
- * here runs on a timer.
- */
-export function useStartupSetupGate(startup: ThreadStartup | undefined): StartupSetupGate {
-  const threadId = startup?.threadId;
-  const setupState = startup?.steps.find((step) => step.phase === "setup")?.state;
-  const revision = startup?.revision;
+function useHydrateStartupRuns(threadId: string | undefined, needed: boolean): void {
   const connected = useConnectionStore((state) => state.status === "connected");
-  const [loaded, setLoaded] = useState<LoadedSetupGate | null>(null);
-  const [reads, setReads] = useState(0);
-  const current = loaded?.threadId === threadId ? loaded : null;
-  const settled = gateIsCurrent(current, setupState, revision, reads);
   useEffect(() => {
-    // A read that failed while offline is not settled, so the reconnect below reads again.
-    if (!threadId || !setupStarted(setupState) || settled) return;
-    let active = true;
-    getTransport().getAutomaticSetup(threadId).then(
-      (snapshot) => {
-        if (!active) return;
-        const attempt = snapshot.attempt?.snapshot;
-        setLoaded({ threadId, setupState, revision, reads, script: attempt?.script ?? undefined, approval: attempt?.approval ?? undefined });
-      },
-      (error: unknown) => {
-        // Background reads only label rows; a failed read the user asked for says why.
-        if (active && reads > 0) showFailure("Could not load the setup command", error);
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [threadId, setupState, revision, settled, connected, reads]);
-  const reload = useCallback(() => setReads((count) => count + 1), []);
-  return { script: current?.script, approval: current?.approval, reload };
+    if (!threadId || !needed || !connected) return;
+    const store = useProjectActionStore.getState();
+    const requestEpoch = store.updateEpochByThread[threadId] ?? 0;
+    const generation = store.beginHydration(threadId);
+    getTransport().listWorkspaceActionRuns(threadId).then(
+      (runs) => useProjectActionStore.getState().hydrateRuns(threadId, runs, requestEpoch, generation),
+      () => undefined,
+    ).finally(() => useProjectActionStore.getState().endHydration(threadId));
+  }, [threadId, needed, connected]);
+}
+
+function needsRunHydration(
+  startup: ThreadStartup | undefined,
+  actions: readonly ThreadStartupAction[],
+  runs: Readonly<Record<string, WorkspaceEnvironmentActionRun>>,
+  view: StartupSetupView,
+): boolean {
+  const missingRun = actions.some((entry) => entry.runId !== null && runs[entry.actionId] === undefined);
+  return missingRun || (startupDecision(startup) === "setup-approval" && view.pending === undefined);
+}
+
+/** The setup step's startup actions joined with their retained runs. */
+export function useStartupSetupView(startup: ThreadStartup | undefined): StartupSetupView {
+  const threadId = startup?.threadId;
+  const detail = startup?.steps.find((step) => step.phase === "setup")?.detail;
+  const actions = detail?.phase === "setup" ? detail.actions : undefined;
+  const runs = useProjectActionStore((state) => (threadId ? state.runsByThread[threadId] : undefined)) ?? NO_RUNS;
+  const view = useMemo(() => startupSetupView(actions ?? [], runs), [actions, runs]);
+  useHydrateStartupRuns(threadId, needsRunHydration(startup, actions ?? [], runs, view));
+  return view;
 }
 
 /** One decision a startup stopped at setup can take. */
@@ -95,7 +70,7 @@ const SETUP_DECISION_FAILURE: Record<SetupDecisionAction, string> = {
   approve: "Could not run setup",
 };
 
-function sendSetupDecision(threadId: string, action: SetupDecisionAction, approval: WorkspaceEnvironmentCommandApproval | undefined): Promise<unknown> {
+function sendSetupDecision(threadId: string, action: SetupDecisionAction, pending: WorkspaceEnvironmentActionRun | undefined): Promise<unknown> {
   const transport = getTransport();
   switch (action) {
     case "retry":
@@ -103,8 +78,10 @@ function sendSetupDecision(threadId: string, action: SetupDecisionAction, approv
     case "skip":
       return transport.continueAutomaticSetup(threadId);
     case "approve":
-      if (!approval) return Promise.reject(new Error("The setup command to approve is not loaded"));
-      return transport.approveWorkspaceEnvironmentCommand(threadId, approval.target, approval.fingerprint);
+      if (!pending) return Promise.reject(new Error("The setup command to approve is not loaded"));
+      return approveAndStartAction(pending).then((started) => {
+        if (!started) throw new Error("The pending setup terminal was closed");
+      });
   }
 }
 
@@ -116,15 +93,15 @@ function showFailure(title: string, error: unknown): void {
  * Sends one setup decision for a thread. The startup push that follows moves the trail, so a
  * success needs no local state; a failure leaves the trail where it was and says why.
  */
-export function useStartupSetupDecision(threadId: string, approval: WorkspaceEnvironmentCommandApproval | undefined): StartupSetupDecision {
-  const [pending, setPending] = useState<SetupDecisionAction | null>(null);
+export function useStartupSetupDecision(threadId: string, pending: WorkspaceEnvironmentActionRun | undefined): StartupSetupDecision {
+  const [inFlight, setInFlight] = useState<SetupDecisionAction | null>(null);
   const run = useCallback((action: SetupDecisionAction) => {
-    setPending(action);
-    sendSetupDecision(threadId, action, approval)
+    setInFlight(action);
+    sendSetupDecision(threadId, action, pending)
       .catch((error: unknown) => showFailure(SETUP_DECISION_FAILURE[action], error))
-      .finally(() => setPending(null));
-  }, [approval, threadId]);
-  return { pending, run };
+      .finally(() => setInFlight(null));
+  }, [pending, threadId]);
+  return { pending: inFlight, run };
 }
 
 type ThreadTurnShape = { readonly kind: "none" } | { readonly kind: "sole-errored"; readonly turnId: string } | { readonly kind: "other" };
@@ -275,20 +252,11 @@ export function useStartingThread(
   return { onCancel };
 }
 
-/** Opens the automatic setup terminal for a thread in its right panel. */
-export async function openStartupSetupTerminal(workspaceId: string, threadId: string): Promise<void> {
-  try {
-    const { ptyId, shell } = await getTransport().openAutomaticSetupTerminal(threadId);
-    showRightPanelAdaptive(workspaceId, threadId);
-    useTerminalStore.getState().addTerminal(threadId, ptyId, shell);
-    useDiffStore.getState().setRightPanelTab(workspaceId, threadId, "terminal");
-  } catch (error) {
-    useToastStore.getState().show({
-      kind: "failed",
-      title: "Could not open setup terminal",
-      meta: error instanceof Error ? error.message : undefined,
-    });
-  }
+/** Shows one startup action's terminal in the thread's right panel. */
+export function openStartupSetupTerminal(workspaceId: string, threadId: string, terminalSessionId: string): void {
+  showRightPanelAdaptive(workspaceId, threadId);
+  useDiffStore.getState().setRightPanelTab(workspaceId, threadId, "terminal");
+  useTerminalStore.getState().setActiveTerminal(threadId, terminalSessionId);
 }
 
 /** Opens Project settings on the environment tab, where the setup script is edited. */

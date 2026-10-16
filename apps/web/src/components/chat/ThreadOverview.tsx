@@ -18,7 +18,7 @@ interface ThreadOverviewProps {
 }
 
 /**
- * The thread's Overview: the shared mount plus the Git, setup and dialog state that only a
+ * The thread's Overview: the shared mount plus the Git and dialog state that only a
  * persisted thread has.
  */
 export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps) {

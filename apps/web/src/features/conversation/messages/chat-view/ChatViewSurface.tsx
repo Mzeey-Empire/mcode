@@ -206,7 +206,7 @@ function ThreadStartupTrail({ thread, startup, pendingStartup }: {
       startupId={pendingStartup?.startupId ?? startup?.startupId}
       kind={startupKind(pendingStartup?.context, startup)}
       actions={startup && !dismissed ? <ThreadStartupActions thread={thread} startup={startup} pendingStartup={pendingStartup} /> : undefined}
-      onOpenTerminal={threadId ? () => { void openStartupSetupTerminal(thread.workspace_id, threadId); } : undefined}
+      onOpenTerminal={threadId ? (terminalSessionId) => openStartupSetupTerminal(thread.workspace_id, threadId, terminalSessionId) : undefined}
       onEditScript={threadId ? () => editStartupSetupScript(thread.workspace_id, threadId) : undefined}
     />
   );

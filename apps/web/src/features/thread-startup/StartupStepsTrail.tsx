@@ -1,21 +1,21 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronRight, CircleAlert, CircleX, LoaderCircle, Minus } from "lucide-react";
-import type { ThreadStartup, ThreadStartupKind } from "@mcode/contracts";
+import type { ThreadStartup, ThreadStartupKind, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { OriginFetchActions } from "./OriginFetchActions";
 import { StartupSetupOutput } from "./StartupSetupOutput";
-import { useStartupCancel, useStartupFetchDecision, useStartupSetupDecision, useStartupSetupGate, type SetupDecisionAction, type StartupSetupGate } from "./useStartupActions";
+import { useStartupCancel, useStartupFetchDecision, useStartupSetupDecision, useStartupSetupView, type SetupDecisionAction } from "./useStartupActions";
 import {
   placeholderTrailRows,
   latestStartedStep,
-  setupCommandLine,
   startupDecision,
   startupHasLiveStep,
   startupTrailRows,
   startupTrailAnnouncement,
   startupTrailSummary,
+  type StartupSetupView,
   type StartupTrailRow,
   type TrailPhase,
   type TrailRowTone,
@@ -34,7 +34,7 @@ export interface StartupStepsTrailProps {
    * decisions itself, since they act on the startup alone.
    */
   readonly actions?: ReactNode;
-  readonly onOpenTerminal?: () => void;
+  readonly onOpenTerminal?: (terminalSessionId: string) => void;
   readonly onEditScript?: () => void;
 }
 
@@ -144,19 +144,19 @@ function useLiveNow(live: boolean): number {
 }
 
 /** The whole script, since Run setup approves every line of it and not just the first. */
-function approvalDetail(startup: ThreadStartup | undefined, setupScript: string | undefined): string | undefined {
-  const script = setupScript?.trim();
+function approvalDetail(startup: ThreadStartup | undefined, pending: WorkspaceEnvironmentActionRun | undefined): string | undefined {
+  const script = pending?.snapshot.script?.trim();
   return script ? `$ ${script}` : startup?.block?.message;
 }
 
-function detailText(startup: ThreadStartup | undefined, setupScript: string | undefined): string | undefined {
-  if (startupDecision(startup) === "setup-approval") return approvalDetail(startup, setupScript);
+function detailText(startup: ThreadStartup | undefined, pending: WorkspaceEnvironmentActionRun | undefined): string | undefined {
+  if (startupDecision(startup) === "setup-approval") return approvalDetail(startup, pending);
   const reason = startup?.block ?? startup?.error;
   return reason?.detail ?? reason?.message;
 }
 
-function StartupDetailLine({ startup, setupScript }: { readonly startup: ThreadStartup | undefined; readonly setupScript: string | undefined }) {
-  const detail = detailText(startup, setupScript);
+function StartupDetailLine({ startup, pending }: { readonly startup: ThreadStartup | undefined; readonly pending: WorkspaceEnvironmentActionRun | undefined }) {
+  const detail = detailText(startup, pending);
   if (!detail) return null;
   return <p role="alert" data-testid="startup-detail" className="whitespace-pre-wrap break-words pb-2 pl-6 pt-1 font-mono text-caption text-muted">{detail}</p>;
 }
@@ -169,13 +169,13 @@ function blocksOtherActions(pending: SetupDecisionAction | null): (action: Setup
   return (action) => pending !== null && pending !== action;
 }
 
-function SetupFailedActions({ threadId, gate, outputOpen, onToggleOutput }: {
+function SetupFailedActions({ threadId, view, outputOpen, onToggleOutput }: {
   readonly threadId: string;
-  readonly gate: StartupSetupGate;
+  readonly view: StartupSetupView;
   readonly outputOpen: boolean;
   readonly onToggleOutput: () => void;
 }) {
-  const decision = useStartupSetupDecision(threadId, gate.approval);
+  const decision = useStartupSetupDecision(threadId, view.pending);
   const blocks = blocksOtherActions(decision.pending);
   return (
     <>
@@ -186,17 +186,27 @@ function SetupFailedActions({ threadId, gate, outputOpen, onToggleOutput }: {
   );
 }
 
-function SetupApprovalActions({ threadId, gate }: { readonly threadId: string; readonly gate: StartupSetupGate }) {
-  const decision = useStartupSetupDecision(threadId, gate.approval);
+function SetupApprovalActions({ threadId, view }: { readonly threadId: string; readonly view: StartupSetupView }) {
+  const decision = useStartupSetupDecision(threadId, view.pending);
   const blocks = blocksOtherActions(decision.pending);
-  // Without a loaded approval there is no shown script to approve, so Run setup reads it first.
-  const runSetup = gate.approval ? () => decision.run("approve") : gate.reload;
   return (
     <>
-      <Button type="button" variant="default" size="compact" className="px-3 text-caption" disabled={blocks("approve")} loading={decision.pending === "approve"} onClick={runSetup}>Run setup</Button>
+      <Button type="button" variant="default" size="compact" className="px-3 text-caption" disabled={blocks("approve") || !view.pending} loading={decision.pending === "approve"} onClick={() => decision.run("approve")}>Run setup</Button>
       <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} disabled={blocks("skip")} loading={decision.pending === "skip"} onClick={() => decision.run("skip")}>Skip setup</Button>
     </>
   );
+}
+
+/** A startup action that never exits (a dev server, a watcher) holds the first turn until the user skips it. */
+function SetupRunningActions({ threadId, view }: { readonly threadId: string; readonly view: StartupSetupView }) {
+  const decision = useStartupSetupDecision(threadId, view.pending);
+  return (
+    <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} loading={decision.pending === "skip"} onClick={() => decision.run("skip")}>Skip setup</Button>
+  );
+}
+
+function runsSetup(startup: ThreadStartup | undefined): startup is ThreadStartup & { readonly threadId: string } {
+  return startup?.state === "running" && startup.phase === "setup" && startup.threadId !== undefined;
 }
 
 function FetchFailedActions({ startup }: { readonly startup: ThreadStartup }) {
@@ -205,28 +215,29 @@ function FetchFailedActions({ startup }: { readonly startup: ThreadStartup }) {
 }
 
 /** The startup-scoped decision the trail offers itself, ahead of any thread-scoped host actions. */
-function StartupDecisionActions({ startup, gate, outputOpen, onToggleOutput }: {
+function StartupDecisionActions({ startup, view, outputOpen, onToggleOutput }: {
   readonly startup: ThreadStartup;
-  readonly gate: StartupSetupGate;
+  readonly view: StartupSetupView;
   readonly outputOpen: boolean;
   readonly onToggleOutput: () => void;
 }) {
   const decision = startupDecision(startup);
   if (decision === "fetch-failed") return <FetchFailedActions startup={startup} />;
   if (!startup.threadId) return null;
-  if (decision === "setup-failed") return <SetupFailedActions threadId={startup.threadId} gate={gate} outputOpen={outputOpen} onToggleOutput={onToggleOutput} />;
-  if (decision === "setup-approval") return <SetupApprovalActions threadId={startup.threadId} gate={gate} />;
+  if (runsSetup(startup)) return <SetupRunningActions threadId={startup.threadId} view={view} />;
+  if (decision === "setup-failed") return <SetupFailedActions threadId={startup.threadId} view={view} outputOpen={outputOpen} onToggleOutput={onToggleOutput} />;
+  if (decision === "setup-approval") return <SetupApprovalActions threadId={startup.threadId} view={view} />;
   return null;
 }
 
 function offersOwnDecision(startup: ThreadStartup | undefined): startup is ThreadStartup {
   const decision = startupDecision(startup);
-  if (decision === "fetch-failed") return true;
+  if (decision === "fetch-failed" || runsSetup(startup)) return true;
   return (decision === "setup-failed" || decision === "setup-approval") && startup?.threadId !== undefined;
 }
 
-function TrailSteps({ startup, kind, setupScript, outputOpen, onToggleOutput, onOpenTerminal, onEditScript, stopPhase, decision }: Pick<StartupStepsTrailProps, "startup" | "kind" | "onOpenTerminal" | "onEditScript"> & {
-  readonly setupScript: string | undefined;
+function TrailSteps({ startup, kind, view, outputOpen, onToggleOutput, onOpenTerminal, onEditScript, stopPhase, decision }: Pick<StartupStepsTrailProps, "startup" | "kind" | "onOpenTerminal" | "onEditScript"> & {
+  readonly view: StartupSetupView;
   readonly outputOpen: boolean;
   readonly onToggleOutput: () => void;
   /** The step a stopped startup stopped at, which carries the decision under it. */
@@ -234,9 +245,11 @@ function TrailSteps({ startup, kind, setupScript, outputOpen, onToggleOutput, on
   readonly decision: ReactNode;
 }) {
   const now = useLiveNow(startupHasLiveStep(startup));
-  const rows = startup ? startupTrailRows(startup, { now, setupCommand: setupCommandLine(setupScript) }) : placeholderTrailRows(kind);
+  const rows = startup ? startupTrailRows(startup, { now, setupCommand: view.commands.at(-1) }) : placeholderTrailRows(kind);
+  const { terminalSessionId } = view;
+  const openTerminal = onOpenTerminal && terminalSessionId !== null ? () => onOpenTerminal(terminalSessionId) : undefined;
   const setupOutput = startup && outputOpen
-    ? <StartupSetupOutput script={setupScript} transcript={startup.transcript} since={startup.steps.find((step) => step.phase === "setup")?.startedAt} onOpenTerminal={onOpenTerminal} onEditScript={onEditScript} />
+    ? <StartupSetupOutput commands={view.commands} transcript={startup.transcript} since={startup.steps.find((step) => step.phase === "setup")?.startedAt} onOpenTerminal={openTerminal} onEditScript={onEditScript} />
     : null;
   return rows.map((row) => (
     <div key={row.phase} className="flex flex-col gap-0.5">
@@ -247,9 +260,9 @@ function TrailSteps({ startup, kind, setupScript, outputOpen, onToggleOutput, on
   ));
 }
 
-function TrailActions({ startup, gate, outputOpen, onToggleOutput, actions, onCancel }: {
+function TrailActions({ startup, view, outputOpen, onToggleOutput, actions, onCancel }: {
   readonly startup: ThreadStartup | undefined;
-  readonly gate: StartupSetupGate;
+  readonly view: StartupSetupView;
   readonly outputOpen: boolean;
   readonly onToggleOutput: () => void;
   readonly actions: ReactNode;
@@ -261,7 +274,7 @@ function TrailActions({ startup, gate, outputOpen, onToggleOutput, actions, onCa
   const approval = startupDecision(startup) === "setup-approval";
   return (
     <div data-testid="startup-actions" className={cn("flex flex-wrap items-center", approval ? "gap-1 pl-6" : "pl-4")}>
-      {ownDecision ? <StartupDecisionActions startup={ownDecision} gate={gate} outputOpen={outputOpen} onToggleOutput={onToggleOutput} /> : null}
+      {ownDecision ? <StartupDecisionActions startup={ownDecision} view={view} outputOpen={outputOpen} onToggleOutput={onToggleOutput} /> : null}
       {actions}
       {onCancel ? <Button type="button" variant="ghost" size="compact" className={TEXT_ACTION_CLASS} onClick={onCancel}>Cancel</Button> : null}
     </div>
@@ -280,7 +293,7 @@ function decisionStopPhase(startup: ThreadStartup | undefined): TrailPhase | und
  * A stopped startup shows the Paper 04f decision for its state, and none of them offers Cancel.
  */
 export function StartupStepsTrail({ startup, startupId, kind, actions, onOpenTerminal, onEditScript }: StartupStepsTrailProps) {
-  const gate = useStartupSetupGate(startup);
+  const view = useStartupSetupView(startup);
   const cancel = useStartupCancel(startup, startupId);
   const liveCancel = startup?.state === "blocked" ? undefined : cancel;
   const [stepsOpen, setStepsOpen] = useState(false);
@@ -288,14 +301,14 @@ export function StartupStepsTrail({ startup, startupId, kind, actions, onOpenTer
   const toggleOutput = () => setOutputOpen((open) => !open);
   const completedStartup = startup?.state === "completed" ? startup : undefined;
   const startedRow = completedStartup
-    ? <StartedRow startup={completedStartup} setupCommand={setupCommandLine(gate.script)} expanded={stepsOpen} onToggle={() => setStepsOpen((open) => !open)} />
+    ? <StartedRow startup={completedStartup} setupCommand={view.commands[0]} expanded={stepsOpen} onToggle={() => setStepsOpen((open) => !open)} />
     : null;
   const announcement = <p role="status" className="sr-only">{startupTrailAnnouncement(startup)}</p>;
   const stopPhase = decisionStopPhase(startup);
   const decision = (
     <>
-      <StartupDetailLine startup={startup} setupScript={gate.script} />
-      <TrailActions startup={startup} gate={gate} outputOpen={outputOpen} onToggleOutput={toggleOutput} actions={actions} onCancel={liveCancel} />
+      <StartupDetailLine startup={startup} pending={view.pending} />
+      <TrailActions startup={startup} view={view} outputOpen={outputOpen} onToggleOutput={toggleOutput} actions={actions} onCancel={liveCancel} />
     </>
   );
   if (completedStartup && !stepsOpen) return <section aria-label="Thread startup" data-testid="startup-trail">{announcement}{startedRow}</section>;
@@ -303,7 +316,7 @@ export function StartupStepsTrail({ startup, startupId, kind, actions, onOpenTer
     <section aria-label="Thread startup" data-testid="startup-trail" className="flex flex-col gap-0.5">
       {announcement}
       {startedRow}
-      <TrailSteps startup={startup} kind={kind} setupScript={gate.script} outputOpen={outputOpen} onToggleOutput={toggleOutput} onOpenTerminal={onOpenTerminal} onEditScript={onEditScript} stopPhase={stopPhase} decision={decision} />
+      <TrailSteps startup={startup} kind={kind} view={view} outputOpen={outputOpen} onToggleOutput={toggleOutput} onOpenTerminal={onOpenTerminal} onEditScript={onEditScript} stopPhase={stopPhase} decision={decision} />
       {stopPhase ? null : decision}
     </section>
   );

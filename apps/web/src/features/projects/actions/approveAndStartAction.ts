@@ -1,11 +1,21 @@
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { applyActionRun } from "@/features/terminal/state/applyActionRun";
-import { isProjectCommandApprovalInvalid } from "@/features/projects/environment/ProjectCommandApprovalDialog";
 import { getTransport } from "@/transport";
 
-function isRunClosed(error: unknown): boolean {
+function errorCode(error: unknown): unknown {
   return typeof error === "object" && error !== null && "code" in error
-    && (error as { readonly code?: unknown }).code === "WORKSPACE_ENVIRONMENT_RUN_CLOSED";
+    ? (error as { readonly code?: unknown }).code
+    : null;
+}
+
+function isApprovalInvalid(error: unknown): boolean {
+  const code = errorCode(error);
+  return code === "WORKSPACE_ENVIRONMENT_APPROVAL_STALE"
+    || code === "WORKSPACE_ENVIRONMENT_APPROVAL_NOT_REQUIRED";
+}
+
+function isRunClosed(error: unknown): boolean {
+  return errorCode(error) === "WORKSPACE_ENVIRONMENT_RUN_CLOSED";
 }
 
 /**
@@ -25,7 +35,7 @@ export async function approveAndStartAction(run: WorkspaceEnvironmentActionRun):
     try {
       await transport.approveWorkspaceEnvironmentCommand(run.threadId, approval.target, approval.fingerprint);
     } catch (error) {
-      if (!isProjectCommandApprovalInvalid(error)) throw error;
+      if (!isApprovalInvalid(error)) throw error;
     }
   }
   try {

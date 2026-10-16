@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadStartup, ThreadStartupStep } from "@mcode/contracts";
+import type { ThreadStartup, ThreadStartupAction, ThreadStartupStep, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import {
   formatStartupDuration,
   placeholderTrailRows,
   setupCommandLine,
   startupDecision,
+  startupSetupView,
   startupTrailRows,
   startupTrailSummary,
 } from "../startup-step-copy";
@@ -185,5 +186,59 @@ describe("startupDecision", () => {
     ["a cancelled startup", record({ state: "cancelled", phase: "agent" }), "cancelled"],
   ] as const)("asks %s for %s", (_name, startup, expected) => {
     expect(startupDecision(startup) ?? null).toBe(expected);
+  });
+});
+
+describe("startupSetupView", () => {
+  const action = (actionId: string, outcome: ThreadStartupAction["outcome"], runId: string | null): ThreadStartupAction =>
+    ({ actionId, scriptHash: "a".repeat(64), runId, outcome });
+  const run = (actionId: string, overrides: Partial<WorkspaceEnvironmentActionRun> = {}): WorkspaceEnvironmentActionRun => ({
+    threadId: "thread-1",
+    workspaceId: "workspace-1",
+    actionId,
+    runId: `${actionId}-run`,
+    revision: 0,
+    terminalSessionId: `${actionId}-pty`,
+    trigger: "startup",
+    actionName: actionId,
+    status: "running",
+    snapshot: { platform: "linux", script: `bun ${actionId}
+bun other`, checkoutPath: "/repo", terminal: null, environmentNames: [] },
+    createdAt: T0,
+    startedAt: T0,
+    finishedAt: null,
+    exitCode: null,
+    port: null,
+    ...overrides,
+  });
+
+  it("lists the first script line of each launched action in sequence order", () => {
+    const view = startupSetupView(
+      [action("install", "ready", "install-run"), action("check", "running", "check-run"), action("build", "pending", null)],
+      { check: run("check"), install: run("install", { status: "completed", exitCode: 0 }), build: run("build") },
+    );
+    expect(view.commands).toEqual(["bun install", "bun check"]);
+    expect(view.terminalSessionId).toBe("check-pty");
+  });
+
+  it("names a replaced run by its action and keeps it out of approval and terminal selection", () => {
+    const replaced = run("install", { runId: "manual-run", status: "awaiting-approval", actionName: "Install" });
+    const view = startupSetupView([action("install", "running", "install-run")], { install: replaced });
+    expect(view).toEqual({ commands: ["Install"], pending: undefined, terminalSessionId: null });
+  });
+
+  it("exposes the run waiting for approval and points Open terminal at the failed action", () => {
+    const waiting = run("web", { status: "awaiting-approval" });
+    const view = startupSetupView(
+      [action("install", "failed", "install-run"), action("web", "pending", "web-run")],
+      { install: run("install", { status: "completed", exitCode: 3 }), web: waiting },
+    );
+    expect(view.pending).toBe(waiting);
+    expect(view.terminalSessionId).toBe("install-pty");
+  });
+
+  it("falls back to the action name for a run without a script", () => {
+    const bare = run("check", { actionName: "Check", snapshot: { platform: "linux", script: null, checkoutPath: "/repo", terminal: null, environmentNames: [] } });
+    expect(startupSetupView([action("check", "running", "check-run")], { check: bare }).commands).toEqual(["Check"]);
   });
 });

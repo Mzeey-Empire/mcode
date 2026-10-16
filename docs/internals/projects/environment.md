@@ -1,7 +1,7 @@
 # Project environment commands
 
-Project environment commands prepare a checkout through **Setup** or run a
-named **Action** in that checkout. The server owns command resolution, approval,
+Project actions run named commands in a checkout. Actions marked **Run on
+startup** prepare a worktree before its first provider turn. The server owns command resolution, approval,
 process lifetime, and retained results. Provider turns use a separate lifecycle.
 
 ## Configuration scope and command approval
@@ -14,14 +14,14 @@ to the main checkout's shared file. This lets a branch change its commands
 without silently running commands from another checkout.
 
 Changing storage mode selects the document at that location. It does not merge
-or copy documents. The [environment service](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L572)
-owns that choice, [checkout path resolution](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L714),
+or copy documents. The [environment service](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts)
+owns that choice, [checkout path resolution](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts),
 validation, and revision-checked atomic saves.
 
 Shared files can arrive through repository changes, so a shared command needs
 approval for its resolved launch. Approval is scoped to the Project and command
-identity, either Setup or a specific Action. Its
-[fingerprint](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L2112)
+identity, `action:<id>`. Its
+[fingerprint](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts)
 also includes the operating system, the terminal executable, and the script
 and arguments with normalized line endings. Approval does not authorize every
 command in a checkout. Identical launch facts can reuse a Project approval
@@ -34,15 +34,15 @@ the [terminal backend](../../../apps/server/src/features/terminal/backends/termi
 checks the expected executable and arguments again before spawn. A changed
 terminal profile therefore cannot execute under an approval for an older
 launch. The [Action resolution](../../../apps/server/src/features/projects/environment/project-action-resolution.ts)
-and [launch failure handling](../../../apps/server/src/features/projects/environment/project-action-service.ts#L255)
+and [launch failure handling](../../../apps/server/src/features/projects/environment/project-action-service.ts)
 return renewed approval work when that mismatch requires another review.
 
 ## The Setup gate is separate from its attempts
 
 Automatic Setup holds the first prompt for any worktree thread, managed or attached, before the
-provider starts. The [automatic Setup store](../../../apps/server/src/features/projects/environment/workspace-environment-automatic-store.ts#L115)
+provider starts. The [automatic Setup store](../../../apps/server/src/features/projects/environment/workspace-environment-automatic-store.ts)
 atomically saves the visible user message, the queued submission, and a blocked
-gate. The [environment service](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L377)
+gate. The [environment service](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts)
 starts Setup only after that admission commits.
 
 Branched starts continue another thread and skip Setup before admission, so
@@ -62,66 +62,82 @@ checkout that never finished setting up.
 Path comparison normalizes separators and trailing slashes, and ignores case
 on Windows.
 
-The gate answers whether queued prompts may start. An attempt records what
-happened to one Setup command. A passed attempt releases the gate. No applicable
-Setup script releases it as not required. A failed or interrupted attempt keeps
-it blocked until the user retries or continues. **Continue** releases queued
-prompts without changing the failed attempt into a pass. **Retry** resolves the
-current configuration and creates another attempt.
+The gate answers whether queued prompts may start. An attempt freezes the
+ordered startup action ids and SHA-256 hashes of their resolved scripts.
+The setup step owns this list and its run ids; the attempt stores no duplicate
+script, output or exit result. The runner commits the attempt and the step's
+action projection in the same transaction.
 
-```mermaid
-flowchart LR
-    Saved["Saved prompt and submission"] --> Blocked["Blocked Setup gate"]
-    Blocked -->|"Setup passes or is not required"| Released["Released queue"]
-    Blocked -->|"Continue after failure or interruption"| Released
-    Released --> Claim["Committed dispatch claim"]
-    Claim --> Dispatch["Provider dispatch"]
-    Dispatch --> Accepted["Saved dispatch acknowledgement"]
-```
+[StartupActionRunner](../../../apps/server/src/features/projects/environment/startup-action-runner.ts)
+uses the normal Action service and real action terminals. Only a current run's
+exit code 0 advances the sequence. A detected, reachable port proves only that
+some process accepts connections, so it never releases Setup. A long-running
+server holds the gate until it exits or the user chooses **Skip setup**.
+No startup actions releases the gate as not required.
 
-Gate release and provider dispatch are separate commits. The
-[queue drain](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L1678)
-claims a released submission durably before dispatch. It marks the claim
-dispatched after the dispatcher accepts it, then waits for that provider turn
-to complete before claiming the next released prompt. Queue order comes from
-durable admission order rather than timestamps.
+The first failure stops the sequence, records `failedActionId` on the attempt
+and the exit code on the setup step, and blocks with `SETUP_FAILED`. A launch
+error, including terminal capacity, also blocks. The terminal remains open in
+its shell phase. Retry freezes the current document and restarts the failed
+action in its existing terminal. Earlier exit-zero actions are skipped only
+when their script hashes still match. A script changed after freezing requires
+Retry instead of silently executing under the old hash.
 
-If dispatch throws, the claim remains unacknowledged. Reconciliation does not
-automatically replay that claim because the provider may already have accepted
-the prompt. Avoiding repeated command effects takes precedence over guessing
-whether an uncertain dispatch succeeded. At server startup,
-[reconciliation](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L552)
-marks unfinished Setup attempts interrupted and drains committed releases. It
-does not automatically rerun the interrupted Setup command.
+Shared actions without approval wait in their terminal and block the trail
+with `SETUP_APPROVAL_REQUIRED`. Approve the run's fingerprint, then start the
+action; either the trail or the terminal card uses this same sequence.
+Approval alone does not start a command.
 
-Manual Setup remains available in Direct mode and attached worktrees after
-startup. It cannot bypass an active automatic gate or startup. Its latest
-attempt is transient server state, and it does not start a provider turn. The
-[manual admission guard](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L2046)
-keeps managed worktrees on the automatic gate path.
+The trail tail is a bounded plain-text projection of command-phase bytes,
+decoded by the terminal plain-text decoder. It excludes the synthesized
+terminal echo and interactive shell output. Each started action contributes
+one `$ <first script line>` entry. Coalesced transcript batches write at most
+four times per second plus the exit flush, retaining at most 32 entries and
+16 KB. The terminal remains the full output view; cursor redraws can repeat
+lines in the trail.
 
-## Cancellation must settle owned commands
+Gate release and provider dispatch remain separate commits. The queue drain
+claims a released submission durably before dispatch and acknowledges the
+claim only after the dispatcher accepts it. It waits for that provider turn
+to complete before claiming the next released prompt. Failed dispatch claims
+are not replayed automatically because the provider may already have accepted
+them.
 
-`thread.startup.cancel` records cancellation intent and contains automatic
-Setup before marking the startup cancelled. After containment, it discards
-pending Turns and clears the Setup gate so a kept Thread accepts new sends.
-The cancelled prompt remains in the transcript and cannot replay through
-Continue or Retry. Opening a recovery terminal leaves the gate unchanged.
+On restart, unfinished attempts and action runs become interrupted.
+Reconciliation drains committed gate releases but never replays a startup
+command. Retry creates a new attempt.
 
-A finished attempt does not prove that its process resources have been
-released. [Stop and Retry](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L440)
-coordinate pending preparation and command closure. Containment failure keeps
-command ownership until release is confirmed, so Retry cannot start a
-replacement while an older command may still run.
+## Legacy configuration upgrades
 
-Thread and Project deletion block new Setup and Action starts before cleanup.
-Automatic Setup and Action teardown wait for admitted work to settle and close
-owned commands. Manual Setup cancellation bounds its wait for pending
-preparation but retains the cancellation check. The service closes a command
-prepared later without starting it. The
-[Setup cancellation checks](../../../apps/server/src/features/projects/environment/workspace-environment-service.ts#L1046)
-and [Action admission gate](../../../apps/server/src/features/projects/environment/project-action-admission.ts)
-prevent a delayed configuration read from launching work after teardown starts.
+[upgradeEnvironmentDocument](../../../apps/server/src/features/projects/environment/workspace-environment-upgrade.ts)
+runs on every read in both storage modes, including worktree-local shared
+files. A legacy `setup` command becomes the first action, named `setup` and
+marked `runOnStartup`. Its id gains a numeric suffix if necessary. Reading
+never rewrites the source file; the next Save writes the upgraded document.
+
+The approval identity changes from `setup` to `action:setup`, or its suffixed
+id. The migration deletes obsolete `setup` approval rows, so shared commands
+ask once after upgrade. This prevents silently granting the new action an old
+command's permission.
+
+The document and startup record share the eight-action limit because each
+startup action retains a terminal record. The document byte cap is 512 KB so
+eight 32 KB platform scripts fit with their metadata. Per-script and
+per-command limits still apply.
+
+## Cancellation keeps terminal shells
+
+Skip setup releases queued turns and detaches the sequence, leaving its
+running command alone. It does not mark that command successful.
+
+`thread.startup.cancel` records cancellation intent, stops startup command
+phases and waits for any admitted launch, then discards pending turns and
+clears the gate. Terminals retain their interactive shells. The cancelled
+prompt remains in the transcript and cannot replay through Continue or Retry.
+
+Thread and Project deletion block new starts before teardown. The startup
+runner stops its owned commands, while Action teardown closes owned terminal
+records. There is no separate manual Setup executor or recovery shell.
 
 ## Actions retain results beyond process exit
 

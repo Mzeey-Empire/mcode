@@ -221,19 +221,17 @@ describe("successful database migration recovery", () => {
     expect(generations).toHaveLength(5);
   });
 
-  it("creates the complete automatic Setup lifecycle in one migration", () => {
+  it("creates the automatic Setup lifecycle in one migration and retires its output columns in 0091", () => {
     const database = openDatabase({ dbPath: databasePath });
     try {
       expect(readJournal(NodePath.join(process.cwd(), "drizzle")).entries.filter(
         (entry) => entry.tag.startsWith("0044_"),
       )).toEqual([migrationEntry(NodePath.join(process.cwd(), "drizzle"), AUTOMATIC_SETUP_MIGRATION)]);
-      expect(columnNames(database, "workspace_environment_automatic_setup_attempts")).toEqual(expect.arrayContaining([
-        "launch_snapshot_json",
-        "outcome",
-        "exit_code",
-        "output",
-        "output_truncated",
-      ]));
+      const attemptColumns = columnNames(database, "workspace_environment_automatic_setup_attempts");
+      expect(attemptColumns).toContain("failed_action_id");
+      for (const retired of ["launch_snapshot_json", "outcome", "exit_code", "output", "output_truncated"]) {
+        expect(attemptColumns).not.toContain(retired);
+      }
       expect(columnNames(database, "workspace_environment_queued_turns")).toContain("dispatched_at");
       expect(database.prepare("SELECT created_at FROM __drizzle_migrations WHERE hash = ?").all(
         migrationHash(NodePath.join(process.cwd(), "drizzle"), AUTOMATIC_SETUP_MIGRATION),

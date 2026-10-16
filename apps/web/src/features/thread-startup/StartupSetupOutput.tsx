@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
 
 /** Props for the 04b setup output card under the live setup step. */
 export interface StartupSetupOutputProps {
-  /** Setup script from the automatic setup gate; each line echoes as a `$` command. */
-  readonly script?: string;
+  /** First script line of each launched startup action, echoed as `$` commands. */
+  readonly commands: readonly string[];
   /** Startup transcript; only setup-phase output feeds the tail. */
   readonly transcript: ThreadStartup["transcript"];
   /** Start of the current setup attempt. Retry keeps the transcript, so earlier attempts' output is dropped. */
@@ -22,10 +22,6 @@ const LINE_CLASS = "font-mono text-caption leading-5";
 function setupOutputLines(transcript: ThreadStartup["transcript"], since: string): string[] {
   const text = transcript.filter((entry) => entry.phase === "setup" && entry.createdAt >= since).map((entry) => entry.content).join("");
   return text.split(/\r?\n/).filter((line, index, lines) => line.length > 0 || index < lines.length - 1);
-}
-
-function scriptLines(script: string | undefined): string[] {
-  return script?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0) ?? [];
 }
 
 function CardIconButton({ label, onClick, children }: { readonly label: string; readonly onClick: () => void; readonly children: ReactNode }) {
@@ -48,9 +44,8 @@ function CardIconButton({ label, onClick, children }: { readonly label: string; 
   );
 }
 
-/** Renders the setup script and a bottom-anchored live tail of its output. */
-export function StartupSetupOutput({ script, transcript, since = "", onOpenTerminal, onEditScript }: StartupSetupOutputProps) {
-  const commands = scriptLines(script);
+/** Renders the startup commands and a bottom-anchored live tail of their output. */
+export function StartupSetupOutput({ commands, transcript, since = "", onOpenTerminal, onEditScript }: StartupSetupOutputProps) {
   const output = setupOutputLines(transcript, since);
   return (
     <div data-testid="startup-setup-output" className="w-full max-w-[56rem] overflow-clip rounded-md border border-border bg-panel">

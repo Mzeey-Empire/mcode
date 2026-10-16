@@ -36,9 +36,7 @@ import type {
   WorkspaceEnvironmentReadResult,
   WorkspaceEnvironmentStorageMode,
   WorkspaceEnvironmentCommandTarget,
-  WorkspaceEnvironmentSetupAttempt,
   WorkspaceEnvironmentAutomaticSetupSnapshot,
-  WorkspaceEnvironmentAutomaticSetupTerminal,
   WorkspaceEnvironmentActionRun,
   Thread,
   RecentThread,
@@ -148,9 +146,7 @@ export type {
   WorkspaceEnrichment,
   WorkspaceEnvironmentDocument,
   WorkspaceEnvironmentReadResult,
-  WorkspaceEnvironmentSetupAttempt,
   WorkspaceEnvironmentAutomaticSetupSnapshot,
-  WorkspaceEnvironmentAutomaticSetupTerminal,
   WorkspaceEnvironmentActionRun,
   Thread,
   RecentThread,
@@ -372,18 +368,10 @@ export interface McodeTransport {
   ): Promise<void>;
   /** Clear every stored approval for one Project. */
   clearWorkspaceEnvironmentApprovals(workspaceId: string): Promise<void>;
-  /** Start a transient manual Setup attempt for one Thread. */
-  startWorkspaceSetup(threadId: string): Promise<WorkspaceEnvironmentSetupAttempt>;
-  /** Read the latest transient manual Setup attempt for one Thread. */
-  getWorkspaceSetupAttempt(threadId: string): Promise<WorkspaceEnvironmentSetupAttempt | null>;
-  /** Read the reconnect-authoritative automatic Setup gate for one Thread. */
-  getAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
   /** Release queued Turns without rerunning automatic Setup. */
   continueAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
   /** Start one new automatic Setup attempt from the current Project environment. */
   retryAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
-  /** Create one interactive recovery Terminal for the current Thread checkout. */
-  openAutomaticSetupTerminal(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupTerminal>;
   /** Lists retained Project Action results for the current Thread. */
   listWorkspaceActionRuns(threadId: string): Promise<WorkspaceEnvironmentActionRun[]>;
   /**

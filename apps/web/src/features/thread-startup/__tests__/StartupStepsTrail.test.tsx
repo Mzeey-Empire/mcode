@@ -1,4 +1,4 @@
-import type { ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup, ThreadStartupAction, ThreadStartupStep, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,17 +6,21 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 const startupTransport = {
   cancelThreadStartup: vi.fn(),
-  getAutomaticSetup: vi.fn(),
   retryAutomaticSetup: vi.fn(),
   continueAutomaticSetup: vi.fn(),
   approveWorkspaceEnvironmentCommand: vi.fn(),
+  startWorkspaceAction: vi.fn(),
   resolveThreadStartup: vi.fn(),
+  listWorkspaceActionRuns: vi.fn(),
 };
 
 vi.mock("@/transport", () => ({
   getTransport: () => startupTransport,
 }));
 
+import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
 import { StartupStepsTrail } from "../StartupStepsTrail";
 import { useThreadStartupStore } from "../state/thread-startup-store";
 
@@ -34,7 +38,7 @@ function startup(overrides: Partial<ThreadStartup> = {}): ThreadStartup {
     steps: [
       { phase: "thread", state: "completed", startedAt: at(0), endedAt: at(0) },
       { phase: "worktree", state: "completed", startedAt: at(0), endedAt: at(2), detail: { phase: "worktree", mode: "created", folderName: "mcode-3f2a", path: "/w/mcode-3f2a" } },
-      { phase: "setup", state: "running", startedAt: at(2) },
+      setupStep("running", "running"),
       { phase: "agent", state: "pending" },
     ],
     transcript: [],
@@ -47,11 +51,45 @@ function startup(overrides: Partial<ThreadStartup> = {}): ThreadStartup {
   };
 }
 
-function setupScript(script: string | null) {
-  startupTransport.getAutomaticSetup.mockResolvedValue({
-    gate: "not-required",
-    attempt: script === null ? null : { state: "running", snapshot: { script } },
-    queuedTurns: [],
+const approval = { target: { kind: "action" as const, actionId: "install" }, fingerprint: "fp-1" };
+
+function installAction(outcome: ThreadStartupAction["outcome"]): ThreadStartupAction {
+  return { actionId: "install", scriptHash: "a".repeat(64), runId: "run-1", outcome };
+}
+
+function setupStep(state: ThreadStartupStep["state"], outcome: ThreadStartupAction["outcome"], times: Partial<ThreadStartupStep> = {}): ThreadStartupStep {
+  return { phase: "setup", state, startedAt: at(2), ...times, detail: { phase: "setup", actions: [installAction(outcome)] } };
+}
+
+function seedRun(script: string, overrides: Partial<WorkspaceEnvironmentActionRun> = {}): WorkspaceEnvironmentActionRun {
+  const run: WorkspaceEnvironmentActionRun = {
+    threadId: "thread-1",
+    workspaceId: "workspace-1",
+    actionId: "install",
+    runId: "run-1",
+    revision: 0,
+    terminalSessionId: "pty-1",
+    trigger: "startup",
+    actionName: "Install",
+    status: "running",
+    snapshot: { platform: "linux", script, checkoutPath: "/repo", terminal: null, environmentNames: [] },
+    createdAt: at(2),
+    startedAt: at(2),
+    finishedAt: null,
+    exitCode: null,
+    port: null,
+    ...overrides,
+  };
+  useProjectActionStore.getState().applyRun(run);
+  return run;
+}
+
+function seedPendingTab(): void {
+  const tab = { id: "pty-1", threadId: "thread-1", label: "Install", state: "pending", kind: "action", actionId: "install" } as TerminalInstance;
+  useTerminalStore.setState({
+    terminals: { "thread-1": [tab] },
+    activeTerminalByScope: { "thread-1": "pty-1" },
+    ptyToThread: { "pty-1": "thread-1" },
   });
 }
 
@@ -65,7 +103,6 @@ function rowLabels() {
 
 describe("StartupStepsTrail", () => {
   beforeEach(() => {
-    setupScript(null);
     const gate = { gate: "not-required", attempt: null, queuedTurns: [] };
     startupTransport.retryAutomaticSetup.mockResolvedValue(gate);
     startupTransport.continueAutomaticSetup.mockResolvedValue(gate);
@@ -77,6 +114,9 @@ describe("StartupStepsTrail", () => {
     vi.useRealTimers();
     for (const mock of Object.values(startupTransport)) mock.mockReset();
     useThreadStartupStore.setState({ recordsByStartupId: {}, startupIdByThreadId: {} });
+    useProjectActionStore.setState({ runsByThread: {} });
+    useTerminalStore.setState({ terminals: {}, activeTerminalByScope: {}, ptyToThread: {} });
+    useConnectionStore.setState({ status: "connecting" });
   });
 
   it("draws pending placeholder rows before the record arrives", () => {
@@ -89,40 +129,63 @@ describe("StartupStepsTrail", () => {
     expect(screen.queryByTestId("startup-step-thread")).toBeNull();
   });
 
-  it("ticks the live row and labels it with the setup command", async () => {
+  it("ticks the live row and labels it with the running action's first script line", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse(at(5)) });
-    setupScript("bun install\nbun run build");
+    seedRun("bun install\nbun run build");
     renderTrail({ startup: startup(), kind: "managed-worktree" });
 
-    await waitFor(() => expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Running setupbun install0:03"));
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Running setupbun install0:03");
     expect(screen.getByTestId("startup-step-worktree")).toHaveTextContent("Created worktreemcode-3f2a0:02");
-    expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1);
-    expect(startupTransport.getAutomaticSetup).toHaveBeenCalledWith("thread-1");
 
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
     expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("0:05");
-    expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1);
   });
 
-  it("re-reads the script on each pushed revision until the attempt records it, never on a timer", async () => {
+  it("labels the live row with the action now running, not the first one", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse(at(5)) });
+    seedRun("bun install", { status: "completed", exitCode: 0 });
+    seedRun("bun check", { actionId: "check", runId: "run-2", terminalSessionId: "pty-2" });
+    const actions = [installAction("ready"), { ...installAction("running"), actionId: "check", runId: "run-2" }];
+    const step = { ...setupStep("running", "running"), detail: { phase: "setup" as const, actions } };
+    renderTrail({ startup: startup({ steps: [{ phase: "thread", state: "completed" }, step, { phase: "agent", state: "pending" }] }), kind: "managed-worktree" });
+
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("bun check");
+  });
+
+  it("reads the retained runs again on reconnect so a missed approval can be run", async () => {
+    const waiting = { ...seedRun("bun install", { status: "awaiting-approval" }), runId: "run-1" };
+    useProjectActionStore.setState({ runsByThread: {} });
+    startupTransport.listWorkspaceActionRuns.mockResolvedValue([waiting]);
+    renderTrail({
+      startup: startup({
+        state: "blocked",
+        steps: [{ phase: "thread", state: "completed" }, setupStep("blocked", "pending"), { phase: "agent", state: "pending" }],
+        block: { code: "SETUP_APPROVAL_REQUIRED", message: "Setup needs approval", actions: ["retry", "continue"] },
+      }),
+      kind: "managed-worktree",
+    });
+    expect(startupTransport.listWorkspaceActionRuns).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Run setup" })).toBeDisabled();
+
+    act(() => useConnectionStore.setState({ status: "connected" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run setup" })).toBeEnabled());
+    expect(startupTransport.listWorkspaceActionRuns).toHaveBeenCalledWith("thread-1");
+  });
+
+  it("labels the row once the run reaches the store, and ignores a run the sequence did not launch", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse(at(3)) });
-    const { rerender } = renderTrail({ startup: startup(), kind: "managed-worktree" });
-    await waitFor(() => expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1));
-    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-    expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1);
+    renderTrail({ startup: startup(), kind: "managed-worktree" });
     expect(screen.getByTestId("startup-step-setup")).not.toHaveTextContent("bun install");
 
-    setupScript("bun install");
-    rerender(<TooltipProvider><StartupStepsTrail startup={startup({ revision: 2 })} kind="managed-worktree" /></TooltipProvider>);
-    await waitFor(() => expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("bun install"));
+    act(() => { seedRun("bun install", { runId: "manual-run" }); });
+    expect(screen.getByTestId("startup-step-setup")).not.toHaveTextContent("bun install");
 
-    rerender(<TooltipProvider><StartupStepsTrail startup={startup({ revision: 3 })} kind="managed-worktree" /></TooltipProvider>);
-    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-    expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(2);
+    act(() => { seedRun("bun install"); });
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("bun install");
   });
 
   it("expands the live setup row into the script and output tail", async () => {
-    setupScript("bun install");
+    seedRun("bun install");
     renderTrail({
       startup: startup({
         transcript: [
@@ -146,14 +209,14 @@ describe("StartupStepsTrail", () => {
   });
 
   it("shows a failed step with its exit code, detail and actions", () => {
-    setupScript("bun install");
+    seedRun("bun install", { status: "completed", exitCode: 1 });
     renderTrail({
       startup: startup({
         state: "failed",
         steps: [
           { phase: "thread", state: "completed" },
           { phase: "worktree", state: "completed", startedAt: at(0), endedAt: at(2), detail: { phase: "worktree", mode: "created", folderName: "mcode-3f2a", path: "/w" } },
-          { phase: "setup", state: "failed", startedAt: at(2), endedAt: at(16), detail: { phase: "setup", exitCode: 1 } },
+          { ...setupStep("failed", "failed", { endedAt: at(16) }), detail: { phase: "setup", actions: [installAction("failed")], exitCode: 1 } },
           { phase: "agent", state: "pending" },
         ],
         error: { code: "SETUP_FAILED", message: "Setup failed", retryable: true, detail: "error: lockfile had changes" },
@@ -170,20 +233,21 @@ describe("StartupStepsTrail", () => {
   });
 
   it("offers Retry setup, Skip setup and Show output for a setup that failed, without Cancel", async () => {
-    setupScript("bun install");
+    seedRun("bun install", { status: "completed", exitCode: 1 });
+    const onOpenTerminal = vi.fn();
     renderTrail({
       startup: startup({
         state: "blocked",
         steps: [
           { phase: "thread", state: "completed" },
-          { phase: "setup", state: "blocked", startedAt: at(2), endedAt: at(16), detail: { phase: "setup", exitCode: 1 } },
+          { ...setupStep("blocked", "failed", { endedAt: at(16) }), detail: { phase: "setup", actions: [installAction("failed")], exitCode: 1 } },
           { phase: "agent", state: "pending" },
         ],
         transcript: [{ phase: "setup", content: "$ bun install\nerror: lockfile had changes\n", createdAt: at(3) }],
         block: { code: "SETUP_FAILED", message: "Project Setup did not complete successfully", actions: ["retry", "continue"], detail: "error: lockfile had changes" },
       }),
       kind: "managed-worktree",
-      onOpenTerminal: vi.fn(),
+      onOpenTerminal,
     });
 
     expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "failed");
@@ -192,7 +256,8 @@ describe("StartupStepsTrail", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Show output" }));
     expect(screen.getByRole("log", { name: "Setup output" })).toHaveTextContent("error: lockfile had changes");
-    expect(screen.getByRole("button", { name: "Open terminal" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Open terminal" }));
+    expect(onOpenTerminal).toHaveBeenCalledWith("pty-1");
     expect(screen.getByRole("button", { name: "Hide output" })).toHaveAttribute("aria-expanded", "true");
 
     await userEvent.click(screen.getByRole("button", { name: "Retry setup" }));
@@ -201,19 +266,34 @@ describe("StartupStepsTrail", () => {
     expect(startupTransport.continueAutomaticSetup).toHaveBeenCalledWith("thread-1");
   });
 
-  it("asks to run a shared setup with its command, then runs it on the server's approval", async () => {
-    const approval = { target: "setup", fingerprint: "fp-1" };
-    startupTransport.getAutomaticSetup.mockResolvedValue({
-      gate: "blocked",
-      attempt: { state: "awaiting-approval", snapshot: { script: "bun install\nbun run build", approval } },
-      queuedTurns: [],
+  it("lets the user skip a running setup that never exits, beside Cancel", async () => {
+    seedRun("bun run dev", { status: "running" });
+    renderTrail({ startup: startup(), kind: "managed-worktree" });
+
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Skip setup" }));
+    expect(startupTransport.continueAutomaticSetup).toHaveBeenCalledWith("thread-1");
+  });
+
+  it("offers no Skip setup before setup starts", () => {
+    renderTrail({ startup: startup({ phase: "worktree", steps: [{ phase: "thread", state: "completed" }, { phase: "worktree", state: "running", startedAt: at(0) }, { phase: "setup", state: "pending" }, { phase: "agent", state: "pending" }] }), kind: "managed-worktree" });
+    expect(screen.queryByRole("button", { name: "Skip setup" })).toBeNull();
+  });
+
+  it("asks to run a shared setup with its command, then approves and starts the action", async () => {
+    const pending = seedRun("bun install\nbun run build", {
+      status: "awaiting-approval",
+      startedAt: null,
+      snapshot: { platform: "linux", script: "bun install\nbun run build", checkoutPath: "/repo", terminal: null, environmentNames: [], approval },
     });
+    seedPendingTab();
+    startupTransport.startWorkspaceAction.mockResolvedValue({ ...pending, runId: "run-2", status: "running" });
     renderTrail({
       startup: startup({
         state: "blocked",
         steps: [
           { phase: "thread", state: "completed" },
-          { phase: "setup", state: "blocked", startedAt: at(2) },
+          setupStep("blocked", "pending"),
           { phase: "agent", state: "pending" },
         ],
         block: { code: "SETUP_APPROVAL_REQUIRED", message: "Setup needs approval", actions: ["retry", "continue"] },
@@ -224,10 +304,11 @@ describe("StartupStepsTrail", () => {
     expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "approval");
     expect(screen.getByTestId("startup-step-setup")).toHaveTextContent(/^Setup needs approval$/);
     expect(screen.getByRole("status")).toHaveTextContent("Setup needs approval");
-    await waitFor(() => expect(screen.getByTestId("startup-detail").textContent).toBe("$ bun install\nbun run build"));
+    expect(screen.getByTestId("startup-detail").textContent).toBe("$ bun install\nbun run build");
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Run setup" }));
-    expect(startupTransport.approveWorkspaceEnvironmentCommand).toHaveBeenCalledWith("thread-1", "setup", "fp-1");
+    await waitFor(() => expect(startupTransport.startWorkspaceAction).toHaveBeenCalledWith("thread-1", "install", pending.runId));
+    expect(startupTransport.approveWorkspaceEnvironmentCommand).toHaveBeenCalledWith("thread-1", approval.target, "fp-1");
     await userEvent.click(screen.getByRole("button", { name: "Skip setup" }));
     expect(startupTransport.continueAutomaticSetup).toHaveBeenCalledWith("thread-1");
   });
@@ -250,7 +331,6 @@ describe("StartupStepsTrail", () => {
   });
 
   it("keeps the other setup actions disabled while one is on its way, and the pending one focusable", async () => {
-    setupScript("bun install");
     startupTransport.retryAutomaticSetup.mockReturnValue(new Promise(() => undefined));
     renderTrail({
       startup: startup({
@@ -266,28 +346,28 @@ describe("StartupStepsTrail", () => {
     expect(screen.getByRole("button", { name: "Skip setup" })).toBeDisabled();
   });
 
-  it("reads the setup command again instead of approving one that never loaded", async () => {
-    const approval = { target: "setup", fingerprint: "fp-1" };
-    startupTransport.getAutomaticSetup
-      .mockRejectedValueOnce(new Error("socket closed"))
-      .mockResolvedValue({ gate: "blocked", attempt: { state: "awaiting-approval", snapshot: { script: "bun install", approval } }, queuedTurns: [] });
+  it("disables Run setup until the pending action run has loaded, and says why", async () => {
     renderTrail({
       startup: startup({
         state: "blocked",
-        steps: [{ phase: "thread", state: "completed" }, { phase: "setup", state: "blocked", startedAt: at(2) }],
+        steps: [{ phase: "thread", state: "completed" }, setupStep("blocked", "pending")],
         block: { code: "SETUP_APPROVAL_REQUIRED", message: "Setup needs approval", actions: ["retry", "continue"] },
       }),
       kind: "managed-worktree",
     });
-    await waitFor(() => expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1));
-    expect(screen.getByTestId("startup-detail")).toHaveTextContent("Setup needs approval");
 
-    await userEvent.click(screen.getByRole("button", { name: "Run setup" }));
-    await waitFor(() => expect(screen.getByTestId("startup-detail")).toHaveTextContent("$ bun install"));
+    expect(screen.getByTestId("startup-detail")).toHaveTextContent("Setup needs approval");
+    expect(screen.getByRole("button", { name: "Run setup" })).toBeDisabled();
     expect(startupTransport.approveWorkspaceEnvironmentCommand).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole("button", { name: "Run setup" }));
-    expect(startupTransport.approveWorkspaceEnvironmentCommand).toHaveBeenCalledWith("thread-1", "setup", "fp-1");
+    act(() => {
+      seedRun("bun install", {
+        status: "awaiting-approval",
+        snapshot: { platform: "linux", script: "bun install", checkoutPath: "/repo", terminal: null, environmentNames: [], approval },
+      });
+    });
+    expect(screen.getByRole("button", { name: "Run setup" })).toBeEnabled();
+    expect(screen.getByTestId("startup-detail")).toHaveTextContent("$ bun install");
   });
 
   it("offers Retry and Start from local for a failed origin fetch, without Cancel", async () => {
@@ -368,7 +448,7 @@ describe("StartupStepsTrail", () => {
   });
 
   it("collapses a completed startup to one row that expands back to its steps", async () => {
-    setupScript("bun install");
+    seedRun("bun install", { status: "completed", exitCode: 0 });
     renderTrail({
       startup: startup({
         state: "completed",
@@ -376,7 +456,7 @@ describe("StartupStepsTrail", () => {
         steps: [
           { phase: "thread", state: "completed" },
           { phase: "worktree", state: "completed", startedAt: at(0), endedAt: at(2), detail: { phase: "worktree", mode: "created", folderName: "mcode-3f2a", path: "/w" } },
-          { phase: "setup", state: "completed", startedAt: at(2), endedAt: at(14) },
+          setupStep("completed", "ready", { endedAt: at(14) }),
           { phase: "agent", state: "completed", startedAt: at(14), endedAt: at(22) },
         ],
         updatedAt: at(40),
@@ -385,7 +465,7 @@ describe("StartupStepsTrail", () => {
     });
 
     const started = screen.getByTestId("startup-started-row");
-    await waitFor(() => expect(started).toHaveTextContent("Started in0:22· mcode-3f2a · bun install"));
+    expect(started).toHaveTextContent("Started in0:22· mcode-3f2a · bun install");
     expect(screen.queryByTestId("startup-step-setup")).toBeNull();
 
     await userEvent.click(started);

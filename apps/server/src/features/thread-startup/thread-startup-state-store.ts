@@ -176,16 +176,18 @@ export class ThreadStartupStateStore {
 
   /** Append one bounded output entry and retain only the newest bounded transcript. */
   appendOutput(startupId: string, content: string): ThreadStartup {
+    return this.appendOutputs(startupId, [content]);
+  }
+
+  /** Retain a coalesced output batch in one revision. */
+  appendOutputs(startupId: string, contents: string[]): ThreadStartup {
     const startup = this.require(startupId);
     if (isTerminal(startup)) return startup;
-    const entry = ThreadStartupTranscriptEntrySchema().parse({
-      phase: startup.phase,
-      content,
-      createdAt: this.now().toISOString(),
-    });
+    const entries = contents.map((content) => ThreadStartupTranscriptEntrySchema().parse({
+      phase: startup.phase, content, createdAt: this.now().toISOString(),
+    }));
     return this.persistNext({
-      ...startup,
-      transcript: retainTranscript([...startup.transcript, entry]),
+      ...startup, transcript: retainTranscript([...startup.transcript, ...entries]),
     });
   }
 
@@ -403,7 +405,7 @@ export class ThreadStartupStateStore {
 
 function retainTranscript(transcript: ThreadStartup["transcript"]): ThreadStartup["transcript"] {
   const retained = transcript.slice(-THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES);
-  while (retained.reduce((total, entry) => total + entry.content.length, 0) > THREAD_STARTUP_TRANSCRIPT_MAX_CHARS) {
+  while (retained.reduce((total, entry) => total + new TextEncoder().encode(entry.content).byteLength, 0) > THREAD_STARTUP_TRANSCRIPT_MAX_CHARS) {
     retained.shift();
   }
   return retained;

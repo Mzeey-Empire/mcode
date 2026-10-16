@@ -8,19 +8,15 @@ import {
   WorkspaceEnvironmentDocumentSchema,
   WorkspaceEnvironmentActionRunSchema,
   WorkspaceEnvironmentErrorSchema,
-  WorkspaceEnvironmentSetupAttemptSchema,
   WorkspaceEnvironmentAutomaticSetupSnapshotSchema,
   WorkspaceEnvironmentAutomaticSetupStopInputSchema,
   WorkspaceEnvironmentAutomaticSetupRetryInputSchema,
-  WorkspaceEnvironmentAutomaticSetupTerminalInputSchema,
-  WorkspaceEnvironmentAutomaticSetupTerminalSchema,
   workspaceEnvironmentValidationIssues,
 } from "../workspace-environment.js";
 
 const validCommand = { default: "bun run dev" };
 const validDocument = {
   version: "0.0.1",
-  setup: validCommand,
   actions: [{ id: "opaque-id", name: "Run app", command: validCommand }],
 };
 
@@ -31,14 +27,8 @@ describe("encodeEnvironmentDocument", () => {
     expect(new TextDecoder().decode(encoded.bytes)).toBe('{"version":"0.0.1","actions":[]}');
   });
 
-  it("preserves legacy Setup and platform overrides without migrating", () => {
-    const document = {
-      ...validDocument,
-      setup: { default: "bun install", windows: "bun install --frozen-lockfile" },
-    };
-    const encoded = encodeEnvironmentDocument(document);
-    expect(encoded.document).toEqual(document);
-    expect(JSON.parse(new TextDecoder().decode(encoded.bytes))).toEqual(document);
+  it("rejects legacy Setup at the save boundary", () => {
+    expect(() => encodeEnvironmentDocument({ ...validDocument, setup: validCommand })).toThrow();
   });
 
   it("derives 0.0.1 when a 0.1.0 document has no new fields", () => {
@@ -80,7 +70,7 @@ describe("encodeEnvironmentDocument", () => {
   });
 
   it("rejects promotion while legacy Setup is still present", () => {
-    expect(() => encodeEnvironmentDocument({ ...validDocument, future: true })).toThrow("Move Setup into an action first.");
+    expect(() => encodeEnvironmentDocument({ ...validDocument, setup: validCommand, future: true })).toThrow();
   });
 });
 
@@ -109,19 +99,19 @@ describe("workspace environment contracts", () => {
   });
 
   it("rejects 0.1.0 Setup with a field-level migration message", () => {
-    const parsed = WorkspaceEnvironmentDocumentSchema().safeParse({ ...validDocument, version: "0.1.0" });
+    const parsed = WorkspaceEnvironmentDocumentSchema().safeParse({ ...validDocument, setup: validCommand, version: "0.1.0" });
     expect(parsed.success).toBe(false);
     if (parsed.success) return;
     expect(workspaceEnvironmentValidationIssues(parsed.error)).toEqual([{
       path: ["setup"],
       code: "INVALID_VALUE",
       reason: "invalid_value",
-      message: "Move Setup into an action first.",
+      message: "Move Setup into a startup action.",
     }]);
   });
 
-  it.each(["document", "action"])("counts unknown %s keys toward the 128KB cap", (location) => {
-    const extra = { future: "é".repeat(65_536) };
+  it.each(["document", "action"])("counts unknown %s keys toward the 512KB cap", (location) => {
+    const extra = { future: "é".repeat(262_144) };
     const parsed = WorkspaceEnvironmentDocumentSchema().safeParse({
       version: "0.1.0",
       ...(location === "document" ? extra : {}),
@@ -195,77 +185,6 @@ describe("workspace environment contracts", () => {
     expect(command).toEqual({ default: "  bun run setup  ", windows: " \t " });
   });
 
-  it("carries Terminal-bounded immutable manual Setup outcomes without environment values", () => {
-    const attempt = WorkspaceEnvironmentSetupAttemptSchema().parse({
-      id: "attempt-1",
-      threadId: "thread-1",
-      workspaceId: "workspace-1",
-      status: "failed",
-      outcome: "containment_failure",
-      snapshot: {
-        platform: "windows",
-        script: "bun run setup",
-        checkoutPath: "C:\\repo",
-        terminal: {
-          executable: "C:\\Program Files\\PowerShell\\pwsh.exe",
-          arguments: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "bun run setup"],
-        },
-      },
-      createdAt: "2026-08-22T12:00:00.000Z",
-      startedAt: "2026-08-22T12:00:00.000Z",
-      finishedAt: "2026-08-22T12:00:05.000Z",
-      exitCode: null,
-      output: "Setup timed out",
-      outputTruncated: false,
-      cleanupPending: true,
-    });
-
-    expect(attempt.outcome).toBe("containment_failure");
-    expect(attempt.snapshot.terminal?.arguments).toContain("-NonInteractive");
-    expect(JSON.stringify(attempt)).not.toContain("SECRET_TOKEN");
-    expect(WorkspaceEnvironmentSetupAttemptSchema().safeParse({
-      ...attempt,
-      cleanupPending: false,
-      snapshot: {
-        ...attempt.snapshot,
-        terminal: {
-          executable: "x".repeat(1_025),
-          arguments: Array.from({ length: 33 }, () => "argument"),
-        },
-      },
-    }).success).toBe(false);
-    expect(WorkspaceEnvironmentSetupAttemptSchema().safeParse({
-      ...attempt,
-      status: "running",
-      outcome: null,
-      startedAt: null,
-      finishedAt: null,
-      cleanupPending: false,
-    }).success).toBe(false);
-    expect(WorkspaceEnvironmentSetupAttemptSchema().safeParse({
-      ...attempt,
-      status: "passed",
-      outcome: "success",
-      cleanupPending: false,
-      exitCode: 1,
-    }).success).toBe(false);
-    expect(WorkspaceEnvironmentSetupAttemptSchema().safeParse({
-      ...attempt,
-      status: "passed",
-      outcome: "success",
-      cleanupPending: false,
-      exitCode: 0,
-      startedAt: null,
-    }).success).toBe(false);
-    expect(WorkspaceEnvironmentSetupAttemptSchema().safeParse({
-      ...attempt,
-      status: "failed",
-      outcome: "success",
-      cleanupPending: false,
-      exitCode: 0,
-    }).success).toBe(false);
-  });
-
   it("accepts the retained latest Action result and rejects obsolete transcript data", () => {
     const run = WorkspaceEnvironmentActionRunSchema().parse({
       threadId: "thread-1",
@@ -325,87 +244,39 @@ describe("workspace environment contracts", () => {
     }).code).toBe("WORKSPACE_ENVIRONMENT_ACTION_NOT_FOUND");
   });
 
-  it("accepts exact automatic gate lifecycle shapes and rejects unfinished results", () => {
-    const queued = WorkspaceEnvironmentAutomaticSetupSnapshotSchema().parse({
-      gate: "blocked",
-      attempt: {
-        id: "attempt-automatic-1",
-        state: "queued",
-        reason: null,
-        snapshot: null,
-        outcome: null,
-        createdAt: "2026-08-22T12:00:00.000Z",
-        startedAt: null,
-        finishedAt: null,
-        exitCode: null,
-        output: "",
-        outputTruncated: false,
-      },
-      queuedTurns: [{
-        id: "submission-1",
-        messageId: "message-1",
-        state: "queued",
-        createdAt: "2026-08-22T12:00:00.000Z",
-        dispatchedAt: null,
-      }, {
-        id: "submission-2",
-        messageId: "message-2",
-        state: "queued",
-        createdAt: "2026-08-22T12:00:01.000Z",
-        dispatchedAt: null,
-      }],
-    });
-    expect(queued.gate).toBe("blocked");
+  it("accepts automatic sequence lifecycle records and rejects obsolete command results", () => {
+    const attempt = {
+      id: "attempt-1", state: "queued", reason: null, failedActionId: null,
+      createdAt: "2026-10-16T12:00:00.000Z", startedAt: null, finishedAt: null,
+    };
+    const snapshot = { gate: "blocked", attempt, queuedTurns: [] };
+    expect(WorkspaceEnvironmentAutomaticSetupSnapshotSchema().parse(snapshot)).toEqual(snapshot);
+    for (const obsolete of ["snapshot", "outcome", "exitCode", "output", "outputTruncated"]) {
+      expect(WorkspaceEnvironmentAutomaticSetupSnapshotSchema().safeParse({
+        ...snapshot, attempt: { ...attempt, [obsolete]: null },
+      }).success).toBe(false);
+    }
     expect(WorkspaceEnvironmentAutomaticSetupSnapshotSchema().safeParse({
-      ...queued,
-      attempt: { ...queued.attempt, state: "failed", reason: null, finishedAt: null },
-      extra: true,
+      ...snapshot, attempt: { ...attempt, state: "passed" },
     }).success).toBe(false);
-
-    const dispatched = WorkspaceEnvironmentAutomaticSetupSnapshotSchema().parse({
-      gate: "released-by-pass",
-      attempt: {
-        id: "attempt-automatic-1",
-        state: "passed",
-        reason: null,
-        snapshot: {
-          platform: "linux",
-          script: "bun run setup",
-          checkoutPath: "/repo/.worktrees/first",
-          terminal: { executable: "sh", arguments: ["-c", "bun run setup"] },
-        },
-        outcome: "success",
-        createdAt: "2026-08-22T12:00:00.000Z",
-        startedAt: "2026-08-22T12:00:00.000Z",
-        finishedAt: "2026-08-22T12:00:01.000Z",
-        exitCode: 0,
-        output: "done",
-        outputTruncated: false,
-      },
-      queuedTurns: [{
-        id: "submission-1",
-        messageId: "message-1",
-        state: "dispatched",
-        createdAt: "2026-08-22T12:00:00.000Z",
-        dispatchedAt: "2026-08-22T12:00:01.000Z",
-      }],
-    });
-    expect(dispatched.queuedTurns).toHaveLength(1);
-    expect(dispatched.queuedTurns[0]?.state).toBe("dispatched");
-    expect(WorkspaceEnvironmentAutomaticSetupSnapshotSchema().safeParse({
-      ...dispatched,
-      attempt: { ...dispatched.attempt, exitCode: 1 },
-    }).success).toBe(false);
-    expect(WorkspaceEnvironmentAutomaticSetupSnapshotSchema().safeParse({
-      ...dispatched,
-      queuedTurns: [{ ...dispatched.queuedTurns[0]!, dispatchedAt: null }],
-    }).success).toBe(false);
-  });
-
-  it("validates strict targeted automatic Setup recovery inputs and Terminal results", () => {
+    const passed = { ...attempt, state: "passed", startedAt: attempt.createdAt, finishedAt: attempt.createdAt };
+    expect(WorkspaceEnvironmentAutomaticSetupSnapshotSchema().parse({ ...snapshot, gate: "released-by-pass", attempt: passed }).attempt).toEqual(passed);
     expect(WorkspaceEnvironmentAutomaticSetupStopInputSchema().safeParse({ threadId: "" }).success).toBe(false);
     expect(WorkspaceEnvironmentAutomaticSetupRetryInputSchema().safeParse({ threadId: "thread-1", extra: true }).success).toBe(false);
-    expect(WorkspaceEnvironmentAutomaticSetupTerminalInputSchema().parse({ threadId: "thread-1" })).toEqual({ threadId: "thread-1" });
-    expect(WorkspaceEnvironmentAutomaticSetupTerminalSchema().safeParse({ ptyId: "pty-1", shell: "pwsh", extra: true }).success).toBe(false);
+  });
+
+  it("accepts eight startup actions with full-size scripts and rejects the ninth with its stable reason", () => {
+    const actions = Array.from({ length: 8 }, (_, index) => ({
+      id: `action-${index}`, name: `Action ${index}`, runOnStartup: true,
+      command: { default: "x".repeat(32 * 1024) },
+    }));
+    const document = { version: "0.1.0", actions };
+    expect(WorkspaceEnvironmentDocumentSchema().parse(document)).toEqual(document);
+    const ninth = WorkspaceEnvironmentDocumentSchema().safeParse({
+      ...document, actions: [...actions, { ...actions[0], id: "ninth" }],
+    });
+    expect(ninth.success).toBe(false);
+    if (ninth.success) throw new Error("Expected the startup limit");
+    expect(workspaceEnvironmentValidationIssues(ninth.error).map((issue) => issue.reason)).toEqual(["too_many_startup_actions"]);
   });
 });

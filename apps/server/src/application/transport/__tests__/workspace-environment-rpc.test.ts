@@ -234,63 +234,7 @@ describe("workspace environment RPC", () => {
     expect(restart).toHaveBeenCalledExactlyOnceWith(params);
   });
 
-  it("starts and reads the typed transient manual Setup attempt", async () => {
-    const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-environment-rpc-"));
-    roots.push(root);
-    const workspaceEnvironmentService = new WorkspaceEnvironmentService({
-      mcodeDir: root,
-      threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "direct" } : null },
-      terminalCommands: {
-        prepare: async () => ({
-          kind: "ready" as const,
-          command: {
-            snapshot: {
-              checkoutPath: "C:\\workspace",
-              terminal: { executable: "pwsh.exe", arguments: ["-NoProfile", "-NonInteractive", "-Command", "setup"] },
-            },
-            start: async () => await new Promise<never>(() => undefined),
-            close: async () => ({ kind: "contained" as const }),
-            waitForRelease: async () => await new Promise<never>(() => undefined),
-          },
-        }),
-      },
-      platform: "windows",
-      createAttemptId: () => "attempt-1",
-      now: () => new Date("2026-08-22T12:00:00.000Z"),
-    });
-    await workspaceEnvironmentService.save({
-      workspaceId: "workspace-1",
-      sourceRevision: null,
-      document: { version: "0.0.1", setup: { windows: "setup" }, actions: [] },
-    });
-    const deps = {
-      workspaceService: { findById: (id: string) => id === "workspace-1" ? { id } : null },
-      workspaceEnvironmentService,
-    } as unknown as RouterDeps;
-
-    const started = await routeMessage(JSON.stringify({
-      id: "start",
-      method: "workspace.environment.setup.start",
-      params: { threadId: "thread-1" },
-    }), deps);
-    expect(started.error).toBeUndefined();
-    expect(started.result).toMatchObject({
-      id: "attempt-1",
-      status: "running",
-      outcome: null,
-      snapshot: { platform: "windows", script: "setup", checkoutPath: "C:\\workspace" },
-    });
-
-    const latest = await routeMessage(JSON.stringify({
-      id: "latest",
-      method: "workspace.environment.setup.get",
-      params: { threadId: "thread-1" },
-    }), deps);
-    expect(latest.error).toBeUndefined();
-    expect(latest.result).toMatchObject({ attempt: { id: "attempt-1", status: "running" } });
-  });
-
-  it("routes strict automatic Setup lifecycle reads and recovery mutations", async () => {
+  it("routes strict automatic Setup recovery mutations", async () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-environment-rpc-"));
     roots.push(root);
     const persistence = createThreadPersistenceTestRuntime();
@@ -301,20 +245,12 @@ describe("workspace environment RPC", () => {
       database: persistence.reader,
       databaseWriter: persistence.writer,
       threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true, worktree_path: "/project/.worktrees/first" } : null },
-      terminalRecovery: { create: () => ({ ptyId: "recovery-pty", shell: "pwsh" }) },
       platform: "linux",
     });
     const deps = {
       workspaceService: { findById: () => null },
       workspaceEnvironmentService,
     } as unknown as RouterDeps;
-
-    const get = await routeMessage(JSON.stringify({
-      id: "automatic-get",
-      method: "workspace.environment.automaticSetup.get",
-      params: { threadId: "thread-1" },
-    }), deps);
-    expect(get.result).toEqual({ gate: "not-required", attempt: null, queuedTurns: [] });
 
     const continued = await routeMessage(JSON.stringify({
       id: "automatic-continue",
@@ -323,7 +259,6 @@ describe("workspace environment RPC", () => {
     }), deps);
     expect(continued.error).toMatchObject({
       code: "WORKSPACE_ENVIRONMENT_SETUP_UNAVAILABLE",
-      message: "Automatic Setup can continue only after Setup failed, was interrupted, or is awaiting approval",
     });
     expect(continued.result).toBeUndefined();
     expect(workspaceEnvironmentService.getAutomaticSetup({ threadId: "thread-1" })).toEqual({
@@ -332,48 +267,17 @@ describe("workspace environment RPC", () => {
       queuedTurns: [],
     });
 
-    const terminal = await routeMessage(JSON.stringify({
-      id: "automatic-terminal",
-      method: "workspace.environment.automaticSetup.openTerminal",
-      params: { threadId: "thread-1" },
-    }), deps);
-    expect(terminal.result).toEqual({ ptyId: "recovery-pty", shell: "pwsh" });
-
     const malformed = await routeMessage(JSON.stringify({
       id: "automatic-bad",
-      method: "workspace.environment.automaticSetup.get",
+      method: "workspace.environment.automaticSetup.retry",
       params: { threadId: "thread-1", extra: true },
     }), deps);
     expect(malformed.error?.code).toBe("WORKSPACE_ENVIRONMENT_VALIDATION");
 
     database.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES ('workspace-1', 'Project', '/project', '{}')").run();
     database.prepare("INSERT INTO threads (id, workspace_id, title, mode, branch, worktree_managed, provider) VALUES ('thread-1', 'workspace-1', 'Blocked Turn', 'worktree', 'main', 1, 'claude')").run();
-    await workspaceEnvironmentService.save({
-      workspaceId: "workspace-1",
-      sourceRevision: null,
-      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
-    });
-    await workspaceEnvironmentService.queueAutomaticFirstTurn({
-      threadId: "thread-1",
-      messageId: "message-1",
-      content: "Blocked Turn",
-      attachments: [],
-      mentions: [],
-      submission: {
-        threadId: "thread-1",
-        messageId: "message-1",
-        content: "Blocked Turn",
-        displayContent: "Blocked Turn",
-        model: "claude-sonnet-4-6",
-        permissionMode: "default",
-        attachments: [],
-        persistedAttachments: [],
-        mentions: [],
-        provider: "claude",
-      },
-    });
-    await expect.poll(() => workspaceEnvironmentService.getAutomaticSetup({ threadId: "thread-1" }).attempt?.state)
-      .toBe("failed");
+    database.prepare("INSERT INTO workspace_environment_automatic_setup_attempts (id, thread_id, state, reason, created_at, finished_at) VALUES ('attempt', 'thread-1', 'failed', 'setup_failed', ?, ?)").run("2026-10-16T12:00:00.000Z", "2026-10-16T12:00:01.000Z");
+    database.prepare("INSERT INTO workspace_environment_setup_gates (thread_id, state, attempt_id, created_at, updated_at) VALUES ('thread-1', 'blocked', 'attempt', ?, ?)").run("2026-10-16T12:00:00.000Z", "2026-10-16T12:00:01.000Z");
 
     const validContinue = await routeMessage(JSON.stringify({
       id: "automatic-continue-valid",
@@ -384,7 +288,7 @@ describe("workspace environment RPC", () => {
     expect(validContinue.result).toMatchObject({
       gate: "released-by-continue",
       attempt: { state: "failed" },
-      queuedTurns: [{ state: "released", messageId: "message-1" }],
+      queuedTurns: [],
     });
   });
 });

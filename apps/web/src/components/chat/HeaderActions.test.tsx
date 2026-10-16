@@ -61,8 +61,6 @@ vi.mock("@/transport", async (importOriginal) => {
         status: "absent",
       }),
       listWorkspaceActionRuns: vi.fn().mockResolvedValue([]),
-      getWorkspaceSetupAttempt: vi.fn().mockResolvedValue(null),
-      startWorkspaceSetup: vi.fn(),
       generateRecap: vi.fn().mockImplementation(async (
         _threadId: string,
         _messages: Array<{ role: "user" | "assistant"; content: string }>,

@@ -28,7 +28,8 @@ export class ThreadStartupService {
     return () => { this.listeners.delete(listener); };
   }
 
-  private publish(startup: ThreadStartup): void {
+  /** Publish a startup committed atomically by another lifecycle owner. */
+  publish(startup: ThreadStartup): void {
     broadcast("thread.startup.updated", startup);
     for (const listener of this.listeners) listener(startup);
   }
@@ -92,6 +93,11 @@ export class ThreadStartupService {
   /** Retain one bounded output entry in the startup transcript. */
   appendOutput(...input: Parameters<ThreadStartupStateStore["appendOutput"]>): Promise<ThreadStartup> {
     return this.commit(threadStartupStateWriteOperations.appendOutput, [input, this.timestamp()]);
+  }
+
+  /** Retain a coalesced batch with one durable transcript update. */
+  appendOutputs(...input: Parameters<ThreadStartupStateStore["appendOutputs"]>): Promise<ThreadStartup> {
+    return this.commit(threadStartupStateWriteOperations.appendOutputs, [input, this.timestamp()]);
   }
 
   /** Complete the final phase and make the lifecycle terminal. */

@@ -75,7 +75,7 @@ function requireAction(resolved: WorkspaceEnvironmentCommandResolution): Workspa
 }
 
 function actionSnapshot(
-  snapshot: import("@mcode/contracts").WorkspaceEnvironmentSetupLaunchSnapshot,
+  snapshot: WorkspaceEnvironmentActionLaunchSnapshot,
 ): WorkspaceEnvironmentActionLaunchSnapshot {
   return {
     platform: snapshot.platform,
