@@ -20,7 +20,7 @@ export async function openTerminalUrl(
     return;
   }
   if (window.desktopBridge?.openExternalUrl) {
-    void window.desktopBridge.openExternalUrl(link.url);
+    await window.desktopBridge.openExternalUrl(link.url);
     return;
   }
   window.open(link.url, "_blank", "noopener,noreferrer");

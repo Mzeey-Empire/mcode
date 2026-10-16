@@ -32,6 +32,12 @@ describe("openTerminalUrl", () => {
     expect(openUrlInPreview).not.toHaveBeenCalled();
   });
 
+  it("rejects when the system browser cannot be opened so the caller can show a notice", async () => {
+    openExternalUrl.mockRejectedValueOnce(new Error("ipc failed"));
+
+    await expect(openTerminalUrl({ url: "https://example.test/", loopback: false }, "thread-1")).rejects.toThrow("ipc failed");
+  });
+
   it("falls back to the system browser for a loopback URL when no thread owns the terminal", async () => {
     await openTerminalUrl({ url: "http://localhost:5173/", loopback: true }, undefined);
 

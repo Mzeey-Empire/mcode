@@ -715,8 +715,9 @@ export const TerminalView = memo(function TerminalView({
               match,
               activate: () => openFileLink(match.target),
             })),
-            // Untrimmed, so a URL followed by row padding is not mistaken for one that runs to the row edge.
-            ...findTerminalUrlLinks(line.translateToString(false), {
+            // Trimmed text keeps typed spaces but drops the unwritten cell a wide character leaves
+            // at a wrap, so a URL cut by that wrap still reads as touching the row edge.
+            ...findTerminalUrlLinks(text, {
               continuesPreviousRow: line.isWrapped,
               continuesOnNextRow: term.buffer.active.getLine(bufferLineNumber)?.isWrapped === true,
             }).map((match) => ({
