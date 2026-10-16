@@ -22,8 +22,8 @@ interface WorkingFolderPillProps {
 }
 
 /**
- * Row-2 pill for a shell's working folder: parent muted, folder name ink, fading
- * on overflow. Clicking copies the full path; the chevron opens the folder elsewhere.
+ * Row-2 pill for a shell's working folder: parent muted, folder name ink. On overflow
+ * the parent fades out so the folder name stays readable. Clicking copies the full path; the chevron opens the folder elsewhere.
  */
 export function WorkingFolderPill({ path, onOpenInEditor, editorReason, onOpenInFileManager }: WorkingFolderPillProps) {
   const [copied, setCopied] = useState(false);
@@ -52,9 +52,9 @@ export function WorkingFolderPill({ path, onOpenInEditor, editorReason, onOpenIn
               type="button"
               aria-label={`Copy ${path}`}
               onClick={copy}
-              className="text-fade flex min-w-0 flex-1 items-baseline text-left font-mono text-xs"
+              className="flex min-w-0 flex-1 items-baseline text-left font-mono text-xs"
             >
-              <span className="shrink-0 text-muted">{parent}</span>
+              <span className="text-fade text-muted">{parent}</span>
               <span className="shrink-0 text-ink">{name}</span>
             </button>
           }
