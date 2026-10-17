@@ -14,7 +14,7 @@ import { ActionsSection } from "./ActionsSection";
 import { EnvironmentConflictBanner } from "./EnvironmentConflictBanner";
 import { useProjectSettingsDraftStore } from "./projectSettingsDraftStore";
 import { SettingsSaveBar } from "./SettingsSaveBar";
-import { jsonEqual, newAction, validateDocument, type SettingsIssue } from "./settings-model";
+import { duplicateAction, jsonEqual, newAction, validateDocument, type SettingsIssue } from "./settings-model";
 import { useProjectSettings } from "./useProjectSettings";
 
 const STORAGE_OPTIONS = [
@@ -91,6 +91,18 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
     setNewActionId(action.id);
   };
 
+  const duplicate = (actionId: string) => {
+    const source = entry?.draft.actions.find((candidate) => candidate.id === actionId);
+    if (!source) return;
+    const copy = duplicateAction(source);
+    edit(workspaceId, (draft) => {
+      const index = draft.actions.findIndex((candidate) => candidate.id === actionId);
+      return { ...draft, actions: [...draft.actions.slice(0, index + 1), copy, ...draft.actions.slice(index + 1)] };
+    });
+    setExpanded(workspaceId, copy.id);
+    setNewActionId(copy.id);
+  };
+
   const playFor = (action: WorkspaceEnvironmentAction): ActionPlay => {
     const saved = entry?.base.document.actions.find((candidate) => candidate.id === action.id);
     if (!threadId) return { disabledReason: "Open a thread to run actions.", run: () => undefined };
@@ -163,6 +175,7 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
             edit(workspaceId, (draft) => ({ ...draft, actions: draft.actions.filter((candidate) => candidate.id !== actionId) }));
             setExpanded(workspaceId, null);
           }}
+          onDuplicate={duplicate}
           onForgetApproval={(actionId) => void settings.forgetApproval(actionId)}
         />
       </div>

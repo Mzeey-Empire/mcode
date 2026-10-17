@@ -210,6 +210,37 @@ describe("ProjectSettingsPanel", () => {
     });
   });
 
+  it("duplicates an action under a new id and saves both", async () => {
+    const user = userEvent.setup();
+    render(<ProjectSettingsPanel workspaceId="workspace-1" />);
+    await openAction(user, "Build");
+
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Duplicate action" }));
+    expect(await screen.findByLabelText("Action name")).toHaveValue("Build copy");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledOnce());
+    const [, saved] = transport.saveWorkspaceEnvironment.mock.calls[0] as [string, WorkspaceEnvironmentReadResult["document"]];
+    expect(saved.actions.map((action) => [action.name, action.command.default])).toEqual([
+      ["Build", "bun run build"],
+      ["Build copy", "bun run build"],
+    ]);
+    expect(new Set(saved.actions.map((action) => action.id)).size).toBe(2);
+  });
+
+  it("returns focus to the collapsed row when Escape closes the editor", async () => {
+    const user = userEvent.setup();
+    render(<ProjectSettingsPanel workspaceId="workspace-1" />);
+    await openAction(user, "Build");
+
+    await user.click(screen.getByLabelText("Action name"));
+    await user.keyboard("{Escape}");
+
+    const row = await screen.findByRole("button", { name: /^Build/, expanded: false });
+    await waitFor(() => expect(row).toHaveFocus());
+  });
+
   it("explains why an action cannot run without a thread", async () => {
     render(<ProjectSettingsPanel workspaceId="workspace-1" />);
     const row = (await screen.findByRole("button", { name: /^Build/ })).closest("div");

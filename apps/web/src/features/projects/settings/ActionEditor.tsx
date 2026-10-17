@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Ellipsis, Play, Trash2, Undo2 } from "lucide-react";
+import { Copy, Ellipsis, Play, Trash2, Undo2 } from "lucide-react";
 import type { WorkspaceEnvironmentAction } from "@mcode/contracts";
 import { IconButton } from "@/components/ui/button";
 import {
@@ -42,6 +42,7 @@ interface ActionEditorProps {
   readonly focusName: boolean;
   readonly onChange: (action: WorkspaceEnvironmentAction) => void;
   readonly onRemove: () => void;
+  readonly onDuplicate: () => void;
   readonly onForgetApproval: () => void;
 }
 
@@ -101,7 +102,7 @@ function CommandEditor({ action, issue, onChange }: Pick<ActionEditorProps, "act
   );
 }
 
-function MoreMenu({ approved, onRemove, onForgetApproval }: Pick<ActionEditorProps, "approved" | "onRemove" | "onForgetApproval">) {
+function MoreMenu({ approved, onDuplicate, onRemove, onForgetApproval }: Pick<ActionEditorProps, "approved" | "onDuplicate" | "onRemove" | "onForgetApproval">) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -114,6 +115,7 @@ function MoreMenu({ approved, onRemove, onForgetApproval }: Pick<ActionEditorPro
         {approved ? (
           <DropdownMenuItem label="Forget approval" icon={<Undo2 />} onClick={onForgetApproval} />
         ) : null}
+        <DropdownMenuItem label="Duplicate action" icon={<Copy />} onClick={onDuplicate} />
         <DropdownMenuItem label="Delete action" icon={<Trash2 />} destructive onClick={onRemove} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -129,6 +131,7 @@ export function ActionEditor({
   focusName,
   onChange,
   onRemove,
+  onDuplicate,
   onForgetApproval,
 }: ActionEditorProps) {
   const nameRef = useRef<HTMLInputElement>(null);
@@ -165,7 +168,7 @@ export function ActionEditor({
         >
           <Play />
         </IconButton>
-        <MoreMenu approved={approved} onRemove={onRemove} onForgetApproval={onForgetApproval} />
+        <MoreMenu approved={approved} onDuplicate={onDuplicate} onRemove={onRemove} onForgetApproval={onForgetApproval} />
       </div>
       <CommandEditor action={action} issue={issue} onChange={onChange} />
       <div className="flex flex-col gap-0.5">

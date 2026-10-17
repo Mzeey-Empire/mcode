@@ -1,6 +1,7 @@
+import { useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
 import type { WorkspaceEnvironmentAction } from "@mcode/contracts";
-import { IconButton } from "@/components/ui/button";
+import { Button, IconButton } from "@/components/ui/button";
 import { ActionIcon } from "../actions/ActionIcon";
 import { ActionEditor, type ActionPlay } from "./ActionEditor";
 import { scriptOf } from "./settings-model";
@@ -13,26 +14,33 @@ function Chip({ children }: { readonly children: string }) {
   );
 }
 
-function CollapsedRow({ action, play, onToggle }: {
+function CollapsedRow({ action, play, restoreFocus, onToggle }: {
   readonly action: WorkspaceEnvironmentAction;
   readonly play: ActionPlay;
+  /** Takes focus on mount, for the row an Escape just collapsed so the keyboard keeps its place. */
+  readonly restoreFocus: boolean;
   readonly onToggle: () => void;
 }) {
   const command = scriptOf(action.command);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (restoreFocus) toggleRef.current?.focus();
+  }, [restoreFocus]);
   return (
     <div className="flex h-11 items-center gap-2.5 rounded-[10px] bg-panel pr-1.5 pl-3">
-      <button
-        type="button"
+      <Button
+        ref={toggleRef}
+        variant="ghost"
         aria-expanded={false}
         onClick={onToggle}
-        className="flex h-full min-w-0 flex-1 items-center gap-2.5 text-left outline-none focus-visible:outline-2 focus-visible:outline-focus"
+        className="h-full min-w-0 flex-1 justify-start gap-2.5 rounded-control px-0 font-normal hover:bg-transparent"
       >
         <ActionIcon iconId={action.icon} command={command} size={16} />
-        <span className="shrink-0 text-body-small font-medium text-ink">{action.name}</span>
+        <span className="text-fade max-w-[45%] shrink-0 text-body-small font-medium text-ink">{action.name}</span>
         <span className="text-fade min-w-0 flex-1 font-mono text-xs whitespace-nowrap text-muted">{command}</span>
         {action.runOnStartup ? <Chip>On startup</Chip> : null}
         {action.runOnCleanup ? <Chip>On cleanup</Chip> : null}
-      </button>
+      </Button>
       <IconButton
         shape="round"
         aria-label={`Run ${action.name}`}
@@ -57,6 +65,7 @@ interface ActionsSectionProps {
   readonly onExpand: (actionId: string | null) => void;
   readonly onChange: (action: WorkspaceEnvironmentAction) => void;
   readonly onRemove: (actionId: string) => void;
+  readonly onDuplicate: (actionId: string) => void;
   readonly onForgetApproval: (actionId: string) => void;
 }
 
@@ -71,8 +80,10 @@ export function ActionsSection({
   onExpand,
   onChange,
   onRemove,
+  onDuplicate,
   onForgetApproval,
 }: ActionsSectionProps) {
+  const [collapsedByEscapeId, setCollapsedByEscapeId] = useState<string | null>(null);
   if (actions.length === 0) return <p className="px-1 py-2 text-caption text-muted">No actions</p>;
   return (
     <ul className="flex flex-col gap-1.5">
@@ -84,6 +95,7 @@ export function ActionsSection({
             onKeyDown={(event) => {
               // Escape inside a menu or popover closes that layer, not the editor under it.
               if (event.key === "Escape" && expanded && event.currentTarget.contains(event.target as Node) && !event.defaultPrevented) {
+                setCollapsedByEscapeId(action.id);
                 onExpand(null);
               }
             }}
@@ -97,12 +109,14 @@ export function ActionsSection({
                 focusName={action.id === focusNameActionId}
                 onChange={onChange}
                 onRemove={() => onRemove(action.id)}
+                onDuplicate={() => onDuplicate(action.id)}
                 onForgetApproval={() => onForgetApproval(action.id)}
               />
             ) : (
               <CollapsedRow
                 action={action}
                 play={playFor(action)}
+                restoreFocus={action.id === collapsedByEscapeId}
                 onToggle={() => onExpand(action.id)}
               />
             )}

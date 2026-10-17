@@ -89,6 +89,11 @@ export function newAction(): WorkspaceEnvironmentAction {
   return { id: crypto.randomUUID(), name: "action", command: { default: "" } };
 }
 
+/** A copy of `action` under a new id, so both can be saved side by side. */
+export function duplicateAction(action: WorkspaceEnvironmentAction): WorkspaceEnvironmentAction {
+  return { ...action, id: crypto.randomUUID(), name: `${action.name} copy` };
+}
+
 /** Key-order independent structural equality for JSON documents, so a reordered file is not "dirty". */
 export function jsonEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
