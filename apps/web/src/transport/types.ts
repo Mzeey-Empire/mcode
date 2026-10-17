@@ -366,8 +366,8 @@ export interface McodeTransport {
     target: WorkspaceEnvironmentCommandTarget,
     fingerprint: string,
   ): Promise<void>;
-  /** Clear every stored approval for one Project. */
-  clearWorkspaceEnvironmentApprovals(workspaceId: string): Promise<void>;
+  /** Forget the stored approval for one shared Project action. */
+  forgetWorkspaceEnvironmentApproval(workspaceId: string, actionId: string): Promise<void>;
   /** Release queued Turns without rerunning automatic Setup. */
   continueAutomaticSetup(threadId: string): Promise<WorkspaceEnvironmentAutomaticSetupSnapshot>;
   /** Start one new automatic Setup attempt from the current Project environment. */

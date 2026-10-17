@@ -8,7 +8,8 @@ import { WorkspaceEnvironmentConfigurationStore } from "./workspace-environment-
 export const workspaceEnvironmentConfigurationWriteOperations = {
   setStorageMode: databaseWriteOperation("workspaceEnvironmentConfiguration.setStorageMode", z.tuple([z.string(), WorkspaceEnvironmentStorageModeSchema]), z.void()),
   approve: databaseWriteOperation("workspaceEnvironmentConfiguration.approve", z.tuple([z.string(), z.string(), z.string()]), z.void()),
-  clearApprovals: databaseWriteOperation("workspaceEnvironmentConfiguration.clearApprovals", z.tuple([z.string()]), z.void()),
+  forgetApproval: databaseWriteOperation("workspaceEnvironmentConfiguration.forgetApproval", z.tuple([z.string(), z.string()]), z.void()),
+  removeWorkspaceApprovals: databaseWriteOperation("workspaceEnvironmentConfiguration.removeWorkspaceApprovals", z.tuple([z.string()]), z.void()),
 };
 
 /** Bind configuration writes to the sole writable connection. */
@@ -18,6 +19,7 @@ export function workspaceEnvironmentConfigurationWriteHandlers(db: Database): Re
   return new Map([
     [operations.setStorageMode.name, databaseWriteHandler(operations.setStorageMode, (input) => store.setStorageMode(...input))],
     [operations.approve.name, databaseWriteHandler(operations.approve, (input) => store.approve(...input))],
-    [operations.clearApprovals.name, databaseWriteHandler(operations.clearApprovals, (input) => store.clearApprovals(...input))],
+    [operations.forgetApproval.name, databaseWriteHandler(operations.forgetApproval, (input) => store.forgetApproval(...input))],
+    [operations.removeWorkspaceApprovals.name, databaseWriteHandler(operations.removeWorkspaceApprovals, (input) => store.removeWorkspaceApprovals(...input))],
   ]);
 }

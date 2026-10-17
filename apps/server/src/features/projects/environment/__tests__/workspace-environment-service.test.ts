@@ -291,7 +291,7 @@ describe("WorkspaceEnvironmentService", () => {
     const approvedAction = await instance.resolveActionCommand("direct", "build");
     expect(approvedAction.kind === "ready" && approvedAction.approval).toBeNull();
     await closeReadyCommand(approvedAction);
-    instance.clearApprovals(workspaceId);
+    await instance.forgetApproval(workspaceId, "build");
     const clearedAction = await instance.resolveActionCommand("direct", "build");
     expect(clearedAction.kind === "ready" && clearedAction.approval?.target).toEqual({ kind: "action", actionId: "build" });
     await closeReadyCommand(clearedAction);

@@ -52,7 +52,7 @@ function workspaceDeps() {
     workspaceEnvironmentService: {
       beginWorkspaceDeletion: vi.fn(() => () => undefined),
       cancelSetupForWorkspace: vi.fn().mockResolvedValue(undefined),
-      clearApprovals: vi.fn(),
+      removeWorkspaceApprovals: vi.fn(),
     },
   } as unknown as RouterDeps;
   return {

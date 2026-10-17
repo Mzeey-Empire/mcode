@@ -4,7 +4,7 @@ import type {
   WorkspaceEnvironmentActionStartInput,
   WorkspaceEnvironmentAutomaticSetupContinueInput,
   WorkspaceEnvironmentAutomaticSetupRetryInput,
-  WorkspaceEnvironmentCommandApprovalClearInput,
+  WorkspaceEnvironmentCommandForgetInput,
   WorkspaceEnvironmentCommandApproveInput,
   WorkspaceEnvironmentReadInput,
   WorkspaceEnvironmentSaveInput,
@@ -26,7 +26,7 @@ type WorkspaceEnvironmentParamsByMethod = {
   "workspace.environment.save": WorkspaceEnvironmentSaveInput;
   "workspace.environment.storage.set": WorkspaceEnvironmentStorageSetInput;
   "workspace.environment.command.approve": WorkspaceEnvironmentCommandApproveInput;
-  "workspace.environment.command.clearApprovals": WorkspaceEnvironmentCommandApprovalClearInput;
+  "workspace.environment.command.forget": WorkspaceEnvironmentCommandForgetInput;
   "workspace.environment.automaticSetup.continue": WorkspaceEnvironmentAutomaticSetupContinueInput;
   "workspace.environment.automaticSetup.retry": WorkspaceEnvironmentAutomaticSetupRetryInput;
   "workspace.environment.action.list": WorkspaceEnvironmentActionListInput;
@@ -65,9 +65,9 @@ const workspaceEnvironmentHandlers: WorkspaceEnvironmentHandlerMap = {
   },
   "workspace.environment.command.approve": (deps, params) =>
     deps.workspaceEnvironmentService.approveCommand(params),
-  "workspace.environment.command.clearApprovals": async (deps, params) => {
+  "workspace.environment.command.forget": async (deps, params) => {
     requireWorkspace(deps, params.workspaceId);
-    await deps.workspaceEnvironmentService.clearApprovals(params.workspaceId);
+    await deps.workspaceEnvironmentService.forgetApproval(params.workspaceId, params.actionId);
   },
   "workspace.environment.automaticSetup.continue": (deps, params) =>
     deps.workspaceEnvironmentService.continueAutomaticSetup(params),

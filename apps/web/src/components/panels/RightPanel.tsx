@@ -87,7 +87,7 @@ export function reconcileWarmPreviewScopes(
     : result;
 }
 import { SubagentDetailTab, SubagentsPanel, useSubagentRoster } from "@/features/subagents";
-import { ProjectEnvironmentPanel } from "@/features/projects/environment";
+import { ProjectSettingsPanel } from "@/features/projects/settings/ProjectSettingsPanel";
 import { TerminalTool } from "./TerminalTool";
 import { FilesTool } from "@/features/files/FilesTool";
 
@@ -723,7 +723,7 @@ function EnvironmentPanelContent({
 }) {
   if (activeTab !== "environment" || !openTabs.includes("environment")) return null;
   return (
-    <ProjectEnvironmentPanel
+    <ProjectSettingsPanel
       key={`${workspaceId}:${threadId ?? "base"}`}
       workspaceId={workspaceId}
       threadId={threadId ?? undefined}

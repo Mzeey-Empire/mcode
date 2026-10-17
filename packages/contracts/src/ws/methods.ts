@@ -17,7 +17,7 @@ import {
   WorkspaceEnvironmentSaveInputSchema,
   WorkspaceEnvironmentStorageSetInputSchema,
   WorkspaceEnvironmentCommandApproveInputSchema,
-  WorkspaceEnvironmentCommandApprovalClearInputSchema,
+  WorkspaceEnvironmentCommandForgetInputSchema,
   WorkspaceEnvironmentAutomaticSetupSnapshotSchema,
   WorkspaceEnvironmentAutomaticSetupContinueInputSchema,
   WorkspaceEnvironmentAutomaticSetupRetryInputSchema,
@@ -34,7 +34,7 @@ import type {
   WorkspaceEnvironmentSaveInput,
   WorkspaceEnvironmentStorageSetInput,
   WorkspaceEnvironmentCommandApproveInput,
-  WorkspaceEnvironmentCommandApprovalClearInput,
+  WorkspaceEnvironmentCommandForgetInput,
   WorkspaceEnvironmentAutomaticSetupSnapshot,
   WorkspaceEnvironmentAutomaticSetupContinueInput,
   WorkspaceEnvironmentAutomaticSetupRetryInput,
@@ -522,7 +522,7 @@ const threadCleanupLifecycleMethods = (): Record<
 type WorkspaceEnvironmentSetupWsMethodName =
   | "workspace.environment.storage.set"
   | "workspace.environment.command.approve"
-  | "workspace.environment.command.clearApprovals"
+  | "workspace.environment.command.forget"
   | "workspace.environment.automaticSetup.continue"
   | "workspace.environment.automaticSetup.retry";
 
@@ -538,8 +538,8 @@ const workspaceEnvironmentSetupMethods = (): Record<
     params: WorkspaceEnvironmentCommandApproveInputSchema() as z.ZodType<WorkspaceEnvironmentCommandApproveInput>,
     result: z.void(),
   },
-  "workspace.environment.command.clearApprovals": {
-    params: WorkspaceEnvironmentCommandApprovalClearInputSchema() as z.ZodType<WorkspaceEnvironmentCommandApprovalClearInput>,
+  "workspace.environment.command.forget": {
+    params: WorkspaceEnvironmentCommandForgetInputSchema() as z.ZodType<WorkspaceEnvironmentCommandForgetInput>,
     result: z.void(),
   },
   "workspace.environment.automaticSetup.continue": {

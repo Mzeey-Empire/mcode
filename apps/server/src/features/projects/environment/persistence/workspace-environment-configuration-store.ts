@@ -84,10 +84,31 @@ export class WorkspaceEnvironmentConfigurationStore {
   }
 
   /** Removes every stored command approval for one Project. */
-  clearApprovals(workspaceId: string): void {
+  removeWorkspaceApprovals(workspaceId: string): void {
     this.orm
       .delete(workspaceEnvironmentCommandApprovals)
       .where(eq(workspaceEnvironmentCommandApprovals.workspaceId, workspaceId))
+      .run();
+  }
+
+  /** Returns stored command identities regardless of whether their fingerprints still match. */
+  listApprovedCommandIds(workspaceId: string): string[] {
+    return this.orm
+      .select({ commandId: workspaceEnvironmentCommandApprovals.commandId })
+      .from(workspaceEnvironmentCommandApprovals)
+      .where(eq(workspaceEnvironmentCommandApprovals.workspaceId, workspaceId))
+      .all()
+      .map((row) => row.commandId);
+  }
+
+  /** Removes only the stored approval for one stable Project command. */
+  forgetApproval(workspaceId: string, commandId: string): void {
+    this.orm
+      .delete(workspaceEnvironmentCommandApprovals)
+      .where(and(
+        eq(workspaceEnvironmentCommandApprovals.workspaceId, workspaceId),
+        eq(workspaceEnvironmentCommandApprovals.commandId, commandId),
+      ))
       .run();
   }
 }
