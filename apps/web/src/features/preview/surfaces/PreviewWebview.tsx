@@ -98,13 +98,17 @@ function resolvePreviewWebviewProps(props: PreviewWebviewProps): ResolvedPreview
 }
 
 function visibleAddress(state: BrowserSurfacePageState): string | null {
-  const address = state.committedAddress ?? state.pendingAddress;
+  // A failed load leaves the previous page (or Chromium's error document) committed, so the address that failed is the pending one.
+  const address = state.mainFrameError
+    ? state.pendingAddress ?? state.committedAddress
+    : state.committedAddress ?? state.pendingAddress;
   return !address || address.startsWith("about:") || address.startsWith("chrome-error:")
     ? null
     : address;
 }
 
-function previewStatus(state: BrowserSurfacePageState): PreviewPageStatus {
+/** Summarizes a surface's page state as the status the preview chrome renders. */
+export function previewStatus(state: BrowserSurfacePageState): PreviewPageStatus {
   const committedBlank = state.committedAddress?.startsWith("about:") === true;
   return {
     url: visibleAddress(state),

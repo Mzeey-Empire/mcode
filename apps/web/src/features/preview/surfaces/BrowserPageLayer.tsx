@@ -122,7 +122,12 @@ export function BrowserPageLayer({
     () => ({ workspaceId: browserWorkspaceId, scope: { kind: "thread" as const, id: threadId }, tabId: activeWebviewTabId }),
     [browserWorkspaceId, threadId, activeWebviewTabId],
   );
-  const certificate = useBrowserCertificate(identity, `${webviewInputUrl}|${pageError?.code ?? ""}`, onPreviewErrorRetry);
+  // Loading is part of the revision so a reload that fails the same way still re-reads the warning.
+  const certificate = useBrowserCertificate(
+    identity,
+    `${webviewInputUrl}|${pageError?.code ?? ""}|${webviewLoading}`,
+    onPreviewErrorRetry,
+  );
   const backToSafety = useCallback(() => {
     if (webviewCanBack) {
       void activeWebviewRef()?.goBack();
@@ -276,6 +281,8 @@ export function BrowserPageLayer({
         <RenderValue value={pageError}>
           {(error) => (
             <BrowserErrorPage
+              // Expanded details and a pending Start belong to the tab that showed them, so another tab's error must not inherit them.
+              key={activeWebviewTabId ?? ""}
               error={error}
               url={webviewInputUrl || null}
               threadId={threadId}

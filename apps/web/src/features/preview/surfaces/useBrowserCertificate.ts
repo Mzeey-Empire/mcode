@@ -39,13 +39,19 @@ export function useBrowserCertificate(
   revision: string,
   reload: () => void,
 ): BrowserCertificate {
-  const [state, setState] = useState<BrowserCertificateState | null>(null);
+  const tabKey = identity ? `${identity.workspaceId}|${identity.scope.kind}:${identity.scope.id}|${identity.tabId}` : null;
+  const [read, setRead] = useState<{ readonly tabKey: string | null; readonly state: BrowserCertificateState | null }>({
+    tabKey: null,
+    state: null,
+  });
+  // Another tab's answer must not render while this tab's read is in flight.
+  const state = read.tabKey === tabKey ? read.state : null;
 
   useEffect(() => {
     let active = true;
     readCertificateState(identity).then(
       (next) => {
-        if (active) setState(next);
+        if (active) setRead({ tabKey, state: next });
       },
       (error: unknown) => {
         if (active) showFailure("Couldn't read the certificate", error);
@@ -54,7 +60,7 @@ export function useBrowserCertificate(
     return () => {
       active = false;
     };
-  }, [identity, revision]);
+  }, [identity, tabKey, revision]);
 
   const proceed = useCallback(async (fingerprint: string) => {
     const bridge = certificateBridge();
