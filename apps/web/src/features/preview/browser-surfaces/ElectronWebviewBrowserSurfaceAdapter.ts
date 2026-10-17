@@ -43,6 +43,7 @@ interface ElectronWebviewElement extends HTMLElement {
 
 type WebviewEvent = Event & {
   readonly isMainFrame?: boolean;
+  readonly isInPlace?: boolean;
   readonly url?: unknown;
   readonly validatedURL?: unknown;
   readonly title?: unknown;
@@ -189,6 +190,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     this.frame.style.visibility = "hidden";
     this.frame.style.pointerEvents = "none";
     this.frame.addEventListener("did-attach", this.onDidAttach);
+    this.frame.addEventListener("did-start-navigation", this.onNavigationStarted);
     this.frame.addEventListener("did-start-loading", this.onLoadStarted);
     this.frame.addEventListener("did-stop-loading", this.onLoadStopped);
     this.frame.addEventListener("did-navigate", this.onNavigated);
@@ -307,6 +309,7 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     window.clearTimeout(this.attachmentTimer);
     this.resolveAdoptionWaiters(false);
     this.frame.removeEventListener("did-attach", this.onDidAttach);
+    this.frame.removeEventListener("did-start-navigation", this.onNavigationStarted);
     this.frame.removeEventListener("did-start-loading", this.onLoadStarted);
     this.frame.removeEventListener("did-stop-loading", this.onLoadStopped);
     this.frame.removeEventListener("did-navigate", this.onNavigated);
@@ -420,6 +423,14 @@ export class ElectronWebviewBrowserSurfaceAdapter implements BrowserSurfaceAdapt
     const complete = { ...event, identity: this.identity, generation: this.generation } as BrowserSurfaceAdapterEvent;
     for (const listener of this.listeners) listener(complete);
   }
+
+  // did-start-loading carries no address, so without this a clicked link has no pending address and the host drops its load failure as stale.
+  private readonly onNavigationStarted = (event: Event): void => {
+    const typed = event as WebviewEvent;
+    const address = eventAddress(typed);
+    if (!address || typed.isMainFrame !== true || typed.isInPlace === true) return;
+    this.emit({ type: "navigation-started", mainFrame: true, address });
+  };
 
   private readonly onLoadStarted = (event: Event): void => {
     const typed = event as WebviewEvent;
