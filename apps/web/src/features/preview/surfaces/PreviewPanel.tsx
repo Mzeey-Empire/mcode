@@ -392,6 +392,7 @@ export function PreviewPanel({
         threadId={threadId}
         webviewInputUrl={webviewInputUrl}
         hasLoadedPage={hasLoadedPage}
+        webviewLoading={webviewLoading}
         pageError={pageError}
         webviewCanBack={webviewCanBack}
         webviewCanFwd={webviewCanFwd}

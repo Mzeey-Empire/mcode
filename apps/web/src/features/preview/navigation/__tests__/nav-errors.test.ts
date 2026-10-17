@@ -153,6 +153,13 @@ describe("previewPageErrorForFailure", () => {
         kind: "certificate",
       });
     });
+
+    it("keeps a named certificate error a certificate warning when the number is missing", () => {
+      // Navigation IPC reports the error by name only, and a network classification here would drop Proceed.
+      expect(previewPageErrorForFailure("net::ERR_CERT_INVALID", null, "https://localhost:4443/")).toMatchObject({
+        kind: "certificate",
+      });
+    });
   });
 });
 
@@ -162,5 +169,11 @@ describe("loopbackPort", () => {
     expect(loopbackPort("http://[::1]:3000/")).toBe("3000");
     expect(loopbackPort("https://example.com:5173/")).toBeNull();
     expect(loopbackPort("not a url")).toBeNull();
+  });
+
+  it("reports the scheme's default port when the address omits it", () => {
+    expect(loopbackPort("http://localhost/")).toBe("80");
+    expect(loopbackPort("http://localhost:80/")).toBe("80");
+    expect(loopbackPort("https://localhost/")).toBe("443");
   });
 });

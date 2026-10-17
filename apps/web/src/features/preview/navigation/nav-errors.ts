@@ -96,11 +96,13 @@ export function navCodeToPageError(code: string): PreviewPageError {
 
 const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0", "[::]"]);
 
-/** The port of a loopback URL, or null for any other host or an unparseable address. */
+/** The effective port of a loopback URL (80 or 443 when omitted), or null for any other host or an unparseable address. */
 export function loopbackPort(url: string): string | null {
   try {
     const parsed = new URL(url);
-    return LOOPBACK_HOSTNAMES.has(parsed.hostname) ? parsed.port : null;
+    if (!LOOPBACK_HOSTNAMES.has(parsed.hostname)) return null;
+    // URL drops a scheme's default port, but a server tile records the port it actually listens on.
+    return parsed.port || (parsed.protocol === "https:" ? "443" : "80");
   } catch {
     return null;
   }
@@ -113,6 +115,11 @@ const NET_ERROR_NUMBERS: Readonly<Record<string, number>> = {
   ERR_CERT_DATE_INVALID: -201,
   ERR_CERT_AUTHORITY_INVALID: -202,
   ERR_CERT_REVOKED: -206,
+  ERR_CERT_INVALID: -207,
+  ERR_CERT_WEAK_SIGNATURE_ALGORITHM: -208,
+  ERR_CERT_WEAK_KEY: -211,
+  ERR_CERT_NAME_CONSTRAINT_VIOLATION: -212,
+  ERR_CERT_VALIDITY_TOO_LONG: -213,
 };
 
 function isCertificateError(number: number): boolean {

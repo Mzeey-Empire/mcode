@@ -32,6 +32,7 @@ interface BrowserChromeProps {
   readonly threadId: string;
   readonly webviewInputUrl: ReturnType<typeof usePreviewPage>["webviewInputUrl"];
   readonly hasLoadedPage: boolean;
+  readonly webviewLoading: ReturnType<typeof usePreviewPage>["webviewLoading"];
   /** Load or rejected-navigation error, taking precedence over the address. */
   readonly pageError: PreviewPageError | undefined;
   readonly webviewCanBack: ReturnType<typeof usePreviewPage>["webviewCanBack"];
@@ -191,7 +192,8 @@ export function BrowserChrome(props: BrowserChromeProps) {
   );
   const certificate = useBrowserCertificate(
     identity,
-    `${props.webviewInputUrl}|${props.pageError?.code ?? ""}`,
+    // Loading is part of the revision because a fresh tab reads before the guest is adopted and then loads the same address.
+    `${props.webviewInputUrl}|${props.pageError?.code ?? ""}|${props.webviewLoading}`,
     () => void props.activeWebviewRef()?.reload(),
   );
   const trustException = loadedOnTrust(certificate, props.webviewInputUrl, props.pageError);
