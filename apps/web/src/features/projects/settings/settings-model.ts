@@ -94,17 +94,21 @@ export function duplicateAction(action: WorkspaceEnvironmentAction): WorkspaceEn
   return { ...action, id: crypto.randomUUID(), name: `${action.name} copy` };
 }
 
+function arraysEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
+  return a.length === b.length && a.every((item, index) => jsonEqual(item, b[index]));
+}
+
+function recordsEqual(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => key in b && jsonEqual(a[key], b[key]));
+}
+
 /** Key-order independent structural equality for JSON documents, so a reordered file is not "dirty". */
 export function jsonEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, index) => jsonEqual(item, b[index]));
-  }
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  const keys = Object.keys(left);
-  return keys.length === Object.keys(right).length && keys.every((key) => key in right && jsonEqual(left[key], right[key]));
+  if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && arraysEqual(a, b);
+  return recordsEqual(a as Record<string, unknown>, b as Record<string, unknown>);
 }
 
 /** Local checks that mirror the server so Save can stay off without a round trip. */
