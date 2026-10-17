@@ -22,6 +22,12 @@ const STORAGE_OPTIONS = [
   { value: "shared", label: "In repo" },
 ] as const;
 
+const SECTION_OPTIONS = [
+  // General's content ships with S12T-15; until then the tab is listed but cannot be chosen.
+  { value: "general", label: "General", disabled: true },
+  { value: "actions", label: "Actions" },
+] as const;
+
 const DIRTY_STORAGE_REASON = "Save or discard changes first.";
 
 function StorageRow({ mode, locked, onChange }: {
@@ -30,9 +36,10 @@ function StorageRow({ mode, locked, onChange }: {
   readonly onChange: (mode: WorkspaceEnvironmentStorageMode) => void;
 }) {
   return (
-    <div className="flex h-10 items-center justify-between gap-2 px-1">
-      <span className="text-caption text-muted">Saved on</span>
+    <div className="flex h-10 items-center gap-2.5 px-1">
+      <span className="min-w-0 flex-1 text-caption text-muted">Saved on</span>
       <SegmentedControl
+        variant="pill"
         size="compact"
         aria-label="Saved on"
         value={mode}
@@ -146,7 +153,14 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
   );
   const addButton = (
     <PanelHeaderSlot slot="row2">
-      <Button variant="subtle" shape="round" className="ml-auto text-body-small" disabled={!entry} onClick={addAction}>
+      <SegmentedControl
+        variant="pill"
+        aria-label="Project settings section"
+        value="actions"
+        onChange={() => undefined}
+        options={SECTION_OPTIONS}
+      />
+      <Button variant="subtle" shape="round" className="ml-auto text-[13px]/[18px] font-medium" disabled={!entry} onClick={addAction}>
         <Plus aria-hidden />
         Action
       </Button>

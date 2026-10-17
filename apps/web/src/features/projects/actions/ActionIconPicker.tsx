@@ -38,7 +38,7 @@ export function ActionIconPicker({ value, command, onChange }: ActionIconPickerP
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-label="Action icon"
-        className="flex size-8 shrink-0 items-center justify-center rounded-md bg-selected outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--color-focus)] data-popup-open:shadow-[inset_0_0_0_1px_var(--color-focus)]"
+        className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background shadow-[inset_0_0_0_1px_var(--color-control-border)] outline-none hover:shadow-[inset_0_0_0_1px_var(--color-muted)] focus-visible:shadow-[inset_0_0_0_1px_var(--color-focus)] data-popup-open:shadow-[inset_0_0_0_1px_var(--color-focus)]"
       >
         <ActionIcon iconId={stored} command={command} size={16} />
       </PopoverTrigger>

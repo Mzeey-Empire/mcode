@@ -61,6 +61,14 @@ describe("ProjectSettingsPanel", () => {
     }));
   });
 
+  it("lists General as unavailable beside the selected Actions section", async () => {
+    render(<ProjectSettingsPanel workspaceId="workspace-1" />);
+    await screen.findByRole("button", { name: /^Build/ });
+
+    expect(screen.getByRole("radio", { name: "General" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Actions" })).toBeChecked();
+  });
+
   it("adds an action, takes its command and saves it", async () => {
     const user = userEvent.setup();
     render(<ProjectSettingsPanel workspaceId="workspace-1" />);

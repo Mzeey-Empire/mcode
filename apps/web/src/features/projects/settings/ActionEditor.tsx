@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, Ellipsis, Play, Trash2, Undo2 } from "lucide-react";
+import { Copy, Ellipsis, Trash2, Undo2 } from "lucide-react";
 import type { WorkspaceEnvironmentAction } from "@mcode/contracts";
 import { IconButton } from "@/components/ui/button";
 import {
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { PlayGlyph } from "./PlayGlyph";
 import { ActionIconPicker } from "../actions/ActionIconPicker";
 import {
   COMMAND_PLATFORMS,
@@ -78,7 +79,8 @@ function CommandEditor({ action, issue, onChange }: Pick<ActionEditorProps, "act
       <div className="flex items-center justify-between gap-2">
         <span className="text-caption text-muted">Command</span>
         <SegmentedControl
-          size="compact"
+          variant="pill"
+          size="small"
           aria-label="Command platform"
           value={platform}
           onChange={(value) => setPlatform(value as CommandPlatform)}
@@ -98,7 +100,7 @@ function CommandEditor({ action, issue, onChange }: Pick<ActionEditorProps, "act
         onChange={(event) =>
           onChange({ ...action, command: withPlatformScript(action.command, platform, event.target.value) })
         }
-        className="min-h-14 resize-none px-2.5 py-2 font-mono text-xs/[18px]"
+        className="min-h-14 resize-none rounded-md border-transparent bg-page px-2.5 py-2 font-mono text-xs/[18px] shadow-[inset_0_0_0_1px_var(--color-border)] hover:border-transparent focus-visible:shadow-[inset_0_0_0_1px_var(--color-focus)]"
       />
       {issue ? <FieldError>{issue}</FieldError> : null}
     </div>
@@ -158,7 +160,7 @@ export function ActionEditor({
           size="compact"
           aria-label="Action name"
           value={action.name}
-          className="min-w-0 flex-1 font-medium"
+          className="min-w-0 flex-1 rounded-md bg-background px-2.5 font-medium"
           ref={nameRef}
           onChange={(event) => onChange({ ...action, name: event.target.value })}
         />
@@ -169,7 +171,7 @@ export function ActionEditor({
           disabled={play.disabledReason !== null}
           onClick={play.run}
         >
-          <Play />
+          <PlayGlyph />
         </IconButton>
         <MoreMenu approved={approved} onDuplicate={onDuplicate} onRemove={onRemove} onForgetApproval={onForgetApproval} />
       </div>

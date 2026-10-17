@@ -20,14 +20,21 @@ export interface SegmentedOption {
   readonly marker?: boolean;
 }
 
-/** Paper's segmented control heights: compact sits in pickers and dense rows, default in forms. */
-export type SegmentedControlSize = "compact" | "default";
+/**
+ * Paper's segmented control heights: compact sits in pickers and dense rows, default in forms.
+ * `small` is for the `pill` variant's in-card switches and reads as compact on the tray.
+ */
+export type SegmentedControlSize = "compact" | "default" | "small";
+
+/** `tray` is the bordered picker control; `pill` is the borderless rounded strip Project settings uses. */
+export type SegmentedControlVariant = "tray" | "pill";
 
 interface SegmentedControlProps {
   readonly options: readonly SegmentedOption[];
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly size?: SegmentedControlSize;
+  readonly variant?: SegmentedControlVariant;
   /** Stretches the tray to its container so segments share the width evenly. */
   readonly fill?: boolean;
   /** Draws a borderless strip of icon segments; each label stays as its segment's accessible name. */
@@ -39,12 +46,51 @@ interface SegmentedControlProps {
 const TRAY_HEIGHT: Record<SegmentedControlSize, string> = {
   compact: "h-control-compact",
   default: "h-control-default",
+  small: "h-control-compact",
 };
 
 const SEGMENT_HEIGHT: Record<SegmentedControlSize, string> = {
   compact: "h-6",
   default: "h-8",
+  small: "h-6",
 };
+
+// Paper sizes the pill strip on its own scale; the 12px strip also drops to regular weight.
+const PILL_TRAY: Record<SegmentedControlSize, string> = {
+  default: "h-8",
+  compact: "h-7",
+  small: "h-[26px]",
+};
+
+const PILL_SEGMENT: Record<SegmentedControlSize, string> = {
+  default: "h-7 px-3 text-[13px]/[18px] font-medium",
+  compact: "h-6 px-3 text-[13px]/[18px] font-medium",
+  small: "h-[22px] px-2.5 text-caption",
+};
+
+type Layout = SegmentedControlVariant | "icon";
+
+function trayClass(layout: Layout, size: SegmentedControlSize): string {
+  // An icon strip sits in a picker's tab row, so it drops the tray and packs tight to fit every provider.
+  if (layout === "icon") return "shrink-0 gap-0.5";
+  if (layout === "pill") return cn("gap-0.5 rounded-full bg-selected p-0.5", PILL_TRAY[size]);
+  return cn("gap-2 rounded-control border border-control-border bg-panel p-[3px]", TRAY_HEIGHT[size]);
+}
+
+const INACTIVE_TRAY_SEGMENT = "text-muted enabled:hover:border-muted enabled:hover:bg-hover enabled:hover:text-ink";
+
+const SEGMENT_BASE =
+  "inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap border border-transparent transition-colors duration-(--duration-fast) ease-(--ease-standard)";
+
+function segmentClass(layout: Layout, size: SegmentedControlSize, isActive: boolean): string {
+  if (layout === "icon") {
+    return cn(SEGMENT_BASE, "h-7 w-[3rem] shrink-0 rounded-sm text-body-small", isActive ? "bg-selected font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
+  }
+  if (layout === "pill") {
+    return cn(SEGMENT_BASE, "flex-1 rounded-full border-0", PILL_SEGMENT[size], isActive ? "bg-border text-ink" : "text-muted enabled:hover:text-ink");
+  }
+  return cn(SEGMENT_BASE, "flex-1 rounded-sm px-2 text-body-small", SEGMENT_HEIGHT[size], isActive ? "bg-selected font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
+}
 
 const NEXT_KEYS: Record<string, 1 | -1> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
 
@@ -66,18 +112,21 @@ function nextEnabledIndex(options: readonly SegmentedOption[], from: number, key
 
 /**
  * Paper's segmented control (AOT-0): a bordered tray of equal segments where the chosen one is
- * filled. It is a radio group, so Tab enters it once and the arrow keys move the choice.
+ * filled. The `pill` variant swaps the tray for Paper's borderless rounded strip. It is a radio
+ * group, so Tab enters it once and the arrow keys move the choice.
  */
 export function SegmentedControl({
   options,
   value,
   onChange,
   size = "default",
+  variant = "tray",
   fill = false,
   iconOnly = false,
   "aria-label": ariaLabel,
   className,
 }: SegmentedControlProps) {
+  const layout: Layout = iconOnly ? "icon" : variant;
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const activeIndex = options.findIndex((option) => option.value === value);
   // A disabled button can't take focus, so with no enabled match the first enabled segment takes the tab stop.
@@ -105,8 +154,7 @@ export function SegmentedControl({
         onKeyDown={handleKeyDown}
         className={cn(
           "items-center",
-          // An icon strip sits in a picker's tab row, so it drops the tray and packs tight to fit every provider.
-          iconOnly ? "shrink-0 gap-0.5" : cn("gap-2 rounded-control border border-control-border bg-panel p-[3px]", TRAY_HEIGHT[size]),
+          trayClass(layout, size),
           fill ? "flex w-full" : "inline-flex",
           className,
         )}
@@ -125,12 +173,8 @@ export function SegmentedControl({
               tabIndex={index === tabStopIndex ? 0 : -1}
               onClick={() => onChange(option.value)}
               className={cn(
-                "inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-sm border border-transparent text-body-small transition-colors duration-(--duration-fast) ease-(--ease-standard)",
-                iconOnly ? "h-7 w-[3rem] shrink-0" : cn("flex-1 px-2", SEGMENT_HEIGHT[size]),
+                segmentClass(layout, size, isActive),
                 FOCUS_RING_CLASS,
-                isActive
-                  ? "bg-selected font-medium text-ink"
-                  : "text-muted enabled:hover:border-muted enabled:hover:bg-hover enabled:hover:text-ink",
                 option.disabled && "cursor-not-allowed opacity-50",
               )}
             >

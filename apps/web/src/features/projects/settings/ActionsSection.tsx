@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Play } from "lucide-react";
 import type { WorkspaceEnvironmentAction } from "@mcode/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
+import { PlayGlyph } from "./PlayGlyph";
 import { ActionIcon } from "../actions/ActionIcon";
 import { ActionEditor, type ActionPlay } from "./ActionEditor";
 import { scriptOf } from "./settings-model";
 
 function Chip({ children }: { readonly children: string }) {
   return (
-    <Badge variant="secondary" size="compact" className="rounded-full">
+    <Badge variant="secondary" size="compact" className="h-[22px] rounded-full px-2">
       {children}
     </Badge>
   );
@@ -34,11 +34,11 @@ function CollapsedRow({ action, play, restoreFocus, onToggle }: {
         variant="ghost"
         aria-expanded={false}
         onClick={onToggle}
-        className="h-full min-w-0 flex-1 justify-start gap-2.5 rounded-control px-0 font-normal hover:bg-transparent"
+        className="h-full min-w-0 flex-1 justify-start gap-2.5 rounded-control px-0 text-left font-normal hover:bg-transparent"
       >
         <ActionIcon iconId={action.icon} command={command} size={16} />
-        <span className="text-fade max-w-[45%] shrink-0 text-body-small font-medium text-ink">{action.name}</span>
-        <span className="text-fade min-w-0 flex-1 font-mono text-xs whitespace-nowrap text-muted">{command}</span>
+        <span className="shrink-0 text-body-small font-medium text-ink">{action.name}</span>
+        <span className="text-fade min-w-0 flex-1 overflow-clip text-left font-mono text-xs whitespace-nowrap text-muted">{command}</span>
         {action.runOnStartup ? <Chip>On startup</Chip> : null}
         {action.runOnCleanup ? <Chip>On cleanup</Chip> : null}
       </Button>
@@ -49,7 +49,7 @@ function CollapsedRow({ action, play, restoreFocus, onToggle }: {
         disabled={play.disabledReason !== null}
         onClick={play.run}
       >
-        <Play className="size-3" />
+        <PlayGlyph />
       </IconButton>
     </div>
   );
