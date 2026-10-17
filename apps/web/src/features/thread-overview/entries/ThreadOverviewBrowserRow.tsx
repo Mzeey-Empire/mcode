@@ -31,7 +31,6 @@ function roleTargetName(args: object): string | undefined {
     : undefined;
 }
 
-/** The step the agent is running on one tab, or null while no step-labelled request is in flight. */
 function useLiveStep(threadId: string, tabId: string | null): string | null {
   return useBrowserAutomationStore((state) => {
     if (tabId === null) return null;
@@ -120,10 +119,7 @@ interface ThreadOverviewBrowserRowProps {
   readonly activeTabId: string | null;
 }
 
-/**
- * The overview's single Browser row. It reads the same acting and hold selectors as the Browser
- * toolbar, so the row and the panel never disagree about who holds the page.
- */
+/** The overview's single Browser row. */
 export function ThreadOverviewBrowserRow({ thread, pages, activeTabId }: ThreadOverviewBrowserRowProps) {
   const actingTabId = useBrowserActingTabId(thread.workspace_id, thread.id);
   const heldTabId = useBrowserUserHeldTabId(thread.workspace_id, thread.id);

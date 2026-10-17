@@ -51,7 +51,6 @@ const ACTIVE_ACTION_LABELS: Record<string, string> = {
   recordingStop: "Stopping the page recording",
 };
 
-/** Operations whose live step names the element, as in "Clicking Update". */
 const NAMED_TARGET_OPERATIONS: ReadonlySet<string> = new Set(["click", "hover"]);
 
 /**
