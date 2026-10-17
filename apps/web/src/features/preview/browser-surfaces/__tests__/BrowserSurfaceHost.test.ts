@@ -181,6 +181,8 @@ describe("BrowserSurfaceHost", () => {
       phase: "error",
       mainFrameError: "offline",
       mainFrameErrorCode: "ERR_NAME_NOT_RESOLVED",
+      title: "",
+      favicon: null,
     });
     adapter.emit({ type: "load-stopped", mainFrame: true });
     expect(host.getSnapshot(IDENTITY)?.phase).toBe("error");

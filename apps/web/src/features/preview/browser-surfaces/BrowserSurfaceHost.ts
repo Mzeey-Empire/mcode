@@ -650,6 +650,9 @@ export class BrowserSurfaceHost {
     if (this.failureTargetsAnotherPage(state, event.address)) return state;
     return this.mergeState(state, {
       ...this.pendingAddress(event.address),
+      // The error page has no title or icon of its own. Keeping the last page's would label the failed tab as that page.
+      title: "",
+      favicon: null,
       phase: "error",
       mainFrameError: boundString(event.error ?? this.errorCodeText(event.errorCode), 500),
       mainFrameErrorCode: event.errorCode ?? null,
