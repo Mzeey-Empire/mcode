@@ -132,11 +132,11 @@ function ConnectionRefused({ error, url, threadId, onRetry, onOpen }: Pick<Brows
       <PageText message={error.message} detail={detail} />
       <div className="flex items-center justify-center gap-2">
         {tile ? (
-          <Button type="button" variant="ink" shape="round" disabled={starting} onClick={() => void start(tile)}>
+          <Button type="button" variant="ink" shape="round" className="text-code-small leading-[1.8rem] font-semibold px-3.5" disabled={starting} onClick={() => void start(tile)}>
             {starting ? "Starting" : `Start ${tile.name}`}
           </Button>
         ) : null}
-        <Button type="button" variant={tile ? "subtle" : "ink"} shape="round" data-testid="preview-error-retry" onClick={onRetry}>Retry</Button>
+        <Button type="button" variant={tile ? "subtle" : "ink"} shape="round" className="text-code-small leading-[1.8rem] font-medium px-3.5" data-testid="preview-error-retry" onClick={onRetry}>Retry</Button>
       </div>
     </>
   );
