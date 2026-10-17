@@ -11,13 +11,19 @@ function validateSender(event: IpcMainInvokeEvent): BrowserWindow {
   return win;
 }
 
-function certificateGuest(event: IpcMainInvokeEvent, surfaceId: unknown) {
+function findCertificateGuest(event: IpcMainInvokeEvent, surfaceId: unknown) {
   const win = validateSender(event);
   const record = resolveAdoptedPreviewSurfaceForWindow(win.id, surfaceId, event.sender);
   if (!record || browserProfiles.workspaceForSession(record.webContents.session) !== record.surface.identity.workspaceId.toLowerCase()) {
-    throw new Error("Invalid Browser certificate surface");
+    return null;
   }
   return record.webContents;
+}
+
+function certificateGuest(event: IpcMainInvokeEvent, surfaceId: unknown) {
+  const guest = findCertificateGuest(event, surfaceId);
+  if (!guest) throw new Error("Invalid Browser certificate surface");
+  return guest;
 }
 
 function workspaceId(value: unknown): string {
@@ -30,7 +36,9 @@ function workspaceId(value: unknown): string {
 export function registerBrowserProfileHandlers(): void {
   browserProfiles.initialize();
   ipcMain.handle("preview:certificate.state", (event, surfaceId: unknown) => {
-    return browserProfiles.certificates.state(certificateGuest(event, surfaceId));
+    // The chrome reads on every navigation, when the guest is briefly between adoptions. No guest has no certificate.
+    const guest = findCertificateGuest(event, surfaceId);
+    return guest ? browserProfiles.certificates.state(guest) : { failure: null, exceptionInUse: false };
   });
   ipcMain.handle("preview:certificate.proceed", (event, surfaceId: unknown, fingerprint: unknown) => {
     const guest = certificateGuest(event, surfaceId);

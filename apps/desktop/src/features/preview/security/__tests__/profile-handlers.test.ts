@@ -7,7 +7,8 @@ const fake = vi.hoisted(() => {
     window: { webContents: sender, isDestroyed: vi.fn(() => false) },
     fromWebContents: vi.fn(),
     handlers: new Map<string, (event: unknown, value: unknown, url?: unknown) => unknown>(),
-    profiles: { initialize: vi.fn(), remove: vi.fn(), reconcile: vi.fn(), history: { list: vi.fn(), remove: vi.fn() } },
+    profiles: { initialize: vi.fn(), remove: vi.fn(), reconcile: vi.fn(), history: { list: vi.fn(), remove: vi.fn() },
+      certificates: { state: vi.fn(), proceed: vi.fn(), revoke: vi.fn() }, workspaceForSession: vi.fn() },
   };
 });
 vi.mock("electron", () => ({
@@ -63,6 +64,15 @@ describe("Browser profile IPC validation", () => {
     expect(() => handler({ sender: fake.sender }, "../escape", url)).toThrow(TypeError);
     expect(fake.profiles.history.remove).toHaveBeenCalledTimes(1);
   });
+  it("reports no certificate for a surface that is not adopted, but refuses to change trust on it", () => {
+    const surface = { identity: { workspaceId: ID, scope: { kind: "thread", id: "t" }, tabId: "tab" }, generation: 1 };
+    const state = fake.handlers.get("preview:certificate.state")!;
+    expect(state({ sender: fake.sender }, surface)).toEqual({ failure: null, exceptionInUse: false });
+    expect(() => state({ sender: {} }, surface)).toThrow();
+    expect(() => fake.handlers.get("preview:certificate.revoke")!({ sender: fake.sender }, surface)).toThrow("Invalid Browser certificate surface");
+    expect(() => fake.handlers.get("preview:certificate.proceed")!({ sender: fake.sender }, surface, "AA")).toThrow("Invalid Browser certificate surface");
+  });
+
   it.each(["remove", "reconcile"] as const)("rejects unowned, destroyed and guest senders for %s", (operation) => {
     const value = operation === "remove" ? ID : [ID];
     fake.fromWebContents.mockReturnValueOnce(null);
