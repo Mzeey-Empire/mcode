@@ -31,8 +31,28 @@ function serverIssues(error: unknown): WorkspaceEnvironmentValidationIssue[] {
 function settle(workspaceId: string, result: WorkspaceEnvironmentReadResult, sentDraft: WorkspaceEnvironmentDocument | undefined): void {
   const store = useProjectSettingsDraftStore.getState();
   const latest = store.drafts[workspaceId];
-  if (latest && sentDraft && !jsonEqual(latest.draft, sentDraft)) store.patchBase(workspaceId, result);
-  else store.adopt(workspaceId, result);
+  if (latest && sentDraft && !jsonEqual(latest.draft, sentDraft)) {
+    store.patchBase(workspaceId, result);
+    // The new base is the file as it is now, so nothing is left to conflict with.
+    store.setConflict(workspaceId, false);
+  } else store.adopt(workspaceId, result);
+}
+
+/** Turns a failed save into a conflict, field-level issues or a toast, whichever the server's answer calls for. */
+function reportSaveFailure(workspaceId: string, error: unknown, sentDraft: WorkspaceEnvironmentDocument): void {
+  const store = useProjectSettingsDraftStore.getState();
+  if (error instanceof RpcError && error.code === STALE) {
+    store.setConflict(workspaceId, true);
+    return;
+  }
+  const issues = serverIssues(error).map((issue) => toSettingsIssue(issue, sentDraft));
+  if (issues.length === 0) {
+    useToastStore.getState().show({ kind: "failed", title: "Project settings could not be saved" });
+    return;
+  }
+  // Issues describe the draft that was sent, so a draft edited meanwhile is left to the next Save to judge.
+  const latest = store.drafts[workspaceId];
+  if (latest && jsonEqual(latest.draft, sentDraft)) store.setIssues(workspaceId, issues);
 }
 
 /** What the settings surface reads and does for one Project, backed by the in-memory draft store. */
@@ -100,24 +120,40 @@ export function useProjectSettings(workspaceId: string, threadId: string | undef
       const result = threadId
         ? await getTransport().saveWorkspaceEnvironment(workspaceId, current.draft, revision, threadId)
         : await getTransport().saveWorkspaceEnvironment(workspaceId, current.draft, revision);
+      useProjectActionStore.getState().invalidateWorkspaceConfiguration(workspaceId);
+      // A read for another thread flagged a conflict while this save was in flight, so `result` is
+      // that other checkout's document and installing it would show the wrong actions.
+      const conflictedMeanwhile = !current.conflict && useProjectSettingsDraftStore.getState().drafts[workspaceId]?.conflict;
+      if (conflictedMeanwhile) return;
       settle(workspaceId, result, current.draft);
       setSyncedKey(threadKey);
-      useProjectActionStore.getState().invalidateWorkspaceConfiguration(workspaceId);
     } catch (error) {
-      if (error instanceof RpcError && error.code === STALE) store.setConflict(workspaceId, true);
-      else {
-        const issues = serverIssues(error).map((issue) => toSettingsIssue(issue, current.draft));
-        // Issues describe the draft that was sent, so a draft edited meanwhile is left to the next Save to judge.
-        const latest = useProjectSettingsDraftStore.getState().drafts[workspaceId];
-        if (issues.length > 0) {
-          if (latest && jsonEqual(latest.draft, current.draft)) store.setIssues(workspaceId, issues);
-        }
-        else useToastStore.getState().show({ kind: "failed", title: "Project settings could not be saved" });
-      }
+      reportSaveFailure(workspaceId, error, current.draft);
     } finally {
       setBusy(false);
     }
   }, [threadId, threadKey, workspaceId]);
+
+  // Reverting the draft hides the banner, so the conflict has to resolve itself by re-reading the file.
+  const conflictResolvable = active && entry?.conflict === true && !dirty;
+  useEffect(() => {
+    if (!conflictResolvable) return;
+    let cancelled = false;
+    read(workspaceId, threadId).then(
+      (fresh) => {
+        const current = useProjectSettingsDraftStore.getState().drafts[workspaceId];
+        if (cancelled || isDraftDirty(current)) return;
+        useProjectSettingsDraftStore.getState().adopt(workspaceId, fresh);
+        setSyncedKey(threadKey);
+      },
+      () => {
+        if (!cancelled) setLoadError(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [conflictResolvable, threadId, threadKey, workspaceId]);
 
   const save = useCallback(
     () => saveDraft(useProjectSettingsDraftStore.getState().drafts[workspaceId]?.base.revision ?? null),
@@ -126,8 +162,9 @@ export function useProjectSettings(workspaceId: string, threadId: string | undef
 
   const reload = useCallback(async () => {
     setBusy(true);
+    const startedWith = useProjectSettingsDraftStore.getState().drafts[workspaceId]?.draft;
     try {
-      useProjectSettingsDraftStore.getState().adopt(workspaceId, await read(workspaceId, threadId));
+      settle(workspaceId, await read(workspaceId, threadId), startedWith);
       setSyncedKey(threadKey);
     } catch {
       useToastStore.getState().show({ kind: "failed", title: "Project settings could not be reloaded" });

@@ -38,8 +38,11 @@ interface ActionEditorProps {
   readonly play: ActionPlay;
   /** Whether a stored approval exists for this In repo action, which offers "Forget approval". */
   readonly approved: boolean;
-  /** Select the name on mount, so a new action can be renamed by typing. */
-  readonly focusName: boolean;
+  /**
+   * Where focus goes on mount. `select` highlights the name so a new action can be renamed by typing,
+   * and `caret` keeps the keyboard in the editor after a row opens without risking an overwrite.
+   */
+  readonly focusName: "select" | "caret" | null;
   readonly onChange: (action: WorkspaceEnvironmentAction) => void;
   readonly onRemove: () => void;
   readonly onDuplicate: () => void;
@@ -138,7 +141,7 @@ export function ActionEditor({
   useEffect(() => {
     if (!focusName) return;
     nameRef.current?.focus();
-    nameRef.current?.select();
+    if (focusName === "select") nameRef.current?.select();
   }, [focusName]);
   return (
     <div className="flex flex-col gap-3 rounded-[10px] bg-panel p-3 shadow-[inset_0_0_0_1px_var(--color-border)]">

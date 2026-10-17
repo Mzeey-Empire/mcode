@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
 import type { WorkspaceEnvironmentAction } from "@mcode/contracts";
+import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
 import { ActionIcon } from "../actions/ActionIcon";
 import { ActionEditor, type ActionPlay } from "./ActionEditor";
@@ -8,9 +9,9 @@ import { scriptOf } from "./settings-model";
 
 function Chip({ children }: { readonly children: string }) {
   return (
-    <span className="inline-flex h-[22px] shrink-0 items-center rounded-full bg-selected px-2 text-caption text-ink">
+    <Badge variant="secondary" size="compact" className="rounded-full">
       {children}
-    </span>
+    </Badge>
   );
 }
 
@@ -84,6 +85,8 @@ export function ActionsSection({
   onForgetApproval,
 }: ActionsSectionProps) {
   const [collapsedByEscapeId, setCollapsedByEscapeId] = useState<string | null>(null);
+  // The row's button unmounts when it opens, which would drop keyboard focus without this.
+  const [openedActionId, setOpenedActionId] = useState<string | null>(null);
   if (actions.length === 0) return <p className="px-1 py-2 text-caption text-muted">No actions</p>;
   return (
     <ul className="flex flex-col gap-1.5">
@@ -106,7 +109,7 @@ export function ActionsSection({
                 issue={issueFor(action.id)}
                 play={playFor(action)}
                 approved={approvedActionIds.includes(action.id)}
-                focusName={action.id === focusNameActionId}
+                focusName={action.id === focusNameActionId ? "select" : action.id === openedActionId ? "caret" : null}
                 onChange={onChange}
                 onRemove={() => onRemove(action.id)}
                 onDuplicate={() => onDuplicate(action.id)}
@@ -117,7 +120,10 @@ export function ActionsSection({
                 action={action}
                 play={playFor(action)}
                 restoreFocus={action.id === collapsedByEscapeId}
-                onToggle={() => onExpand(action.id)}
+                onToggle={() => {
+                  setOpenedActionId(action.id);
+                  onExpand(action.id);
+                }}
               />
             )}
           </li>

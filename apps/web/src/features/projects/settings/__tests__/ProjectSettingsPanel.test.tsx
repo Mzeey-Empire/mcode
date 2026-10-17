@@ -188,6 +188,31 @@ describe("ProjectSettingsPanel", () => {
       expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
     });
 
+    it("shows the disk version once the draft is edited back, so the conflict does not linger", async () => {
+      const user = userEvent.setup();
+      await editThenSaveStale(user);
+
+      await user.clear(screen.getByLabelText("Action name"));
+      await user.type(screen.getByLabelText("Action name"), "Build");
+
+      await waitFor(() => expect(screen.getByLabelText("Action name")).toHaveValue("Theirs"));
+      expect(useProjectSettingsDraftStore.getState().drafts["workspace-1"]?.conflict).toBe(false);
+    });
+
+    it("keeps edits typed while Reload is reading the file", async () => {
+      const user = userEvent.setup();
+      await editThenSaveStale(user);
+      let finish: (value: WorkspaceEnvironmentReadResult) => void = () => undefined;
+      transport.readWorkspaceEnvironment.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+
+      await user.click(screen.getByRole("button", { name: "Reload" }));
+      await user.type(screen.getByLabelText("Action name"), "!");
+      finish(result([{ ...build, name: "Theirs" }], { revision: "rev-9", storageMode: "shared" }));
+
+      await waitFor(() => expect(screen.getByLabelText("Action name")).toHaveValue("Mine!"));
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
     it("shows the disk version on Reload", async () => {
       const user = userEvent.setup();
       await editThenSaveStale(user);
@@ -270,6 +295,38 @@ describe("ProjectSettingsPanel", () => {
 
     const row = await screen.findByRole("button", { name: /^Build/, expanded: false });
     await waitFor(() => expect(row).toHaveFocus());
+  });
+
+  it("moves keyboard focus into the editor when a row opens with Enter", async () => {
+    const user = userEvent.setup();
+    render(<ProjectSettingsPanel workspaceId="workspace-1" />);
+    const row = await screen.findByRole("button", { name: /^Build/, expanded: false });
+
+    row.focus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(screen.getByLabelText("Action name")).toHaveFocus());
+  });
+
+  it("does not install a save result over the actions of a thread that was read meanwhile", async () => {
+    const user = userEvent.setup();
+    let finish: (value: WorkspaceEnvironmentReadResult) => void = () => undefined;
+    transport.saveWorkspaceEnvironment.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const { rerender } = render(<ProjectSettingsPanel key="thread-1" workspaceId="workspace-1" threadId="thread-1" />);
+    await openAction(user, "Build");
+    await user.type(screen.getByLabelText("Action name"), " A");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    transport.readWorkspaceEnvironment.mockResolvedValue(result([{ ...build, name: "Other checkout" }], { revision: "rev-9" }));
+    rerender(<ProjectSettingsPanel key="thread-2" workspaceId="workspace-1" threadId="thread-2" />);
+    await screen.findByRole("alert");
+    finish(result([{ ...build, name: "Build A" }], { revision: "rev-2" }));
+
+    await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const entry = useProjectSettingsDraftStore.getState().drafts["workspace-1"];
+    expect(entry?.base.revision).toBe("rev-1");
+    expect(entry?.conflict).toBe(true);
   });
 
   it("explains why an action cannot run without a thread", async () => {
