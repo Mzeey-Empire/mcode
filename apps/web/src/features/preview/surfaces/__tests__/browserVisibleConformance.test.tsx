@@ -611,15 +611,9 @@ describe("visible Browser conformance observer", () => {
     const activatePage = vi.spyOn(usePreviewTabsStore.getState(), "activatePage");
     render(<ThreadOverview thread={visibleThread()} threadPaneWidth={1_400} />);
 
-    const row = await screen.findByRole("button", {
-      name: /Browser, Checkout, https:\/\/example\.test\/checkout\?token=redacted, agent controls/,
-    });
-    expect(row).toHaveAccessibleName(expect.stringContaining("agent controls"));
-    expect(screen.getByText("Browser")).toBeInTheDocument();
-    expect(screen.getByTestId(`thread-overview-browser-address-${TAB_ID}`)).toHaveTextContent(
-      "https://example.test/checkout?token=redacted",
-    );
-    expect(row.querySelector('[data-testid="thread-overview-browser-agent-cursor"]')).toBeInTheDocument();
+    const row = await screen.findByRole("button", { name: "Browser, Working on the page, Checkout" });
+    expect(screen.getByTestId("thread-overview-browser")).toHaveAttribute("data-state", "acting");
+    expect(screen.getByTestId("thread-overview-browser")).not.toHaveTextContent("token=redacted");
 
     await userEvent.setup().click(row);
     expect(activatePage).toHaveBeenCalledWith(WORKSPACE_ID, THREAD_ID, TAB_ID);
@@ -673,7 +667,7 @@ describe("visible Browser conformance observer", () => {
       );
       await userEvent.click(screen.getByRole("button", { name: "Thread overview" }));
       expect(await screen.findByRole("button", {
-        name: "Browser, Restored page, https://example.test/restored",
+        name: "Browser, Restored page, example.test",
       })).toBeInTheDocument();
       expect(list).toHaveBeenCalledWith(THREAD_ID, WORKSPACE_ID);
 
@@ -688,13 +682,8 @@ describe("visible Browser conformance observer", () => {
       };
       act(() => onTabsUpdated?.(hostTabSet));
 
-      const loadedRow = await screen.findByRole("button", {
-        name: "Browser, Loaded page, https://example.test/loaded?view=full",
-      });
+      const loadedRow = await screen.findByRole("button", { name: "Browser, Loaded page, example.test" });
       expect(loadedRow.querySelector('img[src="https://example.test/favicon.ico"]')).toBeInTheDocument();
-      expect(screen.getByTestId(`thread-overview-browser-address-${TAB_ID}`)).toHaveTextContent(
-        "https://example.test/loaded?view=full",
-      );
 
       firstOverview.unmount();
       usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {} });
@@ -703,7 +692,7 @@ describe("visible Browser conformance observer", () => {
       expect(screen.queryByTestId("thread-overview-browser")).not.toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: "Thread overview" }));
       expect(await screen.findByRole("button", {
-        name: "Browser, Loaded page, https://example.test/loaded?view=full",
+        name: "Browser, Loaded page, example.test",
       })).toBeInTheDocument();
     } finally {
       Object.defineProperty(window, "desktopBridge", {
