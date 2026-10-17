@@ -92,6 +92,26 @@ describe("GeneralSection icon freshness and saving", () => {
     await waitFor(() => expect(screen.getByText("Automatic · no icon file found")).toBeInTheDocument());
   });
 
+  it("keeps saves in order across leaving and reopening General", async () => {
+    const user = userEvent.setup();
+    iconState({ ...image, source: "chosen", chosenMissing: false, path: "brand.svg" });
+    let resolveFirst: (icon: ProjectIcon) => void = () => {};
+    const firstSave = new Promise<ProjectIcon>((resolve) => { resolveFirst = resolve; });
+    vi.mocked(mockTransport.setProjectIcon)
+      .mockReturnValueOnce(firstSave)
+      .mockResolvedValue({ workspaceId: WORKSPACE_ID, source: "none", chosenMissing: false });
+    const { unmount } = render(<GeneralSection workspaceId={WORKSPACE_ID} />);
+    await user.click(screen.getByRole("button", { name: "Use automatic" }));
+    unmount();
+
+    render(<GeneralSection workspaceId={WORKSPACE_ID} />);
+    await user.click(screen.getByRole("button", { name: "Use automatic" }));
+    expect(mockTransport.setProjectIcon).toHaveBeenCalledTimes(1);
+
+    resolveFirst({ ...image, source: "chosen", chosenMissing: false, path: "brand.svg" });
+    await waitFor(() => expect(mockTransport.setProjectIcon).toHaveBeenCalledTimes(2));
+  });
+
   it("reports a failed icon save and keeps the icon as it was", async () => {
     const user = userEvent.setup();
     iconState({ ...image, source: "chosen", chosenMissing: false, path: "brand.svg" });
@@ -124,15 +144,35 @@ describe("GeneralSection location", () => {
 describe("GeneralSection name", () => {
   it("keeps what the user typed when a rename lands mid-edit", async () => {
     const user = userEvent.setup();
-    vi.mocked(mockTransport.renameWorkspace).mockResolvedValue(createMockWorkspace({ id: WORKSPACE_ID, name: "Wagon" }));
+    let resolveRename: (workspace: ReturnType<typeof createMockWorkspace>) => void = () => {};
+    vi.mocked(mockTransport.renameWorkspace).mockReturnValue(new Promise((resolve) => { resolveRename = resolve; }));
     render(<GeneralSection workspaceId={WORKSPACE_ID} />);
     const field = screen.getByLabelText("Name");
 
     await user.clear(field);
     await user.type(field, "Wagon{Enter}");
-    await user.type(screen.getByLabelText("Name"), "x");
+    await user.type(field, "x");
+    resolveRename(createMockWorkspace({ id: WORKSPACE_ID, name: "Wagon" }));
     await waitFor(() => expect(useWorkspaceStore.getState().workspaces[0]?.name).toBe("Wagon"));
 
+    expect(screen.getByLabelText("Name")).toBe(field);
+    expect(field).toHaveFocus();
+    expect(field).toHaveValue("Wagonx");
+  });
+
+  it("keeps newer typing when an earlier rename fails", async () => {
+    const user = userEvent.setup();
+    let rejectRename: (error: Error) => void = () => {};
+    vi.mocked(mockTransport.renameWorkspace).mockReturnValue(new Promise((_, reject) => { rejectRename = reject; }));
+    render(<GeneralSection workspaceId={WORKSPACE_ID} />);
+    const field = screen.getByLabelText("Name");
+
+    await user.clear(field);
+    await user.type(field, "Wagon{Enter}");
+    await user.type(field, "x");
+    rejectRename(new Error("name taken"));
+
+    await waitFor(() => expect(useToastStore.getState().toasts.some((toast) => toast.title === "Project could not be renamed")).toBe(true));
     expect(screen.getByLabelText("Name")).toHaveValue("Wagonx");
   });
 

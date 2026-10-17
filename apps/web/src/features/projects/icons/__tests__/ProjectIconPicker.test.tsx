@@ -68,6 +68,20 @@ describe("ProjectIconPicker", () => {
     expect(onPick).not.toHaveBeenCalled();
   });
 
+  it("still picks when the search has surrounding spaces", async () => {
+    const user = userEvent.setup();
+    const onPick = await openPicker(user);
+    await screen.findByRole("option", { name: /icon\.svg/ });
+    vi.mocked(mockTransport.listProjectIconCandidates).mockResolvedValue({ files: ["apps/web/public/favicon.ico"], total: 1 });
+
+    await user.type(screen.getByRole("combobox", { name: "Search image files" }), " fav ");
+    await waitFor(() => expect(mockTransport.listProjectIconCandidates).toHaveBeenLastCalledWith("ws-1", "fav"));
+    await screen.findByText("Showing 1 of 1");
+    await user.keyboard("{Enter}");
+
+    expect(onPick).toHaveBeenCalledWith("apps/web/public/favicon.ico");
+  });
+
   it("saves the clicked file", async () => {
     const user = userEvent.setup();
     const onPick = await openPicker(user);

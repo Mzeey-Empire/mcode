@@ -80,7 +80,7 @@ function ProjectIconPickerList({ workspaceId, chosenPath, onPick }: ProjectIconP
   }, [workspaceId]);
   const candidates = state.kind === "ready" ? state.candidates : null;
   // The list keeps the previous results until the new ones arrive, so Enter must not pick from them.
-  const settled = state.kind === "ready" && state.query === query;
+  const settled = state.kind === "ready" && state.query === query.trim();
   return (
     <Picker
       query={query}

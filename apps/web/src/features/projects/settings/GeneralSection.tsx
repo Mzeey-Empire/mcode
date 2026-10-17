@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import type { ProjectIcon as ProjectIconModel } from "@mcode/contracts";
 import { IconButton } from "@/components/ui/button";
@@ -63,7 +63,7 @@ function NameField({ workspaceId, name, defaultName }: { readonly workspaceId: s
     setDraft(next);
     if (next === name) return;
     renameWorkspace(workspaceId, next).catch((error: unknown) => {
-      setDraft(name);
+      setDraft((current) => (current === next ? name : current));
       reportFailure("Project could not be renamed", error);
     });
   };
@@ -102,11 +102,13 @@ function LocationRow({ path }: { readonly path: string }) {
   );
 }
 
-/** Returns a saver that runs icon saves one after another, so the last choice made is the one stored and shown. */
+// Outside the component so a save queued before leaving General still precedes one made after coming back.
+const pendingIconSaves = new Map<string, Promise<void>>();
+
+/** Returns a saver that runs a workspace's icon saves one after another, so the last choice made is the one stored and shown. */
 function useIconSaver(workspaceId: string): (iconPath: string | null) => void {
-  const pending = useRef<Promise<void>>(Promise.resolve());
   return (iconPath) => {
-    pending.current = pending.current.then(() =>
+    const save = (pendingIconSaves.get(workspaceId) ?? Promise.resolve()).then(() =>
       getTransport().setProjectIcon(workspaceId, iconPath).then(
         (saved) => {
           useProjectIconStore.getState().applyIcon(saved);
@@ -115,6 +117,7 @@ function useIconSaver(workspaceId: string): (iconPath: string | null) => void {
         (error: unknown) => reportFailure("Icon could not be saved", error),
       ),
     );
+    pendingIconSaves.set(workspaceId, save);
   };
 }
 
