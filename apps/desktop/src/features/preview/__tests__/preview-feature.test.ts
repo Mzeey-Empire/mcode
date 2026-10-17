@@ -33,7 +33,7 @@ const previewTest = vi.hoisted(() => {
     session: { fromPartition: vi.fn(() => previewSession) },
     BrowserWindow: { fromWebContents: browserWindowFromWebContents },
     webContents: electronWebContents,
-    app: { getPath: vi.fn(() => profileTestRoot) },
+    app: { getPath: vi.fn(() => profileTestRoot), on: vi.fn() },
     shell: { openExternal: vi.fn() },
     nativeImage: { createFromBuffer: vi.fn() },
     browserWindowFromWebContents,
@@ -77,6 +77,9 @@ describe("Preview feature public interface", () => {
 
   it("registers every Preview IPC capability, including performance counters", () => {
     const expectedChannels = [
+      "preview:certificate.state",
+      "preview:certificate.proceed",
+      "preview:certificate.revoke",
       "preview:profiles.remove",
       "preview:profiles.reconcile",
       "preview:history.list",

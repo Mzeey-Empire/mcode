@@ -230,15 +230,23 @@ describe("certificate IPC on adopted surfaces", () => {
     for (const fingerprint of [null, 42, "", "x".repeat(257)]) {
       expect(() => certificateCall("proceed", surface(), fingerprint)).toThrow();
     }
+    // The chrome reads state on every navigation, so an unusable surface reads as no certificate instead of throwing.
+    const expectRefused = (operation: string, ref: unknown, sender?: unknown) => {
+      if (operation === "state") {
+        expect(certificateCall(operation, ref, certificate.fingerprint, sender)).toEqual({ failure: null, exceptionInUse: false });
+      } else {
+        expect(() => certificateCall(operation, ref, certificate.fingerprint, sender)).toThrow();
+      }
+    };
     for (const operation of ["state", "proceed", "revoke"]) {
       for (const ref of [null, "tab-1", { generation: 1 }, surface(2),
         { ...surface(), identity: { ...surface().identity, workspaceId: "22222222-2222-4222-8222-222222222222" } }]) {
-        expect(() => certificateCall(operation, ref, certificate.fingerprint)).toThrow();
+        expectRefused(operation, ref);
       }
       expect(() => certificateCall(operation, surface(), certificate.fingerprint, guest)).toThrow();
       const foreign = makeWindow(2);
       allWindows.push(foreign);
-      expect(() => certificateCall(operation, surface(), certificate.fingerprint, foreign.webContents)).toThrow();
+      expectRefused(operation, surface(), foreign.webContents);
     }
     expect(certificateCall("state", surface())).toMatchObject({ exceptionInUse: false });
     guest.destroyed = true;
