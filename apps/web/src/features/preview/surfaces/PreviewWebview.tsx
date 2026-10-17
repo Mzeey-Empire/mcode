@@ -170,6 +170,13 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
       viewport,
     };
     const stateRef = useRef<BrowserSurfacePageState | null>(null);
+    const retryAddressRef = useRef<string | null>(null);
+    // While a retry loads, the committed page is still the one the user left. Reporting it would flip the tab address back, and the address sync would navigate there.
+    const statusOf = useCallback((state: BrowserSurfacePageState): PreviewPageStatus => {
+      if (state.phase !== "loading") retryAddressRef.current = null;
+      const status = previewStatus(state);
+      return retryAddressRef.current ? { ...status, url: retryAddressRef.current } : status;
+    }, []);
     const initialAddressRef = useRef(supportedInitialAddress(src));
     const callbacksRef = useRef({ onPageStatus, onNavigationStateChange });
     callbacksRef.current = { onPageStatus, onNavigationStateChange };
@@ -271,6 +278,13 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
         browserSurfaceHost.navigate(identity, url);
       },
       reload() {
+        // A navigation the page started itself leaves the previous page committed when it fails, so a reload would reload that page instead of the failed one.
+        const failed = currentSurface();
+        if (failed?.phase === "error" && failed.pendingAddress) {
+          retryAddressRef.current = failed.pendingAddress;
+          browserSurfaceHost.navigate(identity, failed.pendingAddress);
+          return;
+        }
         navigateMain("reload");
       },
       forceReload() {
@@ -314,11 +328,11 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
         : null;
       presentationRegistrationRef.current = registration;
       stateRef.current = initial;
-      callbacksRef.current.onPageStatus?.(previewStatus(initial));
+      callbacksRef.current.onPageStatus?.(statusOf(initial));
       publishPresentation(initial);
       const unsubscribe = browserSurfaceHost.subscribe(identity, (state) => {
         stateRef.current = state;
-        callbacksRef.current.onPageStatus?.(previewStatus(state));
+        callbacksRef.current.onPageStatus?.(statusOf(state));
         callbacksRef.current.onNavigationStateChange?.(state.navigation ?? {
           canGoBack: false,
           canGoForward: false,
@@ -332,7 +346,7 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
           presentationRegistrationRef.current = null;
         }
       };
-    }, [ensureViewportCoordinator, identity, presentationSource, publishPresentation, tabId, threadId, workspaceId]);
+    }, [ensureViewportCoordinator, identity, presentationSource, publishPresentation, statusOf, tabId, threadId, workspaceId]);
 
     useEffect(() => {
       const address = supportedInitialAddress(src);
