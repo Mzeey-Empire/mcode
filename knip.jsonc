@@ -24,10 +24,8 @@
     },
     "apps/web": {
       "entry": [
-        "src/main.tsx",
         "src/index.css",
-        "scripts/**/*.{mjs,ts}",
-        "src/test-setup.ts"
+        "scripts/**/*.{mjs,ts}"
       ],
       "project": [
         "src/**/*.{ts,tsx,css}",
@@ -47,7 +45,6 @@
     },
     "apps/desktop": {
       "entry": [
-        "src/main/main.ts",
         "src/main/preload.ts",
         "src/main/snapshot-entry.ts",
         "src/features/preview/preload/guest-input.ts",
@@ -77,7 +74,6 @@
     },
     "apps/server": {
       "entry": [
-        "src/index.ts",
         "src/features/terminal/host/pty-host-entry.ts",
         "src/**/*.worker.ts",
         "scripts/**/*.{mjs,ts}"
@@ -126,10 +122,6 @@
       ]
     }
   },
-  "ignore": [
-    // Build outputs are regenerated from the workspace source entries.
-    "**/{dist,dist-tsc,release,coverage}/**"
-  ],
   "ignoreBinaries": [
     // Provider CLI installed by the user, not an npm executable.
     "codex",
