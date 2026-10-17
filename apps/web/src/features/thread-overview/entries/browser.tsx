@@ -1,6 +1,3 @@
-import { Button } from "@/components/ui/button";
-import { SiteFavicon } from "@/components/ui/favicon";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type {
   BrowserAutomationLiveTarget,
   BrowserAutomationPendingAgentOpen,
@@ -12,18 +9,14 @@ import {
   isEmptyPreviewTabUrl,
   useBrowserAutomationStore,
   usePreviewTabSet,
-  usePreviewTabsStore,
 } from "@/features/preview";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
-import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
-import { cn } from "@/lib/utils";
-import { useDiffStore } from "@/stores/diffStore";
 import { type Thread } from "@/transport";
 import type { BrowserAutomationControllerState, BrowserTabInfo, BrowserTabSet } from "@mcode/contracts";
-import { Globe, MousePointer2 } from "lucide-react";
-import { useCallback, useMemo } from "react";
-import { OVERVIEW_ROW_CLASS, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
+import { useMemo } from "react";
+import { ThreadOverviewBrowserRow } from "@/features/thread-overview/entries/ThreadOverviewBrowserRow";
+import { ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
 const EMPTY_BROWSER_PENDING_OPENS: ReadonlyMap<string, BrowserAutomationPendingAgentOpen> = new Map();
 
@@ -191,72 +184,6 @@ export function getThreadOverviewBrowserTabs({
   return rows;
 }
 
-interface ThreadOverviewBrowserSectionProps {
-  rows: readonly ThreadOverviewBrowserTab[];
-  onOpen: (tabId: string) => void;
-}
-
-/** Renders navigated live Browser tabs that can be opened in this thread. */
-function ThreadOverviewBrowserSection({ rows, onOpen }: ThreadOverviewBrowserSectionProps) {
-  if (rows.length === 0) return null;
-
-  return (
-    <section aria-label="Browser" data-testid="thread-overview-browser">
-      <div className="px-2 pt-1 text-xs font-medium text-muted">Browser</div>
-      <div className="flex w-full flex-col gap-0.5">
-        {rows.map(({ tab, controller }) => {
-          const title = tab.title?.trim() || "Untitled page";
-          const address = tab.url?.trim() || "No address";
-          const isAgentControlled = controller === "agent";
-
-          return (
-            <Tooltip key={tab.id}>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="compact"
-                    type="button"
-                    data-testid={`thread-overview-browser-tab-${tab.id}`}
-                    aria-label={`Browser, ${title}, ${address}${isAgentControlled ? ", agent controls" : ""}`}
-                    onClick={() => onOpen(tab.id)}
-                    className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-between")}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      {isAgentControlled ? (
-                        <MousePointer2
-                          className="size-3.5 shrink-0 fill-primary text-primary"
-                          aria-label="Agent controls this Browser tab"
-                          data-testid="thread-overview-browser-agent-cursor"
-                        />
-                      ) : (
-                        <SiteFavicon
-                          src={tab.faviconUrl}
-                          fallback={<Globe size={14} className="text-muted" />}
-                        />
-                      )}
-                      <span className="min-w-0 text-fade text-xs font-medium">{title}</span>
-                    </span>
-                    <span
-                      data-testid={`thread-overview-browser-address-${tab.id}`}
-                      className="ml-auto text-fade font-mono text-xs tabular-nums text-muted"
-                    >
-                      {address}
-                    </span>
-                  </Button>
-                }
-              />
-              <TooltipContent side="top" className="max-w-xs break-all text-xs">
-                {address}
-              </TooltipContent>
-            </Tooltip>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function useBrowserTabSet(thread: Thread) {
   return { tabSet: usePreviewTabSet(thread.id, thread.workspace_id) };
 }
@@ -301,16 +228,8 @@ function BrowserEntry({ thread }: { thread: Thread }) {
       thread.workspace_id,
     ],
   );
-  const openBrowserTab = useCallback(
-    (tabId: string) => {
-      showRightPanelAdaptive(thread.workspace_id, thread.id);
-      useDiffStore.getState().setRightPanelTab(thread.workspace_id, thread.id, "preview");
-      void usePreviewTabsStore.getState().activatePage(thread.workspace_id, thread.id, tabId);
-    },
-    [thread.id, thread.workspace_id],
-  );
   return (<ThreadOverviewWhen when={browserTabs.length > 0}>
-    <ThreadOverviewBrowserSection rows={browserTabs} onOpen={openBrowserTab} />
+    <ThreadOverviewBrowserRow thread={thread} pages={browserTabs} activeTabId={browserTabSet?.activeTabId ?? null} />
   </ThreadOverviewWhen>);
 }
 

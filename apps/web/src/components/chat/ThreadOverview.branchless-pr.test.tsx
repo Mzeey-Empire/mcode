@@ -520,7 +520,7 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(screen.queryByRole("menuitem", { name: /Success/ })).not.toBeInTheDocument();
   });
 
-  it("renders navigated live Browser rows and reveals the exact tab without navigation", async () => {
+  it("renders one Browser row for the thread and reveals the exact tab without navigation", async () => {
     const lifecycleTab = {
       workspaceId: "ws-1",
       threadId: "thread-1",
@@ -608,11 +608,10 @@ describe("ThreadOverview branchless Create PR", () => {
     navigate.mockClear();
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
-    const agentRow = screen.getByRole("button", { name: /Browser, Agent page/ });
+    const row = screen.getByRole("button", { name: "Browser, Working on the page, Agent page" });
     const user = userEvent.setup();
-    expect(agentRow).toHaveAttribute("type", "button");
-    expect(agentRow).toHaveAccessibleName(expect.stringContaining("agent controls"));
-    expect(agentRow.querySelector('[data-testid="thread-overview-browser-agent-cursor"]')).toBeInTheDocument();
+    expect(row).toHaveAttribute("type", "button");
+    expect(screen.getAllByTestId("thread-overview-browser")).toHaveLength(1);
     act(() => {
       useBrowserAutomationStore.getState().setControllerForTarget("ws-1", "thread-1", "agent-tab", {
         tabId: "agent-tab",
@@ -620,14 +619,10 @@ describe("ThreadOverview branchless Create PR", () => {
         controlEpoch: 2,
       });
     });
-    expect(agentRow.querySelector('[data-testid="thread-overview-browser-agent-cursor"]')).not.toBeInTheDocument();
-    const claimedRow = screen.getByRole("button", { name: /Browser, Claimed page/ });
-    expect(claimedRow).toBeInTheDocument();
-    expect(claimedRow.querySelector('[data-testid="thread-overview-browser-agent-cursor"]')).not.toBeInTheDocument();
-    expect(claimedRow.querySelector('img[src="https://claimed.test/favicon.ico"]')).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Browser, Ordinary page/ })).toBeInTheDocument();
+    const pausedRow = screen.getByRole("button", { name: "Browser, paused, Agent page" });
+    expect(screen.getByRole("button", { name: "Hand back" })).toBeInTheDocument();
 
-    agentRow.focus();
+    pausedRow.focus();
     await user.keyboard("{Enter}");
     expect(showRightPanel).toHaveBeenCalledWith("ws-1", "thread-1");
     expect(setRightPanelTab).toHaveBeenCalledWith("ws-1", "thread-1", "preview");
@@ -635,11 +630,12 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(navigate).not.toHaveBeenCalled();
 
     act(() => useBrowserAutomationStore.getState().detachTarget("ws-1", "thread-1", "agent-tab"));
-    expect(screen.queryByRole("button", { name: /Browser, Agent page/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Browser, Claimed page/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Agent page/ })).not.toBeInTheDocument();
+    const openRow = screen.getByRole("button", { name: "Browser, Claimed page, claimed.test, 1 more pages" });
+    expect(openRow.querySelector('img[src="https://claimed.test/favicon.ico"]')).toBeInTheDocument();
 
     act(() => useBrowserAutomationStore.getState().setLifecycleTabs([claimedTab]));
-    expect(screen.queryByRole("button", { name: /Browser, Agent page/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Agent page/ })).not.toBeInTheDocument();
 
     act(() => useBrowserAutomationStore.setState({ registered: false, status: "unavailable" }));
     expect(screen.queryByTestId("thread-overview-browser")).not.toBeInTheDocument();
@@ -704,9 +700,7 @@ describe("ThreadOverview branchless Create PR", () => {
 
     render(<ThreadOverview thread={makeThread()} threadPaneWidth={1400} />);
 
-    const row = screen.getByRole("button", { name: /Browser, example\.test/ });
-    expect(row).toHaveAccessibleName(expect.stringContaining("agent controls"));
-    expect(screen.getByTestId("thread-overview-browser-agent-cursor")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Browser, Working on the page, example.test" })).toBeInTheDocument();
   });
 
   it("filters empty and detached tabs while retaining released live tabs as user rows", () => {

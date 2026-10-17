@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { loopbackPort } from "../navigation/nav-errors";
-import { projectServerTiles, type ServerTile } from "./browserNewPageModel";
+import { projectServerTiles, type ServerTile, serverForPort } from "./browserNewPageModel";
 import type { BrowserCertificate } from "./useBrowserCertificate";
 import { useStartServer, useThreadActionRuns } from "./useProjectServers";
 
@@ -115,7 +115,7 @@ function useServerTiles(threadId: string, url: string | null): { readonly tiles:
   const port = url === null ? null : loopbackPort(url);
   const runs = useThreadActionRuns(threadId, port !== null);
   const tiles = useMemo(() => projectServerTiles(runs, []), [runs]);
-  return { tiles, tile: tiles.find((candidate) => String(candidate.port) === port) ?? null };
+  return { tiles, tile: serverForPort(port, tiles) };
 }
 
 function ConnectionRefused({ error, url, threadId, onRetry, onOpen }: Pick<BrowserErrorPageProps, "error" | "url" | "threadId" | "onRetry" | "onOpen">) {
