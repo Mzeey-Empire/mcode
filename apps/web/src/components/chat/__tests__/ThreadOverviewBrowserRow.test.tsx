@@ -15,7 +15,7 @@ vi.mock("@/transport", async (importOriginal) => ({
   getTransport: () => transport,
 }));
 
-import { browserAutomationTargetKey, useBrowserAutomationStore } from "@/features/preview";
+import { browserAutomationTargetKey, useBrowserAutomationStore, usePreviewTabsStore } from "@/features/preview";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import type { ThreadOverviewBrowserTab } from "@/features/thread-overview/entries/browser";
 import { ThreadOverviewBrowserRow } from "@/features/thread-overview/entries/ThreadOverviewBrowserRow";
@@ -187,6 +187,18 @@ describe("overview Browser row", () => {
     await userEvent.click(screen.getByRole("button", { name: "Start web" }));
 
     expect(transport.restartWorkspaceAction).toHaveBeenCalledWith(THREAD.id, "web");
+  });
+
+  it("makes the stopped page the active tab before starting its server", async () => {
+    seedRuns(webRun());
+    transport.restartWorkspaceAction.mockResolvedValue(webRun({ runId: "run-2", status: "running", finishedAt: null }));
+    const activatePage = vi.spyOn(usePreviewTabsStore.getState(), "activatePage").mockResolvedValue(undefined as never);
+    renderRow([page("a", "http://localhost:5173/", "Vite App"), page("b", "https://b.test/", "B page")], "a");
+
+    await userEvent.click(await screen.findByRole("button", { name: "Start web" }));
+
+    expect(activatePage).toHaveBeenCalledWith("ws-1", THREAD.id, "a");
+    activatePage.mockRestore();
   });
 
   it("starts an action that never had a terminal instead of restarting it", async () => {

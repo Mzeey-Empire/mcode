@@ -90,7 +90,7 @@ function RowText({ state }: { state: BrowserRowState }) {
   );
 }
 
-function RowAction({ children, onPress, disabled = false }: { children: ReactNode; onPress: () => void; disabled?: boolean }) {
+function RowAction({ children, onPress, loading = false }: { children: ReactNode; onPress: () => void; loading?: boolean }) {
   return (
     <Button
       type="button"
@@ -98,7 +98,7 @@ function RowAction({ children, onPress, disabled = false }: { children: ReactNod
       shape="round"
       size="compact"
       className="h-6 shrink-0 px-2.5 text-xs"
-      disabled={disabled}
+      loading={loading}
       onClick={onPress}
     >
       {children}
@@ -175,8 +175,14 @@ function BrowserRowAction({
   }
   if (state.kind === "server-stopped") {
     const { tile } = state;
+    const tabId = state.page.tabId;
+    // The reload lands in the active tab, so make the stopped page the active one before it starts.
+    const startOnThisPage = () => {
+      void usePreviewTabsStore.getState().activatePage(thread.workspace_id, thread.id, tabId);
+      void start(tile);
+    };
     return (
-      <RowAction disabled={isRequesting(tile.actionId)} onPress={() => void start(tile)}>
+      <RowAction loading={isRequesting(tile.actionId)} onPress={startOnThisPage}>
         {isRequesting(tile.actionId) ? "Starting" : `Start ${tile.name}`}
       </RowAction>
     );
