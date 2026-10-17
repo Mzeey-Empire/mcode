@@ -12,7 +12,7 @@ import { getTransport } from "@/transport";
 import type { ActionPlay } from "./ActionEditor";
 import { ActionsSection } from "./ActionsSection";
 import { EnvironmentConflictBanner } from "./EnvironmentConflictBanner";
-import { useProjectSettingsDraftStore } from "./projectSettingsDraftStore";
+import { useProjectSettingsDraftStore, type ProjectSettingsDraft } from "./projectSettingsDraftStore";
 import { SettingsSaveBar } from "./SettingsSaveBar";
 import { duplicateAction, jsonEqual, newAction, validateDocument, type SettingsIssue } from "./settings-model";
 import { useProjectSettings } from "./useProjectSettings";
@@ -58,6 +58,37 @@ function groupIssues(issues: readonly SettingsIssue[]) {
   return { byAction, document };
 }
 
+function describeEntry(entry: ProjectSettingsDraft, dirty: boolean) {
+  const issues = groupIssues([...validateDocument(entry.draft), ...entry.issues]);
+  return {
+    issues,
+    storageMode: entry.base.storageMode ?? "system",
+    approvedActionIds: entry.base.approvedActionIds ?? [],
+    canSave: dirty && issues.byAction.size === 0 && issues.document === null,
+  };
+}
+
+function useProjectName(workspaceId: string): string {
+  return useWorkspaceStore((state) =>
+    state.workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? "Unknown project",
+  );
+}
+
+/** Why an action cannot be run from the panel right now, or null when it can. */
+function playBlockedReason(
+  action: WorkspaceEnvironmentAction,
+  savedActions: readonly WorkspaceEnvironmentAction[] | undefined,
+  threadId: string | undefined,
+  syncedWithThread: boolean,
+): string | null {
+  if (!threadId) return "Open a thread to run actions.";
+  // Until this thread's file has been read, the rows show another checkout's actions.
+  if (!syncedWithThread) return "Loading actions.";
+  // Runs read the saved file, so an unsaved or edited action would run something other than what is shown.
+  const saved = savedActions?.find((candidate) => candidate.id === action.id);
+  return saved && jsonEqual(saved, action) ? null : "Save to run this action.";
+}
+
 function startAction(workspaceId: string, threadId: string, action: WorkspaceEnvironmentAction): void {
   openRightPanelTab(workspaceId, threadId, "terminal");
   getTransport().startWorkspaceAction(threadId, action.id).then(
@@ -75,9 +106,7 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
   readonly threadId?: string;
   readonly active?: boolean;
 }) {
-  const projectName = useWorkspaceStore((state) =>
-    state.workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? "Unknown project",
-  );
+  const projectName = useProjectName(workspaceId);
   const settings = useProjectSettings(workspaceId, threadId, active);
   const [newActionId, setNewActionId] = useState<string | null>(null);
   const { entry, dirty } = settings;
@@ -104,11 +133,8 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
   };
 
   const playFor = (action: WorkspaceEnvironmentAction): ActionPlay => {
-    const saved = entry?.base.document.actions.find((candidate) => candidate.id === action.id);
-    if (!threadId) return { disabledReason: "Open a thread to run actions.", run: () => undefined };
-    // Runs read the saved file, so an unsaved or edited action would run something other than what is shown.
-    if (!saved || !jsonEqual(saved, action)) return { disabledReason: "Save to run this action.", run: () => undefined };
-    return { disabledReason: null, run: () => startAction(workspaceId, threadId, action) };
+    const reason = playBlockedReason(action, entry?.base.document.actions, threadId, settings.syncedWithThread);
+    return { disabledReason: reason, run: () => (threadId ? startAction(workspaceId, threadId, action) : undefined) };
   };
 
   const header = (
@@ -139,16 +165,14 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
     );
   }
 
-  const issues = groupIssues([...validateDocument(entry.draft), ...entry.issues]);
-  const storageMode = entry.base.storageMode ?? "system";
-  const canSave = dirty && issues.byAction.size === 0 && issues.document === null;
+  const { issues, storageMode, approvedActionIds, canSave } = describeEntry(entry, dirty);
 
   return (
     <section className="flex min-h-0 flex-1 flex-col" aria-labelledby="project-settings-title">
       {header}
       {addButton}
       <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pt-1 pb-2">
-        {entry.conflict ? (
+        {entry.conflict && dirty ? (
           <EnvironmentConflictBanner
             storageMode={storageMode}
             busy={settings.busy}
@@ -161,7 +185,7 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
           actions={entry.draft.actions}
           expandedActionId={entry.expandedActionId}
           focusNameActionId={newActionId}
-          approvedActionIds={entry.base.approvedActionIds ?? []}
+          approvedActionIds={approvedActionIds}
           issueFor={(actionId) => issues.byAction.get(actionId) ?? null}
           playFor={playFor}
           onExpand={(actionId) => setExpanded(workspaceId, actionId)}

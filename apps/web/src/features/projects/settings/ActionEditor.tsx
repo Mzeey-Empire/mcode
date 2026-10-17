@@ -82,7 +82,7 @@ function CommandEditor({ action, issue, onChange }: Pick<ActionEditorProps, "act
           options={COMMAND_PLATFORMS.map(({ value, label }) => ({
             value,
             label,
-            marker: value === "windows" && platformHasScript(action.command, "windows"),
+            marker: value !== "default" && platformHasScript(action.command, value),
           }))}
         />
       </div>

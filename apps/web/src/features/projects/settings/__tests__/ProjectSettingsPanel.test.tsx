@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentReadResult } from "@mcode/contracts";
 
-const { transport, MockRpcError } = vi.hoisted(() => {
+const { transport, MockRpcError, applyActionRun } = vi.hoisted(() => {
   class MockRpcError extends Error {
     readonly data?: Record<string, unknown>;
 
@@ -15,6 +15,7 @@ const { transport, MockRpcError } = vi.hoisted(() => {
   }
   return {
     MockRpcError,
+    applyActionRun: vi.fn(),
     transport: {
       readWorkspaceEnvironment: vi.fn(),
       saveWorkspaceEnvironment: vi.fn(),
@@ -26,6 +27,7 @@ const { transport, MockRpcError } = vi.hoisted(() => {
 });
 
 vi.mock("@/transport", () => ({ getTransport: () => transport, RpcError: MockRpcError }));
+vi.mock("@/features/terminal/state/applyActionRun", () => ({ applyActionRun: applyActionRun }));
 vi.mock("@/features/projects/state/workspaceStore", () => ({
   useWorkspaceStore: (selector: (state: { workspaces: readonly { id: string; name: string }[] }) => unknown) =>
     selector({ workspaces: [{ id: "workspace-1", name: "Caravan" }] }),
@@ -115,6 +117,24 @@ describe("ProjectSettingsPanel", () => {
     expect(await screen.findByText("This command is too long. The limit is 32 KB.")).toBeInTheDocument();
   });
 
+  it("does not pin a server issue on a command that was corrected while the save ran", async () => {
+    const user = userEvent.setup();
+    let reject: (error: unknown) => void = () => undefined;
+    transport.saveWorkspaceEnvironment.mockReturnValue(new Promise((_resolve, fail) => { reject = fail; }));
+    render(<ProjectSettingsPanel workspaceId="workspace-1" />);
+    await openAction(user, "Build");
+    await user.type(screen.getByLabelText("Command"), " --watch");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await user.type(screen.getByLabelText("Command"), "!");
+    reject(new MockRpcError("invalid", "WORKSPACE_ENVIRONMENT_VALIDATION", {
+      issues: [{ path: ["actions", 0, "command", "default"], code: "SCRIPT_TOO_LARGE", reason: "script_too_large", message: "x" }],
+    }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+    expect(screen.queryByText("This command is too long. The limit is 32 KB.")).not.toBeInTheDocument();
+  });
+
   it("keeps the draft and save bar when the panel moves to another thread and back", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<ProjectSettingsPanel key="thread-1" workspaceId="workspace-1" threadId="thread-1" />);
@@ -155,6 +175,17 @@ describe("ProjectSettingsPanel", () => {
       expect(revision).toBe("rev-9");
       expect(saved.actions[0]?.name).toBe("Mine");
       await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    });
+
+    it("drops the banner when the draft is edited back to what was loaded", async () => {
+      const user = userEvent.setup();
+      await editThenSaveStale(user);
+
+      await user.clear(screen.getByLabelText("Action name"));
+      await user.type(screen.getByLabelText("Action name"), "Build");
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
     });
 
     it("shows the disk version on Reload", async () => {
@@ -247,13 +278,25 @@ describe("ProjectSettingsPanel", () => {
     expect(within(row as HTMLElement).getByRole("button", { name: "Run Build" })).toBeDisabled();
   });
 
-  it("runs a saved action in the open thread", async () => {
+  it("runs a saved action in the open thread and shows its terminal", async () => {
     const user = userEvent.setup();
-    transport.startWorkspaceAction.mockResolvedValue({ actionId: "build", threadId: "thread-1" });
+    const run = { actionId: "build", threadId: "thread-1" };
+    transport.startWorkspaceAction.mockResolvedValue(run);
     render(<ProjectSettingsPanel workspaceId="workspace-1" threadId="thread-1" />);
 
     await user.click(await screen.findByRole("button", { name: "Run Build" }));
 
     await waitFor(() => expect(transport.startWorkspaceAction).toHaveBeenCalledWith("thread-1", "build"));
+    await waitFor(() => expect(applyActionRun).toHaveBeenCalledWith(run, { focus: true }));
+  });
+
+  it("will not run until the actions were read for the thread it would run in", async () => {
+    const { rerender } = render(<ProjectSettingsPanel workspaceId="workspace-1" threadId="thread-1" />);
+    expect(await screen.findByRole("button", { name: "Run Build" })).toBeEnabled();
+
+    transport.readWorkspaceEnvironment.mockReturnValue(new Promise(() => undefined));
+    rerender(<ProjectSettingsPanel workspaceId="workspace-1" threadId="thread-2" />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run Build" })).toBeDisabled());
   });
 });
