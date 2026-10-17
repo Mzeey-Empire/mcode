@@ -230,6 +230,21 @@ describe("BrowserSurfaceHost", () => {
     host.disposeHost();
   });
 
+  it("keeps the failure of a navigation the page started itself, such as a clicked link", () => {
+    const { host, adapter } = testHost();
+    adapter.emit({ type: "navigation-committed", mainFrame: true, address: "https://example.test/current" });
+    adapter.emit({ type: "load-stopped", mainFrame: true, address: "https://example.test/current" });
+    adapter.emit({ type: "navigation-started", mainFrame: true, address: "https://bad-cert.test/" });
+    adapter.emit({ type: "load-failed", mainFrame: true, address: "https://bad-cert.test/", error: "ERR_CERT_AUTHORITY_INVALID" });
+
+    expect(host.getSnapshot(IDENTITY)).toMatchObject({
+      phase: "error",
+      pendingAddress: "https://bad-cert.test/",
+      mainFrameError: "ERR_CERT_AUTHORITY_INVALID",
+    });
+    host.disposeHost();
+  });
+
   it("pauses hidden publication and flushes latest state on visible", () => {
     const { host, adapter, scheduling, visibility } = testHost();
     const updates: string[] = [];
