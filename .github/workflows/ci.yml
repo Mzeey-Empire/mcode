@@ -153,6 +153,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run lint:architecture
+      - run: bun run lint:deadcode
 
   # Server and web take nearly all of the test time, so each runs in two shards
   # on its own runner instead of after the other on one.
