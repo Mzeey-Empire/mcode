@@ -131,8 +131,11 @@ function netErrorNumber(error: string | null, code: string | number | null): num
   for (const text of [code, error]) {
     if (text === null) continue;
     if (/^-\d+$/.test(text)) return Number(text);
-    const known = NET_ERROR_NUMBERS[text.replace(/^net::/, "")];
+    const name = text.replace(/^net::/, "");
+    const known = NET_ERROR_NUMBERS[name];
     if (known !== undefined) return known;
+    // Every Chromium error in the certificate range is named ERR_CERT*, so an unlisted one still gets the warning.
+    if (name.startsWith("ERR_CERT")) return NET_ERROR_NUMBERS.ERR_CERT_INVALID!;
   }
   return null;
 }

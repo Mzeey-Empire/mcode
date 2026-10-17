@@ -154,6 +154,16 @@ describe("previewPageErrorForFailure", () => {
       });
     });
 
+    it.each(["ERR_CERTIFICATE_TRANSPARENCY_REQUIRED", "ERR_CERT_KNOWN_INTERCEPTION_BLOCKED", "ERR_CERT_UNABLE_TO_CHECK_REVOCATION"])(
+      "treats the unlisted name %s as a certificate warning",
+      (name) => {
+        expect(previewPageErrorForFailure(`net::${name}`, null, "https://localhost:4443/")).toMatchObject({
+          kind: "certificate",
+          detail: "The certificate for localhost isn't trusted: it's invalid. Someone could be posing as this site.",
+        });
+      },
+    );
+
     it("keeps a named certificate error a certificate warning when the number is missing", () => {
       // Navigation IPC reports the error by name only, and a network classification here would drop Proceed.
       expect(previewPageErrorForFailure("net::ERR_CERT_INVALID", null, "https://localhost:4443/")).toMatchObject({

@@ -44,6 +44,8 @@ export function useBrowserCertificate(
     tabKey: null,
     state: null,
   });
+  // Bumped when the desktop refuses a fingerprint, because the details on screen were then stale.
+  const [staleReads, setStaleReads] = useState(0);
   // Another tab's answer must not render while this tab's read is in flight.
   const state = read.tabKey === tabKey ? read.state : null;
 
@@ -60,7 +62,7 @@ export function useBrowserCertificate(
     return () => {
       active = false;
     };
-  }, [identity, tabKey, revision]);
+  }, [identity, tabKey, revision, staleReads]);
 
   const proceed = useCallback(async (fingerprint: string) => {
     const bridge = certificateBridge();
@@ -68,7 +70,10 @@ export function useBrowserCertificate(
     if (!bridge || !surface) return;
     try {
       if (await bridge.proceed(surface, fingerprint)) reload();
-      else showFailure("Couldn't trust this certificate", "The page changed. Reload and try again.");
+      else {
+        setStaleReads((count) => count + 1);
+        showFailure("Couldn't trust this certificate", "The page changed. Reload and try again.");
+      }
     } catch (error) {
       showFailure("Couldn't trust this certificate", error);
     }

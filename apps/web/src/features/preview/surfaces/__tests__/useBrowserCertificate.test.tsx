@@ -89,6 +89,7 @@ describe("useBrowserCertificate", () => {
     await act(async () => { await result.current.proceed("sha256/stale"); });
 
     expect(reload).not.toHaveBeenCalled();
+    await waitFor(() => expect(bridge.state).toHaveBeenCalledTimes(2));
     expect(useToastStore.getState().toasts[0]).toMatchObject({ title: "Couldn't trust this certificate" });
   });
 
