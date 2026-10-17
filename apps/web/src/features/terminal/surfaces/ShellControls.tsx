@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Eraser, MoreHorizontal, Search } from "lucide-react";
+import { Eraser, Ellipsis, Search } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
@@ -52,7 +52,7 @@ export function ShellControls({ workspaceId, threadId, terminal, onClose }: Shel
         <DropdownMenuTrigger
           render={
             <IconButton shape="round" aria-label="More terminal actions">
-              <MoreHorizontal />
+              <Ellipsis />
             </IconButton>
           }
         />

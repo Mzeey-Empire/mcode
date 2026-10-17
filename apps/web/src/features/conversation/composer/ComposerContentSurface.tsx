@@ -736,7 +736,7 @@ function DraftWriteFailureNotice() {
   const failure = useDraftWriteFailureStore((state) => state.failure);
   if (!failure) return null;
   return (
-    <p role="status" className="px-1 pt-1 text-xs text-muted-foreground">
+    <p role="status" className="px-1 pt-1 text-xs text-muted">
       Draft not saved · {DRAFT_WRITE_FAILURE_DETAIL[failure]}
     </p>
   );

@@ -94,7 +94,7 @@ function RowAction({ row, onSignIn, onUpdateCli, onTry }: RowProps) {
 
 function ActionPill({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <Button variant="subtle" shape="round" className="h-7 shrink-0 px-2.5 text-[1.3rem]/[1.8rem] font-medium" onClick={onClick}>
+    <Button variant="subtle" shape="round" className="h-7 shrink-0 px-2.5 text-body-small font-medium" onClick={onClick}>
       {label}
     </Button>
   );

@@ -12,7 +12,7 @@ export function TrafficLightsReserve() {
 export function SidebarToggleButton({ label, onClick }: { readonly label: string; readonly onClick: () => void }) {
   return (
     <Button variant="ghost" size="icon-compact" aria-label={label} className="text-muted" onClick={onClick}>
-      <PanelLeft size={16} strokeWidth={1.5} aria-hidden />
+      <PanelLeft size={16} aria-hidden />
     </Button>
   );
 }
@@ -30,7 +30,7 @@ export function HistoryButtons() {
         disabled={!canGoBack}
         onClick={() => executeCommand("navigation.back")}
       >
-        <ArrowLeft size={16} strokeWidth={1.5} aria-hidden />
+        <ArrowLeft size={16} aria-hidden />
       </Button>
       <Button
         variant="ghost"
@@ -40,7 +40,7 @@ export function HistoryButtons() {
         disabled={!canGoForward}
         onClick={() => executeCommand("navigation.forward")}
       >
-        <ArrowRight size={16} strokeWidth={1.5} aria-hidden />
+        <ArrowRight size={16} aria-hidden />
       </Button>
     </>
   );

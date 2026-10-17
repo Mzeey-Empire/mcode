@@ -35,7 +35,7 @@ export function AnsweredSummary({ content, messageId }: AnsweredSummaryProps) {
       data-role="answered-plan-questions"
       className={cn("flex h-7 items-center gap-2 rounded-sm px-2", echo && "animate-wizard-marker-echo")}
     >
-      <Check size={14} strokeWidth={1.5} className="shrink-0 text-success" aria-hidden />
+      <Check size={14} className="shrink-0 text-success" aria-hidden />
       <span className="text-sm text-muted">Answered {count} {count === 1 ? "question" : "questions"}</span>
     </div>
   );

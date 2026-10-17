@@ -193,7 +193,7 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
       onKeyDown={handleKeyDown}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <Icon size={14} strokeWidth={1.5} className="shrink-0 text-primary" aria-hidden />
+        <Icon size={14} className="shrink-0 text-primary" aria-hidden />
         <h2 className="min-w-0 text-sm font-medium text-ink">{title}</h2>
         <SubagentOrigin request={active} />
         <span className="flex-1" />
@@ -229,7 +229,7 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
           </div>
           {submission?.state === "failed" && (
             <div role="alert" className="flex items-center gap-2 text-sm">
-              <CircleAlert size={14} strokeWidth={1.5} className="shrink-0 text-error" aria-hidden />
+              <CircleAlert size={14} className="shrink-0 text-error" aria-hidden />
               <span className="min-w-0 text-error">Your answer didn&apos;t reach {approvalActorName(active)}.</span>
               <span className="flex-1" />
               <button type="button" className="shrink-0 cursor-pointer font-medium text-ink" onClick={retry}>Try again</button>

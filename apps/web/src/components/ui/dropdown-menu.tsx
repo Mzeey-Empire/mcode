@@ -262,7 +262,7 @@ function DropdownMenuSubTrigger({
         <MenuRowBody
           label={label}
           icon={icon}
-          trailing={<ChevronRightIcon aria-hidden className="size-[1.6rem] text-muted" strokeWidth={1.5} />}
+          trailing={<ChevronRightIcon aria-hidden className="size-[1.6rem] text-muted" />}
         />
         {disabled ? <span id={reasonId} hidden>{disabledReason}</span> : null}
       </MenuPrimitive.SubmenuTrigger>

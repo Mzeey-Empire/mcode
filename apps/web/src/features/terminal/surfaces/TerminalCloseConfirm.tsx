@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 
 /** The Paper confirm buttons are 14px padded with 13/18 type, between the shared compact and default sizes. */
-const CONFIRM_BUTTON = "px-3.5 text-[13px]/[18px]";
+const CONFIRM_BUTTON = "px-3.5 text-body-small";
 
 interface TerminalCloseConfirmProps {
   readonly name: string;
@@ -33,7 +33,7 @@ export function TerminalCloseConfirm({ name, anchor, command, onConfirm, onCance
       >
         <div className="flex flex-col gap-1">
           <p id={titleId} className="text-sm font-semibold text-ink">Stop {name}?</p>
-          <p id={descriptionId} className="text-[13px]/5 text-muted">
+          <p id={descriptionId} className="text-body-small text-muted">
             {command === undefined
               ? "It is still running. Closing stops it and everything it started."
               : `${command} is still running. Closing the tab stops it.`}

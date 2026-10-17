@@ -1073,7 +1073,7 @@ export function ProjectTree() {
       <div className="mx-1.5 flex h-8 shrink-0 items-center gap-1 pl-2">
         <span className="min-w-0 flex-1 text-label text-muted">Projects</span>
         <IconButton aria-label="Add project" onClick={handleOpenFolder}>
-          <Plus strokeWidth={1.5} aria-hidden />
+          <Plus aria-hidden />
         </IconButton>
       </div>
 

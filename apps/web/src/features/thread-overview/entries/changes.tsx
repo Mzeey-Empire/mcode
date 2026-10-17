@@ -350,7 +350,6 @@ function ChangesEntry() {
       <span className="flex size-4 shrink-0 items-center justify-center">
         <Diff
           size={16}
-          strokeWidth={1.5}
           className="text-muted transition-colors duration-150 group-hover:text-ink/80"
         />
       </span>

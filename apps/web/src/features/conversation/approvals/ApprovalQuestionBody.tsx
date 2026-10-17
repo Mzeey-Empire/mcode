@@ -46,7 +46,7 @@ function QuestionFooter({ request, failed, submitting, canAdvance, isLast, onSki
     <>
       {failed && (
         <div role="alert" className="flex items-center gap-2 text-sm">
-          <CircleAlert size={14} strokeWidth={1.5} className="shrink-0 text-error" aria-hidden />
+          <CircleAlert size={14} className="shrink-0 text-error" aria-hidden />
           <span className="min-w-0 text-error">Your answer didn&apos;t reach {approvalActorName(request)}.</span>
         </div>
       )}

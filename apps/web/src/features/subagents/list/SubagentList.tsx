@@ -43,7 +43,7 @@ function StatusTrail({ row, now }: { readonly row: SubagentRosterEntry; readonly
     case "running":
       return <span className="flex items-center gap-1.5 text-ink"><span aria-hidden className="size-[7px] rounded-full bg-success" />{time}</span>;
     case "done":
-      return <span className="flex items-center gap-1.5 text-muted"><Check size={12} strokeWidth={2} aria-hidden />{time}</span>;
+      return <span className="flex items-center gap-1.5 text-muted"><Check size={12} aria-hidden />{time}</span>;
     case "failed":
       return <span className="flex items-center gap-1.5 text-muted">
         <span aria-hidden className="size-[7px] rounded-full bg-error" />

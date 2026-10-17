@@ -282,13 +282,13 @@ function BarHeader(props: BarHeaderProps) {
         aria-controls={expanded ? listId : undefined}
         className="flex min-w-0 items-center gap-2 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-focus"
       >
-        <Diff aria-hidden size={14} strokeWidth={1.5} className="shrink-0 text-muted" />
+        <Diff aria-hidden size={14} className="shrink-0 text-muted" />
         <span className="shrink-0 text-body-small font-medium text-ink">
           Changed {fileCount} {fileCount === 1 ? "file" : "files"}
         </span>
         <HeaderCounts changes={changes} />
         {props.allReverted && <span className="shrink-0 text-caption text-muted">reverted</span>}
-        <Chevron aria-hidden size={14} strokeWidth={1.5} className="shrink-0 text-muted" />
+        <Chevron aria-hidden size={14} className="shrink-0 text-muted" />
       </button>
       <span className="grow" />
       {collapseControl && (
@@ -299,8 +299,8 @@ function BarHeader(props: BarHeaderProps) {
           className={ICON_BUTTON_CLASS}
         >
           {collapseControl.anyCollapsed
-            ? <ChevronsUpDown aria-hidden size={14} strokeWidth={1.5} />
-            : <ChevronsDownUp aria-hidden size={14} strokeWidth={1.5} />}
+            ? <ChevronsUpDown aria-hidden size={14} />
+            : <ChevronsDownUp aria-hidden size={14} />}
         </button>
       )}
       <button
@@ -442,8 +442,8 @@ function FolderRow({ folder, depth, collapsed, showTotals, onToggle }: FolderRow
       style={indent(depth)}
       className="flex h-[2.8rem] w-full shrink-0 items-center gap-2 pr-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-focus"
     >
-      <Chevron aria-hidden size={12} strokeWidth={1.5} className="w-3 shrink-0 text-muted" />
-      <Folder aria-hidden size={14} strokeWidth={1.5} className="shrink-0 text-muted" />
+      <Chevron aria-hidden size={12} className="w-3 shrink-0 text-muted" />
+      <Folder aria-hidden size={14} className="shrink-0 text-muted" />
       <span className="text-body-small text-muted text-fade">{folder.label}</span>
       <span className="shrink-0 text-caption text-muted">{folder.fileCount}</span>
       <span className="grow" />
@@ -557,7 +557,7 @@ function RowActions({ path, checkoutRoot }: { readonly path: string; readonly ch
         onClick={() => copyText(path, "Path copied", "Couldn't copy path")}
         className={ROW_ACTION_CLASS}
       >
-        <Copy aria-hidden size={14} strokeWidth={1.5} />
+        <Copy aria-hidden size={14} />
       </button>
     </span>
   );
@@ -572,7 +572,7 @@ function EditorAction({ absolutePath }: { readonly absolutePath: string }) {
       dirPath={dirname(absolutePath)}
       trigger={
         <button type="button" aria-label="Open in editor" className={ROW_ACTION_CLASS}>
-          {editor ? openInAppIcon(editor.iconKey, 14) : <ExternalLink aria-hidden size={14} strokeWidth={1.5} />}
+          {editor ? openInAppIcon(editor.iconKey, 14) : <ExternalLink aria-hidden size={14} />}
         </button>
       }
     />

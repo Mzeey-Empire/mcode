@@ -1,8 +1,8 @@
-# Last turn changes
+# Turn changes
 
-Review's **Last turn** view uses the provider's complete patch when it is available and valid. **Agent changes** identifies this source. **Live** means the turn is still running. The settled patch belongs to the assistant message and remains available after reopening the thread while its turn's snapshots remain readable.
+The settled patch belongs to the assistant message and remains available after reopening the thread while its turn's snapshots remain readable.
 
-For a single snapshot, source selection uses a valid provider unified patch first, then native full before-and-after evidence such as Cursor ACP. If native evidence is unavailable or rejected, complete tracked file-tool evidence supplies **Tracked file evidence**. Otherwise, Review uses attributed Git snapshots. **Git fallback: same-file edits may appear** explains that another editor's changes to the same file can appear in that comparison. All providers use the same Last turn controls.
+For a single snapshot, source selection uses a valid provider unified patch first, then native full before-and-after evidence such as Cursor ACP. If native evidence is unavailable or rejected, complete tracked file-tool evidence supplies the patch. Otherwise, Review uses attributed Git snapshots, which can include another editor's changes to the same file.
 
 Retry attempts share the first attempt's turn id. When multiple attempts contributed paths, Review reads Git evidence from the first baseline to the last snapshot: the replacement's native patch cannot describe earlier edits. A missing snapshot from a finished attempt makes the entire turn unavailable, even when later snapshots survive. Cumulative readers omit that whole turn. This also covers captures that were never written; grouping expiry dates alone would still silently shorten those turns. See [turn-snapshot-range.ts](../../../apps/server/src/features/projects/diffs/snapshots/turn-snapshot-range.ts).
 

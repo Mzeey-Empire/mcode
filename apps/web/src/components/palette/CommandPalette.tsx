@@ -15,7 +15,7 @@ import { SourcesView } from "./views/SourcesView";
 import { ThreadSearchView } from "./views/ThreadSearchView";
 import { isBrowseQuery, getPaletteMode } from "./CommandPalette.logic";
 import { cn } from "@/lib/utils";
-import { DIALOG_FADE_CLASS } from "@/components/ui/overlay-surface";
+import { DIALOG_FADE_CLASS, POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 
 type PaletteView = ReturnType<typeof useCommandPaletteStore.getState>["viewStack"][number];
 
@@ -122,7 +122,8 @@ export function CommandPalette() {
         >
           <Command
             className={cn(
-              "gap-px overflow-hidden rounded-[1.2rem] border border-border bg-panel p-1.5 text-ink shadow-popover",
+              POPOVER_SURFACE_CLASS,
+              "gap-px overflow-hidden p-1.5",
               PALETTE_LIST_CLASS,
             )}
             // We do all filtering/ranking ourselves (filterCommandPaletteGroups,
@@ -205,10 +206,10 @@ function PaletteInput({
             onMouseDown={keepInputFocus}
             onClick={onBack}
           >
-            <ArrowLeft aria-hidden className="size-[1.4rem]" strokeWidth={1.5} />
+            <ArrowLeft aria-hidden className="size-[1.4rem]" />
           </Button>
         ) : (
-          <SearchIcon aria-hidden className="size-[1.4rem] shrink-0 text-muted" strokeWidth={1.5} />
+          <SearchIcon aria-hidden className="size-[1.4rem] shrink-0 text-muted" />
         )}
         <CommandPrimitive.Input
           autoFocus

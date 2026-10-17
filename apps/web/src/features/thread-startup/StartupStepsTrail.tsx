@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronRight, CircleAlert, CircleX, LoaderCircle, Minus } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleAlert, CircleX, Minus } from "lucide-react";
 import type { ThreadStartup, ThreadStartupKind, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -53,7 +54,7 @@ function StatusMark({ tone }: { readonly tone: TrailRowTone }) {
     case "done":
       return <Check size={12} className="text-muted" />;
     case "live":
-      return <LoaderCircle size={14} className="text-primary animate-spin motion-reduce:animate-none" />;
+      return <Spinner size={16} className="text-primary" />;
     case "pending":
       return <span className="size-1 rounded-full bg-muted" />;
     case "failed":
