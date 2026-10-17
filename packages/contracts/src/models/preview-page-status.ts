@@ -23,17 +23,16 @@ export type PreviewPagePhase = z.infer<ReturnType<typeof PreviewPagePhaseSchema>
 
 /**
  * Classified load failure attached to a status whose phase is `error`.
- * Populated by W1 (`classifyLoadResult`); defined here so the reducer and the
- * renderer share one shape.
+ * Classified by the renderer so the reducer and error page share one shape.
  */
 export const PreviewPageErrorSchema = lazySchema(() =>
   z.object({
-    kind: z.enum(["http", "network", "file-not-found", "crash", "blocked"]),
+    kind: z.enum(["network", "connection-refused", "certificate", "crash", "file-not-found", "blocked"]),
     status: z.number().int().optional(),
     /**
      * Diagnostic code shown to the (developer) audience in the error panel:
      * the Chromium net-error name for network/file failures
-     * (e.g. `ERR_NAME_NOT_RESOLVED`). HTTP failures use {@link status} instead.
+     * (e.g. `ERR_NAME_NOT_RESOLVED`).
      */
     code: z.string().max(PREVIEW_PAGE_STATUS_STRING_MAX.code).optional(),
     message: z.string().max(PREVIEW_PAGE_STATUS_STRING_MAX.message),

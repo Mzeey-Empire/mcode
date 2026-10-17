@@ -418,6 +418,23 @@ describe("ElectronWebviewBrowserSurfaceAdapter", () => {
     expect(() => adapter.element.dispatchEvent(new Event("did-navigate"))).not.toThrow();
   });
 
+  it("reports a page-initiated main-frame navigation as started, but not hash changes or subframes", () => {
+    const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 3, { root: document.body, bridge: bridge() });
+    const events: BrowserSurfaceAdapterEvent[] = [];
+    adapter.subscribe((event) => events.push(event));
+    const start = (url: string, isMainFrame: boolean, isInPlace: boolean) =>
+      adapter.element.dispatchEvent(Object.assign(new Event("did-start-navigation"), { url, isMainFrame, isInPlace }));
+
+    start("https://example.test/clicked", true, false);
+    start("https://example.test/page#hash", true, true);
+    start("https://ads.example.test/frame", false, false);
+
+    expect(events.filter((event) => event.type === "navigation-started")).toEqual([
+      expect.objectContaining({ mainFrame: true, address: "https://example.test/clicked", identity: IDENTITY, generation: 3 }),
+    ]);
+    adapter.dispose();
+  });
+
   it("applies explicit input and accessibility state", () => {
     const adapter = new ElectronWebviewBrowserSurfaceAdapter(IDENTITY, 8, {
       root: document.body,

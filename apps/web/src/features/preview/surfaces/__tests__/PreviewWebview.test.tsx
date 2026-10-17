@@ -8,6 +8,7 @@ import {
   releaseBrowserAutomationThreadScope,
   useBrowserAutomationStore,
 } from "../../automation/browserAutomationStore";
+import type { PreviewPageStatus } from "@mcode/contracts";
 import { PreviewWebview, type PreviewWebviewHandle } from "../PreviewWebview";
 import {
   browserSurfaceHost,
@@ -115,6 +116,81 @@ describe("PreviewWebview", () => {
         generation: expect.any(Number),
       },
       navigation: { kind: "back" },
+    });
+  });
+
+  describe("reload", () => {
+    const WORKSPACE = "55555555-5555-4555-8555-555555555555";
+    const IDENTITY = { workspaceId: WORKSPACE, scope: { kind: "thread" as const, id: WORKSPACE }, tabId: "tab-reload" };
+
+    async function mountWithBridge(onPageStatus?: (status: PreviewPageStatus) => void) {
+      const navigate = vi.fn().mockResolvedValue({ ok: true });
+      window.desktopBridge = { preview: { surface: {
+        prepare: vi.fn().mockResolvedValue({ ok: true }),
+        adopt: vi.fn().mockResolvedValue({ ok: true }),
+        navigate,
+        release: vi.fn().mockResolvedValue({ ok: true }),
+        hidden: vi.fn().mockResolvedValue({ ok: true }),
+      } } } as unknown as NonNullable<typeof window.desktopBridge>;
+      const observed: { handle: PreviewWebviewHandle | null } = { handle: null };
+      function Probe() {
+        const ref = useRef<PreviewWebviewHandle>(null);
+        useEffect(() => { observed.handle = ref.current; }, []);
+        return <PreviewWebview ref={ref} threadId={WORKSPACE} tabId="tab-reload" src="https://example.com" onPageStatus={onPageStatus} />;
+      }
+      render(<Probe />);
+      const guest = await screen.findByTestId("electron-browser-surface-webview");
+      await waitFor(() => expect(observed.handle).not.toBeNull());
+      Object.assign(guest, { canGoBack: () => false, canGoForward: () => false });
+      return { handle: observed.handle!, guest, navigate };
+    }
+
+    it("retries the failed address, because the guest still holds the page the user clicked away from", async () => {
+      const { handle, guest, navigate } = await mountWithBridge();
+      guest.dispatchEvent(Object.assign(new Event("did-navigate"), { url: "https://example.com/", isMainFrame: true }));
+      guest.dispatchEvent(Object.assign(new Event("did-start-navigation"), { url: "https://self-signed.test/", isMainFrame: true, isInPlace: false }));
+      guest.dispatchEvent(Object.assign(new Event("did-fail-load"), {
+        validatedURL: "https://self-signed.test/",
+        errorCode: -202,
+        errorDescription: "ERR_CERT_AUTHORITY_INVALID",
+        isMainFrame: true,
+      }));
+      const retry = vi.spyOn(browserSurfaceHost, "navigate");
+
+      handle.reload();
+
+      expect(retry).toHaveBeenCalledWith(IDENTITY, "https://self-signed.test/");
+      expect(navigate).not.toHaveBeenCalledWith(expect.objectContaining({ navigation: { kind: "reload" } }));
+    });
+
+    it("keeps reporting the retried address while it loads, so the tab address does not fall back to the stale page", async () => {
+      const statuses: PreviewPageStatus[] = [];
+      const { handle, guest } = await mountWithBridge((status) => statuses.push(status));
+      guest.dispatchEvent(Object.assign(new Event("did-navigate"), { url: "https://example.com/", isMainFrame: true }));
+      guest.dispatchEvent(Object.assign(new Event("did-start-navigation"), { url: "https://self-signed.test/", isMainFrame: true, isInPlace: false }));
+      guest.dispatchEvent(Object.assign(new Event("did-fail-load"), {
+        validatedURL: "https://self-signed.test/",
+        errorCode: -202,
+        errorDescription: "ERR_CERT_AUTHORITY_INVALID",
+        isMainFrame: true,
+      }));
+      statuses.length = 0;
+
+      handle.reload();
+
+      await waitFor(() => expect(statuses.some((status) => status.phase === "loading")).toBe(true));
+      const loading = statuses.filter((status) => status.phase === "loading");
+      expect(loading.map((status) => status.url)).toEqual(loading.map(() => "https://self-signed.test/"));
+    });
+
+    it("reloads the current page when the last load succeeded", async () => {
+      const { handle, guest, navigate } = await mountWithBridge();
+      guest.dispatchEvent(Object.assign(new Event("did-navigate"), { url: "https://example.com/", isMainFrame: true }));
+      guest.dispatchEvent(Object.assign(new Event("did-stop-loading"), { isMainFrame: true }));
+
+      handle.reload();
+
+      expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ navigation: { kind: "reload" } }));
     });
   });
 

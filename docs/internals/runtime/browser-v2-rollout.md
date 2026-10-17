@@ -38,6 +38,14 @@ guest attaches. Server deletion releases the workspace's guests and clears
 its data; reconciliation with a complete workspace list also removes profiles
 deleted while this desktop was disconnected. See [ADR 0024](../../adr/0024-one-browser-profile-per-project.md).
 
+Certificate exceptions are per profile and held only in memory until Mcode quits
+or the profile is removed; clearing cookies or cache leaves them intact. Main
+answers `certificate-error` from the current host/fingerprint exceptions because
+`setCertificateVerifyProc` results are cached by Electron's network service. Only
+a user click in Browser chrome can add an exception for a recorded main-frame
+failure; automation can use that trust but cannot grant it. Stop trusting removes
+the active host's exceptions and closes the profile's connections before reload.
+
 Electron main [fixes each webview's attachment policy](../../../apps/desktop/src/features/preview/security/webview-attachment-policy.ts)
 before creation. It disables Node integration, enables context isolation and
 sandboxing, replaces the preload, and requires the partition bound to this

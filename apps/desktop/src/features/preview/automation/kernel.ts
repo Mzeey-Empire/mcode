@@ -1477,7 +1477,13 @@ export class BrowserAutomationKernel {
       markEffect();
       const result = await boundedRace(navigation, signal, deadline);
       this.assertNavigationActive(signal, state, navigationSequence);
-      if (result.status === "failed") throw new KernelError("NAVIGATION_FAILED", "Browser navigation failed", true);
+      if (result.status === "failed") {
+        const certificateError = result.errorNumber !== undefined && result.errorNumber <= -200 && result.errorNumber >= -299;
+        const message = certificateError
+          ? `Certificate error for ${new URL(url).hostname} (${result.errorCode ?? result.errorNumber}). Only the user can proceed past it in the Browser.`
+          : "Browser navigation failed";
+        throw new KernelError("NAVIGATION_FAILED", message, true);
+      }
     } catch (cause) {
       this.rethrowUrlNavigationFailure(cause, stopNavigation);
     } finally {

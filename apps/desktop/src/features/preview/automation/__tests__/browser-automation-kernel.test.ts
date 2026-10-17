@@ -988,6 +988,30 @@ describe("BrowserAutomationKernel", () => {
     });
   });
 
+  it.each([-200, -202, -299])("reports certificate failure %s to an agent opening a page", async (errno) => {
+    currentWebContents!.loadURL.mockRejectedValueOnce(Object.assign(new Error("certificate rejected"), {
+      code: "ERR_CERT_AUTHORITY_INVALID", errno,
+    }));
+    await expect(kernel.execute(
+      event(), payload(request("open", { url: "https://self-signed.test/" })),
+    )).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "NAVIGATION_FAILED",
+        message: "Certificate error for self-signed.test (ERR_CERT_AUTHORITY_INVALID). Only the user can proceed past it in the Browser.",
+      },
+    });
+  });
+
+  it.each([-199, -300, -102])("keeps ordinary navigation failure %s distinct from certificates", async (errno) => {
+    currentWebContents!.loadURL.mockRejectedValueOnce(Object.assign(new Error("load rejected"), { errno }));
+    await expect(kernel.execute(
+      event(), payload(request("open", { url: "https://other.test/" })),
+    )).resolves.toMatchObject({
+      ok: false, error: { code: "NAVIGATION_FAILED", message: "Browser navigation failed" },
+    });
+  });
+
   it("rejects an aborted load that leaves the previous page unchanged", async () => {
     currentWebContents!.loadURL.mockRejectedValueOnce(Object.assign(new Error("ERR_ABORTED (-3)"), {
       code: "ERR_ABORTED",

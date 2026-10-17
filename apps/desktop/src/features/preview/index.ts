@@ -16,6 +16,7 @@ import { registerPreviewSurfaceHandlers } from "./surfaces/registry.js";
 import { registerDesignModeHandlers } from "./design/handlers.js";
 import { registerBrowserAutomationHandlers } from "./automation/index.js";
 import { registerBrowserProfileHandlers } from "./security/profile-handlers.js";
+import { browserProfiles } from "./security/browser-profiles.js";
 import { abortOverlayCapture } from "./capture/overlay.js";
 import { sessions } from "./state/window-session.js";
 import { clearDiscardTimers } from "./tabs/discard-scheduler.js";
@@ -37,6 +38,7 @@ export function disposePreviewForWindow(win: import("electron").BrowserWindow): 
 /** Registers all preview:* IPC handlers. Call once at app startup. */
 export function registerPreviewBrowserHandlers(platform: NodeJS.Platform): void {
   registerBrowserProfileHandlers();
+  browserProfiles.certificates.register();
 
   registerNavigationHandlers();
   registerCaptureHandlers();

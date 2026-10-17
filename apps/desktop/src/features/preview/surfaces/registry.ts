@@ -300,13 +300,15 @@ function setRendererResidency(
   emitTabsUpdated(win, getSession(win), owner.threadId);
 }
 
-/** Resolves the adopted guest for an exact identity and generation. */
+/** Validates and resolves the adopted guest for an exact identity and generation. */
 export function resolveAdoptedPreviewSurfaceForWindow(
   windowId: number,
-  surface: PreviewSurfaceRef,
+  surface: unknown,
   sender?: WebContents,
 ): AdoptedPreviewSurface | null {
-  const record = adoptedForWindow(windowId, surface);
+  const validated = validateSurface(surface);
+  if (!validated) return null;
+  const record = adoptedForWindow(windowId, validated);
   if (!record) return null;
   if (sender && record.webContents.hostWebContents !== sender) return null;
   return record;

@@ -662,6 +662,9 @@ export type {
   PreviewPageStatus,
 } from "./models/preview-page-status.js";
 
+export { BrowserCertificateFailureSchema, BrowserCertificateStateSchema } from "./models/browser-certificate.js";
+export type { BrowserCertificateFailure, BrowserCertificateState } from "./models/browser-certificate.js";
+
 export {
   BROWSER_AUTOMATION_CONTRACT_VERSION,
   BROWSER_AUTOMATION_MAX_URL_CHARS,

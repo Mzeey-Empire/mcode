@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatNavError,
   isPageEligibleNavError,
+  loopbackPort,
   navCodeToPageError,
   previewPageErrorForFailure,
 } from "../nav-errors";
@@ -79,7 +80,7 @@ describe("formatNavError", () => {
 
 describe("previewPageErrorForFailure", () => {
   it("classifies a resolver code carried as the error string", () => {
-    expect(previewPageErrorForFailure("sensitive-file", null)).toMatchObject({
+    expect(previewPageErrorForFailure("sensitive-file", null, null)).toMatchObject({
       kind: "blocked",
       code: "sensitive-file",
       message: "This file can't be previewed",
@@ -88,26 +89,101 @@ describe("previewPageErrorForFailure", () => {
 
   it("classifies ERR_FILE_NOT_FOUND by string name or number", () => {
     for (const code of ["ERR_FILE_NOT_FOUND", -6] as const) {
-      expect(previewPageErrorForFailure("ERR_FILE_NOT_FOUND", code)).toMatchObject({
+      expect(previewPageErrorForFailure("ERR_FILE_NOT_FOUND", code, "file:///missing.html")).toMatchObject({
         kind: "file-not-found",
         message: "File not found",
       });
     }
   });
 
-  it("keeps the raw description for other network failures", () => {
-    expect(previewPageErrorForFailure("ERR_NAME_NOT_RESOLVED", -105)).toEqual({
-      kind: "network",
-      code: "-105",
-      message: "ERR_NAME_NOT_RESOLVED",
+  it("maps a lost surface to a crash", () => {
+    expect(previewPageErrorForFailure("surface-lost", null, "http://localhost:5173/")).toMatchObject({
+      kind: "crash",
+      message: "This page crashed",
     });
   });
 
-  it("defaults to a generic network error when nothing is known", () => {
-    expect(previewPageErrorForFailure(null, null)).toEqual({
-      kind: "network",
-      code: "ERR_FAILED",
-      message: "Can't reach this site",
+  describe("plain words for network failures", () => {
+    const cases = [
+      ["a refused local port", "ERR_CONNECTION_REFUSED", -102, "http://localhost:5173/", "connection-refused", "Can't reach localhost:5173", "Nothing is listening on this port."],
+      ["a refused 127.0.0.1 port", "ERR_CONNECTION_REFUSED", -102, "http://127.0.0.1:3000/app", "connection-refused", "Can't reach 127.0.0.1:3000", "Nothing is listening on this port."],
+      ["a refused remote host", "ERR_CONNECTION_REFUSED", -102, "https://example.com/", "network", "Can't reach example.com", "Check the address or your connection."],
+      ["an unknown host", "ERR_NAME_NOT_RESOLVED", -105, "https://nope.invalid/", "network", "Can't reach nope.invalid", "Check the address or your connection."],
+      ["an offline machine", "ERR_INTERNET_DISCONNECTED", -106, "https://example.com/", "network", "Can't reach example.com", "Check the address or your connection."],
+      ["a reset connection", "ERR_CONNECTION_RESET", -101, "http://localhost:8080/", "network", "Can't reach localhost:8080", "Check the address or your connection."],
+    ] as const;
+
+    it.each(cases)("%s", (_name, error, code, url, kind, message, detail) => {
+      const result = previewPageErrorForFailure(error, code, url);
+      expect(result).toMatchObject({ kind, message, detail });
+      expect(`${result.message} ${result.detail ?? ""}`).not.toMatch(/ERR_/);
     });
+
+    it("names no host when the address is unknown", () => {
+      expect(previewPageErrorForFailure(null, null, null)).toEqual({
+        kind: "network",
+        code: "ERR_FAILED",
+        message: "Can't reach this site",
+        detail: "Check the address or your connection.",
+      });
+    });
+  });
+
+  describe("certificate failures", () => {
+    const cases = [
+      ["authority invalid", "ERR_CERT_AUTHORITY_INVALID", -202, "it's self-signed or from an unknown issuer"],
+      ["date invalid", "ERR_CERT_DATE_INVALID", -201, "it has expired or isn't valid yet"],
+      ["name invalid", "ERR_CERT_COMMON_NAME_INVALID", -200, "it was issued for another name"],
+      ["revoked", "ERR_CERT_REVOKED", -206, "it was revoked"],
+      ["any other certificate error", "ERR_CERT_INVALID", -207, "it's invalid"],
+    ] as const;
+
+    it.each(cases)("%s names the host and its reason without an error code", (_name, error, code, reason) => {
+      const result = previewPageErrorForFailure(error, code, "https://localhost:4443/");
+      expect(result).toMatchObject({
+        kind: "certificate",
+        message: "This connection isn't private",
+        detail: `The certificate for localhost isn't trusted: ${reason}. Someone could be posing as this site.`,
+      });
+      expect(`${result.message} ${result.detail}`).not.toMatch(/ERR_/);
+    });
+
+    it("reads the number from the error text when no code is given", () => {
+      expect(previewPageErrorForFailure("net::ERR_CERT_DATE_INVALID", null, "https://expired.example/")).toMatchObject({
+        kind: "certificate",
+      });
+    });
+
+    it.each(["ERR_CERTIFICATE_TRANSPARENCY_REQUIRED", "ERR_CERT_KNOWN_INTERCEPTION_BLOCKED", "ERR_CERT_UNABLE_TO_CHECK_REVOCATION"])(
+      "treats the unlisted name %s as a certificate warning",
+      (name) => {
+        expect(previewPageErrorForFailure(`net::${name}`, null, "https://localhost:4443/")).toMatchObject({
+          kind: "certificate",
+          detail: "The certificate for localhost isn't trusted: it's invalid. Someone could be posing as this site.",
+        });
+      },
+    );
+
+    it("keeps a named certificate error a certificate warning when the number is missing", () => {
+      // Navigation IPC reports the error by name only, and a network classification here would drop Proceed.
+      expect(previewPageErrorForFailure("net::ERR_CERT_INVALID", null, "https://localhost:4443/")).toMatchObject({
+        kind: "certificate",
+      });
+    });
+  });
+});
+
+describe("loopbackPort", () => {
+  it("returns the port only for loopback hosts", () => {
+    expect(loopbackPort("http://localhost:5173/")).toBe("5173");
+    expect(loopbackPort("http://[::1]:3000/")).toBe("3000");
+    expect(loopbackPort("https://example.com:5173/")).toBeNull();
+    expect(loopbackPort("not a url")).toBeNull();
+  });
+
+  it("reports the scheme's default port when the address omits it", () => {
+    expect(loopbackPort("http://localhost/")).toBe("80");
+    expect(loopbackPort("http://localhost:80/")).toBe("80");
+    expect(loopbackPort("https://localhost/")).toBe("443");
   });
 });

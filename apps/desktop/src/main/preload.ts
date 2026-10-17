@@ -7,7 +7,7 @@
 
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
-import type { BrowserHistory } from "@mcode/contracts";
+import type { BrowserCertificateState, BrowserHistory } from "@mcode/contracts";
 import type { PreviewSurfaceRef } from "../features/preview/surfaces/registry.js";
 import {
   PREVIEW_POPUP_REQUESTED_CHANNEL,
@@ -260,6 +260,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
    * without this namespace; the renderer checks `desktopBridge?.preview` before use.
    */
   preview: {
+    certificate: {
+      state(surfaceId: PreviewSurfaceRef): Promise<BrowserCertificateState> {
+        return ipcRenderer.invoke("preview:certificate.state", surfaceId);
+      },
+      proceed(surfaceId: PreviewSurfaceRef, fingerprint: string): Promise<boolean> {
+        return ipcRenderer.invoke("preview:certificate.proceed", surfaceId, fingerprint);
+      },
+      revoke(surfaceId: PreviewSurfaceRef): Promise<void> {
+        return ipcRenderer.invoke("preview:certificate.revoke", surfaceId);
+      },
+    },
     history: {
       list(workspaceId: string): Promise<BrowserHistory> {
         return ipcRenderer.invoke("preview:history.list", workspaceId);

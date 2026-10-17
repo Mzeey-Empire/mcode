@@ -38,9 +38,17 @@ export type BrowserToolbarPage =
       readonly pageActions: BrowserPageActions;
     };
 
+/** A host the user chose to trust despite its certificate. Absent for every normally verified page. */
+export interface BrowserTrustException {
+  readonly host: string;
+  readonly stopTrusting: () => void;
+}
+
 /** The address pill's inputs; editing works whether or not the last load succeeded. */
 export interface BrowserAddress {
   readonly url: string;
+  /** Set while this page loads only because the user trusted its certificate. */
+  readonly trustException?: BrowserTrustException;
   readonly onNavigate: (input: string) => void;
   readonly openExternal: BrowserAction;
   /** Called when a human focuses the address, so automation observation can be invalidated. */

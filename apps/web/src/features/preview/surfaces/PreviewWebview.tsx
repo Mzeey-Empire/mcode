@@ -98,13 +98,17 @@ function resolvePreviewWebviewProps(props: PreviewWebviewProps): ResolvedPreview
 }
 
 function visibleAddress(state: BrowserSurfacePageState): string | null {
-  const address = state.committedAddress ?? state.pendingAddress;
+  // A failed load leaves the previous page (or Chromium's error document) committed, so the address that failed is the pending one.
+  const address = state.mainFrameError
+    ? state.pendingAddress ?? state.committedAddress
+    : state.committedAddress ?? state.pendingAddress;
   return !address || address.startsWith("about:") || address.startsWith("chrome-error:")
     ? null
     : address;
 }
 
-function previewStatus(state: BrowserSurfacePageState): PreviewPageStatus {
+/** Summarizes a surface's page state as the status the preview chrome renders. */
+export function previewStatus(state: BrowserSurfacePageState): PreviewPageStatus {
   const committedBlank = state.committedAddress?.startsWith("about:") === true;
   return {
     url: visibleAddress(state),
@@ -116,7 +120,7 @@ function previewStatus(state: BrowserSurfacePageState): PreviewPageStatus {
     // `mainFrameError` may be a resolver code (rejected before any load) or a
     // Chromium description; the classifier maps both onto the shared copy table.
     ...(state.mainFrameError
-      ? { error: previewPageErrorForFailure(state.mainFrameError, state.mainFrameErrorCode) }
+      ? { error: previewPageErrorForFailure(state.mainFrameError, state.mainFrameErrorCode, visibleAddress(state)) }
       : {}),
   };
 }
@@ -166,6 +170,13 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
       viewport,
     };
     const stateRef = useRef<BrowserSurfacePageState | null>(null);
+    const retryAddressRef = useRef<string | null>(null);
+    // While a retry loads, the committed page is still the one the user left. Reporting it would flip the tab address back, and the address sync would navigate there.
+    const statusOf = useCallback((state: BrowserSurfacePageState): PreviewPageStatus => {
+      if (state.phase !== "loading") retryAddressRef.current = null;
+      const status = previewStatus(state);
+      return retryAddressRef.current ? { ...status, url: retryAddressRef.current } : status;
+    }, []);
     const initialAddressRef = useRef(supportedInitialAddress(src));
     const callbacksRef = useRef({ onPageStatus, onNavigationStateChange });
     callbacksRef.current = { onPageStatus, onNavigationStateChange };
@@ -267,6 +278,13 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
         browserSurfaceHost.navigate(identity, url);
       },
       reload() {
+        // A navigation the page started itself leaves the previous page committed when it fails, so a reload would reload that page instead of the failed one.
+        const failed = currentSurface();
+        if (failed?.phase === "error" && failed.pendingAddress) {
+          retryAddressRef.current = failed.pendingAddress;
+          browserSurfaceHost.navigate(identity, failed.pendingAddress);
+          return;
+        }
         navigateMain("reload");
       },
       forceReload() {
@@ -310,11 +328,11 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
         : null;
       presentationRegistrationRef.current = registration;
       stateRef.current = initial;
-      callbacksRef.current.onPageStatus?.(previewStatus(initial));
+      callbacksRef.current.onPageStatus?.(statusOf(initial));
       publishPresentation(initial);
       const unsubscribe = browserSurfaceHost.subscribe(identity, (state) => {
         stateRef.current = state;
-        callbacksRef.current.onPageStatus?.(previewStatus(state));
+        callbacksRef.current.onPageStatus?.(statusOf(state));
         callbacksRef.current.onNavigationStateChange?.(state.navigation ?? {
           canGoBack: false,
           canGoForward: false,
@@ -328,7 +346,7 @@ export const PreviewWebview = forwardRef<PreviewWebviewHandle, PreviewWebviewPro
           presentationRegistrationRef.current = null;
         }
       };
-    }, [ensureViewportCoordinator, identity, presentationSource, publishPresentation, tabId, threadId, workspaceId]);
+    }, [ensureViewportCoordinator, identity, presentationSource, publishPresentation, statusOf, tabId, threadId, workspaceId]);
 
     useEffect(() => {
       const address = supportedInitialAddress(src);

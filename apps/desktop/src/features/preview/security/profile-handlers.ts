@@ -2,10 +2,28 @@ import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
 import { browserPartitionFor } from "@mcode/shared/browser-partition";
 import { browserProfiles } from "./browser-profiles.js";
 import { sanitizeHistoryUrl } from "../profiles/history-store.js";
+import { BrowserCertificateFailureSchema } from "@mcode/contracts";
+import { resolveAdoptedPreviewSurfaceForWindow } from "../surfaces/registry.js";
 
-function validateSender(event: IpcMainInvokeEvent): void {
+function validateSender(event: IpcMainInvokeEvent): BrowserWindow {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win || win.isDestroyed() || win.webContents !== event.sender) throw new Error("Invalid Browser profile sender");
+  return win;
+}
+
+function findCertificateGuest(event: IpcMainInvokeEvent, surfaceId: unknown) {
+  const win = validateSender(event);
+  const record = resolveAdoptedPreviewSurfaceForWindow(win.id, surfaceId, event.sender);
+  if (!record || browserProfiles.workspaceForSession(record.webContents.session) !== record.surface.identity.workspaceId.toLowerCase()) {
+    return null;
+  }
+  return record.webContents;
+}
+
+function certificateGuest(event: IpcMainInvokeEvent, surfaceId: unknown) {
+  const guest = findCertificateGuest(event, surfaceId);
+  if (!guest) throw new Error("Invalid Browser certificate surface");
+  return guest;
 }
 
 function workspaceId(value: unknown): string {
@@ -17,6 +35,19 @@ function workspaceId(value: unknown): string {
 /** Registers UUID-validated profile deletion and bounded complete-list reconciliation. */
 export function registerBrowserProfileHandlers(): void {
   browserProfiles.initialize();
+  ipcMain.handle("preview:certificate.state", (event, surfaceId: unknown) => {
+    // The chrome reads on every navigation, when the guest is briefly between adoptions. No guest has no certificate.
+    const guest = findCertificateGuest(event, surfaceId);
+    return guest ? browserProfiles.certificates.state(guest) : { failure: null, exceptionInUse: false };
+  });
+  ipcMain.handle("preview:certificate.proceed", (event, surfaceId: unknown, fingerprint: unknown) => {
+    const guest = certificateGuest(event, surfaceId);
+    const parsed = BrowserCertificateFailureSchema().shape.fingerprint.parse(fingerprint);
+    return browserProfiles.certificates.proceed(guest, parsed);
+  });
+  ipcMain.handle("preview:certificate.revoke", (event, surfaceId: unknown) => {
+    return browserProfiles.certificates.revoke(certificateGuest(event, surfaceId));
+  });
   ipcMain.handle("preview:history.list", (event, value: unknown) => {
     validateSender(event);
     return browserProfiles.history.list(workspaceId(value));

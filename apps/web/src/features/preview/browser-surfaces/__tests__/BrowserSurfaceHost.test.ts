@@ -181,6 +181,8 @@ describe("BrowserSurfaceHost", () => {
       phase: "error",
       mainFrameError: "offline",
       mainFrameErrorCode: "ERR_NAME_NOT_RESOLVED",
+      title: "",
+      favicon: null,
     });
     adapter.emit({ type: "load-stopped", mainFrame: true });
     expect(host.getSnapshot(IDENTITY)?.phase).toBe("error");
@@ -224,6 +226,21 @@ describe("BrowserSurfaceHost", () => {
       phase: "loaded",
       committedAddress: "https://example.test/current",
       mainFrameError: null,
+    });
+    host.disposeHost();
+  });
+
+  it("keeps the failure of a navigation the page started itself, such as a clicked link", () => {
+    const { host, adapter } = testHost();
+    adapter.emit({ type: "navigation-committed", mainFrame: true, address: "https://example.test/current" });
+    adapter.emit({ type: "load-stopped", mainFrame: true, address: "https://example.test/current" });
+    adapter.emit({ type: "navigation-started", mainFrame: true, address: "https://bad-cert.test/" });
+    adapter.emit({ type: "load-failed", mainFrame: true, address: "https://bad-cert.test/", error: "ERR_CERT_AUTHORITY_INVALID" });
+
+    expect(host.getSnapshot(IDENTITY)).toMatchObject({
+      phase: "error",
+      pendingAddress: "https://bad-cert.test/",
+      mainFrameError: "ERR_CERT_AUTHORITY_INVALID",
     });
     host.disposeHost();
   });

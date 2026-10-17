@@ -16,6 +16,7 @@ const createPartition = () => ({
   on: vi.fn(), webRequest: { onCompleted: vi.fn() },
   setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(),
   clearStorageData: vi.fn(async () => undefined), clearCache: vi.fn(async () => undefined),
+  closeAllConnections: vi.fn(async () => undefined),
 });
 const previewPartition = createPartition();
 const otherPartition = createPartition();
@@ -144,9 +145,11 @@ import {
   findPendingPreviewAttachment,
   findAdoptedWebContentsForWindow,
   registerPreviewSurfaceHandlers,
+  resolveAdoptedPreviewSurfaceForWindow,
   requestRendererSurfaceDiscard,
 } from "../registry.js";
 import { getSession, previewTabScopeKey, sessions, toBrowserTabSet } from "../../state/window-session.js";
+import { registerBrowserProfileHandlers } from "../../security/profile-handlers.js";
 
 const surface = (generation = 1) => ({
   identity: {
@@ -180,6 +183,75 @@ beforeEach(() => {
 afterEach(() => {
   _resetAdoptionRegistryForTests();
   sessions.clear();
+});
+
+describe("certificate IPC on adopted surfaces", () => {
+  const certificate = { fingerprint: "AA:BB", subjectName: "localhost", issuerName: "localhost", validStart: 100, validExpiry: 200 };
+
+  function certificateCall(operation: string, ref: unknown, fingerprint?: unknown, sender: unknown = allWindows[0]!.webContents) {
+    return ipcHandlers[`preview:certificate.${operation}`]!({ sender }, ref, fingerprint);
+  }
+
+  function adoptedGuest() {
+    registerBrowserProfileHandlers();
+    browserProfiles.certificates.forget(surface().identity.workspaceId);
+    const guest = makeGuest(allWindows[0]!);
+    expect(invoke("preview.surface.prepare", { surface: surface(), adoptionToken: "token-1234" })).toEqual({ ok: true });
+    expect(invoke("preview.surface.adopt", { surface: surface(), adoptionToken: "token-1234" })).toEqual({ ok: true });
+    const record = resolveAdoptedPreviewSurfaceForWindow(1, surface());
+    if (!record) throw new Error("Expected adopted guest");
+    guest.url = "https://localhost:4443/";
+    browserProfiles.certificates.handle({ preventDefault: vi.fn() }, record.webContents, guest.url,
+      "net::ERR_CERT_AUTHORITY_INVALID", certificate, vi.fn(), true);
+    return { guest, webContents: record.webContents };
+  }
+
+  it("lets owned chrome trust a recorded failure and revokes the active host through the bridge", async () => {
+    const { guest, webContents } = adoptedGuest();
+    expect(certificateCall("state", surface())).toEqual({
+      failure: { host: "localhost", error: "net::ERR_CERT_AUTHORITY_INVALID", ...certificate }, exceptionInUse: false,
+    });
+    expect(certificateCall("proceed", surface(), "different")).toBe(false);
+    expect(certificateCall("proceed", surface(), certificate.fingerprint)).toBe(true);
+    guest.emit("did-navigate", {}, guest.url);
+    expect(certificateCall("state", surface())).toEqual({ failure: null, exceptionInUse: true });
+    previewPartition.closeAllConnections.mockClear();
+    await certificateCall("revoke", surface());
+    expect(previewPartition.closeAllConnections).toHaveBeenCalledOnce();
+    const callback = vi.fn();
+    browserProfiles.certificates.handle({ preventDefault: vi.fn() }, webContents, guest.url,
+      "net::ERR_CERT_AUTHORITY_INVALID", certificate, callback, true);
+    expect(callback.mock.calls).toEqual([[false]]);
+    expect(certificateCall("state", surface())).toMatchObject({ exceptionInUse: false });
+  });
+
+  it("rejects invalid fingerprints and stale, foreign, malformed, or destroyed surfaces before granting trust", () => {
+    const { guest } = adoptedGuest();
+    for (const fingerprint of [null, 42, "", "x".repeat(257)]) {
+      expect(() => certificateCall("proceed", surface(), fingerprint)).toThrow();
+    }
+    // The chrome reads state on every navigation, so an unusable surface reads as no certificate instead of throwing.
+    const expectRefused = (operation: string, ref: unknown, sender?: unknown) => {
+      if (operation === "state") {
+        expect(certificateCall(operation, ref, certificate.fingerprint, sender)).toEqual({ failure: null, exceptionInUse: false });
+      } else {
+        expect(() => certificateCall(operation, ref, certificate.fingerprint, sender)).toThrow();
+      }
+    };
+    for (const operation of ["state", "proceed", "revoke"]) {
+      for (const ref of [null, "tab-1", { generation: 1 }, surface(2),
+        { ...surface(), identity: { ...surface().identity, workspaceId: "22222222-2222-4222-8222-222222222222" } }]) {
+        expectRefused(operation, ref);
+      }
+      expect(() => certificateCall(operation, surface(), certificate.fingerprint, guest)).toThrow();
+      const foreign = makeWindow(2);
+      allWindows.push(foreign);
+      expectRefused(operation, surface(), foreign.webContents);
+    }
+    expect(certificateCall("state", surface())).toMatchObject({ exceptionInUse: false });
+    guest.destroyed = true;
+    expect(() => certificateCall("proceed", surface(), certificate.fingerprint)).toThrow();
+  });
 });
 
 describe("preview typed surface bridge", () => {

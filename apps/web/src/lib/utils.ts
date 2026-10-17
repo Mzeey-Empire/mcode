@@ -20,7 +20,7 @@ const twMerge = extendTailwindMerge<"text-fade">({
       shadow: ["popover", "floating", "dialog"],
     },
     classGroups: {
-      "font-size": [{ text: ["body", "prose", "body-small", "caption", "label", "button", "code"] }, "type-link"],
+      "font-size": [{ text: ["body", "prose", "body-small", "caption", "label", "button", "code", "code-small"] }, "type-link"],
       "font-family": [{ font: ["code"] }],
       "text-fade": ["text-fade", { "text-fade-lines": [validators.isInteger] }],
     },

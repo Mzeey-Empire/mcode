@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { pageStatusReducer, initialPageStatus } from "../page-status.js";
 import type { PreviewPageError } from "@mcode/contracts";
 
-const ERR: PreviewPageError = { kind: "http", status: 404, message: "Page not found" };
+const ERR: PreviewPageError = { kind: "file-not-found", message: "Page not found" };
 
 describe("pageStatusReducer", () => {
   it("starts loaded with empty chrome", () => {
