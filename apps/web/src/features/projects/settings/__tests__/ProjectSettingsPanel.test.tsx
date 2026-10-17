@@ -29,8 +29,8 @@ const { transport, MockRpcError, applyActionRun } = vi.hoisted(() => {
 vi.mock("@/transport", () => ({ getTransport: () => transport, RpcError: MockRpcError }));
 vi.mock("@/features/terminal/state/applyActionRun", () => ({ applyActionRun: applyActionRun }));
 vi.mock("@/features/projects/state/workspaceStore", () => ({
-  useWorkspaceStore: (selector: (state: { workspaces: readonly { id: string; name: string }[] }) => unknown) =>
-    selector({ workspaces: [{ id: "workspace-1", name: "Caravan" }] }),
+  useWorkspaceStore: (selector: (state: { workspaces: readonly { id: string; name: string; path: string; icon_path: null }[] }) => unknown) =>
+    selector({ workspaces: [{ id: "workspace-1", name: "Caravan", path: "/src/caravan", icon_path: null }] }),
 }));
 
 import { ProjectSettingsPanel } from "../ProjectSettingsPanel";
@@ -61,12 +61,17 @@ describe("ProjectSettingsPanel", () => {
     }));
   });
 
-  it("lists General as unavailable beside the selected Actions section", async () => {
+  it("opens on Actions and switches to General, which has no Action button", async () => {
+    const user = userEvent.setup();
     render(<ProjectSettingsPanel workspaceId="workspace-1" />);
     await screen.findByRole("button", { name: /^Build/ });
-
-    expect(screen.getByRole("radio", { name: "General" })).toBeDisabled();
     expect(screen.getByRole("radio", { name: "Actions" })).toBeChecked();
+
+    await user.click(screen.getByRole("radio", { name: "General" }));
+
+    expect(screen.getByRole("radio", { name: "General" })).toBeChecked();
+    expect(screen.getByLabelText("Name")).toHaveValue("Caravan");
+    expect(screen.queryByRole("button", { name: "Action" })).toBeNull();
   });
 
   it("adds an action, takes its command and saves it", async () => {

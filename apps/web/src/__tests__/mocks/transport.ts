@@ -124,6 +124,7 @@ export const mockTransport: McodeTransport = {
   renameWorkspace: vi.fn().mockResolvedValue(createMockWorkspace()),
   resolveProjectIcons: vi.fn().mockResolvedValue([]),
   setProjectIcon: vi.fn<McodeTransport["setProjectIcon"]>(),
+  listProjectIconCandidates: vi.fn().mockResolvedValue({ files: [], total: 0 }),
   readWorkspaceEnvironment: vi.fn().mockResolvedValue({
     document: { version: "0.0.1", actions: [] },
     revision: null,

@@ -343,6 +343,8 @@ export interface McodeTransport {
   resolveProjectIcons(workspaceIds: string[]): Promise<ProjectIcon[]>;
   /** Store a chosen icon path, or null to return to automatic detection. */
   setProjectIcon(workspaceId: string, iconPath: string | null): Promise<ProjectIcon>;
+  /** Image files under the project root that can be chosen as its icon, with the match count before `limit`. */
+  listProjectIconCandidates(workspaceId: string, query: string, limit?: number): Promise<{ files: string[]; total: number }>;
   /** Rename a workspace without changing its filesystem path. */
   renameWorkspace(id: string, name: string): Promise<Workspace>;
   /** Read the selected workspace environment document and revision. */
