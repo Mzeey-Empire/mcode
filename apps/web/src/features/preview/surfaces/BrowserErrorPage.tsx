@@ -175,7 +175,7 @@ export function BrowserErrorPage(props: BrowserErrorPageProps) {
       data-testid="preview-error-panel"
       data-kind={error.kind}
       role="alert"
-      // `m-auto` on the child centers it while it fits and lets the page scroll when expanded details outgrow a short panel.
+      // `m-auto` centers the child while it fits and still scrolls when expanded details outgrow the panel.
       className="absolute inset-0 flex overflow-y-auto p-6 text-center motion-safe:animate-in motion-safe:fade-in"
     >
       <div className="m-auto flex w-80 max-w-full flex-col items-center gap-4">
