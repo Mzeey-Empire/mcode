@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectIcon } from "@mcode/contracts";
 import { createMockWorkspace, mockTransport } from "@/__tests__/mocks/transport";
 
@@ -10,6 +10,7 @@ vi.mock("@/transport", async () => ({
 }));
 
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useToastStore } from "@/stores/toastStore";
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
 import { GeneralSection } from "../GeneralSection";
 
@@ -27,6 +28,8 @@ beforeEach(() => {
   });
   vi.mocked(mockTransport.setProjectIcon).mockReset();
   vi.mocked(mockTransport.renameWorkspace).mockReset();
+  vi.mocked(mockTransport.resolveProjectIcons).mockReset().mockResolvedValue([]);
+  useProjectIconStore.setState({ iconsByWorkspaceId: {} });
 });
 
 describe("GeneralSection icon row", () => {
@@ -60,7 +63,91 @@ describe("GeneralSection icon row", () => {
   });
 });
 
+describe("GeneralSection icon freshness and saving", () => {
+  it("re-resolves the icon on open so a deleted chosen file shows as missing", async () => {
+    useWorkspaceStore.setState({ workspaces: [createMockWorkspace({ id: WORKSPACE_ID, name: "Caravan", icon_path: "brand.svg" })] });
+    iconState({ ...image, source: "chosen", chosenMissing: false, path: "brand.svg" });
+    vi.mocked(mockTransport.resolveProjectIcons).mockResolvedValue([{ workspaceId: WORKSPACE_ID, source: "none", chosenMissing: true }]);
+    render(<GeneralSection workspaceId={WORKSPACE_ID} />);
+
+    expect(await screen.findByText(/is missing · using automatic/)).toBeInTheDocument();
+    expect(mockTransport.resolveProjectIcons).toHaveBeenCalledWith([WORKSPACE_ID]);
+  });
+
+  it("keeps the last choice when saves are made in quick succession", async () => {
+    const user = userEvent.setup();
+    iconState({ ...image, source: "chosen", chosenMissing: false, path: "brand.svg" });
+    let resolveFirst: (icon: ProjectIcon) => void = () => {};
+    const firstSave = new Promise<ProjectIcon>((resolve) => { resolveFirst = resolve; });
+    const second: ProjectIcon = { workspaceId: WORKSPACE_ID, source: "none", chosenMissing: false };
+    vi.mocked(mockTransport.setProjectIcon).mockReturnValueOnce(firstSave).mockResolvedValueOnce(second);
+    render(<GeneralSection workspaceId={WORKSPACE_ID} />);
+
+    await user.click(screen.getByRole("button", { name: "Use automatic" }));
+    await user.click(screen.getByRole("button", { name: "Use automatic" }));
+    expect(mockTransport.setProjectIcon).toHaveBeenCalledTimes(1);
+
+    resolveFirst({ ...image, source: "chosen", chosenMissing: false, path: "brand.svg" });
+    await waitFor(() => expect(mockTransport.setProjectIcon).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Automatic · no icon file found")).toBeInTheDocument());
+  });
+
+  it("reports a failed icon save and keeps the icon as it was", async () => {
+    const user = userEvent.setup();
+    iconState({ ...image, source: "chosen", chosenMissing: false, path: "brand.svg" });
+    vi.mocked(mockTransport.setProjectIcon).mockRejectedValue(new Error("disk full"));
+    render(<GeneralSection workspaceId={WORKSPACE_ID} />);
+
+    await user.click(screen.getByRole("button", { name: "Use automatic" }));
+
+    await waitFor(() => expect(useToastStore.getState().toasts.some((toast) => toast.title === "Icon could not be saved")).toBe(true));
+    expect(screen.getByRole("button", { name: "Use automatic" })).toBeInTheDocument();
+  });
+});
+
+describe("GeneralSection location", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, "desktopBridge");
+  });
+
+  it("offers Open folder only in the desktop app", () => {
+    const { unmount } = render(<GeneralSection workspaceId={WORKSPACE_ID} />);
+    expect(screen.queryByRole("button", { name: "Open folder" })).toBeNull();
+    unmount();
+
+    Object.defineProperty(window, "desktopBridge", { value: {}, configurable: true, writable: true });
+    render(<GeneralSection workspaceId={WORKSPACE_ID} />);
+    expect(screen.getByRole("button", { name: "Open folder" })).toBeInTheDocument();
+  });
+});
+
 describe("GeneralSection name", () => {
+  it("keeps what the user typed when a rename lands mid-edit", async () => {
+    const user = userEvent.setup();
+    vi.mocked(mockTransport.renameWorkspace).mockResolvedValue(createMockWorkspace({ id: WORKSPACE_ID, name: "Wagon" }));
+    render(<GeneralSection workspaceId={WORKSPACE_ID} />);
+    const field = screen.getByLabelText("Name");
+
+    await user.clear(field);
+    await user.type(field, "Wagon{Enter}");
+    await user.type(screen.getByLabelText("Name"), "x");
+    await waitFor(() => expect(useWorkspaceStore.getState().workspaces[0]?.name).toBe("Wagon"));
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Wagonx");
+  });
+
+  it("drops the edit on Escape and does not rename on the blur that follows", async () => {
+    const user = userEvent.setup();
+    render(<GeneralSection workspaceId={WORKSPACE_ID} />);
+    const field = screen.getByLabelText("Name");
+
+    await user.type(field, "zzz{Escape}");
+    await user.tab();
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Caravan");
+    expect(mockTransport.renameWorkspace).not.toHaveBeenCalled();
+  });
+
   it("renames on Enter", async () => {
     const user = userEvent.setup();
     vi.mocked(mockTransport.renameWorkspace).mockResolvedValue(createMockWorkspace({ id: WORKSPACE_ID, name: "Wagon" }));

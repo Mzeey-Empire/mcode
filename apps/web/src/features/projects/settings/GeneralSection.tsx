@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { FolderOpen, RotateCcw } from "lucide-react";
 import type { ProjectIcon as ProjectIconModel } from "@mcode/contracts";
 import { IconButton } from "@/components/ui/button";
@@ -50,6 +50,12 @@ function iconSource(icon: ProjectIconModel | undefined, chosenPath: string | nul
 
 function NameField({ workspaceId, name, defaultName }: { readonly workspaceId: string; readonly name: string; readonly defaultName: string }) {
   const [draft, setDraft] = useState(name);
+  const [savedName, setSavedName] = useState(name);
+  // A rename lands after the user may have typed again, so only an untouched draft follows the saved name.
+  if (name !== savedName) {
+    setSavedName(name);
+    if (draft === savedName) setDraft(name);
+  }
   const renameWorkspace = useWorkspaceStore((state) => state.renameWorkspace);
 
   const commit = () => {
@@ -73,9 +79,43 @@ function NameField({ workspaceId, name, defaultName }: { readonly workspaceId: s
         if (event.key === "Enter") event.currentTarget.blur();
         if (event.key === "Escape") setDraft(name);
       }}
-      className="w-[200px] shrink-0"
+      className="w-[200px] shrink-0 rounded-[0.8rem] bg-background"
     />
   );
+}
+
+function LocationRow({ path }: { readonly path: string }) {
+  return (
+    <SettingRow title="Location" last detail={<Mono>{path}</Mono>}>
+      {window.desktopBridge ? (
+        <IconButton
+          shape="round"
+          aria-label="Open folder"
+          onClick={() => {
+            getTransport().openIn(FILE_EXPLORER_ID, path).catch((error: unknown) => reportFailure("Couldn't open File Explorer", error));
+          }}
+        >
+          <FolderOpen />
+        </IconButton>
+      ) : null}
+    </SettingRow>
+  );
+}
+
+/** Returns a saver that runs icon saves one after another, so the last choice made is the one stored and shown. */
+function useIconSaver(workspaceId: string): (iconPath: string | null) => void {
+  const pending = useRef<Promise<void>>(Promise.resolve());
+  return (iconPath) => {
+    pending.current = pending.current.then(() =>
+      getTransport().setProjectIcon(workspaceId, iconPath).then(
+        (saved) => {
+          useProjectIconStore.getState().applyIcon(saved);
+          useWorkspaceStore.getState().applyWorkspaceIconPath(workspaceId, iconPath);
+        },
+        (error: unknown) => reportFailure("Icon could not be saved", error),
+      ),
+    );
+  };
 }
 
 /**
@@ -85,20 +125,17 @@ function NameField({ workspaceId, name, defaultName }: { readonly workspaceId: s
 export function GeneralSection({ workspaceId }: { readonly workspaceId: string }) {
   const workspace = useWorkspaceStore((state) => state.workspaces.find((item) => item.id === workspaceId));
   const icon = useProjectIconStore((state) => state.iconsByWorkspaceId[workspaceId]);
+  const saveIcon = useIconSaver(workspaceId);
+
+  // The cached icon is only as fresh as the last resolve, so a file deleted since then would still read as chosen.
+  useEffect(() => {
+    useProjectIconStore.getState().resolve([workspaceId]).catch((error: unknown) => reportFailure("Icon could not be refreshed", error));
+  }, [workspaceId]);
+
   if (!workspace) return null;
 
   const hasChoice = icon?.source === "chosen" || icon?.chosenMissing === true;
   const chosenPath = icon?.source === "chosen" ? icon.path : workspace.icon_path;
-
-  const saveIcon = (iconPath: string | null) => {
-    getTransport().setProjectIcon(workspaceId, iconPath).then(
-      (saved) => {
-        useProjectIconStore.getState().applyIcon(saved);
-        useWorkspaceStore.getState().applyWorkspaceIconPath(workspaceId, iconPath);
-      },
-      (error: unknown) => reportFailure("Icon could not be saved", error),
-    );
-  };
 
   return (
     <div className="flex flex-col px-2">
@@ -106,25 +143,15 @@ export function GeneralSection({ workspaceId }: { readonly workspaceId: string }
         <ProjectIcon workspaceId={workspaceId} name={workspace.name} size={40} />
         <ProjectIconPicker workspaceId={workspaceId} chosenPath={icon?.source === "chosen" ? icon.path : null} onPick={saveIcon} />
         {hasChoice ? (
-          <IconButton shape="round" aria-label="Use automatic" tooltip="Use automatic" onClick={() => saveIcon(null)}>
+          <IconButton shape="round" variant="ghost" aria-label="Use automatic" tooltip="Use automatic" onClick={() => saveIcon(null)}>
             <RotateCcw />
           </IconButton>
         ) : null}
       </SettingRow>
       <SettingRow title="Name" detail="Defaults to the folder name">
-        <NameField key={workspace.name} workspaceId={workspaceId} name={workspace.name} defaultName={folderName(workspace.path)} />
+        <NameField workspaceId={workspaceId} name={workspace.name} defaultName={folderName(workspace.path)} />
       </SettingRow>
-      <SettingRow title="Location" last detail={<Mono>{workspace.path}</Mono>}>
-        <IconButton
-          shape="round"
-          aria-label="Open folder"
-          onClick={() => {
-            getTransport().openIn(FILE_EXPLORER_ID, workspace.path).catch((error: unknown) => reportFailure("Couldn't open File Explorer", error));
-          }}
-        >
-          <FolderOpen />
-        </IconButton>
-      </SettingRow>
+      <LocationRow path={workspace.path} />
     </div>
   );
 }

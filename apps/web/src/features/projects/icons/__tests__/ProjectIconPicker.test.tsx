@@ -57,6 +57,17 @@ describe("ProjectIconPicker", () => {
     await waitFor(() => expect(screen.queryByRole("combobox")).toBeNull());
   });
 
+  it("does not pick from results that belong to an older search", async () => {
+    const user = userEvent.setup();
+    const onPick = await openPicker(user);
+    await screen.findByRole("option", { name: /icon\.svg/ });
+    vi.mocked(mockTransport.listProjectIconCandidates).mockReturnValue(new Promise(() => {}));
+
+    await user.type(screen.getByRole("combobox", { name: "Search image files" }), "fav{Enter}");
+
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
   it("saves the clicked file", async () => {
     const user = userEvent.setup();
     const onPick = await openPicker(user);

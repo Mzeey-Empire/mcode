@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerStatus } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useDebouncedQuery } from "@/features/conversation/composer/execution/targets/useBranchTargets";
@@ -14,7 +15,7 @@ interface Candidates {
 
 type CandidatesState =
   | { readonly kind: "loading" }
-  | { readonly kind: "ready"; readonly candidates: Candidates }
+  | { readonly kind: "ready"; readonly query: string; readonly candidates: Candidates }
   | { readonly kind: "failed"; readonly detail: string };
 
 function splitPath(path: string): { name: string; folder: string } {
@@ -29,7 +30,7 @@ function useIconCandidates(workspaceId: string, query: string, retryKey: number)
     getTransport()
       .listProjectIconCandidates(workspaceId, query)
       .then(
-        (candidates) => { if (!cancelled) setState({ kind: "ready", candidates }); },
+        (candidates) => { if (!cancelled) setState({ kind: "ready", query, candidates }); },
         (error: unknown) => {
           if (!cancelled) setState({ kind: "failed", detail: error instanceof Error ? error.message : String(error) });
         },
@@ -78,6 +79,8 @@ function ProjectIconPickerList({ workspaceId, chosenPath, onPick }: ProjectIconP
     return { key: path, name, tag: folder || undefined, icon: <Thumbnail workspaceId={workspaceId} path={path} /> };
   }, [workspaceId]);
   const candidates = state.kind === "ready" ? state.candidates : null;
+  // The list keeps the previous results until the new ones arrive, so Enter must not pick from them.
+  const settled = state.kind === "ready" && state.query === query;
   return (
     <Picker
       query={query}
@@ -89,7 +92,7 @@ function ProjectIconPickerList({ workspaceId, chosenPath, onPick }: ProjectIconP
       onRetry={() => setRetryKey((key) => key + 1)}
       selectedKey={chosenPath ?? undefined}
       renderItem={renderRow}
-      onSelect={onPick}
+      onSelect={(path) => { if (settled) onPick(path); }}
     />
   );
 }
@@ -111,7 +114,7 @@ export function ProjectIconPicker({ workspaceId, chosenPath, onPick }: ProjectIc
       <PopoverTrigger
         render={<Button type="button" variant="subtle" shape="round" className="text-[13px]/[18px] font-medium" aria-haspopup="dialog">Choose file</Button>}
       />
-      <PopoverContent align="end" side="bottom" sideOffset={8} className={PICKER_PANEL_CLASS}>
+      <PopoverContent align="end" side="bottom" sideOffset={8} className={cn(PICKER_PANEL_CLASS, "w-[min(92vw,34rem)] p-1.5")}>
         {open ? (
           <ProjectIconPickerList
             workspaceId={workspaceId}
