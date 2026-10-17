@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { FolderTree, MoreHorizontal, Search } from "lucide-react";
+import { FolderTree, Ellipsis, Search } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
@@ -144,7 +144,7 @@ function MoreMenu({ path, actions }: { readonly path: string | null; readonly ac
   const reason = !path ? "Open a file first" : actions.canResolve ? null : "This checkout has no folder yet";
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<IconButton shape="round" aria-label="More file actions"><MoreHorizontal /></IconButton>} />
+      <DropdownMenuTrigger render={<IconButton shape="round" aria-label="More file actions"><Ellipsis /></IconButton>} />
       <DropdownMenuContent align="end" sideOffset={6}>
         <DropdownMenuItem label="Open in editor" disabledReason={reason} onClick={() => path && actions.openInEditor(path)} />
         <DropdownMenuItem label="Reveal" disabledReason={reason} onClick={() => path && actions.reveal(path)} />

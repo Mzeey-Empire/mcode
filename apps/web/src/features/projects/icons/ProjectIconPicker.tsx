@@ -112,7 +112,7 @@ export function ProjectIconPicker({ workspaceId, chosenPath, onPick }: ProjectIc
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        render={<Button type="button" variant="subtle" shape="round" className="text-[13px]/[18px] font-medium" aria-haspopup="dialog">Choose file</Button>}
+        render={<Button type="button" variant="subtle" shape="round" className="text-body-small font-medium" aria-haspopup="dialog">Choose file</Button>}
       />
       <PopoverContent align="end" side="bottom" sideOffset={8} className={cn(PICKER_PANEL_CLASS, "w-[min(92vw,34rem)] p-1.5")}>
         {open ? (

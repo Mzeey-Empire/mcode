@@ -82,7 +82,7 @@ function WellBody({ state, caption, ...dropHandlers }: WellBodyProps) {
       )}
       {...dropHandlers}
     >
-      <FolderDown size={20} strokeWidth={1.5} aria-hidden className="text-muted" />
+      <FolderDown size={20} aria-hidden className="text-muted" />
       {over ? (
         <p className="text-body-small font-medium text-ink">Drop to add project</p>
       ) : (

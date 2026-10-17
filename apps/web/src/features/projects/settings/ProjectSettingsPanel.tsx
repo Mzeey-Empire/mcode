@@ -164,7 +164,7 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
         options={SECTION_OPTIONS}
       />
       {section === "actions" ? (
-        <Button variant="subtle" shape="round" className="ml-auto text-[13px]/[18px] font-medium" disabled={!entry} onClick={addAction}>
+        <Button variant="subtle" shape="round" className="ml-auto text-body-small font-medium" disabled={!entry} onClick={addAction}>
           <Plus aria-hidden />
           Action
         </Button>

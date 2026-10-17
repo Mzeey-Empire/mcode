@@ -40,11 +40,11 @@ function SidebarGoZone() {
   const setPrimarySurface = useUiStore((s) => s.setPrimarySurface);
   return <div className="flex shrink-0 items-center gap-2 px-3">
     <button type="button" className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-control bg-panel px-2 text-left text-body-small text-muted transition-colors duration-(--duration-fast) hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus" onClick={() => useCommandPaletteStore.getState().open({ intent: "threadSearch" })}>
-      <Search size={16} strokeWidth={1.5} aria-hidden className="shrink-0" />
+      <Search size={16} aria-hidden className="shrink-0" />
       <span>Search</span>
     </button>
     <IconButton data-testid="sidebar-new-thread" aria-label="New thread" onClick={() => { setPrimarySurface("chat"); useWorkspaceStore.getState().beginNewThread(); }}>
-      <SquarePen strokeWidth={1.5} aria-hidden />
+      <SquarePen aria-hidden />
     </IconButton>
   </div>;
 }

@@ -206,10 +206,6 @@ export function FileTagPopup({
   let renderedIndex = 0;
   let currentGroup: MentionSuggestion["group"] | null = null;
 
-  // The group header uses bg-inherit so it always matches the popup surface.
-  // When tone="dark" the wrapper's explicit bg sets the inherited value; no
-  // separate groupHeaderClassName is needed.
-
   const list = (
     <div
       ref={scrollRef}

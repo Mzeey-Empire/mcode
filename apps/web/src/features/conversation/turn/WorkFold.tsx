@@ -42,7 +42,6 @@ export function WorkFold({ label, expanded, onToggle }: WorkFoldProps) {
       <span className="shrink-0">{label}</span>
       <ChevronRight
         size={14}
-        strokeWidth={1.5}
         aria-hidden="true"
         className={cn("shrink-0 motion-safe:transition-transform motion-safe:duration-150", expanded && "rotate-90")}
       />

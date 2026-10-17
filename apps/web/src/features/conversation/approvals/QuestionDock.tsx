@@ -196,7 +196,7 @@ function QuestionPanel({ threadId, providerId, composerContainerRef, isAgentRunn
       onKeyDown={handleKeyDown}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <CircleHelp size={14} strokeWidth={1.5} className="shrink-0 text-primary" aria-hidden />
+        <CircleHelp size={14} className="shrink-0 text-primary" aria-hidden />
         <h2 className="min-w-0 text-sm font-medium text-ink">{getCatalogEntry(providerId).name} has a question</h2>
         <span className="flex-1" />
         {questions.length > 1 && (

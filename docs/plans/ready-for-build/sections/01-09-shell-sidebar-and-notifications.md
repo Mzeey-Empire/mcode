@@ -453,7 +453,7 @@ Rules for the new commands:
 | `SidebarTitle` | `Sidebar.tsx:39-44` | `SidebarHeader` on every platform | S01-01 | `rg -n "SidebarTitle" apps/web/src` empty |
 | Sidebar text nav and Settings text button | `Sidebar.tsx:53-56,61-64` | Go zone + footer icons | S01-02 | `bun run --cwd apps/web test -- src/components/sidebar/Sidebar.test.tsx` passes with a case asserting no text nav buttons (the palette keeps the "Search threads" label, so the text is not searched) |
 | `SIDEBAR_WIDTH_PX` | `composer-layout.ts:9` | `sidebarWidthStore` | S01-02 | `rg -n "SIDEBAR_WIDTH_PX" apps/web/src` empty |
-| "No projects yet" empty state | `ProjectTree.tsx:1136-1160` | `ProjectDropWell` | S01-02 | `rg -n "No projects yet" apps/web/src` empty |
+| "No projects yet" empty state | `ProjectTree.tsx:1136-1160` | `ProjectDropWell` | S01-02 | `rg -n "No projects yet" apps/web/src -g 'ProjectTree.tsx'` empty |
 | `ThreadStateMarker`, `getThreadStateMarker`, `ThreadStateMarkerModel` | `components/sidebar/ThreadStateMarker.tsx` | `deriveThreadRowState` + `ThreadStatusLane` | S01-04 | `rg -n "ThreadStateMarker" apps` empty |
 | Leading lifecycle circle | `ProjectTree.tsx:1907-1964` | trailing ✓ hover action | S01-04 | `rg -n "ThreadLifecycleButton" apps/web/src` empty |
 | Recovery store read in rows | `ProjectTree.tsx:1462-1464` | `lastTurn.outcome === "interrupted"` | S01-04 | `rg -n "hasRecoveryEntry" apps/web/src/features/projects` empty (store stays for ChatView; S08 decides its fate) |

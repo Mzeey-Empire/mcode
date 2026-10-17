@@ -1,14 +1,14 @@
-# Last turn changes
+# Turn changes
 
-Review's **Last turn** view uses the provider's complete patch when it is available and valid. **Agent changes** identifies this source. **Live** means the turn is still running. The settled patch belongs to the assistant message and remains available after reopening the thread while its turn's snapshots remain readable.
+Review reads each turn's changes from the provider's complete patch when it is available and valid. The settled patch belongs to the assistant message and remains available after reopening the thread while its turn's snapshots remain readable.
 
-For a single snapshot, source selection uses a valid provider unified patch first, then native full before-and-after evidence such as Cursor ACP. If native evidence is unavailable or rejected, complete tracked file-tool evidence supplies **Tracked file evidence**. Otherwise, Review uses attributed Git snapshots. **Git fallback: same-file edits may appear** explains that another editor's changes to the same file can appear in that comparison. All providers use the same Last turn controls.
+For a single snapshot, source selection uses a valid provider unified patch first, then native full before-and-after evidence such as Cursor ACP. If native evidence is unavailable or rejected, complete tracked file-tool evidence supplies the patch. Otherwise, Review uses attributed Git snapshots, which can include another editor's changes to the same file.
 
 Retry attempts share the first attempt's turn id. When multiple attempts contributed paths, Review reads Git evidence from the first baseline to the last snapshot: the replacement's native patch cannot describe earlier edits. A missing snapshot from a finished attempt makes the entire turn unavailable, even when later snapshots survive. Cumulative readers omit that whole turn. This also covers captures that were never written; grouping expiry dates alone would still silently shorten those turns. See [turn-snapshot-range.ts](../../../apps/server/src/features/projects/diffs/snapshots/turn-snapshot-range.ts).
 
 The native text patch limit is 2,097,152 UTF-8 bytes, 20,000 parsed lines, and 32,768 bytes per line. The server validates the complete patch before accepting it. It rejects incomplete hunks, unsafe paths, unsupported quoted paths, binary patches, and over-limit evidence. It does not truncate patches. Repeated Cursor edits must connect the previous after state to the next before state. Rejected evidence uses the next valid source.
 
-Live patches stay in memory. A completed turn stores its selected source separately from the Git snapshot. Stop, failure, replacement, and invalidation clear Live evidence without replacing the previous settled comparison. A reconnected client reads settled evidence until it receives a fresh diff update. Other connected clients retain their Live view. Existing messages and completed Git snapshots remain readable after the database upgrade.
+Live means the turn is still running. Live patches stay in memory. A completed turn stores its selected source separately from the Git snapshot. Stop, failure, replacement, and invalidation clear Live evidence without replacing the previous settled comparison. A reconnected client reads settled evidence until it receives a fresh diff update. Other connected clients retain their Live view. Existing messages and completed Git snapshots remain readable after the database upgrade.
 
 Rename-with-content patches emitted with changed file headers are supported. Git-style rename or copy metadata without this native text form uses Git fallback, with its stated same-file fidelity limit.
 

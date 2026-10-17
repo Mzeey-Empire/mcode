@@ -63,8 +63,8 @@ const PILL_TRAY: Record<SegmentedControlSize, string> = {
 };
 
 const PILL_SEGMENT: Record<SegmentedControlSize, string> = {
-  default: "h-7 px-3 text-[13px]/[18px] font-medium",
-  compact: "h-6 px-3 text-[13px]/[18px] font-medium",
+  default: "h-7 px-3 text-body-small font-medium",
+  compact: "h-6 px-3 text-body-small font-medium",
   small: "h-[22px] px-2.5 text-caption",
 };
 

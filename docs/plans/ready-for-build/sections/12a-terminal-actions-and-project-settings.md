@@ -474,7 +474,7 @@ export const ProjectIconSchema = lazySchema(() => z.object({
 | Command approval dialog `ProjectCommandApprovalDialog` (manual Setup is its last caller after S04-04 and S12T-07) | `ProjectCommandApprovalDialog.tsx`, `ProjectSetupControl.tsx:14,258` | `ActionApprovalCard` in the action's terminal | S12T-11 | `rg -n "ProjectCommandApprovalDialog" apps` returns nothing |
 | `ProjectEnvironmentPanel` and its test; "Environment storage" radio; `ClearSharedApprovals`; raw `issueText`; empty-command `newAction`; catalog blurb "Edit Project environment"; "Loading environment..." | `ProjectEnvironmentPanel.tsx`, `panel-tabs.ts:98-104` | `ProjectSettingsPanel` | S12T-13 | `rg -n "ProjectEnvironmentPanel\|Edit Project environment\|Clear shared command approvals" apps` returns nothing |
 | `workspace.environment.command.clearApprovals` | contracts, `workspace-environment-rpc.ts`, service `clearApprovals` | Per-action `command.forget` (decision T6) | S12T-13 | `rg -n "clearApprovals" apps packages` returns nothing |
-| Project folder glyphs | `NewThreadProjectPicker.tsx:55,91`; folder glyph in the sidebar project row (`ProjectTree.tsx:2589-2593`, lifecycle toggle placed by S01-02) | `ProjectIcon` | S12T-14 | `rg -n "<Folder " apps/web/src/components/chat/NewThreadProjectPicker.tsx` returns nothing |
+| Project folder glyphs | `NewThreadProjectPicker.tsx:55,91`; folder glyph in the sidebar project row (`ProjectTree.tsx:2589-2593`, lifecycle toggle placed by S01-02) | `ProjectIcon` | S12T-14 | `rg -n "<Folder " apps/web/src -g '{NewThreadProjectPicker,ProjectChooser,ProjectTree}.tsx'` returns nothing |
 
 ## Proposed tickets
 

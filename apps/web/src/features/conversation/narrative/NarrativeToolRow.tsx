@@ -41,7 +41,7 @@ const ROW_CLASS = "inline-flex h-7 w-fit max-w-full min-w-0 items-center gap-2 o
 export function NarrativeToolRow({ icon: Icon, label, children, disclosure }: NarrativeToolRowProps) {
   const content = (
     <>
-      <Icon className="size-3.5 shrink-0 text-muted" strokeWidth={1.5} aria-hidden="true" />
+      <Icon className="size-3.5 shrink-0 text-muted" aria-hidden="true" />
       {/* A detail after the label gives way first, but a long tool name still fades so the chevron stays in the row. A label alone may shrink so its parts can fade. */}
       <span className={`${children ? "max-w-[60%] shrink-0 text-fade" : "flex min-w-0"} text-sm font-medium text-muted`}>{label}</span>
       {children}
@@ -59,7 +59,6 @@ export function NarrativeToolRow({ icon: Icon, label, children, disclosure }: Na
       {content}
       <ChevronRight
         className={`size-3.5 shrink-0 text-muted transition-transform duration-150 motion-reduce:transition-none ${disclosure.open ? "rotate-90" : ""}`}
-        strokeWidth={1.5}
         aria-hidden="true"
       />
     </button>

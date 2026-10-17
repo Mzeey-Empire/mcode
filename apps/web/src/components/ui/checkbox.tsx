@@ -31,9 +31,9 @@ function Checkbox({
     >
       <CheckboxPrimitive.Indicator data-slot="checkbox-indicator">
         {mixed ? (
-          <Minus className="size-4" strokeWidth={2} aria-hidden />
+          <Minus className="size-4" aria-hidden />
         ) : (
-          <Check className="size-4" strokeWidth={2} aria-hidden />
+          <Check className="size-4" aria-hidden />
         )}
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>

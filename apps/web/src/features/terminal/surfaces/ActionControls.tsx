@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MoreHorizontal, Play, RotateCcw, Square } from "lucide-react";
+import { Ellipsis, Play, RotateCcw, Square } from "lucide-react";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { IconButton } from "@/components/ui/button";
@@ -132,7 +132,7 @@ export function ActionControls({ workspaceId, threadId, terminal, onClose }: Act
         <DropdownMenuTrigger
           render={
             <IconButton shape="round" aria-label="More terminal actions">
-              <MoreHorizontal />
+              <Ellipsis />
             </IconButton>
           }
         />

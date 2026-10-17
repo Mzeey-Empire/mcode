@@ -183,7 +183,7 @@ export function Picker<T>(props: PickerProps<T>) {
   return (
     <div data-slot="picker" className="flex min-w-0 flex-col">
       <div className="flex h-control-compact items-center gap-2 px-2">
-        <SearchIcon aria-hidden className="size-[1.4rem] shrink-0 text-muted" strokeWidth={1.5} />
+        <SearchIcon aria-hidden className="size-[1.4rem] shrink-0 text-muted" />
         <input
           role="combobox"
           aria-expanded={hasRows}
@@ -559,7 +559,7 @@ function PickerOptionContent({ row, selected, onRunAction }: { readonly row: Pic
       {row.tag ? <span className="max-w-[60%] min-w-0 text-caption text-fade text-muted">{row.tag}</span> : null}
       {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
       <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
-        {selected ? <CheckIcon className="size-[1.4rem] text-ink" strokeWidth={1.5} /> : null}
+        {selected ? <CheckIcon className="size-[1.4rem] text-ink" /> : null}
       </span>
     </>
   );
