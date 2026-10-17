@@ -16,6 +16,8 @@ export interface SegmentedOption {
   readonly icon?: ReactNode;
   /** Tooltip text, typically the reason a disabled option is unavailable. */
   readonly title?: string;
+  /** Draws a small primary dot after the label, flagging an option that holds content. */
+  readonly marker?: boolean;
 }
 
 /** Paper's segmented control heights: compact sits in pickers and dense rows, default in forms. */
@@ -141,6 +143,7 @@ export function SegmentedControl({
                 <>
                   {option.icon}
                   {option.label}
+                  {option.marker ? <span aria-hidden className="size-[5px] shrink-0 rounded-full bg-primary" /> : null}
                 </>
               )}
             </button>
