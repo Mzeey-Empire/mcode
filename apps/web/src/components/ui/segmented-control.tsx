@@ -82,14 +82,20 @@ const INACTIVE_TRAY_SEGMENT = "text-muted enabled:hover:border-muted enabled:hov
 const SEGMENT_BASE =
   "inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap border border-transparent transition-colors duration-(--duration-fast) ease-(--ease-standard)";
 
-function segmentClass(layout: Layout, size: SegmentedControlSize, isActive: boolean): string {
+function segmentClass(layout: Layout, size: SegmentedControlSize, isActive: boolean, fill: boolean): string {
   if (layout === "icon") {
     return cn(SEGMENT_BASE, "h-7 w-[3rem] shrink-0 rounded-sm text-body-small", isActive ? "bg-selected font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
   }
   if (layout === "pill") {
-    return cn(SEGMENT_BASE, "flex-1 rounded-full border-0", PILL_SEGMENT[size], isActive ? "bg-border text-ink" : "text-muted enabled:hover:text-ink");
+    return cn(SEGMENT_BASE, "rounded-full border-0", fill ? "flex-1" : "shrink-0", PILL_SEGMENT[size], isActive ? "bg-border text-ink" : "text-muted enabled:hover:text-ink");
   }
   return cn(SEGMENT_BASE, "flex-1 rounded-sm px-2 text-body-small", SEGMENT_HEIGHT[size], isActive ? "bg-selected font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
+}
+
+/** Keeps a tooltip wrapper sized like the segment it holds. */
+function tooltipWrapperClass(layout: Layout, fill: boolean): string {
+  if (layout === "icon") return "flex min-w-0";
+  return layout === "pill" && !fill ? "flex shrink-0" : "flex min-w-0 flex-1";
 }
 
 const NEXT_KEYS: Record<string, 1 | -1> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
@@ -173,7 +179,7 @@ export function SegmentedControl({
               tabIndex={index === tabStopIndex ? 0 : -1}
               onClick={() => onChange(option.value)}
               className={cn(
-                segmentClass(layout, size, isActive),
+                segmentClass(layout, size, isActive, fill),
                 FOCUS_RING_CLASS,
                 option.disabled && "cursor-not-allowed opacity-50",
               )}
@@ -198,7 +204,7 @@ export function SegmentedControl({
           // Disabled buttons swallow pointer events, so the tooltip hangs off a wrapper instead.
           return (
             <Tooltip key={option.value}>
-              <TooltipTrigger render={<span className={cn("flex min-w-0", !iconOnly && "flex-1")} />}>{segment}</TooltipTrigger>
+              <TooltipTrigger render={<span className={tooltipWrapperClass(layout, fill)} />}>{segment}</TooltipTrigger>
               <TooltipContent>{option.title}</TooltipContent>
             </Tooltip>
           );
