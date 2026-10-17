@@ -108,6 +108,7 @@ function RunStatusIcon({ icon, running }: { icon: RunStatus["icon"]; running: bo
   return (
     <StackedLayersIcon
       animated={running}
+      strokeWidth={1.3}
       className={stackedLayersIconClassName(running)}
       data-run-status-icon="layers"
     />
