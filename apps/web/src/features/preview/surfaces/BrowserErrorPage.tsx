@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { FileX, Globe, OctagonAlert, ShieldAlert, WifiOff, type LucideIcon } from "lucide-react";
+import { FileX, OctagonAlert, ShieldAlert, WifiOff, type LucideIcon } from "lucide-react";
 import type { BrowserCertificateFailure, PreviewPageError } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -9,9 +9,9 @@ import { projectServerTiles, type ServerTile } from "./browserNewPageModel";
 import type { BrowserCertificate } from "./useBrowserCertificate";
 import { useStartServer, useThreadActionRuns } from "./useProjectServers";
 
-const ERROR_ICON: Record<PreviewPageError["kind"], LucideIcon> = {
+// A refused port is the everyday "server isn't up yet" case, so its page is text and buttons only.
+const ERROR_ICON: Record<Exclude<PreviewPageError["kind"], "connection-refused">, LucideIcon> = {
   network: WifiOff,
-  "connection-refused": Globe,
   certificate: ShieldAlert,
   crash: OctagonAlert,
   "file-not-found": FileX,
@@ -72,13 +72,9 @@ function CertificateDetails({ failure, fallbackCode, onProceed }: {
       </dl>
       <div className="flex items-center justify-between">
         {failure ? (
-          <button
-            type="button"
-            onClick={() => onProceed(failure.fingerprint)}
-            className="text-body-small text-error hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-focus"
-          >
+          <Button type="button" variant="destructive" shape="round" className="min-w-0 text-fade" onClick={() => onProceed(failure.fingerprint)}>
             Proceed to {failure.host} (unsafe)
-          </button>
+          </Button>
         ) : <span />}
         <CopyButton text={text} label="Copy certificate details" />
       </div>
@@ -115,44 +111,33 @@ function useProjectName(workspaceId: string): string | null {
   return useWorkspaceStore((state) => state.workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? null);
 }
 
-function ProjectServerActions({ tile, onRetry, onOpen }: {
-  readonly tile: ServerTile;
-  readonly onRetry: () => void;
-  readonly onOpen: (url: string) => void;
-}) {
-  const { start, isRequesting } = useStartServer([tile], onOpen);
-  const starting = isRequesting(tile.actionId) || tile.state === "starting";
-  return (
-    <div className="flex items-center justify-center gap-2">
-      <Button type="button" variant="ink" shape="round" disabled={starting} onClick={() => void start(tile)}>
-        {starting ? "Starting" : `Start ${tile.name}`}
-      </Button>
-      <Button type="button" variant="subtle" shape="round" data-testid="preview-error-retry" onClick={onRetry}>Retry</Button>
-    </div>
-  );
-}
-
-function useServerForPort(threadId: string, url: string | null): ServerTile | null {
+function useServerTiles(threadId: string, url: string | null): { readonly tiles: readonly ServerTile[]; readonly tile: ServerTile | null } {
   const port = url === null ? null : loopbackPort(url);
   const runs = useThreadActionRuns(threadId, port !== null);
   const tiles = useMemo(() => projectServerTiles(runs, []), [runs]);
-  return tiles.find((tile) => String(tile.port) === port) ?? null;
+  return { tiles, tile: tiles.find((candidate) => String(candidate.port) === port) ?? null };
 }
 
 function ConnectionRefused({ error, url, threadId, onRetry, onOpen }: Pick<BrowserErrorPageProps, "error" | "url" | "threadId" | "onRetry" | "onOpen">) {
-  const tile = useServerForPort(threadId, url);
+  const { tiles, tile } = useServerTiles(threadId, url);
+  // Watching every tile, not just the one on this port, lets a restart that lands on another port still open its page.
+  const { start, isRequesting } = useStartServer(tiles, onOpen);
   const project = useProjectName(tile?.run.workspaceId ?? "");
   const detail = tile
     ? `${error.detail} ${tile.name}${project ? ` in ${project}` : ""} usually runs here.`
     : error.detail;
+  const starting = tile !== null && (isRequesting(tile.actionId) || tile.state === "starting");
   return (
     <>
       <PageText message={error.message} detail={detail} />
-      {tile ? (
-        <ProjectServerActions tile={tile} onRetry={onRetry} onOpen={onOpen} />
-      ) : (
-        <RetryButton onRetry={onRetry} />
-      )}
+      <div className="flex items-center justify-center gap-2">
+        {tile ? (
+          <Button type="button" variant="ink" shape="round" disabled={starting} onClick={() => void start(tile)}>
+            {starting ? "Starting" : `Start ${tile.name}`}
+          </Button>
+        ) : null}
+        <Button type="button" variant={tile ? "subtle" : "ink"} shape="round" data-testid="preview-error-retry" onClick={onRetry}>Retry</Button>
+      </div>
     </>
   );
 }
@@ -181,7 +166,7 @@ function RetryButton({ onRetry, label = "Retry" }: { readonly onRetry: () => voi
  */
 export function BrowserErrorPage(props: BrowserErrorPageProps) {
   const { error, url, onRetry, onBackToSafety, certificate } = props;
-  const Icon = ERROR_ICON[error.kind];
+  const Icon = error.kind === "connection-refused" ? null : ERROR_ICON[error.kind];
   // A blocked file stays blocked; retrying would only refuse again.
   const canRetry = error.kind !== "blocked";
 
@@ -190,10 +175,11 @@ export function BrowserErrorPage(props: BrowserErrorPageProps) {
       data-testid="preview-error-panel"
       data-kind={error.kind}
       role="alert"
-      className="absolute inset-0 flex items-center justify-center px-6 text-center motion-safe:animate-in motion-safe:fade-in"
+      // `m-auto` on the child centers it while it fits and lets the page scroll when expanded details outgrow a short panel.
+      className="absolute inset-0 flex overflow-y-auto p-6 text-center motion-safe:animate-in motion-safe:fade-in"
     >
-      <div className="flex w-80 flex-col items-center gap-4">
-        <Icon size={32} className="text-muted" aria-hidden />
+      <div className="m-auto flex w-80 max-w-full flex-col items-center gap-4">
+        {Icon ? <Icon size={32} className="text-muted" aria-hidden /> : null}
         {error.kind === "connection-refused" ? (
           <ConnectionRefused {...props} />
         ) : (

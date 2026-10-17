@@ -176,6 +176,33 @@ describe("BrowserErrorPage", () => {
       await waitFor(() => expect(onOpen).toHaveBeenCalledWith("http://localhost:5173/"));
     });
 
+    it("never offers Start for an action that belongs to another thread", async () => {
+      seedRuns(actionRun({ threadId: "thread-2" }));
+      renderPage(refused("http://localhost:5173/"), "http://localhost:5173/");
+
+      await waitFor(() => expect(transport.listWorkspaceActionRuns).toHaveBeenCalledWith(THREAD_ID));
+      expect(screen.queryByRole("button", { name: /^Start/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    });
+
+    it("still opens the page when the restarted server lands on another port", async () => {
+      seedRuns(actionRun());
+      const { onOpen } = renderPage(refused("http://localhost:5173/"), "http://localhost:5173/");
+      transport.restartWorkspaceAction.mockResolvedValue(actionRun({ runId: "run-2", status: "running", finishedAt: null }));
+
+      await userEvent.click(await screen.findByRole("button", { name: "Start web" }));
+      act(() => seedRuns(actionRun({
+        runId: "run-2",
+        revision: 2,
+        status: "running",
+        createdAt: "2026-08-22T12:10:00.000Z",
+        finishedAt: null,
+        port: { ...actionRun().port!, runId: "run-2", port: 5174, url: "http://localhost:5174/", reachable: true },
+      })));
+
+      await waitFor(() => expect(onOpen).toHaveBeenCalledWith("http://localhost:5174/"));
+    });
+
     it("retries the failed page", async () => {
       const { onRetry } = renderPage(refused("http://localhost:3000/"), "http://localhost:3000/");
 
