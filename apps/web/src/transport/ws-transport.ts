@@ -1049,8 +1049,8 @@ export function createWsTransport(
       rpc<WorkspaceEnvironmentReadResult>("workspace.environment.storage.set", { workspaceId, storageMode, threadId }),
     approveWorkspaceEnvironmentCommand: (threadId, target, fingerprint) =>
       rpc<void>("workspace.environment.command.approve", { threadId, target, fingerprint }),
-    clearWorkspaceEnvironmentApprovals: (workspaceId) =>
-      rpc<void>("workspace.environment.command.clearApprovals", { workspaceId }),
+    forgetWorkspaceEnvironmentApproval: (workspaceId, actionId) =>
+      rpc<void>("workspace.environment.command.forget", { workspaceId, actionId }),
     continueAutomaticSetup: (threadId) =>
       rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
         "workspace.environment.automaticSetup.continue",

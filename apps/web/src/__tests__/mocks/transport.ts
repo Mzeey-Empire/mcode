@@ -141,7 +141,7 @@ export const mockTransport: McodeTransport = {
     storageMode: "system",
   }),
   approveWorkspaceEnvironmentCommand: vi.fn().mockResolvedValue(undefined),
-  clearWorkspaceEnvironmentApprovals: vi.fn().mockResolvedValue(undefined),
+  forgetWorkspaceEnvironmentApproval: vi.fn().mockResolvedValue(undefined),
   continueAutomaticSetup: vi.fn(),
   retryAutomaticSetup: vi.fn(),
   listWorkspaceActionRuns: vi.fn().mockResolvedValue([]),
