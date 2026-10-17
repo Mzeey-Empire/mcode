@@ -76,7 +76,6 @@ export function EntityIcon({
       <span data-entity-icon={kind} className={iconClassName} {...props}>
         <StackedLayersIcon
           animated={animated}
-          strokeWidth={1.3}
           style={{ width: size, height: size }}
         />
       </span>

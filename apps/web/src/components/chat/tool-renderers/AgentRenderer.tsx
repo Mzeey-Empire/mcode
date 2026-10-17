@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from "react";
+import { useState } from "react";
 import { StackedLayersIcon } from "@/components/ui/StackedLayersIcon";
 import type { ToolRendererProps } from "./types";
 import { ToolCallWrapper } from "./ToolCallWrapper";
@@ -11,7 +11,7 @@ export function AgentRenderer({ toolCall, isActive }: ToolRendererProps) {
 
   return (
     <ToolCallWrapper
-      icon={(props: ComponentProps<typeof StackedLayersIcon>) => <StackedLayersIcon {...props} strokeWidth={1.3} />}
+      icon={StackedLayersIcon}
       label="Subagent"
       badge={summary}
       isActive={isActive}

@@ -210,7 +210,7 @@ function StepRow({ step }: { readonly step: SubagentDetail["steps"][number] }) {
   const verb = stepVerb(toolName);
   return (
     <li data-testid="subagent-step" className="flex h-7 min-w-0 items-center gap-2 text-body-small">
-      <Icon size={14} strokeWidth={toolName === "Agent" ? 1.3 : undefined} aria-hidden className={cn("shrink-0", step.status === "failed" ? "text-error" : "text-muted")} />
+      <Icon size={14} aria-hidden className={cn("shrink-0", step.status === "failed" ? "text-error" : "text-muted")} />
       <span className="shrink-0 text-muted">{verb}</span>
       {step.label !== step.toolName && <span className="text-fade min-w-0 flex-1 text-ink">{step.label}</span>}
       <StepChanges additions={step.additions ?? 0} deletions={step.deletions ?? 0} />
