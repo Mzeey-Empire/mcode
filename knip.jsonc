@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/knip/schema.json",
-  // Locally used declarations remain live; surplus export modifiers are deferred to the follow-up audit.
+  // Locally used declarations remain live; surplus export modifiers are deferred to the follow-up audit. See #2198.
   "ignoreExportsUsedInFile": true,
   "workspaces": {
     ".": {
