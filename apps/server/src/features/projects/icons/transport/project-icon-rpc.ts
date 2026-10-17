@@ -11,7 +11,7 @@ type ProjectIconRpcParamsByMethod = {
 
 /** Services required to route validated project icon RPC calls. */
 export interface ProjectIconRouterDeps {
-  projectIconService: Pick<ProjectIconService, "resolve" | "set">;
+  projectIconService: Pick<ProjectIconService, "resolve" | "set" | "candidates">;
 }
 
 type ProjectIconHandlerMap = {
@@ -22,6 +22,9 @@ type ProjectIconHandlerMap = {
 };
 
 const projectIconHandlers: ProjectIconHandlerMap = {
+  "workspace.icon.candidates": async (deps, params) => (
+    deps.projectIconService.candidates(params.workspaceId, params.query, params.limit)
+  ),
   "workspace.icon.resolve": async (deps, params) => ({
     icons: await deps.projectIconService.resolve(params.workspaceIds),
   }),

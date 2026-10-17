@@ -24,6 +24,7 @@ import {
 import { ProjectActionRunRepo } from "../environment/persistence/project-action-run-repo.js";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import { ProjectIconService } from "../icons/project-icon-service.js";
+import type { GitExecutor } from "../git/execution/index.js";
 import { WorktreeRepo } from "../persistence/worktree-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { TerminalCommandService } from "../../terminal/commands/terminal-command-service.js";
@@ -99,6 +100,7 @@ export function registerProjectServices(container: DependencyContainer): void {
   container.register(ProjectIconService, {
     useFactory: instanceCachingFactory((c: DependencyContainer) => new ProjectIconService({
       workspaces: c.resolve(WorkspaceRepo),
+      gitExecutor: c.resolve<GitExecutor>("GitExecutor"),
       platform: c.resolve<HostRuntime>("HostRuntime").platform,
     })),
   });
