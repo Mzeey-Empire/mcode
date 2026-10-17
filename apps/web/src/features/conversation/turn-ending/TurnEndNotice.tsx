@@ -17,7 +17,8 @@ interface TurnEndNoticeProps {
   error?: string | null;
 }
 
-const ICON_PROPS = { "aria-hidden": true, className: "size-4 shrink-0" } as const;
+// A class, not the strokeWidth prop: the base-layer `.lucide` rule outranks the SVG attribute.
+const ICON_PROPS = { "aria-hidden": true, className: "size-4 shrink-0 [stroke-width:1.6]" } as const;
 // An interruption is a waiting state and takes the primary lamp; only a failure takes the error color.
 const FILLED_ICONS: Readonly<Record<FilledNotice["icon"], { Icon: LucideIcon; tone: string }>> = {
   failed: { Icon: CircleAlert, tone: "text-error" },
