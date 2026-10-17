@@ -145,8 +145,8 @@ function ConnectionRefused({ error, url, threadId, onRetry, onOpen }: Pick<Brows
 function PageText({ message, detail }: { readonly message: string; readonly detail: string | undefined }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <p data-testid="preview-error-headline" className="text-body font-semibold text-ink">{message}</p>
-      {detail ? <p data-testid="preview-error-detail" className="text-balance text-body-small text-muted">{detail}</p> : null}
+      <p data-testid="preview-error-headline" className="text-body leading-[2.2rem] font-semibold text-ink">{message}</p>
+      {detail ? <p data-testid="preview-error-detail" className="text-balance text-code-small text-muted">{detail}</p> : null}
     </div>
   );
 }
