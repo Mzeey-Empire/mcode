@@ -2,7 +2,7 @@ import { useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 
-/** The Paper confirm buttons are 14px padded with 13/18 type, between the shared compact and default sizes. */
+/** The Paper confirm buttons are 14px padded, between the shared compact and default sizes. */
 const CONFIRM_BUTTON = "px-3.5 text-body-small";
 
 interface TerminalCloseConfirmProps {

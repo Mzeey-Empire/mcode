@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 
-/** Paper's card buttons are 14px padded with 13/18 type, between the shared compact and default sizes. */
+/** Paper's card buttons are 14px padded, between the shared compact and default sizes. */
 const CARD_BUTTON = "px-3.5 text-body-small";
 
 interface ActionApprovalCardProps {
