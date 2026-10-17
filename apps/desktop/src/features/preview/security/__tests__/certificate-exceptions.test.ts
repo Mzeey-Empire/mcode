@@ -199,6 +199,24 @@ describe("Browser certificate exceptions", () => {
     expect(rejectCertificate(otherWorkspace).callback.mock.calls).toEqual([[true]]);
   });
 
+  it("does not carry a trusted certificate across an app relaunch on the same data directory", () => {
+    proceed();
+    expect(rejectCertificate().callback.mock.calls).toEqual([[true]]);
+
+    electron.sessions.clear();
+    electron.app.on.mockClear();
+    const relaunched = new BrowserProfiles({
+      userDataPath: () => root, sessionDataPath: () => root,
+      sessionFromPartition: (partition) => session.fromPartition(partition),
+      installPolicy: () => undefined, releaseWorkspace: () => undefined,
+    });
+    relaunched.certificates.register();
+    const reopened = new Guest(relaunched.sessionForWorkspace(A));
+
+    expect(relaunched.certificates.state(reopened)).toEqual({ failure: null, exceptionInUse: false });
+    expect(rejectCertificate(reopened).callback.mock.calls).toEqual([[false]]);
+  });
+
   it("forgetting a workspace removes its trust even while its session remains alive", () => {
     proceed();
     trust.forget(A);
