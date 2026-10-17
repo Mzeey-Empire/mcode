@@ -1,3 +1,4 @@
+import "reflect-metadata";
 import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
 import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_OPERATIONS } from "@mcode/contracts";

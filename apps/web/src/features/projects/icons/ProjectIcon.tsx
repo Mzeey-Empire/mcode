@@ -6,7 +6,7 @@ import { useProjectIconStore } from "./projectIconStore";
 /** Sizes used by the sidebar, breadcrumb, chooser, and settings surfaces. */
 export type ProjectIconSize = 14 | 16 | 20 | 40;
 
-const RADIUS_BY_SIZE: Record<ProjectIconSize, number> = { 14: 3, 16: 4, 20: 4, 40: 8 };
+const RADIUS_BY_SIZE: Record<ProjectIconSize, number> = { 14: 3, 16: 4, 20: 4, 40: 10 };
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -64,8 +64,8 @@ function ProjectMonogram({ name, size, style, className }: TileProps) {
     <span
       aria-hidden
       data-testid="project-monogram"
-      style={{ ...style, fontSize: Math.round(size * 0.6) }}
-      className={cn("inline-flex shrink-0 select-none items-center justify-center bg-primary font-semibold leading-none text-primary-ink", className)}
+      style={{ ...style, fontSize: size === 40 ? 18 : Math.round(size * 0.6) }}
+      className={cn("inline-flex shrink-0 select-none items-center justify-center bg-primary leading-none text-primary-ink", size === 40 ? "font-bold" : "font-semibold", className)}
     >
       {projectMonogram(name)}
     </span>

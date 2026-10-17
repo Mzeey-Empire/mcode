@@ -5,6 +5,10 @@ import { lazySchema } from "../utils/lazySchema.js";
 export const PROJECT_ICON_PATH_MAX_CHARS = 1_024;
 /** Most workspaces one `workspace.icon.resolve` call may ask about. */
 export const PROJECT_ICON_RESOLVE_MAX_IDS = 256;
+/** Number of image files offered when a candidate request omits its limit. */
+export const PROJECT_ICON_CANDIDATES_DEFAULT_LIMIT = 50;
+/** Most image files one candidate request may return. */
+export const PROJECT_ICON_CANDIDATES_MAX_LIMIT = 200;
 
 /**
  * The icon a project shows: a chosen file, a detected favicon, or the monogram.

@@ -41,29 +41,7 @@ export class FileService {
    */
   async list(workspaceId: string, threadId?: string): Promise<WorkspaceFileList> {
     const cwd = this.resolveWorkingDir(workspaceId, threadId);
-
-    try {
-      const paths = new Set<string>();
-      let truncated = false;
-      await this.readGitRecords(
-        ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        cwd,
-        (path) => {
-          if (paths.has(path)) return;
-          if (paths.size < FILE_LIST_MAX_PATHS) paths.add(path);
-          else truncated = true;
-        },
-      );
-      return { paths: [...paths], truncated };
-    } catch (err) {
-      // Non-git folders have no ls-files source; a real repo failure still throws.
-      if (NodeFS.existsSync(NodePath.join(cwd, ".git"))) {
-        throw new Error(
-          `Failed to list files: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      return listDirectoryTree(cwd);
-    }
+    return listWorkspaceFiles(cwd, this.gitExecutor);
   }
 
   /** Returns bounded file marks relative to HEAD for the selected checkout. */
@@ -86,7 +64,7 @@ export class FileService {
       const prefix = stdout.replace(/\r?\n$/, "");
       const entries: Array<{ path: string; status: string }> = [];
       let skipSource = false;
-      await this.readGitRecords(
+      await readGitRecords(this.gitExecutor,
         ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."], cwd,
         (record) => {
           if (skipSource) { skipSource = false; return; }
@@ -101,20 +79,6 @@ export class FileService {
       if (NodeFS.existsSync(NodePath.join(cwd, ".git"))) throw error;
       return null;
     }
-  }
-
-  private async readGitRecords(args: string[], cwd: string, onRecord: (record: string) => void): Promise<void> {
-    let pending = "";
-    await this.gitExecutor.exec(args, {
-      cwd,
-      retainStdout: false,
-      onStdout(chunk) {
-        const records = (pending + chunk).split("\0");
-        pending = records.pop() ?? "";
-        for (const record of records) if (record) onRecord(record);
-      },
-    });
-    if (pending) onRecord(pending);
   }
 
   /**
@@ -286,6 +250,46 @@ export class FileService {
       thread?.worktree_path ?? null,
     );
   }
+}
+
+/** Shared bounded file index for a checkout, including non-ignored untracked files. */
+export async function listWorkspaceFiles(root: string, gitExecutor: GitExecutor): Promise<WorkspaceFileList> {
+  try {
+    const paths = new Set<string>();
+    let truncated = false;
+    await readGitRecords(gitExecutor,
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      root,
+      (path) => {
+        if (paths.has(path)) return;
+        if (paths.size < FILE_LIST_MAX_PATHS) paths.add(path);
+        else truncated = true;
+      },
+    );
+    return { paths: [...paths], truncated };
+  } catch (err) {
+    // Non-git folders have no ls-files source; a real repo failure still throws.
+    if (NodeFS.existsSync(NodePath.join(root, ".git"))) {
+      throw new Error(
+        `Failed to list files: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return listDirectoryTree(root);
+  }
+}
+
+async function readGitRecords(gitExecutor: GitExecutor, args: string[], cwd: string, onRecord: (record: string) => void): Promise<void> {
+  let pending = "";
+  await gitExecutor.exec(args, {
+    cwd,
+    retainStdout: false,
+    onStdout(chunk) {
+      const records = (pending + chunk).split("\0");
+      pending = records.pop() ?? "";
+      for (const record of records) if (record) onRecord(record);
+    },
+  });
+  if (pending) onRecord(pending);
 }
 
 function decodeText(bytes: Buffer, partial: boolean): Pick<Extract<FileReadResult, { kind: "text" }>, "content" | "encoding"> | null {

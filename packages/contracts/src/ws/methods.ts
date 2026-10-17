@@ -9,7 +9,7 @@ import {
 import { AcknowledgeSeenResultSchema, ThreadAttentionSchema } from "../models/thread-attention.js";
 import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
-import { PROJECT_ICON_PATH_MAX_CHARS, PROJECT_ICON_RESOLVE_MAX_IDS, ProjectIconSchema } from "../models/project-icon.js";
+import { PROJECT_ICON_PATH_MAX_CHARS, PROJECT_ICON_RESOLVE_MAX_IDS, PROJECT_ICON_CANDIDATES_MAX_LIMIT, ProjectIconSchema } from "../models/project-icon.js";
 import { WorkspaceFileListSchema, WorkspaceFileChangesSchema, FileReadResultSchema } from "../models/workspace-file.js";
 import {
   WorkspaceEnvironmentReadResultSchema,
@@ -759,6 +759,18 @@ export const WS_METHODS = lazySchema(() => ({
   "workspace.icon.set": {
     params: z.object({ workspaceId: z.string(), iconPath: z.string().max(PROJECT_ICON_PATH_MAX_CHARS).nullable() }),
     result: ProjectIconSchema(),
+  },
+  /** List selectable image files under the workspace root, with the count before limiting. */
+  "workspace.icon.candidates": {
+    params: z.object({
+      workspaceId: z.string(),
+      query: z.string().max(PROJECT_ICON_PATH_MAX_CHARS).optional(),
+      limit: z.number().int().min(1).max(PROJECT_ICON_CANDIDATES_MAX_LIMIT).optional(),
+    }),
+    result: z.object({
+      files: z.array(z.string().max(PROJECT_ICON_PATH_MAX_CHARS)).max(PROJECT_ICON_CANDIDATES_MAX_LIMIT),
+      total: z.number().int().nonnegative(),
+    }),
   },
   /** Browse the host filesystem starting at the given path, for the folder picker. */
   "filesystem.browse": {

@@ -556,7 +556,7 @@ function PickerOptionContent({ row, selected, onRunAction }: { readonly row: Pic
           <span className="flex min-w-0 items-center gap-1.5 text-caption text-muted">{row.description}</span>
         ) : null}
       </span>
-      {row.tag ? <span className="shrink-0 text-caption text-muted">{row.tag}</span> : null}
+      {row.tag ? <span className="max-w-[60%] min-w-0 text-caption text-fade text-muted">{row.tag}</span> : null}
       {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
       <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
         {selected ? <CheckIcon className="size-[1.4rem] text-ink" strokeWidth={1.5} /> : null}

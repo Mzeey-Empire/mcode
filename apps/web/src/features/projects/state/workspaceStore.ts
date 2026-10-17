@@ -625,6 +625,8 @@ interface WorkspaceState {
   deleteWorkspace: (id: string) => Promise<void>;
   /** Remove a workspace from local state immediately (used by push channel handlers). */
   removeWorkspaceFromState: (id: string) => void;
+  /** Record a saved icon choice locally so a later "file is missing" line can name the path. */
+  applyWorkspaceIconPath: (id: string, iconPath: string | null) => void;
   /**
    * Set the active workspace by ID. Clears the active thread if it belongs to a
    * different workspace, and bumps the workspace's last_opened_at locally so
@@ -1227,6 +1229,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       set({ error: String(e) });
       throw e;
     }
+  },
+
+  applyWorkspaceIconPath: (id, iconPath) => {
+    set((state) => ({
+      workspaces: state.workspaces.map((item) => (item.id === id ? { ...item, icon_path: iconPath } : item)),
+    }));
   },
 
   removeWorkspaceFromState: (id) => {

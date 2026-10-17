@@ -1036,6 +1036,8 @@ export function createWsTransport(
     resolveProjectIcons: async (workspaceIds) =>
       (await rpc<{ icons: ProjectIcon[] }>("workspace.icon.resolve", { workspaceIds })).icons,
     setProjectIcon: (workspaceId, iconPath) => rpc<ProjectIcon>("workspace.icon.set", { workspaceId, iconPath }),
+    listProjectIconCandidates: (workspaceId, query, limit) =>
+      rpc<{ files: string[]; total: number }>("workspace.icon.candidates", { workspaceId, query, limit }),
     readWorkspaceEnvironment: (workspaceId, threadId) =>
       rpc<WorkspaceEnvironmentReadResult>("workspace.environment.read", { workspaceId, threadId }),
     saveWorkspaceEnvironment: (workspaceId, document, sourceRevision, threadId) =>

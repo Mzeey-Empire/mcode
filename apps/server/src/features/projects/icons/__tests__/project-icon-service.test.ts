@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import type { Workspace } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
+import { RealGitExecutor } from "../../git/execution/index.js";
 import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../testing/owned-test-database.js";
 import { ProjectIconService } from "../project-icon-service.js";
 
@@ -15,6 +16,7 @@ let repo: WorkspaceRepo;
 let workspace: Workspace;
 let now: number;
 let service: ProjectIconService;
+let git: RealGitExecutor;
 
 beforeEach(async () => {
   temp = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-project-icon-"));
@@ -24,7 +26,8 @@ beforeEach(async () => {
   repo = new WorkspaceRepo(database.db, database.writer);
   workspace = await repo.create("project", root, true);
   now = 1_000;
-  service = new ProjectIconService({ workspaces: repo, platform: process.platform, now: () => now });
+  git = new RealGitExecutor();
+  service = new ProjectIconService({ workspaces: repo, gitExecutor: git, platform: process.platform, now: () => now });
 });
 
 afterEach(async () => {
@@ -174,11 +177,110 @@ describe("ProjectIconService.set", () => {
   });
 });
 
+describe("ProjectIconService.candidates", () => {
+  it("excludes ignored files, dependency and git directories, non-images and oversized images", async () => {
+    await git.exec(["init"], { cwd: root });
+    write(".gitignore", "ignored/\nignored.svg\n");
+    write("ignored/hidden.png");
+    write("ignored.svg");
+    write(".git/hidden.svg");
+    write("node_modules/dependency/icon.svg");
+    write("nested/node_modules/icon.svg");
+    await git.exec(["add", "-f", "node_modules", "nested"], { cwd: root });
+    write("readme.txt");
+    write("unsupported.bmp");
+    write("huge.png", Buffer.alloc(2 * 1024 * 1024 + 1));
+    write("boundary.png", Buffer.alloc(2 * 1024 * 1024));
+    write("logo.svg");
+
+    expect(await service.candidates(workspace.id)).toEqual({ files: ["boundary.png", "logo.svg"], total: 2 });
+  });
+
+  it("offers every allowed extension regardless of case", async () => {
+    for (const path of ["a.SVG", "b.PNG", "c.ICO", "d.WEBP", "e.JPG", "f.JPEG", "g.GIF", "h.AVIF"]) write(path);
+
+    expect(await service.candidates(workspace.id)).toEqual({
+      files: ["a.SVG", "b.PNG", "c.ICO", "d.WEBP", "e.JPG", "f.JPEG", "g.GIF", "h.AVIF"], total: 8,
+    });
+  });
+
+  it("sorts non-git folder results by depth then case-insensitive path and excludes internal directories", async () => {
+    for (const path of ["a/deep/first.svg", "b/alpha.svg", "a/Zebra.svg", "a/apple.svg", "Zoo.svg", "apple.svg"]) write(path);
+    write("node_modules/hidden.svg");
+    write("nested/.git/hidden.svg");
+
+    expect(await service.candidates(workspace.id)).toEqual({
+      files: ["apple.svg", "Zoo.svg", "a/apple.svg", "a/Zebra.svg", "b/alpha.svg", "a/deep/first.svg"], total: 6,
+    });
+  });
+
+  it.each([
+    ["BRAND", ["Brand/mark.svg", "Brand/other.png"]],
+    ["aNd/Ma", ["Brand/mark.svg"]],
+    ["MARK", ["Brand/mark.svg", "elsewhere/mark.png"]],
+    ["", ["Brand/mark.svg", "Brand/other.png", "elsewhere/mark.png"]],
+    ["absent", []],
+  ])("filters the full relative path with query %j", async (query, files) => {
+    write("Brand/mark.svg");
+    write("Brand/other.png");
+    write("elsewhere/mark.png");
+
+    expect(await service.candidates(workspace.id, query)).toEqual({ files, total: files.length });
+  });
+
+  it("limits returned files after filtering and counts all matches", async () => {
+    for (let index = 0; index < 205; index += 1) write(`icon-${String(index).padStart(3, "0")}.svg`);
+
+    const defaults = await service.candidates(workspace.id);
+    expect(defaults.files).toHaveLength(50);
+    expect(defaults.files[0]).toBe("icon-000.svg");
+    expect(defaults.files[49]).toBe("icon-049.svg");
+    expect(defaults.total).toBe(205);
+    expect(await service.candidates(workspace.id, "", 2)).toEqual({ files: ["icon-000.svg", "icon-001.svg"], total: 205 });
+    const capped = await service.candidates(workspace.id, "", 201);
+    expect(capped.files).toHaveLength(200);
+    expect(capped.files[199]).toBe("icon-199.svg");
+    expect(capped.total).toBe(205);
+    expect(await service.candidates(workspace.id, "204", 1)).toEqual({ files: ["icon-204.svg"], total: 1 });
+  });
+
+  it("uses the requested workspace root instead of another checkout", async () => {
+    write("root.svg");
+    const checkout = NodePath.join(temp, "worktree");
+    NodeFS.mkdirSync(checkout);
+    NodeFS.writeFileSync(NodePath.join(checkout, "worktree.svg"), "<svg/>");
+    await repo.create("other checkout", checkout, true);
+
+    expect(await service.candidates(workspace.id)).toEqual({ files: ["root.svg"], total: 1 });
+  });
+
+  it("skips indexed files that disappear or escape the shared path validator", async () => {
+    await git.exec(["init"], { cwd: root });
+    write("escape/outside.svg");
+    write("deleted.svg");
+    write("logo.svg");
+    await git.exec(["add", "."], { cwd: root });
+    NodeFS.rmSync(NodePath.join(root, "deleted.svg"));
+    NodeFS.rmSync(NodePath.join(root, "escape"), { recursive: true });
+    const outside = NodePath.join(temp, "outside");
+    NodeFS.mkdirSync(outside);
+    NodeFS.writeFileSync(NodePath.join(outside, "outside.svg"), "<svg/>");
+    NodeFS.symlinkSync(outside, NodePath.join(root, "escape"), "junction");
+
+    expect(await service.candidates(workspace.id)).toEqual({ files: ["logo.svg"], total: 1 });
+  });
+
+  it("reports an unknown workspace", async () => {
+    await expect(service.candidates("missing-workspace")).rejects.toMatchObject({ code: "workspace_not_found" });
+  });
+});
+
 describe("project icon URLs", () => {
   function fixedService(id: string): ProjectIconService {
     const fixed: Workspace = { ...workspace, id, icon_path: null };
     return new ProjectIconService({
       workspaces: { findById: (candidate) => (candidate === id ? fixed : null), setIconPath: async () => null },
+      gitExecutor: git,
       platform: process.platform,
       now: () => now,
     });

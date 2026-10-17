@@ -7,8 +7,13 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { WORKSPACE_IMAGE_MAX_BYTES, type ProjectIcon, type Workspace } from "@mcode/contracts";
+import {
+  PROJECT_ICON_CANDIDATES_DEFAULT_LIMIT, PROJECT_ICON_CANDIDATES_MAX_LIMIT, PROJECT_ICON_PATH_MAX_CHARS,
+  WORKSPACE_IMAGE_MAX_BYTES, type ProjectIcon, type Workspace,
+} from "@mcode/contracts";
 import type { WorkspaceRepo } from "../persistence/workspace-repo.js";
+import type { GitExecutor } from "../git/execution/index.js";
+import { listWorkspaceFiles } from "../files/file-service.js";
 import { readWorkspaceFileBytes, validateWorkspaceFilePath, WorkspaceFileNotFoundError } from "../files/workspace-file-access.js";
 
 const CACHE_TTL_MS = 60_000;
@@ -42,6 +47,7 @@ export class ProjectIconError extends Error {
 /** Dependencies for {@link ProjectIconService}; `now` is injectable so tests can expire the cache. */
 export interface ProjectIconServiceOptions {
   workspaces: Pick<WorkspaceRepo, "findById" | "setIconPath">;
+  gitExecutor: GitExecutor;
   platform: NodeJS.Platform;
   now?: () => number;
 }
@@ -98,12 +104,42 @@ export class ProjectIconService {
     return this.resolveCached(updated);
   }
 
+  /** Lists valid image choices from the workspace root, counting matches before limiting. */
+  async candidates(workspaceId: string, query = "", limit = PROJECT_ICON_CANDIDATES_DEFAULT_LIMIT): Promise<{ files: string[]; total: number }> {
+    const workspace = this.options.workspaces.findById(workspaceId);
+    if (!workspace) throw new ProjectIconError("workspace_not_found", "This project no longer exists.");
+    const index = await listWorkspaceFiles(workspace.path, this.options.gitExecutor);
+    const search = query.toLowerCase();
+    const matches: string[] = [];
+    for (const path of index.paths) {
+      if (!path.toLowerCase().includes(search)) continue;
+      if (isIconCandidate(workspace.path, path, this.options.platform)) matches.push(path);
+    }
+    matches.sort((left, right) => {
+      const depth = left.split("/").length - right.split("/").length;
+      return depth || left.toLowerCase().localeCompare(right.toLowerCase());
+    });
+    return { files: matches.slice(0, Math.min(limit, PROJECT_ICON_CANDIDATES_MAX_LIMIT)), total: matches.length };
+  }
+
   private async resolveCached(workspace: Workspace): Promise<ProjectIcon> {
     const cached = this.cache.get(workspace.id);
     if (cached && cached.expiresAt > this.now()) return cached.icon;
     const icon = await resolveIcon(workspace, this.options.platform);
     this.cache.set(workspace.id, { icon, expiresAt: this.now() + CACHE_TTL_MS });
     return icon;
+  }
+}
+
+function isIconCandidate(root: string, path: string, platform: NodeJS.Platform): boolean {
+  if (path.length > PROJECT_ICON_PATH_MAX_CHARS || iconRuleViolation(path, 0)) return false;
+  if (path.split("/").some((segment) => segment === ".git" || segment === "node_modules")) return false;
+  try {
+    const { fullPath } = validateIconPath(root, path, platform);
+    return NodeFS.statSync(fullPath).size <= WORKSPACE_IMAGE_MAX_BYTES.icon;
+  } catch (error) {
+    if (isUnusablePath(error)) return false;
+    throw error;
   }
 }
 

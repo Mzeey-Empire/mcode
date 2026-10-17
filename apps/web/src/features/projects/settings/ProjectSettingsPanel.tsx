@@ -12,6 +12,7 @@ import { getTransport } from "@/transport";
 import type { ActionPlay } from "./ActionEditor";
 import { ActionsSection } from "./ActionsSection";
 import { EnvironmentConflictBanner } from "./EnvironmentConflictBanner";
+import { GeneralSection } from "./GeneralSection";
 import { useProjectSettingsDraftStore, type ProjectSettingsDraft } from "./projectSettingsDraftStore";
 import { SettingsSaveBar } from "./SettingsSaveBar";
 import { duplicateAction, jsonEqual, newAction, validateDocument, type SettingsIssue } from "./settings-model";
@@ -23,10 +24,11 @@ const STORAGE_OPTIONS = [
 ] as const;
 
 const SECTION_OPTIONS = [
-  // General's content ships with S12T-15; until then the tab is listed but cannot be chosen.
-  { value: "general", label: "General", disabled: true },
+  { value: "general", label: "General" },
   { value: "actions", label: "Actions" },
 ] as const;
+
+type SettingsSection = (typeof SECTION_OPTIONS)[number]["value"];
 
 const DIRTY_STORAGE_REASON = "Save or discard changes first.";
 
@@ -116,6 +118,7 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
   const projectName = useProjectName(workspaceId);
   const settings = useProjectSettings(workspaceId, threadId, active);
   const [newActionId, setNewActionId] = useState<string | null>(null);
+  const [section, setSection] = useState<SettingsSection>("actions");
   const { entry, dirty } = settings;
   const edit = useProjectSettingsDraftStore((state) => state.edit);
   const setExpanded = useProjectSettingsDraftStore((state) => state.setExpanded);
@@ -156,16 +159,30 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
       <SegmentedControl
         variant="pill"
         aria-label="Project settings section"
-        value="actions"
-        onChange={() => undefined}
+        value={section}
+        onChange={(value) => setSection(value as SettingsSection)}
         options={SECTION_OPTIONS}
       />
-      <Button variant="subtle" shape="round" className="ml-auto text-[13px]/[18px] font-medium" disabled={!entry} onClick={addAction}>
-        <Plus aria-hidden />
-        Action
-      </Button>
+      {section === "actions" ? (
+        <Button variant="subtle" shape="round" className="ml-auto text-[13px]/[18px] font-medium" disabled={!entry} onClick={addAction}>
+          <Plus aria-hidden />
+          Action
+        </Button>
+      ) : null}
     </PanelHeaderSlot>
   );
+
+  if (section === "general") {
+    return (
+      <section className="flex min-h-0 flex-1 flex-col" aria-labelledby="project-settings-title">
+        {header}
+        {addButton}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <GeneralSection workspaceId={workspaceId} />
+        </div>
+      </section>
+    );
+  }
 
   if (!entry) {
     return (
