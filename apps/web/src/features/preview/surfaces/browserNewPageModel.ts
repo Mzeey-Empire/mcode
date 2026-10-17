@@ -3,6 +3,7 @@ import type {
   BrowserServerThumbnail,
   WorkspaceEnvironmentActionRun,
 } from "@mcode/contracts";
+import { loopbackPort } from "../navigation/nav-errors";
 
 /** What a project server tile shows. Derived from the run, never stored. */
 export type ServerTileState = "running" | "starting" | "stopped";
@@ -28,18 +29,6 @@ export interface RecentPage {
   readonly server: string;
   readonly path: string;
   readonly lastVisitedAt: number;
-}
-
-const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0", "[::]"]);
-
-function loopbackPort(url: string): string | null {
-  try {
-    const parsed = new URL(url);
-    if (!LOOPBACK_HOSTNAMES.has(parsed.hostname)) return null;
-    return parsed.port;
-  } catch {
-    return null;
-  }
 }
 
 /**

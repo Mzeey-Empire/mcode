@@ -103,6 +103,27 @@ describe("BrowserToolbar", () => {
     expect(screen.getByRole("textbox", { name: "Preview URL" })).toHaveAttribute("placeholder", "Search or enter URL");
   });
 
+  it("marks a page loaded on a certificate exception and stops trusting from its menu", async () => {
+    const user = userEvent.setup();
+    const log: string[] = [];
+    renderToolbar(loadedProps(log, {
+      address: address(log, { trustException: { host: "localhost", stopTrusting: () => log.push("stop-trusting") } }),
+    }));
+
+    expect(screen.getByTestId("browser-not-secure")).toHaveTextContent("Not secure");
+    await user.click(screen.getByTestId("browser-not-secure"));
+    const menu = await screen.findByRole("menu");
+    await user.click(within(menu).getByRole("menuitem", { name: "Stop trusting localhost" }));
+
+    expect(log).toEqual(["stop-trusting"]);
+  });
+
+  it("shows no Not secure mark for a normally verified page", () => {
+    renderToolbar(loadedProps([]));
+
+    expect(screen.queryByTestId("browser-not-secure")).not.toBeInTheDocument();
+  });
+
   it("keeps navigation on an errored page but drops the page tools", () => {
     const log: string[] = [];
     renderToolbar({ page: { kind: "error", navigation: navigation(log) }, address: address(log), tools: tools(log), control: { kind: "none" } });

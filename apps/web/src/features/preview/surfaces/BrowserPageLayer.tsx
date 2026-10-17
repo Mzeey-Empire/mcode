@@ -1,7 +1,7 @@
 /**
  * Owns resident page surfaces, viewport presentation, loading and control overlays, error and empty states, and the performance HUD. Design overlays occupy an explicit slot in the existing element order.
  */
-import type { RefObject, ReactNode } from "react";
+import { useCallback, useMemo, type RefObject, type ReactNode } from "react";
 import type { PreviewPageError } from "@mcode/contracts";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -9,7 +9,8 @@ import { usePreviewTabsStore } from "../state/previewTabsStore";
 import { BrowserActingOverlay } from "./BrowserActingOverlay";
 import { BrowserNewPage } from "./BrowserNewPage";
 import { BrowserViewportCanvas } from "./BrowserViewportCanvas";
-import { PreviewErrorPanel } from "./PreviewErrorPanel";
+import { useBrowserCertificate } from "./useBrowserCertificate";
+import { BrowserErrorPage } from "./BrowserErrorPage";
 import { PreviewPerfHud } from "./PreviewPerfHud";
 import { PreviewWebview, type PreviewWebviewHandle } from "./PreviewWebview";
 import type { PreviewCaptureKind } from "../capture/usePreviewCapture";
@@ -117,6 +118,22 @@ export function BrowserPageLayer({
   onWebviewNavigate,
   designLayer,
 }: BrowserPageLayerProps) {
+  const identity = useMemo(
+    () => ({ workspaceId: browserWorkspaceId, scope: { kind: "thread" as const, id: threadId }, tabId: activeWebviewTabId }),
+    [browserWorkspaceId, threadId, activeWebviewTabId],
+  );
+  const certificate = useBrowserCertificate(identity, `${webviewInputUrl}|${pageError?.code ?? ""}`, onPreviewErrorRetry);
+  const backToSafety = useCallback(() => {
+    if (webviewCanBack) {
+      void activeWebviewRef()?.goBack();
+      return;
+    }
+    const tabs = usePreviewTabsStore.getState();
+    void tabs.openPage(browserWorkspaceId, threadId).then((opened) => {
+      if (opened) return tabs.closePage(browserWorkspaceId, threadId, activeWebviewTabId);
+    });
+  }, [activeWebviewRef, activeWebviewTabId, browserWorkspaceId, threadId, webviewCanBack]);
+
   const warmWebviewLayer = warmWebviewTabs.map((tab) => {
     const tabKey = browserAutomationTargetKey(browserWorkspaceId, threadId, tab.id);
     const tabViewport = automationViewports.get(tabKey);
@@ -257,14 +274,16 @@ export function BrowserPageLayer({
           {designLayer}
         </div>
         <RenderValue value={pageError}>
-          {(pageError) => (
-          <PreviewErrorPanel
-            error={pageError}
-            url={webviewInputUrl || null}
-            canBack={webviewCanBack}
-            onRetry={onPreviewErrorRetry}
-            onGoBack={() => void activeWebviewRef()?.goBack()}
-          />
+          {(error) => (
+            <BrowserErrorPage
+              error={error}
+              url={webviewInputUrl || null}
+              threadId={threadId}
+              onRetry={onPreviewErrorRetry}
+              onOpen={onWebviewNavigate}
+              onBackToSafety={backToSafety}
+              certificate={certificate}
+            />
           )}
         </RenderValue>
         <RenderWhen condition={showNewPage}>

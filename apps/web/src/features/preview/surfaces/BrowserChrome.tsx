@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { BrowserToolbar } from "./BrowserToolbar";
 import { BrowserDeviceRow } from "./BrowserDeviceRow";
@@ -14,9 +15,11 @@ import {
   type BrowserNavigation,
   type BrowserToolbarPage,
   type BrowserTools,
+  type BrowserTrustException,
 } from "./browserToolbarModel";
 import type { PreviewPageError } from "@mcode/contracts";
 import { useBrowserCommands } from "./useBrowserCommands";
+import { useBrowserCertificate, type BrowserCertificate } from "./useBrowserCertificate";
 
 interface BrowserChromeProps {
   readonly viewportToolbarOpen: ReturnType<typeof usePreviewViewport>["viewportToolbarOpen"];
@@ -141,9 +144,11 @@ function desktopTools(inputs: DesktopToolsInputs): BrowserTools {
 function desktopAddress(
   props: Pick<BrowserChromeProps, "webviewInputUrl" | "onWebviewNavigate" | "onWebviewOpenExternal" | "activeAutomationController">,
   invalidateObservation: () => void,
+  trustException: BrowserAddress["trustException"],
 ): BrowserAddress {
   return {
     url: props.webviewInputUrl,
+    trustException,
     onNavigate: (url) => {
       invalidateObservation();
       props.onWebviewNavigate(url);
@@ -155,6 +160,24 @@ function desktopAddress(
   };
 }
 
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The exception a loaded page rests on. A failed page has none, because the warning page shows instead. */
+function loadedOnTrust(
+  certificate: BrowserCertificate,
+  url: string,
+  pageError: PreviewPageError | undefined,
+): BrowserTrustException | undefined {
+  const host = certificate.state?.exceptionInUse && !pageError ? hostOf(url) : null;
+  return host === null ? undefined : { host, stopTrusting: () => void certificate.revoke() };
+}
+
 /** Browser header with annotation controls and a viewport toolbar. */
 export function BrowserChrome(props: BrowserChromeProps) {
   const { threadId, browserWorkspaceId, activeWebviewTabId } = props;
@@ -162,6 +185,16 @@ export function BrowserChrome(props: BrowserChromeProps) {
     invalidateBrowserAutomationTargetObservation(browserWorkspaceId, threadId, activeWebviewTabId);
   };
   const control = useBrowserControl(browserWorkspaceId, threadId, activeWebviewTabId);
+  const identity = useMemo(
+    () => ({ workspaceId: browserWorkspaceId, scope: { kind: "thread" as const, id: threadId }, tabId: activeWebviewTabId }),
+    [browserWorkspaceId, threadId, activeWebviewTabId],
+  );
+  const certificate = useBrowserCertificate(
+    identity,
+    `${props.webviewInputUrl}|${props.pageError?.code ?? ""}`,
+    () => void props.activeWebviewRef()?.reload(),
+  );
+  const trustException = loadedOnTrust(certificate, props.webviewInputUrl, props.pageError);
   const tools = desktopTools({ ...props, invalidateObservation });
   useBrowserCommands({ active: props.commandsActive, actions: tools });
 
@@ -176,7 +209,7 @@ export function BrowserChrome(props: BrowserChromeProps) {
         <div data-browser-chrome="" className="min-w-0 flex-1">
           <BrowserToolbar
             page={desktopPage({ ...props, invalidateObservation })}
-            address={desktopAddress(props, invalidateObservation)}
+            address={desktopAddress(props, invalidateObservation, trustException)}
             tools={tools}
             control={control}
             focusRequest={props.omniboxFocusTick}

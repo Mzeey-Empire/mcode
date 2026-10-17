@@ -116,7 +116,7 @@ function previewStatus(state: BrowserSurfacePageState): PreviewPageStatus {
     // `mainFrameError` may be a resolver code (rejected before any load) or a
     // Chromium description; the classifier maps both onto the shared copy table.
     ...(state.mainFrameError
-      ? { error: previewPageErrorForFailure(state.mainFrameError, state.mainFrameErrorCode) }
+      ? { error: previewPageErrorForFailure(state.mainFrameError, state.mainFrameErrorCode, visibleAddress(state)) }
       : {}),
   };
 }
