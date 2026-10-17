@@ -51,6 +51,22 @@ const ACTIVE_ACTION_LABELS: Record<string, string> = {
   recordingStop: "Stopping the page recording",
 };
 
+/** Operations whose live step names the element, as in "Clicking Update". */
+const NAMED_TARGET_OPERATIONS: ReadonlySet<string> = new Set(["click", "hover"]);
+
+/**
+ * The step an agent is running right now, for surfaces that show it live. The element name comes
+ * only from a role target, so a selector or coordinate never leaks into the label. Callers must
+ * not persist the result, which keeps the narrative content-free.
+ */
+export function liveBrowserStepLabel(operation: string, accessibleName: string | undefined): string | null {
+  const label = ACTIVE_ACTION_LABELS[operation];
+  if (label === undefined) return null;
+  const name = accessibleName?.trim();
+  if (!name || !NAMED_TARGET_OPERATIONS.has(operation)) return label;
+  return `${label.split(" ")[0]} ${name}`;
+}
+
 const COMPLETED_ACTION_LABELS: Record<string, string> = {
   navigate: "Navigated the page",
   back: "Went back",
