@@ -75,7 +75,7 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     id: "environment",
     label: "Project settings",
     icon: Settings,
-    blurb: "Edit Project environment",
+    blurb: "Edit Project actions",
     needsThread: false,
     commandId: "projectEnvironment.open",
   },

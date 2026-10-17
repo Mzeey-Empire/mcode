@@ -165,7 +165,7 @@ vi.mock("./CreatePrDialog", () => ({
 import { getThreadOverviewBrowserTabs } from "@/features/thread-overview/entries/browser";
 import { ThreadOverview } from "./ThreadOverview";
 import { canStartBranchlessCreatePr } from "@/features/thread-overview/branch-creation";
-import { ProjectEnvironmentPanel } from "@/features/projects/environment";
+import { ProjectSettingsPanel } from "@/features/projects/settings/ProjectSettingsPanel";
 
 function rosterEntry(id: string, overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
   return { id: `call:${id}`, provider: "codex", title: id, prompt: null, subagentType: null, model: null, reasoningEffort: null,
@@ -501,14 +501,14 @@ describe("ThreadOverview branchless Create PR", () => {
       return persisted;
     });
 
-    render(<><ThreadOverview thread={makeThread({ mode: "direct" })} threadPaneWidth={1400} /><ProjectEnvironmentPanel workspaceId="ws-1" /></>);
+    render(<><ThreadOverview thread={makeThread({ mode: "direct" })} threadPaneWidth={1400} /><ProjectSettingsPanel workspaceId="ws-1" threadId="thread-1" /></>);
 
-    await screen.findByLabelText("Action name for Success");
+    await user.click(await screen.findByRole("button", { name: /Success/, expanded: false }));
     await user.click(screen.getByRole("button", { name: "Actions" }));
     expect(await screen.findByRole("menuitem", { name: /Success/ })).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
-    const actionName = screen.getByLabelText("Action name for Success");
+    const actionName = screen.getByLabelText("Action name");
     await user.clear(actionName);
     await user.type(actionName, "Renamed Action");
     await user.click(screen.getByRole("button", { name: "Save" }));
