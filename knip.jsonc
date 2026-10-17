@@ -1,0 +1,548 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  // Locally used declarations remain live; surplus export modifiers are deferred to the follow-up audit.
+  "ignoreExportsUsedInFile": true,
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/**/*.{mjs,ts}",
+        "docs/plans/ready-for-build/tools/*.mjs"
+      ],
+      "project": [
+        "scripts/**/*.{mjs,ts}"
+      ],
+      "ignoreDependencies": [
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@anthropic-ai/claude-agent-sdk",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "opensrc",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "reflect-metadata",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "ws"
+      ]
+    },
+    "apps/web": {
+      "entry": [
+        "src/main.tsx",
+        "src/index.css",
+        "scripts/**/*.{mjs,ts}",
+        "src/test-setup.ts"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx,css}",
+        "scripts/**/*.{mjs,ts}",
+        "*.ts"
+      ],
+      "ignoreDependencies": [
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@radix-ui/react-dropdown-menu",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@radix-ui/react-popover",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@tanstack/react-router",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@types/hast"
+      ]
+    },
+    "apps/desktop": {
+      "entry": [
+        "src/main/main.ts",
+        "src/main/preload.ts",
+        "src/main/snapshot-entry.ts",
+        "src/features/preview/preload/guest-input.ts",
+        "scripts/**/*.mjs"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.{mjs,ts}",
+        "*.ts"
+      ],
+      "ignoreDependencies": [
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@types/uuid",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@types/which",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "electron-mksnapshot",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "koffi",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "node-pty",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "uuid",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "which"
+      ]
+    },
+    "apps/server": {
+      "entry": [
+        "src/index.ts",
+        "src/features/terminal/host/pty-host-entry.ts",
+        "src/**/*.worker.ts",
+        "scripts/**/*.{mjs,ts}"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.{mjs,ts}",
+        "*.ts"
+      ],
+      "ignoreDependencies": [
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@anthropic-ai/claude-agent-sdk",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@github/copilot-sdk",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@swc/cli",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "@swc/core",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "koffi",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "smol-toml",
+        // Existing dependency or hoisted import; audit ownership before removal.
+        "vite-node"
+      ]
+    },
+    "packages/*": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/providers": {
+      "entry": [
+        "src/conformance/plan-probes/probe.ts"
+      ]
+    },
+    "packages/contracts": {
+      "entry": [
+        "src/**/*.type-test.ts"
+      ]
+    },
+    "packages/browser-conformance": {
+      "ignoreDependencies": [
+        // Existing unused workspace dependency; no retirement row authorizes its removal.
+        "@mcode/contracts"
+      ]
+    }
+  },
+  "ignore": [
+    // Build outputs are regenerated from the workspace source entries.
+    "**/{dist,dist-tsc,release,coverage}/**"
+  ],
+  "ignoreBinaries": [
+    // Provider CLI installed by the user, not an npm executable.
+    "codex",
+    // Host OS command used by process integration tests.
+    "ping",
+    // Windows process inventory command used by cleanup and tests.
+    "tasklist"
+  ],
+  "ignoreIssues": {
+    // Knip treats an existing cwd-relative script command as an import relative to its caller.
+    "apps/desktop/scripts/build-main.mjs": [
+      "unresolved"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/desktop/src/features/application-updates/index.ts": [
+      "exports"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/desktop/src/features/attachments/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/desktop/src/features/desktop-window/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/desktop/src/features/open-in/index.ts": [
+      "types"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/desktop/src/features/preview/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/desktop/src/features/preview/automation/index.ts": [
+      "exports"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/desktop/src/features/preview/contracts/guest-input.ts": [
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/desktop/src/features/preview/state/window-session.ts": [
+      "exports"
+    ],
+    // Existing exports, types, duplicates outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/desktop/src/features/preview/surfaces/registry.ts": [
+      "exports",
+      "types",
+      "duplicates"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/agents/conversation/migrations/legacy-conversation-migration.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/agents/conversation/narrative/narrative-store.ts": [
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/agents/conversation/persistence/message-repo.ts": [
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/agents/execution/execution-mailbox-scheduler.ts": [
+      "types"
+    ],
+    // Existing duplicates outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/agents/orchestration/agent-turn-command-port.ts": [
+      "duplicates"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/agents/orchestration/agent-service.ts": [
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/agents/steering/turn-steer.ts": [
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/agents/turns/turn-diff-service.ts": [
+      "exports"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/agents/turns/parent-turn-durability.ts": [
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/handoff/artifacts/{handoff-builder.ts,handoff-types.ts}": [
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/handoff/providers/session-forker.ts": [
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/projects/diffs/revert/turn-revert-model.ts": [
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/projects/environment/workspace-environment-automatic-repository.ts": [
+      "types"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/projects/git/git-service.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/projects/git/execution/index.ts": [
+      "types"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/projects/persistence/worktree-repo.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/providers/adapters/copilot/copilot-cli-resolver.ts": [
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/providers/adapters/opencode/opencode-provider.ts": [
+      "exports"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/providers/adapters/opencode/{opencode-event-mapper.ts,opencode-resume-cursor.ts}": [
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/providers/models/persistence/model-cache-repo.ts": [
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/pull-requests/reviews/persistence/pull-request-review-link-repo.ts": [
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/terminal/preferences/workspace-terminal-preferences-service.ts": [
+      "exports"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/thread-control/authority/persistence/thread-control-approval-repo.ts": [
+      "types"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/thread-control/cleanup/persistence/cleanup-job-repo.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/thread-control/external/external-thread-control-pairing-store.ts": [
+      "exports"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/thread-control/external/external-thread-control-pairing-service.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing files outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/thread-control/external/external-thread-control-pairing-registry.ts": [
+      "files"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/thread-control/persistence/thread-repo.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/features/thread-startup/index.ts": [
+      "exports"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/runtime/environment/shell-env-resolver.ts": [
+      "exports"
+    ],
+    // Existing files outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/server/src/runtime/process/containment/__tests__/stub-job-object.ts": [
+      "files"
+    ],
+    // Existing duplicates outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/components/chat/MarkdownContent.tsx": [
+      "duplicates"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/components/chat/handoff-utils.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing files outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/components/chat/{HookActivitySection.tsx,PrBadge.tsx,UsagePopover.tsx}": [
+      "files"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/components/chat/lexical/cursor-utils.ts": [
+      "exports"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/components/chat/lexical/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing files outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/components/chat/tool-renderers/{AgentRenderer.tsx,BashRenderer.tsx,EditRenderer.tsx,GenericRenderer.tsx,GlobRenderer.tsx,GrepRenderer.tsx,ReadRenderer.tsx,ShowMoreButton.tsx,WebRenderer.tsx,WriteRenderer.tsx,index.ts,types.ts}": [
+      "files"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/components/diff/index.ts": [
+      "exports"
+    ],
+    // Existing files outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/components/diff/diff-surface.ts": [
+      "files"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/components/ui/{command.tsx,dialog.tsx,select.tsx}": [
+      "exports"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/conversation/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/conversation/composer/Composer.tsx": [
+      "exports"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/conversation/composer/execution/ComposerTargetSelection.tsx": [
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/conversation/hydration/thread-hydrator.ts": [
+      "exports"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/conversation/hydration/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/conversation/messages/{message-list-scroll.ts,message-list-virtualization.ts}": [
+      "exports"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/conversation/narrative/{build-narrative.ts,build-persisted-narrative.ts,subagent-provider.tsx}": [
+      "exports"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/conversation/narrative/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/preview/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/preview/automation/{browserAutomationHostExecution.ts,browserAutomationHostNavigation.ts,browserAutomationStore.ts}": [
+      "exports"
+    ],
+    // Existing files outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/preview/automation/services/index.ts": [
+      "files"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/preview/automation/web-browser-automation/targetRegistry.ts": [
+      "exports"
+    ],
+    // Existing exports, duplicates outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/preview/browser-surfaces/{ElectronWebviewBrowserSurfaceAdapter.ts,WebIframeBrowserSurfaceAdapter.ts}": [
+      "exports",
+      "duplicates"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/preview/browser-surfaces/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/preview/state/previewAnnotationStore.ts": [
+      "types"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/projects/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/projects/settings/settings-model.ts": [
+      "exports"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/projects/state/workspace-selectors.ts": [
+      "exports"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/pull-requests/state/pull-request-code-selectors.ts": [
+      "exports"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/subagents/index.ts": [
+      "exports"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/subagents/lifecycle/SubagentStopControl.tsx": [
+      "exports"
+    ],
+    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/terminal/index.ts": [
+      "exports",
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/terminal/surfaces/{TerminalView.tsx,index.ts}": [
+      "exports"
+    ],
+    // Existing files outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/terminal/surfaces/terminalPool.ts": [
+      "files"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/features/thread-startup/index.ts": [
+      "types"
+    ],
+    // Existing files outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/hooks/useMediaQuery.ts": [
+      "files"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/lib/{ci-status.ts,composer-layout.ts,context-tracker.ts,ensure-terminal.ts,model-registry.ts,right-panel-layout.ts,shortcuts.ts,time.ts,ui-hit-target.ts,worktree.ts}": [
+      "exports"
+    ],
+    // Existing files outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/lib/{diff.ts,tool-call-utils.ts}": [
+      "files"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/performance/shiki-performance.ts": [
+      "exports"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/stores/{thread-selectors.ts,thread-store-test-utils.ts}": [
+      "exports"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/stores/thread-store/narrative-projection.ts": [
+      "exports"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "apps/web/src/transport/types.ts": [
+      "types"
+    ],
+    // Existing duplicates outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/browser-conformance/src/races.ts": [
+      "duplicates"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/browser-conformance/src/schedule.ts": [
+      "exports"
+    ],
+    // Existing duplicates outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/contracts/src/thread-control.ts": [
+      "duplicates"
+    ],
+    // Existing duplicates outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/contracts/src/models/conversation-tail.ts": [
+      "duplicates"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/contracts/src/models/{browser-automation.ts,thread.ts}": [
+      "types"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/contracts/src/providers/usage.ts": [
+      "types"
+    ],
+    // Existing duplicates outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/oxlint-plugin/src/index.ts": [
+      "duplicates"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/providers/src/availability.ts": [
+      "exports"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/providers/src/private/codex/codex-agent-discovery.ts": [
+      "exports"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/providers/src/private/codex/codex-types.ts": [
+      "types"
+    ],
+    // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/providers/src/private/cursor/acp/cursor-acp-transient-retry.ts": [
+      "exports"
+    ],
+    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/providers/src/private/devin/devin-session-state.ts": [
+      "types"
+    ],
+    // Existing duplicates outside the retirement rows; decide removal or API retention in the follow-up.
+    "packages/shared/src/model-context/index.ts": [
+      "duplicates"
+    ],
+    // Knip treats an existing cwd-relative script command as an import relative to its caller.
+    "scripts/agent/__tests__/db-info.test.mjs": [
+      "unresolved"
+    ]
+  }
+}
