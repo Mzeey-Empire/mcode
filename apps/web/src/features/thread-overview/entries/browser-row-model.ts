@@ -1,4 +1,4 @@
-import { loopbackPort, type ServerTile } from "@/features/preview";
+import { loopbackPort, type ServerTile, serverForPort } from "@/features/preview";
 import type { ThreadOverviewBrowserTab } from "@/features/thread-overview/entries/browser";
 
 /** The page the Browser row speaks for. */
@@ -44,17 +44,15 @@ function toPage({ tab }: ThreadOverviewBrowserTab): BrowserRowPage {
   };
 }
 
-/** The stopped project server whose port the page address points at, if any. */
 function stoppedServerFor(url: string | null, tiles: readonly ServerTile[]): ServerTile | null {
-  const port = url === null ? null : loopbackPort(url);
-  if (port === null) return null;
-  return tiles.find((tile) => String(tile.port) === port && tile.state === "stopped") ?? null;
+  const owner = serverForPort(url === null ? null : loopbackPort(url), tiles);
+  return owner?.state === "stopped" ? owner : null;
 }
 
 /**
  * Picks the one state for the Browser row. Acting wins over a user hold, which wins over a stopped
- * server, because each is more urgent for the person watching the thread. The row follows the tab
- * behind the winning state so its title and Start web never describe a different page.
+ * server. The row follows the tab behind the winning state so its title and Start web never
+ * describe a different page.
  */
 export function deriveBrowserRow(input: BrowserRowInput): BrowserRowState | null {
   const { pages, activeTabId, actingTabId, heldTabId, liveStep, tiles } = input;

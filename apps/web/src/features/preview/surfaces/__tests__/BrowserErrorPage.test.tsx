@@ -140,6 +140,15 @@ describe("BrowserErrorPage", () => {
       expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     });
 
+    it("offers no Start when two stopped actions claim the refused port", async () => {
+      seedRuns(actionRun({ actionId: "api", actionName: "api" }), actionRun());
+      renderPage(refused("http://localhost:5173/"), "http://localhost:5173/");
+
+      await waitFor(() => expect(transport.listWorkspaceActionRuns).toHaveBeenCalled());
+      expect(screen.queryByRole("button", { name: /^Start/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    });
+
     it("never offers Start for a remote host whose port matches an action", async () => {
       seedRuns(actionRun());
       renderPage(previewPageErrorForFailure("ERR_CONNECTION_REFUSED", -102, "https://example.com:5173/"), "https://example.com:5173/");

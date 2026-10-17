@@ -221,6 +221,27 @@ describe("overview Browser row", () => {
     expect(screen.queryByRole("button", { name: "Start web" })).not.toBeInTheDocument();
   });
 
+  it("stays open when a live server shares the port with a stopped one", async () => {
+    seedRuns(
+      webRun({ actionId: "api", actionName: "api" }),
+      webRun({ actionId: "web", status: "running", finishedAt: null, port: { ...webRun().port!, reachable: true } }),
+    );
+    renderRow([page("a", "http://localhost:5173/", "Vite App")]);
+
+    await waitFor(() => expect(transport.listWorkspaceActionRuns).toHaveBeenCalled());
+    expect(row()).toHaveAttribute("data-state", "open");
+    expect(screen.queryByRole("button", { name: /^Start/ })).not.toBeInTheDocument();
+  });
+
+  it("offers no Start when two stopped servers claim the page's port", async () => {
+    seedRuns(webRun({ actionId: "api", actionName: "api" }), webRun());
+    renderRow([page("a", "http://localhost:5173/", "Vite App")]);
+
+    await waitFor(() => expect(transport.listWorkspaceActionRuns).toHaveBeenCalled());
+    expect(row()).toHaveAttribute("data-state", "open");
+    expect(screen.queryByRole("button", { name: /^Start/ })).not.toBeInTheDocument();
+  });
+
   it("stays open for a page on a port no project server announced", async () => {
     seedRuns(webRun());
     renderRow([page("a", "http://localhost:3000/", "Other app")]);

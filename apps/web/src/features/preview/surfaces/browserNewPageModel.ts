@@ -72,12 +72,26 @@ export function projectServerTiles(
   return tiles.sort((a, b) => a.name.localeCompare(b.name) || a.actionId.localeCompare(b.actionId));
 }
 
+/**
+ * The project server that owns a loopback port. A running tile outranks a starting one, which
+ * outranks a stopped one, so a stale run never hides the server that is answering. Ties among live
+ * tiles fall to the caller's order. Two stopped tiles with no live one is a guess between two
+ * commands, so the port has no owner and nothing offers to start either.
+ */
+export function serverForPort(port: string | null, tiles: readonly ServerTile[]): ServerTile | null {
+  if (port === null) return null;
+  const onPort = tiles.filter((tile) => String(tile.port) === port);
+  const live = onPort.find((tile) => tile.state === "running") ?? onPort.find((tile) => tile.state === "starting");
+  if (live) return live;
+  return onPort.length === 1 ? onPort[0]! : null;
+}
+
 function describeAddress(url: string, tiles: readonly ServerTile[]): { server: string; path: string } {
   try {
     const parsed = new URL(url);
     const path = `${parsed.pathname}${parsed.search}`;
     const port = loopbackPort(url);
-    const tile = port === null ? undefined : tiles.find((candidate) => String(candidate.port) === port);
+    const tile = serverForPort(port, tiles);
     return { server: tile?.name ?? parsed.host, path: path === "/" ? "" : path };
   } catch {
     return { server: url, path: "" };

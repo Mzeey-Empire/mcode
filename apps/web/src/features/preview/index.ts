@@ -82,6 +82,6 @@ export {
 
 export { useBrowserActingTabId, useBrowserUserHeldTabId } from "./state/useBrowserActing";
 export { loopbackPort } from "./navigation/nav-errors";
-export { projectServerTiles } from "./surfaces/browserNewPageModel";
+export { projectServerTiles, serverForPort } from "./surfaces/browserNewPageModel";
 export type { ServerTile } from "./surfaces/browserNewPageModel";
 export { useStartServer, useThreadActionRuns } from "./surfaces/useProjectServers";
