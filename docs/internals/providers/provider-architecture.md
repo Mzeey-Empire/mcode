@@ -271,10 +271,7 @@ update, omit that choice, never a deny choice.
   is offered with the requested patterns. See upstream
   [permission reply handling](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/permission.ts).
 
-Deny-note delivery is separate from choosing a deny option. Claude's native
-protocol accepts a message and Copilot's accepts feedback. Codex needs a steer,
-with next-turn delivery if rejected and an unknown state if no acknowledgement
-arrives. Cursor and Devin need next-turn delivery. OpenCode currently declares
-next-turn delivery; v2's optional native message must be wired through the reply
-transport before claiming native delivery. These are delivery contracts, not a
-reason to reinterpret an allow option as a deny.
+A deny carries no note. To redirect the agent, the user denies and then sends a
+message from the composer, which works the same on every provider. A per-provider
+note would need a different delivery path for each adapter (native message,
+steer, or next turn), so it was dropped (#1927).
