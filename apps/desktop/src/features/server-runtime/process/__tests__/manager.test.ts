@@ -29,9 +29,19 @@ const refs = vi.hoisted(() => {
     (input: { isPackaged: boolean; execPath: string }) => input.execPath,
   );
 
+  // Sizes only matter for the startup-failure file; every other path is missing.
+  const missingFile = (): never => {
+    const err = new Error("ENOENT: no such file or directory") as NodeJS.ErrnoException;
+    err.code = "ENOENT";
+    throw err;
+  };
+  const statSyncSpy = vi.fn(missingFile);
+
   return {
     mockChildProcess,
     existsSyncSpy,
+    statSyncSpy,
+    missingFile,
     resolveServerBinarySpy,
     getExitCallback: () => exitCallback,
     resetExitCallback: () => {
@@ -91,6 +101,7 @@ vi.mock("node:fs", () => ({
     err.code = "ENOENT";
     throw err;
   }),
+  statSync: refs.statSyncSpy,
   renameSync: vi.fn(),
   linkSync: vi.fn(),
   mkdirSync: vi.fn(),
@@ -165,14 +176,17 @@ function setupDefaultReadFileMock() {
 const originalFetch = globalThis.fetch;
 
 import { ServerManager } from "../manager.js";
+import { ServerStartupRefusedError } from "../startup-failure.js";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeNet from "node:net";
 import {
+  describeRefusal,
   SERVER_HEAP_DEFAULT_MB,
   SERVER_HEAP_LEGACY_DEFAULT_MB,
+  type StartupRefusal,
 } from "@mcode/contracts";
 
 // ---------------------------------------------------------------------------
@@ -1484,6 +1498,78 @@ describe("ServerManager", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("a server that exits before becoming ready", () => {
+    const refusal: StartupRefusal = {
+      kind: "database-newer",
+      databasePath: "/tmp/mcode/mcode.db",
+      raisedBy: "0093_next",
+    };
+
+    async function startExitedServer(failureFile: (startupId: string) => string | null): Promise<unknown> {
+      vi.spyOn(manager, "isHealthy").mockResolvedValue(false);
+      vi.useFakeTimers();
+      try {
+        const startup = manager.start().catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(0);
+        const spawnOptions = vi.mocked(NodeChildProcess.spawn).mock.calls.at(-1)?.[2];
+        const startupId = spawnOptions?.env?.MCODE_STARTUP_ID;
+        expect(startupId).toEqual(expect.any(String));
+        const failureText = (path: unknown): string | null =>
+          String(path).endsWith("startup-failure.json") ? failureFile(String(startupId)) : null;
+        refs.statSyncSpy.mockImplementation((path) => {
+          const text = failureText(path);
+          return text === null ? refs.missingFile() : { size: Buffer.byteLength(text) };
+        });
+        vi.mocked(NodeFS.readFileSync).mockReset().mockImplementation((path) => {
+          const text = failureText(path);
+          if (text !== null) return text;
+          return refs.missingFile();
+        });
+        refs.getExitCallback()!(78);
+        await vi.advanceTimersByTimeAsync(400);
+        return await startup;
+      } finally {
+        refs.statSyncSpy.mockImplementation(refs.missingFile);
+        vi.useRealTimers();
+      }
+    }
+
+    it("returns the refusal the server recorded for this spawn", async () => {
+      const error = await startExitedServer((startupId) => JSON.stringify({ version: 1, startupId, refusal }));
+
+      expect(error).toBeInstanceOf(ServerStartupRefusedError);
+      expect(error).toMatchObject({ refusal, message: describeRefusal(refusal) });
+    });
+
+    it.each([
+      {
+        name: "names a different startup",
+        file: () => JSON.stringify({ version: 1, startupId: "left-by-an-earlier-start", refusal }),
+      },
+      {
+        name: "fails the contract schema",
+        file: (startupId: string) => JSON.stringify({ version: 1, startupId, refusal: { kind: "disk-on-fire", databasePath: "/x" } }),
+      },
+      { name: "is not JSON", file: () => "{ half a fi" },
+      {
+        name: "records an unexpected failure rather than a refusal",
+        file: (startupId: string) => JSON.stringify({ version: 1, startupId, unexpected: { message: "boom" } }),
+      },
+    ])("falls back to the stderr tail when the file $name", async ({ file }) => {
+      const error = await startExitedServer(file);
+
+      expect(error).not.toBeInstanceOf(ServerStartupRefusedError);
+      expect(error).toEqual(expect.objectContaining({ message: expect.stringContaining("Server process exited before becoming ready") }));
+    });
+
+    it("falls back to the stderr tail when the server left no file", async () => {
+      const error = await startExitedServer(() => null);
+
+      expect(error).not.toBeInstanceOf(ServerStartupRefusedError);
+      expect(error).toEqual(expect.objectContaining({ message: expect.stringContaining("Server process exited before becoming ready") }));
+    });
   });
 
   it("rotates the previous stderr log before opening a new one", async () => {

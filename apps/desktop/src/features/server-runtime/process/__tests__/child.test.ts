@@ -32,6 +32,8 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 import { SERVER_LOG_PATH, SERVER_ROTATED_LOG_PATH, spawnServerProcess } from "../child.js";
 
+const STARTUP_ID = "00000000-0000-4000-8000-0000000000bb";
+
 const originalGitEnvironment = {
   branch: process.env.MCODE_GIT_BRANCH,
   topLevel: process.env.MCODE_GIT_TOPLEVEL,
@@ -52,14 +54,14 @@ describe("server startup error capture", () => {
     vi.stubEnv("MCODE_GIT_BRANCH", "test");
     vi.stubEnv("MCODE_GIT_TOPLEVEL", fixture.directory);
     NodeFS.writeFileSync(SERVER_LOG_PATH, "Previous startup failed\n");
-    const { child, stderrStream } = spawnServerProcess(19500, process.platform);
+    const { child, stderrStream } = spawnServerProcess(19500, process.platform, STARTUP_ID);
     try {
       const [code] = await NodeEvents.once(child, "exit");
       expect(code).toBe(1);
       expect(NodeChildProcess.spawn).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(Array),
-        expect.objectContaining({ windowsHide: true }),
+        expect.objectContaining({ windowsHide: true, env: expect.objectContaining({ MCODE_STARTUP_ID: STARTUP_ID }) }),
       );
       expect(NodeFS.readFileSync(SERVER_LOG_PATH, "utf8")).toBe("Startup fixture failed\n");
       expect(NodeFS.readFileSync(SERVER_ROTATED_LOG_PATH, "utf8")).toBe("Previous startup failed\n");
@@ -155,7 +157,7 @@ function gitCalls() {
 async function startServer(): Promise<NodeJS.ProcessEnv> {
   vi.stubEnv("ELECTRON_RENDERER_URL", "http://localhost:5173");
   vi.stubEnv("BUN", process.execPath);
-  const { child, stderrStream } = spawnServerProcess(19500, process.platform);
+  const { child, stderrStream } = spawnServerProcess(19500, process.platform, STARTUP_ID);
   const call = vi.mocked(NodeChildProcess.spawn).mock.calls.at(-1);
   if (!call?.[2]?.env) throw new Error("The startup fixture did not receive a child environment");
   const environment = call[2].env;

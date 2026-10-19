@@ -23,13 +23,17 @@ export function getServerPortBand(): ServerPortBand {
   return isDesktopDev() ? { min: 19500, max: 19600 } : { min: 19600, max: 19700 };
 }
 
-export function spawnServerProcess(port: number, platform: NodeJS.Platform): SpawnedServerProcess {
+/**
+ * Spawn the detached server. `startupId` is passed as `MCODE_STARTUP_ID` so a failed start can
+ * name this spawn in `startup-failure.json`.
+ */
+export function spawnServerProcess(port: number, platform: NodeJS.Platform, startupId: string): SpawnedServerProcess {
   const paths = getServerPaths(platform);
   const stderrStream = createServerStderrStream();
   try {
     const child = NodeChildProcess.spawn(paths.bunBinary, [paths.entry], {
       cwd: paths.cwd,
-      env: createServerEnvironment(paths, port, platform),
+      env: createServerEnvironment(paths, port, platform, startupId),
       detached: true,
       windowsHide: true,
       // A direct file handle preserves the final error even if the child exits immediately;
@@ -103,7 +107,7 @@ function resolveBunRuntimeExecutable(candidate: string): string {
   return runtimeExecutable;
 }
 
-function createServerEnvironment(paths: ServerPaths, port: number, platform: NodeJS.Platform): Record<string, string> {
+function createServerEnvironment(paths: ServerPaths, port: number, platform: NodeJS.Platform, startupId: string): Record<string, string> {
   const { ELECTRON_RUN_AS_NODE: _electronRunAsNode, ...parentEnvironment } = process.env;
   const env: Record<string, string> = {
     ...(parentEnvironment as Record<string, string>),
@@ -114,6 +118,7 @@ function createServerEnvironment(paths: ServerPaths, port: number, platform: Nod
     MCODE_DATA_DIR: getMcodeDir(),
     MCODE_TEMP_DIR: app.getPath("temp"),
     MCODE_VERSION: app.getVersion(),
+    MCODE_STARTUP_ID: startupId,
   };
   setGitEnvironment(env, paths.cwd);
   if (app.isPackaged) {

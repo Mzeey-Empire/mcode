@@ -6,6 +6,7 @@
 
 import { app } from "electron";
 import type * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir } from "@mcode/shared";
@@ -36,6 +37,7 @@ import {
   releaseStartupLock,
 } from "./startup.js";
 import { stopServerHeldByLock } from "./shutdown.js";
+import { readStartupRefusal, ServerStartupRefusedError } from "./startup-failure.js";
 
 /** Interval between server readiness probes. */
 const HEALTH_POLL_INTERVAL = 200;
@@ -59,6 +61,7 @@ export class ServerManager {
   private ownedServerIdentity: OwnedServerIdentity | null = null;
   private ownedServerProcess: NodeChildProcess.ChildProcess | null = null;
   private _port = 0;
+  private startupId = "";
   private _authToken = "";
   private _ipcPath = "";
   private _reusedExisting = false;
@@ -263,7 +266,8 @@ export class ServerManager {
   /** Find a port, spawn the child, and retain the server lock identity. */
   private async startNewServer(): Promise<{ port: number; authToken: string }> {
     this._port = await this.findStartupPort();
-    const spawned = spawnServerProcess(this._port, this.platform);
+    this.startupId = NodeCrypto.randomUUID();
+    const spawned = spawnServerProcess(this._port, this.platform, this.startupId);
     const generation = this.assignServerProcess(spawned.child);
     this.registerSpawnedServer(spawned.child, spawned.stderrStream, generation);
     try {
@@ -448,8 +452,9 @@ export class ServerManager {
     throw this.createStartupTimeoutError(timeoutMs);
   }
 
-  /** Create an error for a child that exits before the server becomes ready. */
   private createStartupFailureError(): Error {
+    const refusal = readStartupRefusal(getMcodeDir(), this.startupId);
+    if (refusal) return new ServerStartupRefusedError(refusal);
     const logExcerpt = this.readServerLogTail();
     return new Error(
       "Server process exited before becoming ready." +
