@@ -1160,3 +1160,19 @@ export const turnSteers = sqliteTable(
       sql`${table.state} IN ('pending', 'delivered', 'rejected', 'delivery_unknown', 'resend_queued', 'closed')`),
   ],
 );
+
+/**
+ * The oldest build allowed to open this database: one whose newest migration is at least
+ * `floor_when`. A contract migration raises it in its own SQL to the `when` of its `expandedIn`
+ * migration, so an older build can tell a database it can still read from one it cannot.
+ * `id` is pinned to 1 by a CHECK so a second row is impossible.
+ */
+export const mcodeSchemaCompatibility = sqliteTable(
+  "mcode_schema_compatibility",
+  {
+    id: integer("id").primaryKey().notNull().default(1),
+    floorWhen: integer("floor_when").notNull(),
+    raisedBy: text("raised_by").notNull(),
+  },
+  (table) => [check("mcode_schema_compatibility_single_row", sql`${table.id} = 1`)],
+);

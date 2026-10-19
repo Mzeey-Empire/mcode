@@ -200,14 +200,29 @@ describe("successful database migration recovery", () => {
   });
 
   it("keeps five generations and preserves public text identifiers", () => {
-    const originalDatabase = new Database(databasePath, { strict: true });
-    originalDatabase.exec("CREATE TABLE records (id TEXT PRIMARY KEY)");
-    originalDatabase
-      .prepare("INSERT INTO records (id) VALUES (?)")
-      .run("thread-public-id");
-    originalDatabase.close(true);
+    const steps = NodePath.join(directory, "drizzle-steps");
+    NodeFS.mkdirSync(NodePath.join(steps, "meta"), { recursive: true });
+    const entries: Array<{ idx: number; version: string; when: number; tag: string; breakpoints: boolean }> = [];
+    const addMigration = (sql: string): void => {
+      const idx = entries.length;
+      const tag = `${String(idx).padStart(4, "0")}_step`;
+      entries.push({ idx, version: "6", when: idx + 1, tag, breakpoints: true });
+      NodeFS.writeFileSync(NodePath.join(steps, `${tag}.sql`), sql);
+      NodeFS.writeFileSync(
+        NodePath.join(steps, "meta", "_journal.json"),
+        JSON.stringify({ version: "7", dialect: "sqlite", entries }),
+      );
+    };
+    process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = steps;
+    addMigration([
+      "CREATE TABLE records (id TEXT PRIMARY KEY);",
+      "--> statement-breakpoint",
+      "INSERT INTO records (id) VALUES ('thread-public-id');",
+    ].join("\n"));
+    openDatabase({ dbPath: databasePath }).close(true);
 
-    for (let generation = 0; generation < 7; generation++) {
+    for (let generation = 1; generation <= 7; generation++) {
+      addMigration(`CREATE TABLE generation_${generation} (id INTEGER);`);
       const upgradedDatabase = openDatabase({ dbPath: databasePath });
       expect(upgradedDatabase.prepare("SELECT id FROM records").get()).toEqual({
         id: "thread-public-id",

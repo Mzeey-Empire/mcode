@@ -1,31 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const copyFailure = vi.hoisted(() => ({ walSource: "" }));
-
-vi.mock("node:fs", async (importOriginal) => {
-  const original = await importOriginal<typeof import("node:fs")>();
-  return {
-    ...original,
-    copyFileSync(source: NodeJS.ArrayBufferView | string | URL, destination: NodeJS.ArrayBufferView | string | URL, mode?: number) {
-      if (String(source) === copyFailure.walSource) {
-        throw new Error("forced WAL copy failure");
-      }
-      original.copyFileSync(source, destination, mode);
-    },
-  };
-});
-
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createMigrationBackup,
-  pruneMigrationBackups,
-  restoreMigrationBackupAfterFailure,
-  restoreMigrationBackup,
-} from "../migration-backup.js";
+import { createMigrationBackup, pruneMigrationBackups } from "../migration-backup.js";
 
 describe("migration-backup", () => {
   let dir: string;
@@ -38,9 +17,29 @@ describe("migration-backup", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    copyFailure.walSource = "";
     NodeFS.rmSync(dir, { recursive: true, force: true });
   });
+
+  function writeDatabase(path: string, body: string): void {
+    const database = new Database(path, { strict: true });
+    try {
+      database.exec("CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, body TEXT NOT NULL)");
+      database.prepare("INSERT OR REPLACE INTO records (id, body) VALUES ('row', ?)").run(body);
+    } finally {
+      database.close(true);
+    }
+  }
+
+  function bodyIn(path: string): unknown {
+    const database = new Database(path, { readonly: true, strict: true });
+    try {
+      return database.query("SELECT body FROM records WHERE id = 'row'").get();
+    } finally {
+      database.close(true);
+    }
+  }
+
+  const backupFiles = (): string[] => NodeFS.readdirSync(dir).filter((name) => name.startsWith("mcode.db.bak-"));
 
   it("returns null for an in-memory DB and creates no files", () => {
     const result = createMigrationBackup(":memory:");
@@ -54,20 +53,21 @@ describe("migration-backup", () => {
   });
 
   it("rejects a migration before backup creation when five generations cannot fit", () => {
-    NodeFS.writeFileSync(dbPath, "1234567890");
+    writeDatabase(dbPath, "preserved");
+    const size = BigInt(NodeFS.statSync(dbPath).size);
 
     expect(() =>
       createMigrationBackup(dbPath, {
-        availableBytes: 49n,
+        availableBytes: size * 5n - 1n,
         retainedGenerations: 5,
       }),
-    ).toThrow(/requires 50 bytes.*49 bytes available/);
+    ).toThrow(new RegExp(`requires ${size * 5n} bytes.*${size * 5n - 1n} bytes available`));
 
     expect(NodeFS.readdirSync(dir)).toEqual(["mcode.db"]);
   });
 
   it("requires space for only one new copy when five generations exist", () => {
-    NodeFS.writeFileSync(dbPath, "1234567890");
+    writeDatabase(dbPath, "preserved");
     for (let generation = 1; generation <= 5; generation++) {
       NodeFS.writeFileSync(
         NodePath.join(dir, `mcode.db.bak-${generation}`),
@@ -76,30 +76,32 @@ describe("migration-backup", () => {
     }
 
     const backupPath = createMigrationBackup(dbPath, {
-      availableBytes: 10n,
+      availableBytes: BigInt(NodeFS.statSync(dbPath).size),
       retainedGenerations: 5,
     });
 
     expect(backupPath).not.toBeNull();
   });
 
-  it("copies the DB file and a present WAL sidecar", () => {
-    NodeFS.writeFileSync(dbPath, "DBCONTENT");
-    NodeFS.writeFileSync(`${dbPath}-wal`, "WALCONTENT");
+  it("writes a backup that opens as a database and passes the integrity check", () => {
+    writeDatabase(dbPath, "preserved");
 
-    const backupPath = createMigrationBackup(dbPath);
-    expect(backupPath).not.toBeNull();
-    expect(NodeFS.readFileSync(backupPath!, "utf-8")).toBe("DBCONTENT");
-    expect(NodeFS.readFileSync(`${backupPath}-wal`, "utf-8")).toBe("WALCONTENT");
+    const backupPath = createMigrationBackup(dbPath)!;
+
+    const backup = new Database(backupPath, { readonly: true, strict: true });
+    try {
+      expect(backup.query("PRAGMA integrity_check").all()).toEqual([{ integrity_check: "ok" }]);
+    } finally {
+      backup.close(true);
+    }
+    expect(bodyIn(backupPath)).toEqual({ body: "preserved" });
   });
 
-  it("removes both partial backup files when copying the WAL fails", () => {
-    NodeFS.writeFileSync(dbPath, "DBCONTENT");
-    NodeFS.writeFileSync(`${dbPath}-wal`, "WALCONTENT");
-    copyFailure.walSource = `${dbPath}-wal`;
+  it("removes the partial backup when the source cannot be copied", () => {
+    NodeFS.writeFileSync(dbPath, "not a sqlite database ".repeat(50));
 
-    expect(() => createMigrationBackup(dbPath)).toThrow("forced WAL copy failure");
-    expect(NodeFS.readdirSync(dir).filter((name) => name.startsWith("mcode.db.bak-"))).toEqual([]);
+    expect(() => createMigrationBackup(dbPath)).toThrow();
+    expect(backupFiles()).toEqual([]);
   });
 
   it("backs up a committed WAL row that has not been checkpointed into the main file", () => {
@@ -127,100 +129,43 @@ describe("migration-backup", () => {
     }
   });
 
-  it("restores DB content and WAL while clearing stale sidecars", () => {
-    NodeFS.writeFileSync(dbPath, "ORIGINAL");
-    NodeFS.writeFileSync(`${dbPath}-wal`, "ORIG_WAL");
-    const backupPath = createMigrationBackup(dbPath)!;
+  it("leaves a write that another connection has not committed out of the backup", () => {
+    const writer = new Database(dbPath, { strict: true });
+    try {
+      writer.exec(`
+        PRAGMA journal_mode = WAL;
+        CREATE TABLE records (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+        INSERT INTO records (id, body) VALUES ('committed', 'kept');
+        BEGIN;
+        INSERT INTO records (id, body) VALUES ('in-flight', 'not committed');
+      `);
 
-    // Simulate a failed migration: main file mutated, sidecars dirty.
-    NodeFS.writeFileSync(dbPath, "PARTIALLY_MUTATED");
-    NodeFS.writeFileSync(`${dbPath}-wal`, "STALE_WAL");
-    NodeFS.writeFileSync(`${dbPath}-shm`, "STALE_SHM");
+      const backupPath = createMigrationBackup(dbPath)!;
 
-    restoreMigrationBackup(backupPath, dbPath);
-
-    expect(NodeFS.readFileSync(dbPath, "utf-8")).toBe("ORIGINAL");
-    expect(NodeFS.readFileSync(`${dbPath}-wal`, "utf-8")).toBe("ORIG_WAL");
-    // SHM is regenerable; restore must not leave a stale one in place.
-    expect(NodeFS.readdirSync(dir).filter((f) => f.endsWith("-shm"))).toEqual([]);
+      const backup = new Database(backupPath, { readonly: true, strict: true });
+      try {
+        expect(backup.query("PRAGMA integrity_check").all()).toEqual([{ integrity_check: "ok" }]);
+        expect(backup.query("SELECT id FROM records ORDER BY id").all()).toEqual([{ id: "committed" }]);
+      } finally {
+        backup.close(true);
+      }
+    } finally {
+      writer.close(true);
+    }
   });
 
   it("creates distinct generations when backups share a timestamp", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-09T12:00:00.000Z"));
-    NodeFS.writeFileSync(dbPath, "generation one");
+    writeDatabase(dbPath, "generation one");
     const firstBackup = createMigrationBackup(dbPath)!;
 
-    NodeFS.writeFileSync(dbPath, "generation two");
+    writeDatabase(dbPath, "generation two");
     const secondBackup = createMigrationBackup(dbPath)!;
 
     expect(secondBackup).not.toBe(firstBackup);
-    expect(NodeFS.readFileSync(firstBackup, "utf-8")).toBe("generation one");
-    expect(NodeFS.readFileSync(secondBackup, "utf-8")).toBe("generation two");
-  });
-
-  it("restores public text identifiers after a migration failure", () => {
-    const originalError = new Error("forced migration failure");
-    let database = new Database(dbPath, { strict: true });
-    database.exec("CREATE TABLE records (id TEXT PRIMARY KEY)");
-    database.prepare("INSERT INTO records (id) VALUES (?)").run("thread-public-id");
-    database.close(true);
-
-    const backupPath = createMigrationBackup(dbPath)!;
-    database = new Database(dbPath, { strict: true });
-    database.prepare("UPDATE records SET id = ?").run("mutated-id");
-    database.close(true);
-
-    expect(() =>
-      restoreMigrationBackupAfterFailure(backupPath, dbPath, originalError),
-    ).toThrow(originalError);
-
-    database = new Database(dbPath, { strict: true });
-    expect(database.prepare("SELECT id FROM records").get()).toEqual({
-      id: "thread-public-id",
-    });
-    database.close(true);
-  });
-
-  it("retains five recoverable generations after repeated failed migrations", () => {
-    let database = new Database(dbPath, { strict: true });
-    database.exec("CREATE TABLE records (id TEXT PRIMARY KEY)");
-    database.prepare("INSERT INTO records (id) VALUES (?)").run("preserved-id");
-    database.close(true);
-
-    for (let attempt = 0; attempt < 7; attempt++) {
-      const backupPath = createMigrationBackup(dbPath)!;
-      database = new Database(dbPath, { strict: true });
-      database.prepare("UPDATE records SET id = ?").run(`mutated-${attempt}`);
-      database.close(true);
-
-      expect(() => restoreMigrationBackupAfterFailure(backupPath, dbPath, new Error("migration failed"))).toThrow("migration failed");
-    }
-
-    expect(NodeFS.readdirSync(dir).filter((name) => name.startsWith("mcode.db.bak-") && !name.endsWith("-wal"))).toHaveLength(5);
-    database = new Database(dbPath, { readonly: true, strict: true });
-    expect(database.query("SELECT id FROM records").get()).toEqual({ id: "preserved-id" });
-    database.close(true);
-  });
-
-  it("reports both the migration and restore failures", () => {
-    NodeFS.writeFileSync(dbPath, "usable database");
-    const backupPath = createMigrationBackup(dbPath)!;
-    const migrationError = new Error("forced migration failure");
-    NodeFS.rmSync(backupPath);
-
-    let reportedError: unknown;
-    try {
-      restoreMigrationBackupAfterFailure(backupPath, dbPath, migrationError);
-    } catch (error) {
-      reportedError = error;
-    }
-
-    expect(reportedError).toBeInstanceOf(AggregateError);
-    expect(reportedError).toMatchObject({
-      message: "Database migration failed and automatic restore failed.",
-      errors: [migrationError, expect.any(Error)],
-    });
+    expect(bodyIn(firstBackup)).toEqual({ body: "generation one" });
+    expect(bodyIn(secondBackup)).toEqual({ body: "generation two" });
   });
 
   it("retains exactly five recent backup generations with their WALs", () => {
@@ -270,13 +215,12 @@ describe("migration-backup", () => {
   });
 
   it("does nothing when keep is larger than the number of backups", () => {
-    NodeFS.writeFileSync(dbPath, "DB");
+    writeDatabase(dbPath, "preserved");
     createMigrationBackup(dbPath);
 
     pruneMigrationBackups(dbPath, 10);
 
-    const remaining = NodeFS.readdirSync(dir).filter((f) => f.startsWith("mcode.db.bak-"));
-    expect(remaining).toHaveLength(1);
+    expect(backupFiles()).toHaveLength(1);
   });
 
   it("rejects negative keep values", () => {

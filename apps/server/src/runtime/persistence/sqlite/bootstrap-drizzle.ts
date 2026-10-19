@@ -10,7 +10,8 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 const PREVIOUS_MIGRATION_TAG = "0041_index_completed_thread_cleanup";
-const SUBAGENT_IDENTITY_MIGRATION_TAG = "0042_supreme_terrax";
+/** The migration {@link reconcileSubagentIdentityMigration} records on behalf of the previous release. */
+export const SUBAGENT_IDENTITY_MIGRATION_TAG = "0042_supreme_terrax";
 
 type JournalEntry = {
   tag: string;
@@ -85,6 +86,11 @@ function baselineAlreadyApplied(db: Database): boolean {
  *
  * The CREATE + INSERT runs in a single transaction so an interrupted
  * bootstrap can never leave the tracking table in a half-initialised state.
+ *
+ * The ledger guard only plans a baseline for a database that holds every object 0000 creates
+ * (the `workspaces` sentinel among them) and nothing a later migration creates. Anything else
+ * that has tables but no receipts is refused before this runs, because recording only 0000
+ * would make `migrate()` replay the later migrations over tables that already exist.
  *
  * @param db Open SQLite database (foreign keys enabled by caller).
  * @param drizzleDir Absolute or cwd-relative path to `apps/server/drizzle`.

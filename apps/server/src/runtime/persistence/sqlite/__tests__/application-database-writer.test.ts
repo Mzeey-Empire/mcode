@@ -16,6 +16,7 @@ import { WorkspaceStore } from "../../../../features/projects/persistence/worksp
 import { WorkspaceRepo } from "../../../../features/projects/persistence/workspace-repo.js";
 import { workspaces } from "../schema.js";
 import type { ApplicationDatabaseWriterResponse } from "../application-database-writer-protocol.js";
+import { DatabaseStartupRefusal } from "../startup-refusal.js";
 
 describe("application SQLite owner", () => {
   let directory: string;
@@ -83,6 +84,23 @@ describe("application SQLite owner", () => {
       expect(freshReader.query("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
       expect(() => freshReader.run("DELETE FROM workspaces")).toThrow(/readonly/);
     } finally { freshReader.close(true); }
+  });
+
+  it("hands the typed refusal across the worker boundary when the ledger is damaged", async () => {
+    const damagedPath = NodePath.join(directory, "damaged.sqlite");
+    openDatabase({ dbPath: damagedPath }).close(true);
+    const damager = new Database(damagedPath, { strict: true });
+    try {
+      // Drizzle's `id` column is not a rowid alias, so the rows are addressed by rowid.
+      damager.run("DELETE FROM __drizzle_migrations WHERE rowid IN (SELECT rowid FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 2)");
+    } finally { damager.close(true); }
+
+    const refused = new ApplicationDatabaseWriter(damagedPath, undefined, { bootstrap: true });
+    const failure = await refused.whenReady().then(() => undefined, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(DatabaseStartupRefusal);
+    expect(failure).toMatchObject({ refusal: { kind: "ledger-damaged", databasePath: damagedPath } });
+    await expect(refused.close()).rejects.toBeInstanceOf(DatabaseStartupRefusal);
   });
 
   it("faults the owner while retaining readonly main reads and restores following writes", async () => {

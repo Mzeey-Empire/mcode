@@ -55,10 +55,23 @@ const reviewedMigrations: readonly ReviewedMigration[] = [
   },
 ];
 
+/** The migrations {@link repairLostConversationWriterReceipts} can restore receipts for. */
+export const REVIEWED_MIGRATION_TAGS: readonly string[] = reviewedMigrations.map((migration) => migration.tag);
+
 const anchor = {
   tag: "0060_modern_tiger_shark", when: 1789133181264,
   hash: "8bfd22072f8ab59b8faa2e8812fba89d9b3a999054f84bb1ae425b7453e94277",
 };
+
+/**
+ * True when the ledger holds the trusted 0060 receipt that the 0061-0066 repair builds on.
+ * The guard checks this before it plans the repair; the repair checks it again while it writes.
+ */
+export function hasConversationWriterAnchor(
+  receipts: ReadonlyArray<Readonly<{ hash: string; createdAt: number | null }>>,
+): boolean {
+  return receipts.some((receipt) => receipt.createdAt === anchor.when && receipt.hash === anchor.hash);
+}
 
 const journalSchema = lazySchema(() => z.object({
   entries: z.array(z.object({ tag: z.string(), when: z.number().int().positive() })),

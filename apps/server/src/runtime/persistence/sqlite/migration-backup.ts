@@ -1,18 +1,11 @@
-/**
- * Pre-migration safety net: copies the SQLite file (and its WAL sidecar) to a
- * timestamped backup before `migrate()` runs, so a botched migration can be
- * fully restored even if the schema mutation itself committed partial damage
- * before throwing. Old backups are pruned to a small ring so disk pressure
- * stays bounded over many app starts.
- */
-
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import { Database } from "bun:sqlite";
 
-/** Sidecar files SQLite may write next to the main DB in WAL mode. */
 const WAL_SUFFIX = "-wal";
-const SHM_SUFFIX = "-shm";
+/** A writer may hold the file briefly while it checkpoints or closes. */
+const BACKUP_BUSY_TIMEOUT_MS = 5000;
 
 /** Number of recoverable database generations retained after upgrades. */
 export const MIGRATION_BACKUP_RETENTION = 5;
@@ -73,12 +66,13 @@ export function assertMigrationBackupSpace(
 }
 
 /**
- * Copy `dbPath` (and its WAL sidecar, if present) to a timestamped backup.
+ * Copy `dbPath` to a timestamped backup with `VACUUM INTO`, which reads one consistent snapshot
+ * through SQLite itself (including committed pages still in the WAL). A raw file copy could pair
+ * the main file with a WAL from a different moment.
  *
- * Returns the backup path on success or `null` when there is nothing to back
- * up (in-memory database, or the file does not exist yet because this is a
- * first-run install). The caller must make sure that no process writes to the
- * database while the main file and its WAL are copied.
+ * Returns the backup path on success or `null` when there is nothing to back up (in-memory
+ * database, or the file does not exist yet because this is a first-run install). A failed copy
+ * leaves no partial file behind.
  */
 export function createMigrationBackup(
   dbPath: string,
@@ -91,60 +85,17 @@ export function createMigrationBackup(
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const backupPath = `${dbPath}.bak-${stamp}-${NodeCrypto.randomUUID()}`;
-  NodeFS.copyFileSync(dbPath, backupPath);
-
-  const walSrc = `${dbPath}${WAL_SUFFIX}`;
+  const source = new Database(dbPath, { readonly: true, strict: true });
   try {
-    if (NodeFS.existsSync(walSrc)) {
-      NodeFS.copyFileSync(walSrc, `${backupPath}${WAL_SUFFIX}`);
-    }
+    source.run(`PRAGMA busy_timeout = ${BACKUP_BUSY_TIMEOUT_MS}`);
+    source.run("VACUUM INTO ?", [backupPath]);
   } catch (error) {
-    for (const suffix of ["", WAL_SUFFIX]) {
-      const partial = `${backupPath}${suffix}`;
-      if (NodeFS.existsSync(partial)) NodeFS.unlinkSync(partial);
-    }
+    NodeFS.rmSync(backupPath, { force: true });
     throw error;
+  } finally {
+    source.close(true);
   }
   return backupPath;
-}
-
-/**
- * Restore a backup created by `createMigrationBackup` over the live DB path.
- *
- * Removes any current `-wal` / `-shm` sidecars first so SQLite cannot replay
- * a journal from the failed migration over the restored file. The shared
- * memory file is regenerated automatically on next open.
- */
-export function restoreMigrationBackup(backupPath: string, dbPath: string): void {
-  for (const suffix of [WAL_SUFFIX, SHM_SUFFIX]) {
-    const sidecar = `${dbPath}${suffix}`;
-    if (NodeFS.existsSync(sidecar)) NodeFS.unlinkSync(sidecar);
-  }
-
-  NodeFS.copyFileSync(backupPath, dbPath);
-
-  const walBackup = `${backupPath}${WAL_SUFFIX}`;
-  if (NodeFS.existsSync(walBackup)) {
-    NodeFS.copyFileSync(walBackup, `${dbPath}${WAL_SUFFIX}`);
-  }
-}
-
-/** Restore the usable generation, then rethrow the migration failure. */
-export function restoreMigrationBackupAfterFailure(
-  backupPath: string,
-  dbPath: string,
-  migrationError: unknown,
-): never {
-  try {
-    restoreMigrationBackup(backupPath, dbPath);
-    pruneMigrationBackups(dbPath);
-  } catch (restoreError) {
-    throw new AggregateError(
-      [migrationError, restoreError],
-      "Database migration failed and automatic restore failed.",
-    );
-  }
-  throw migrationError;
 }
 
 /**

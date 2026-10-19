@@ -1,4 +1,4 @@
-import type { CanonicalAgentEventEnvelope, CanonicalAgentRevision } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope, CanonicalAgentRevision, StartupRefusal } from "@mcode/contracts";
 import type { SavedProgressReceipt } from "../execution/thread-progress-types.js";
 import type { CanonicalProviderProjection } from "./canonical-provider-projection.js";
 import type { CanonicalAcceptedWriteInput } from "./canonical-accepted-write.js";
@@ -10,6 +10,18 @@ import type {
   CanonicalAgentEventDraft,
   ParentNarrativeRecoveryCommitInput,
 } from "./canonical-agent-boundary.js";
+
+/**
+ * An error as it crosses the writer worker boundary. `refusal` is set only when the worker
+ * refused to start on a database, so the parent can rebuild the typed error instead of parsing text.
+ */
+export type WriterFailure = {
+  name: string;
+  message: string;
+  code?: string;
+  retryAfterSeconds?: number;
+  refusal?: StartupRefusal;
+};
 
 /** Upper bound for one committed semantic publication message. */
 export const SEMANTIC_PUBLICATION_PAGE_SIZE = 64;
@@ -82,4 +94,4 @@ export type CanonicalWriterResponse =
   | (Correlation & { kind: "operation-acknowledged" })
   | (Correlation & { kind: "closed" })
   | (Correlation & { kind: "failed"; reason: "open-failed" | "write-failed" | "operation-conflict" | "receipt-capacity";
-      failure?: { name: string; message: string; code?: string } });
+      failure?: WriterFailure });

@@ -4,6 +4,7 @@ import * as NodeV8 from "node:v8";
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
 import type { CanonicalWriterRequest, CanonicalWriterResponse } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
+import { DatabaseStartupRefusal } from "./startup-refusal.js";
 import type { DatabaseWriteOperation } from "./database-write-operation.js";
 import type { ApplicationDatabaseWriterRequest, ApplicationDatabaseWriterResponse } from "./application-database-writer-protocol.js";
 
@@ -297,6 +298,7 @@ function matchesResponse(request: ApplicationDatabaseWriterRequest, response: Ap
 function responseError(response: ApplicationDatabaseWriterResponse): Error {
   if (response.kind !== "failed" && response.kind !== "ordinary-failed") return new Error("Unexpected database writer response");
   const failure = response.failure;
+  if (failure?.refusal) return new DatabaseStartupRefusal(failure.refusal);
   const error = new Error(failureMessage(response));
   if (!failure) return error;
   error.name = failure.name;

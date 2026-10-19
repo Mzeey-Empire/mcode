@@ -4,6 +4,7 @@
  */
 
 import { setupContainer } from "../composition/container.js";
+import { runStartupOrExit, startupFailureTarget } from "./startup-failure.js";
 import { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { createWsServer } from "../transport/ws-server.js";
 import { broadcast, broadcastTerminalData, maxBufferedAmount, onSessionChange, sessionCount } from "../transport/push.js";
@@ -329,7 +330,7 @@ applyDevGitCheckoutEnv();
 recordStartupCheckpoint("checkout environment resolved");
 
 // Initialize DI container (PtyPidRegistry needs the data dir path at construction time)
-const container = await setupContainer(getMcodeDir());
+const container = await runStartupOrExit(() => setupContainer(getMcodeDir()), startupFailureTarget(getMcodeDir()));
 recordStartupCheckpoint("dependency container initialized");
 
 const browserAutomationCredentials = container.resolve(BrowserAutomationCredentialRegistry);

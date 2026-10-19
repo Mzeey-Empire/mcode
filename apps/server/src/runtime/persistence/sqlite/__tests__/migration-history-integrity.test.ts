@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { openDatabase } from "../database.js";
+import type { StartupRefusal } from "@mcode/contracts";
+import { DatabaseStartupRefusal } from "../startup-refusal.js";
 
 const journalSchema = z.object({
   entries: z.array(z.object({
@@ -253,13 +255,33 @@ function createDamagedFixture(options: Parameters<typeof createUpgradedFixture>[
   });
 }
 
+function captureFailure(action: () => void): unknown {
+  try {
+    action();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("Expected the action to fail");
+}
+
+function expectStartupRefusal(options: Parameters<typeof withDatabase>[0], refusal: Partial<StartupRefusal>): void {
+  const before = NodeFS.readFileSync(options.dbPath);
+  const failure = captureFailure(() => withDatabase(options, () => {}));
+  expect(failure).toBeInstanceOf(DatabaseStartupRefusal);
+  expect(failure).toMatchObject({ refusal });
+  expect(NodeFS.readFileSync(options.dbPath).equals(before)).toBe(true);
+}
+
 function expectRejectedRecovery(options: Parameters<typeof withDatabase>[0], snapshot: {
   ledger: z.infer<typeof ledgerSchema>;
   schema: z.infer<typeof schemaSnapshotSchema>;
 }, affectedObject: string): void {
-  expect(() => withDatabase(options, () => {})).toThrow(
-    new RegExp(`^Migration history repair refused:.*${affectedObject}`),
-  );
+  const failure = captureFailure(() => withDatabase(options, () => {}));
+  expect(failure).toBeInstanceOf(DatabaseStartupRefusal);
+  expect(failure).toMatchObject({
+    refusal: { kind: "migration-failed", backupPath: expect.any(String) },
+    message: expect.stringMatching(new RegExp(`Migration history repair refused:.*${affectedObject}`)),
+  });
   inspectSavedDatabase(options.dbPath, (database) => {
     expect(readLedger(database)).toEqual(snapshot.ledger);
     expect(readSchema(database)).toEqual(snapshot.schema);
@@ -289,7 +311,8 @@ describe("migration history integrity", () => {
     const older = copyCatalogue({ root: directory, lastIndex: 60, lineEndings: "lf" });
     const originalLedger = createUpgradedFixture({ dbPath: databasePath, catalogue: newer });
 
-    withDatabase({ dbPath: databasePath, catalogue: older }, (database) => {
+    expectStartupRefusal({ dbPath: databasePath, catalogue: older }, { kind: "database-newer" });
+    withDatabase({ dbPath: databasePath, catalogue: newer }, (database) => {
       expect(readLedger(database)).toEqual(originalLedger);
       expectFixtureData(database);
     });
@@ -306,7 +329,10 @@ describe("migration history integrity", () => {
     });
   });
 
-  it.each(["unrecognized historical", "future"])("preserves an %s receipt across older and current catalogues", (kind) => {
+  it.each([
+    { kind: "unrecognized historical", refusal: "database-unknown-history" },
+    { kind: "future", refusal: "database-newer" },
+  ] as const)("refuses an $kind receipt under older and current catalogues without touching the file", ({ kind, refusal }) => {
     const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
     createUpgradedFixture({ dbPath: databasePath, catalogue: previous });
     const ledger = withDatabase({ dbPath: databasePath, catalogue: previous }, (database) => {
@@ -318,11 +344,9 @@ describe("migration history integrity", () => {
     });
     const older = copyCatalogue({ root: directory, lastIndex: 60, lineEndings: "lf" });
 
+    expect(ledger.some((receipt) => receipt.hash === `unrecognized-${kind}-receipt`)).toBe(true);
     for (const catalogue of [older, previous]) {
-      withDatabase({ dbPath: databasePath, catalogue }, (database) => {
-        expect(readLedger(database)).toEqual(ledger);
-        expectFixtureData(database);
-      });
+      expectStartupRefusal({ dbPath: databasePath, catalogue }, { kind: refusal });
     }
   });
 
@@ -551,7 +575,7 @@ describe("migration history integrity", () => {
           ON thought_segments(message_id, sort_order, id) WHERE is_final_response <> 1;
       `),
     },
-  ])("rejects orphaned receipts with $label and restores the original database", ({ object, damage }) => {
+  ])("rejects orphaned receipts with $label and leaves the original database unchanged", ({ object, damage }) => {
     const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
     const snapshot = createDamagedFixture({ dbPath: databasePath, catalogue: previous }, damage);
     const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });
@@ -568,7 +592,7 @@ describe("migration history integrity", () => {
     expectRejectedRecovery({ dbPath: databasePath, catalogue: current }, snapshot, "0061_hard_human_cannonball");
   });
 
-  it("restores the entire old ledger and schema when 0067 fails after receipt recovery", () => {
+  it("leaves the entire old ledger and schema when 0067 fails after receipt recovery", () => {
     const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
     const snapshot = createDamagedFixture({ dbPath: databasePath, catalogue: previous }, () => {});
     const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });

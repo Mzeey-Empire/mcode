@@ -1,5 +1,8 @@
 import type { Database } from "bun:sqlite";
 
+/** How long a connection waits for a lock held by another connection, once its policy is applied. */
+export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
 /** Active SQLite page-cache budget in kibibytes. */
 export const SQLITE_ACTIVE_CACHE_KIB = 2_048;
 
@@ -31,7 +34,7 @@ export function applySQLiteConnectionPolicy(
   if (isFileBacked) {
     // The busy handler must exist before the first statement. Reading the schema
     // for the WAL pragma waits on a lock held by another connection's final close.
-    db.run("PRAGMA busy_timeout = 5000");
+    db.run(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
     db.run("PRAGMA journal_mode = WAL");
     applySQLiteCacheBudget(db, "active");
     db.run("PRAGMA mmap_size = 0");
@@ -41,7 +44,7 @@ export function applySQLiteConnectionPolicy(
 
   if (isFileBacked) {
     assertPragmaValue(db, "journal_mode", "wal");
-    assertPragmaValue(db, "busy_timeout", 5_000);
+    assertPragmaValue(db, "busy_timeout", SQLITE_BUSY_TIMEOUT_MS);
     assertPragmaValue(db, "mmap_size", 0);
   }
   assertPragmaValue(db, "foreign_keys", 1);

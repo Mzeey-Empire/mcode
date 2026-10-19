@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CanonicalWriterRequest, CanonicalWriterResponse } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
+import type { CanonicalWriterRequest, CanonicalWriterResponse, WriterFailure } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 
 /** Ordinary write envelope. Operation-specific schemas parse its input in the worker. */
 export const OrdinaryDatabaseWriteRequestSchema = z.object({
@@ -23,4 +23,4 @@ export type ApplicationDatabaseWriterRequest = CanonicalWriterRequest | z.infer<
 export type ApplicationDatabaseWriterResponse = CanonicalWriterResponse
   | { kind: "ordinary-written"; requestId: string; name: string; result: unknown }
   | { kind: "ordinary-failed"; requestId: string; name: string;
-      failure: { name: string; message: string; code?: string; retryAfterSeconds?: number } };
+      failure: WriterFailure };
