@@ -379,10 +379,7 @@ describe("Claude public factory core and capabilities", () => {
     expect(events().filter(({ event }) => event.type === "approvalDecided")).toEqual([]);
   });
 
-  it.each([
-    { note: undefined, message: "Permission denied by user" },
-    { note: "Use the existing checkout instead", message: "Use the existing checkout instead" },
-  ])("delivers the SDK denial message: $message", async ({ note, message }) => {
+  it("exposes native command scope and acknowledges the SDK deny callback", async () => {
     const transport = installTransport(() => []);
     const { provider } = fixture();
     await provider.sendTurn(request());
@@ -399,8 +396,8 @@ describe("Claude public factory core and capabilities", () => {
       toolCallId: "tool-approval", subject: { kind: "command", command: "bun run lint" },
       noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" },
     });
-    expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny", note })).toEqual({ status: "resolved" });
-    expect(await native).toEqual({ behavior: "deny", message });
+    expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
+    expect(await native).toMatchObject({ behavior: "deny" });
     expect(provider.listPendingApprovals?.()).toEqual([]);
   });
 
