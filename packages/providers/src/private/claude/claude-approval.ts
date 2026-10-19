@@ -23,8 +23,7 @@ export async function claudeApprovalBody(toolName: string, input: Record<string,
   choices.push({ id: "deny", intent: "deny", label: "Deny" });
   return { requestedAt: new Date().toISOString(), toolCallId: options.toolUseID,
     reason: options.decisionReason, subject: await claudeSubject(toolName, input, cwd),
-    choices, noteDelivery: "native", noteChoiceId: "deny",
-    origin: options.origin ?? (options.agentID ? { kind: "subagent", label: "Subagent" } : { kind: "agent" }) };
+    choices, noteChoiceId: "deny", origin: options.origin ?? (options.agentID ? { kind: "subagent", label: "Subagent" } : { kind: "agent" }) };
 }
 
 function sessionDescription(updates: PermissionUpdate[] | undefined): string | undefined {

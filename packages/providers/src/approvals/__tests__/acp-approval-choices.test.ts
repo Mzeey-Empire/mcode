@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApprovalRequestBodySchema } from "@mcode/contracts";
-import { acpApprovalChoices, acpNoteChoiceId } from "../../approval-scope.js";
+import { acpApprovalChoices } from "../../approval-scope.js";
 
 type AcpOption = Parameters<typeof acpApprovalChoices>[0][number];
 
@@ -8,7 +8,7 @@ function body(options: AcpOption[]) {
   const choices = acpApprovalChoices(options);
   return {
     requestedAt: "2026-10-13T12:00:00.000Z", subject: { kind: "command" as const, command: "git status" },
-    choices, noteDelivery: "next_turn" as const, noteChoiceId: acpNoteChoiceId(options, choices), origin: { kind: "agent" as const },
+    choices, origin: { kind: "agent" as const },
   };
 }
 
@@ -32,7 +32,6 @@ describe("acpApprovalChoices", () => {
 
     expect(ApprovalRequestBodySchema().safeParse(request).success).toBe(true);
     expect(request.choices.find((choice) => choice.intent === "deny")).toEqual({ id: "reject", intent: "deny", label: "Deny" });
-    expect(request.noteChoiceId).toBe("reject");
   });
 
   it("falls back to the synthetic deny when the native reject id cannot be shown", () => {
@@ -42,6 +41,6 @@ describe("acpApprovalChoices", () => {
     ]);
 
     expect(ApprovalRequestBodySchema().safeParse(request).success).toBe(true);
-    expect(request.noteChoiceId).toBe("mcode-deny");
+    expect(request.choices.filter((choice) => choice.intent === "deny").map((choice) => choice.id)).toEqual(["mcode-deny"]);
   });
 });

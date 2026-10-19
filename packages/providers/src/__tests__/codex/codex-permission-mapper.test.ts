@@ -160,7 +160,6 @@ describe("synthesizeCodexApprovalRequest", () => {
       { id: "allow-session", intent: "allow_scoped", label: "Allow for this session" },
       { id: "deny", intent: "deny", label: "Deny" },
     ]);
-    expect(request.noteDelivery).toBe("steer");
   });
 
   it.each([

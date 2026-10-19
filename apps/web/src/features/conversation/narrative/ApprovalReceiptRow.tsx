@@ -75,6 +75,14 @@ export function ApprovalReceiptRow({ receipt }: { receipt: ApprovalReceipt }) {
           <TooltipContent>{receipt.subjectLabel}</TooltipContent>
         </Tooltip>
       ) : null}
+      {receipt.outcome.status === "denied" && receipt.outcome.note ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={<span className="min-w-0 text-fade whitespace-nowrap text-sm leading-5 text-muted">{receipt.outcome.note}</span>}
+          />
+          <TooltipContent>{receipt.outcome.note}</TooltipContent>
+        </Tooltip>
+      ) : null}
     </div>
   );
 }

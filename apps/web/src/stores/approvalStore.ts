@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ApprovalRequest } from "@mcode/contracts";
+import type { ApprovalRequest, ApprovalResponse } from "@mcode/contracts";
 
 /**
  * Pending-approval state. A settled request stays as a tombstone so a late replay of
@@ -8,9 +8,12 @@ import type { ApprovalRequest } from "@mcode/contracts";
  */
 export type StoredApproval = ApprovalRequest & { settled: boolean };
 
+/** An answer the user gives, as opposed to Mcode's automatic denial. */
+export type ApprovalUserResponse = Exclude<ApprovalResponse, { autoDeny: unknown }>;
+
 /** The answer the user picked for one request, kept in the store so it survives a dock remount. */
 export interface ApprovalSubmission {
-  readonly choiceId: string;
+  readonly response: ApprovalUserResponse;
   readonly state: "submitting" | "failed";
 }
 

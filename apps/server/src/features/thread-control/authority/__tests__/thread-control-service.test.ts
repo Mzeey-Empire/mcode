@@ -1234,7 +1234,7 @@ describe("ThreadControlService", () => {
       requestId: "approval-send", threadId: "thread-1", providerId: "claude", requestedAt: "2026-10-10T09:00:00Z",
       subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "target-thread", message: "Needs approval." },
       choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
-      noteDelivery: "none", origin: { kind: "agent" },
+      origin: { kind: "agent" },
     });
     expect(service.listPendingApprovals("target-thread")).toEqual([]);
     const stored = approvals.listPending();

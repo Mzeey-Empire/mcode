@@ -59,8 +59,7 @@ export function copilotApprovalBody(native: PermissionRequest, scope: CopilotSes
   choices.push({ id: "deny", intent: "deny", label: "Deny" });
   return {
     toolCallId: native.toolCallId, requestedAt: new Date().toISOString(), subject: copilotSubject(native),
-    choices,
-    noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" },
+    choices, noteChoiceId: "deny", origin: { kind: "agent" },
   };
 }
 

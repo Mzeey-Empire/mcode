@@ -1,6 +1,6 @@
-import type { ApprovalAnswers, ApprovalRequest } from "@mcode/contracts";
+import type { ApprovalRequest } from "@mcode/contracts";
 import { getTransport } from "@/transport";
-import { useApprovalStore } from "@/stores/approvalStore";
+import { useApprovalStore, type ApprovalUserResponse } from "@/stores/approvalStore";
 import { useThreadStore } from "@/stores/threadStore";
 
 /** Devin's "Switch to Bypass" choice also flips the thread's mode, so later tool calls stop asking. */
@@ -11,13 +11,13 @@ const DEVIN_SWITCH_BYPASS_CHOICE_ID = "switch_bypass";
  * acknowledges it, so the dock advances without waiting for the broadcast. A question
  * request carries its `answers` with the allowing choice.
  */
-export async function submitApprovalChoice(request: ApprovalRequest, choiceId: string, answers?: ApprovalAnswers): Promise<void> {
+export async function submitApprovalChoice(request: ApprovalRequest, response: ApprovalUserResponse): Promise<void> {
   const store = useApprovalStore.getState();
-  store.setSubmission(request.requestId, { choiceId, state: "submitting" });
+  store.setSubmission(request.requestId, { response, state: "submitting" });
   try {
-    const result = await getTransport().respondToApproval(request.requestId, { choiceId, ...(answers ? { answers } : {}) });
+    const result = await getTransport().respondToApproval(request.requestId, response);
     if (result.status === "failed") {
-      store.setSubmission(request.requestId, { choiceId, state: "failed" });
+      store.setSubmission(request.requestId, { response, state: "failed" });
       return;
     }
     if (result.status === "not_pending") {
@@ -25,10 +25,10 @@ export async function submitApprovalChoice(request: ApprovalRequest, choiceId: s
       return;
     }
     store.resolve(request.requestId);
-    if (choiceId === DEVIN_SWITCH_BYPASS_CHOICE_ID) {
+    if (response.choiceId === DEVIN_SWITCH_BYPASS_CHOICE_ID) {
       void useThreadStore.getState().setThreadSettings(request.threadId, { devinMode: "bypass" });
     }
   } catch {
-    store.setSubmission(request.requestId, { choiceId, state: "failed" });
+    store.setSubmission(request.requestId, { response, state: "failed" });
   }
 }

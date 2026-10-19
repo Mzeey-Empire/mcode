@@ -629,7 +629,7 @@ export class ThreadControlService {
 
   /** Resolve a durable delegated-thread approval before provider permission handlers. */
   async respondToApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
-    if (!("autoDeny" in response) && response.choiceId !== "allow" && response.choiceId !== "deny") {
+    if (!("autoDeny" in response) && ((response.choiceId !== "allow" && response.choiceId !== "deny") || response.note)) {
       return this.approvals.listPending().some((approval) => approval.approvalId === requestId)
         ? { status: "failed", message: "The approval choice is unavailable" } : { status: "not_pending" };
     }
@@ -1017,7 +1017,7 @@ export class ThreadControlService {
       subject: { kind: "thread_operation", operation: approval.operation, targetThreadId: approval.threadId,
         ...(approval.operation === "thread_send" ? { message: approval.message } : {}) },
       choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
-      noteDelivery: "none", origin: providerId ? { kind: "agent" } : { kind: "integration", label: "Integration" },
+      origin: providerId ? { kind: "agent" } : { kind: "integration", label: "Integration" },
     };
   }
 

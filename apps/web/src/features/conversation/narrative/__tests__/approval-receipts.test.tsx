@@ -74,6 +74,16 @@ describe("approvalReceiptCopy", () => {
     expect(screen.getByText("Denied automatically · Mcode couldn't read this request")).toBeTruthy();
     expect(screen.queryByText("secret-ish")).toBeNull();
   });
+
+  it("shows the note the user denied with", () => {
+    render(
+      <ApprovalReceiptRow
+        receipt={{ requestId: "r", subjectLabel: "bun run lint", outcome: { status: "denied", choiceLabel: "Deny", note: "Run the tests instead" }, decidedAt: 0 }}
+      />,
+    );
+    expect(screen.getByText("Denied")).toBeTruthy();
+    expect(screen.getByText("Run the tests instead")).toBeTruthy();
+  });
 });
 
 describe("approval receipt position", () => {

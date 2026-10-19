@@ -78,6 +78,11 @@ function dockKeyAction(event: KeyboardEvent): DockKeyAction | undefined {
   return event.key.length === 1 && event.key !== " " ? { kind: "arm", value: 0 } : undefined;
 }
 
+/** A text field owns its keys except the arrows, so a typed note can contain digits and brackets. */
+function textFieldOwnsKey(action: DockKeyAction, event: KeyboardEvent): boolean {
+  return event.target instanceof HTMLInputElement && action.kind !== "move";
+}
+
 /** A question body owns its keys, except `[` and `]` it left unhandled at its first or last question. */
 function questionBodyOwnsKey(active: StoredApproval, action: DockKeyAction, event: KeyboardEvent): boolean {
   if (active.subject.kind !== "question") return false;
@@ -123,14 +128,15 @@ export interface ApprovalDockProps {
  */
 export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, isStopPending, onStop, onFocusComposer }: ApprovalDockProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const rowRefs = useRef<(HTMLElement | null)[]>([]);
   const guardUntilRef = useRef(0);
   const pagedToRef = useRef<string | undefined>(undefined);
   const { active, index, page } = useActiveRequest(requests);
   const [focusedRow, setFocusedRow] = useFocusedRow(active.requestId);
   const submission = useApprovalStore((state) => state.submissions[active.requestId]);
   const title = approvalTitle(active);
-  const noteShown = active.noteDelivery !== "none" && submission?.state !== "submitting";
+  const noteChoiceId = active.noteChoiceId;
+  const rowCount = active.choices.length + (noteChoiceId ? 1 : 0);
 
   const arm = () => { guardUntilRef.current = Date.now() + APPROVAL_ARM_DELAY_MS; };
 
@@ -146,11 +152,17 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
 
   const choose = (choice: ApprovalChoice) => {
     if (Date.now() < guardUntilRef.current || submission?.state === "submitting") return;
-    void submitApprovalChoice(active, choice.id);
+    void submitApprovalChoice(active, { choiceId: choice.id });
+  };
+
+  // Typing a note and pressing Enter is deliberate, so the misclick guard does not apply.
+  const denyWithNote = (note: string) => {
+    if (!noteChoiceId || submission?.state === "submitting") return;
+    void submitApprovalChoice(active, { choiceId: noteChoiceId, note });
   };
 
   const moveFocus = (row: number) => {
-    const target = Math.max(0, Math.min(active.choices.length - 1, row));
+    const target = Math.max(0, Math.min(rowCount - 1, row));
     setFocusedRow(target);
     rowRefs.current[target]?.focus();
   };
@@ -162,6 +174,7 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
   const chooseRow = (row: number) => {
     const choice = active.choices[row];
     if (choice) choose(choice);
+    else if (noteChoiceId && row === active.choices.length) moveFocus(row);
   };
 
   const runKey: Record<DockKeyAction["kind"], (value: number) => void> = {
@@ -174,14 +187,13 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const action = dockKeyAction(event);
-    if (!action || questionBodyOwnsKey(active, action, event)) return;
+    if (!action || questionBodyOwnsKey(active, action, event) || textFieldOwnsKey(action, event)) return;
     event.preventDefault();
     runKey[action.kind](action.value);
   };
 
   const retry = () => {
-    const choice = active.choices.find((item) => item.id === submission?.choiceId);
-    if (choice) void submitApprovalChoice(active, choice.id);
+    if (submission) void submitApprovalChoice(active, submission.response);
   };
 
   const Icon = SUBJECT_ICONS[active.subject.kind];
@@ -217,15 +229,26 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
                 choice={choice}
                 index={row}
                 focused={row === focusedRow}
-                submitting={submission?.state === "submitting" && submission.choiceId === choice.id}
-                dimmed={submission?.state === "submitting" && submission.choiceId !== choice.id}
+                submitting={submission?.state === "submitting" && submission.response.choiceId === choice.id}
+                dimmed={submission?.state === "submitting" && submission.response.choiceId !== choice.id}
                 submittingLabel={submittingLabel(choice)}
                 buttonRef={(element) => { rowRefs.current[row] = element; }}
                 onChoose={() => choose(choice)}
                 onFocus={() => setFocusedRow(row)}
               />
             ))}
-            {noteShown && <ApprovalNoteRow index={active.choices.length} label={noteRowLabel(active)} />}
+            {noteChoiceId && (
+              <ApprovalNoteRow
+                key={active.requestId}
+                index={active.choices.length}
+                label={noteRowLabel(active)}
+                focused={focusedRow === active.choices.length}
+                dimmed={submission?.state === "submitting"}
+                inputRef={(element) => { rowRefs.current[active.choices.length] = element; }}
+                onSubmit={denyWithNote}
+                onFocus={() => setFocusedRow(active.choices.length)}
+              />
+            )}
           </div>
           {submission?.state === "failed" && (
             <div role="alert" className="flex items-center gap-2 text-sm">

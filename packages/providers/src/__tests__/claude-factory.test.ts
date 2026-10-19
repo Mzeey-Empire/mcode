@@ -379,7 +379,10 @@ describe("Claude public factory core and capabilities", () => {
     expect(events().filter(({ event }) => event.type === "approvalDecided")).toEqual([]);
   });
 
-  it("exposes native command scope and acknowledges the SDK deny callback", async () => {
+  it.each([
+    { response: { choiceId: "deny" }, message: "User denied" },
+    { response: { choiceId: "deny", note: "Run bun run test instead" }, message: "The user doesn't want to proceed with this tool use. The tool use was rejected. To tell you how to proceed, the user said:\nRun bun run test instead" },
+  ])("exposes native command scope and sends the deny message $message", async ({ response, message }) => {
     const transport = installTransport(() => []);
     const { provider } = fixture();
     await provider.sendTurn(request());
@@ -394,10 +397,10 @@ describe("Claude public factory core and capabilities", () => {
     });
     expect(pending[0]?.body).toMatchObject({
       toolCallId: "tool-approval", subject: { kind: "command", command: "bun run lint" },
-      noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" },
+      noteChoiceId: "deny", origin: { kind: "agent" },
     });
-    expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
-    expect(await native).toMatchObject({ behavior: "deny" });
+    expect(await provider.resolveApproval?.(pending[0]!.requestId, response)).toEqual({ status: "resolved" });
+    expect(await native).toEqual({ behavior: "deny", message });
     expect(provider.listPendingApprovals?.()).toEqual([]);
   });
 

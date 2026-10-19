@@ -1,3 +1,4 @@
+import { useState, type KeyboardEvent } from "react";
 import type { ApprovalChoice } from "@mcode/contracts";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
@@ -65,12 +66,44 @@ export function ApprovalChoiceRow({ choice, index, focused, submitting, dimmed, 
   );
 }
 
-/** The deny-with-a-note row. It shows its number but stays inert until notes can be delivered. */
-export function ApprovalNoteRow({ index, label }: { readonly index: number; readonly label: string }) {
+/** Props for {@link ApprovalNoteRow}. */
+export interface ApprovalNoteRowProps {
+  readonly index: number;
+  readonly label: string;
+  readonly focused: boolean;
+  /** An answer is in flight. */
+  readonly dimmed: boolean;
+  readonly inputRef: (element: HTMLInputElement | null) => void;
+  readonly onSubmit: (note: string) => void;
+  readonly onFocus: () => void;
+}
+
+/** Numbered deny-with-a-note row. Enter denies and sends the note to the provider. */
+export function ApprovalNoteRow({ index, label, focused, dimmed, inputRef, onSubmit, onFocus }: ApprovalNoteRowProps) {
+  const [note, setNote] = useState("");
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    const trimmed = note.trim();
+    if (trimmed && !dimmed) onSubmit(trimmed);
+  };
   return (
-    <div aria-disabled="true" className={ROW_CLASS}>
+    <label className={cn(ROW_CLASS, "cursor-text focus-within:bg-hover", focused && "bg-hover", dimmed && "opacity-45")}>
       <KeyChip index={index} />
-      <span className="min-w-0 flex-1 text-sm text-muted">{label}</span>
-    </div>
+      <input
+        ref={inputRef}
+        type="text"
+        tabIndex={focused ? 0 : -1}
+        value={note}
+        maxLength={4_000}
+        readOnly={dimmed}
+        placeholder={label}
+        aria-label={label}
+        className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+        onChange={(event) => setNote(event.target.value)}
+        onKeyDown={handleKeyDown}
+        onFocus={onFocus}
+      />
+    </label>
   );
 }

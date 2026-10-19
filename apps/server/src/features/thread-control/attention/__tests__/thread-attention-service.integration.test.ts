@@ -227,10 +227,10 @@ describe("thread attention through real SQLite and the serialized writer", () =>
     const request: ApprovalRequest = { requestId: "approval-send", threadId: t.a.id, providerId: "codex", requestedAt: BEFORE,
       subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: t.b.id, message: "Continue" },
       choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
-      noteDelivery: "none", origin: { kind: "agent" } };
+      origin: { kind: "agent" } };
     t.requests.push({ ...request, requestId: "later", requestedAt: ENDED }, request);
     t.approvals.publish({ requestId: request.requestId, threadId: request.threadId, body: {
-      requestedAt: request.requestedAt, subject: request.subject, choices: request.choices, noteDelivery: request.noteDelivery, origin: request.origin,
+      requestedAt: request.requestedAt, subject: request.subject, choices: request.choices, origin: request.origin,
     } }, { id: "codex" });
     const reloaded = new ThreadAttentionService(t.reader, t.writer, [approvalWaitingSource(t.approvals)], () => {});
     expect(reloaded.listInteresting().map(({ threadId, waiting }) => ({ threadId, waiting }))).toEqual([
