@@ -652,6 +652,13 @@
       "when": 1792188588184,
       "tag": "0091_happy_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "6",
+      "when": 1792403433367,
+      "tag": "0092_rich_outlaw_kid",
+      "breakpoints": true
     }
   ]
 }

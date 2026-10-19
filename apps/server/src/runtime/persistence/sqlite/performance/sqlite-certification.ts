@@ -8,6 +8,7 @@ import {
   type SQLiteProfileSample,
 } from "./sqlite-profile.js";
 import { openDatabase } from "../database.js";
+import { DatabaseStartupRefusal } from "../startup-refusal.js";
 import {
   MIGRATION_BACKUP_RETENTION,
 } from "../migration-backup.js";
@@ -21,7 +22,7 @@ import {
 export type SQLiteForcedMigrationFailureCertification =
   | {
     status: "pass";
-    restoredDatabase: true;
+    ledgerUnchanged: true;
     backupGenerations: number;
   }
   | { status: "fail"; error: string };
@@ -138,7 +139,7 @@ export function runSQLiteCacheBudgetCertification(
       const activePragma = readNumericPragma(database, "cache_size");
       return { activeKiB, backgroundKiB, activePragma, backgroundPragma };
     } finally {
-      database.close();
+      database.close(true);
     }
   });
 }
@@ -146,33 +147,21 @@ export function runSQLiteCacheBudgetCertification(
 function runForcedMigrationFailureScenario(
   scenarioDirectory: string,
 ): SQLiteForcedMigrationFailureCertification {
-  const { databasePath, originalBytes } = createScenarioDatabase(scenarioDirectory);
-  const migrationsDirectory = NodePath.join(scenarioDirectory, "drizzle");
-  const forcedMigrationTag = "0000_forced_failure";
-  NodeFS.mkdirSync(NodePath.join(migrationsDirectory, "meta"), { recursive: true });
-  NodeFS.writeFileSync(
-    NodePath.join(migrationsDirectory, "meta", "_journal.json"),
-    JSON.stringify({
-      version: "7",
-      dialect: "sqlite",
-      entries: [{
-        idx: 0,
-        version: "6",
-        when: 1,
-        tag: forcedMigrationTag,
-        breakpoints: true,
-      }],
-    }),
+  const { databasePath, migrationsDirectory } = createScenarioDatabase(
+    scenarioDirectory,
+    { tag: "0001_forced_failure", when: 2, sql: "SELECT FROM;" },
   );
+  const ledgerBefore = describeLedger(databasePath);
 
   let migrationFailed = false;
   withMigrationsDirectory(migrationsDirectory, () => {
     try {
-      openDatabase({ dbPath: databasePath }).close();
+      openDatabase({ dbPath: databasePath }).close(true);
     } catch (error) {
       if (
-        !(error instanceof Error)
-        || !error.message.includes(`${forcedMigrationTag}.sql`)
+        !(error instanceof DatabaseStartupRefusal)
+        || error.refusal.kind !== "migration-failed"
+        || error.refusal.backupPath === null
       ) {
         throw error;
       }
@@ -180,40 +169,45 @@ function runForcedMigrationFailureScenario(
     }
   });
 
-  const restoredDatabase = NodeFS.readFileSync(databasePath).equals(originalBytes);
+  const ledgerUnchanged = describeLedger(databasePath) === ledgerBefore;
   const backupGenerations = countBackupGenerations(databasePath);
-  if (!migrationFailed || !restoredDatabase || backupGenerations !== 1) {
+  if (!migrationFailed || !ledgerUnchanged || backupGenerations !== 1) {
     return {
       status: "fail",
-      error: `migrationFailed=${migrationFailed}, restoredDatabase=${restoredDatabase}, backupGenerations=${backupGenerations}`,
+      error: `migrationFailed=${migrationFailed}, ledgerUnchanged=${ledgerUnchanged}, backupGenerations=${backupGenerations}`,
     };
   }
-  return { status: "pass", restoredDatabase: true, backupGenerations };
+  return { status: "pass", ledgerUnchanged: true, backupGenerations };
 }
 
 function runInsufficientDiskScenario(
   scenarioDirectory: string,
 ): SQLiteInsufficientDiskCertification {
-  const { databasePath, originalBytes } = createScenarioDatabase(scenarioDirectory);
+  const { databasePath, originalBytes, migrationsDirectory } = createScenarioDatabase(
+    scenarioDirectory,
+    { tag: "0001_pending", when: 2, sql: "CREATE TABLE pending (id TEXT PRIMARY KEY);" },
+  );
   let rejected = false;
-  try {
-    openDatabase({
-      dbPath: databasePath,
-      migrationBackupSpace: {
-        retainedGenerations: MIGRATION_BACKUP_RETENTION,
-        availableBytes: 0n,
-      },
-    }).close();
-  } catch (error) {
-    if (
-      !(error instanceof Error)
-      || !error.message.includes("Database migration requires")
-      || !error.message.includes("with 0 bytes available")
-    ) {
-      throw error;
+  withMigrationsDirectory(migrationsDirectory, () => {
+    try {
+      openDatabase({
+        dbPath: databasePath,
+        migrationBackupSpace: {
+          retainedGenerations: MIGRATION_BACKUP_RETENTION,
+          availableBytes: 0n,
+        },
+      }).close(true);
+    } catch (error) {
+      if (
+        !(error instanceof Error)
+        || !error.message.includes("Database migration requires")
+        || !error.message.includes("with 0 bytes available")
+      ) {
+        throw error;
+      }
+      rejected = true;
     }
-    rejected = true;
-  }
+  });
 
   const rejectedBeforeMutation = rejected
     && NodeFS.readFileSync(databasePath).equals(originalBytes);
@@ -230,8 +224,8 @@ function runInsufficientDiskScenario(
 function runRetentionScenario(
   scenarioDirectory: string,
 ): SQLiteRetentionCertification {
-  const { databasePath } = createScenarioDatabase(scenarioDirectory);
-  removeSyntheticDatabase(databasePath);
+  NodeFS.mkdirSync(scenarioDirectory, { recursive: true });
+  const databasePath = NodePath.join(scenarioDirectory, "mcode.db");
   const migrationsDirectory = NodePath.join(scenarioDirectory, "drizzle");
   NodeFS.cpSync(ACTUAL_MIGRATIONS_DIRECTORY, migrationsDirectory, { recursive: true });
   const journalPath = NodePath.join(migrationsDirectory, "meta", "_journal.json");
@@ -250,7 +244,7 @@ function runRetentionScenario(
     for (const pendingEntry of pendingEntries) {
       journal.entries.push(pendingEntry);
       NodeFS.writeFileSync(journalPath, JSON.stringify(journal, null, 2));
-      openDatabase({ dbPath: databasePath }).close();
+      openDatabase({ dbPath: databasePath }).close(true);
     }
   });
 
@@ -262,7 +256,7 @@ function runRetentionScenario(
   const finalMigrationCount = (
     database.prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations").get() as { count: number }
   ).count;
-  database.close();
+  database.close(true);
   const publicTextIdentifierPreserved = record?.id === PUBLIC_TEXT_IDENTIFIER;
   const appliedMigrations = finalMigrationCount - initialMigrationCount;
   const backupIdentifiersPreserved = listBackupGenerations(databasePath).every(
@@ -287,20 +281,54 @@ function runRetentionScenario(
   };
 }
 
-function createScenarioDatabase(scenarioDirectory: string): {
+interface ScenarioMigration {
+  tag: string;
+  when: number;
+  sql: string;
+}
+
+const SCENARIO_BASE_MIGRATION: ScenarioMigration = {
+  tag: "0000_records",
+  when: 1,
+  sql: [
+    "CREATE TABLE records (id TEXT PRIMARY KEY);",
+    "--> statement-breakpoint",
+    `INSERT INTO records (id) VALUES ('${PUBLIC_TEXT_IDENTIFIER}');`,
+  ].join("\n"),
+};
+
+function createScenarioDatabase(scenarioDirectory: string, pending: ScenarioMigration): {
   databasePath: string;
   originalBytes: Buffer;
+  migrationsDirectory: string;
 } {
   NodeFS.mkdirSync(scenarioDirectory, { recursive: true });
   const databasePath = NodePath.join(scenarioDirectory, "mcode.db");
-  createDatabaseWithPublicIdentifier(databasePath);
-  return { databasePath, originalBytes: NodeFS.readFileSync(databasePath) };
+  const migrationsDirectory = NodePath.join(scenarioDirectory, "drizzle");
+  writeScenarioCatalogue(migrationsDirectory, [SCENARIO_BASE_MIGRATION]);
+  withMigrationsDirectory(migrationsDirectory, () => openDatabase({ dbPath: databasePath }).close(true));
+  writeScenarioCatalogue(migrationsDirectory, [SCENARIO_BASE_MIGRATION, pending]);
+  return { databasePath, originalBytes: NodeFS.readFileSync(databasePath), migrationsDirectory };
 }
 
-function removeSyntheticDatabase(databasePath: string): void {
-  for (const suffix of ["", "-wal", "-shm"]) {
-    const path = `${databasePath}${suffix}`;
-    if (NodeFS.existsSync(path)) NodeFS.unlinkSync(path);
+function writeScenarioCatalogue(directory: string, migrations: readonly ScenarioMigration[]): void {
+  NodeFS.mkdirSync(NodePath.join(directory, "meta"), { recursive: true });
+  NodeFS.writeFileSync(
+    NodePath.join(directory, "meta", "_journal.json"),
+    JSON.stringify({
+      version: "7",
+      dialect: "sqlite",
+      entries: migrations.map((migration, idx) => ({
+        idx,
+        version: "6",
+        when: migration.when,
+        tag: migration.tag,
+        breakpoints: true,
+      })),
+    }),
+  );
+  for (const migration of migrations) {
+    NodeFS.writeFileSync(NodePath.join(directory, `${migration.tag}.sql`), migration.sql);
   }
 }
 
@@ -322,7 +350,7 @@ function createProductionDatabase(
         database.prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations").get() as { count: number }
       ).count;
     } finally {
-      database.close();
+      database.close(true);
     }
   });
 }
@@ -386,18 +414,20 @@ function readNumericPragma(database: Database, name: string): number {
   return value;
 }
 
-function createDatabaseWithPublicIdentifier(databasePath: string): void {
-  const database = openRawDatabase(databasePath);
-  try {
-    database.exec("CREATE TABLE records (id TEXT PRIMARY KEY)");
-    database.prepare("INSERT INTO records (id) VALUES (?)").run(PUBLIC_TEXT_IDENTIFIER);
-  } finally {
-    database.close();
-  }
-}
-
 function openRawDatabase(databasePath: string): Database {
   return new Database(databasePath, { strict: true });
+}
+
+/** Opening switches the database to WAL, so "nothing was applied" is judged by content, not file bytes. */
+function describeLedger(databasePath: string): string {
+  const database = openRawDatabase(databasePath);
+  try {
+    const receipts = database.prepare("SELECT hash, created_at FROM __drizzle_migrations ORDER BY id").all();
+    const tables = database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all();
+    return JSON.stringify({ receipts, tables });
+  } finally {
+    database.close(true);
+  }
 }
 
 function withMigrationsDirectory<T>(directory: string, work: () => T): T {
@@ -431,7 +461,7 @@ function databaseContainsPublicIdentifier(databasePath: string): boolean {
     return database.prepare("SELECT id FROM threads WHERE id = ?")
       .get(PUBLIC_TEXT_IDENTIFIER) !== null;
   } finally {
-    database.close();
+    database.close(true);
   }
 }
 

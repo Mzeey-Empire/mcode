@@ -10,6 +10,7 @@ const STARTUP_TIME = performance.now();
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Notification,
@@ -29,6 +30,8 @@ import {
   registerOpenInHandlers,
 } from "../features/open-in/index.js";
 import { ServerRuntime } from "../features/server-runtime/index.js";
+import { ServerStartupRefusedError } from "../features/server-runtime/process/startup-failure.js";
+import { showStartupRefusalDialog } from "../features/server-runtime/startup-refusal-dialog.js";
 import {
   initializeApplicationUpdates,
   cleanupApplicationUpdates,
@@ -568,6 +571,12 @@ app.whenReady().then(async () => {
       `[perf] Startup complete: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`,
     );
   } catch (error) {
+    if (error instanceof ServerStartupRefusedError) {
+      console.error("Server refused to start", error.refusal);
+      await showStartupRefusalDialog(error.refusal, { dialog, shell, clipboard, dataDir: getMcodeDir() });
+      app.quit();
+      return;
+    }
     const detail =
       error instanceof Error
         ? `${error.message}\n\n${error.stack ?? ""}`

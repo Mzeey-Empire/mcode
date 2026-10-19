@@ -110,7 +110,7 @@ describe("SQLite release certification", () => {
     expect(recovery).toEqual({
       forcedMigrationFailure: {
         status: "pass",
-        restoredDatabase: true,
+        ledgerUnchanged: true,
         backupGenerations: 1,
       },
       insufficientDisk: {

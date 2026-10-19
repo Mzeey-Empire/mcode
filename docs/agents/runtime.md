@@ -77,6 +77,11 @@ including development launches. Normal worktree development uses
 Server stderr and stdout both go directly to this file; stdin stays isolated
 from the desktop terminal.
 
+A server the desktop spawned that fails startup exits 78 and leaves
+`startup-failure.json` in its data directory. The file holds the typed
+refusal, such as `ledger-damaged`, or the unexpected error. A server started
+without `MCODE_STARTUP_ID`, which the desktop sets, only logs the failure.
+
 The server also writes crash diagnostics synchronously, bypassing the buffered
 logger: a `fatal` record in the daily `mcode.log.<date>` file and a mirror in
 `server-fatal.log` next to `server-stderr.log`. The fatal record carries the

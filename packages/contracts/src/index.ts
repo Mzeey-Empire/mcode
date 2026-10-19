@@ -1616,3 +1616,13 @@ export type { LegacyTerminalRecord, LegacyTerminalCreateResult } from "./ws/term
 
 export * from "./models/subagent-roster.js";
 export { SUBAGENT_REPORTING } from "./providers/interfaces.js";
+
+export {
+  STARTUP_FAILURE_FILE_NAME,
+  STARTUP_FAILURE_EXIT_CODE,
+  STARTUP_FAILURE_FILE_MAX_BYTES,
+  StartupRefusalSchema,
+  StartupFailureFileSchema,
+  describeRefusal,
+} from "./startup-failure.js";
+export type { StartupRefusal, StartupFailureFile } from "./startup-failure.js";

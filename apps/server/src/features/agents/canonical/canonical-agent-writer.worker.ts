@@ -5,6 +5,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { applySQLiteConnectionPolicy } from "../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
 import { openDatabase as openBootstrapDatabase } from "../../../runtime/persistence/sqlite/database.js";
+import { DatabaseStartupRefusal, rootCauseMessage } from "../../../runtime/persistence/sqlite/startup-refusal.js";
 import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
 import { CanonicalProviderCommitProjector } from "./canonical-provider-projection.js";
 import { CanonicalAcceptedEventWrite } from "./canonical-accepted-write.js";
@@ -18,6 +19,7 @@ import type {
   CanonicalProviderWriteInput,
   CanonicalWriterRequest,
   CanonicalWriterResponse,
+  WriterFailure,
 } from "./canonical-agent-writer-protocol.js";
 import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "./canonical-agent-writer-protocol.js";
 import { applicationDatabaseHandlers } from "../../../runtime/persistence/sqlite/application-database-handlers.js";
@@ -263,9 +265,19 @@ function requireProviderProjector(): CanonicalProviderCommitProjector {
 const requestQueue: QueuedCanonicalWrite[] = [];
 let draining = false;
 
-function describeFailure(error: unknown): { name: string; message: string; code?: string; retryAfterSeconds?: number } {
+/**
+ * Wrappers such as DrizzleError say "Failed to run the query" and keep SQLite's reason in `cause`,
+ * which structured clone drops. The root cause is appended so the parent still sees the reason.
+ */
+function failureMessageWithCause(error: Error): string {
+  const root = rootCauseMessage(error);
+  return error.message.includes(root) ? error.message : `${error.message}: ${root}`;
+}
+
+function describeFailure(error: unknown): WriterFailure {
   if (!(error instanceof Error)) return { name: "Error", message: String(error).slice(0, 8_000) };
-  return { name: error.name.slice(0, 128), message: error.message.slice(0, 8_000),
+  return { name: error.name.slice(0, 128), message: failureMessageWithCause(error).slice(0, 8_000),
+    ...(error instanceof DatabaseStartupRefusal ? { refusal: error.refusal } : {}),
     ...("code" in error && typeof error.code === "string" ? { code: error.code.slice(0, 128) } : {}),
     ...("retryAfterSeconds" in error && typeof error.retryAfterSeconds === "number" && Number.isFinite(error.retryAfterSeconds)
       ? { retryAfterSeconds: error.retryAfterSeconds } : {}) };
