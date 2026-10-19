@@ -28,7 +28,7 @@ interface TaskStatusView {
 const TASK_STATUS_VIEW: Record<TaskStatus, TaskStatusView> = {
   completed: {
     label: "Completed",
-    mark: <Check className="size-4 text-muted" strokeWidth={1.5} aria-hidden />,
+    mark: <Check className="size-4 text-muted" aria-hidden />,
     textClass: "text-muted",
   },
   in_progress: {
@@ -43,7 +43,7 @@ const TASK_STATUS_VIEW: Record<TaskStatus, TaskStatusView> = {
   },
   cancelled: {
     label: "Cancelled",
-    mark: <X className="size-4 text-muted" strokeWidth={1.5} aria-hidden />,
+    mark: <X className="size-4 text-muted" aria-hidden />,
     textClass: "text-muted line-through",
   },
 };
@@ -115,7 +115,7 @@ function TaskRow({ progress, expanded, listId, chevronRef, onToggle }: TaskRowPr
       onClick={onToggle}
     >
       <span className="flex size-4 shrink-0 items-center justify-center">
-        <ListChecks className="size-4 text-muted" strokeWidth={1.5} aria-hidden />
+        <ListChecks className="size-4 text-muted" aria-hidden />
       </span>
       <span className="text-fade flex-1 text-label text-ink">{progress.title}</span>
       <SegmentLane segments={progress.segments} />
@@ -130,7 +130,6 @@ function TaskRow({ progress, expanded, listId, chevronRef, onToggle }: TaskRowPr
         className="shrink-0 text-muted"
       >
         <ChevronUp
-          strokeWidth={1.5}
           className={cn("transition-transform duration-150", expanded && "rotate-180")}
         />
       </IconButton>

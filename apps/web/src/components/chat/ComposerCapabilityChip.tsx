@@ -35,7 +35,7 @@ export function ComposerCapabilityChip({
             aria-label={turnOffLabel}
             className="h-8 shrink-0 gap-1.5 rounded-control bg-selected px-2 text-body-small text-ink"
           >
-            <Icon size={16} strokeWidth={1.5} className="text-ink" aria-hidden />
+            <Icon size={16} className="text-ink" aria-hidden />
             <span>{label}</span>
           </Button>
         }

@@ -427,7 +427,7 @@ function getPickerTabs(
   });
   if (lockedToProvider) return providerTabs;
   return [
-    { id: FAVORITES_TAB, label: "Favourites", icon: <Star aria-hidden className="size-[1.4rem]" strokeWidth={1.5} /> },
+    { id: FAVORITES_TAB, label: "Favourites", icon: <Star aria-hidden className="size-[1.4rem]" /> },
     ...providerTabs,
   ];
 }
@@ -439,7 +439,7 @@ function favoriteAction(
 ): PickerRowAction {
   return {
     label: getFavoriteActionLabel(option.label, starred),
-    icon: <Star className={starred ? "fill-primary text-primary" : "text-ink"} strokeWidth={1.5} />,
+    icon: <Star className={starred ? "fill-primary text-primary" : "text-ink"} />,
     pinned: starred,
     run: () => onToggle({ providerId: option.providerId, modelId: option.modelId, label: option.label }),
   };

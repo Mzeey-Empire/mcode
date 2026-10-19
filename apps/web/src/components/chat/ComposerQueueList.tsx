@@ -65,7 +65,7 @@ export function ComposerQueueList({
         {queue.map((message, index) => (
           <li key={message.id} className="flex h-10 items-center gap-2">
             <span className="flex size-4 shrink-0 items-center justify-center">
-              <CornerDownRight className="size-4 text-muted" strokeWidth={1.5} aria-hidden />
+              <CornerDownRight className="size-4 text-muted" aria-hidden />
             </span>
             <QueueRowText message={message} />
             {isDeliveryUnknown(message) ? (
@@ -107,7 +107,7 @@ function QueueRowText({ message }: { message: QueuedMessage }) {
             className="flex shrink-0 items-center gap-0.5 text-body-small tabular-nums text-muted"
             aria-label={`${message.attachments.length} ${message.attachments.length === 1 ? "attachment" : "attachments"}`}
           >
-            <Paperclip className="size-4" strokeWidth={1.5} aria-hidden />
+            <Paperclip className="size-4" aria-hidden />
             {message.attachments.length}
           </span>
         ) : null}
@@ -139,14 +139,14 @@ function QueueRowActions({ position, pending, canSendNow, onSendNow, onEdit, onR
       <span className="flex w-24 items-center justify-end">
       {canSendNow && !busy ? (
         <IconButton aria-label={`Send queued message ${position} now`} tooltip="Send now" onClick={onSendNow}>
-          <ArrowUp strokeWidth={1.5} />
+          <ArrowUp />
         </IconButton>
       ) : null}
       <IconButton aria-label={`Edit queued message ${position}`} tooltip="Edit" disabled={busy} onClick={onEdit}>
-        <Pencil strokeWidth={1.5} />
+        <Pencil />
       </IconButton>
       <IconButton aria-label={`Remove queued message ${position}`} tooltip="Remove" disabled={busy} onClick={onRemove}>
-        <X strokeWidth={1.5} />
+        <X />
       </IconButton>
       </span>
     </span>

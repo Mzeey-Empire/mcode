@@ -32,7 +32,7 @@ export function ProvidersBell() {
       }}
     >
       <PopoverTrigger render={<IconButton aria-label="Providers" />}>
-        <Bell strokeWidth={1.5} aria-hidden />
+        <Bell aria-hidden />
         {rows.length > 0 && (
           <span
             aria-hidden

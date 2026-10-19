@@ -500,9 +500,9 @@ function BrowseEntries({
           onSelect={() => onSelect(entry.name)}
           className="group/row gap-2 px-2 py-1.5 text-body-small"
         >
-          <Folder aria-hidden className="size-[1.4rem] shrink-0 text-muted group-aria-selected/row:text-ink" strokeWidth={1.5} />
+          <Folder aria-hidden className="size-[1.4rem] shrink-0 text-muted group-aria-selected/row:text-ink" />
           <span className="text-fade text-ink group-aria-selected/row:font-medium">{entry.name}</span>
-          <ChevronRight aria-hidden className="ml-auto hidden size-[1.4rem] shrink-0 text-muted group-aria-selected/row:block" strokeWidth={1.5} />
+          <ChevronRight aria-hidden className="ml-auto hidden size-[1.4rem] shrink-0 text-muted group-aria-selected/row:block" />
         </CommandItem>
       ))}
     </CommandGroup>

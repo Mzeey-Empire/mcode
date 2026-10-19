@@ -47,7 +47,7 @@ export interface MenuRowContent {
 
 /** The check that marks a row as the current choice. */
 export function MenuRowCheck() {
-  return <CheckIcon aria-hidden className="size-[1.6rem] text-ink" strokeWidth={1.5} />
+  return <CheckIcon aria-hidden className="size-[1.6rem] text-ink" />
 }
 
 function MenuRowShortcut({ keys }: { readonly keys: readonly string[] }) {

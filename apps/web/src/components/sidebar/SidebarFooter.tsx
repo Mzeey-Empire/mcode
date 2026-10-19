@@ -22,7 +22,7 @@ export function SidebarFooter({ settingsOpen, onOpenSettings }: SidebarFooterPro
     <footer data-testid="sidebar-footer" className="flex shrink-0 items-center justify-between gap-1 px-3">
       <div className="flex items-center gap-1">
         <IconButton aria-label="Settings" onClick={onOpenSettings}>
-          <Settings strokeWidth={1.5} aria-hidden />
+          <Settings aria-hidden />
         </IconButton>
         <PullRequestsButton />
         <ProvidersBell />
@@ -44,7 +44,7 @@ function PullRequestsButton() {
       aria-current={active ? "page" : undefined}
       onClick={() => setPrimarySurface("pullRequests")}
     >
-      <GitPullRequest strokeWidth={1.5} aria-hidden />
+      <GitPullRequest aria-hidden />
     </IconButton>
   );
 }

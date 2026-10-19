@@ -105,7 +105,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
       case "rest":
         return (
           <IconButton aria-label="Check for updates" shape="round" variant="ghost" onClick={() => void check()}>
-            <RefreshCw strokeWidth={1.5} aria-hidden />
+            <RefreshCw aria-hidden />
           </IconButton>
         );
       case "checking":
@@ -117,7 +117,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
       case "up-to-date":
         return (
           <span role="status" className={cn("inline-flex h-8 items-center", GHOST_TEXT_CLASS)}>
-            <Check className="size-4 shrink-0" strokeWidth={1.5} aria-hidden />
+            <Check className="size-4 shrink-0" aria-hidden />
             <span className="text-fade">Up to date</span>
           </span>
         );
@@ -125,7 +125,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
         return (
           <ReleaseNotesHover version={view.version} notes={view.releaseNotes} nightlyTooltip={`Download ${view.version}`}>
             <Button variant="subtle" className={FILLED_CLASS} onClick={() => void app.downloadUpdate()}>
-              <CircleArrowDown strokeWidth={1.5} aria-hidden />
+              <CircleArrowDown aria-hidden />
               <span className="flex gap-1.5 text-fade">
                 Download
                 <VersionText>{view.versionLabel}</VersionText>
@@ -150,7 +150,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
         return (
           <ReleaseNotesHover version={view.version} notes={view.releaseNotes} nightlyTooltip={`Install ${view.version}`}>
             <Button variant="subtle" className={FILLED_CLASS} onClick={() => void install(view.version)}>
-              <CircleArrowUp strokeWidth={1.5} aria-hidden />
+              <CircleArrowUp aria-hidden />
               <span className="flex gap-1.5 text-fade">
                 Install
                 <VersionText>{view.versionLabel}</VersionText>
@@ -162,7 +162,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
         return (
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="subtle" className={FILLED_CLASS} />}>
-              <CircleArrowUp strokeWidth={1.5} aria-hidden />
+              <CircleArrowUp aria-hidden />
               <span className="text-fade">Installs when idle</span>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="end">
@@ -176,7 +176,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
         return (
           <Tooltip>
             <TooltipTrigger render={<Button variant="ghost" className={GHOST_TEXT_CLASS} onClick={() => retry(operation)} />}>
-              <CircleAlert strokeWidth={1.5} aria-hidden />
+              <CircleAlert aria-hidden />
               <span className="text-fade">Retry update</span>
             </TooltipTrigger>
             <TooltipContent className="flex-col items-start gap-0.5">

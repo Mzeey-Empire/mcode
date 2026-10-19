@@ -62,7 +62,7 @@ function LimitContent({ threadId, state, actions, now }: LimitContentProps) {
   const resetsAt = state.resetsAt && Date.parse(state.resetsAt) > now ? state.resetsAt : undefined;
   return (
     <>
-      <RowIcon><CirclePause className="size-4 text-warning" strokeWidth={1.5} aria-hidden /></RowIcon>
+      <RowIcon><CirclePause className="size-4 text-warning" aria-hidden /></RowIcon>
       <RowLabel
         wide={`${state.provider} usage limit reached`}
         narrow="Usage limit"
@@ -106,7 +106,7 @@ interface ScheduledContentProps {
 function ScheduledContent({ state, actions, now }: ScheduledContentProps) {
   return (
     <>
-      <RowIcon><AlarmClock className="size-4 text-warning" strokeWidth={1.5} aria-hidden /></RowIcon>
+      <RowIcon><AlarmClock className="size-4 text-warning" aria-hidden /></RowIcon>
       <RowLabel wide={`Resuming at ${clockTime(state.at)}`} muted={` ${timeUntil(state.at, now)}`} error={actions.error} />
       <Button variant="ghost" disabled={actions.pending} className={GHOST_CLASS} onClick={actions.cancel}>
         Cancel

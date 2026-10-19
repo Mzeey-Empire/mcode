@@ -37,7 +37,7 @@ export function TurnMenu({ onReviewChanges, onCopyFilePaths, onRevertTurn, rever
           open && "bg-hover",
         )}
       >
-        <Ellipsis aria-hidden size={14} strokeWidth={1.5} />
+        <Ellipsis aria-hidden size={14} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={4} className="w-[24rem] gap-0 p-1">
         <DropdownMenuItem

@@ -131,7 +131,7 @@ function NoProjects() {
         aria-hidden
         className="flex size-[3.6rem] shrink-0 items-center justify-center rounded-lg border border-border bg-selected text-muted"
       >
-        <FolderIcon className="size-[1.8rem]" strokeWidth={1.5} />
+        <FolderIcon className="size-[1.8rem]" />
       </span>
       <div className="flex flex-col items-center gap-0.5">
         <p className="text-label text-ink">No projects yet</p>
@@ -151,10 +151,10 @@ function AddProjectRow({ onClick }: { readonly onClick: () => void }) {
         FOCUS_RING_CLASS,
       )}
     >
-      <PlusIcon aria-hidden className="size-[1.4rem] shrink-0 text-ink" strokeWidth={1.5} />
+      <PlusIcon aria-hidden className="size-[1.4rem] shrink-0 text-ink" />
       <span className="min-w-0 flex-1 text-fade text-label text-ink">Add project</span>
       <span className="shrink-0 text-caption text-muted">{SOURCES_META}</span>
-      <ChevronRightIcon aria-hidden className="size-[1.2rem] shrink-0 text-muted" strokeWidth={1.5} />
+      <ChevronRightIcon aria-hidden className="size-[1.2rem] shrink-0 text-muted" />
     </button>
   );
 }

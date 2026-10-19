@@ -29,7 +29,7 @@ export function SourcesView() {
                 value={source.id}
                 onSelect={() => setQuery(source.query)}
               >
-                <source.icon aria-hidden className="size-[1.4rem] shrink-0 text-ink" strokeWidth={1.5} />
+                <source.icon aria-hidden className="size-[1.4rem] shrink-0 text-ink" />
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span className="text-fade text-label text-ink">{source.title}</span>
                   <span className="text-fade text-caption text-muted">{source.subtitle}</span>

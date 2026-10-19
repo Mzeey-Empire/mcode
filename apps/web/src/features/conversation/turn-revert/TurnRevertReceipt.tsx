@@ -68,7 +68,7 @@ export function TurnRevertReceipt({ message }: { readonly message: Message }) {
 
   return (
     <div className="flex h-7 min-w-0 max-w-full items-center gap-2 px-2" role="note" data-turn-revert-receipt={revertId}>
-      <Undo aria-hidden size={14} strokeWidth={1.5} className="shrink-0 text-muted" />
+      <Undo aria-hidden size={14} className="shrink-0 text-muted" />
       <span className={cn("min-w-0 text-fade whitespace-nowrap text-sm leading-5 text-muted", detail && "max-w-[60%] shrink-0")}>
         {label}
       </span>
