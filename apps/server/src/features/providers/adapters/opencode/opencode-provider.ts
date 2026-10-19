@@ -1304,7 +1304,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       this.pendingPermissions.set(requestId, {
         request: { requestId, threadId, body: {
           requestedAt: new Date().toISOString(), subject: { kind: "tool", toolName: "Unreadable request" },
-          choices: [{ id: "deny", intent: "deny", label: "Deny" }], noteDelivery: "none", origin: source.origin,
+          choices: [{ id: "deny", intent: "deny", label: "Deny" }], origin: source.origin,
         } },
         sessionId: req.sessionId, upstreamSessionId: source.upstreamSessionId, endpoint, kind: "permission",
         version: askVersion(normalized.type), signal: state.abortController.signal, routing, replying: false, unanswerable: true,

@@ -64,13 +64,3 @@ export function ApprovalChoiceRow({ choice, index, focused, submitting, dimmed, 
     </button>
   );
 }
-
-/** The deny-with-a-note row. It shows its number but stays inert until notes can be delivered. */
-export function ApprovalNoteRow({ index, label }: { readonly index: number; readonly label: string }) {
-  return (
-    <div aria-disabled="true" className={ROW_CLASS}>
-      <KeyChip index={index} />
-      <span className="min-w-0 flex-1 text-sm text-muted">{label}</span>
-    </div>
-  );
-}

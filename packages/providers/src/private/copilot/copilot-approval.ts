@@ -60,7 +60,7 @@ export function copilotApprovalBody(native: PermissionRequest, scope: CopilotSes
   return {
     toolCallId: native.toolCallId, requestedAt: new Date().toISOString(), subject: copilotSubject(native),
     choices,
-    noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" },
+    origin: { kind: "agent" },
   };
 }
 

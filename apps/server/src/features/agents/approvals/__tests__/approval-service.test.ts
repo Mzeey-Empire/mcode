@@ -11,7 +11,7 @@ const body: ApprovalRequestBody = {
   requestedAt: "2026-10-10T10:00:00Z", subject: { kind: "command", command: "bun run lint" },
   choices: [{ id: "allow", intent: "allow_once", label: "Allow once" },
     { id: "reject_once", intent: "deny", label: "Reject once" }, { id: "reject_always", intent: "deny", label: "Reject always" }],
-  noteDelivery: "next_turn", noteChoiceId: "reject_once", origin: { kind: "agent" },
+  origin: { kind: "agent" },
 };
 
 class FakeProvider extends NodeEvents.EventEmitter {
@@ -68,8 +68,6 @@ describe("ApprovalService", () => {
 
   it.each([
     { ...body, choices: [{ id: "allow", intent: "allow_once", label: "Allow" }] },
-    { ...body, noteChoiceId: undefined },
-    { ...body, noteChoiceId: "allow" },
     { ...body, choices: [...body.choices, { id: "allow", intent: "deny", label: "Deny" }] },
   ])("rejects unusable choice sets during publication and listing", async (invalid) => {
     const test = setup();

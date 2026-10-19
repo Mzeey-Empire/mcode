@@ -1017,7 +1017,7 @@ export class ThreadControlService {
       subject: { kind: "thread_operation", operation: approval.operation, targetThreadId: approval.threadId,
         ...(approval.operation === "thread_send" ? { message: approval.message } : {}) },
       choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
-      noteDelivery: "none", origin: providerId ? { kind: "agent" } : { kind: "integration", label: "Integration" },
+      origin: providerId ? { kind: "agent" } : { kind: "integration", label: "Integration" },
     };
   }
 

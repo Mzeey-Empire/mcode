@@ -341,20 +341,6 @@ describe("ApprovalDock subjects", () => {
     expect(screen.queryByTestId("approval-dock")).not.toBeInTheDocument();
   });
 
-  it("hides the note row when the provider cannot take a note", () => {
-    addApproval({ noteDelivery: "none", noteChoiceId: undefined });
-    render(<DockHarness />);
-
-    expect(screen.queryByText("Tell Codex what to do instead…")).not.toBeInTheDocument();
-  });
-
-  it("shows the note row when the provider can take a note", () => {
-    addApproval();
-    render(<DockHarness />);
-
-    expect(screen.getByText("Tell Codex what to do instead…")).toBeInTheDocument();
-  });
-
   it("names a subagent in its chip rather than the title", () => {
     addApproval({ origin: { kind: "subagent", label: "Explorer" } });
     render(<DockHarness />);

@@ -394,7 +394,7 @@ describe("Claude public factory core and capabilities", () => {
     });
     expect(pending[0]?.body).toMatchObject({
       toolCallId: "tool-approval", subject: { kind: "command", command: "bun run lint" },
-      noteDelivery: "native", noteChoiceId: "deny", origin: { kind: "agent" },
+      origin: { kind: "agent" },
     });
     expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
     expect(await native).toMatchObject({ behavior: "deny" });

@@ -8,7 +8,7 @@ function request(subject: ApprovalSubject): ApprovalRequestEnvelope {
     body: {
       toolCallId: "tool-1", requestedAt: "2026-10-10T12:00:00.000Z", subject,
       choices: [{ id: "deny", intent: "deny", label: "Reject always" }],
-      noteDelivery: "none", origin: { kind: "agent" },
+      origin: { kind: "agent" },
     },
   };
 }

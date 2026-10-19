@@ -368,7 +368,7 @@ describe("Copilot public factory", () => {
     const native = options.onPermissionRequest({ kind: "shell", fullCommandText: "bun run lint", toolCallId: "call-1" }, { sessionId: session.sessionId });
     const pending = provider.listPendingApprovals?.("thread-1") ?? [];
     expect(pending).toHaveLength(1);
-    expect(pending[0]?.body).toMatchObject({ subject: { kind: "command", command: "bun run lint" }, toolCallId: "call-1", noteDelivery: "native" });
+    expect(pending[0]?.body).toMatchObject({ subject: { kind: "command", command: "bun run lint" }, toolCallId: "call-1" });
     expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
     expect(await native).toEqual({ kind: "denied-interactively-by-user" });
     await finish();

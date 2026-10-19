@@ -4,8 +4,8 @@ import { useShallow } from "zustand/shallow";
 import type { ApprovalChoice, ApprovalSubject as ApprovalSubjectModel } from "@mcode/contracts";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { selectDockApprovals, useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
-import { approvalActorName, approvalTitle, noteRowLabel, submittingLabel } from "./approval-copy";
-import { ApprovalChoiceRow, ApprovalNoteRow } from "./ApprovalChoiceRow";
+import { approvalActorName, approvalTitle, submittingLabel } from "./approval-copy";
+import { ApprovalChoiceRow } from "./ApprovalChoiceRow";
 import { ApprovalQuestionBody } from "./ApprovalQuestionBody";
 import { ApprovalPager } from "./ApprovalPager";
 import { ApprovalSubject } from "./ApprovalSubject";
@@ -130,7 +130,6 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
   const [focusedRow, setFocusedRow] = useFocusedRow(active.requestId);
   const submission = useApprovalStore((state) => state.submissions[active.requestId]);
   const title = approvalTitle(active);
-  const noteShown = active.noteDelivery !== "none" && submission?.state !== "submitting";
 
   const arm = () => { guardUntilRef.current = Date.now() + APPROVAL_ARM_DELAY_MS; };
 
@@ -225,7 +224,6 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
                 onFocus={() => setFocusedRow(row)}
               />
             ))}
-            {noteShown && <ApprovalNoteRow index={active.choices.length} label={noteRowLabel(active)} />}
           </div>
           {submission?.state === "failed" && (
             <div role="alert" className="flex items-center gap-2 text-sm">

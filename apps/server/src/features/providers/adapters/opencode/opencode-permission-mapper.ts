@@ -108,7 +108,7 @@ export function synthesizeOpenCodeApprovalRequest(input: {
     body: {
       requestedAt: new Date().toISOString(), toolCallId: tool.success ? tool.data.callID : undefined,
       subject: askSubjectOf(scope),
-      choices, noteDelivery: "next_turn", noteChoiceId: "reject", origin: input.origin,
+      choices, origin: input.origin,
     },
   };
 }
@@ -181,7 +181,7 @@ export function synthesizeOpenCodeQuestionRequest(input: {
     body: {
       requestedAt: new Date().toISOString(), subject: { kind: "question", questions },
       choices: [{ id: "answer", intent: "allow_once", label: "Submit answers" }, { id: "reject", intent: "deny", label: "Dismiss" }],
-      noteDelivery: "none", origin: input.origin,
+      origin: input.origin,
     },
   };
 }

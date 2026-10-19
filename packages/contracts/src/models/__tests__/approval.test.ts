@@ -11,7 +11,7 @@ const body = {
     { id: "reject_once", intent: "deny", label: "Reject once" },
     { id: "reject_always", intent: "deny", label: "Reject always" },
   ],
-  noteDelivery: "next_turn", noteChoiceId: "reject_once", origin: { kind: "agent" },
+  origin: { kind: "agent" },
 };
 
 describe("approval choice safety", () => {
@@ -22,8 +22,6 @@ describe("approval choice safety", () => {
   });
   it.each([
     { ...body, choices: [body.choices[0]] },
-    { ...body, noteChoiceId: undefined },
-    { ...body, noteChoiceId: "allow" },
     { ...body, choices: [...body.choices, { id: "allow", intent: "deny", label: "Deny" }] },
     { ...body, subject: { kind: "command", command: "x".repeat(70_000) } },
   ])("rejects the same unsafe body at both boundaries", (invalid) => {
@@ -43,7 +41,7 @@ describe("provider questions", () => {
     const questions = [{ header: "Deploy", question: "Where should this go?", options: [{ label: "Production", description: "Ship now" }], multiple: false, custom: true }];
     const request = ApprovalRequestSchema().parse({
       ...body, requestId: "que_1", threadId: "thread-1", providerId: "opencode",
-      subject: { kind: "question", questions }, noteDelivery: "none", noteChoiceId: undefined,
+      subject: { kind: "question", questions },
     });
     expect(request.subject).toEqual({ kind: "question", questions });
     expect(WS_METHODS()["approval.respond"].params.parse({

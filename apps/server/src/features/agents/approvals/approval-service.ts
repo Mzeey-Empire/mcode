@@ -100,7 +100,7 @@ export class ApprovalService {
   private async respond(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     if (!("autoDeny" in response)) {
       const parsed = ApprovalResponseSchema().safeParse(response);
-      if (!parsed.success || parsed.data.note) return { status: "failed", message: "This approval response is not supported" };
+      if (!parsed.success) return { status: "failed", message: "This approval response is not supported" };
     }
     const threadResult = await this.threadControl?.respondToApproval(requestId, response);
     if (threadResult && threadResult.status !== "not_pending") return threadResult;

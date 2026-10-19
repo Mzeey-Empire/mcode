@@ -42,9 +42,3 @@ export function submittingLabel(choice: ApprovalChoice): string {
   if (choice.intent === "deny") return "Denying…";
   return `${choice.label}…`;
 }
-
-/** Placeholder for the deny-with-a-note row. */
-export function noteRowLabel(request: ApprovalRequest): string {
-  const target = request.origin.kind === "subagent" ? "the subagent" : approvalActorName(request);
-  return `Tell ${target} what to do instead…`;
-}
