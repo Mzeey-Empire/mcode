@@ -351,7 +351,7 @@ components:
   dialog:
     backgroundColor: "{colors.panel}"
     borderColor: "{colors.border}"
-    rounded: "{rounded.dialog}"
+    rounded: "{rounded.composer}"
     shadow: "{shadows.dialog}"
   toast:
     width: "34rem"
@@ -562,7 +562,7 @@ The control boundary tokens are solid 1px colors, not translucent hints.
 | H1 | Public Sans | `4.8rem / 5.6rem` | 600 | Rare screen-level or document-level heading. |
 | H2 | Public Sans | `4rem / 4.8rem` | 600 | Major panel or document section heading. |
 | H3 | Public Sans | `3.2rem / 4rem` | 600 | Section title inside a full surface. |
-| H4 | Public Sans | `2.8rem / 3.2rem` | 600 | Dialog title or high-emphasis panel title. |
+| H4 | Public Sans | `2.8rem / 3.2rem` | 600 | High-emphasis panel title. |
 | H5 | Public Sans | `2.4rem / 2.8rem` | 600 | Compact panel title, utility page title. |
 | H6 | Public Sans | `2rem / 2.4rem` | 600 | Dense subsection heading. |
 | Body | Public Sans | `1.6rem / 2.4rem` | 400 | Forms, dialogs, and readable UI copy. |
@@ -615,9 +615,10 @@ the 24px grid, round caps and joins. Provider marks, file-type icons, action
 icons from the vscode-icons set, and operating-system or third-party brand
 marks remain their authentic assets. They are identity, not product controls.
 
-Every product icon renders at the 1.5px stroke. Set the stroke once in the
-shared icon module, not per call site. Do not import Phosphor or any second
-outline library.
+Every product icon renders at the 1.5px stroke. Do not set it per call site.
+`icon-map.tsx` sets it on its icons, and one `.lucide` rule in the base layer of
+`apps/web/src/index.css` gives direct Lucide imports the same stroke. Do not
+import Phosphor or any second outline library.
 
 The shared module `apps/web/src/components/ui/icon-map.tsx` is the only
 product-level alias map. It exports the canonical concepts below with the
@@ -724,8 +725,8 @@ Flat by default. Depth begins with **tonal layering**. The signature move: `page
 | `badge` | 6px | Badges, inline code, segmented-control segments. |
 | `menu` | 8px | Menu rows, tooltips, list rows. |
 | `control` | 10px | Buttons, inputs, selects, segmented controls, icon tiles. |
-| `composer` | 14px | The composer, menus, popovers, pickers, and floating cards. |
-| `dialog` | 18px | Dialogs, sheets, toasts, and floating pills. |
+| `composer` | 14px | The composer, dialogs, menus, popovers, pickers, and floating cards. |
+| `dialog` | 18px | Sheets, toasts, and floating pills. |
 | `full` | 999px | Round icon buttons, the composer Send button, status marks. |
 
 Workspace panes stay square to the app shell.
@@ -988,8 +989,8 @@ Paper's "04 · Components" page holds the full state matrix for every variant.
   bounce, no color flash.
 - **Error / Disabled / Read-only:** invalid draws an `error` border and an
   error line under the field (icon plus text). Disabled drops to 50% opacity
-  and `pointer-events-none`. Read-only keeps the value legible and removes
-  the boundary affordance.
+  and `pointer-events-none`. Read-only keeps the value legible and the 1px
+  `control-border`, and fills the field with `panel`.
 - **Search rows** inside menus and pickers are borderless: a 16px search icon
   and the field on the panel surface, sitting above the list.
 
@@ -998,10 +999,9 @@ Paper's "04 · Components" page holds the full state matrix for every variant.
 - Checkboxes, radio buttons, and switches each have default, hover, focus,
   invalid, and disabled states on the Components page. Checkboxes support a
   three-state (mixed) value for folder rows.
-- Off uses a muted track and quiet knob. On uses a stronger neutral track and
-  ink knob, plus the control's semantic checked state.
-- Do not use Filament Amber for an enabled switch. Amber is appropriate only
-  when enabling the setting directly starts, arms, or exposes live work.
+- A switch is off on the field fill with a 1px `control-border` and a `muted`
+  knob. On, the track is `primary` and the knob is `primary-ink`, plus the
+  control's semantic checked state.
 - Keep labels and concise consequences beside the control. A switch changes the
   setting immediately; use a checkbox when several choices are submitted as a
   group.
@@ -1019,13 +1019,16 @@ counts.
 - **Workspace panes:** Edge-to-edge, square to the app shell, and resizable where the user compares or inspects content. Do not wrap a primary work area in a decorative card.
 - **Floating cards** (the thread overview, menus, popovers, pickers): `panel`
   fill, 1px `border`, `composer` radius, and the `popover` shadow.
-- **Dialogs and sheets:** `panel` fill, 1px `border`, `dialog` radius, and the
-  `dialog` shadow.
+- **Dialogs:** `panel` fill, 1px `border`, `composer` radius, and the `dialog`
+  shadow. The title is 16px on a 24px line at weight 600, and the footer sits
+  under a 1px `border` rule with 16px above the buttons.
+- **Sheets:** `panel` fill, 1px `border`, `dialog` radius, and the `dialog`
+  shadow.
 - **Shadow strategy:** Tonal separation first. Transient panels use the
   recipe for their role.
 - **Border:** Quiet hairlines are allowed for dense internal structure. Never a colored side-stripe.
 - **Internal Padding:** 8px inside menus and pickers, 16px inside popovers,
-  24px inside dialogs and panels. Repeated list rows may use less, while
+  20px inside dialogs, 24px inside panels. Repeated list rows may use less, while
   writing, reading, and decision surfaces should preserve comfortable
   structure.
 - **Containment depth:** A discrete object may use one contained surface. Its
@@ -1546,21 +1549,15 @@ If a design wants to convert a visitor, it is wrong.
 
 ### Implementation status
 
-The design decisions in this document are complete enough for routine feature
-work. The codebase is still migrating toward them; the foundation brief in
-`docs/plans/ready-for-build/sections/00-foundation.md` lists each gap and the
-ticket that closes it:
+The foundation layer in this document has shipped: the shared `icon-map.tsx`, the
+`text-fade` utility, the round icon button, the split button, the picker, the
+toast lane, and the status mark all live in `apps/web/src/components/ui/` or
+`apps/web/src/index.css`. Lucide is the only outline icon family, and
+`@phosphor-icons/react` is gone. Do not add a second one.
 
-- Lucide is installed and used across the app at its default 2px stroke.
-  `@phosphor-icons/react` is installed and imported by two files; both
-  migrate to Lucide and the dependency goes. Do not add new Phosphor imports.
-- The shared `icon-map.tsx`, the fade truncation primitive, the round icon
-  button, the split button, the picker primitive, and the toast lane do not
-  exist yet. Feature work that needs them depends on the matching foundation
-  ticket.
-- Pane thresholds and layer values in this document are the fallback contract.
-  Live measurement may move a posture earlier when real content needs more
-  space, but feature code must not invent different global constants.
+Pane thresholds and layer values in this document are the fallback contract.
+Live measurement may move a posture earlier when real content needs more
+space, but feature code must not invent different global constants.
 
 ## 12. Non-negotiable Prohibitions
 
