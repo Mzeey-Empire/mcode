@@ -467,7 +467,8 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
 
   private nativeApprovalResult(choice: ApprovalChoice | undefined, response: ApprovalResponse): PermissionRequestResult {
     if ("autoDeny" in response) return { kind: "denied-no-approval-rule-and-could-not-request-from-user" };
-    return choice?.intent === "deny" ? { kind: "denied-interactively-by-user" } : { kind: "approved" };
+    if (choice?.intent !== "deny") return { kind: "approved" };
+    return { kind: "denied-interactively-by-user", ...(response.note ? { feedback: response.note } : {}) };
   }
 
   /** List stable routing and display bodies from pending native callbacks. */

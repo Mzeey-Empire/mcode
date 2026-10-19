@@ -55,11 +55,11 @@ export const ApprovalOriginSchema = lazySchema(() => z.discriminatedUnion("kind"
 const approvalRequestBodyObject = lazySchema(() => z.object({
   toolCallId: z.string().max(256).optional(), requestedAt: z.string(), reason: z.string().max(1_000).optional(),
   subject: ApprovalSubjectSchema(), choices: z.array(ApprovalChoiceSchema()).min(1).max(10),
-  noteDelivery: z.enum(["native", "steer", "next_turn", "none"]), noteChoiceId: z.string().min(1).max(200).optional(),
-  origin: ApprovalOriginSchema(),
+  // Set only by adapters whose native deny answer carries the user's note.
+  noteChoiceId: z.string().min(1).max(200).optional(), origin: ApprovalOriginSchema(),
 }).strict());
 
-function denyChoicesAndNoteChoice(body: z.infer<ReturnType<typeof approvalRequestBodyObject>>, ctx: z.RefinementCtx): void {
+function validChoices(body: z.infer<ReturnType<typeof approvalRequestBodyObject>>, ctx: z.RefinementCtx): void {
   const ids = new Set<string>();
   for (const [index, choice] of body.choices.entries()) {
     if (ids.has(choice.id)) ctx.addIssue({ code: "custom", path: ["choices", index, "id"], message: "Choice ids must be unique" });
@@ -68,17 +68,17 @@ function denyChoicesAndNoteChoice(body: z.infer<ReturnType<typeof approvalReques
   if (body.subject.kind !== "question" && !body.choices.some((choice) => choice.intent === "deny")) {
     ctx.addIssue({ code: "custom", path: ["choices"], message: "A deny choice is required" });
   }
-  if (body.noteDelivery !== "none" && !body.choices.some((choice) => choice.id === body.noteChoiceId && choice.intent === "deny")) {
+  if (body.noteChoiceId !== undefined && !body.choices.some((choice) => choice.id === body.noteChoiceId && choice.intent === "deny")) {
     ctx.addIssue({ code: "custom", path: ["noteChoiceId"], message: "Notes require a deny choice" });
   }
 }
 
 /** Untrusted adapter display data, including decision safety invariants. */
-export const ApprovalRequestBodySchema = lazySchema(() => approvalRequestBodyObject().superRefine(denyChoicesAndNoteChoice));
+export const ApprovalRequestBodySchema = lazySchema(() => approvalRequestBodyObject().superRefine(validChoices));
 /** Validated client request with routing identity supplied by the adapter. */
 export const ApprovalRequestSchema = lazySchema(() => approvalRequestBodyObject().extend({
   requestId: z.string().min(1).max(256), threadId: z.string().min(1), providerId: ProviderIdSchema.nullable(),
-}).strict().superRefine(denyChoicesAndNoteChoice).superRefine((request, ctx) => {
+}).strict().superRefine(validChoices).superRefine((request, ctx) => {
   if (request.providerId === null && request.origin.kind !== "integration") {
     ctx.addIssue({ code: "custom", path: ["providerId"], message: "Only integrations can omit provider identity" });
   }
@@ -86,7 +86,7 @@ export const ApprovalRequestSchema = lazySchema(() => approvalRequestBodyObject(
 /** The acknowledged result of an approval. */
 export const ApprovalOutcomeSchema = lazySchema(() => z.discriminatedUnion("status", [
   z.object({ status: z.literal("allowed"), intent: z.enum(["allow_once", "allow_scoped", "provider"]), choiceLabel: z.string().max(200) }),
-  z.object({ status: z.literal("denied"), choiceLabel: z.string().max(200), note: z.string().max(4_000).optional(), noteDelivery: z.enum(["native", "steer", "next_turn"]).optional() }),
+  z.object({ status: z.literal("denied"), choiceLabel: z.string().max(200), note: z.string().max(4_000).optional() }),
   z.object({ status: z.literal("answered"), count: z.number().int().min(1) }),
   z.object({ status: z.literal("cancelled"), reason: z.enum(["session_stopped", "turn_ended", "unanswerable"]) }),
   z.object({ status: z.literal("auto_denied"), reason: z.enum(["unreadable", "too_large"]) }),
@@ -97,8 +97,8 @@ export const ApprovalResponseSchema = lazySchema(() => z.object({
 }));
 /** Delivery result returned after the provider acknowledges its native answer. */
 export const ApprovalRespondResultSchema = lazySchema(() => z.discriminatedUnion("status", [
-  z.object({ status: z.literal("resolved"), noteDelivery: z.enum(["native", "steer", "next_turn", "unknown"]).optional() }),
-  z.object({ status: z.literal("not_pending"), note: z.enum(["queued", "delivery_unknown"]).optional() }),
+  z.object({ status: z.literal("resolved") }),
+  z.object({ status: z.literal("not_pending") }),
   z.object({ status: z.literal("failed"), message: z.string().max(500) }),
 ]));
 /** Routing identity is separate from untrusted display data. */

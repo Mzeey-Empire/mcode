@@ -64,8 +64,8 @@ function createFixture() {
   return { service, agent };
 }
 
-function approvalOwnership({ threadId, providerId, subject, choices, noteDelivery, origin }: ApprovalRequest) {
-  return { threadId, providerId, subject, choices, noteDelivery, origin };
+function approvalOwnership({ threadId, providerId, subject, choices, origin }: ApprovalRequest) {
+  return { threadId, providerId, subject, choices, origin };
 }
 
 describe("supervised cross-thread send approval", () => {
@@ -81,7 +81,7 @@ describe("supervised cross-thread send approval", () => {
       threadId: "thread-A", providerId: "claude",
       subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "thread-B", message: "Needs approval." },
       choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
-      noteDelivery: "none", origin: { kind: "agent" },
+      origin: { kind: "agent" },
     }];
     expect(vi.mocked(broadcast).mock.calls.filter(([channel]) => channel === "approval.requested")).toHaveLength(1);
     expect(broadcast).toHaveBeenCalledWith("approval.requested", expect.objectContaining(expected[0]));

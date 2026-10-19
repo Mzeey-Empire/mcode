@@ -362,15 +362,18 @@ describe("Copilot public factory", () => {
     });
   });
 
-  it("keeps full native command scope and acknowledges a user denial", async () => {
+  it.each([
+    { response: { choiceId: "deny" }, result: { kind: "denied-interactively-by-user" } },
+    { response: { choiceId: "deny", note: "Run bun run test instead" }, result: { kind: "denied-interactively-by-user", feedback: "Run bun run test instead" } },
+  ])("keeps full native command scope and acknowledges a user denial with $response", async ({ response, result }) => {
     await provider.sendTurn(request({ permissionMode: "supervised" }));
     const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
     const native = options.onPermissionRequest({ kind: "shell", fullCommandText: "bun run lint", toolCallId: "call-1" }, { sessionId: session.sessionId });
     const pending = provider.listPendingApprovals?.("thread-1") ?? [];
     expect(pending).toHaveLength(1);
-    expect(pending[0]?.body).toMatchObject({ subject: { kind: "command", command: "bun run lint" }, toolCallId: "call-1", noteDelivery: "native" });
-    expect(await provider.resolveApproval?.(pending[0]!.requestId, { choiceId: "deny" })).toEqual({ status: "resolved" });
-    expect(await native).toEqual({ kind: "denied-interactively-by-user" });
+    expect(pending[0]?.body).toMatchObject({ subject: { kind: "command", command: "bun run lint" }, toolCallId: "call-1", noteChoiceId: "deny" });
+    expect(await provider.resolveApproval?.(pending[0]!.requestId, response)).toEqual({ status: "resolved" });
+    expect(await native).toEqual(result);
     await finish();
   });
 

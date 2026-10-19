@@ -10,7 +10,7 @@ export function approvalChoice(body: ApprovalRequestBody, response: ApprovalResp
 export function approvalOutcome(choice: ApprovalChoice | undefined, response: ApprovalResponse): ApprovalOutcome {
   if ("autoDeny" in response) return { status: "auto_denied", reason: response.autoDeny };
   if (!choice) return { status: "cancelled", reason: "unanswerable" };
-  if (choice.intent === "deny") return { status: "denied", choiceLabel: choice.label };
+  if (choice.intent === "deny") return { status: "denied", choiceLabel: choice.label, ...(response.note ? { note: response.note } : {}) };
   if (response.answers) return { status: "answered", count: response.answers.length };
   return { status: "allowed", intent: choice.intent, choiceLabel: choice.label };
 }
@@ -39,9 +39,3 @@ function acpChoice(option: AcpPermissionOption): ApprovalChoice | undefined {
   return ApprovalChoiceSchema().safeParse(plain).success ? plain : undefined;
 }
 
-/** Prefer the native one-off reject for the future deny-note action. */
-export function acpNoteChoiceId(options: readonly { optionId: string; kind?: string | null }[], choices: ApprovalChoice[]): string | undefined {
-  const rejectOnceId = options.find((option) => option.kind === "reject_once")?.optionId;
-  return choices.find((choice) => choice.id === rejectOnceId)?.id
-    ?? choices.find((choice) => choice.intent === "deny")?.id;
-}

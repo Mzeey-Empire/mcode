@@ -94,7 +94,7 @@ export function ApprovalQuestionBody({ request, questions, isArmed, arm }: Appro
 
   const respond = (intent: "allow_once" | "deny", payload?: ApprovalAnswers) => {
     const choice = request.choices.find((item) => item.intent === intent);
-    if (choice) void submitApprovalChoice(request, choice.id, payload);
+    if (choice) void submitApprovalChoice(request, { choiceId: choice.id, ...(payload ? { answers: payload } : {}) });
   };
   const submit = () => respond("allow_once", answers);
 

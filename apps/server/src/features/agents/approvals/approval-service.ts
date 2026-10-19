@@ -100,7 +100,7 @@ export class ApprovalService {
   private async respond(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     if (!("autoDeny" in response)) {
       const parsed = ApprovalResponseSchema().safeParse(response);
-      if (!parsed.success || parsed.data.note) return { status: "failed", message: "This approval response is not supported" };
+      if (!parsed.success) return { status: "failed", message: "This approval response is not supported" };
     }
     const threadResult = await this.threadControl?.respondToApproval(requestId, response);
     if (threadResult && threadResult.status !== "not_pending") return threadResult;
@@ -121,6 +121,7 @@ export class ApprovalService {
       }
       if (!request.choices.some((choice) => choice.id === response.choiceId)) return { status: "failed", message: "The approval choice is unavailable" };
       if (response.answers && request.subject.kind !== "question") return { status: "failed", message: "This approval does not accept question answers" };
+      if (response.note && response.choiceId !== request.noteChoiceId) return { status: "failed", message: "This approval does not accept a note" };
     }
     return this.deliver(envelope.requestId, owner, response);
   }

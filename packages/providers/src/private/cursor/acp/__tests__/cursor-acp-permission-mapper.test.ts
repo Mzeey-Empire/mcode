@@ -47,7 +47,6 @@ describe("Cursor native approval boundary", () => {
       { id: "reject_once", intent: "deny", label: "Reject once" },
       { id: "reject_always", intent: "deny", label: "Reject always" },
     ]);
-    expect(body.noteChoiceId).toBe("reject_once");
     expect(test.emitApprovalRequest.mock.calls).toEqual([[request]]);
     expect(await test.bridge.resolveApproval(request.requestId, { choiceId: "reject_always" })).toEqual({ status: "resolved" });
     await expect(native).resolves.toEqual({ outcome: { outcome: "selected", optionId: "reject_always" } });

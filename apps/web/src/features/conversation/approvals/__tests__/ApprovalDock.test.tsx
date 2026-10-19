@@ -341,18 +341,42 @@ describe("ApprovalDock subjects", () => {
     expect(screen.queryByTestId("approval-dock")).not.toBeInTheDocument();
   });
 
-  it("hides the note row when the provider cannot take a note", () => {
-    addApproval({ noteDelivery: "none", noteChoiceId: undefined });
-    render(<DockHarness />);
-
-    expect(screen.queryByText("Tell Codex what to do instead…")).not.toBeInTheDocument();
-  });
-
-  it("shows the note row when the provider can take a note", () => {
+  it("offers no note row when the provider cannot take a note", () => {
     addApproval();
     render(<DockHarness />);
 
-    expect(screen.getByText("Tell Codex what to do instead…")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /what to do instead/ })).not.toBeInTheDocument();
+  });
+
+  it("denies with the typed note, and digits in the note do not answer", async () => {
+    const user = setupUser();
+    addApproval({ noteChoiceId: "deny" });
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.keyboard("3");
+    const note = screen.getByRole("textbox", { name: "Tell Codex what to do instead…" });
+    expect(note).toHaveFocus();
+    await user.keyboard("Use 1 test{Enter}");
+
+    expect(respondToApproval.mock.calls).toEqual([["req-1", { choiceId: "deny", note: "Use 1 test" }]]);
+  });
+
+  it("resends the note when a failed deny is retried", async () => {
+    respondToApproval.mockResolvedValueOnce({ status: "failed", message: "offline" });
+    const user = setupUser();
+    addApproval({ noteChoiceId: "deny" });
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.click(screen.getByRole("textbox", { name: "Tell Codex what to do instead…" }));
+    await user.keyboard("Run lint first{Enter}");
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expect(respondToApproval.mock.calls).toEqual([
+      ["req-1", { choiceId: "deny", note: "Run lint first" }],
+      ["req-1", { choiceId: "deny", note: "Run lint first" }],
+    ]);
   });
 
   it("names a subagent in its chip rather than the title", () => {

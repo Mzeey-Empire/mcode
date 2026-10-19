@@ -91,7 +91,7 @@ export function synthesizeCodexApprovalRequest(input: {
       { id: "allow-session", intent: "allow_scoped", label: "Allow for this session" },
       { id: "deny", intent: "deny", label: "Deny" },
     ],
-    noteDelivery: "steer", noteChoiceId: "deny", origin: input.origin ?? { kind: "agent" },
+    origin: input.origin ?? { kind: "agent" },
   };
 }
 

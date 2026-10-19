@@ -12,7 +12,7 @@ import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
 import { claudeApprovalBody } from "./claude-approval.js";
 
-type ClaudeApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled" | "auto-deny";
+type ClaudeApprovalDecision = "allow" | "allow-session" | "cancelled" | "auto-deny" | { denyMessage: string };
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import { captureClaudePlanFileRef, isClaudePlanFilePath, isWritableClaudePlanPath, syncClaudePlanFile } from "../../plan/claude-plan-file.js";
@@ -127,6 +127,14 @@ import {
   ClaudeCanonicalEventPublisher,
   type ClaudeCanonicalEventRouting,
 } from "./claude-canonical-event-publisher.js";
+
+/**
+ * The SDK puts a deny message into the tool result, which Claude treats as untrusted tool output.
+ * Claude Code frames the user's rejection reason the same way so Claude follows it as the user's instruction.
+ */
+function userDenyNoteMessage(note: string): string {
+  return `The user doesn't want to proceed with this tool use. The tool use was rejected. To tell you how to proceed, the user said:\n${note}`;
+}
 
 /**
  * Default model slug used for side-channel and fallback paths.
@@ -1344,7 +1352,7 @@ export class ClaudeProvider
       options,
       routing,
     );
-    logger.debug("canUseTool decision", { toolName, requestId, decision });
+    logger.debug("canUseTool decision", { toolName, requestId, decision: typeof decision === "string" ? decision : "deny" });
     const result = this.toClaudePermissionResult(
       decision,
       input,
@@ -1419,6 +1427,7 @@ export class ClaudeProvider
     toolName: string,
     requestId: string,
   ): ClaudeToolPermissionResult {
+    if (typeof decision !== "string") return { behavior: "deny", message: decision.denyMessage };
     switch (decision) {
       case "allow":
         return { behavior: "allow" as const, updatedInput: input };
@@ -1428,8 +1437,6 @@ export class ClaudeProvider
           updatedInput: input,
           updatedPermissions: options?.suggestions?.map((update) => ({ ...update, destination: "session" })),
         };
-      case "deny":
-        return { behavior: "deny" as const, message: "User denied" };
       case "auto-deny":
         return { behavior: "deny", message: "Mcode could not display this permission request" };
       case "cancelled":
@@ -3401,7 +3408,8 @@ export class ClaudeProvider
   private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): ClaudeApprovalDecision {
     if ("autoDeny" in response) return "auto-deny";
     if (choice?.intent === "allow_once") return "allow";
-    return choice?.id === "allow-session" ? "allow-session" : "deny";
+    if (choice?.id === "allow-session") return "allow-session";
+    return { denyMessage: response.note ? userDenyNoteMessage(response.note) : "User denied" };
   }
 
   /** Return stable adapter routing and the original approval body. */
