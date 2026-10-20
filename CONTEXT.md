@@ -21,9 +21,8 @@ explicitly. Set globally in user settings.
 The provider used for short, one-shot, non-conversational completions that
 the app issues on the user's behalf (currently: drafting PR titles/bodies
 and summarising a diff). Set globally in user settings; may differ from the
-default provider. Handoff generation is **not** a utility-provider use case;
-handoffs route through the originating thread's own provider via the B/D
-pipeline.
+default provider. Handoffs never use the utility provider; handoff v2 builds
+them from stored messages without calling any provider.
 
 ### Session runtime
 The per-Provider service for adapters with a persistent process per session. It owns the
@@ -726,9 +725,8 @@ same selection and delivery primitive with their own kinds.
 ### Compaction
 A separate mechanism that summarizes a thread's older turns into a single
 compact summary stored on the thread itself, used to keep long threads
-within their own provider's context window. Distinct from a fork handoff,
-though the orchestrator does consult `last_compact_summary` when building a
-deterministic path-D handoff.
+within their own provider's context window. Distinct from a handoff, which
+selects stored messages verbatim and never reads the compact summary.
 
 ## Pull request review
 

@@ -4,7 +4,7 @@ Performant AI agent orchestration desktop app built with Electron + TypeScript. 
 
 ## Start here
 
-1. **[CONTEXT.md](CONTEXT.md)**: Domain glossary. Read first. Defines providers, workspaces, worktrees, composer modes (Direct / New worktree / Existing worktree), interaction modes (Plan / Build), threads, turns, narration segments, the handoff B/A/D ladder, and app-side extensibility surfaces (Skill / Slash command / Hook). Most product terms are defined there, not in code.
+1. **[CONTEXT.md](CONTEXT.md)**: Domain glossary. Read first. Defines providers, workspaces, worktrees, composer modes (Direct / New worktree / Existing worktree), interaction modes (Plan / Build), threads, turns, narration segments, handoff v2 (provider switch, fork, and recovery context), and app-side extensibility surfaces (Skill / Slash command / Hook). Most product terms are defined there, not in code.
 2. **[ARCHITECTURE.md](ARCHITECTURE.md)**: System architecture, data model, IPC flow, directory layout, and diagrams.
 3. **[docs/agents/runtime.md](docs/agents/runtime.md)**: Canonical startup commands, environment variables, runtime artifact locations, and agent write boundaries.
 4. **[PRODUCT.md](PRODUCT.md)** before scoping a feature, and **[DESIGN.md](DESIGN.md)** before changing UI.
