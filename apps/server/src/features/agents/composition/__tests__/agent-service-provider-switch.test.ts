@@ -208,6 +208,33 @@ describe("provider switch on send", () => {
     expect(thread().sdk_session_id).toBe("claude-s2");
   }, 120_000);
 
+  it("keeps the target's previous session off the thread until the fresh session reports", async () => {
+    await completeTurn(codex, "start on codex", "codex here", "codex-s1");
+    await completeTurn(claude, "now claude", "claude here", "claude-s1", 1);
+    const reportSession = deferred();
+    codex.sendTurn.mockImplementationOnce(async (request) => {
+      const common = { threadId: request.threadId, turnExecutionId: request.turnExecutionId };
+      await submit("codex", request, 1, { ...common, type: "textDelta", delta: "fresh codex", isFinalResponse: true });
+      await reportSession.promise;
+      await container.resolve(ThreadRepo).updateSdkSessionId(request.threadId, "codex", "codex-s2");
+      await submit("codex", request, 2, {
+        ...common, type: "turnComplete", providerId: "codex", reason: "end_turn", costUsd: null,
+        tokensIn: 1, tokensOut: 1, totalProcessedTokens: 2, contextWindow: undefined, cacheReadTokens: undefined,
+      });
+      await submit("codex", request, 3, { ...common, type: "ended" });
+    });
+
+    const sending = send(codex, "back on codex", { forceFreshSession: true });
+    await waitFor(() => thread().provider === "codex");
+
+    // The first codex session is not the one just started, so the legacy column must not name it.
+    expect(thread().sdk_session_id).toBeNull();
+    reportSession.resolve();
+    await sending;
+    await settled(3);
+    expect(thread().sdk_session_id).toBe("codex-s2");
+  });
+
   it("refuses a switching send while a turn is active and switches when the same send arrives once idle", async () => {
     const release = deferred();
     claude.sendTurn.mockImplementationOnce(async (request) => {
@@ -217,7 +244,8 @@ describe("provider switch on send", () => {
     const running = send(claude, "long running work");
     await waitFor(() => runtime.owner.current(threadId) !== undefined);
 
-    await expect(send(codex, "switch now")).rejects.toThrow();
+    // AgentService has no error code for a busy thread; callers match this message (thread-control maps it to thread_busy).
+    await expect(send(codex, "switch now")).rejects.toThrow(/already has an active agent session/);
     expect(codex.sendTurn).not.toHaveBeenCalled();
     expect(thread().provider).toBe("claude");
 
@@ -233,11 +261,14 @@ describe("provider switch on send", () => {
   it("leaves provider, model, session and history unchanged when the target fails before its first event", async () => {
     await completeTurn(claude, "before the switch", "answer", "claude-s1");
     const before = { thread: thread(), assistants: assistantRows() };
-    codex.sendTurn.mockRejectedValueOnce(new Error("codex binary is missing"));
+    codex.sendTurn.mockRejectedValueOnce(
+      new ProviderTurnError("codex binary is missing", { kind: "fatal", code: "codex_binary_missing" }),
+    );
 
     await send(codex, "try codex");
     await settled(2);
 
+    expect(terminalFailureCodes()).toContain("codex_binary_missing");
     expect(thread()).toMatchObject({ provider: "claude", model: before.thread.model, sdk_session_id: "claude-s1" });
     expect(sessions().find(threadId, "codex")).toBeNull();
     expect(assistantRows()).toEqual(before.assistants);

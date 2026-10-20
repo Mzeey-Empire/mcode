@@ -1432,7 +1432,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT id FROM messages WHERE id = ?").get(question.id)).toBeNull();
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
-    expect(db.prepare("SELECT content, is_internal FROM messages WHERE id = ?").get(question.id)).toEqual({ content: "Question", is_internal: 1 });
+    expect(db.prepare("SELECT content, is_internal, provider FROM messages WHERE id = ?").get(question.id)).toEqual({ content: "Question", is_internal: 1, provider: "codex" });
     await send(3, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 2, "textDelta", { delta: " answered", isFinalResponse: true })] });
     await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "turnComplete")],
