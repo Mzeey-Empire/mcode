@@ -228,7 +228,7 @@ The [Project environment guide](docs/internals/projects/environment.md) explains
 
 Worktree cleanup must account for every linked active thread. It must also distinguish managed worktrees from external checkouts and protected branches. The [cleanup guide](docs/internals/projects/thread-cleanup.md) records those constraints.
 
-Handoff orchestration separates provider-context acquisition, handoff artifact creation, and checkout changes. The [handoff pipeline](apps/server/src/features/handoff/orchestration/handoff-pipeline.ts) selects a supported generation strategy rather than requiring every provider to fork sessions identically. Provider-native session identity is distinct from the durable source thread and its saved history.
+Switch, fork, and recovery share [handoff v2](apps/server/src/features/handoff/v2/): budgeted transcript selection delivered as a fenced inline preamble. Returning providers can resume their own native session with only the missed history. [Handoff storage](apps/server/src/features/handoff/persistence/handoff-storage.ts) saves schemaVersion 2 audit copies independently of checkout changes. Provider-native session identity remains distinct from the durable thread and its saved history.
 
 Pull request review preparation resolves repository identity, a canonical review task, and a server-owned worktree candidate. Confirmation rechecks the checkout and observed pull request head. Creating a local review task performs no remote write. The [review worktree guide](docs/internals/review/pull-request-review-worktrees.md) explains its transaction and cleanup invariants.
 

@@ -209,11 +209,9 @@ covers off-PATH installs.
 - **Resume without forking.** `session/load` resumes across eviction and
   restart (`threads.sdk_session_id` is the cursor); there is no
   `session/resume`/`session/close`, and teardown is `session/cancel` plus
-  process kill. The public [handoff pipeline](../conversation/chat-fork-handoff.md) goes
-  directly to path D because Devin declares `sessionForkOnResume:
-  "unsupported"`. Its adapter has a throwaway history-replay side channel,
-  but the pipeline does not call it. The descriptor's `clean-fork` capability
-  does not override this gate.
+  process kill. [Handoff v2](../conversation/chat-fork-handoff.md) supplies
+  budgeted history inline for a fresh fork or recovery session. Context transfer
+  does not require a provider-owned summary query.
 - **Conditional cost data.** `contextEstimate` comes from `usage_update` and
   token counts from the `session/prompt` response. If Devin ever sends a
   `usage_update.cost` payload, its USD amount lands on `turnComplete.costUsd`;
