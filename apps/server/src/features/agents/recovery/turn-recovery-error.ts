@@ -13,12 +13,13 @@ const TurnRecoveryErrorCodeSchema = z.enum([
   "TURN_RECOVERY_NOT_ADMITTED",
   "TURN_RECOVERY_SCHEDULE_INVALID_TIME",
   "TURN_RECOVERY_SCHEDULE_TOO_FAR",
+  "handoff_budget_exhausted",
 ]);
 
 /** A rejected recovery action with a stable code preserved by the database writer. */
 export class TurnRecoveryError extends Error {
-  constructor(readonly code: z.infer<typeof TurnRecoveryErrorCodeSchema>, message: string) {
-    super(message);
+  constructor(readonly code: z.infer<typeof TurnRecoveryErrorCodeSchema>, message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "TurnRecoveryError";
   }
 }

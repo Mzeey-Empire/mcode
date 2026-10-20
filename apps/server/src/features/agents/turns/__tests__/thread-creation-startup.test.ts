@@ -481,7 +481,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
 
   it("keeps a failed branch bound when its child still exists", async () => {
     const { workspace, threads, startups, parent, fork, handoffs, makeCoordinator } = await branchHarness();
-    vi.spyOn(handoffs, "writeSwitchAudit").mockRejectedValueOnce(new Error("Handoff failed"));
+    vi.spyOn(handoffs, "writeHandoffAudit").mockRejectedValueOnce(new Error("Handoff failed"));
     await expect(makeCoordinator().createInitialTurn({
       workspaceId: workspace.id, content: "Branch directly", parentThreadId: parent.id,
       forkedFromMessageId: fork.id, startupId: directStartupId,

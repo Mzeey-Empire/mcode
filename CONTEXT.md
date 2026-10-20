@@ -49,8 +49,9 @@ A new attempt of an interrupted or errored turn, started explicitly when
 same-turn recovery is unavailable. **Retry** replays an errored turn's user
 message. **Resume** continues an interrupted turn with a hidden continuation
 prompt: in the provider's saved session when it can, otherwise in a fresh
-session seeded with the thread's recent conversation. Either may repeat effects from
-the earlier attempt. The transcript shows the turn's user message once, then
+session seeded with a budgeted selection of the thread's conversation (handoff v2). If
+the handoff preamble or the interrupted turn's own request cannot fit, the resume fails instead of sending a truncated
+message. Either may repeat effects from the earlier attempt. The transcript shows the turn's user message once, then
 only the latest attempt; earlier attempts' records stay persisted.
 
 ### Protocol adapter

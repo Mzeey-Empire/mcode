@@ -153,7 +153,7 @@ describe("provider switch on send", () => {
     expect(wire.length).toBeLessThanOrEqual(2_000);
     expect(wire).toContain("Preserve this decision.");
     expect(wire).not.toContain("Oversized history");
-    const audit = await container.resolve(HandoffStorage).readLatestSwitch(child.id);
+    const audit = await container.resolve(HandoffStorage).readLatestHandoffAudit(child.id);
     expect(audit).toContain("schemaVersion: 2\nkind: fork");
     expect(audit).toContain("fromProvider: claude\ntoProvider: codex");
     expect(audit).toContain("coveredSequences: [2]");
@@ -175,7 +175,7 @@ describe("provider switch on send", () => {
     expect(wire).toContain("Stable API selected.");
     expect(wire).not.toContain("experimental API");
     expect(wire).not.toContain("Experimental API");
-    const audit = await container.resolve(HandoffStorage).readLatestSwitch(child.id);
+    const audit = await container.resolve(HandoffStorage).readLatestHandoffAudit(child.id);
     expect(audit).toContain("coveredSequences: [1,2]");
     expect(audit).toContain("omittedSequences: []");
     expect(audit).toContain("Sequences: 1-2");
@@ -368,7 +368,7 @@ describe("provider switch on send", () => {
     expect(thread()).toMatchObject({ provider: "claude", model: before.thread.model, sdk_session_id: "claude-s1" });
     expect(sessions().find(threadId, "codex")).toBeNull();
     expect(assistantRows()).toEqual(before.assistants);
-    expect(await container.resolve(HandoffStorage).readLatestSwitch(threadId)).toBeNull();
+    expect(await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId)).toBeNull();
   });
 
   it("drops options the target cannot honour and records them in the audit copy", async () => {
@@ -380,7 +380,7 @@ describe("provider switch on send", () => {
     const request = lastRequest(claude);
     expect(request.codexFastMode).toBeUndefined();
     expect(request.reasoningLevel).toBeUndefined();
-    const audit = await container.resolve(HandoffStorage).readLatestSwitch(threadId);
+    const audit = await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId);
     expect(audit).toContain("schemaVersion: 2");
     expect(audit).toContain("kind: switch");
     expect(audit).toContain("fromProvider: codex");
@@ -444,6 +444,12 @@ describe("provider switch on send", () => {
     const userRows = container.resolve(MessageRepo).listIncludingInternal(threadId)
       .filter((message) => message.role === "user" && message.content === "back on claude");
     expect(userRows.map((message) => message.sequence)).toEqual([5]);
+
+    // Recovery reuses the switch's own handoff: one fenced history, no second copy seeded by recovery.
+    expect(retry.message.match(/\[mcode-handoff:begin /g)).toHaveLength(1);
+    expect(retry.message.match(/ancient question/g)).toHaveLength(1);
+    expect(retry.message.endsWith("back on claude")).toBe(true);
+    expect(await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId)).toContain("kind: switch");
   });
 
   function notices(): string[] {

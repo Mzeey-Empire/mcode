@@ -28,6 +28,13 @@ export { loadHandoffMessages } from "./message-adapter.js";
 /** Select and render history, or report an exhausted preamble budget. */
 export { HandoffBudgetExhaustedError, selectHandoffHistory } from "./select.js";
 
+/** Budgeted, fenced history shared by every handoff kind. */
+export { buildFencedHandoff } from "./fenced-handoff.js";
+export type { FencedHandoff, FencedHandoffInput } from "./fenced-handoff.js";
+
+/** The per-turn character cap a target provider imposes on a handoff. */
+export { targetInputCharacterCap } from "./input-cap.js";
+
 /** Delta-or-fresh planning and fenced rendering for a provider switch. */
-export { MAX_DELTA_TURNS, handoffInputCharacterCap, planSwitchHandoff } from "./switch-plan.js";
+export { MAX_DELTA_TURNS, planSwitchHandoff } from "./switch-plan.js";
 export type { SwitchHandoffInput, SwitchHandoffMode, SwitchHandoffPlan } from "./switch-plan.js";

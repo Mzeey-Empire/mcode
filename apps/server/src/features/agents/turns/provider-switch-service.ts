@@ -11,7 +11,12 @@ import { ProviderTurnError, SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/provi
 import { logger } from "@mcode/shared";
 import { broadcast } from "../../../application/transport/push.js";
 import { HandoffStorage } from "../../handoff/persistence/handoff-storage.js";
-import { HandoffBudgetExhaustedError, handoffInputCharacterCap, loadHandoffMessages, planSwitchHandoff } from "../../handoff/v2/index.js";
+import {
+  HandoffBudgetExhaustedError,
+  loadHandoffMessages,
+  planSwitchHandoff,
+  targetInputCharacterCap,
+} from "../../handoff/v2/index.js";
 import type { SwitchHandoffPlan } from "../../handoff/v2/index.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ThreadProviderSessionRepo } from "../../thread-control/persistence/thread-provider-session-repo.js";
@@ -161,7 +166,7 @@ export class ProviderSwitchService {
         throughSequence,
         resumeWatermark,
         contextWindow: thread.context_window ?? null,
-        inputCharacterCap: handoffInputCharacterCap(this.providers.resolve(ticket.toProvider)),
+        inputCharacterCap: targetInputCharacterCap(this.providers.resolve(ticket.toProvider)),
         userText: command.content,
         attachments: attachmentKinds(command),
       });
@@ -273,7 +278,8 @@ export class ProviderSwitchService {
 
   private async writeAudit(ticket: ProviderSwitchTicket, threadId: string, plan: PlannedSwitch): Promise<void> {
     try {
-      await this.storage.writeSwitchAudit(threadId, {
+      await this.storage.writeHandoffAudit(threadId, {
+        kind: "switch",
         fromProvider: ticket.fromProvider,
         toProvider: ticket.toProvider,
         coveredSequences: plan.handoff.selection.selectedSequences,

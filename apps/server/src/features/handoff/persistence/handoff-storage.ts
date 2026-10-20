@@ -30,9 +30,9 @@ export interface AttachmentSource {
   parentMessageId: string;
 }
 
-/** What an inline handoff records about replayed history and dropped options. */
-export interface SwitchAudit {
-  readonly kind?: "switch" | "fork";
+/** What an inline v2 handoff records about the history it replayed and the options it dropped. */
+export interface HandoffAudit {
+  readonly kind: "switch" | "fork" | "recovery";
   readonly fromProvider: string | null;
   readonly toProvider: string;
   readonly coveredSequences: readonly number[];
@@ -86,7 +86,7 @@ export class HandoffStorage {
   async readLatest(threadId: string): Promise<HandoffArtifact | null> {
     const handoffsRoot = resolveThreadHandoffsDir(this.mcodeDirFn(), threadId);
     if (!NodeFS.existsSync(handoffsRoot)) return null;
-    // V2 audits are markdown only; legacy artifacts require the handoff.json sidecar.
+    // A switch audit is markdown only, so it has no handoff.json and is not a fork artifact.
     const entries = (await NodeFSPromises.readdir(handoffsRoot))
       .filter((entry) => NodeFS.existsSync(NodePath.join(handoffsRoot, entry, "handoff.json")));
     const latest = entries.sort().at(-1);
@@ -100,17 +100,17 @@ export class HandoffStorage {
   }
 
   /**
-   * Persist the audit copy of a v2 switch or fork handoff as `handoff.md`.
+   * Persist the audit copy of an inline handoff as `handoff.md`.
    *
    * It carries no legacy `handoff.json`, so {@link readLatest} skips v2 audits.
    */
-  async writeSwitchAudit(threadId: string, audit: SwitchAudit): Promise<string> {
+  async writeHandoffAudit(threadId: string, audit: HandoffAudit): Promise<string> {
     const ulid = newHandoffUlid();
     const handoffDir = resolveHandoffDir(this.mcodeDirFn(), threadId, ulid);
     await NodeFSPromises.mkdir(handoffDir, { recursive: true });
     const frontmatter = [
       "schemaVersion: 2",
-      `kind: ${audit.kind ?? "switch"}`,
+      `kind: ${audit.kind}`,
       `fromProvider: ${audit.fromProvider}`,
       `toProvider: ${audit.toProvider}`,
       `coveredSequences: ${JSON.stringify(audit.coveredSequences)}`,
@@ -122,8 +122,8 @@ export class HandoffStorage {
     return ulid;
   }
 
-  /** The newest v2 switch or fork audit's markdown, or null when none exists. */
-  async readLatestSwitch(threadId: string): Promise<string | null> {
+  /** The newest v2 audit's markdown, or null when the thread has none. */
+  async readLatestHandoffAudit(threadId: string): Promise<string | null> {
     const handoffsRoot = resolveThreadHandoffsDir(this.mcodeDirFn(), threadId);
     if (!NodeFS.existsSync(handoffsRoot)) return null;
     const audits = (await NodeFSPromises.readdir(handoffsRoot))
