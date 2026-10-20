@@ -1372,7 +1372,6 @@ interface ThreadRowProps {
   workspaceName: string;
   thread: WorkspaceThread;
   depth: number;
-  checks?: ChecksStatus;
   isEditing: boolean;
   inlineEdit: InlineEditState | null;
   worktreesLoadedFor: string | null;
@@ -1399,7 +1398,6 @@ const ThreadRow = memo(function ThreadRow({
   workspaceName,
   thread,
   depth,
-  checks,
   isEditing,
   inlineEdit,
   worktreesLoadedFor,
@@ -1462,7 +1460,6 @@ const ThreadRow = memo(function ThreadRow({
         workspaceName,
         thread,
         depth,
-        checks,
         isEditing,
         inlineEdit,
         onInlineEditChange,
@@ -1506,7 +1503,6 @@ interface ThreadRowVisualProps {
   workspaceName: string;
   thread: WorkspaceThread;
   depth: number;
-  checks: ChecksStatus | undefined;
   isEditing: boolean;
   inlineEdit: InlineEditState | null;
   onInlineEditChange: (title: string) => void;
@@ -1703,7 +1699,6 @@ function ThreadRowVisual({
   workspaceName,
   thread,
   depth,
-  checks,
   isEditing,
   inlineEdit,
   onInlineEditChange,
@@ -1740,7 +1735,7 @@ function ThreadRowVisual({
           onInlineEditCancel={onInlineEditCancel}
         />
         <ThreadRowBranchLine thread={thread} presentation={presentation} />
-        <ThreadRowThirdLine thread={thread} checks={checks} presentation={presentation} lifecycle={lifecycle} />
+        <ThreadRowThirdLine thread={thread} presentation={presentation} lifecycle={lifecycle} />
       </div>
       <ThreadRowActions
         thread={thread}
@@ -1932,10 +1927,9 @@ function ThreadModeIcon({ thread, stale }: { thread: WorkspaceThread; stale: boo
 /** The third line: a row state label when there is one, otherwise the most urgent thread context. */
 function ThreadRowThirdLine({
   thread,
-  checks,
   presentation,
   lifecycle,
-}: Pick<ThreadRowVisualProps, "thread" | "checks" | "presentation" | "lifecycle">) {
+}: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {
   const label = presentation.look.label;
   if (label) return <ThreadRowCaption className={label.className}>{label.text}</ThreadRowCaption>;
   // A retry in flight or its failure is newer news than the standing block it retries.
@@ -1953,7 +1947,7 @@ function ThreadRowThirdLine({
     return <ThreadRowCaption className="text-error" data-testid={`sidebar-unusable-${thread.id}`}>{presentation.unusableReason}</ThreadRowCaption>;
   }
   if (isPrable(thread) && thread.pr_number !== null) {
-    return <ThreadPrLine threadId={thread.id} prNumber={thread.pr_number} prStatus={thread.pr_status} checks={checks} dimmed={presentation.isUserCompleted} />;
+    return <ThreadPrLine threadId={thread.id} prNumber={thread.pr_number} prStatus={thread.pr_status} dimmed={presentation.isUserCompleted} />;
   }
   return null;
 }
@@ -2245,39 +2239,22 @@ function threadCountLabel(
   return `${count} ${state} ${count === 1 ? "thread" : "threads"}`;
 }
 
-const PR_CHECKS_WORD: Record<"passing" | "pending" | "failing", string> = {
-  passing: "Passing",
-  pending: "Pending",
-  failing: "Failing",
-};
-
-/** The checks word shown after the number. A merged PR shows none: its violet number already says merged. */
-function threadPrStateWord(prStatus: string | null, checks: ChecksStatus | undefined): string | null {
-  if (prStatus?.toLowerCase() === "merged") return null;
-  if (!checks || checks.aggregate === "no_checks") return null;
-  return PR_CHECKS_WORD[checks.aggregate];
-}
-
-/** The PR context line: number tinted by PR state, then its checks word when it has one. */
+/** The PR context line: the PR icon and number, tinted by PR state. */
 function ThreadPrLine({
   threadId,
   prNumber,
   prStatus,
-  checks,
   dimmed,
 }: {
   threadId: string;
   prNumber: number;
   prStatus: string | null;
-  checks: ChecksStatus | undefined;
   dimmed: boolean;
 }) {
   const { Icon: PrIcon, color: prColor } = getPrVisual(prStatus);
-  const word = threadPrStateWord(prStatus, checks);
-  const wordColor = checks && checks.aggregate !== "no_checks" ? getCiVisual(checks.aggregate).color : "text-muted";
   return (
     <div
-      aria-label={`PR #${prNumber}, ${prStatus ?? "open"}${word ? `, checks ${word.toLowerCase()}` : ""}`}
+      aria-label={`PR #${prNumber}, ${prStatus ?? "open"}`}
       data-testid={`thread-pr-indicator-${threadId}`}
       className={cn("flex h-5 min-w-0 items-center gap-1 text-caption text-muted", dimmed && "grayscale opacity-45")}
     >
@@ -2285,12 +2262,6 @@ function ThreadPrLine({
         <PrIcon size={16} aria-hidden className={prColor} />
       </span>
       <span className={cn("shrink-0 font-medium underline underline-offset-2", prColor)}>PR #{prNumber}</span>
-      {word ? (
-        <>
-          <span aria-hidden className="text-muted/45">·</span>
-          <span data-testid={`thread-pr-ci-${threadId}`} className={cn("text-fade min-w-0", wordColor)}>{word}</span>
-        </>
-      ) : null}
     </div>
   );
 }
@@ -2911,7 +2882,6 @@ function WorkspaceThreadSection({
               workspaceName={workspace.name}
               thread={item.thread}
               depth={item.depth}
-              checks={ctx.checksById[item.thread.id]}
               isEditing={ctx.inlineEdit?.threadId === item.thread.id}
               inlineEdit={
                 ctx.inlineEdit?.threadId === item.thread.id

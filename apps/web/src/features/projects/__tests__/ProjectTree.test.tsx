@@ -1841,40 +1841,32 @@ describe("ProjectTree PR-ability gating by mode", () => {
     expect(row).toContainElement(indicator);
   });
 
-  it("renders a merged PR as a violet number with no state word, even when checks exist", () => {
+  it("renders a merged PR as a violet number, and never words the CI state", () => {
     renderWithThread(
       makeThread({ mode: "worktree", pr_number: 42, pr_status: "merged" }),
       {
         "thread-1": {
-          aggregate: "passing",
-          runs: [{ name: "build", status: "completed", conclusion: "success" }],
+          aggregate: "failing",
+          runs: [{ name: "build", status: "completed", conclusion: "failure" }],
         },
       },
     );
     const indicator = screen.getByLabelText("PR #42, merged");
     expect(indicator).toHaveTextContent(/^PR #42$/);
     expect(screen.getByText("PR #42")).toHaveClass("text-pr-merged");
-    expect(screen.queryByTestId("thread-pr-ci-thread-1")).toBeNull();
   });
 
-  it.each([
-    ["passing", "Passing"],
-    ["failing", "Failing"],
-    ["pending", "Pending"],
-  ])("names %s checks after the PR number", (aggregate, word) => {
+  it("shows only the PR number on an open PR with failing checks", () => {
     renderWithThread(
       makeThread({ mode: "worktree", pr_number: 42, pr_status: "open" }),
       {
         "thread-1": {
-          aggregate,
-          runs: [{ name: "build", status: "completed", conclusion: "success" }],
+          aggregate: "failing",
+          runs: [{ name: "build", status: "completed", conclusion: "failure" }],
         },
       },
     );
-
-    expect(screen.getByLabelText(`PR #42, open, checks ${word.toLowerCase()}`)).toBeInTheDocument();
-    const checks = screen.getByTestId("thread-pr-ci-thread-1");
-    expect(checks).toHaveTextContent(word);
+    expect(screen.getByLabelText("PR #42, open")).toHaveTextContent(/^PR #42$/);
   });
 
   it("renders no status mark or PR line for a quiet non-PR row", () => {
