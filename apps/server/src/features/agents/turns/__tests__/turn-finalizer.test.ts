@@ -576,6 +576,15 @@ describe("TurnFinalizer canonical commit recovery", () => {
     expect(providerSessions.find(THREAD, "codex")?.lastSeenSequence).toBe(0);
   });
 
+  it("stamps the assistant reply with the provider that ran the turn", async () => {
+    const { messageRepo, finalizer } = await buildCanonicalHarness();
+
+    await finalizer.finalize(THREAD, "completed", Promise.resolve(), executionId);
+
+    const reply = messageRepo.listByThread(THREAD, 10).messages.find((m) => m.role === "assistant");
+    expect(reply?.provider).toBe("claude");
+  });
+
   it("does not credit messages another provider added when a finalize is replayed", async () => {
     const { db, finalizer, providerSessions } = await buildCanonicalHarness();
     await providerSessions.upsert({ threadId: THREAD, providerId: "claude", sessionId: "claude-native", lastSeenSequence: 0 });

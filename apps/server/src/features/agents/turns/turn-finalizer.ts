@@ -308,8 +308,8 @@ export class TurnFinalizer {
       return;
     }
     await this.persistCompatibilityFinalize(threadId, executionId, outcome, turnRef, materialized, settleDiff);
-    // No canonical turn names its provider here, so the thread's provider stands in for it.
-    const provider = this.threadRepo.findById(threadId)?.provider;
+    // The canonical thread carries the provider recorded at the turn's start, which a switch commits to the thread only later.
+    const provider = this.canonicalSink?.loadThread(threadId)?.providerId ?? this.threadRepo.findById(threadId)?.provider;
     if (provider) await this.recordCoverage(threadId, provider, outcome, materialized.id);
   }
 
@@ -738,6 +738,7 @@ export class TurnFinalizer {
         content: input.content,
         sequence: nextSeq,
         model: input.model,
+        provider: this.canonicalSink?.loadThread(threadId)?.providerId ?? this.threadRepo.findById(threadId)?.provider ?? null,
         attachments: input.attachments.length > 0 ? input.attachments : undefined,
         isInternal: stageInternal,
       });
