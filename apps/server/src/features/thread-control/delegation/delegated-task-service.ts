@@ -209,6 +209,7 @@ export class DelegatedTaskService {
   private async repairLineage(task: DelegatedTask): Promise<void> {
     const threadId = this.deps.startups.get(task.taskId)?.threadId;
     if (!threadId) return;
+    if (this.deps.threads.findById(threadId)?.delegation_coordinator_thread_id === task.coordinatorThreadId) return;
     await this.deps.threads.updateDelegationLineage(threadId, {
       coordinatorThreadId: task.coordinatorThreadId, creatorTurnId: task.plan.creatorTurnId,
       creatorToolCallId: task.plan.creatorToolCallId, creationKind: "thread_delegation",

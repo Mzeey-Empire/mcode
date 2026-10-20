@@ -3,6 +3,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeEvents from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { container } from "tsyringe";
+import { WS_CHANNELS } from "@mcode/contracts";
 import type { AgentStopResult, DelegateTaskResult, TaskStatusResult, IAgentProvider, IProviderRegistry } from "@mcode/contracts";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import { createOriginFixture, git } from "../../projects/git/__tests__/start-from-origin-fixture.js";
@@ -49,6 +50,7 @@ import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup
 import { DelegationTargetResolver } from "../../agents/collaboration/delegation-target-resolver.js";
 import { DelegatedTaskRepo } from "./delegated-task-repo.js";
 import { DelegatedTaskService } from "./delegated-task-service.js";
+import { broadcast } from "../../../application/transport/push.js";
 
 vi.mock("../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 const disposables: Array<() => Promise<void> | void> = [];
@@ -185,6 +187,16 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     expect(f.threads.listByWorkspace(f.workspace.id)).toHaveLength(2);
     const thread = f.threads.findById(first.threadId ?? "");
     expect(git(thread?.worktree_path ?? "", "rev-parse", "HEAD")).toBe(f.localSha);
+  });
+
+  it("pushes the delegated thread's lineage to clients that already hold the thread", async () => {
+    const f = await harness();
+    const task = requireTask(await f.service.delegate(f.source, f.input));
+    const pushed = vi.mocked(broadcast).mock.calls
+      .filter(([channel]) => channel === "thread.lifecycleChanged")
+      .map(([, payload]) => WS_CHANNELS["thread.lifecycleChanged"].parse(payload).thread)
+      .filter((thread) => thread.id === task.threadId);
+    expect(pushed.at(-1)?.delegation_coordinator_thread_id).toBe(f.coordinator.id);
   });
 
   it("queues the reserved first turn with its origin and replays it after setup", async () => {

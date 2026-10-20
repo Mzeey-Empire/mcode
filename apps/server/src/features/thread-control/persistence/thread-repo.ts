@@ -176,8 +176,14 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.updateLineage, [id, parentThreadId, forkedFromMessageId]);
   }
 
-  updateDelegationLineage(id: Parameters<ThreadStore["updateDelegationLineage"]>[0], lineage: Parameters<ThreadStore["updateDelegationLineage"]>[1]): Promise<ReturnType<ThreadStore["updateDelegationLineage"]>> {
-    return this.writer.execute(threadWriteOperations.updateDelegationLineage, [id, lineage]);
+  /** Persist delegation provenance and push it, since clients already hold the thread from its startup. */
+  async updateDelegationLineage(id: Parameters<ThreadStore["updateDelegationLineage"]>[0], lineage: Parameters<ThreadStore["updateDelegationLineage"]>[1]): Promise<ReturnType<ThreadStore["updateDelegationLineage"]>> {
+    const changed = await this.writer.execute(threadWriteOperations.updateDelegationLineage, [id, lineage]);
+    if (changed) {
+      const thread = this.findById(id);
+      if (thread) broadcast("thread.lifecycleChanged", { thread });
+    }
+    return changed;
   }
 
   updateExternalCreator(id: Parameters<ThreadStore["updateExternalCreator"]>[0], integrationId: Parameters<ThreadStore["updateExternalCreator"]>[1]): Promise<ReturnType<ThreadStore["updateExternalCreator"]>> {
