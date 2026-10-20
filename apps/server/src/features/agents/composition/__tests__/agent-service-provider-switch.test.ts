@@ -130,6 +130,17 @@ describe("provider switch on send", () => {
     expect(wire).not.toContain("question 1 ");
   }, 60_000);
 
+  it("leaves a timeline notice when the target accepted the turn but the switch cannot be saved", async () => {
+    await completeTurn(claude, "before the switch", "answer", "claude-s1");
+    vi.spyOn(container.resolve(ThreadRepo), "commitProviderSwitch").mockRejectedValue(new Error("database is locked"));
+
+    await completeTurn(codex, "switch anyway", "codex here", "codex-s1");
+
+    await waitFor(() => notices().length > 0);
+    expect(notices()[0]).toContain("not saved");
+    expect(thread().provider).toBe("claude");
+  });
+
   it("keeps what the user typed in the timeline and the provider that produced each message", async () => {
     await completeTurn(claude, "first question", "first answer", "claude-s1");
     await completeTurn(codex, "second question", "second answer", "codex-s1");
@@ -288,6 +299,12 @@ describe("provider switch on send", () => {
       .filter((message) => message.role === "user" && message.content === "back on claude");
     expect(userRows.map((message) => message.sequence)).toEqual([5]);
   });
+
+  function notices(): string[] {
+    return container.resolve(MessageRepo).listIncludingInternal(threadId)
+      .filter((message) => message.role === "system" && message.systemNotice?.kind === "warning")
+      .map((message) => message.content);
+  }
 
   function thread() {
     const found = container.resolve(ThreadRepo).findById(threadId);

@@ -14,6 +14,7 @@ import { CODEX_INLINE_INPUT_MAX_CHARS } from "../../handoff/artifacts/handoff-bu
 import { HandoffStorage } from "../../handoff/persistence/handoff-storage.js";
 import { HandoffBudgetExhaustedError, loadHandoffMessages, planSwitchHandoff } from "../../handoff/v2/index.js";
 import type { SwitchHandoffPlan } from "../../handoff/v2/index.js";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ThreadProviderSessionRepo } from "../../thread-control/persistence/thread-provider-session-repo.js";
 import type { ResolvedProviderSession } from "../../thread-control/persistence/thread-provider-session-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
@@ -24,6 +25,7 @@ import { sendAdmittedTurn } from "../transport/turn-message-dispatch.js";
 import { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
 import { reconcileSwitchOptions, type DroppedOption } from "./provider-switch-options.js";
 import type { RuntimeReleaseCause, SendMessageCommand } from "./turn-admission-dispatch-coordinator.js";
+import { turnConversationWriteOperations } from "./turn-conversation-write-operations.js";
 
 /** Settings a switching send writes to the thread once the target accepts the turn. */
 export type ProviderSwitchSettings = Parameters<ThreadRepo["updateSettings"]>[1] & { readonly model: string };
@@ -65,6 +67,9 @@ export interface ProviderSwitchTicket {
   armed: ArmedSwitch | null;
 }
 
+/** A write that fails once is usually a busy database; a second failure is not worth blocking the turn for. */
+const COMMIT_ATTEMPTS = 2;
+
 const FALLBACK_SELECTION_KEYS = [
   "model", "permissionMode", "reasoningLevel", "provider", "interactionMode", "orchestrationMode",
   "contextWindow", "thinking", "codexFastMode", "devinMode",
@@ -85,6 +90,7 @@ export class ProviderSwitchService {
     @inject(HandoffStorage) private readonly storage: HandoffStorage,
     @inject("IProviderRegistry") private readonly providers: IProviderRegistry,
     @inject(TurnRecoveryService) private readonly recovery: Pick<TurnRecoveryService, "retryErroredTurn">,
+    @inject(ApplicationDatabaseWriter) private readonly writer: Pick<ApplicationDatabaseWriter, "execute">,
   ) {}
 
   /** Bind the runtime's send, used to start the fresh attempt after a resume fails. */
@@ -227,20 +233,43 @@ export class ProviderSwitchService {
   private async commit(ticket: ProviderSwitchTicket, threadId: string, armed: ArmedSwitch): Promise<void> {
     const plan = ticket.plan;
     if (!plan) return;
-    try {
-      await this.threads.commitProviderSwitch(
-        threadId,
-        { ...armed.settings, provider: ticket.toProvider },
-        plan.staleSessionId,
-      );
-      broadcast("thread.modelUpdated", { threadId, model: armed.settings.model, provider: ticket.toProvider });
-    } catch (error) {
-      logger.error("Provider switch accepted by the target but not saved", {
-        threadId, toProvider: ticket.toProvider, error: error instanceof Error ? error.message : String(error),
-      });
-      return;
-    }
+    if (!(await this.saveSwitch(ticket, threadId, armed, plan))) return;
     await this.writeAudit(ticket, threadId, plan);
+  }
+
+  /** Save the accepted switch, retrying once; a switch that still cannot be saved is reported in the timeline. */
+  private async saveSwitch(ticket: ProviderSwitchTicket, threadId: string, armed: ArmedSwitch, plan: PlannedSwitch): Promise<boolean> {
+    for (let attempt = 1; attempt <= COMMIT_ATTEMPTS; attempt += 1) {
+      try {
+        await this.threads.commitProviderSwitch(threadId, { ...armed.settings, provider: ticket.toProvider }, plan.staleSessionId);
+        broadcast("thread.modelUpdated", { threadId, model: armed.settings.model, provider: ticket.toProvider });
+        return true;
+      } catch (error) {
+        logger.error("Provider switch accepted by the target but not saved", {
+          threadId, toProvider: ticket.toProvider, attempt, error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    await this.reportUnsavedSwitch(threadId, ticket.toProvider);
+    return false;
+  }
+
+  /**
+   * The target is already running the turn but the thread still names the old provider. The next send
+   * from the composer switches again and replays the history, so this tells the user why the header lags.
+   */
+  private async reportUnsavedSwitch(threadId: string, toProvider: ProviderId): Promise<void> {
+    try {
+      await this.writer.execute(turnConversationWriteOperations.systemNotice, {
+        threadId,
+        content: `This turn is running on ${toProvider}, but the switch to it was not saved. Send again to finish switching.`,
+        notice: { kind: "warning", presentation: "timeline", scope: "turn" },
+      });
+    } catch (error) {
+      logger.error("Provider switch failure notice was not written", {
+        threadId, error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async writeAudit(ticket: ProviderSwitchTicket, threadId: string, plan: PlannedSwitch): Promise<void> {

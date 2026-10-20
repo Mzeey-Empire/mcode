@@ -29,6 +29,7 @@ function plannedSwitch(): PlannedSwitch {
 function buildService() {
   const commitProviderSwitch = vi.fn(async () => true);
   const writeSwitchAudit = vi.fn(async () => undefined);
+  const execute = vi.fn(async () => undefined);
   const service = new ProviderSwitchService(
     { commitProviderSwitch } as never,
     {} as never,
@@ -37,8 +38,9 @@ function buildService() {
     { writeSwitchAudit } as never,
     {} as never,
     { retryErroredTurn: vi.fn() } as never,
+    { execute } as never,
   );
-  return { service, commitProviderSwitch, writeSwitchAudit };
+  return { service, commitProviderSwitch, writeSwitchAudit, execute };
 }
 
 function armedTicket(service: ProviderSwitchService, turnId: string): ProviderSwitchTicket {
@@ -73,6 +75,37 @@ describe("ProviderSwitchService arm lifecycle", () => {
     await current.armed?.committing;
     expect(commitProviderSwitch).toHaveBeenCalledTimes(1);
     expect(stale.armed?.accepted).toBe(false);
+  });
+
+  it("saves the switch on a second try when the first write fails", async () => {
+    const { service, commitProviderSwitch, writeSwitchAudit, execute } = buildService();
+    commitProviderSwitch.mockRejectedValueOnce(new Error("database is locked"));
+    const ticket = armedTicket(service, "turn-a");
+
+    notifyCommittedCanonicalEvents([event("turn-a", "turn.provider-started")]);
+    await ticket.armed?.committing;
+
+    expect(commitProviderSwitch).toHaveBeenCalledTimes(2);
+    expect(writeSwitchAudit).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("tells the user in the timeline when the accepted switch cannot be saved", async () => {
+    const { service, commitProviderSwitch, writeSwitchAudit, execute } = buildService();
+    commitProviderSwitch.mockRejectedValue(new Error("database is locked"));
+    const ticket = armedTicket(service, "turn-a");
+
+    notifyCommittedCanonicalEvents([event("turn-a", "turn.provider-started")]);
+    await ticket.armed?.committing;
+
+    expect(commitProviderSwitch).toHaveBeenCalledTimes(2);
+    expect(writeSwitchAudit).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({
+      threadId: THREAD_ID,
+      content: expect.stringContaining("not saved"),
+      notice: { kind: "warning", presentation: "timeline" },
+    });
   });
 
   it("forgets a discarded ticket so the thread's arm table does not grow", () => {

@@ -381,6 +381,7 @@ export function createTestProviderSwitch({ db, writer, threadRepo, messageRepo, 
     HandoffStorage.forTesting({ mcodeDirFn: () => mcodeDir }),
     providerRegistry,
     recovery ?? { retryErroredTurn: () => Promise.reject(new Error("No recovery service in this test")) },
+    writer,
   );
 }
 
