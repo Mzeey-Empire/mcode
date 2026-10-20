@@ -266,6 +266,7 @@ export class CanonicalParentTurnWrite {
       content: text,
       sequence: this.messages.getLatestSequenceIncludingInternal(input.threadId) + 1,
       model: this.threads.findById(input.threadId)?.model ?? null,
+      provider: this.turnProvider(input.threadId),
       isInternal: true,
     });
   }
@@ -335,6 +336,7 @@ export class CanonicalParentTurnWrite {
       content: input.content,
       sequence,
       model: input.model,
+      provider: this.turnProvider(threadId),
       attachments: [...input.attachments],
       isInternal: true,
     });
@@ -433,9 +435,15 @@ export class CanonicalParentTurnWrite {
       content: input.assistant.content,
       sequence,
       model: input.assistant.model,
+      provider: this.turnProvider(input.threadId),
       attachments: [...input.assistant.attachments],
       isInternal: true,
     });
+  }
+
+  /** Every turn start records its provider on the canonical thread, so this names the provider that produced the row. */
+  private turnProvider(threadId: string): string | null {
+    return this.canonical.loadThread(threadId)?.providerId ?? null;
   }
 
   private assertAssistantMatches(

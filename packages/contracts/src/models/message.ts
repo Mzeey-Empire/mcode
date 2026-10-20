@@ -101,6 +101,8 @@ export const MessageSchema = lazySchema(() =>
      * column existed.
      */
     model: z.string().nullable().optional(),
+    /** Provider that produced an assistant message. Absent for user messages and rows that predate provider provenance. */
+    provider: z.string().nullable().optional(),
     /** Terminal outcome written only when the turn finalizer proves its end. */
     outcome: TurnOutcomeSchema.nullable().optional(),
     /** Exact execution identity needed by existing retry recovery after reload. */

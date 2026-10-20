@@ -124,6 +124,26 @@ describe("useQueuedMessageDispatch", () => {
     expect(queuedContents()).toEqual(["first queued follow-up"]);
   });
 
+  it("sends a queued message to the provider chosen when it was queued, so a switch happens at send time", async () => {
+    useQueueStore.getState().enqueue(THREAD_ID, {
+      content: "continue on codex",
+      displayContent: "continue on codex",
+      attachments: [],
+      model: "gpt-5.5",
+      permissionMode: "full",
+      provider: "codex",
+    });
+    const { result } = renderHook(() => useQueuedMessageDispatch(THREAD_ID));
+
+    await act(async () => {
+      await result.current.sendNow(queued(0));
+    });
+
+    expect(mockTransport.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: THREAD_ID, provider: "codex", model: "gpt-5.5" }),
+    );
+  });
+
   it("does not let Send now claim past an in-flight lease", async () => {
     queueMessage("first queued follow-up");
     queueMessage("second queued follow-up");

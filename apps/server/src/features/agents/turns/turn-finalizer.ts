@@ -25,7 +25,7 @@ import { persistTurnSnapshot } from "./persistence/turn-finalization-write-opera
 import { broadcast } from "../../../application/transport/push.js";
 import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import type { CompletedTurnWatermark } from "./completed-turn-watermark.js";
+import { admittedSessionId, type CompletedTurnWatermark } from "./completed-turn-watermark.js";
 import type { TurnSnapshotRepo } from "./persistence/turn-snapshot-repo.js";
 import type { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
@@ -308,9 +308,9 @@ export class TurnFinalizer {
       return;
     }
     await this.persistCompatibilityFinalize(threadId, executionId, outcome, turnRef, materialized, settleDiff);
-    // No canonical turn names its provider here, so the thread's provider stands in for it.
-    const provider = this.threadRepo.findById(threadId)?.provider;
-    if (provider) await this.recordCoverage(threadId, provider, outcome, materialized.id);
+    // The canonical thread carries the provider recorded at the turn's start, which a switch commits to the thread only later.
+    const provider = this.canonicalSink?.loadThread(threadId)?.providerId ?? this.threadRepo.findById(threadId)?.provider;
+    if (provider) await this.recordCoverage(threadId, provider, null, outcome, materialized.id);
   }
 
   private async discardUnmaterializedTurn(threadId: string, turnRef: TurnRef | undefined, outcome: TurnOutcome, executionId: string | undefined): Promise<void> {
@@ -410,7 +410,8 @@ export class TurnFinalizer {
     await this.completeCanonicalFinalize(
       threadId, executionId, turnId, outcome, turnRef, projection, materialized, !projection.materialized, settleDiff,
     );
-    await this.recordCoverage(threadId, canonical.thread.providerId, outcome, materialized.id);
+    const { providerId, providerIdentities } = canonical.thread;
+    await this.recordCoverage(threadId, providerId, admittedSessionId(providerId, providerIdentities), outcome, materialized.id);
   }
 
   /**
@@ -418,10 +419,10 @@ export class TurnFinalizer {
    * mark is bound to that reply, not the thread's newest message, so a replayed finalize cannot credit
    * messages another provider added since. This runs after the turn's other effects.
    */
-  private async recordCoverage(threadId: string, providerId: string, outcome: TurnOutcome, assistantMessageId: string): Promise<void> {
+  private async recordCoverage(threadId: string, providerId: string, sessionId: string | null, outcome: TurnOutcome, assistantMessageId: string): Promise<void> {
     if (outcome !== "completed") return;
     const reply = this.messageRepo.listIncludingInternal(threadId).find((message) => message.id === assistantMessageId);
-    await this.completedTurns?.record({ threadId, providerId, outcome, sequence: reply?.sequence ?? null });
+    await this.completedTurns?.record({ threadId, providerId, sessionId, outcome, sequence: reply?.sequence ?? null });
   }
 
   private requireCanonicalThread(threadId: string, executionId: string) {
@@ -738,6 +739,7 @@ export class TurnFinalizer {
         content: input.content,
         sequence: nextSeq,
         model: input.model,
+        provider: this.assistantProvider(threadId),
         attachments: input.attachments.length > 0 ? input.attachments : undefined,
         isInternal: stageInternal,
       });
@@ -758,6 +760,11 @@ export class TurnFinalizer {
       });
       return null;
     }
+  }
+
+  /** The provider that ran the turn: canonical state leads because the thread row can lag a pending switch. */
+  private assistantProvider(threadId: string): string | null {
+    return this.canonicalSink?.loadThread(threadId)?.providerId ?? this.threadRepo.findById(threadId)?.provider ?? null;
   }
 
   private assistantMaterializationInput(threadId: string): AssistantMaterializationInput {

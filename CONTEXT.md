@@ -638,6 +638,10 @@ banner copy.
 
 ## Handoff delivery
 
+A provider switch (handoff v2) does not use this path: it prepends the history
+to the user's message as an inline preamble sized to the target's context window,
+and writes the same text to `handoff.md` for audit only.
+
 Off-band delivery sends a file pointer, short summary, and the user's first
 message. The child Reads the document under a one-shot Scoped pre-grant.
 Inline delivery must fit the child adapter's input limits, so it can omit part
@@ -736,15 +740,21 @@ error (if any). Used by the View doc dialog and by the fallback banner copy.
 ### Cross-provider switch
 Swapping a thread's provider mid-conversation. The **same thread continues**:
 its id, message history, and worktree are unchanged; only the active provider
-swaps. The outgoing provider generates a handoff (B/D ladder, anchored at the
-thread's last message), and the incoming provider reads that doc to pick up
-context. The thread's persisted messages stay intact; only the new provider's
-in-memory context comes from the handoff.
+swaps. A send whose provider differs from the thread's is the switch, and it
+is admitted only while the thread is idle. The incoming provider receives the
+thread's history inline, ahead of the user's message, as a fenced handoff
+preamble built without calling the outgoing provider (handoff v2). The
+thread's persisted messages stay intact, and the timeline shows only what the
+user typed.
 
-Swap-back (A → B → A) is the same process repeated: each direction is one
-handoff. The outgoing session is abandoned and eventually evicted by the
-session runtime's idle timer; swap-back spawns a fresh session on the
-returning provider with a new handoff, not a resumed session.
+The thread keeps its provider, model, and session until the incoming provider
+accepts the turn. A target that fails first leaves the thread unchanged. Each
+provider keeps its own native session on the thread. Switching back resumes the
+returning provider's session and sends only the turns it missed, unless the
+gap exceeds the delta-turn limit (`MAX_DELTA_TURNS`) or the resume fails; then
+it starts a fresh session with the full history. The outgoing provider's session stays recorded for that return trip.
+Composer options the target cannot honour (Fast, reasoning level, context-window
+mode) are dropped and recorded in the audit `handoff.md`.
 
 Surfaced in the [[Overview]] as the **Switch provider** action, kept distinct
 from the Overview's Fork actions (which spawn a new thread). Was a deferred item
@@ -867,8 +877,9 @@ targets:
 - **New local thread** - child thread in Direct mode + handoff.
 
 **Switch provider** - a [[cross-provider switch]]: *this same thread* continues
-(id, history, worktree unchanged) and only the provider driving it swaps, with a
-handoff generated from the outgoing provider. Swap-back is the same process.
+(id, history, worktree unchanged) and only the provider driving it swaps. The
+incoming provider gets a handoff built from the stored history without calling
+the outgoing one. Swap-back is the same process.
 
 Handoff is always-on for both - it is the mechanism, not a standalone menu item.
 The split keeps "spawn a copy" (Fork) visually distinct from "change this

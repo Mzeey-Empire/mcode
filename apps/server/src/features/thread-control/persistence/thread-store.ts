@@ -1119,6 +1119,25 @@ export class ThreadStore {
     return result.changes > 0;
   }
 
+  /**
+   * Make `settings.provider` the thread's provider once that provider accepted a switching turn.
+   *
+   * The legacy `sdk_session_id` column follows the new provider's own row. A fresh target may hold an
+   * older row from before the switch (`staleSessionId`); that session is not the one just started, so
+   * the column stays empty until the new session reports and overwrites the row.
+   */
+  commitProviderSwitch(id: string, settings: ThreadSettings & { provider: string }, staleSessionId: string | null): boolean {
+    return this.db.transaction(() => {
+      const row = this.providerSessions.find(id, settings.provider);
+      const sdkSessionId = row && row.sessionId !== staleSessionId ? row.sessionId : null;
+      const result = runChanges(this.orm
+        .update(threads)
+        .set({ ...buildSettingsSet(settings), sdkSessionId, updatedAt: new Date().toISOString() })
+        .where(eq(threads.id, id)));
+      return result.changes > 0;
+    })();
+  }
+
   /** Change planning progress only while Plan mode still owns the thread. */
   updatePlanPhase(id: string, phase: PlanPhase | null): boolean {
     return this.db.prepare(`UPDATE threads SET plan_phase = ?, updated_at = ?

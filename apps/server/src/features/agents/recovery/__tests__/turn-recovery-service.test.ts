@@ -201,6 +201,33 @@ describe("TurnRecoveryService", () => {
       expect(sink.loadTurn(result.turnId)).toMatchObject({ status: "Running", attemptOf: TURN_ID });
     });
 
+    it("attaches a retry to the turn's existing user row, with its attachments, when asked to reuse it", async () => {
+      failTurn();
+      const original = sink.loadUserMessage(TURN_ID);
+      if (!original) throw new Error("Accepted test message missing");
+      const storedDir = NodePath.join(NodePath.dirname(db.filename), "attachments", THREAD_ID);
+      NodeFS.mkdirSync(storedDir, { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(storedDir, "source-file.txt"), "original bytes");
+      const stored = [{ id: "source-file", name: "input.txt", mimeType: "text/plain", sizeBytes: 14 }];
+      db.prepare("UPDATE messages SET attachments = ? WHERE id = ?").run(JSON.stringify(stored), original.id);
+      db.prepare("UPDATE canonical_agent_items SET payload_json = json_set(payload_json, '$.message', json(?)) WHERE turn_id = ? AND kind = 'message'")
+        .run(JSON.stringify({ ...original, attachments: stored }), TURN_ID);
+      let dispatched: SendMessageCommand | undefined;
+
+      await service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, async (command) => {
+        dispatched = command;
+        await admit(command);
+      }, { reuseUserMessage: true });
+
+      expect(dispatched?.persistedUserMessage).toMatchObject({
+        id: original.id,
+        sequence: original.sequence,
+        attachments: stored,
+        persistedAttachments: [expect.objectContaining({ id: "source-file", name: "input.txt" })],
+      });
+      expect(dispatched?.attachments).toEqual([]);
+    });
+
     it("rejects an older attempt even after its timestamp is updated", async () => {
       failTurn();
       await admit({ threadId: THREAD_ID, sourceTurnId: "later-turn", content: "another request" });

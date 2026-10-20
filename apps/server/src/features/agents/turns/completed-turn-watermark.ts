@@ -1,5 +1,5 @@
 import { logger } from "@mcode/shared";
-import type { TurnOutcome } from "@mcode/contracts";
+import type { ProviderIdentity, TurnOutcome } from "@mcode/contracts";
 import type { ExecutionTerminalPersistenceReceipt } from "../execution/execution-worker-handler.js";
 import type { ThreadProviderSessionRepo } from "../../thread-control/persistence/thread-provider-session-repo.js";
 
@@ -8,6 +8,11 @@ export interface FinishedTurnCoverage {
   threadId: string;
   /** Provider the turn ran on, taken from the turn and never from the thread's current provider. */
   providerId: string;
+  /**
+   * Session the turn was admitted on. Null for a fresh session, which the provider reports only mid-turn, so
+   * the session it holds when the turn is credited stands in.
+   */
+  sessionId: string | null;
   outcome: TurnOutcome;
   /** The turn's own last persisted message sequence, not the thread's newest. */
   sequence: number | null;
@@ -15,7 +20,14 @@ export interface FinishedTurnCoverage {
 
 /** Describe what a terminal receipt proves about the session that produced it. */
 export function coverageOf(threadId: string, persisted: ExecutionTerminalPersistenceReceipt): FinishedTurnCoverage {
-  return { threadId, providerId: persisted.providerId, outcome: persisted.outcome, sequence: persisted.messageSequence };
+  return { threadId, providerId: persisted.providerId, sessionId: persisted.sessionId, outcome: persisted.outcome, sequence: persisted.messageSequence };
+}
+
+/** The native session a turn was admitted on, read from the identities recorded at admission. */
+export function admittedSessionId(providerId: string, identities: readonly ProviderIdentity[]): string | null {
+  const session = identities.find((identity) => identity.providerId === providerId
+    && identity.provenance === "native" && (identity.scope === "session" || identity.scope === "thread"));
+  return session?.value ?? null;
 }
 
 /**
@@ -33,9 +45,11 @@ export class CompletedTurnWatermark {
   async record(turn: FinishedTurnCoverage): Promise<void> {
     if (turn.outcome !== "completed" || turn.sequence === null) return;
     try {
-      const session = this.sessions.resolve(turn.threadId, turn.providerId);
-      if (!session) return;
-      await this.sessions.markSeen(turn.threadId, turn.providerId, session.sessionId, turn.sequence);
+      // Credit the admitted session by id: markSeen ignores a row that has since moved to another session, which
+      // resolving here would instead credit with a mark the new session never earned.
+      const sessionId = turn.sessionId ?? this.sessions.resolve(turn.threadId, turn.providerId)?.sessionId;
+      if (!sessionId) return;
+      await this.sessions.markSeen(turn.threadId, turn.providerId, sessionId, turn.sequence);
     } catch (error) {
       logger.warn("Failed to advance provider session watermark", {
         threadId: turn.threadId,

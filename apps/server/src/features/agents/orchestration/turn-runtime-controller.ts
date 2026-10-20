@@ -59,6 +59,7 @@ import {
 } from "../turns/turn-event-pipeline.js";
 import { ProviderTurnEventApplication } from "../turns/provider-turn-event-application.js";
 import { TurnDiffService } from "../turns/turn-diff-service.js";
+import { ProviderSwitchService } from "../turns/provider-switch-service.js";
 import { TURN_FEATURE_EFFECTS, TurnFeatureEffects } from "../turns/turn-feature-effects.js";
 import { TURN_RUNTIME_PERSISTENCE, type TurnRuntimePersistence } from "../turns/turn-runtime-persistence.js";
 import {
@@ -72,6 +73,7 @@ import {
   TURN_ADMISSION_DISPATCH_COORDINATOR,
   type CommandEffectReceipt,
   type PreparedTurnDispatch,
+  type RuntimeReleaseCause,
   type SendMessageCommand,
   type ThreadControlLeaseDirective,
   type TurnRuntimeAdmissionAuthority,
@@ -192,7 +194,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    */
   private readonly endedSuppressionThreads = new Set<string>();
   /** Callbacks keyed by turn execution that run once that runtime releases its active slot, so follow-up turns can admit. */
-  private readonly runtimeReleaseCallbacks = new Map<string, () => void>();
+  private readonly runtimeReleaseCallbacks = new Map<string, (cause?: RuntimeReleaseCause) => void>();
   /**
    * Per-thread dispatch state for transient retries. Fire-and-forget providers
    * A provider can return from `sendTurn` before the stream ends, so the retry
@@ -269,6 +271,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     private readonly eventApplication: ProviderTurnEventApplication,
     @inject(TurnDiffService) turnDiffs: TurnDiffService,
     @inject(TurnSteerRuntimePort) steering: TurnSteerRuntimePort,
+    @inject(ProviderSwitchService) providerSwitch: ProviderSwitchService,
     @inject("WorkerOwnedTurnRuntime", { isOptional: true })
     private readonly workerRuntime?: WorkerOwnedTurnRuntime,
     @inject("ExecutionFileEvidenceCoordinator", { isOptional: true })
@@ -285,6 +288,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         ownsFileMutation: (event) => Boolean(workerRuntime.owner.current(event.threadId)?.started),
         capture: (event) => workerFiles.capture(event),
       } : undefined);
+    providerSwitch.bindDispatch((command) => this.sendMessage(command));
     runtimeCommands.bind({
       createAndSend: (command, options) => this.createAndSend(command, options),
       sendMessage: (command) => this.sendMessage(command),
@@ -346,11 +350,20 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return this.turnFileEffects.currentTurnId(threadId);
   }
 
+  /**
+   * The provider running the thread's current turn. A switching send keeps the persisted provider until the
+   * target accepts the turn, so stop and teardown must follow the dispatch, not the thread row.
+   */
+  private activeProviderId(threadId: string): ProviderId | undefined {
+    return this.turnRetryDispatchByThread.get(threadId)?.effectiveProvider
+      ?? this.runtimePersistence.load(threadId)?.provider as ProviderId | undefined;
+  }
+
   /** Admit provider-originated runtime state before it can replace the active turn. */
   admitProviderTurn(threadId: string): boolean {
     const reservation = this.mutationReservations.get(threadId);
     if (reservation?.state === "stopping") {
-      this.stopUnadmittedTurn(threadId, this.runtimePersistence.load(threadId)?.provider as ProviderId | undefined, "late TurnStarted");
+      this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "late TurnStarted");
       return false;
     }
     // A thread holding an active mutation reservation has a server-admitted turn in flight;
@@ -359,12 +372,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (this.activeMutationReservations.has(threadId)) return true;
     const thread = this.runtimePersistence.load(threadId);
     if (isStoppedThread(thread?.status)) {
-      this.stopUnadmittedTurn(threadId, thread?.provider as ProviderId | undefined, "late TurnStarted");
+      this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "late TurnStarted");
       return false;
     }
     const token = this.mutationReservations.reserve(threadId, "activeTurn");
     if (!token) {
-      this.stopUnadmittedTurn(threadId, thread?.provider as ProviderId | undefined, "blocked auto-resumed turn");
+      this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "blocked auto-resumed turn");
       return false;
     }
     this.activeMutationReservations.set(threadId, token);
@@ -472,7 +485,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     logger.error(reason, { threadId: event.threadId, turnExecutionId: executionId, eventType: event.type });
     let providerId: ProviderId | undefined;
     try {
-      providerId = this.runtimePersistence.load(event.threadId)?.provider as ProviderId | undefined;
+      providerId = this.activeProviderId(event.threadId);
     } catch (error) {
       logger.warn("Provider lookup failed after event application failure", {
         threadId: event.threadId,
@@ -593,7 +606,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
     if (ownsMutation) this.activeMutationReservations.delete(lease.threadId);
     this.mutationReservations.release(lease.threadId, lease.mutationReservationToken);
+    // A failed admission never reaches `trackSessionEnded`, so waiters on the release (a switch's event
+    // subscription, a queued turn's completion) would otherwise never be told.
+    const released = this.runtimeReleaseCallbacks.get(lease.turnExecutionId);
     this.runtimeReleaseCallbacks.delete(lease.turnExecutionId);
+    released?.("admission-failed");
   }
 
   /** Terminalize an admitted turn when durable admission cannot complete. */
@@ -989,6 +1006,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.turnRetryDispatchByThread.set(prepared.lease.threadId, dispatch);
     this.retryingThreads.add(prepared.lease.threadId);
     this.bindClaudeCanonicalDelivery(prepared.provider);
+    if (prepared.dispatchRefusal) return this.handleInitialDispatchFailure(prepared.lease.threadId, dispatch, prepared.dispatchRefusal);
     if (prepared.replaceSession) await this.replacePooledSession(prepared);
     await this.sendPreparedDispatch(prepared.lease.threadId, dispatch);
   }
@@ -1486,7 +1504,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return {
       threadId,
       sessionId: `mcode-${threadId}`,
-      providerId: this.runtimePersistence.load(threadId)?.provider as ProviderId | undefined,
+      providerId: this.activeProviderId(threadId),
       reservationToken,
       dispatchState,
       runtime,
@@ -2162,7 +2180,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const thread = this.runtimePersistence.load(threadId);
     if (!thread) return { kind: "declined", reason: "unavailable" };
     if (this.mutationReservations.get(threadId)?.state !== "stopping") return null;
-    this.stopUnadmittedTurn(threadId, thread.provider as ProviderId | undefined, "provider turn while stopping");
+    this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "provider turn while stopping");
     return { kind: "declined", reason: "stopping" };
   }
 
@@ -2171,7 +2189,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const message = error instanceof Error ? error.message : String(error);
     if (/already has an active agent session|already has a pending mutation/.test(message)) return { kind: "declined", reason: "busy" };
     if (/Cannot send message to (terminal|deleted) thread/.test(message)) {
-      this.stopUnadmittedTurn(threadId, this.runtimePersistence.load(threadId)?.provider as ProviderId | undefined, "provider turn on stopped thread");
+      this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "provider turn on stopped thread");
       return { kind: "declined", reason: "stopped" };
     }
     logger.warn("Provider turn admission failed", { threadId, error: message });
@@ -2308,8 +2326,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Stop the active turn and discard any pooled provider session for a deleted thread. */
   async teardownSession(threadId: string): Promise<void> {
     const sessionId = `mcode-${threadId}`;
-    const thread = this.runtimePersistence.load(threadId);
-    const providerId = thread?.provider as ProviderId | undefined;
+    const providerId = this.activeProviderId(threadId);
     const wasActive = this.activeSessionIds.has(threadId);
 
     if (wasActive) {
@@ -2355,8 +2372,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       ids.map(async (threadId) => {
         await this.featureEffects.stopDescendants(threadId);
         const sessionId = `mcode-${threadId}`;
-        const thread = this.runtimePersistence.load(threadId);
-        const providerId = thread?.provider as ProviderId | undefined;
+        const providerId = this.activeProviderId(threadId);
         if (!providerId) return;
         try {
           const provider = this.providerRegistry.resolve(providerId);

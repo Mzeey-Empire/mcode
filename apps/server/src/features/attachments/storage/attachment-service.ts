@@ -217,23 +217,27 @@ export class AttachmentService {
     return removed;
   }
 
-  /** Rebuild outbound attachment metadata from Mcode-owned stored files for an explicit Retry. */
+  /**
+   * Rebuild outbound attachment metadata from Mcode-owned stored files for an explicit Retry. Each copy gets a
+   * new id, unless `keepIds` says the retry reuses the original message and so its stored attachment rows.
+   */
   prepareRetryAttachments(
     threadId: string,
     attachments: readonly StoredAttachment[],
+    options: { readonly keepIds?: boolean } = {},
   ): AttachmentMeta[] {
     assertSafeId("thread ID", threadId);
     const baseDir = NodePath.join(getAttachmentsDir(), threadId);
     return attachments.map((attachment) => {
       assertSafeId("attachment ID", attachment.id);
       if (shouldPersistAttachmentWithoutFile({ ...attachment, sourcePath: "" })) {
-        return { ...attachment, id: NodeCrypto.randomUUID(), sourcePath: "" };
+        return { ...attachment, id: options.keepIds ? attachment.id : NodeCrypto.randomUUID(), sourcePath: "" };
       }
       const sourcePath = resolveStoredAttachmentPath(baseDir, attachment.id, attachment.mimeType);
       if (!NodeFS.existsSync(sourcePath) || !NodeFS.statSync(sourcePath).isFile()) {
         throw new Error(`Stored attachment file not found: ${attachment.id}`);
       }
-      return { ...attachment, id: NodeCrypto.randomUUID(), sourcePath };
+      return { ...attachment, id: options.keepIds ? attachment.id : NodeCrypto.randomUUID(), sourcePath };
     });
   }
 

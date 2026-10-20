@@ -30,6 +30,18 @@ export interface AttachmentSource {
   parentMessageId: string;
 }
 
+/** What a provider switch records about the history it replayed and the options it dropped. */
+export interface SwitchAudit {
+  readonly fromProvider: string;
+  readonly toProvider: string;
+  readonly coveredSequences: readonly number[];
+  readonly omittedSequences: readonly number[];
+  readonly budgetBytes: number;
+  readonly droppedOptions: readonly { readonly option: string; readonly value: string | boolean; readonly reason: string }[];
+  /** The rendered history exactly as the target received it. */
+  readonly history: string;
+}
+
 /** Attachments larger than this are skipped during copy to avoid blowing storage budgets. */
 const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -73,8 +85,9 @@ export class HandoffStorage {
   async readLatest(threadId: string): Promise<HandoffArtifact | null> {
     const handoffsRoot = resolveThreadHandoffsDir(this.mcodeDirFn(), threadId);
     if (!NodeFS.existsSync(handoffsRoot)) return null;
-    const entries = await NodeFSPromises.readdir(handoffsRoot);
-    if (entries.length === 0) return null;
+    // A switch audit is markdown only, so it has no handoff.json and is not a fork artifact.
+    const entries = (await NodeFSPromises.readdir(handoffsRoot))
+      .filter((entry) => NodeFS.existsSync(NodePath.join(handoffsRoot, entry, "handoff.json")));
     const latest = entries.sort().at(-1);
     if (!latest) return null;
     const dir = NodePath.join(handoffsRoot, latest);
@@ -83,6 +96,41 @@ export class HandoffStorage {
       NodeFSPromises.readFile(NodePath.join(dir, "handoff.json"), "utf8"),
     ]);
     return { markdown: md, meta: JSON.parse(json) as HandoffMeta };
+  }
+
+  /**
+   * Persist the audit copy of a provider-switch handoff as `handoff.md`.
+   *
+   * It carries no `handoff.json`: the sidecar describes a fork's parent and child, which a switch has
+   * neither of, so {@link readLatest} skips switch audits.
+   */
+  async writeSwitchAudit(threadId: string, audit: SwitchAudit): Promise<string> {
+    const ulid = newHandoffUlid();
+    const handoffDir = resolveHandoffDir(this.mcodeDirFn(), threadId, ulid);
+    await NodeFSPromises.mkdir(handoffDir, { recursive: true });
+    const frontmatter = [
+      "schemaVersion: 2",
+      "kind: switch",
+      `fromProvider: ${audit.fromProvider}`,
+      `toProvider: ${audit.toProvider}`,
+      `coveredSequences: ${JSON.stringify(audit.coveredSequences)}`,
+      `omittedSequences: ${JSON.stringify(audit.omittedSequences)}`,
+      `budgetBytes: ${audit.budgetBytes}`,
+      `droppedOptions: ${JSON.stringify(audit.droppedOptions)}`,
+    ].join("\n");
+    await NodeFSPromises.writeFile(NodePath.join(handoffDir, "handoff.md"), `---\n${frontmatter}\n---\n\n${audit.history}\n`, "utf8");
+    return ulid;
+  }
+
+  /** The newest switch audit's markdown, or null when the thread never switched. */
+  async readLatestSwitch(threadId: string): Promise<string | null> {
+    const handoffsRoot = resolveThreadHandoffsDir(this.mcodeDirFn(), threadId);
+    if (!NodeFS.existsSync(handoffsRoot)) return null;
+    const audits = (await NodeFSPromises.readdir(handoffsRoot))
+      .filter((entry) => !NodeFS.existsSync(NodePath.join(handoffsRoot, entry, "handoff.json")))
+      .sort();
+    const latest = audits.at(-1);
+    return latest ? NodeFSPromises.readFile(NodePath.join(handoffsRoot, latest, "handoff.md"), "utf8") : null;
   }
 
   /** Copy source files into <thread>/attachments/<id>.<ext>. */

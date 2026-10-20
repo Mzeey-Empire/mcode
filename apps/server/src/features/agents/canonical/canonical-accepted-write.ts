@@ -99,6 +99,7 @@ export class CanonicalAcceptedEventWrite {
     }
     this.messages.createAssistantIdempotent({ id: assistant.id, threadId: assistant.thread_id,
       content: assistant.content, sequence: assistant.sequence, model: assistant.model ?? null,
+      provider: this.canonical.loadThread(assistant.thread_id)?.providerId ?? null,
       attachments: assistant.attachments ?? [], isInternal: phase !== "finalized" });
   }
 
