@@ -73,6 +73,7 @@ import {
   TURN_ADMISSION_DISPATCH_COORDINATOR,
   type CommandEffectReceipt,
   type PreparedTurnDispatch,
+  type RuntimeReleaseCause,
   type SendMessageCommand,
   type ThreadControlLeaseDirective,
   type TurnRuntimeAdmissionAuthority,
@@ -193,7 +194,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    */
   private readonly endedSuppressionThreads = new Set<string>();
   /** Callbacks keyed by turn execution that run once that runtime releases its active slot, so follow-up turns can admit. */
-  private readonly runtimeReleaseCallbacks = new Map<string, () => void>();
+  private readonly runtimeReleaseCallbacks = new Map<string, (cause?: RuntimeReleaseCause) => void>();
   /**
    * Per-thread dispatch state for transient retries. Fire-and-forget providers
    * A provider can return from `sendTurn` before the stream ends, so the retry
@@ -605,7 +606,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
     if (ownsMutation) this.activeMutationReservations.delete(lease.threadId);
     this.mutationReservations.release(lease.threadId, lease.mutationReservationToken);
+    // A failed admission never reaches `trackSessionEnded`, so waiters on the release (a switch's event
+    // subscription, a queued turn's completion) would otherwise never be told.
+    const released = this.runtimeReleaseCallbacks.get(lease.turnExecutionId);
     this.runtimeReleaseCallbacks.delete(lease.turnExecutionId);
+    released?.("admission-failed");
   }
 
   /** Terminalize an admitted turn when durable admission cannot complete. */

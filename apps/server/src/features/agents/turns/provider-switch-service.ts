@@ -22,7 +22,7 @@ import { TurnRecoveryService } from "../recovery/turn-recovery-service.js";
 import { sendAdmittedTurn } from "../transport/turn-message-dispatch.js";
 import { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
 import { reconcileSwitchOptions, type DroppedOption } from "./provider-switch-options.js";
-import type { SendMessageCommand } from "./turn-admission-dispatch-coordinator.js";
+import type { RuntimeReleaseCause, SendMessageCommand } from "./turn-admission-dispatch-coordinator.js";
 
 /** Settings a switching send writes to the thread once the target accepts the turn. */
 export type ProviderSwitchSettings = Parameters<ThreadRepo["updateSettings"]>[1] & { readonly model: string };
@@ -111,9 +111,9 @@ export class ProviderSwitchService {
     };
     ticket.command = {
       ...command,
-      onRuntimeReleased: () => {
-        command.onRuntimeReleased?.();
-        void this.release(ticket);
+      onRuntimeReleased: (cause) => {
+        command.onRuntimeReleased?.(cause);
+        void this.release(ticket, cause);
       },
     };
     return ticket;
@@ -206,6 +206,8 @@ export class ProviderSwitchService {
   discard(ticket: ProviderSwitchTicket): void {
     ticket.armed?.unsubscribe();
     ticket.armed = null;
+    const threadId = ticket.command.threadId;
+    if (this.armedByThread.get(threadId) === ticket) this.armedByThread.delete(threadId);
   }
 
   private observe(
@@ -270,7 +272,8 @@ export class ProviderSwitchService {
   }
 
   /** The runtime freed the thread: settle the switch, and retry on a fresh session if the resume failed. */
-  private async release(ticket: ProviderSwitchTicket): Promise<void> {
+  private async release(ticket: ProviderSwitchTicket, cause?: RuntimeReleaseCause): Promise<void> {
+    if (cause === "admission-failed") return this.discard(ticket);
     const armed = ticket.armed;
     if (!armed) return;
     try {

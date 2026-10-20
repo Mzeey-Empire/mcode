@@ -71,6 +71,9 @@ export type { WorkspaceEnvironmentQueuedTurnSubmission };
 /** Injection token for the complete first-turn admission coordinator. */
 export const TURN_ADMISSION_DISPATCH_COORDINATOR = "TurnAdmissionDispatchCoordinator";
 
+/** Why a turn's runtime slot was released; absent for a turn that ran to its terminal state. */
+export type RuntimeReleaseCause = "admission-failed";
+
 /** A complete command accepted by a parent-turn admission coordinator. */
 export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "provider"> & {
   permissionMode?: PermissionMode | "default";
@@ -104,8 +107,11 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   resumeRequired?: boolean;
   /** Stores the user row hidden from the transcript, for server-authored continuation prompts. */
   internalUserMessage?: boolean;
-  /** Runs once this turn's runtime releases its active slot, so a follow-up turn on the thread can admit. */
-  onRuntimeReleased?: () => void;
+  /**
+   * Runs once this turn's runtime releases its active slot, so a follow-up turn on the thread can admit.
+   * `admission-failed` means the turn never reached a provider, so no terminal event will follow.
+   */
+  onRuntimeReleased?: (cause?: RuntimeReleaseCause) => void;
   /** First-Turn message and attachment data already committed by the automatic Setup gate. */
   persistedUserMessage?: {
     readonly id: string;
