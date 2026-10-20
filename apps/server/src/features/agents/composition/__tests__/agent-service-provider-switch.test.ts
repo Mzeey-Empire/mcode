@@ -17,6 +17,7 @@ import type {
 import { ProviderTurnError, SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
 
 import { setupContainer } from "../../../../application/composition/container.js";
+import { mapRouteError } from "../../../../application/transport/ws-router.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { HandoffStorage } from "../../../handoff/persistence/handoff-storage.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
@@ -61,6 +62,8 @@ describe("provider switch on send", () => {
     temporaryDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-provider-switch-"));
     process.env.MCODE_DB_PATH = NodePath.join(temporaryDirectory, "mcode.db");
     await setupContainer(temporaryDirectory);
+    const auditDirectory = temporaryDirectory;
+    container.registerInstance(HandoffStorage, HandoffStorage.forTesting({ mcodeDirFn: () => auditDirectory }));
     databaseWriter = container.resolve(ApplicationDatabaseWriter);
     database = container.resolve<Database>("Database");
     runtime = container.resolve(WorkerOwnedTurnRuntime);
@@ -113,6 +116,99 @@ describe("provider switch on send", () => {
     expect(thread()).toMatchObject({ provider: "codex", model: CODEX_MODEL, sdk_session_id: "codex-s1" });
     expect(sessions().find(threadId, "claude")).toMatchObject({ sessionId: "claude-s1" });
   });
+
+  it("forks onto Codex with inline parent context without calling the parent's provider", async () => {
+    const messages = container.resolve(MessageRepo);
+    await messages.create(threadId, "user", "The project is Heliotrope.", 1);
+    await messages.create(threadId, "assistant", "Keep the CLI compatible.", 2);
+    await container.resolve(ThreadRepo).updateSdkSessionId(threadId, "claude", "parent-session");
+    Object.assign(claude, { sessionForkOnResume: "clean" });
+    const parentFork = vi.spyOn(claude.forker, "fork");
+
+    const child = await fork("Continue the project.");
+
+    const request = lastRequest(codex);
+    expect(request.threadId).toBe(child.id);
+    expect(request.resumeFrom).toBeUndefined();
+    expect(request.message).toContain("[mcode-handoff:begin boundary=");
+    expect(request.message).toContain("The project is Heliotrope.");
+    expect(request.message).toContain("Keep the CLI compatible.");
+    expect(request.message).toContain("Kind: fork");
+    expect(request.message.endsWith("Continue the project.")).toBe(true);
+    expect(claude.sendTurn).not.toHaveBeenCalled();
+    expect(parentFork).not.toHaveBeenCalled();
+    expect(messages.listIncludingInternal(child.id).filter(row => row.role === "user").map(row => row.content))
+      .toEqual(["Continue the project."]);
+  });
+
+  it("records covered and omitted fork sequences and respects the target's per-turn cap", async () => {
+    const messages = container.resolve(MessageRepo);
+    await messages.create(threadId, "user", "Oversized history " + "x".repeat(20_000), 1);
+    await messages.create(threadId, "assistant", "Preserve this decision.", 2);
+    Object.assign(codex, { maxInputCharactersPerTurn: 2_000 });
+
+    const child = await fork("Continue.");
+
+    const wire = lastRequest(codex).message;
+    expect(wire.length).toBeLessThanOrEqual(2_000);
+    expect(wire).toContain("Preserve this decision.");
+    expect(wire).not.toContain("Oversized history");
+    const audit = await container.resolve(HandoffStorage).readLatestSwitch(child.id);
+    expect(audit).toContain("schemaVersion: 2\nkind: fork");
+    expect(audit).toContain("fromProvider: claude\ntoProvider: codex");
+    expect(audit).toContain("coveredSequences: [2]");
+    expect(audit).toContain("omittedSequences: [1]");
+    expect(audit).toContain(wire.slice(0, -"Continue.".length));
+  });
+
+  it("cuts fork history at the selected message even when later messages exist", async () => {
+    const messages = container.resolve(MessageRepo);
+    await messages.create(threadId, "user", "Use the stable API.", 1);
+    const anchor = await messages.create(threadId, "assistant", "Stable API selected.", 2);
+    await messages.create(threadId, "user", "Later change: use the experimental API.", 3);
+    await messages.create(threadId, "assistant", "Experimental API selected.", 4);
+
+    const child = await fork("Continue from here.", anchor.id);
+
+    const wire = lastRequest(codex).message;
+    expect(wire).toContain("Use the stable API.");
+    expect(wire).toContain("Stable API selected.");
+    expect(wire).not.toContain("experimental API");
+    expect(wire).not.toContain("Experimental API");
+    const audit = await container.resolve(HandoffStorage).readLatestSwitch(child.id);
+    expect(audit).toContain("coveredSequences: [1,2]");
+    expect(audit).toContain("omittedSequences: []");
+    expect(audit).toContain("Sequences: 1-2");
+  });
+
+  it.each(["context", "input cap"])("refuses an exhausted fork %s budget before creating or dispatching a child", async (limit) => {
+    const messages = container.resolve(MessageRepo);
+    await messages.create(threadId, "user", "History must survive.", 1);
+    if (limit === "context") await container.resolve(ThreadRepo).updateContextUsage(threadId, 1, 40);
+    else Object.assign(codex, { maxInputCharactersPerTurn: 100 });
+    const content = "Keep this new message whole.";
+
+    const response = await fork(content).catch(error => mapRouteError({
+      id: "fork-request", method: "agent.createAndSend", params: {},
+    }, error));
+    expect(response).toMatchObject({ id: "fork-request", error: { code: "handoff_budget_exhausted" } });
+
+    expect(codex.sendTurn).not.toHaveBeenCalled();
+    expect(claude.sendTurn).not.toHaveBeenCalled();
+    expect(container.resolve(ThreadRepo).listByWorkspace(thread().workspace_id).map(row => row.id)).toEqual([threadId]);
+    expect(messages.listIncludingInternal(threadId).map(row => row.content)).toEqual(["History must survive."]);
+  });
+
+  async function fork(content: string, forkedFromMessageId?: string) {
+    codex.sendTurn.mockImplementationOnce(answer(codex, "Child reply.", "child-session"));
+    const child = await container.resolve(AgentService).createAndSend({
+      workspaceId: thread().workspace_id, parentThreadId: threadId, forkedFromMessageId,
+      content, provider: "codex", model: CODEX_MODEL, permissionMode: "default", mode: "direct",
+    });
+    await waitFor(() => codex.sendTurn.mock.calls.some(([request]) => request.threadId === child.id));
+    await waitFor(() => runtime.owner.current(child.id) === undefined);
+    return child;
+  }
 
   it("trims the replayed history so the message fits a target that accepts few characters per turn", async () => {
     Object.assign(codex, { maxInputCharactersPerTurn: 4_000 });

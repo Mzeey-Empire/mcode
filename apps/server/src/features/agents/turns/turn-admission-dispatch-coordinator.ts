@@ -82,6 +82,8 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   markPlanAnswerForMessageId?: string;
   /** Provider payload used instead of the persisted user-facing content. */
   providerWireOverride?: string;
+  /** Server-built fork history, prepended only to the provider's first-turn payload. */
+  handoffPreamble?: string;
   /** Server-assigned turn identity used by thread-control creation results. */
   sourceTurnId?: string;
   /** Source thread identity for a cross-thread user message origin. */
@@ -1110,9 +1112,9 @@ export class TurnAdmissionDispatchCoordinator {
     return this.withHandoffPreamble(prepared, withNotice);
   }
 
-  /** A switching send carries the earlier conversation inline; the stored user message stays what was typed. */
+  /** Switches and forks carry history inline; the stored user message stays what was typed. */
   private withHandoffPreamble(prepared: PreparedCommand, payload: string): string {
-    return `${prepared.providerSwitch?.plan?.handoff.preamble ?? ""}${payload}`;
+    return `${prepared.providerSwitch?.plan?.handoff.preamble ?? prepared.command.handoffPreamble ?? ""}${payload}`;
   }
 
   private withPlanInstructions(prepared: PreparedCommand): string {
