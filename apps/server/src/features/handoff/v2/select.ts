@@ -53,6 +53,13 @@ function renderRange(range: SequenceRange): string {
   return range.first === range.last ? `${range.first}` : `${range.first}-${range.last}`;
 }
 
+function rangeWithout(range: SequenceRange, sequence: number): SequenceRange[] {
+  const remaining: SequenceRange[] = [];
+  if (sequence > range.first) remaining.push({ first: range.first, last: sequence - 1 });
+  if (sequence < range.last) remaining.push({ first: sequence + 1, last: range.last });
+  return remaining;
+}
+
 class OmittedMessages {
   private readonly counts = new Map<number, number>();
   private readonly ranges: SequenceRange[] = [];
@@ -99,9 +106,7 @@ class OmittedMessages {
     }
     const index = this.rangeIndex(sequence);
     const range = this.ranges[index];
-    const replacements: SequenceRange[] = [];
-    if (sequence > range.first) replacements.push({ first: range.first, last: sequence - 1 });
-    if (sequence < range.last) replacements.push({ first: sequence + 1, last: range.last });
+    const replacements = rangeWithout(range, sequence);
     const nextRangeCount = this.ranges.length - 1 + replacements.length;
     const separators = Math.max(0, nextRangeCount - 1) - Math.max(0, this.ranges.length - 1);
     const nextBytes = this.bytes - renderRange(range).length
