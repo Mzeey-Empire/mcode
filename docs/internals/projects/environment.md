@@ -78,15 +78,11 @@ document stores only that `false`, and `actionSchedule` is the one reader that
 turns it into a `wait` or `release` gate; the runner freezes the gate with the
 action ids and hashes.
 
-A `release` action advances the sequence as soon as its run is running, so its
-entry's `ready` means "no longer holds the gate", not "finished". Its later
-exit is ignored: a dev server that dies after the first prompt has been
-released must not block or fail Setup retroactively. Everything before the
-running state still blocks as for a `wait` action: launch failure, a pending
-approval and a changed script. Retry reuses a released entry only while its
-retained run is the same run and still running; a dead server relaunches
-instead of being counted as set up. Reuse of a `wait` entry stays hash-only
-because exit zero is a finished one-shot.
+A `release` action advances the sequence once its run is running, so an
+entry's `ready` means "no longer holds the gate", not "finished". Its later exit
+is ignored, because a dev server that dies after the first prompt must not fail
+Setup retroactively. Retry reuses a released entry only while the same run is
+still running, so a dead server relaunches instead of counting as set up.
 No startup actions releases the gate as not required.
 
 The first failure stops the sequence, records `failedActionId` on the attempt
@@ -191,13 +187,10 @@ output and is the output record for the Action's terminal tab. Retained runs
 store lifecycle metadata and confirmed port reachability. Command output only
 publishes a run update when a port is confirmed or its reachability changes.
 
-`openPreview` asks clients to open the Browser once. The server captures the
-request per run id at launch and attaches `openPreview: { url }` to the single
-`action.updated` broadcast where that run is running and its port is reachable.
-It is never stored on the run, so reconnecting, replaying a retained run or
-restarting the server cannot reopen a tab. A configured URL pins the port
-monitor to that URL, so the probed URL is the one that opens and detected
-output cannot replace it.
+`openPreview` is a one-time instruction, never part of the retained run: the
+server attaches it to a single `action.updated` broadcast, so reconnecting or
+replaying a run cannot reopen a tab. A configured URL pins the port monitor to
+that URL, so the URL that was probed is the one that opens.
 
 The initial running result must be saved before the service subscribes to
 exit events. If retention fails after launch, the
