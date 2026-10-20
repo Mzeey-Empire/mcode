@@ -172,6 +172,43 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
     expect(host.mcode.close).toHaveBeenCalledWith("mcode-thread-1");
   });
 
+  it("reattaches the mcode server on the next turn when the session started without it", async () => {
+    const host = createHost();
+    vi.mocked(host.mcode.attach).mockRejectedValueOnce(new Error("mcode server unavailable"));
+    const first = createFakeAcpRuntime("acp-1", 101);
+    const second = createFakeAcpRuntime("acp-1", 202);
+    const provider = startProvider(host, [first, second]);
+    await provider.sendTurn(turn());
+    await provider.sendTurn({ ...turn(), turnId: "turn-2", turnExecutionId: "execution-2", resumeFrom: "acp-1" });
+
+    expect(openedServers(first)).toEqual([]);
+    expect(openedServers(second)).toHaveLength(1);
+    expect(second.openSession.mock.calls[0]?.[0]).toMatchObject({ resumeFrom: "acp-1" });
+    expect(promptText(second)).toContain(THREAD_TOOL);
+  });
+
+  it("keeps reusing a session that started with the mcode server", async () => {
+    const host = createHost();
+    const first = createFakeAcpRuntime("acp-1", 101);
+    const provider = startProvider(host, [first]);
+    await provider.sendTurn(turn());
+    await provider.sendTurn({ ...turn(), turnId: "turn-2", turnExecutionId: "execution-2", resumeFrom: "acp-1" });
+
+    expect(host.mcode.attach).toHaveBeenCalledTimes(1);
+    expect(first.prompt).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not respawn a session whose Cursor build lacks HTTP MCP", async () => {
+    const host = createHost();
+    const first = createFakeAcpRuntime("acp-1", 101);
+    first.initialize.mockResolvedValue({ agentCapabilities: {}, authMethods: [] });
+    const provider = startProvider(host, [first]);
+    await provider.sendTurn(turn());
+    await provider.sendTurn({ ...turn(), turnId: "turn-2", turnExecutionId: "execution-2", resumeFrom: "acp-1" });
+
+    expect(first.prompt).toHaveBeenCalledTimes(2);
+  });
+
   it("closes the mcode session when the pooled session is torn down", async () => {
     const host = createHost();
     const provider = startProvider(host, [createFakeAcpRuntime("acp-1", 101)]);

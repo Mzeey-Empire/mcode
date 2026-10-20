@@ -477,7 +477,10 @@ export class CursorProvider
   ): Promise<CursorSessionState | undefined> {
     const entry = this.runtime.get(context.sessionId);
     if (!entry) return undefined;
-    if (context.resume || entry.activeTurnState !== null) return entry;
+    if (entry.activeTurnState !== null) return entry;
+    // A session that started without the mcode server never gets it back by being reused, so the
+    // next turn respawns it (resuming the same ACP session) and tries the attach again.
+    if (context.resume && !entry.mcodeDegraded) return entry;
 
     await this.runtime.stop(context.sessionId);
     return undefined;
@@ -914,6 +917,7 @@ export class CursorProvider
       );
       state = opened.state;
       state.mcodeLogicalSessionReloaded = opened.reloaded;
+      state.mcodeDegraded = state.supportsHttpMcp && opened.mcode === null;
       browserGrant = this.releaseUnlistedBrowserGrant(browserGrant, opened.mcode);
       this.throwIfPendingStop(sessionId);
       this.configureSpawnedSession(state, opened.mcode, browserGrant);

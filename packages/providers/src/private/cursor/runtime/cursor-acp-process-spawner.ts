@@ -159,6 +159,7 @@ export class CursorAcpProcessSpawner {
       mcodeRuntimeInstructions: "",
       mcodeRuntimeInstructionsSent: false,
       mcodeLogicalSessionReloaded: false,
+      mcodeDegraded: false,
     };
     entry = initializedEntry;
     child.stderr?.on("data", (chunk: Buffer) => {
