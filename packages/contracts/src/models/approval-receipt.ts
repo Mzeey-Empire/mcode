@@ -7,7 +7,7 @@ export const ApprovalDecidedPayloadSchema = lazySchema(() => z.object({
   threadId: z.string().min(1).max(256),
   requestId: z.string().min(1).max(256),
   toolCallId: z.string().max(256).optional(),
-  kind: z.enum(["command", "file_edit", "fetch", "tool", "thread_operation", "question"]),
+  kind: z.enum(["command", "file_edit", "fetch", "tool", "thread_operation", "delegate_task", "question"]),
   subjectLabel: z.string().min(1).max(200),
   outcome: ApprovalOutcomeSchema(),
   origin: ApprovalOriginSchema().optional(),

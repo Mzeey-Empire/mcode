@@ -22,6 +22,7 @@ function subjectLabel(subject: ApprovalSubject): string {
     case "tool": return subject.toolName;
     case "question": return "Questions";
     case "thread_operation": return subject.operation;
+    case "delegate_task": return subject.title;
   }
 }
 
