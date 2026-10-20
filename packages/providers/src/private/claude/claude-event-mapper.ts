@@ -114,6 +114,8 @@ export type ClaudeMapOutcome = "none" | "turn_complete" | "result_error";
 /** Converts Claude SDK messages to provider-neutral events. */
 export class ClaudeEventMapper {
   private lastAssistantText = "";
+  // The CLI yields each finished block before the API reports stop_reason, so main-thread text waits for message_delta, a tool call, or the result.
+  private boundaryAwaitsStopReason = false;
   private lastInputTokens: number | undefined;
   private lastContextWindow: number | undefined;
   private compacting = false;
@@ -196,6 +198,7 @@ export class ClaudeEventMapper {
     this.reasoningItemByBlock.clear();
     this.reasoningMessageKey = undefined;
     this.lastAssistantText = "";
+    this.boundaryAwaitsStopReason = false;
     this.lastInputTokens = undefined;
     this.nativeSource = {};
     this.resetFailureEvidence();
@@ -298,16 +301,26 @@ export class ClaudeEventMapper {
       .join("");
     if (text) {
       this.lastAssistantText = text;
-      this.emit({
-        type: AgentEventType.AssistantMessageBoundary,
-        threadId: this.threadId,
-        isFinalResponse: finalStopReason(assistant?.stop_reason ?? null),
-      });
+      const stopReason = assistant?.stop_reason ?? null;
+      if (stopReason === null && !parentToolCallId) this.boundaryAwaitsStopReason = true;
+      else this.emitBoundary(finalStopReason(stopReason));
     }
-    for (const block of content)
-      if (block.type === "tool_use") this.emitToolUse(block, parentToolCallId);
+    for (const block of content) {
+      if (block.type !== "tool_use") continue;
+      if (!parentToolCallId) this.emitPendingBoundary(false);
+      this.emitToolUse(block, parentToolCallId);
+    }
     if (parentToolCallId) this.reportSubagentRun(parentToolCallId, { model: runModel(objectValue(assistant).model) });
     return "none";
+  }
+
+  private emitBoundary(isFinalResponse: boolean): void {
+    this.boundaryAwaitsStopReason = false;
+    this.emit({ type: AgentEventType.AssistantMessageBoundary, threadId: this.threadId, isFinalResponse });
+  }
+
+  private emitPendingBoundary(isFinalResponse: boolean): void {
+    if (this.boundaryAwaitsStopReason) this.emitBoundary(isFinalResponse);
   }
 
   /**
@@ -453,6 +466,7 @@ export class ClaudeEventMapper {
 
   private emitResultMessage(usage: Usage): void {
     if (!this.lastAssistantText) return;
+    this.emitPendingBoundary(true);
     this.emit({
       type: AgentEventType.Message,
       threadId: this.threadId,
@@ -511,6 +525,7 @@ export class ClaudeEventMapper {
 
   private resetResult(): void {
     this.lastAssistantText = "";
+    this.boundaryAwaitsStopReason = false;
     this.lastInputTokens = undefined;
   }
 
@@ -677,6 +692,8 @@ export class ClaudeEventMapper {
   private streamEvent(message: Message): ClaudeMapOutcome {
     const event = objectValue(message.event);
     const usage = (event.message as { usage?: Usage } | undefined)?.usage;
+    const stopReason = event.type === "message_delta" ? objectValue(event.delta).stop_reason : undefined;
+    if (typeof stopReason === "string" && !parentId(message)) this.emitPendingBoundary(finalStopReason(stopReason));
     if (event.type === "message_start") this.startReasoningMessage(event);
     if (event.type === "message_start" && usage)
       this.emitContextEstimate(usage);
