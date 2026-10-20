@@ -301,17 +301,24 @@ export class ClaudeEventMapper {
       .join("");
     if (text) {
       this.lastAssistantText = text;
-      const stopReason = assistant?.stop_reason ?? null;
-      if (stopReason === null && !parentToolCallId) this.boundaryAwaitsStopReason = true;
-      else this.emitBoundary(finalStopReason(stopReason));
+      this.classifyAssistantText(assistant?.stop_reason ?? null, parentToolCallId);
     }
+    this.emitToolUses(content, parentToolCallId);
+    if (parentToolCallId) this.reportSubagentRun(parentToolCallId, { model: runModel(objectValue(assistant).model) });
+    return "none";
+  }
+
+  private classifyAssistantText(stopReason: string | null, parentToolCallId: string | undefined): void {
+    if (stopReason === null && !parentToolCallId) this.boundaryAwaitsStopReason = true;
+    else this.emitBoundary(finalStopReason(stopReason));
+  }
+
+  private emitToolUses(content: Message[], parentToolCallId: string | undefined): void {
     for (const block of content) {
       if (block.type !== "tool_use") continue;
       if (!parentToolCallId) this.emitPendingBoundary(false);
       this.emitToolUse(block, parentToolCallId);
     }
-    if (parentToolCallId) this.reportSubagentRun(parentToolCallId, { model: runModel(objectValue(assistant).model) });
-    return "none";
   }
 
   private emitBoundary(isFinalResponse: boolean): void {
@@ -692,8 +699,7 @@ export class ClaudeEventMapper {
   private streamEvent(message: Message): ClaudeMapOutcome {
     const event = objectValue(message.event);
     const usage = (event.message as { usage?: Usage } | undefined)?.usage;
-    const stopReason = event.type === "message_delta" ? objectValue(event.delta).stop_reason : undefined;
-    if (typeof stopReason === "string" && !parentId(message)) this.emitPendingBoundary(finalStopReason(stopReason));
+    if (event.type === "message_delta" && !parentId(message)) this.settleBoundaryFromDelta(event);
     if (event.type === "message_start") this.startReasoningMessage(event);
     if (event.type === "message_start" && usage)
       this.emitContextEstimate(usage);
@@ -702,6 +708,10 @@ export class ClaudeEventMapper {
       this.emitDelta(objectValue(event.delta), event.index);
     if (event.type === "content_block_stop") this.closeReasoningBlock(event.index);
     return "none";
+  }
+  private settleBoundaryFromDelta(event: Message): void {
+    const stopReason = objectValue(event.delta).stop_reason;
+    if (typeof stopReason === "string") this.emitPendingBoundary(finalStopReason(stopReason));
   }
   private startReasoningMessage(event: Message): void {
     this.reasoningItemByBlock.clear();
