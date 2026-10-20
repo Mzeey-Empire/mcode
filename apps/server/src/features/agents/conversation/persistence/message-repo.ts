@@ -5,7 +5,7 @@ import type { Database } from "bun:sqlite";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { MessageStore } from "./message-store.js";
 import { messageWriteOperations } from "./message-write-operations.js";
-export type { ThreadControlMessageRecord, ThreadHistoryBudget, BudgetedThreadMessages, BudgetedThreadMessageOptions } from "./message-store.js";
+export type { ThreadControlMessageRecord } from "./message-store.js";
 
 /** Read-only queries and committed mutations for MessageRepo. */
 @injectable()
@@ -85,10 +85,6 @@ export class MessageRepo {
 
   listByThreadUpToSequence(threadId: Parameters<MessageStore["listByThreadUpToSequence"]>[0], maxSequence: Parameters<MessageStore["listByThreadUpToSequence"]>[1]): ReturnType<MessageStore["listByThreadUpToSequence"]> {
     return this.reader.listByThreadUpToSequence(threadId, maxSequence);
-  }
-
-  listByThreadUpToSequenceBudgeted(threadId: Parameters<MessageStore["listByThreadUpToSequenceBudgeted"]>[0], maxSequence: Parameters<MessageStore["listByThreadUpToSequenceBudgeted"]>[1], options: Parameters<MessageStore["listByThreadUpToSequenceBudgeted"]>[2]): ReturnType<MessageStore["listByThreadUpToSequenceBudgeted"]> {
-    return this.reader.listByThreadUpToSequenceBudgeted(threadId, maxSequence, options);
   }
 
   findByIdInThread(threadId: Parameters<MessageStore["findByIdInThread"]>[0], messageId: Parameters<MessageStore["findByIdInThread"]>[1]): ReturnType<MessageStore["findByIdInThread"]> {

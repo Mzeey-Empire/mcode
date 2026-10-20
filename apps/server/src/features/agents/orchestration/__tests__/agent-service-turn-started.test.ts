@@ -74,7 +74,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     providerStub = wrapProviderEmitterForRuntimeEvents(Object.assign(new NodeEvents.EventEmitter(), {
       id: "claude" as ProviderId,
       supportsCompletion: false,
-      sessionForkOnResume: "unsupported" as const,
+
       maxInputCharactersPerTurn: 16_000,
       // Never resolves. We want to observe events emitted BEFORE completion.
       // Snapshot capturedEvents.length synchronously on entry: this is the
@@ -146,7 +146,6 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       memoryPressureServiceStub,
       settingsServiceStub,
       availabilityStub,
-      { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       new NarrativeStore(
         messageRepo,

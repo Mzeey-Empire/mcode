@@ -12,7 +12,6 @@
     "permissions",
     "usage",
     "session-eviction",
-    "clean-fork",
     "browser-access",
     "thread-control"
   ],

@@ -215,7 +215,6 @@ export function createAgentServiceForTest(
   memoryPressureService: MemoryPressureService,
   settingsService: SettingsService,
   availability: ProviderAvailabilityService,
-  _handoff: unknown,
   scopedPreGrant: ScopedPreGrantService,
   narrativeStore: NarrativeStore,
   parentAssistantTextCheckpoints: ParentAssistantTextCheckpointService,

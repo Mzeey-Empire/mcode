@@ -25,15 +25,12 @@ function inertHost(platform: NodeJS.Platform) {
 
 type Register = (registry: { registerInstance: (token: string, provider: IAgentProvider) => unknown }, input: ProviderFactoryInput) => IAgentProvider;
 
-const createForker = vi.fn(() => ({ fork: vi.fn() }));
-
 const cases: ReadonlyArray<{
   id: string;
   platform: NodeJS.Platform;
   register: Register;
   input: (host: ProviderHostPorts) => ProviderFactoryInput;
   tokens: readonly string[];
-  forkerCalls: number;
 }> = [
   {
     id: "claude",
@@ -42,10 +39,9 @@ const cases: ReadonlyArray<{
     input: (host) => ({
       configuration: { cliPath: "claude", idleSessionTtlMs: 600_000 },
       host,
-      claude: { createForker },
+
     }),
     tokens: ["IAgentProvider", "ClaudeProvider"],
-    forkerCalls: 1,
   },
   {
     id: "codex",
@@ -67,7 +63,6 @@ const cases: ReadonlyArray<{
       },
     }) as unknown as ProviderFactoryInput,
     tokens: ["IAgentProvider"],
-    forkerCalls: 0,
   },
   {
     id: "cursor",
@@ -82,33 +77,19 @@ const cases: ReadonlyArray<{
       },
     }),
     tokens: ["IAgentProvider"],
-    forkerCalls: 0,
   },
 ];
 
 describe("provider registration", () => {
-  it.each(cases)("registers one usable $id lifecycle owner under its server tokens without host I/O", ({ id, platform, register, input, tokens, forkerCalls }) => {
+  it.each(cases)("registers one usable $id lifecycle owner under its server tokens without host I/O", ({ id, platform, register, input, tokens }) => {
     const { host, io } = inertHost(platform);
     const registerInstance = vi.fn();
-    createForker.mockClear();
 
     const provider = register({ registerInstance }, input(host));
 
     expect(registerInstance.mock.calls).toEqual(tokens.map((token) => [token, provider]));
     expect(provider.id).toBe(id);
     expect(provider.sendTurn).toBeTypeOf("function");
-    expect(io).not.toHaveBeenCalled();
-    expect(createForker).toHaveBeenCalledTimes(forkerCalls);
-  });
-
-  it("registers no Claude provider when the required server fork policy is absent", () => {
-    const { host, io } = inertHost("win32");
-    const registerInstance = vi.fn();
-    const input: ProviderFactoryInput = { configuration: { cliPath: "claude", idleSessionTtlMs: 600_000 }, host };
-
-    expect(() => registerClaudeProvider({ registerInstance }, input)).toThrow("createForker");
-
-    expect(registerInstance).not.toHaveBeenCalled();
     expect(io).not.toHaveBeenCalled();
   });
 });

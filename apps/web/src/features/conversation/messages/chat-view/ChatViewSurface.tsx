@@ -10,7 +10,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { describeCliError, isCliError } from "@/components/chat/cli-error";
 import { CollapsibleError } from "@/components/chat/CollapsibleError";
 import { ConversationHoldOverlay } from "@/components/chat/ConversationHoldOverlay";
-import { HandoffDocDialog, useHandoffFallback } from "@/components/chat/handoff-fallback";
 import { HeaderActions } from "@/components/chat/HeaderActions";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
 import { CanvasBreadcrumb } from "@/components/shell/CanvasBreadcrumb";
@@ -348,19 +347,6 @@ function WarningOutput({ lines }: { lines: readonly string[] }) {
   return <div className="space-y-2">{lines.map((line, i) => <pre key={i} className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-3 font-mono text-caption text-muted">{line}</pre>)}</div>;
 }
 
-/** Fork-thread notice for a handoff the local builder produced. */
-function HandoffFallbackNotice({ threadId }: { threadId: string }) {
-  const fallback = useHandoffFallback(threadId);
-  const [docOpen, setDocOpen] = useState(false);
-  if (!fallback) return null;
-  return (
-    <>
-      <Notice tone={fallback.copy.tone} title={fallback.copy.title} detail={fallback.copy.detail} action={{ label: "View doc", onClick: () => setDocOpen(true), emphasis: "neutral" }} onDismiss={fallback.dismiss} data-testid="handoff-fallback-notice" className="mx-4 mt-2" />
-      <HandoffDocDialog threadId={threadId} open={docOpen} onOpenChange={setDocOpen} />
-    </>
-  );
-}
-
 /** Provider CLI setup notice above the composer. */
 function CliErrorNotice({ error, onDismiss, onOpenSettings }: { error: string; onDismiss: () => void; onOpenSettings: () => void }) {
   const { headline, installCommand, settingsHint } = describeCliError(error);
@@ -618,7 +604,6 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
         <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} />
         <ActiveThreadBanners state={state} />
         {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
-        <HandoffFallbackNotice threadId={thread.id} />
         <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
         <TurnSavingNotice lostProgress={state.lostProgress} />
         <ChatMessageStage state={state} interactions={interactions} startupTrail={startup && startup.state !== "completed" ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />

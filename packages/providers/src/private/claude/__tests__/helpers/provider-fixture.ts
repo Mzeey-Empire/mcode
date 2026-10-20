@@ -44,7 +44,7 @@ export class ClaudeProvider extends RuntimeClaudeProvider {
       }
       return receipt;
     } };
-    super(host, { cliPath: process.execPath, idleSessionTtlMs: 600_000 }, { createForker: () => ({ fork: async () => { throw new Error("Test handoff policy is not configured"); } }) });
+    super(host, { cliPath: process.execPath, idleSessionTtlMs: 600_000 });
     emit = (event) => { this.emit("event", event); };
   }
 }

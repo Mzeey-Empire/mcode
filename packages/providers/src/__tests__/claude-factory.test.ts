@@ -66,7 +66,7 @@ function fixture() {
   const sink = new DeterministicCanonicalSink();
   const drafts: ProviderEventDraft[] = [];
   const host = fixtureHost({ events: { submit: async (batch) => { drafts.push(...batch.events); return sink.submit(batch); } } });
-  const input: ProviderFactoryInput = { configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 }, host, claude: { createForker: (generator) => ({ fork: async (req) => { await generator.runSideChannelQuery({ parentThreadId: req.parentThreadId, parentSdkSessionId: req.parentSdkSessionId ?? "", prompt: req.prompt, cwd: req.cwd }); throw new Error("Fixture handoff artifacts are server-owned"); } }) } };
+  const input: ProviderFactoryInput = { configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 }, host };
   const provider = createClaudeProvider(input);
   providers.push(provider);
   const events = (): ProviderRuntimeEvent[] => drafts.flatMap((draft) => draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent" ? [ProviderRuntimeEventSchema().parse(JSON.parse(JSON.stringify(draft.payload.item.payload.runtimeEvent)))] : []);
@@ -486,7 +486,6 @@ describe("Claude public factory core and capabilities", () => {
     const { provider, input } = fixture();
     expect(sdkQuery).not.toHaveBeenCalled();
     expect(provider.id).toBe("claude");
-    expect(() => createClaudeProvider({ ...input, claude: undefined })).toThrow("createForker");
     expect(() => createClaudeProvider({ ...input, configuration: { ...input.configuration, idleSessionTtlMs: 0 } })).toThrow("idleSessionTtlMs");
     Reflect.deleteProperty(input.host.events, "submit");
     expect(() => createClaudeProvider(input)).toThrow("events.submit");
@@ -520,19 +519,6 @@ describe("Claude public factory core and capabilities", () => {
     await completed(events, 2);
     expect(sdkQuery).toHaveBeenCalledTimes(2);
     expect(transport.optionsSeen[1]).toMatchObject({ resume: "NATIVE_PARENT", permissionMode: "bypassPermissions" });
-  });
-
-  it("forks a side channel with forkSession without changing the parent's live query or native identity", async () => {
-    const transport = installTransport((turn, options) => options.forkSession ? [{ type: "assistant", message: { content: [{ type: "text", text: "fixture handoff" }] } }, result()] : [result(`RESULT_${turn}`)]);
-    const { provider, events } = fixture();
-    await provider.sendTurn(request());
-    await completed(events, 1);
-    await provider.runSideChannelQuery({ parentThreadId: "thread-1", parentSdkSessionId: "NATIVE_PARENT", prompt: "fixture", cwd: process.cwd() });
-    expect(transport.optionsSeen[1]).toMatchObject({ resume: "NATIVE_PARENT", forkSession: true, persistSession: false, tools: [] });
-    await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: execution2 }));
-    await completed(events, 2);
-    expect(sdkQuery).toHaveBeenCalledTimes(2);
-    expect(events().filter(({ event }) => event.type === AgentEventType.System && event.subtype?.startsWith("sdk_session_id:"))).toHaveLength(1);
   });
 
   it("provides completion through an ephemeral query and isolates its output from live canonical events", async () => {
@@ -643,7 +629,7 @@ describe("Claude public factory core and capabilities", () => {
 
   it("declares only implemented profiles and explicitly excludes native continuation and independent child cancellation", () => {
     const { provider } = fixture();
-    expect(provider.descriptor.capabilities.filter(({ support }) => support === "supported").map(({ name }) => name)).toEqual(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer", "session-resume"]);
+    expect(provider.descriptor.capabilities.filter(({ support }) => support === "supported").map(({ name }) => name)).toEqual(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "orchestration", "browser-access", "thread-control", "turn-steer", "session-resume"]);
     expect(provider.descriptor.capabilities).toContainEqual({ name: "provider-continuation", support: "unsupported" });
     expect(provider.descriptor.capabilities).toContainEqual({ name: "child-cancellation", support: "unsupported" });
   });

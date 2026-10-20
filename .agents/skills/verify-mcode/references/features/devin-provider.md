@@ -8,7 +8,7 @@
 - Devin's flattened mode axis (Normal / Accept Edits / Smart / Bypass) renders in the shared Access Mode control and persists as `threads.devin_mode`; `provider.listModes` exposes the mode select Devin advertised so account-gated modes filter out of the picker. Plan interaction mode sends `plan` and restores the prior native mode.
 - Permission prompts render Devin's real options; `switch_bypass` updates the thread's `devin_mode` so the composer reflects the mode Devin entered. `allow_always_global` is hidden.
 - Usage reporting is tokens plus conditional cost: `usage_update` drives `contextEstimate`, its `cost` payload (when Devin sends one) lands on `turnComplete.costUsd`, and the `session/prompt` response fills `turnComplete` tokens.
-- Handoff uses the history-replay side channel (path B-prime); Devin has no session-fork API.
+- Handoff uses the handoff v2 inline preamble like every provider; Devin has no session-fork API.
 - On Windows there is no OS sandbox: `full` maps to unsandboxed Bypass.
 
 ## How to get to it (user POV)

@@ -122,8 +122,6 @@ describe("provider switch on send", () => {
     await messages.create(threadId, "user", "The project is Heliotrope.", 1);
     await messages.create(threadId, "assistant", "Keep the CLI compatible.", 2);
     await container.resolve(ThreadRepo).updateSdkSessionId(threadId, "claude", "parent-session");
-    Object.assign(claude, { sessionForkOnResume: "clean" });
-    const parentFork = vi.spyOn(claude.forker, "fork");
 
     const child = await fork("Continue the project.");
 
@@ -136,7 +134,6 @@ describe("provider switch on send", () => {
     expect(request.message).toContain("Kind: fork");
     expect(request.message.endsWith("Continue the project.")).toBe(true);
     expect(claude.sendTurn).not.toHaveBeenCalled();
-    expect(parentFork).not.toHaveBeenCalled();
     expect(messages.listIncludingInternal(child.id).filter(row => row.role === "user").map(row => row.content))
       .toEqual(["Continue the project."]);
   });
@@ -155,7 +152,7 @@ describe("provider switch on send", () => {
     expect(wire).not.toContain("Oversized history");
     const audit = await container.resolve(HandoffStorage).readLatestHandoffAudit(child.id);
     expect(audit).toContain("schemaVersion: 2\nkind: fork");
-    expect(audit).toContain("fromProvider: claude\ntoProvider: codex");
+    expect(audit).toContain('fromProvider: "claude"\ntoProvider: "codex"');
     expect(audit).toContain("coveredSequences: [2]");
     expect(audit).toContain("omittedSequences: [1]");
     expect(audit).toContain(wire.slice(0, -"Continue.".length));
@@ -383,8 +380,8 @@ describe("provider switch on send", () => {
     const audit = await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId);
     expect(audit).toContain("schemaVersion: 2");
     expect(audit).toContain("kind: switch");
-    expect(audit).toContain("fromProvider: codex");
-    expect(audit).toContain("toProvider: claude");
+    expect(audit).toContain('fromProvider: "codex"');
+    expect(audit).toContain('toProvider: "claude"');
     expect(audit).toContain('"option":"codexFastMode"');
     expect(audit).toContain('"option":"reasoningLevel"');
   });
@@ -555,10 +552,10 @@ function fakeProvider(id: "claude" | "codex"): FakeProvider {
     id,
     descriptor: { id, capabilities: [{ name: "session-resume", support: "supported" }] },
     supportsCompletion: false,
-    sessionForkOnResume: "unsupported" as const,
+
     maxInputCharactersPerTurn: 16_000,
     models: [] as ProviderModelInfo[],
-    forker: { fork: async () => { throw new Error("Session forks are outside this fixture"); } },
+
     sendTurn: vi.fn<SendTurn>(async () => { throw new Error(`${id} received an unscripted turn`); }),
     stopSession: async () => undefined,
     shutdown: () => undefined,

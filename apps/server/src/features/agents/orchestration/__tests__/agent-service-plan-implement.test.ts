@@ -106,8 +106,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     await workers.whenReady();
     provider = Object.assign(new NodeEvents.EventEmitter(), {
       id: "codex" as const, descriptor: { id: "codex" as const, capabilities: [] },
-      supportsCompletion: false, sessionForkOnResume: "unsupported" as const, maxInputCharactersPerTurn: 100_000,
-      forker: { fork: async () => { throw new Error("No session fork in this fixture"); } },
+      supportsCompletion: false,  maxInputCharactersPerTurn: 100_000,
+
       sendTurn: async (request: TurnRequest) => {
         sent.push(request);
         atDispatch.push({ text: NodeFS.readFileSync(files.path(threadId), "utf8"), status: plans.getById(ready.id)?.status });

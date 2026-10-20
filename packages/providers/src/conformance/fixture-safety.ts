@@ -23,7 +23,6 @@ const PROFILES = new Set([
   "permissions",
   "usage",
   "session-eviction",
-  "clean-fork",
   "orchestration",
   "browser-access",
   "thread-control",

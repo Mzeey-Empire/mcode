@@ -116,7 +116,7 @@ describe("loadConversationPage", () => {
     db.close();
   });
 
-  it("keeps session notices out of budgeted transcript history", () => {
+  it("keeps session notices out of transcript history", () => {
     const db = openMemoryDatabase();
     seedThread(db);
     const repo = new MessageRepo(db);
@@ -128,10 +128,9 @@ describe("loadConversationPage", () => {
       kind: "warning", presentation: "timeline", scope: "turn", sessionId: "session-1", noticeKey: "warning-1",
     });
 
-    const history = repo.listByThreadUpToSequenceBudgeted("thread-1", 2, { maxBytes: 1 });
+    const history = repo.listByThreadUpToSequence("thread-1", 2);
 
-    expect(history.messages.map((message) => message.content)).toEqual(["D"]);
-    expect(history.budget.omittedBeforeCount).toBe(0);
+    expect(history.map((message) => message.content)).toEqual(["Disk space low"]);
     db.close();
   });
 

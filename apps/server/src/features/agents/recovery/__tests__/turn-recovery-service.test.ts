@@ -607,7 +607,7 @@ describe("TurnRecoveryService", () => {
         const record = await handoffs.readLatestHandoffAudit(THREAD_ID);
         expect(record).toContain("schemaVersion: 2");
         expect(record).toContain("kind: recovery");
-        expect(record).toContain("fromProvider: codex");
+        expect(record).toContain('fromProvider: "codex"');
         expect(record).toContain("coveredSequences: [1,3]");
         expect(record).toContain("omittedSequences: [2]");
         // The record holds the history exactly as the target received it.

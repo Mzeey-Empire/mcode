@@ -12,23 +12,18 @@ import {
   restoreComposerAnnotations,
 } from "./composer-annotations";
 import { settlePageSnapshots } from "./prepare-composer-submission";
-import { useComposerHandoffDispatch } from "./useComposerHandoffDispatch";
-
-type HandoffStatus = "generating" | "ready" | "fallback" | "error" | undefined;
 
 /** Inputs that connect one Composer form to all queue lifecycles. */
 export interface UseComposerQueueControllerOptions {
   threadId?: string;
   annotationScopeId?: string;
-  handoffStatus: HandoffStatus;
   form: ComposerFormController;
 }
 
-/** Owns handoff deferral, queue editing, and explicit queued-message dispatch for one Composer. */
+/** Owns queue editing and explicit queued-message dispatch for one Composer. */
 export function useComposerQueueController({
   threadId,
   annotationScopeId,
-  handoffStatus,
   form,
 }: UseComposerQueueControllerOptions) {
   const setPreviewDesignModeActive = usePreviewDesignModeStore((state) => state.setActive);
@@ -80,15 +75,10 @@ export function useComposerQueueController({
     form: formForQueueEdit,
     annotations: annotationsForQueueEdit,
   });
-  const handoff = useComposerHandoffDispatch({
-    threadId,
-    handoffStatus,
-  });
   const dispatch = useQueuedMessageDispatch(threadId);
 
   return {
     ...editing,
-    ...handoff,
     sendQueuedMessageNow: dispatch.sendNow,
     clearAnnotations,
   };

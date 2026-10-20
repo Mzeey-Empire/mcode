@@ -21,7 +21,7 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
   {
     providerId: "claude",
     factory: createClaudeProvider,
-    requiredProfiles: ["core", "build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer", "session-resume"],
+    requiredProfiles: ["core", "build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "orchestration", "browser-access", "thread-control", "turn-steer", "session-resume"],
     fixtureFiles: [fixtureFile("claude"), namedFixtureFile("claude-native.synthetic.json"), namedFixtureFile("claude-startup-error.captured.json")],
     requiredFixtureProvenance: ["captured", "synthetic"],
     supportedVersions: [{
@@ -42,7 +42,6 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
       "permissions",
       "usage",
       "session-eviction",
-      "clean-fork",
       "orchestration",
       "browser-access",
       "thread-control",
@@ -67,7 +66,7 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
   {
     providerId: "copilot",
     factory: createCopilotProvider,
-    requiredProfiles: ["core", "build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control", "session-resume"],
+    requiredProfiles: ["core", "build", "plan", "completion", "permissions", "usage", "session-eviction", "browser-access", "thread-control", "session-resume"],
     fixtureFiles: [fixtureFile("copilot"), namedFixtureFile("copilot-core.captured.json")],
     requiredFixtureProvenance: ["captured", "synthetic"],
     supportedVersions: [{
@@ -86,7 +85,6 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
       "plan",
       "permissions",
       "session-eviction",
-      "clean-fork",
       "browser-access",
       "thread-control",
       "session-resume",

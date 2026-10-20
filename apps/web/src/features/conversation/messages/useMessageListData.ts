@@ -5,7 +5,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
 import { useThreadStore } from "@/stores/threadStore";
 import { getCanonicalLifecycleTurn, getThreadRuntimePhase } from "@/stores/thread-lifecycle";
-import { getHandoffStatus, getThreadRecord, useThreadRecord } from "../state";
+import { getThreadRecord, useThreadRecord } from "../state";
 import { isConversationVisible } from "../residency/conversation-residency";
 import {
   projectCanonicalMessageList,
@@ -189,9 +189,6 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const latestTurnWithChanges = useThreadRecord(renderedThreadId, (record) => record.latestTurnWithChanges);
   const hasMore = useThreadRecord(renderedThreadId, (record) => record.hasMoreMessages);
   const hasNewer = useThreadRecord(renderedThreadId, (record) => record.hasNewerMessages);
-  const handoffStatus = useThreadStore((state) =>
-    renderedThreadId ? getHandoffStatus(getThreadRecord(state.records, renderedThreadId)) : undefined,
-  );
   const isLoadingMore = useThreadRecord(renderedThreadId, (record) => record.isLoadingMore);
   const isLoadingNewer = useThreadRecord(renderedThreadId, (record) => record.isLoadingNewer);
   const loadOlderMessages = useThreadStore((state) => state.loadOlderMessages);
@@ -235,7 +232,6 @@ export function useMessageListData(displayThreadId: string | undefined) {
     latestTurnWithChanges,
     hasMore,
     hasNewer,
-    handoffStatus,
     isLoadingMore,
     isLoadingNewer,
     loadOlderMessages,

@@ -40,8 +40,7 @@ function goalProvider(result: GoalLookupResult): IGoalCapable {
   return {
     id: "codex",
     supportsCompletion: false,
-    sessionForkOnResume: "unsupported" as const,
-    forker: {} as IGoalCapable["forker"],
+
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn(),
     stopSession: vi.fn(),
@@ -64,8 +63,7 @@ function clearableProvider(opts: {
   const provider = {
     id: opts.id ?? "codex",
     supportsCompletion: false,
-    sessionForkOnResume: "unsupported" as const,
-    forker: {} as IGoalCapable["forker"],
+
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn(),
     stopSession: vi.fn(),
@@ -104,8 +102,7 @@ describe("GoalLifecycleService.get", () => {
       provider: {
         id: "copilot",
         supportsCompletion: false,
-        sessionForkOnResume: "unsupported",
-        forker: {},
+
         maxInputCharactersPerTurn: 16_000,
         sendTurn: vi.fn(),
         stopSession: vi.fn(),
@@ -167,8 +164,7 @@ describe("GoalLifecycleService.clear", () => {
       provider: {
         id: "copilot",
         supportsCompletion: false,
-        sessionForkOnResume: "unsupported",
-        forker: {},
+
         maxInputCharactersPerTurn: 16_000,
         sendTurn: vi.fn(),
         stopSession: vi.fn(),

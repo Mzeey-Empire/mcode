@@ -1,145 +1,78 @@
 import "reflect-metadata";
-import * as NodeFS from "node:fs";
+import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { HandoffStorage } from "../handoff-storage.js";
-import type { HandoffArtifact } from "../../artifacts/handoff-types.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { WS_METHODS } from "@mcode/contracts";
+import { HandoffStorage, type HandoffAudit } from "../handoff-storage.js";
+import { routeHandoffRpc } from "../../transport/handoff-rpc.js";
 
-let dir: string;
-let storage: HandoffStorage;
-
-beforeEach(() => {
-  dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "handoff-store-"));
-  storage = HandoffStorage.forTesting({ mcodeDirFn: () => dir });
-});
-
-afterEach(() => {
-  NodeFS.rmSync(dir, { recursive: true, force: true });
-});
-
-function makeArtifact(overrides: Partial<HandoffArtifact["meta"]> = {}): HandoffArtifact {
-  return {
-    markdown: "# Handoff\n\n## Goal\nTest the storage layer.",
-    meta: {
-      schemaVersion: 1,
-      parentThreadId: "t_parent",
-      forkedFromMessageId: "m_1",
-      forkAnchorRole: "assistant",
-      childThreadId: "t_child",
-      generatedBy: "provider",
-      provider: "claude",
-      ladderStep: "B",
-      mode: "full",
-      generatedAt: new Date().toISOString(),
-      characterCount: 50,
-      parentSdkSessionId: "sdk_123",
-      providerErrorOnGenerate: null,
-      regenerationHistory: [],
-      attachments: [],
-      ...overrides,
-    },
-  };
-}
+const audit: HandoffAudit = {
+  kind: "switch", fromProvider: "claude", toProvider: "codex",
+  coveredSequences: [1, 2], omittedSequences: [3], budgetBytes: 4096,
+  droppedOptions: [{ option: "thinking", value: true, reason: "unsupported" }],
+  history: "The replayed history",
+};
 
 describe("HandoffStorage", () => {
-  it("write creates handoffs/<ulid>/handoff.md and handoff.json", async () => {
-    const a = makeArtifact();
-    const ulid = await storage.write("t_child", a);
-    expect(NodeFS.existsSync(NodePath.join(dir, "threads", "t_child", "handoffs", ulid, "handoff.md"))).toBe(true);
-    expect(NodeFS.existsSync(NodePath.join(dir, "threads", "t_child", "handoffs", ulid, "handoff.json"))).toBe(true);
+  let dir: string;
+  let storage: HandoffStorage;
+  beforeEach(async () => {
+    dir = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "handoff-storage-"));
+    storage = HandoffStorage.forTesting({ mcodeDirFn: () => dir });
+  });
+  afterEach(async () => {
+    await NodeFSPromises.rm(dir, { recursive: true, force: true });
   });
 
-  it("write injects YAML frontmatter into the markdown", async () => {
-    const a = makeArtifact();
-    const ulid = await storage.write("t_child", a);
-    const md = NodeFS.readFileSync(NodePath.join(dir, "threads", "t_child", "handoffs", ulid, "handoff.md"), "utf8");
-    expect(md.startsWith("---\n")).toBe(true);
-    expect(md).toContain("schemaVersion: 1");
-    expect(md).toContain("ladderStep: B");
-  });
-
-  it("readLatest returns the highest-ULID handoff for the thread", async () => {
-    await storage.write("t_child", makeArtifact({ ladderStep: "D" }));
-    await new Promise((r) => setTimeout(r, 10));
-    await storage.write("t_child", makeArtifact({ ladderStep: "B" }));
-    const latest = await storage.readLatest("t_child");
-    expect(latest?.meta.ladderStep).toBe("B");
-  });
-
-  it("readLatest returns null when no handoffs exist", async () => {
-    expect(await storage.readLatest("t_none")).toBeNull();
-  });
-
-  it("keeps a switch audit out of readLatest and returns it from readLatestHandoffAudit", async () => {
-    await storage.write("t_child", makeArtifact({ ladderStep: "B" }));
-    await new Promise((r) => setTimeout(r, 10));
-    await storage.writeHandoffAudit("t_child", {
-      kind: "switch",
-      fromProvider: "claude",
-      toProvider: "codex",
-      coveredSequences: [1, 2],
-      omittedSequences: [3],
-      budgetBytes: 4096,
-      droppedOptions: [],
-      history: "the replayed history",
+  it.each(["switch", "fork", "recovery"] as const)("reads a %s audit through the RPC contract", async (kind) => {
+    const ulid = await storage.writeHandoffAudit("child", { ...audit, kind });
+    const result = await routeHandoffRpc("handoff.readLatest", { threadId: "child" }, { handoffStorage: storage });
+    const parsed = WS_METHODS()["handoff.readLatest"].result.parse(result);
+    expect(parsed?.meta).toEqual({
+      schemaVersion: 2, kind, fromProvider: "claude", toProvider: "codex",
+      coveredSequences: [1, 2], omittedSequences: [3], budgetBytes: 4096,
+      droppedOptions: [{ option: "thinking", value: true, reason: "unsupported" }],
     });
-
-    expect((await storage.readLatest("t_child"))?.meta.ladderStep).toBe("B");
-    const audit = await storage.readLatestHandoffAudit("t_child");
-    expect(audit).toContain("schemaVersion: 2");
-    expect(audit).toContain("kind: switch");
-    expect(audit).toContain("fromProvider: claude");
-    expect(audit).toContain("coveredSequences: [1,2]");
-    expect(audit).toContain("omittedSequences: [3]");
-    expect(audit).toContain("budgetBytes: 4096");
-    expect(audit).toContain("the replayed history");
+    expect(parsed?.markdown).toContain("\n\nThe replayed history\n");
+    expect(await storage.readLatestHandoffAudit("child")).toBe(parsed?.markdown);
+    expect(await NodeFSPromises.readdir(NodePath.join(dir, "threads", "child", "handoffs", ulid))).toEqual(["handoff.md"]);
   });
 
-  it("readLatestHandoffAudit returns null for a thread that never switched", async () => {
-    await storage.write("t_child", makeArtifact({ ladderStep: "B" }));
-    expect(await storage.readLatestHandoffAudit("t_child")).toBeNull();
+  it("returns the newest audit by ULID, independent of kind", async () => {
+    const first = await storage.writeHandoffAudit("child", audit);
+    const second = await storage.writeHandoffAudit("child", { ...audit, kind: "recovery", history: "Recovered history" });
+    // Use fixed directory names so the assertion is independent of clock resolution and ULID randomness.
+    const handoffs = NodePath.join(dir, "threads", "child", "handoffs");
+    await NodeFSPromises.rename(NodePath.join(handoffs, first), NodePath.join(handoffs, "01"));
+    await NodeFSPromises.rename(NodePath.join(handoffs, second), NodePath.join(handoffs, "02"));
+    expect((await storage.readLatest("child"))?.meta.kind).toBe("recovery");
+    expect(await storage.readLatestHandoffAudit("child")).toContain("Recovered history");
   });
 
-  it("copyAttachments duplicates source files into the child's attachments dir", async () => {
-    const srcDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "att-src-"));
-    const srcFile = NodePath.join(srcDir, "screenshot.png");
-    NodeFS.writeFileSync(srcFile, Buffer.from([1, 2, 3, 4]));
-
-    await storage.copyAttachments("t_child", [
-      { id: "att_1", absolutePath: srcFile, originalName: "screenshot.png", mime: "image/png", parentMessageId: "m_5" },
-    ]);
-
-    expect(NodeFS.existsSync(NodePath.join(dir, "threads", "t_child", "attachments", "att_1.png"))).toBe(true);
-    NodeFS.rmSync(srcDir, { recursive: true, force: true });
+  it("ignores legacy metadata and preserves existing audit files", async () => {
+    const legacy = NodePath.join(dir, "threads", "child", "handoffs", "ZZZ-legacy");
+    await NodeFSPromises.mkdir(legacy, { recursive: true });
+    await NodeFSPromises.writeFile(NodePath.join(legacy, "handoff.md"), "---\nschemaVersion: 1\nmode: minimal\n---\nOld summary");
+    await NodeFSPromises.writeFile(NodePath.join(legacy, "handoff.json"), '{"schemaVersion":1,"mode":"minimal"}');
+    expect(await storage.readLatest("child")).toBeNull();
+    await storage.writeHandoffAudit("child", audit);
+    expect((await storage.readLatest("child"))?.meta.schemaVersion).toBe(2);
+    expect(await NodeFSPromises.readFile(NodePath.join(legacy, "handoff.json"), "utf8")).toBe('{"schemaVersion":1,"mode":"minimal"}');
   });
 
-  it("skips copying attachments that exceed the 25MB cap and records sentinel sha256", async () => {
-    const srcDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "att-large-"));
-    const srcFile = NodePath.join(srcDir, "huge.bin");
-    NodeFS.writeFileSync(srcFile, Buffer.from([0]));
-
-    // Inject a custom statFn that reports the file as oversized without writing real bytes.
-    const oversizedStatFn = async (_path: string) => ({ size: 26 * 1024 * 1024 });
-    const storageWithOverride = HandoffStorage.forTesting({
-      mcodeDirFn: () => dir,
-      statFn: oversizedStatFn,
-    });
-
-    const manifest = await storageWithOverride.copyAttachments("t_child", [
-      { id: "att_large", absolutePath: srcFile, originalName: "huge.bin", mime: "application/octet-stream", parentMessageId: "m_10" },
-    ]);
-
-    expect(manifest).toHaveLength(1);
-    expect(manifest[0].sha256).toBe("<skipped>");
-    expect(NodeFS.existsSync(NodePath.join(dir, "threads", "t_child", "attachments", "att_large.bin"))).toBe(false);
-
-    NodeFS.rmSync(srcDir, { recursive: true, force: true });
+  it("skips invalid frontmatter and round trips quoted provider IDs", async () => {
+    const invalid = NodePath.join(dir, "threads", "child", "handoffs", "ZZZ-invalid");
+    await NodeFSPromises.mkdir(invalid, { recursive: true });
+    await NodeFSPromises.writeFile(NodePath.join(invalid, "handoff.md"), "---\nschemaVersion: 2\nkind: unknown\n---\nInvalid");
+    await storage.writeHandoffAudit("child", { ...audit, fromProvider: null, toProvider: "custom: provider\nname" });
+    expect((await storage.readLatest("child"))?.meta).toMatchObject({ fromProvider: null, toProvider: "custom: provider\nname" });
   });
 
-  it("deleteThreadFiles removes the entire thread subtree", async () => {
-    await storage.write("t_child", makeArtifact());
-    await storage.deleteThreadFiles("t_child");
-    expect(NodeFS.existsSync(NodePath.join(dir, "threads", "t_child"))).toBe(false);
+  it("returns null for an absent thread and removes audits on thread deletion", async () => {
+    expect(await storage.readLatest("absent")).toBeNull();
+    await storage.writeHandoffAudit("child", audit);
+    await storage.deleteThreadFiles("child");
+    expect(await storage.readLatest("child")).toBeNull();
   });
 });

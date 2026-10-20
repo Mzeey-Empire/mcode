@@ -624,7 +624,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       )} />
       <MessageListOverlays
         contentPaddingRight={props.contentPaddingRight}
-        handoffStatus={data.handoffStatus} messages={data.messages} isLoadingMore={data.isLoadingMore} isLoadingNewer={data.isLoadingNewer}
+        messages={data.messages} isLoadingMore={data.isLoadingMore} isLoadingNewer={data.isLoadingNewer}
         onSelectedTextComment={props.onSelectedTextComment} onDeleteSelectedTextComment={props.onDeleteSelectedTextComment}
         onSelectedTextCommentEditorChange={props.onSelectedTextCommentEditorChange} onOpenSelectedTextCommentEditor={props.onOpenSelectedTextCommentEditor}
         selectedTextCommentEditor={props.selectedTextCommentEditor} selectedTextCommentEditorScope={props.selectedTextCommentEditorScope}

@@ -1527,36 +1527,7 @@ export function createWsTransport(
       rpc<{ text: string }>("recap.generate", { threadId, messages, previousRecap }),
 
     readLatestHandoff: (threadId: string) =>
-      rpc<{
-        markdown: string;
-        meta: {
-          schemaVersion: 1;
-          parentThreadId: string;
-          forkedFromMessageId: string;
-          forkAnchorRole: "user" | "assistant";
-          childThreadId: string;
-          generatedBy: "provider" | "deterministic";
-          provider: string | null;
-          ladderStep: "B" | "D";
-          mode: "full" | "minimal";
-          generatedAt: string;
-          characterCount: number;
-          parentSdkSessionId: string | null;
-          providerErrorOnGenerate: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | "clean" | null;
-          regenerationHistory: Array<{
-            at: string;
-            ladderStep: "B" | "D";
-            reason: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | "clean" | "user-requested";
-          }>;
-          attachments: Array<{
-            id: string;
-            originalName: string;
-            sha256: string;
-            mime: string;
-            parentMessageId: string;
-          }>;
-        };
-      } | null>("handoff.readLatest", { threadId }),
+      rpc<Awaited<ReturnType<McodeTransport["readLatestHandoff"]>>>("handoff.readLatest", { threadId }),
 
     // Memory pressure
     setBackground: (background) => rpc<void>("memory.setBackground", { background }),

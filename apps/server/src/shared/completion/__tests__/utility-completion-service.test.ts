@@ -9,7 +9,7 @@ function mockProvider(supportsCompletion: boolean) {
   return {
     id: "claude",
     supportsCompletion,
-    sessionForkOnResume: "unsupported" as const,
+
     maxInputCharactersPerTurn: 16_000,
     complete: vi.fn().mockResolvedValue("summary result"),
   } as unknown as IAgentProvider & { complete: ReturnType<typeof vi.fn> };

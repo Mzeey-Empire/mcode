@@ -270,7 +270,6 @@ async function build(options: {
     memoryPressureService,
     settingsService,
     availability,
-      { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       narrativeStore,
       parentAssistantTextCheckpoints,

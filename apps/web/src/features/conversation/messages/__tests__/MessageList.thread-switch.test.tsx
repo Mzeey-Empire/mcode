@@ -41,7 +41,6 @@ let messagesValue: {
 let hasMoreMessagesValue = false;
 let hasNewerMessagesValue = false;
 let runningThreadIdsValue = new Set<string>();
-let handoffStatusByThread: Record<string, "generating" | "ready" | "fallback" | "error"> = {};
 let recordOverridesByThread: Record<string, Record<string, unknown>> = {};
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 
@@ -78,7 +77,6 @@ function buildMockRecord(threadId = currentThreadIdValue) {
     currentTurnMessageId: "",
     narrativeByMessage: {},
     agentStartTime: undefined,
-    ...(handoffStatusByThread[threadId] ? { handoffMeta: { status: handoffStatusByThread[threadId] } } : {}),
     ...recordOverridesByThread[threadId],
   };
 }
@@ -225,7 +223,6 @@ beforeEach(() => {
   hasNewerMessagesValue = false;
   currentThreadIdValue = "thread-A";
   runningThreadIdsValue = new Set();
-  handoffStatusByThread = {};
   recordOverridesByThread = {};
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
     return Number.parseFloat(this.firstElementChild instanceof HTMLElement ? this.firstElementChild.style.height : "0") || 800;
@@ -1178,35 +1175,6 @@ describe("MessageList thread switch", () => {
 
     await waitFor(() => expect(queryByText("Thread B reasoning")).not.toBeNull());
   });
-
-  it("uses the rendered transcript thread for handoff skeletons", () => {
-    activeThreadIdValue = "thread-B";
-    currentThreadIdValue = "thread-A";
-    handoffStatusByThread = { "thread-B": "generating" };
-    messagesValue = [{
-      id: "a-user",
-      sequence: 1,
-      thread_id: "thread-A",
-      role: "user",
-      content: "Thread A request",
-    }];
-    const { container, rerender } = render(<MessageList displayThreadId="thread-A" />);
-
-    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0);
-
-    currentThreadIdValue = "thread-B";
-    messagesValue = [{
-      id: "b-user",
-      sequence: 1,
-      thread_id: "thread-B",
-      role: "user",
-      content: "Thread B request",
-    }];
-    act(() => rerender(<MessageList />));
-
-    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3);
-  });
-
 
   // The heaviest case in the file (about 1.4s locally). A loaded CI runner pushed it past the 5s default, and the
   // timed-out run kept rendering into the following tests, so it carries its own bound.

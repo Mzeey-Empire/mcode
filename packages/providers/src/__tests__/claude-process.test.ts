@@ -30,7 +30,7 @@ function fixture() {
   const host = fixtureHost();
   host.processes.attach = vi.fn();
   host.processes.terminateTree = vi.fn(async () => undefined);
-  const provider = createClaudeProvider({ host, configuration: { cliPath: process.execPath, idleSessionTtlMs: 600_000 }, claude: { createForker: () => ({ fork: async () => { throw new Error("Unused handoff policy"); } }) } });
+  const provider = createClaudeProvider({ host, configuration: { cliPath: process.execPath, idleSessionTtlMs: 600_000 } });
   owned.push(provider);
   return { provider, child, host };
 }

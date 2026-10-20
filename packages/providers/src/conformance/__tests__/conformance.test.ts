@@ -95,7 +95,7 @@ async function replayClaudePlan(trace: Extract<SyntheticPlanTrace, { providerId:
   planReplay.requests.push(...trace.requests);
   const sink = new DeterministicCanonicalSink();
   const provider = createClaudeProvider({ configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 },
-    host: fixtureHost({ events: sink }), claude: { createForker: () => ({ fork: async () => { throw new Error("Unused fixture fork"); } }) } });
+    host: fixtureHost({ events: sink }) });
   const captures: PlanCapture[] = [];
   provider.on("plan_captured", (capture) => captures.push(capture));
   try {
@@ -418,7 +418,6 @@ describe("Provider conformance registry", () => {
       "permissions",
       "usage",
       "session-eviction",
-      "clean-fork",
       "orchestration",
       "browser-access",
       "thread-control",

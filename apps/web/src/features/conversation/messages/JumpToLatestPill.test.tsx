@@ -5,7 +5,6 @@ import { MessageListOverlays } from "./MessageListOverlays";
 function renderOverlays(showJumpToLatest: boolean, onJumpToLatest = vi.fn(), contentPaddingRight?: string) {
   render(
     <MessageListOverlays
-      handoffStatus={undefined}
       messages={[]}
       isLoadingMore={false}
       isLoadingNewer={false}

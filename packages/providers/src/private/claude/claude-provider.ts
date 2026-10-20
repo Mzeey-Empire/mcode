@@ -73,7 +73,7 @@ import { AnthropicOAuthUsageSource } from "./usage/oauth-usage-source.js";
 import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
 import { CompositeUsageSource } from "./usage/composite-usage-source.js";
 import { SessionRuntime } from "../session-runtime.js";
-import type { ClaudeProviderPorts, ProviderFactoryConfiguration } from "../../factory-types.js";
+import type { ProviderFactoryConfiguration } from "../../factory-types.js";
 import {
   buildMcodeInstructionSections,
   renderMcodeInstructionSections,
@@ -90,13 +90,11 @@ import {
   type ProviderBrowserLeaseRequest as BrowserAutomationSessionLeaseScope,
   type ProviderBrowserLeaseHandle as BrowserAutomationSessionLeaseStage,
 } from "../../host-ports.js";
-import type { SessionForker } from "@mcode/contracts";
 import type { ProviderBackgroundToolSettlement, ProviderHostPorts, ProviderMcodeAttachment, ProviderTurnOpening, ProviderTurnRouting } from "../../host-ports.js";
 import type { ProviderIdentity } from "@mcode/contracts";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
 import {
   collectCompletionText,
-  collectSideChannelText,
 } from "./claude-query-output.js";
 import {
   ClaudeEventMapper,
@@ -117,11 +115,6 @@ function userDenyNoteMessage(note: string): string {
   return `The user doesn't want to proceed with this tool use. The tool use was rejected. To tell you how to proceed, the user said:\n${note}`;
 }
 
-/**
- * Default model slug used for side-channel and fallback paths.
- * Kept in one place so all paths stay in sync when upgrading the default.
- */
-const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5";
 const claudePlanWriteSchema = z.object({ file_path: z.string() });
 
 /** Max queued messages before push() warns and drops. */
@@ -494,9 +487,6 @@ export function isUnrecoverableThinkingBlockError(
   );
 }
 
-/** Max time to wait on a resume side-channel before falling back to sessionless. */
-const SIDE_CHANNEL_RESUME_PROBE_MS = 20_000;
-
 /** Bytes of subprocess stderr retained per session for crash diagnostics. */
 const STDERR_CAPTURE_LIMIT = 8_000;
 
@@ -551,20 +541,6 @@ interface PendingBrowserAccess {
   scope: BrowserAutomationSessionLeaseScope;
   stage?: BrowserAutomationSessionLeaseStage;
   grant?: BrowserAutomationSessionLeaseGrant;
-}
-
-interface ClaudeSideChannelRequest {
-  parentThreadId: string;
-  parentSdkSessionId: string;
-  prompt: string;
-  abortSignal?: AbortSignal;
-  conversationHistory?: string;
-  cwd: string;
-}
-
-interface ClaudeResumeProbe {
-  signal: AbortSignal | undefined;
-  dispose(): void;
 }
 
 interface ClaudeSendMessageParams {
@@ -661,16 +637,13 @@ export class ClaudeProvider
   readonly id = "claude" as const;
   readonly subagentReporting = SUBAGENT_REPORTING.claude;
   readonly descriptor = Object.freeze({ id: "claude" as const, capabilities: [
-    ...(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control", "turn-steer", "session-resume"] as const).map((name) => ({ name, support: "supported" as const })),
+    ...(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "orchestration", "browser-access", "thread-control", "turn-steer", "session-resume"] as const).map((name) => ({ name, support: "supported" as const })),
     { name: "provider-continuation" as const, support: "unsupported" as const },
     { name: "child-cancellation" as const, support: "unsupported" as const },
   ] });
   /** Claude supports one-shot text completion via sdkQuery with maxTurns: 1. */
   readonly supportsCompletion = true;
-  readonly sessionForkOnResume = "clean" as const;
   readonly maxInputCharactersPerTurn = 180_000;
-  /** Path B (+ B-prime) forker; calls this provider's runSideChannelQuery. */
-  readonly forker: SessionForker;
 
   /** Owns the session pool and idle eviction with the adapter busy guard. */
   private readonly runtime: SessionRuntime<ClaudeSessionState>;
@@ -765,11 +738,8 @@ export class ClaudeProvider
   constructor(
     private readonly host: ProviderHostPorts,
     private readonly configuration: ProviderFactoryConfiguration,
-    ports: ClaudeProviderPorts,
   ) {
     super();
-    this.forker = ports.createForker({ id: "claude", runSideChannelQuery: this.runSideChannelQuery.bind(this) });
-    if (typeof this.forker?.fork !== "function") throw new TypeError("Claude handoff composition must return a SessionForker");
     this.canonicalEventPublisher = new ClaudeCanonicalEventPublisher(this.host.events, (routing, error) => {
       void this.reportCanonicalDeliveryFailure(routing, error).catch((failure: unknown) => {
         logger.error("Claude canonical failure reporting failed", { executionId: routing.executionId, error: String(failure) });
@@ -906,306 +876,6 @@ export class ClaudeProvider
     }
   }
 
-  /**
-   * Run a one-shot query against a forked copy of the parent's session.
-   * Uses `resume` with `forkSession: true` to create a clean fork. The
-   * original session is not mutated. Only the text output is returned;
-   * the forked session ID is discarded.
-   *
-   * Post-restart vulnerability: after a server restart, the parent thread's
-   * sdk_session_id is still in SQLite but the Claude SDK's in-memory session
-   * cache is empty. The SDK may also reject sessions that exceed its retention
-   * window (TTL). When that happens, the SDK throws with a session-not-found /
-   * session-expired message. We detect that shape here and, when
-   * `conversationHistory` is provided, transparently retry without `resume:`
-   * by baking the history directly into the prompt (sessionless fallback).
-   * Without `conversationHistory`, session-missing errors are rethrown with
-   * code="ETIMEDOUT" so the pipeline falls cleanly to path D.
-   */
-  async runSideChannelQuery(args: ClaudeSideChannelRequest): Promise<string> {
-    const { parentSdkSessionId, prompt, abortSignal, cwd } = args;
-
-    // Resolve model from the parent thread's active session if available,
-    // falling back to the default claude-sonnet model.
-    const parentSessionId = `mcode-${args.parentThreadId}`;
-    const parentSession = this.runtime.get(parentSessionId);
-
-    // Path B-prime: after a server restart (or when the user forks without
-    // sending a new message on the parent), the SDK subprocess is not running
-    // even though sdk_session_id is still in SQLite. Resume on a cold subprocess
-    // often hangs until the pipeline abort fires, leaving no time for the
-    // sessionless retry. Skip resume and bake message history into the prompt.
-    if (!parentSession && args.conversationHistory) {
-      logger.info(
-        "Claude side-channel: no live parent session, using sessionless path B-prime",
-        {
-          threadId: args.parentThreadId,
-        },
-      );
-      return await this.runSideChannelQuerySessionless(
-        args.conversationHistory,
-        prompt,
-        abortSignal,
-        args.parentThreadId,
-        cwd,
-      );
-    }
-
-    const model = parentSession?.model ?? DEFAULT_CLAUDE_MODEL;
-    const ownedProcess = this.createOwnedClaudeProcess("clean-fork");
-
-    // Cap resume attempts so a hung subprocess does not consume the full
-    // pipeline timeout before sessionless path B-prime can run.
-    const resumeProbe = this.createSideChannelResumeProbe(
-      args.conversationHistory,
-      abortSignal,
-    );
-
-    try {
-
-      const queue = createPromptQueue();
-      const ephemeralId = `side-channel-${crypto.randomUUID()}`;
-
-      const sdkAbortController = this.createSdkAbortController(
-        resumeProbe.signal ?? abortSignal,
-      );
-
-      const q = sdkQuery({
-        prompt: queue.iterable,
-        options: {
-          env: { ...this.host.environment.snapshot() },
-          pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
-          spawnClaudeCodeProcess: ownedProcess.spawn,
-          cwd,
-          model,
-          // 2 turns so a thinking-block or compliance turn from the model
-          // does not exhaust the budget before the actual response. We pass
-          // tools: [] so the model has nothing to call, but it can still
-          // emit a no-op turn during reasoning.
-          maxTurns: 2,
-          resume: parentSdkSessionId,
-          forkSession: true,
-          tools: [],
-          settingSources: [],
-          permissionMode: "default" as const,
-          persistSession: false,
-          includePartialMessages: true,
-          ...(sdkAbortController
-            ? { abortController: sdkAbortController }
-            : {}),
-        },
-      });
-
-      queue.push(toUserMessage(prompt, ephemeralId));
-      // Close immediately after pushing so the SDK subprocess exits after the
-      // single turn instead of blocking waiting for more input.
-      queue.close();
-
-      return await collectSideChannelText(
-        q,
-        this.sideChannelOutputOptions(args.parentThreadId, false),
-      );
-    } catch (err) {
-      return await this.handleResumedSideChannelError(
-        args,
-        resumeProbe.signal,
-        err,
-      );
-    } finally {
-      resumeProbe.dispose();
-      await ownedProcess.retire();
-    }
-  }
-
-  /**
-   * Retry a side-channel query without a `resume:` session ID by baking the
-   * conversation history directly into the prompt. Called automatically by
-   * `runSideChannelQuery` when the parent session is unresumable and history
-   * has been provided by the pipeline.
-   */
-  private async runSideChannelQuerySessionless(
-    history: string,
-    prompt: string,
-    abortSignal: AbortSignal | undefined,
-    parentThreadId: string,
-    cwd: string,
-  ): Promise<string> {
-    // Prepend the prior conversation so the model has equivalent context to a
-    // resumed session. The handoff request follows the separator.
-    const fullPrompt = `## Prior conversation (parent thread)\n\n${history}\n\n---\n\n${prompt}`;
-    // The parent session is gone so we cannot look up its original model.
-    // Use the same safe default as the main path's fallback.
-    const model = DEFAULT_CLAUDE_MODEL;
-
-    const ownedProcess = this.createOwnedClaudeProcess("sessionless-fork");
-    try {
-
-      const queue = createPromptQueue();
-      const ephemeralId = `side-channel-sessionless-${crypto.randomUUID()}`;
-
-      const sdkAbortController = this.createSdkAbortController(abortSignal);
-
-      const q = sdkQuery({
-        prompt: queue.iterable,
-        options: {
-          env: { ...this.host.environment.snapshot() },
-          pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
-          spawnClaudeCodeProcess: ownedProcess.spawn,
-          cwd,
-          model,
-          // 2 turns, same rationale as the main side-channel method above.
-          maxTurns: 2,
-          // No `resume:`: this is the point of the sessionless fallback.
-          tools: [],
-          settingSources: [],
-          permissionMode: "default" as const,
-          persistSession: false,
-          includePartialMessages: true,
-          ...(sdkAbortController
-            ? { abortController: sdkAbortController }
-            : {}),
-        },
-      });
-
-      queue.push(toUserMessage(fullPrompt, ephemeralId));
-      queue.close();
-
-      return await collectSideChannelText(
-        q,
-        this.sideChannelOutputOptions(parentThreadId, true),
-      );
-    } finally {
-      await ownedProcess.retire();
-    }
-  }
-
-  private createSideChannelResumeProbe(
-    history: string | undefined,
-    abortSignal: AbortSignal | undefined,
-  ): ClaudeResumeProbe {
-    if (!history) return { signal: undefined, dispose: () => undefined };
-    const controller = new AbortController();
-    if (!abortSignal || abortSignal.aborted)
-      return { signal: controller.signal, dispose: () => undefined };
-    const timer = setTimeout(
-      () => controller.abort(),
-      SIDE_CHANNEL_RESUME_PROBE_MS,
-    );
-    abortSignal.addEventListener("abort", () => controller.abort(), {
-      once: true,
-    });
-    return { signal: controller.signal, dispose: () => clearTimeout(timer) };
-  }
-
-  private createSdkAbortController(
-    abortSignal: AbortSignal | undefined,
-  ): AbortController | undefined {
-    if (!abortSignal) return undefined;
-    const controller = new AbortController();
-    if (abortSignal.aborted) controller.abort();
-    else
-      abortSignal.addEventListener("abort", () => controller.abort(), {
-        once: true,
-      });
-    return controller;
-  }
-
-  private sideChannelOutputOptions(
-    parentThreadId: string,
-    sessionless: boolean,
-  ) {
-    return sessionless
-      ? {
-          errorPrefix: "Claude sessionless side-channel SDK",
-          emptyMessage:
-            "Claude sessionless side-channel query returned empty output",
-          onResultError: (output: Record<string, unknown>) =>
-            this.logSideChannelResultError(parentThreadId, output, true),
-        }
-      : {
-          errorPrefix: "Claude side-channel query SDK",
-          emptyMessage: "Claude side-channel query returned empty output",
-          onResultError: (output: Record<string, unknown>) =>
-            this.logSideChannelResultError(parentThreadId, output, false),
-        };
-  }
-
-  private logSideChannelResultError(
-    parentThreadId: string,
-    output: Record<string, unknown>,
-    sessionless: boolean,
-  ): void {
-    const errors = Array.isArray(output.errors) ? output.errors : [];
-    const details = {
-      threadId: parentThreadId,
-      sdkResultKeys: Object.keys(output),
-      errorsField: errors,
-      subtype: output.subtype,
-    };
-    if (sessionless) {
-      logger.warn(
-        "Claude sessionless side-channel SDK returned is_error",
-        details,
-      );
-      return;
-    }
-    logger.warn("Claude side-channel SDK returned is_error", {
-      ...details,
-      durationMs: output.duration_ms,
-      rawResult: output,
-    });
-  }
-
-  private async handleResumedSideChannelError(
-    args: ClaudeSideChannelRequest,
-    resumeProbeSignal: AbortSignal | undefined,
-    error: unknown,
-  ): Promise<string> {
-    if (this.didResumeProbeTimeout(args, resumeProbeSignal)) {
-      logger.info(
-        "Claude side-channel: resume probe timed out, retrying without resume",
-        { threadId: args.parentThreadId },
-      );
-      return await this.runSideChannelQuerySessionless(
-        args.conversationHistory!,
-        args.prompt,
-        args.abortSignal,
-        args.parentThreadId,
-        args.cwd,
-      );
-    }
-    if (!isUnresumableSideChannelError(error)) throw error;
-    if (args.conversationHistory) {
-      logger.info(
-        "Claude side-channel: parent session unresumable, retrying without resume",
-        {
-          threadId: args.parentThreadId,
-          originalError: sideChannelErrorMessage(error),
-        },
-      );
-      return await this.runSideChannelQuerySessionless(
-        args.conversationHistory,
-        args.prompt,
-        args.abortSignal,
-        args.parentThreadId,
-        args.cwd,
-      );
-    }
-    throw transientSideChannelResumeError(error);
-  }
-
-  private didResumeProbeTimeout(
-    args: ClaudeSideChannelRequest,
-    resumeProbeSignal: AbortSignal | undefined,
-  ): boolean {
-    return (
-      resumeProbeSignal?.aborted === true &&
-      args.abortSignal !== undefined &&
-      !args.abortSignal.aborted &&
-      args.conversationHistory !== undefined
-    );
-  }
-
   private createCanUseTool(threadId: string, spawnRouting?: ClaudeCanonicalEventRouting): CanUseTool {
     return async (toolName, input, options) => {
       try {
@@ -1326,7 +996,7 @@ export class ClaudeProvider
       })
     )
       return undefined;
-    logger.debug("canUseTool: auto-allowing pre-granted handoff Read", {
+    logger.debug("canUseTool: auto-allowing pre-granted Read", {
       threadId,
       path: input.path,
     });
@@ -3434,20 +3104,4 @@ export class ClaudeProvider
 
 function sideChannelErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isUnresumableSideChannelError(error: unknown): boolean {
-  return /no conversation found|session not found|session expired|resume.*invalid|unknown session/.test(
-    sideChannelErrorMessage(error).toLowerCase(),
-  );
-}
-
-function transientSideChannelResumeError(
-  error: unknown,
-): Error & { code: string } {
-  const rethrown = new Error(
-    `Parent session not resumable (likely after server restart): ${sideChannelErrorMessage(error)}`,
-  ) as Error & { code: string };
-  rethrown.code = "ETIMEDOUT";
-  return rethrown;
 }

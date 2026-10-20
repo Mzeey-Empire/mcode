@@ -41,7 +41,7 @@ function createInput(): ProviderFactoryInput {
       idleSessionTtlMs: 600_000,
     },
     host: createHostPorts(),
-    claude: { createForker: () => ({ fork: async () => { throw new Error("Conformance handoff is not configured"); } }) },
+
     codex: {
       settings: { get: vi.fn(async () => ({ cliPath: "codex", fastMode: false })) },
       attachments: { persistGeneratedImageFromPath: vi.fn() },
@@ -84,7 +84,6 @@ describe("Provider factories", () => {
         { name: "permissions", support: "supported" },
         { name: "usage", support: "supported" },
         { name: "session-eviction", support: "supported" },
-        { name: "clean-fork", support: "supported" },
         { name: "orchestration", support: "supported" },
         { name: "browser-access", support: "supported" },
         { name: "thread-control", support: "supported" },

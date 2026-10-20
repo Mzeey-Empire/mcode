@@ -10,6 +10,7 @@ export const ProviderCapabilityNameSchema = z.enum([
   "permissions",
   "usage",
   "session-eviction",
+  // Retained for reading older capability snapshots; current adapters no longer advertise it.
   "clean-fork",
   "orchestration",
   "browser-access",

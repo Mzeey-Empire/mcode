@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HandoffAuditMetadataSchema } from "../handoff.js";
 import { BuildStageSchema } from "../build-stage.js";
 import { GitSearchCommitsParamsSchema, GitSearchCommitsResultSchema } from "../git.js";
 import {
@@ -1605,14 +1606,6 @@ export const WS_METHODS = lazySchema(() => ({
     result: z.void(),
   },
   /**
-   * v1 stub for regenerating a handoff document via the live AI path.
-   * Live regeneration is deferred to a follow-on plan.
-   */
-  "handoff.regenerate": {
-    params: z.object({ threadId: z.string() }),
-    result: z.object({ status: z.literal("not-implemented") }),
-  },
-  /**
    * Read the latest handoff artifact for a child thread.
    * Returns null when no handoff exists for the given thread.
    */
@@ -1620,35 +1613,7 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ threadId: z.string() }),
     result: z.object({
       markdown: z.string(),
-      meta: z.object({
-        schemaVersion: z.literal(1),
-        parentThreadId: z.string(),
-        forkedFromMessageId: z.string(),
-        forkAnchorRole: z.enum(["user", "assistant"]),
-        childThreadId: z.string(),
-        generatedBy: z.enum(["provider", "deterministic"]),
-        provider: z.string().nullable(),
-        ladderStep: z.enum(["B", "D"]),
-        mode: z.enum(["full", "minimal"]),
-        generatedAt: z.string(),
-        characterCount: z.number(),
-        parentSdkSessionId: z.string().nullable(),
-        providerErrorOnGenerate: z
-          .enum(["quota", "auth", "context-overflow", "transient", "fatal", "clean"])
-          .nullable(),
-        regenerationHistory: z.array(z.object({
-          at: z.string(),
-          ladderStep: z.enum(["B", "D"]),
-          reason: z.enum(["quota", "auth", "context-overflow", "transient", "fatal", "clean", "user-requested"]),
-        })),
-        attachments: z.array(z.object({
-          id: z.string(),
-          originalName: z.string(),
-          sha256: z.string(),
-          mime: z.string(),
-          parentMessageId: z.string(),
-        })),
-      }),
+      meta: HandoffAuditMetadataSchema(),
     }).nullable(),
   },
   /** Generate a stateless one-line conversational recap from caller-supplied messages. */

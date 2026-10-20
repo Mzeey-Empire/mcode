@@ -81,8 +81,8 @@ async function fixture(
   const providerFinished = Promise.withResolvers<void>();
   const provider: IAgentProvider = Object.assign(new NodeEvents.EventEmitter(), {
     id: "codex", descriptor: { id: "codex", capabilities: [] }, supportsCompletion: false,
-    sessionForkOnResume: "unsupported" as const, maxInputCharactersPerTurn: 100_000,
-    forker: { fork: async () => { throw new Error("Not used by admission"); } },
+     maxInputCharactersPerTurn: 100_000,
+
     sendTurn: () => providerFinished.promise, stopSession: () => {}, shutdown: () => {}, listModels: async () => [],
   });
   const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };

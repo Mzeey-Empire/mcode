@@ -17,31 +17,6 @@ export async function collectCompletionText(
   return text.trim();
 }
 
-/** Describes provider-owned diagnostics for a side-channel SDK result error. */
-export interface ClaudeSideChannelOutputOptions {
-  errorPrefix: string;
-  emptyMessage: string;
-  onResultError?(output: Record<string, unknown>): void;
-}
-
-/** Collects assistant text and preserves SDK result errors for side-channel calls. */
-export async function collectSideChannelText(
-  query: AsyncIterable<unknown>,
-  options: ClaudeSideChannelOutputOptions,
-): Promise<string> {
-  let assistantText = "";
-  for await (const message of query) {
-    const output = message as Record<string, unknown>;
-    if (output.type === "result" && output.is_error) {
-      options.onResultError?.(output);
-      throw resultError(output, options.errorPrefix);
-    }
-    if (output.type === "assistant") assistantText += readAssistantText(output);
-  }
-  if (!assistantText) throw new Error(options.emptyMessage);
-  return assistantText.trim();
-}
-
 function readResultText(
   output: Record<string, unknown>,
   previous: string,

@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import { ScopedPreGrantService } from "../scoped-pre-grant.js";
 
 const T = "child-thread-1";
-const DOC = NodePath.resolve("/tmp/mcode-handoff-child-thread-1-123.md");
+const DOC = NodePath.resolve("/tmp/mcode-plan-child-thread-1-123.md");
 const OTHER = NodePath.resolve("/tmp/secrets.env");
 const hostRuntime = { platform: "linux", architecture: "x64", nodeAbi: "127" } as const;
 
@@ -23,7 +23,7 @@ describe("ScopedPreGrantService", () => {
   });
 
   it("path-scoped: matches across separator/././ normalisation", () => {
-    const messy = "/tmp/./sub/../mcode-handoff-child-thread-1-123.md";
+    const messy = "/tmp/./sub/../mcode-plan-child-thread-1-123.md";
     expect(svc.tryConsume({ threadId: T, toolName: "Read", path: messy })).toBe(true);
   });
 

@@ -4,7 +4,7 @@
   "cliVersion": "synthetic",
   "protocolVersion": "synthetic-v1",
   "provenance": "synthetic",
-  "requiredProfiles": ["core", "build", "plan", "permissions", "session-eviction", "clean-fork", "browser-access", "thread-control", "session-resume"],
+  "requiredProfiles": ["core", "build", "plan", "permissions", "session-eviction", "browser-access", "thread-control", "session-resume"],
   "scenario": "synthetic Cursor ACP lifecycle and unsupported extension replay",
   "sourceHash": "53ba7e93c307101e5959156225add7607455cf8b8ccb0c4c9e75de66041c5794",
   "redaction": { "reviewed": true, "removedFields": ["prompt", "response", "environment", "tool output", "absolute paths"] },

@@ -375,33 +375,6 @@ describe("Cursor browser MCP configuration", () => {
     spawnMock.mockReset();
   });
 
-  it("terminates the side-channel process tree when its handshake fails", async () => {
-    const child = Object.assign(new NodeEvents.EventEmitter(), {
-      stdin: new NodeStream.PassThrough(),
-      stdout: new NodeStream.PassThrough(),
-      pid: 109,
-      kill: vi.fn(),
-    });
-    const terminateTree = vi.fn(async () => undefined);
-    spawnMock.mockReturnValue(child);
-    const provider = Object.create(CursorProvider.prototype) as any;
-    provider.envService = { getEnv: vi.fn(() => ({})) };
-    provider.settingsService = { get: vi.fn(() => ({ provider: { cli: {}, cursor: {} } })) };
-    provider.host = { runtime: TEST_HOST_RUNTIME, processes: { terminateTree } };
-    const sideChannel = provider.getSideChannel();
-    sideChannel.acpHandshake = vi.fn().mockRejectedValue(
-      Object.assign(new TypeError("invalid ACP payload"), { code: "INVALID_ACP_PAYLOAD" }),
-    );
-
-    await expect(sideChannel.createTransport({ cwd: ".", client: {} })).rejects.toMatchObject({
-      code: "INVALID_ACP_PAYLOAD",
-    });
-
-    expect(terminateTree).toHaveBeenCalledExactlyOnceWith(109);
-    expect(child.kill).not.toHaveBeenCalled();
-    spawnMock.mockReset();
-  });
-
   it("returns a typed unsupported result for unknown or malformed Cursor child extensions", async () => {
     const provider = Object.create(CursorProvider.prototype) as any;
     provider.settingsService = { get: vi.fn(() => ({ provider: { cursor: {} } })) };

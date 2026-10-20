@@ -69,7 +69,6 @@ import {
 } from "@/features/conversation/hydration";
 import {
   type ThreadRecord,
-  type HandoffMeta,
   type ThreadSettings,
   providerNoticeSessionId,
   getThreadRecord,
@@ -399,8 +398,7 @@ function preserveRunningThreadIds(previous: Set<string>, next: Set<string>): Set
   return previous.size === next.size && [...next].every((id) => previous.has(id)) ? previous : next;
 }
 
-export type { HandoffMeta, ThreadSettings } from "./thread-record";
-export { getHandoffStatus } from "./thread-record";
+export type { ThreadSettings } from "./thread-record";
 
 /** In-memory Recap cache entry for one thread, reset when the app restarts. */
 export interface ThreadRecapCacheEntry {
@@ -559,11 +557,6 @@ interface ThreadState {
   appendServerNotice: (threadId: string, message: Message) => void;
   /** Clear the interrupt file-notice banner for one thread (user dismissed). */
   clearInterruptStopFileNotice: (threadId: string) => void;
-
-  /** Update handoff metadata for a child thread. */
-  setHandoffMeta: (threadId: string, meta: HandoffMeta) => void;
-  /** @deprecated Use setHandoffMeta. Still functional for legacy callers. */
-  setHandoffStatus: (threadId: string, status: "generating" | "ready" | "fallback" | "error") => void;
 
   /** Set or clear fork mode for a thread. */
   setForkMode: (threadId: string, state: { messageId: string; content: string | null; role: "user" | "assistant" } | null) => void;
@@ -4130,15 +4123,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }
   },
 
-  setHandoffMeta: (threadId, meta) => {
-    patchRec(threadId, { handoffMeta: meta });
-  },
 
-  setHandoffStatus: (threadId, status) => {
-    patchRec(threadId, (rec) => ({
-      handoffMeta: { ...rec.handoffMeta, status },
-    }));
-  },
 
   setForkMode: (threadId, forkState) => {
     patchRec(threadId, { forkMode: forkState });

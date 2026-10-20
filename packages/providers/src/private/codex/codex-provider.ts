@@ -34,10 +34,6 @@ import type {
   ApprovalReviewSupport,
   IGoalCapable,
   ISessionEvictable,
-  SessionForker,
-  ForkRequest,
-  HandoffArtifact,
-  HandoffMeta,
   TurnRequest,
   AgentEvent,
   GoalState,
@@ -86,7 +82,6 @@ import type {
   CodexNotification,
   CodexTurnInput,
   CodexTurnOptions,
-  CompletedItem,
   SandboxMode,
   ThreadGoal,
   TurnInputPart,
@@ -106,7 +101,6 @@ export {
   mergeCodexUsageInfo,
 } from "./codex-input-mapper.js";
 
-const SIDE_CHANNEL_TIMEOUT_MS = 120_000;
 const USAGE_WARMUP_TIMEOUT_MS = 10_000;
 const CODEX_MCP_STARTUP_TIMEOUT_MS = 10_000;
 /** Child-only env var carrying the `mcode` bearer token, so the token never appears in argv or config. */
@@ -144,7 +138,6 @@ const CODEX_SUPPORTED_CAPABILITIES = [
   "permissions",
   "usage",
   "session-eviction",
-  "clean-fork",
   "orchestration",
   "browser-access",
   "thread-control",
@@ -178,53 +171,6 @@ function isTurnScopedEvent(event: AgentEvent): boolean {
   return TURN_SCOPED_EVENT_TYPES.has(event.type);
 }
 
-interface CleanForkCapable {
-  readonly id: string;
-  runSideChannelQuery(args: {
-    parentThreadId: string;
-    parentSdkSessionId: string;
-    prompt: string;
-    abortSignal?: AbortSignal;
-    conversationHistory?: string;
-    cwd: string;
-  }): Promise<string>;
-}
-
-class CleanForker implements SessionForker {
-  constructor(private readonly provider: CleanForkCapable) {}
-
-  async fork(request: ForkRequest): Promise<HandoffArtifact> {
-    const markdown = await this.provider.runSideChannelQuery({
-      parentThreadId: request.parentThreadId,
-      parentSdkSessionId: request.parentSdkSessionId ?? "",
-      prompt: request.prompt,
-      abortSignal: request.abortSignal,
-      conversationHistory: request.conversationHistory,
-      cwd: request.cwd,
-    });
-    const parent = request.parentThread;
-    const meta: HandoffMeta = {
-      schemaVersion: 1,
-      parentThreadId: request.parentThreadId,
-      forkedFromMessageId: request.forkedFromMessageId,
-      forkAnchorRole: request.forkAnchorRole,
-      childThreadId: request.childThreadId,
-      generatedBy: "provider",
-      provider: parent.provider,
-      ladderStep: "B",
-      mode: "full",
-      generatedAt: new Date().toISOString(),
-      characterCount: markdown.length,
-      parentSdkSessionId: parent.sdk_session_id ?? null,
-      providerErrorOnGenerate: null,
-      regenerationHistory: [],
-      attachments: [],
-      ...(request.historyBudget && { historyBudget: request.historyBudget }),
-    };
-    return { markdown, meta };
-  }
-}
-
 type CodexEndedOutcome = "completed" | "errored" | "cancelled";
 
 type CodexCliPreflightResult =
@@ -248,12 +194,6 @@ class CodexTurnSupersededError extends Error {
     super("Codex turn superseded");
     this.name = "CodexTurnSupersededError";
   }
-}
-
-function transientHandoffError(message: string): Error & { code: string } {
-  const err = new Error(message) as Error & { code: string };
-  err.code = "ETIMEDOUT";
-  return err;
 }
 
 type CodexMcodeStartupOutcome =
@@ -600,15 +540,6 @@ function rememberChildEventKey(state: CodexSessionState, eventKey: string): void
   }
 }
 
-function completedAssistantText(item: CompletedItem | undefined): string {
-  if (!item || (item.type !== "agentMessage" && item.type !== "message")) return "";
-  const parts = Array.isArray(item.content) ? item.content : [];
-  return parts
-    .map((part) => (typeof part.text === "string" ? part.text : ""))
-    .join("")
-    .trim();
-}
-
 /** Codex provider adapter implementing IAgentProvider with a persistent app-server process per session. */
 export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProvider, IApprovalReviewCapable, IGoalCapable, ISessionEvictable, ProtocolAdapter<CodexSessionState> {
   readonly id = "codex" as const;
@@ -622,7 +553,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
   /** Codex CLI is an agentic tool with no one-shot text completion mode. */
   readonly supportsCompletion = false;
-  readonly sessionForkOnResume = "clean" as const;
   readonly maxInputCharactersPerTurn = 16_000;
 
   async getApprovalReviewSupport(input: {
@@ -644,8 +574,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
     return { status: "available", supportedModes: ["manual", "automatic"], reason: "experimental-api-enabled", liveChangeScope: "none" };
   }
-  /** Path B forker; calls this provider's throwaway app-server side channel. */
-  readonly forker: SessionForker = new CleanForker(this);
 
   /** Returns the live Codex model catalog in provider order. */
   async listModels(): Promise<ProviderModelInfo[]> {
@@ -2522,148 +2450,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (!state.server.isAlive) return true;
     const sandbox = args.permissionMode === "full" ? "danger-full-access" : "workspace-write";
     return state.sandboxMode !== sandbox || state.cwd !== args.cwd;
-  }
-
-  /**
-   * Run a handoff prompt against a throwaway Codex app-server session.
-   * The pooled parent session is left untouched; the throwaway process is killed.
-   */
-  async runSideChannelQuery(args: {
-    parentThreadId: string;
-    parentSdkSessionId: string;
-    prompt: string;
-    abortSignal?: AbortSignal;
-    conversationHistory?: string;
-    cwd: string;
-  }): Promise<string> {
-    const { parentThreadId, prompt, abortSignal, conversationHistory, cwd } = args;
-    if (abortSignal?.aborted) throw transientHandoffError("Codex side-channel query aborted before start");
-
-    const settings = await this.codexPorts.settings.get();
-    const cliPath = settings.cliPath;
-    const preflight = this.checkCodexCliPreflight(cliPath);
-    if (!preflight.ok) {
-      const errorMessage = preflight.reason === "unavailable"
-        ? preflight.error
-        : `Codex CLI version ${preflight.version} is too old for side-channel handoff`;
-      throw transientHandoffError(errorMessage);
-    }
-
-    const server = new CodexAppServer({
-      cliPath,
-      platform: this.host.runtime.platform,
-      workingDirectory: cwd,
-      sandbox: "read-only",
-      // No approvalHandler is registered here, so side-channel tool requests
-      // are denied while the handoff prompt still runs in the parent session.
-      approvalPolicy: "on-request",
-      // Side-channel work must never resume the MCP-enabled parent session.
-      // Conversation history is supplied explicitly when available.
-      resumeThreadId: undefined,
-      processAttachment: this.host.processes,
-      getSpawnEnv: () => ({ ...this.host.environment.snapshot() }),
-    });
-
-    let settled = false;
-    const output = { deltaText: "", completedText: "" };
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-
-    const cleanup = async (): Promise<void> => {
-      clearTimeout(timeout);
-      abortSignal?.removeEventListener("abort", onAbort);
-      await server.kill().catch((err: unknown) =>
-        logger.debug("Codex side-channel kill failed", { parentThreadId, error: String(err) }),
-      );
-    };
-
-    const onAbort = (): void => {
-      if (settled) return;
-      settled = true;
-      void cleanup();
-    };
-
-    abortSignal?.addEventListener("abort", onAbort, { once: true });
-
-    try {
-      await server.start();
-
-      const sideChannelPrompt = conversationHistory
-        ? `Conversation history up to the fork point:\n\n${conversationHistory}\n\n---\n\n${prompt}`
-        : prompt;
-
-      const result = await new Promise<string>((resolve, reject) => {
-        const finish = (value: string): void => {
-          abortSignal?.removeEventListener("abort", abortDuringTurn);
-          server.removeListener("notification", onNotification);
-          server.removeListener("fatal", onFatal);
-          resolve(value);
-        };
-        const rejectTransient = (message: string): void => {
-          abortSignal?.removeEventListener("abort", abortDuringTurn);
-          server.removeListener("notification", onNotification);
-          server.removeListener("fatal", onFatal);
-          reject(transientHandoffError(message));
-        };
-        const abortDuringTurn = (): void => rejectTransient("Codex side-channel query aborted");
-
-        timeout = setTimeout(
-          () => rejectTransient("Codex side-channel query timed out"),
-          SIDE_CHANNEL_TIMEOUT_MS,
-        );
-
-        const onNotification = (notification: unknown): void => {
-          this.handleSideChannelNotification(notification as CodexNotification, output, finish, rejectTransient);
-        };
-
-        const onFatal = (error: string): void => rejectTransient(error);
-        server.on("notification", onNotification);
-        server.once("fatal", onFatal);
-        abortSignal?.addEventListener("abort", abortDuringTurn, { once: true });
-
-        void server.sendTurn(
-          [{ type: "text", text: sideChannelPrompt }],
-          {
-            effort: "low",
-            ...(settings.fastMode && { serviceTier: "priority" }),
-          },
-        )
-          .catch((err: unknown) => rejectTransient(err instanceof Error ? err.message : String(err)));
-      });
-
-      settled = true;
-      return result;
-    } finally {
-      await cleanup();
-    }
-  }
-
-  private handleSideChannelNotification(
-    notification: CodexNotification,
-    output: { deltaText: string; completedText: string },
-    finish: (value: string) => void,
-    reject: (message: string) => void,
-  ): void {
-    if (notification.method === "item/agentMessage/delta") { output.deltaText += notification.params.delta ?? ""; return; }
-    if (notification.method === "item/completed") { this.recordSideChannelCompletedText(notification, output); return; }
-    if (notification.method === "turn/completed") this.finishSideChannelTurn(notification, output, finish, reject);
-  }
-
-  private recordSideChannelCompletedText(notification: CodexNotification, output: { completedText: string }): void {
-    const text = completedAssistantText((notification.params as { item?: CompletedItem }).item);
-    if (text) output.completedText = text;
-  }
-
-  private finishSideChannelTurn(
-    notification: CodexNotification,
-    output: { deltaText: string; completedText: string },
-    finish: (value: string) => void,
-    reject: (message: string) => void,
-  ): void {
-    const turn = (notification.params as { turn?: { status?: string; error?: { message?: string } } }).turn;
-    if (turn?.status === "failed") { reject(turn.error?.message ?? "Codex side-channel query failed"); return; }
-    const text = (output.completedText || output.deltaText).trim();
-    if (!text) { reject("Codex side-channel query returned empty output"); return; }
-    finish(text);
   }
 
   /** Apply a queued native goal to the app-server before dispatching a turn. */

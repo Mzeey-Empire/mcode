@@ -21,9 +21,8 @@ explicitly. Set globally in user settings.
 The provider used for short, one-shot, non-conversational completions that
 the app issues on the user's behalf (currently: drafting PR titles/bodies
 and summarising a diff). Set globally in user settings; may differ from the
-default provider. Handoff generation is **not** a utility-provider use case;
-handoffs route through the originating thread's own provider via the B/D
-pipeline.
+default provider. Handoffs never use the utility provider; handoff v2 builds
+them from stored messages without calling any provider.
 
 ### Session runtime
 The per-Provider service for adapters with a persistent process per session. It owns the
@@ -588,87 +587,57 @@ _Avoid_: revert message, revert toast
 ## Handoff
 
 ### Handoff
-A markdown document summarizing the parent thread so a forked child picks up
-with the parent's context, replacing a verbose transcript replay. Delivery
-depends on the child provider. An off-band delivery gives the child a file
-pointer and short summary, with a one-shot Scoped pre-grant to Read the full
-document. A provider without that read path receives a bounded inline handoff.
-The saved artifact remains available for inspection independently of delivery.
+A deterministic, budgeted selection of stored conversation history delivered
+with the next turn. Handoff v2 supports three kinds: **switch** continues the
+same thread with another provider, **fork** starts a child from a chosen
+message, and **recovery** seeds a replacement session. Selection does not call
+the outgoing provider or change the saved conversation.
 
 ### Scoped pre-grant
-A pipeline-issued permission bypass authorising the child to `Read` exactly one
-file (its Handoff document) on exactly one Turn (its first), consumed once. It
-is **path-scoped** (only that file), **Turn-scoped** (does not survive into the
-second Turn), and **one-shot** (a second Read of the same path on the same Turn
-is not pre-granted). It bypasses the Thread's `permissionMode` only for that
-single Read. A pipeline guarantee that makes the Handoff feel invisible — not a
-user-configurable Hook.
+A one-shot permission to read one exact file during one turn, such as the plan
+file supplied to an implementation turn. Other reads follow the thread's
+permission mode. Handoff v2 delivers history inline and needs no file grant.
 
-### Handoff pipeline
-The orchestration layer that produces a handoff for a given fork. Routes
-through one of two paths (B / D) based on the parent provider's capability
-and live availability.
+## Budgeted transcript selection
 
-### Side-channel
-A provider call made out-of-band from the user-visible conversation, used to
-generate a handoff. Does not appear in the parent thread's UI. Side-channels
-typically use a separate SDK process.
+History retains whole user and assistant messages and compact records of file
+changes and commands. Selection prioritizes the latest user and assistant
+messages, then the first user message, then recent history. Selected items stay
+in conversation order and retain their role, provider, and sequence. The
+preamble identifies omitted sequences. Reasoning, tool-output bodies, and
+attachment contents are not replayed.
 
-## The B/D ladder
-
-### Path B (clean side-channel)
-Resumes the parent provider's session in a forked SDK process to generate
-the handoff. The original session is untouched. Used when the provider
-declares `sessionForkOnResume: "clean"` and the parent has a saved session ID.
-
-### Path B-prime (sessionless side-channel)
-A history-replay variant of path B that supplies conversation text instead of
-resuming a session. It uses the same artifact ladder label ("B"). Adapter
-side-channel implementations can support this variant, but the ordinary fork
-pipeline selects path D when the parent has no saved session ID.
-
-### Path D (deterministic)
-Local builder that produces the handoff from message rows without invoking
-any provider. Used as the universal fallback. Lowest fidelity but always
-available.
-
-### Ladder step
-A label on a produced handoff artifact (`"B" | "D"`) identifying which path
-generated it. Stored in `handoff.json` for diagnostics and the fallback
-banner copy.
+The budget reserves room for the target context window, the new message and
+attachments, and the response. It conservatively counts one token per UTF-8
+byte, applies the configured caps, and also respects the target's input
+character limit. If even the preamble cannot fit, the operation fails with
+`handoff_budget_exhausted`. The user's new message is never shortened to
+make room. See [ADR 0031](docs/adr/0031-handoff-v2-budgeted-transcript-selection.md)
+and the [v2 implementation](apps/server/src/features/handoff/v2/).
 
 ## Handoff delivery
 
-A provider switch (handoff v2) does not use this path: it prepends the history
-to the user's message as an inline preamble sized to the target's context window,
-and writes the same text to `handoff.md` for audit only.
+Switch, fork, and recovery prepend history to the next provider input inside a
+fence with a fresh random boundary. The preamble distinguishes historical text
+from the user's new request. The timeline keeps the user's original text.
 
-Off-band delivery sends a file pointer, short summary, and the user's first
-message. The child Reads the document under a one-shot Scoped pre-grant.
-Inline delivery must fit the child adapter's input limits, so it can omit part
-of the saved artifact. See the [handoff delivery constraints](docs/internals/conversation/chat-fork-handoff.md).
-
-The former full/minimal selection and percentage-based section truncation are
-retired. `HandoffMeta.mode` remains the constant `"full"` for provenance
-compatibility. That label does not guarantee that inline delivery contains
-every character of the artifact.
+The same history is saved for inspection at
+`<MCODE_DATA_DIR>/threads/<threadId>/handoffs/<ulid>/handoff.md`. Its
+`schemaVersion: 2` frontmatter records the kind, providers, covered and
+omitted sequences, budget, and dropped options. This is an audit copy, not a
+file the provider must read. See [handoff constraints](docs/internals/conversation/chat-fork-handoff.md).
 
 ## Provider capabilities
 
-### Session fork behavior
-Declared per provider as `"clean" | "unsupported"`. Together with a saved
-parent session ID, this flag controls eligibility for provider-generated
-handoff path B. The pipeline invokes the eligible provider's `SessionForker`.
-
-- **clean**: the provider can generate a handoff without mutating the source
-  session. Without a saved session ID, the pipeline still selects path D.
-- **unsupported**: the pipeline goes directly to path D.
+### Native session continuity
+Each provider keeps its own native session identity and last-seen message
+sequence on the thread. Returning to a provider can resume that session and
+replay only the missed messages. A fork always starts a fresh child session.
 
 ### Per-turn input cap
-The maximum input characters a provider accepts per turn. Declared as
-`maxInputCharactersPerTurn`. The handoff pipeline does not use this metadata
-to select full/minimal mode. Adapters can impose separate inline delivery
-limits (see `Handoff delivery`).
+The maximum input characters a provider accepts per turn, declared as
+`maxInputCharactersPerTurn`. Handoff v2 also bounds Codex inline input to
+14,000 characters and uses the smaller limit when selecting history.
 
 ### Goal support
 The ability to set, inspect, and clear a standing **goal**: a thread-scoped
@@ -739,34 +708,25 @@ error (if any). Used by the View doc dialog and by the fallback banner copy.
 ## Related but distinct
 
 ### Cross-provider switch
-Swapping a thread's provider mid-conversation. The **same thread continues**:
-its id, message history, and worktree are unchanged; only the active provider
-swaps. A send whose provider differs from the thread's is the switch, and it
-is admitted only while the thread is idle. The incoming provider receives the
-thread's history inline, ahead of the user's message, as a fenced handoff
-preamble built without calling the outgoing provider (handoff v2). The
-thread's persisted messages stay intact, and the timeline shows only what the
-user typed.
+A send to a different provider continues the same idle thread with its existing
+messages and worktree. Handoff v2 supplies a budgeted, fenced history preamble
+without calling the outgoing provider. The timeline shows the user's original
+message.
 
-The thread keeps its provider, model, and session until the incoming provider
-accepts the turn. A target that fails first leaves the thread unchanged. Each
-provider keeps its own native session on the thread. Switching back resumes the
-returning provider's session and sends only the turns it missed, unless the
-gap exceeds the delta-turn limit (`MAX_DELTA_TURNS`) or the resume fails; then
-it starts a fresh session with the full history. The outgoing provider's session stays recorded for that return trip.
-Composer options the target cannot honour (Fast, reasoning level, context-window
-mode) are dropped and recorded in the audit `handoff.md`.
-
-Surfaced in the [[Overview]] as the **Switch provider** action, kept distinct
-from the Overview's Fork actions (which spawn a new thread). Was a deferred item
-in the chat-fork handoff feature (PR #499); un-deferred for the Overview epic.
+The thread keeps its active provider, model, and session until the incoming
+provider accepts the turn. Each provider's native session remains recorded.
+Switching back resumes the returning provider and sends the delta after its
+last-seen sequence. When the gap exceeds `MAX_DELTA_TURNS` or native resume
+fails, a fresh session receives a budgeted selection of the full history.
+Unsupported composer options are dropped and recorded in the
+`schemaVersion: 2` audit with kind `switch`. Fork and recovery use the
+same selection and delivery primitive with their own kinds.
 
 ### Compaction
 A separate mechanism that summarizes a thread's older turns into a single
 compact summary stored on the thread itself, used to keep long threads
-within their own provider's context window. Distinct from a fork handoff,
-though the orchestrator does consult `last_compact_summary` when building a
-deterministic path-D handoff.
+within their own provider's context window. Distinct from a handoff, which
+selects stored messages verbatim and never reads the compact summary.
 
 ## Pull request review
 

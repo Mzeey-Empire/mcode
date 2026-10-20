@@ -764,9 +764,9 @@ function fakeCodexProvider(
     id: "codex" as const,
     descriptor: { id: "codex" as const, capabilities: [] },
     supportsCompletion: false,
-    sessionForkOnResume: "unsupported" as const,
+
     maxInputCharactersPerTurn: 16000,
-    forker: { fork: async () => { throw new Error("Session forks are outside this composition fixture"); } },
+
     sendTurn,
     stopSession,
     shutdown: () => undefined,

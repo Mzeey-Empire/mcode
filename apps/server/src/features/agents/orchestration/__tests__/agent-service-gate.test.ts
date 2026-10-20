@@ -128,7 +128,7 @@ function buildService({
   const providerStub = Object.assign(new NodeEvents.EventEmitter(), {
     id: "codex" as const,
     supportsCompletion: true,
-    sessionForkOnResume: "unsupported" as const,
+
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn(() => Promise.resolve()),
   }, getApprovalReviewSupport ? { getApprovalReviewSupport } : {});
@@ -191,7 +191,6 @@ function buildService({
     memoryPressureService,
     settingsService,
     availability,
-      { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       new NarrativeStore(
         messageRepo,

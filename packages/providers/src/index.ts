@@ -9,8 +9,6 @@ export {
 export type {
   ProviderBoundary,
   ClaudeProviderBoundary,
-  ClaudeProviderPorts,
-  ClaudeSideChannelGenerator,
   ClaudeCanonicalEventRouting,
   CodexProviderBoundary,
   CodexProviderPorts,

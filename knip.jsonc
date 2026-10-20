@@ -214,14 +214,6 @@
       "types"
     ],
     // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
-    "apps/server/src/features/handoff/artifacts/{handoff-builder.ts,handoff-types.ts}": [
-      "types"
-    ],
-    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
-    "apps/server/src/features/handoff/providers/session-forker.ts": [
-      "types"
-    ],
-    // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
     "apps/server/src/features/projects/diffs/revert/turn-revert-model.ts": [
       "types"
     ],
@@ -309,11 +301,6 @@
     // Existing duplicates outside the retirement rows; decide removal or API retention in the follow-up.
     "apps/web/src/components/chat/MarkdownContent.tsx": [
       "duplicates"
-    ],
-    // Existing exports, types outside the retirement rows; decide removal or API retention in the follow-up.
-    "apps/web/src/components/chat/handoff-utils.ts": [
-      "exports",
-      "types"
     ],
     // Existing files outside the retirement rows; decide removal or API retention in the follow-up.
     "apps/web/src/components/chat/{HookActivitySection.tsx,PrBadge.tsx,UsagePopover.tsx}": [

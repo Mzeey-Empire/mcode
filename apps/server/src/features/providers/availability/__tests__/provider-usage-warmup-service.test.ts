@@ -24,8 +24,7 @@ function makeProvider(
   return {
     id,
     supportsCompletion: false,
-    sessionForkOnResume: "unsupported",
-    forker: {} as IAgentProvider["forker"],
+
     maxInputCharactersPerTurn: 1,
     sendTurn: vi.fn(),
     stopSession: vi.fn(),

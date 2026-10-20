@@ -59,8 +59,8 @@ async function fixture(providerId: ProviderId = "codex", beforeCommit: () => Pro
   const thread = await threads.create(workspace.id, "Draft images", "direct", "main", false, providerId);
   const provider: IAgentProvider = Object.assign(new NodeEvents.EventEmitter(), {
     id: providerId, descriptor: { id: providerId, capabilities: [] }, supportsCompletion: false,
-    sessionForkOnResume: "unsupported" as const, maxInputCharactersPerTurn: 100_000,
-    forker: { fork: async () => { throw new Error("Not used by admission"); } },
+     maxInputCharactersPerTurn: 100_000,
+
     sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: async () => [],
   });
   const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };

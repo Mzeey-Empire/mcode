@@ -1,7 +1,7 @@
 import type { WsMethodName } from "@mcode/contracts";
 import type { HandoffStorage } from "../index.js";
 
-type HandoffMethod = "handoff.regenerate" | "handoff.readLatest";
+type HandoffMethod = "handoff.readLatest";
 
 /** Defines dependencies required to route validated Handoff RPC calls. */
 export interface HandoffRouterDeps {
@@ -12,7 +12,6 @@ const handoffHandlers: Record<
   HandoffMethod,
   (deps: HandoffRouterDeps, params: any) => Promise<unknown> | unknown
 > = {
-  "handoff.regenerate": () => ({ status: "not-implemented" as const }),
   "handoff.readLatest": (deps, params) => deps.handoffStorage.readLatest(params.threadId),
 };
 

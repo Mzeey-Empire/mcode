@@ -192,7 +192,6 @@ function buildService(): {
     memoryPressureService,
     settingsService,
     availability,
-    { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as never,
     { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as never,
     new NarrativeStore(
       messageRepo,

@@ -1,5 +1,7 @@
 import type { IAgentProvider } from "@mcode/contracts";
-import { CODEX_INLINE_INPUT_MAX_CHARS } from "../artifacts/handoff-builder.js";
+
+/** Largest first-turn input Codex accepts inline, so seeded Codex prompts must fit inside it. */
+export const CODEX_INLINE_INPUT_MAX_CHARS = 14_000;
 
 /**
  * The most characters one turn may carry to the target. Codex also inlines its input into a prompt with a

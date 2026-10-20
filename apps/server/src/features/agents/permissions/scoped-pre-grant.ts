@@ -1,21 +1,7 @@
 /**
- * ScopedPreGrant — a narrow, one-shot permission bypass the handoff pipeline
- * issues so a freshly forked child can Read its Handoff document on its first
- * Turn without prompting the user, regardless of the Thread's `permissionMode`.
- *
- * The grant is deliberately the smallest authority that makes the Handoff feel
- * invisible (PRD user stories 3 and 4):
- *  - **Path-scoped:** authorises exactly ONE absolute file path. No prefix or
- *    directory matching — a different path is not covered.
- *  - **Turn-scoped:** valid only until the granted Turn ends. {@link clear} is
- *    called when the child's first Turn completes, so the grant never survives
- *    into a second Turn.
- *  - **One-shot:** the first matching consume marks it used; a second Read of
- *    the same path on the same Turn is NOT pre-granted (falls back to the
- *    normal permission flow).
- *
- * This is a pipeline guarantee, not a user-configurable Hook, and it bypasses
- * `permissionMode` only for the single granted Read.
+ * Authorizes one Read of an exact file path for one turn, such as the plan file
+ * supplied to an implementation turn. Other paths and repeated reads follow
+ * the normal permission flow. The turn owner clears unused grants on completion.
  */
 import * as NodePath from "node:path";
 import { inject, injectable } from "tsyringe";

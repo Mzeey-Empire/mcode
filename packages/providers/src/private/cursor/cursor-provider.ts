@@ -49,10 +49,6 @@ import { classifyCursorFailure } from "./acp/cursor-failure-classifier.js";
 import { cursorSessionRecoveryErrorMessage } from "./acp/cursor-session-recovery-error.js";
 import { CursorAcpProcessSpawner } from "./runtime/cursor-acp-process-spawner.js";
 import { CursorTurnExecutor } from "./runtime/cursor-turn-executor.js";
-import {
-  CursorSideChannel,
-} from "./handoff/cursor-side-channel.js";
-import { CursorCleanForker } from "./handoff/cursor-clean-forker.js";
 import { createCliStatusRunner, readCliStatusVersion, resolveCliStatusBinary } from "../status/cli-status-runner.js";
 import { describeCursorAuth } from "../status/provider-auth-checks.js";
 import type {
@@ -103,7 +99,6 @@ const CURSOR_SUPPORTED_CAPABILITIES = [
   "plan",
   "permissions",
   "session-eviction",
-  "clean-fork",
   "browser-access",
   "thread-control",
   "session-resume",
@@ -139,10 +134,7 @@ export class CursorProvider
     ],
   });
   readonly supportsCompletion = false;
-  readonly sessionForkOnResume = "clean" as const;
   readonly maxInputCharactersPerTurn = 4_000;
-  /** Path B forker; calls this provider's runSideChannelQuery on a forked copy of the parent session. */
-  readonly forker = new CursorCleanForker(this);
 
   /** Owns the session pool, idle eviction, and server-managed process cleanup. */
   private readonly runtime: SessionRuntime<CursorSessionState>;
@@ -184,7 +176,6 @@ export class CursorProvider
   private acpClientBridge?: CursorAcpClientBridge;
   private processSpawner?: CursorAcpProcessSpawner;
   private turnExecutor?: CursorTurnExecutor;
-  private sideChannel?: CursorSideChannel;
 
   constructor(
     private readonly host: ProviderHostPorts,
@@ -207,7 +198,6 @@ export class CursorProvider
     this.getAcpClientBridge();
     this.getProcessSpawner();
     this.getTurnExecutor();
-    this.getSideChannel();
   }
 
   private getAcpClientBridge(): CursorAcpClientBridge {
@@ -288,18 +278,6 @@ export class CursorProvider
       });
     }
     return this.turnExecutor;
-  }
-
-  private getSideChannel(): CursorSideChannel {
-    if (!this.sideChannel) {
-      this.sideChannel = new CursorSideChannel({
-        host: this.host,
-        getEnvironment: () => this.envService.getEnv(),
-        getCliCandidates: () => cursorCliProbeBinaries(this.settingsService.get()),
-        readWorkspaceFile: (cwd, filePath) => this.getAcpClientBridge().readWorkspaceFile(cwd, filePath),
-      });
-    }
-    return this.sideChannel;
   }
 
   /** Reports sign-in from `cursor-agent status`, trying the same binaries sessions spawn. */
@@ -1345,17 +1323,5 @@ export class CursorProvider
     opts: Parameters<CursorTurnExecutor["run"]>[1],
   ): Promise<void> {
     return this.getTurnExecutor().run(entry, opts);
-  }
-
-  /** Runs an isolated path-B summary query against a persisted Cursor session. */
-  async runSideChannelQuery(args: {
-    parentThreadId: string;
-    parentSdkSessionId: string;
-    prompt: string;
-    abortSignal?: AbortSignal;
-    conversationHistory?: string;
-    cwd: string;
-  }): Promise<string> {
-    return this.getSideChannel().run(args);
   }
 }

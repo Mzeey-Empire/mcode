@@ -242,8 +242,8 @@ describe("TurnResumeScheduler", () => {
     const provider: IAgentProvider = Object.assign(new NodeEvents.EventEmitter(), {
       id: "codex" as const, descriptor: { id: "codex" as const, capabilities: [] }, supportsCompletion: false,
       subagentReporting: null,
-      sessionForkOnResume: "unsupported" as const, maxInputCharactersPerTurn: 100_000,
-      forker: { fork: async () => { throw new Error("Not used by admission"); } },
+       maxInputCharactersPerTurn: 100_000,
+
       sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: async () => [],
     });
     const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };

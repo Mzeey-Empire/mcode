@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useMemo } from "react";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
-import { useThreadRecord, getThreadRecord, getHandoffStatus } from "../state";
+import { useThreadRecord } from "../state";
 import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
 import type { Thread } from "@/transport";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
@@ -404,9 +404,6 @@ export function Composer({
     composerContainerRef,
   );
   const contextEntry = useThreadRecord(threadId, (r) => r.context);
-  const handoffStatus = useThreadStore((s) =>
-    threadId ? getHandoffStatus(getThreadRecord(s.records, threadId)) : undefined,
-  );
   const planPending = useThreadRecord(
     threadId,
     (r) => r.planQuestionsStatus === "pending",
@@ -485,8 +482,6 @@ export function Composer({
   }, [threadId, stopAgent]);
 
   const {
-    queuedSend,
-    queueIfGenerating,
     sendQueuedMessageNow,
     editing: editingFromQueue,
     loadIntoComposer,
@@ -500,21 +495,19 @@ export function Composer({
   } = useComposerQueueController({
     threadId,
     annotationScopeId,
-    handoffStatus,
     form,
   });
 
   const submissionQueue = useMemo(
     () => ({
       editing: editingFromQueue,
-      queueIfGenerating,
       discardEmptyEdit,
       finishEditing,
       consumeEditForDispatch,
       releaseConsumedEdit,
       resolvePreviewAnnotations,
     }),
-    [consumeEditForDispatch, discardEmptyEdit, editingFromQueue, finishEditing, queueIfGenerating, releaseConsumedEdit, resolvePreviewAnnotations],
+    [consumeEditForDispatch, discardEmptyEdit, editingFromQueue, finishEditing, releaseConsumedEdit, resolvePreviewAnnotations],
   );
   const {
     submit: handleSend,
@@ -634,7 +627,6 @@ export function Composer({
             isStopPending,
             provider,
             planPending,
-            queuedSend: Boolean(queuedSend),
             needsWorkspace,
             editingFromQueue,
             composerMode,

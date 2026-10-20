@@ -24,7 +24,6 @@ import type {
   ProviderModelInfo,
   ProviderIdentity,
   ProviderTurnDiffUpdate,
-  SessionForker,
   TurnRequest,
   TurnFailure,
   NativePlanFileOutcome,
@@ -47,7 +46,6 @@ import {
 } from "@mcode/providers";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
-import { CleanForker } from "../../../handoff/index.js";
 import {
   CanonicalLiveEventPublisher,
   type CanonicalLiveEventRouting,
@@ -425,9 +423,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     ],
   });
   readonly supportsCompletion = false;
-  readonly sessionForkOnResume = "unsupported" as const;
   readonly maxInputCharactersPerTurn = 16_000;
-  readonly forker: SessionForker = new CleanForker(this);
 
   private readonly turns = new Map<string, OpenCodeTurnState>();
   private readonly canonicalRoutings = new Map<string, CanonicalLiveEventRouting>();
@@ -469,11 +465,6 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     if (seams.http) this.http = seams.http;
     if (seams.probeCli) this.probeCli = seams.probeCli;
     if (seams.idleConfirm) this.idleConfirm = { ...DEFAULT_IDLE_CONFIRM, ...seams.idleConfirm };
-  }
-
-  /** Run a handoff prompt without a pooled turn; the parent session is untouched. */
-  async runSideChannelQuery(): Promise<string> {
-    throw Object.assign(new Error("OpenCode side-channel query is not available in the minimal turn slice"), { code: "ETIMEDOUT" });
   }
 
   /**
