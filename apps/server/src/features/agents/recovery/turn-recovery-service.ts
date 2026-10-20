@@ -311,7 +311,7 @@ export class TurnRecoveryService {
         afterSequence: 0,
         throughSequence: target.message.sequence,
         contextWindow: thread.context_window ?? null,
-        inputCharacterCap: targetInputCharacterCap(this.providers.resolve(providerId), providerId),
+        inputCharacterCap: targetInputCharacterCap(this.providers.resolve(providerId)),
         userText: RESUME_CONTINUATION_PROMPT,
         attachments: [],
       });

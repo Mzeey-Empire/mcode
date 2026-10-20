@@ -122,6 +122,7 @@ describe("TurnRecoveryService", () => {
 
     function providerRegistry(supportsSessionResume: boolean) {
       const provider = {
+        id: "codex" as const,
         get maxInputCharactersPerTurn() { return inputCap; },
         descriptor: { capabilities: [
           { name: "session-resume", support: supportsSessionResume ? "supported" : "unsupported" },
