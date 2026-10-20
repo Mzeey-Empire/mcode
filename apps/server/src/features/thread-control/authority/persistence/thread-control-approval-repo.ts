@@ -3,6 +3,7 @@ import type { Database } from "bun:sqlite";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ThreadControlApprovalStore } from "./thread-control-approval-store.js";
 import { threadControlApprovalWriteOperations } from "./thread-control-approval-write-operations.js";
+export type { PendingDelegatedTaskApproval } from "./thread-control-approval-store.js";
 export type { PendingThreadCreateApproval, PendingThreadSendApproval, PendingThreadStopApproval, MalformedThreadCreateApproval, PendingThreadControlApproval, RecoverableThreadCreateApproval, ThreadControlApprovalOperation } from "./thread-control-approval-store.js";
 
 /** Read-only queries and committed mutations for ThreadControlApprovalRepo. */
@@ -13,6 +14,14 @@ export class ThreadControlApprovalRepo {
   constructor(@inject("Database") db: Database, @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {
     this.reader = new ThreadControlApprovalStore(db);
   }
+
+  /** Persist a protected task launch before its child exists. */
+  createDelegate(input: Parameters<ThreadControlApprovalStore["createDelegate"]>[0]) {
+    return this.writer.execute(threadControlApprovalWriteOperations.createDelegate, [input]);
+  }
+
+  /** Read a task approval's mutable decision state. */
+  status(approvalId: string) { return this.reader.status(approvalId); }
 
   create(input: Parameters<ThreadControlApprovalStore["create"]>[0]): Promise<ReturnType<ThreadControlApprovalStore["create"]>> {
     return this.writer.execute(threadControlApprovalWriteOperations.create, [input]);

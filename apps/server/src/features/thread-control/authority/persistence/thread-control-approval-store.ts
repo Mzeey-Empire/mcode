@@ -4,9 +4,11 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   ResolvedExecutionSchema,
+  DelegateTaskApprovalSubjectSchema,
   ThreadPlacementSchema,
   type ResolvedExecution,
   type ThreadPlacement,
+  type ApprovalSubject,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { threadControlApprovals } from "../../../../runtime/persistence/sqlite/schema.js";
@@ -59,6 +61,21 @@ export interface PendingThreadStopApproval {
   sourceThreadId?: string;
 }
 
+/** Protected task launch whose child does not exist before the human accepts. */
+export interface PendingDelegatedTaskApproval {
+  createdAt: string;
+  operation: "delegate_task";
+  approvalId: string;
+  threadId: string;
+  workspaceId: string;
+  execution: ResolvedExecution;
+  turnId: string;
+  callerId: string;
+  sourceThreadId: string;
+  operationPhase: "pre_dispatch" | "dispatching" | "dispatched";
+  subject: Extract<ApprovalSubject, { kind: "delegate_task" }>;
+}
+
 /** Safe persisted identity for a processing approval whose payload cannot be rehydrated. */
 export interface MalformedThreadCreateApproval {
   invalid: true;
@@ -71,10 +88,10 @@ export interface MalformedThreadCreateApproval {
 }
 
 /** Processing approval that can either resume safely or must fail closed. */
-export type PendingThreadControlApproval = PendingThreadCreateApproval | PendingThreadSendApproval | PendingThreadStopApproval;
+export type PendingThreadControlApproval = PendingThreadCreateApproval | PendingThreadSendApproval | PendingThreadStopApproval | PendingDelegatedTaskApproval;
 export type RecoverableThreadCreateApproval = PendingThreadControlApproval | MalformedThreadCreateApproval;
 /** Durable operation identifiers stored with thread-control approvals. */
-export type ThreadControlApprovalOperation = "thread_create_batch" | "thread_send" | "thread_stop";
+export type ThreadControlApprovalOperation = "thread_create_batch" | "thread_send" | "thread_stop" | "delegate_task";
 
 /** Columns read by approval recovery and pending-request queries. */
 const APPROVAL_COLUMNS = {
@@ -97,7 +114,7 @@ const APPROVAL_COLUMNS = {
 type ApprovalRow = Pick<typeof threadControlApprovals.$inferSelect, keyof typeof APPROVAL_COLUMNS>;
 
 function parseOperation(value: string | null | undefined): ThreadControlApprovalOperation | undefined {
-  return value === "thread_create_batch" || value === "thread_send" || value === "thread_stop" ? value : undefined;
+  return value === "thread_create_batch" || value === "thread_send" || value === "thread_stop" || value === "delegate_task" ? value : undefined;
 }
 
 /** Durable repository for protected thread-control creation approvals. */
@@ -106,6 +123,23 @@ export class ThreadControlApprovalStore {
 
   constructor(db: Database) {
     this.orm = drizzle(db);
+  }
+
+  /** Persist one pending approval and return its opaque identity. */
+  createDelegate(input: Omit<PendingDelegatedTaskApproval, "createdAt" | "operation" | "operationPhase">): string {
+    this.orm.insert(threadControlApprovals).values({
+      id: input.approvalId, threadId: input.threadId, workspaceId: input.workspaceId,
+      prompt: input.subject.title, executionJson: JSON.stringify(input.execution), placementJson: JSON.stringify(input.subject),
+      turnId: input.turnId, callerId: input.callerId, sourceThreadId: input.sourceThreadId,
+      operation: "delegate_task", operationPhase: "pre_dispatch", status: "pending",
+    }).onConflictDoNothing().run();
+    return input.approvalId;
+  }
+
+  /** Read the durable decision without treating a processing approval as a new request. */
+  status(approvalId: string): string | null {
+    return this.orm.select({ status: threadControlApprovals.status }).from(threadControlApprovals)
+      .where(eq(threadControlApprovals.id, approvalId)).get()?.status ?? null;
   }
 
   /** Persist one pending approval and return its opaque identity. */
@@ -274,7 +308,7 @@ export class ThreadControlApprovalStore {
   }
 
   /** Mark a processing approval with its terminal outcome, or fail malformed pending data. */
-  settle(approvalId: string, status: "approved" | "rejected" | "failed"): boolean {
+  settle(approvalId: string, status: "approved" | "rejected" | "failed" | "cancelled"): boolean {
     const where = status === "failed"
       ? and(eq(threadControlApprovals.id, approvalId), inArray(threadControlApprovals.status, ["pending", "processing"]))
       : and(eq(threadControlApprovals.id, approvalId), eq(threadControlApprovals.status, "processing"));
@@ -418,11 +452,22 @@ function parseApprovalByOperation(
   execution: ResolvedExecution,
 ): PendingThreadControlApproval {
   const parsers: Record<ThreadControlApprovalOperation, () => PendingThreadControlApproval> = {
+    delegate_task: () => ({
+      operation: "delegate_task", ...approvalIdentity(row), execution,
+      sourceThreadId: row.sourceThreadId ?? row.threadId,
+      operationPhase: parseMutationPhase(row.operationPhase),
+      subject: DelegateTaskApprovalSubjectSchema().parse(JSON.parse(row.placementJson)),
+    }),
     thread_create_batch: () => parseCreateApproval(row, execution),
     thread_send: () => parseSendApproval(row, execution),
     thread_stop: () => parseStopApproval(row, execution),
   };
   return parsers[operation]();
+}
+
+function parseMutationPhase(value: string): PendingDelegatedTaskApproval["operationPhase"] {
+  if (value === "pre_dispatch" || value === "dispatching" || value === "dispatched") return value;
+  throw new Error("Stored task approval has invalid phase");
 }
 
 function parseCreateApproval(row: ApprovalRow, execution: ResolvedExecution): PendingThreadCreateApproval {

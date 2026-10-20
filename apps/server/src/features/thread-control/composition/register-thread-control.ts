@@ -1,4 +1,4 @@
-import { Lifecycle, type DependencyContainer } from "tsyringe";
+import { delay, instanceCachingFactory, Lifecycle, type DependencyContainer } from "tsyringe";
 
 import {
   ExternalThreadControlMcpRuntime,
@@ -12,9 +12,37 @@ import {
 import { McodeSessionAuthority } from "../../mcode-mcp/mcode-session-authority.js";
 import { ThreadControlApprovalRepo } from "../authority/persistence/thread-control-approval-repo.js";
 import { ThreadControlAuditRepo } from "../authority/persistence/thread-control-audit-repo.js";
+import { DelegatedTaskRepo } from "../delegation/delegated-task-repo.js";
+import { DelegatedTaskService } from "../delegation/delegated-task-service.js";
+import { ThreadRepo } from "../persistence/thread-repo.js";
+import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
+import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup-fetch-decisions.js";
+import { WorkspaceEnvironmentService } from "../../projects/environment/workspace-environment-service.js";
+import { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
+import { AgentService } from "../../agents/orchestration/agent-service.js";
+import { AgentTurnCommandPort } from "../../agents/orchestration/agent-turn-command-port.js";
+import { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-boundary.js";
+import { DelegationTargetResolver } from "../../agents/collaboration/delegation-target-resolver.js";
+import { ApprovalService } from "../../agents/approvals/approval-service.js";
+import type { CancelThreadStartupDeps } from "../../thread-startup/cancel-thread-startup.js";
 
 /** Register thread-control mutation, approval, authority, and lifecycle services. */
 export function registerThreadControlServices(container: DependencyContainer): void {
+  container.register(DelegatedTaskRepo, { useClass: DelegatedTaskRepo }, { lifecycle: Lifecycle.Singleton });
+  container.register<CancelThreadStartupDeps>("CancelThreadStartupDeps", { useFactory: instanceCachingFactory((c) => ({
+    threadStartupService: c.resolve(ThreadStartupService),
+    threadStartupFetchDecisions: c.resolve(ThreadStartupFetchDecisions),
+    workspaceEnvironmentService: c.resolve(delay(() => WorkspaceEnvironmentService)),
+    agentService: c.resolve(delay(() => AgentService)),
+  })) });
+  container.register(DelegatedTaskService, { useFactory: instanceCachingFactory((c) => new DelegatedTaskService({
+    tasks: c.resolve(DelegatedTaskRepo), threads: c.resolve(ThreadRepo), startups: c.resolve(ThreadStartupService),
+    approvals: c.resolve(ThreadControlApprovalRepo), canonical: c.resolve(CanonicalAgentBoundary),
+    targets: c.resolve(delay(() => DelegationTargetResolver)), git: c.resolve(delay(() => GitWorktreeService)),
+    control: c.resolve(delay(() => ThreadControlService)), approvalService: c.resolve(delay(() => ApprovalService)),
+    cancellation: c.resolve<CancelThreadStartupDeps>("CancelThreadStartupDeps"),
+    commands: c.resolve(delay(() => AgentTurnCommandPort)),
+  })) });
   container.register(
     ThreadControlMutationReservationService,
     { useClass: ThreadControlMutationReservationService },

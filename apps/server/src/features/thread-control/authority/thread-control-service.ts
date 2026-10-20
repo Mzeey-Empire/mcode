@@ -45,7 +45,6 @@ import {
 } from "@mcode/contracts";
 import type {
   ExternalThreadControlAuthority,
-  InternalThreadControlAuthority,
   ThreadControlAuthority,
 } from "@mcode/thread-orchestration";
 export type {
@@ -64,6 +63,8 @@ import {
   type PendingThreadSendApproval,
   type PendingThreadStopApproval,
   type PendingThreadCreateApproval,
+  type PendingThreadControlApproval,
+  type PendingDelegatedTaskApproval,
 } from "./persistence/thread-control-approval-repo.js";
 import { ThreadControlAuditRepo } from "./persistence/thread-control-audit-repo.js";
 import { ProviderRegistry } from "../../providers/composition/provider-registry.js";
@@ -81,6 +82,9 @@ import { ModelCacheService } from "../../providers/models/model-cache-service.js
 import { SettingsService } from "../../settings/settings-service.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { DelegatedTaskService } from "../delegation/delegated-task-service.js";
+import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
+import { cancelThreadStartup, type CancelThreadStartupDeps } from "../../thread-startup/cancel-thread-startup.js";
 
 type ThreadApprovalDecision = "allow" | "deny" | "cancelled";
 
@@ -133,6 +137,9 @@ export class ThreadControlService {
     @inject("MessageRepo", { isOptional: true }) private readonly messages?: MessageRepo,
     @inject(ThreadControlMutationReservationService) mutationReservations?: ThreadControlMutationReservationService,
     @inject(delay(() => DelegationTargetResolver), { isOptional: true }) private readonly targetResolver?: DelegationTargetResolver,
+    @inject(delay(() => DelegatedTaskService), { isOptional: true }) private readonly delegatedTasks?: DelegatedTaskService,
+    @inject(delay(() => ThreadStartupService), { isOptional: true }) private readonly startups?: ThreadStartupService,
+    @inject("CancelThreadStartupDeps", { isOptional: true }) private readonly startupCancellation?: CancelThreadStartupDeps,
   ) {
     this.mutationReservations = mutationReservations ?? new ThreadControlMutationReservationService();
   }
@@ -316,14 +323,17 @@ export class ThreadControlService {
     return { status: "found", workspaceId: input.workspaceId, worktrees };
   }
 
-  /** Create one to twenty independent delegated threads while preserving input order. */
+  /** Create an external integration's batch while preserving per-item outcomes. */
   async threadCreateBatch(
     authority: ThreadControlAuthority,
     input: ThreadCreateBatchInput,
   ): Promise<ThreadCreateBatchResult> {
     const validatedInput = ThreadCreateBatchInputSchema().parse(input);
-    const items = this.resolveBatchItems(authority, validatedInput);
-    const reservations = await this.reserveBatchCapacity(authority, items);
+    if (authority.type !== "external") return { results: validatedInput.items.map((_item, index) => ({
+      index, status: "rejected", error: this.error("forbidden", "Internal child work must use delegate_task", false),
+    })) };
+    const items = validatedInput.items;
+    const reservations = await this.reserveExternalCapacity(authority, validatedInput);
     const results: ThreadCreateItemResult[] = [];
     for (let index = 0; index < items.length; index += 1) {
       results.push(await this.createBatchItem(authority, items[index]!, index, reservations[index]));
@@ -331,23 +341,8 @@ export class ThreadControlService {
     return { results };
   }
 
-  private resolveBatchItems(authority: ThreadControlAuthority, input: ThreadCreateBatchInput): ThreadCreateInput[] {
-    const sourceWorkspaceId = authority.type === "internal" && input.items.some((item) => item.workspaceId === undefined)
-      ? this.resolveInternalSourceWorkspaceId(authority)
-      : undefined;
-    return input.items.map((item) => item.workspaceId === undefined && sourceWorkspaceId
-      ? { ...item, workspaceId: sourceWorkspaceId }
-      : item);
-  }
-
-  private async reserveBatchCapacity(authority: ThreadControlAuthority, items: ThreadCreateInput[]): Promise<boolean[]> {
-    return authority.type === "external"
-      ? this.reserveExternalCapacity(authority, { items })
-      : items.map(() => false);
-  }
-
   private async createBatchItem(
-    authority: ThreadControlAuthority,
+    authority: ExternalThreadControlAuthority,
     item: ThreadCreateInput,
     index: number,
     reserved: boolean,
@@ -359,22 +354,21 @@ export class ThreadControlService {
       (await this.auditCreateResult(authority, result));
       return result;
     } finally {
-      if (authority.type === "external" && reserved) await this.releaseExternalReservation(authority.integrationId);
+      if (reserved) await this.releaseExternalReservation(authority.integrationId);
     }
   }
 
   private async batchItemRejection(
-    authority: ThreadControlAuthority,
+    authority: ExternalThreadControlAuthority,
     item: ThreadCreateInput,
     index: number,
     reserved: boolean,
   ): Promise<ThreadCreateItemResult | null> {
-    const sourceMissing = authority.type === "internal" && item.workspaceId === undefined;
-    const capacityExceeded = authority.type === "external" && this.externalItemCanCreate(authority, item) && !reserved;
-    if (!sourceMissing && !capacityExceeded) return null;
-    const result: ThreadCreateItemResult = sourceMissing
-      ? { index, status: "rejected", error: this.error("not_found", "Source thread not found", false) }
-      : { index, status: "rejected", workspaceId: item.workspaceId, error: this.error("limit_exceeded", "External active-thread limit reached", true) };
+    if (!this.externalItemCanCreate(authority, item) || reserved) return null;
+    const result: ThreadCreateItemResult = {
+      index, status: "rejected", workspaceId: item.workspaceId,
+      error: this.error("limit_exceeded", "External active-thread limit reached", true),
+    };
     (await this.auditCreateResult(authority, result));
     return result;
   }
@@ -640,8 +634,12 @@ export class ThreadControlService {
     return { status: "resolved" };
   }
 
-  private async respondToClaimedApproval(pending: PendingThreadCreateApproval | PendingThreadSendApproval | PendingThreadStopApproval, decision: ThreadApprovalDecision): Promise<boolean> {
+  private async respondToClaimedApproval(pending: PendingThreadControlApproval, decision: ThreadApprovalDecision): Promise<boolean> {
     const requestId = pending.approvalId;
+
+    if (pending.operation === "delegate_task") {
+      return this.respondToDelegationApproval(pending, decision);
+    }
 
     if ("operation" in pending && (pending.operation === "thread_send" || pending.operation === "thread_stop")) {
       return (await this.respondToMutationApproval(pending, decision));
@@ -703,6 +701,17 @@ export class ThreadControlService {
     }
   }
 
+  private async respondToDelegationApproval(pending: PendingDelegatedTaskApproval, decision: ThreadApprovalDecision): Promise<boolean> {
+    if (decision === "allow") {
+      if (!this.delegatedTasks) throw new Error("Delegated task service is unavailable");
+      await this.delegatedTasks.launch(pending.approvalId);
+    }
+    const status = decision === "allow" ? "approved" : "rejected";
+    await this.approvals.settle(pending.approvalId, decision === "cancelled" ? "cancelled" : status);
+    this.publishApprovalResolution(pending, decision);
+    return true;
+  }
+
   /** Restore stranded approvals without replaying an ambiguous external side effect. */
   async recoverApprovals(): Promise<void> {
     const pendingApprovals = this.approvals.listPending();
@@ -713,6 +722,10 @@ export class ThreadControlService {
           threadId: approval.threadId,
         });
         (await this.failRecovery(approval));
+        continue;
+      }
+      if (approval.operation === "delegate_task") {
+        this.publishThreadApproval(approval.approvalId);
         continue;
       }
       if (!("operation" in approval) || (approval.operation !== "thread_send" && approval.operation !== "thread_stop")) continue;
@@ -923,11 +936,15 @@ export class ThreadControlService {
       (await this.failInvalidApprovalRecovery(approval));
       return;
     }
+    if (approval.operation === "delegate_task") {
+      await this.respondToClaimedApproval(approval, "allow");
+      return;
+    }
     if ("operation" in approval && (approval.operation === "thread_send" || approval.operation === "thread_stop")) {
       (await this.recoverMutationApproval(approval));
       return;
     }
-    await this.recoverCreateApproval(approval as PendingThreadCreateApproval);
+    await this.recoverCreateApproval(approval);
   }
 
   private async failInvalidApprovalRecovery(approval: RecoverableThreadCreateApproval): Promise<void> {
@@ -1014,14 +1031,20 @@ export class ThreadControlService {
     return {
       requestId: approval.approvalId, threadId: ownerThreadId, providerId,
       requestedAt: approval.createdAt,
-      subject: { kind: "thread_operation", operation: approval.operation, targetThreadId: approval.threadId,
-        ...(approval.operation === "thread_send" ? { message: approval.message } : {}) },
+      subject: this.approvalSubject(approval),
       choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
       origin: providerId ? { kind: "agent" } : { kind: "integration", label: "Integration" },
     };
   }
 
-  private publishThreadApproval(approvalId: string): void {
+  private approvalSubject(approval: PendingThreadControlApproval): ApprovalRequest["subject"] {
+    if (approval.operation === "delegate_task") return approval.subject;
+    return { kind: "thread_operation", operation: approval.operation, targetThreadId: approval.threadId,
+      ...(approval.operation === "thread_send" ? { message: approval.message } : {}) };
+  }
+
+  /** Publish an already committed approval on its authenticated source thread. */
+  publishThreadApproval(approvalId: string): void {
     const approval = this.approvals.listPending().find((item) => item.approvalId === approvalId);
     if (!approval) throw new Error("Pending thread approval was not found");
     const request = this.approvalRequestFor(approval);
@@ -1032,7 +1055,15 @@ export class ThreadControlService {
     });
   }
 
-  private publishApprovalResolution(pending: PendingThreadCreateApproval | PendingThreadSendApproval | PendingThreadStopApproval, decision: ThreadApprovalDecision): void {
+  /** Cancel an unclaimed task approval without creating its child. */
+  async cancelDelegationApproval(approvalId: string): Promise<void> {
+    const pending = await this.approvals.claim(approvalId);
+    if (!pending) return;
+    if (pending.operation !== "delegate_task") throw new Error("Approval is not a delegated task launch");
+    await this.respondToClaimedApproval(pending, "cancelled");
+  }
+
+  private publishApprovalResolution(pending: PendingThreadControlApproval, decision: ThreadApprovalDecision): void {
     this.approvalService.resolved({
       requestId: pending.approvalId, threadId: pending.sourceThreadId ?? pending.threadId,
       outcome: decision === "cancelled" ? { status: "cancelled", reason: "session_stopped" }
@@ -1042,7 +1073,7 @@ export class ThreadControlService {
   }
 
   private async createOne(
-    authority: ThreadControlAuthority,
+    authority: ExternalThreadControlAuthority,
     input: ThreadCreateInput,
     index: number,
   ): Promise<ThreadCreateItemResult> {
@@ -1052,14 +1083,15 @@ export class ThreadControlService {
     if ("error" in execution) {
       return { index, status: "rejected", workspaceId: input.workspaceId, error: execution.error };
     }
-    const confirmedInput = input as ThreadCreateInput & { workspaceId: string };
+    if (!input.workspaceId) throw new Error("Validated batch item has no workspace");
+    const confirmedInput = { ...input, workspaceId: input.workspaceId };
     const existingWorktree = this.resolveExistingWorktree(confirmedInput, index);
     if ("rejection" in existingWorktree) return existingWorktree.rejection;
     return (await this.persistCreateOne(authority, confirmedInput, index, execution.value, existingWorktree.worktree));
   }
 
   private createInputRejection(
-    authority: ThreadControlAuthority,
+    authority: ExternalThreadControlAuthority,
     input: ThreadCreateInput,
     index: number,
   ): ThreadCreateItemResult | null {
@@ -1078,15 +1110,13 @@ export class ThreadControlService {
     };
   }
 
-  private canCreateInWorkspace(authority: ThreadControlAuthority, workspaceId: string | undefined): workspaceId is string {
+  private canCreateInWorkspace(authority: ExternalThreadControlAuthority, workspaceId: string | undefined): workspaceId is string {
     if (!workspaceId) return false;
-    return authority.type === "internal"
-      || (authority.allowedWorkspaceIds.includes(workspaceId) && authority.scopes.includes("threads:create"));
+    return authority.allowedWorkspaceIds.includes(workspaceId) && authority.scopes.includes("threads:create");
   }
 
-  private canCreateWorktree(authority: ThreadControlAuthority, input: ThreadCreateInput): boolean {
-    return authority.type === "internal"
-      || input.placement.type !== "new_worktree"
+  private canCreateWorktree(authority: ExternalThreadControlAuthority, input: ThreadCreateInput): boolean {
+    return input.placement.type !== "new_worktree"
       || authority.scopes.includes("worktrees:create");
   }
 
@@ -1111,7 +1141,7 @@ export class ThreadControlService {
   }
 
   private async persistCreateOne(
-    authority: ThreadControlAuthority,
+    authority: ExternalThreadControlAuthority,
     input: ThreadCreateInput & { workspaceId: string },
     index: number,
     execution: ResolvedExecution,
@@ -1121,7 +1151,7 @@ export class ThreadControlService {
     try {
       const persisted = await this.persistThread(input, execution, existingWorktree);
       threadId = persisted.threadId;
-      (await this.recordThreadCreator(authority, threadId));
+      (await this.threads.updateExternalCreator(threadId, authority.integrationId));
       const approval = (await this.createWorktreeApproval(authority, input, index, threadId, execution));
       if (approval) return approval;
       return this.provisionAndStartThread(input, index, threadId, execution);
@@ -1131,44 +1161,24 @@ export class ThreadControlService {
     }
   }
 
-  private async recordThreadCreator(authority: ThreadControlAuthority, threadId: string): Promise<void> {
-    if (authority.type === "internal") {
-      (await this.threads.updateDelegationLineage(threadId, {
-        coordinatorThreadId: authority.sourceThreadId,
-        creatorTurnId: authority.sourceTurnId,
-        creatorToolCallId: authority.sourceToolCallId,
-        creationKind: "thread_delegation",
-      }));
-      return;
-    }
-    (await this.threads.updateExternalCreator(threadId, authority.integrationId));
-  }
-
   private async createWorktreeApproval(
-    authority: ThreadControlAuthority,
+    authority: ExternalThreadControlAuthority,
     input: ThreadCreateInput & { workspaceId: string },
     index: number,
     threadId: string,
     execution: ResolvedExecution,
   ): Promise<ThreadCreateItemResult | null> {
-    if (input.placement.type !== "new_worktree" || !this.requiresWorktreeApproval(authority, execution)) return null;
+    if (input.placement.type !== "new_worktree" || execution.permissionMode !== "supervised") return null;
     (await this.threads.updateStatus(threadId, "paused"));
     const approvalId = (await this.approvals.create({
       threadId, workspaceId: input.workspaceId, prompt: input.prompt, execution, placement: input.placement, turnId: NodeCrypto.randomUUID(),
-      callerId: authority.type === "internal" ? authority.userId : authority.integrationId,
-      ...(authority.type === "internal" ? { sourceThreadId: authority.sourceThreadId } : {}),
+      callerId: authority.integrationId,
     }));
     this.publishThreadApproval(approvalId);
     return {
       index, status: "pending_approval", workspaceId: input.workspaceId, threadId, approvalId, execution,
       requestedPlacement: input.placement, state: { status: "waiting_for_approval", approvalId },
     };
-  }
-
-  private requiresWorktreeApproval(authority: ThreadControlAuthority, execution: ResolvedExecution): boolean {
-    return authority.type === "internal"
-      ? authority.permissionMode === "supervised"
-      : execution.permissionMode === "supervised";
   }
 
   private async provisionAndStartThread(
@@ -1204,12 +1214,11 @@ export class ThreadControlService {
     };
   }
 
-  private async auditCreateResult(authority: ThreadControlAuthority, result: ThreadCreateItemResult): Promise<void> {
+  private async auditCreateResult(authority: ExternalThreadControlAuthority, result: ThreadCreateItemResult): Promise<void> {
     const threadId = "threadId" in result ? result.threadId : undefined;
     (await this.writeAudit(
       {
-        callerId: authority.type === "internal" ? authority.userId : authority.integrationId,
-        ...(authority.type === "internal" ? { sourceThreadId: authority.sourceThreadId } : {}),
+        callerId: authority.integrationId,
         workspaceId: result.workspaceId,
         ...(threadId ? { threadId } : {}),
         operation: "thread_create_batch",
@@ -1220,7 +1229,7 @@ export class ThreadControlService {
   }
 
   private async resolveExecution(
-    authority: ThreadControlAuthority,
+    authority: ExternalThreadControlAuthority,
     input: ThreadCreateInput,
   ): Promise<{ value: ResolvedExecution } | { error: ThreadControlError }> {
     const permissionError = this.createPermissionError(authority, input);
@@ -1231,9 +1240,8 @@ export class ThreadControlService {
     return { value: this.resolvedCreateExecution(authority, input, target.providerId, target.modelId) };
   }
 
-  private createPermissionError(authority: ThreadControlAuthority, input: ThreadCreateInput): ThreadControlError | null {
-    const forbidden = authority.type === "external"
-      && input.permissionMode === "full"
+  private createPermissionError(authority: ExternalThreadControlAuthority, input: ThreadCreateInput): ThreadControlError | null {
+    const forbidden = input.permissionMode === "full"
       && !authority.scopes.includes("execution:full");
     return forbidden ? this.error("forbidden", "Full execution is not permitted", false) : null;
   }
@@ -1248,7 +1256,7 @@ export class ThreadControlService {
   }
 
   private resolvedCreateExecution(
-    authority: ThreadControlAuthority,
+    authority: ExternalThreadControlAuthority,
     input: ThreadCreateInput,
     providerId: string,
     modelId: string,
@@ -1262,11 +1270,11 @@ export class ThreadControlService {
   }
 
   private createPermissionMode(
-    authority: ThreadControlAuthority,
+    authority: ExternalThreadControlAuthority,
     permissionMode: ThreadCreateInput["permissionMode"],
   ): ResolvedExecution["permissionMode"] {
     if (permissionMode) return permissionMode;
-    if (authority.type === "external" && !authority.scopes.includes("execution:full")) return "supervised";
+    if (!authority.scopes.includes("execution:full")) return "supervised";
     return this.settings.get().agent.defaults.permission;
   }
 
@@ -1571,6 +1579,11 @@ export class ThreadControlService {
   }
 
   private async stopTarget(threadId: string): Promise<void> {
+    const startup = this.startups?.findByThreadId(threadId);
+    if (startup && ["pending", "running", "blocked"].includes(startup.state)) {
+      if (!this.startupCancellation) throw new Error("Startup cancellation is unavailable");
+      await cancelThreadStartup(this.startupCancellation, startup.startupId);
+    }
     await this.agentService.stopSession(threadId, { by: "mcode", reason: "thread_control" });
     (await this.threads.updateStatus(threadId, "interrupted"));
     broadcast("thread.status", { threadId, status: "interrupted" });
@@ -1662,12 +1675,6 @@ export class ThreadControlService {
         input.placement.type !== "new_worktree"
         || authority.scopes.includes("worktrees:create")
       );
-  }
-
-  private resolveInternalSourceWorkspaceId(authority: InternalThreadControlAuthority): string | undefined {
-    const source = this.threads.findById(authority.sourceThreadId);
-    if (!source || source.deleted_at != null) return undefined;
-    return source.workspace_id;
   }
 
   private async reserveExternalCapacity(

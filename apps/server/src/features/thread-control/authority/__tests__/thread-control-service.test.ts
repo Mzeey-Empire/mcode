@@ -8,7 +8,7 @@ const { mockBroadcast } = vi.hoisted(() => ({ mockBroadcast: vi.fn() }));
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: mockBroadcast }));
 
-import { ThreadControlService, type InternalThreadControlAuthority } from "../thread-control-service.js";
+import { ThreadControlService, type InternalThreadControlAuthority, type ExternalThreadControlAuthority } from "../thread-control-service.js";
 import { ThreadControlMutationReservationService } from "../thread-control-mutation-reservation-service.js";
 import { DatabaseWriteOutcomeUnknown } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 
@@ -20,6 +20,14 @@ const authority: InternalThreadControlAuthority = {
   sourceToolCallId: "call-1",
   sourceProviderId: "claude",
   permissionMode: "supervised",
+};
+
+const batchAuthority: ExternalThreadControlAuthority = {
+  type: "external",
+  integrationId: "integration-1",
+  allowedWorkspaceIds: ["workspace-1"],
+  scopes: ["threads:create", "worktrees:create", "execution:full"],
+  limits: { callsPerMinute: 100, maxActiveThreads: 10 },
 };
 
 const approvalService = new ApprovalService({ resolveAll: () => [] });
@@ -363,10 +371,10 @@ describe("ThreadControlService", () => {
     });
   });
 
-  it("creates a direct thread with user defaults, exact title, lineage, and Build mode", async () => {
+  it("creates an external direct thread with user defaults, exact title, and Build mode", async () => {
     const service = createService();
 
-    const result = await service.threadCreateBatch(authority, {
+    const result = await service.threadCreateBatch(batchAuthority, {
       items: [{
         workspaceId: workspace.id,
         title: "Exact delegated title",
@@ -400,12 +408,7 @@ describe("ThreadControlService", () => {
       "named",
       null,
     );
-    expect(threads.updateDelegationLineage).toHaveBeenCalledWith(createdThread.id, {
-      coordinatorThreadId: authority.sourceThreadId,
-      creatorTurnId: authority.sourceTurnId,
-      creatorToolCallId: authority.sourceToolCallId,
-      creationKind: "thread_delegation",
-    });
+    expect(threads.updateExternalCreator).toHaveBeenCalledWith(createdThread.id, batchAuthority.integrationId);
     expect(agentService.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       threadId: createdThread.id,
       content: "Implement the task.",
@@ -417,22 +420,19 @@ describe("ThreadControlService", () => {
     }));
   });
 
-  it("defaults an internal item without a Project to its source thread Project", async () => {
+  it("rejects internal batch creation before creating a thread", async () => {
     const service = createService();
-    threads.findById.mockImplementation((id: string) => id === authority.sourceThreadId
-      ? { ...createdThread, id: authority.sourceThreadId, deleted_at: null }
-      : null);
-
     const result = await service.threadCreateBatch(authority, {
       items: [{
-        title: "Inherited Project",
-        prompt: "Create in source Project.",
+        workspaceId: workspace.id, title: "Use delegation", prompt: "Create child work",
         placement: { type: "direct" },
       }],
     });
-
-    expect(result.results[0]).toMatchObject({ status: "created", workspaceId: workspace.id });
-    expect(threads.create).toHaveBeenCalledWith(workspace.id, expect.any(String), "direct", "main", true, "codex", undefined, "named", null);
+    expect(result.results).toEqual([{
+      index: 0, status: "rejected",
+      error: { code: "forbidden", message: "Internal child work must use delegate_task", retryable: false },
+    }]);
+    expect(threads.create).not.toHaveBeenCalled();
   });
 
   it("rejects an external item without a Project without looking up or creating", async () => {
@@ -462,31 +462,11 @@ describe("ThreadControlService", () => {
     expect(threads.create).not.toHaveBeenCalled();
   });
 
-  it("fails closed when an internal source thread is unavailable", async () => {
-    const service = createService();
-
-    const result = await service.threadCreateBatch(authority, {
-      items: [{
-        title: "Unavailable source",
-        prompt: "Reject this.",
-        placement: { type: "direct" },
-      }],
-    });
-
-    expect(result.results).toEqual([{
-      index: 0,
-      status: "rejected",
-      error: { code: "not_found", message: "Source thread not found", retryable: false },
-    }]);
-    expect(workspaces.findById).not.toHaveBeenCalled();
-    expect(threads.create).not.toHaveBeenCalled();
-  });
-
   it("returns a created result when audit storage fails", async () => {
     const service = createService();
     audit.write.mockImplementationOnce(() => { throw new Error("audit unavailable"); });
 
-    await expect(service.threadCreateBatch(authority, {
+    await expect(service.threadCreateBatch(batchAuthority, {
       items: [{
         workspaceId: workspace.id,
         title: "Audit failure",
@@ -504,7 +484,7 @@ describe("ThreadControlService", () => {
   it("honors exact provider and model overrides or rejects them without persistence", async () => {
     const service = createService();
 
-    const result = await service.threadCreateBatch(authority, {
+    const result = await service.threadCreateBatch(batchAuthority, {
       items: [
         {
           workspaceId: workspace.id,
@@ -556,7 +536,7 @@ describe("ThreadControlService", () => {
       workspaceId === workspace.id ? workspace : null,
     );
 
-    const result = await service.threadCreateBatch(authority, {
+    const result = await service.threadCreateBatch(batchAuthority, {
       items: [
         {
           workspaceId: "missing-workspace",
@@ -583,7 +563,7 @@ describe("ThreadControlService", () => {
     const service = createService();
     worktrees.findCurrentById.mockReturnValue(null);
 
-    const result = await service.threadCreateBatch(authority, {
+    const result = await service.threadCreateBatch(batchAuthority, {
       items: [{
         workspaceId: workspace.id,
         title: "Wrong worktree",
@@ -605,9 +585,9 @@ describe("ThreadControlService", () => {
     expect(JSON.stringify(result)).not.toContain("C:/");
   });
 
-  it("persists a visible pending thread before supervised new-worktree approval", async () => {
+  it("persists an external pending thread before supervised new-worktree approval", async () => {
     const service = createService();
-    const supervisedAuthority = { ...authority, permissionMode: "supervised" as const };
+    const supervisedAuthority: ExternalThreadControlAuthority = { ...batchAuthority, scopes: ["threads:create", "worktrees:create"] };
 
     const result = await service.threadCreateBatch(supervisedAuthority, {
       items: [{
@@ -627,7 +607,7 @@ describe("ThreadControlService", () => {
       execution: {
         providerId: "codex",
         modelId: "gpt-default",
-        permissionMode: "full",
+        permissionMode: "supervised",
         interactionMode: "build",
       },
       requestedPlacement: { type: "new_worktree", baseRef: "main" },
@@ -641,7 +621,7 @@ describe("ThreadControlService", () => {
 
   it("provisions a full-access new worktree and returns only its opaque identity", async () => {
     const service = createService();
-    const fullAuthority = { ...authority, permissionMode: "full" as const };
+    const fullAuthority = batchAuthority;
 
     const result = await service.threadCreateBatch(fullAuthority, {
       items: [{
@@ -679,7 +659,7 @@ describe("ThreadControlService", () => {
 
   it("keeps new worktree branchless when branchName is omitted", async () => {
     const service = createService();
-    const fullAuthority = { ...authority, permissionMode: "full" as const };
+    const fullAuthority = batchAuthority;
 
     const result = await service.threadCreateBatch(fullAuthority, {
       items: [{
