@@ -27,3 +27,7 @@ export { loadHandoffMessages } from "./message-adapter.js";
 
 /** Select and render history, or report an exhausted preamble budget. */
 export { HandoffBudgetExhaustedError, selectHandoffHistory } from "./select.js";
+
+/** Delta-or-fresh planning and fenced rendering for a provider switch. */
+export { MAX_DELTA_TURNS, planSwitchHandoff } from "./switch-plan.js";
+export type { SwitchHandoffInput, SwitchHandoffMode, SwitchHandoffPlan } from "./switch-plan.js";
