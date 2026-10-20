@@ -138,6 +138,11 @@ export type ProjectedCommittedProviderEvent = Omit<
 export interface ExecutionTerminalPersistenceReceipt {
   /** Provider the turn ran on. Session bookkeeping must not infer it from the thread, which may have moved on. */
   readonly providerId: string;
+  /**
+   * Native session the turn was admitted on, or null when it started a fresh one. Bookkeeping credits this
+   * session, not whichever one the provider holds by the time the save is acknowledged.
+   */
+  readonly sessionId: string | null;
   /** Sequence of the turn's own assistant message, unlike `settledMessage`, which is the thread's newest. */
   readonly messageSequence: number | null;
   readonly messageId: string | null;

@@ -19,7 +19,7 @@ import { ThreadProgressOwner } from "../execution/thread-progress-owner.js";
 import type { AcceptedProgressBatch, SavedProgressReceipt, ProgressSaveFailure } from "../execution/thread-progress-types.js";
 import type { ExecutionAcceptedReceipt, ExecutionSemanticOperation, ExecutionTerminalPersistenceReceipt } from "../execution/execution-worker-handler.js";
 import { publishTurnPersisted } from "../execution/turn-persisted-publication.js";
-import { coverageOf, type CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
+import { admittedSessionId, coverageOf, type CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { CanonicalWriterAcknowledgementCapacity, type CanonicalAgentWriterClient } from "./canonical-agent-writer-client.js";
@@ -1148,7 +1148,8 @@ function acceptedTerminalPersistence(operation: ExecutionSemanticOperation, mess
   const mutation = operation.mutation;
   if (mutation.kind !== "finish-live-event") return undefined;
   const fileEvidence = mutation.input.fileEvidence;
-  return { providerId: mutation.input.providerId, messageSequence: message?.sequence ?? null,
+  return { providerId: mutation.input.providerId, sessionId: admittedSessionId(mutation.input.providerId, mutation.input.providerIdentities),
+    messageSequence: message?.sequence ?? null,
     messageId: message?.id ?? null, settledMessage: message ? { id: message.id, sequence: message.sequence } : null,
     outcome: mutation.outcome, toolCallCount: mutation.projection.narrative.filter((item) => item.kind === "toolCall").length,
     filesChanged: [...fileEvidence?.filesChanged ?? []], ...(fileEvidence ? { fileEffects: fileEvidence.fileEffects } : {}) };

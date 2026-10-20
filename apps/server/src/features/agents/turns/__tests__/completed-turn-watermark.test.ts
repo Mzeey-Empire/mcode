@@ -29,7 +29,7 @@ vi.mock("../../../../application/transport/push.js", () => ({
 describe("CompletedTurnWatermark", () => {
   const sessions = { resolve: vi.fn(), markSeen: vi.fn() };
   const watermark = new CompletedTurnWatermark(sessions);
-  const completed = { threadId: "thread", providerId: "claude", outcome: "completed" as const, sequence: 4 };
+  const completed = { threadId: "thread", providerId: "claude", sessionId: null, outcome: "completed" as const, sequence: 4 };
 
   beforeEach(() => {
     sessions.resolve.mockReset().mockReturnValue({ sessionId: "native-1", lastSeenSequence: 1 });
@@ -40,6 +40,11 @@ describe("CompletedTurnWatermark", () => {
     await watermark.record(completed);
     expect(sessions.resolve).toHaveBeenCalledWith("thread", "claude");
     expect(sessions.markSeen).toHaveBeenCalledWith("thread", "claude", "native-1", 4);
+  });
+
+  it("credits the session the turn was admitted on, not the one the provider holds by now", async () => {
+    await watermark.record({ ...completed, sessionId: "native-0" });
+    expect(sessions.markSeen).toHaveBeenCalledWith("thread", "claude", "native-0", 4);
   });
 
   it.each([
@@ -71,11 +76,13 @@ const NOW = "2026-10-20T10:00:00.000Z";
 const execution = { threadId: "watermark-thread", turnId: "watermark-turn", executionId: "00000000-0000-4000-8000-000000000321" };
 const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "watermark-lease" };
 
-function startClaudeTurn(): Extract<ExecutionWorkCommand, { kind: "start" }> {
+const ADMITTED_SESSION = [{ providerId: "claude", scope: "session", value: "claude-native", provenance: "native" }] as const;
+
+function startClaudeTurn(providerIdentities: readonly (typeof ADMITTED_SESSION)[number][] = []): Extract<ExecutionWorkCommand, { kind: "start" }> {
   return { kind: "start", providerId: "claude", publishParentStart: true,
     parentLive: { planFeature: "none", precedingMessageId: `${execution.turnId}:user` },
     input: { thread: { id: execution.threadId, workspaceId: "workspace", providerId: "claude", createdAt: NOW },
-      turnId: execution.turnId, executionId: execution.executionId, permissionMode: "full", providerIdentities: [],
+      turnId: execution.turnId, executionId: execution.executionId, permissionMode: "full", providerIdentities: [...providerIdentities],
       userMessage: { kind: "create", messageId: `${execution.turnId}:user`, content: "Task", sequence: 1 } } };
 }
 
@@ -137,13 +144,13 @@ describe("provider session watermark through the accepted worker path", { timeou
     .run(execution.threadId, providerId, sessionId, lastSeenSequence, NOW);
   const watermarkOf = (providerId: string) => sessions.find(execution.threadId, providerId)?.lastSeenSequence;
 
-  async function completeTurn() {
-    await send(1, startClaudeTurn());
+  async function completeTurn(admittedOn: readonly (typeof ADMITTED_SESSION)[number][] = []) {
+    await send(1, startClaudeTurn(admittedOn));
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [providerEvent(1, "textDelta", { delta: "The answer", isFinalResponse: true })] });
     const terminal = await send(3, { kind: "event", phase: "running", nativeCursor: null,
       events: [providerEvent(2, "ended", { outcome: "completed" })],
-      terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      terminalInput: { ...execution, providerId: "claude", providerIdentities: [...admittedOn], outcome: "completed", projection: { kind: "writer-staged" } } });
     expect(terminal.result.kind).toBe("accepted");
     await expect.poll(() => progress.depth().pending).toBe(0);
   }
@@ -168,6 +175,13 @@ describe("provider session watermark through the accepted worker path", { timeou
     seed("claude", "an-older-native-session", 1);
     await completeTurn();
     expect(watermarkOf("claude")).toBe(1);
+  });
+
+  it("does not credit a session the provider moved to after the turn was admitted", async () => {
+    seed("claude", "claude-newer", 0);
+    db.prepare("UPDATE threads SET sdk_session_id = 'claude-newer' WHERE id = ?").run(execution.threadId);
+    await completeTurn(ADMITTED_SESSION);
+    expect(watermarkOf("claude")).toBe(0);
   });
 
   it("still persists and publishes the turn when the watermark write fails", async () => {

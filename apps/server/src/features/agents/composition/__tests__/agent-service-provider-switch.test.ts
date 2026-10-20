@@ -141,6 +141,25 @@ describe("provider switch on send", () => {
     expect(thread().provider).toBe("claude");
   });
 
+  it("credits the target's session when the turn ends before the switch is committed", async () => {
+    await completeTurn(claude, "before the switch", "answer", "claude-s1");
+    const commitGate = deferred();
+    const realCommit = container.resolve(ThreadRepo).commitProviderSwitch.bind(container.resolve(ThreadRepo));
+    vi.spyOn(container.resolve(ThreadRepo), "commitProviderSwitch").mockImplementation(async (...args) => {
+      await commitGate.promise;
+      return realCommit(...args);
+    });
+
+    codex.sendTurn.mockImplementationOnce(answer(codex, "codex here", "codex-s1"));
+    await send(codex, "switch");
+    await waitFor(() => sessions().find(threadId, "codex")?.lastSeenSequence === 4);
+
+    expect(thread().provider).toBe("claude");
+    expect(sessions().find(threadId, "claude")?.lastSeenSequence).toBe(2);
+    commitGate.resolve();
+    await waitFor(() => thread().provider === "codex");
+  });
+
   it("keeps what the user typed in the timeline and the provider that produced each message", async () => {
     await completeTurn(claude, "first question", "first answer", "claude-s1");
     await completeTurn(codex, "second question", "second answer", "codex-s1");

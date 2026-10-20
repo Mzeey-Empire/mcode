@@ -46,6 +46,7 @@ import type { ProviderEventProjection } from "../../providers/composition/provid
 import { CanonicalCodexSystemErrorProjection } from "./canonical-codex-system-error-projection.js";
 import { matchesCodexSystemIntents } from "./codex-system-intents.js";
 import { endingFromAdapterFailure } from "./turn-ending.js";
+import { admittedSessionId } from "../turns/completed-turn-watermark.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
 import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type DataOnlyParentTurnFinishInput } from "./canonical-parent-turn-write.js";
 import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
@@ -1193,6 +1194,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const fileEvidence = mutation.input.fileEvidence;
     return {
       providerId: mutation.input.providerId,
+      sessionId: admittedSessionId(mutation.input.providerId, mutation.input.providerIdentities),
       ...terminalMessageIdentity(message),
       settledMessage,
       outcome: mutation.outcome,

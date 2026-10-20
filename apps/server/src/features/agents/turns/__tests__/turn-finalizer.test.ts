@@ -607,6 +607,17 @@ describe("TurnFinalizer canonical commit recovery", () => {
     expect(providerSessions.find(THREAD, "claude")?.lastSeenSequence).toBe(2);
   });
 
+  it("credits the turn's provider on the compatibility path even when the thread row names another", async () => {
+    const { finalizer, providerSessions } = await buildCanonicalHarness();
+    await providerSessions.upsert({ threadId: THREAD, providerId: "claude", sessionId: "claude-native", lastSeenSequence: 0 });
+    await providerSessions.upsert({ threadId: THREAD, providerId: "codex", sessionId: "codex-native", lastSeenSequence: 0 });
+
+    await finalizer.finalize(THREAD, "completed");
+
+    expect(providerSessions.find(THREAD, "claude")?.lastSeenSequence).toBe(2);
+    expect(providerSessions.find(THREAD, "codex")?.lastSeenSequence).toBe(0);
+  });
+
   it("leaves the watermark alone when the turn did not complete", async () => {
     const { finalizer, providerSessions } = await buildCanonicalHarness();
     await providerSessions.upsert({ threadId: THREAD, providerId: "claude", sessionId: "claude-native", lastSeenSequence: 0 });
