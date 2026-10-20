@@ -165,16 +165,6 @@ export class McodeSessionAuthority {
     return entry?.active?.active ? entry.credential : undefined;
   }
 
-  /** Resolves the active lease for a bearer credential, for the legacy thread-control transport. */
-  authorize(credential: string, sourceToolCallId: string): InternalThreadControlAuthority | undefined {
-    return authorizeEntry(this.findByCredential(credential), sourceToolCallId);
-  }
-
-  /** Returns the revocation signal for a bearer credential, for the legacy thread-control transport. */
-  signalForCredential(credential: string): AbortSignal | undefined {
-    return activeSignal(this.findByCredential(credential));
-  }
-
   private findByCredential(credential: string): SessionEntry | undefined {
     const digest = digestOf(credential);
     let found: SessionEntry | undefined;

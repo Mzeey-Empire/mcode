@@ -151,7 +151,7 @@ async function runClaudeFactoryCore(
     await waitForClaudeCoreTerminals(sink, 1);
     await boundary.sendTurn({ ...request, turnId: "TURN_2", turnExecutionId: "00000000-0000-4000-8000-000000000002" });
     await waitForClaudeCoreTerminals(sink, 2);
-    const spawnCount = calls.filter((call) => call === "threadControl.bootstrap").length;
+    const spawnCount = calls.filter((call) => call === "mcode.attach").length;
     if (spawnCount !== 1) throw new Error("Claude core profile failed live queue reuse");
     return { providerId: "claude", spawnCount, terminalType: "turn.completed" };
   } finally { await boundary.shutdown(); }
@@ -585,10 +585,6 @@ function createFakeHost(sink: DeterministicCanonicalSink, calls: string[]): Prov
       refresh: (leaseId) => ({ ok: false, leaseId, reason: "not-found" }),
       release: (leaseId) => ({ leaseId, released: false }),
       revokeCredential: () => false,
-    },
-    threadControl: {
-      bootstrap: async () => { calls.push("threadControl.bootstrap"); return null; },
-      close: async () => { calls.push("threadControl.close"); },
     },
     mcode: {
       attach: async () => { calls.push("mcode.attach"); return null; },

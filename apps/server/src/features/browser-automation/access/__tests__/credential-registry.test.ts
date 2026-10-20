@@ -16,12 +16,12 @@ function scope(session = "provider-session") {
 }
 
 describe("BrowserAutomationCredentialRegistry", () => {
-  it("authenticates the right opaque token and preserves every scope boundary", () => {
+  it("touches the issued credential and preserves every scope boundary", () => {
     const registry = new BrowserAutomationCredentialRegistry();
     const issued = registry.issue(scope());
 
-    expect(registry.authenticate("not-the-token")).toBeNull();
-    expect(registry.authenticate(issued.token)).toMatchObject({
+    expect(registry.touch("unknown-credential")).toBeNull();
+    expect(registry.touch(issued.credentialId)).toMatchObject({
       credentialId: issued.credentialId,
       providerId: "cursor",
       providerSessionId: "provider-session",
@@ -42,9 +42,9 @@ describe("BrowserAutomationCredentialRegistry", () => {
     const revoked = registry.issue(scope("revoked"));
     const expired = registry.issue(scope("expired"));
     expect(registry.revoke(revoked.credentialId)).toBe(true);
-    expect(registry.authenticate(revoked.token)).toBeNull();
+    expect(registry.touch(revoked.credentialId)).toBeNull();
     now = 111;
-    expect(registry.authenticate(expired.token)).toBeNull();
+    expect(registry.touch(expired.credentialId)).toBeNull();
     expect(registry.size()).toBe(0);
   });
 
@@ -60,9 +60,9 @@ describe("BrowserAutomationCredentialRegistry", () => {
     now = 1_050;
     expect(registry.touch(first.credentialId)).toMatchObject({ credentialId: first.credentialId, providerSessionId: "first" });
     expect(registry.revokeProviderSession("cursor", "second")).toBe(1);
-    expect(registry.authenticate(second.token)).toBeNull();
+    expect(registry.touch(second.credentialId)).toBeNull();
     now = 1_101;
-    expect(registry.authenticate(first.token)).not.toBeNull();
+    expect(registry.touch(first.credentialId)).not.toBeNull();
   });
 
   it("returns null from touch once a credential idles out or is revoked", () => {
@@ -86,27 +86,27 @@ describe("BrowserAutomationCredentialRegistry", () => {
     const issued = registry.issue(scope("bounded-lifetime"));
 
     now = 1_090;
-    expect(registry.authenticate(issued.token)).not.toBeNull();
+    expect(registry.touch(issued.credentialId)).not.toBeNull();
     now = 1_180;
-    expect(registry.authenticate(issued.token)).not.toBeNull();
+    expect(registry.touch(issued.credentialId)).not.toBeNull();
     now = 1_251;
-    expect(registry.authenticate(issued.token)).toBeNull();
+    expect(registry.touch(issued.credentialId)).toBeNull();
   });
 
-  it("evicts the least recently used digest when the bounded capacity is full", () => {
+  it("evicts the least recently used credential when the bounded capacity is full", () => {
     let now = 1;
     const registry = new BrowserAutomationCredentialRegistry({ maxCredentials: 2, now: () => now });
     const first = registry.issue(scope("first"));
     now++;
     const second = registry.issue(scope("second"));
     now++;
-    expect(registry.authenticate(first.token)).not.toBeNull();
+    expect(registry.touch(first.credentialId)).not.toBeNull();
     now++;
     const third = registry.issue(scope("third"));
 
-    expect(registry.authenticate(first.token)).not.toBeNull();
-    expect(registry.authenticate(second.token)).toBeNull();
-    expect(registry.authenticate(third.token)).not.toBeNull();
+    expect(registry.touch(first.credentialId)).not.toBeNull();
+    expect(registry.touch(second.credentialId)).toBeNull();
+    expect(registry.touch(third.credentialId)).not.toBeNull();
     expect(registry.size()).toBe(2);
   });
 
@@ -124,7 +124,7 @@ describe("BrowserAutomationCredentialRegistry", () => {
       permissionCapability: "interact",
       allowedOperations: ["tabs"],
     });
-    expect(registry.authenticate(interact.token)?.allowedOperations).toEqual(["tabs"]);
+    expect(registry.touch(interact.credentialId)?.allowedOperations).toEqual(["tabs"]);
     expect(() => registry.issue({
       ...scope(),
       permissionCapability: "observe",

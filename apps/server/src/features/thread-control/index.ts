@@ -7,12 +7,6 @@ export { ThreadControlService } from "./authority/thread-control-service.js";
 /** Reserves threads for serialized control mutations. */
 export { ThreadControlMutationReservationService } from "./authority/thread-control-mutation-reservation-service.js";
 
-/** Hosts internal provider thread-control MCP sessions. */
-export {
-  InternalThreadControlMcpRuntime,
-  type InternalThreadControlMcpHttpConnection,
-} from "./authority/thread-control-mcp-runtime.js";
-
 /** Manages external thread-control pairings. */
 export { ExternalThreadControlPairingService } from "./external/external-thread-control-pairing-service.js";
 

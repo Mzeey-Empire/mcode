@@ -28,9 +28,8 @@ export type BrowserAutomationSessionLeaseRequest =
   | BrowserAutomationSessionLeaseScope
   | { scope: BrowserAutomationSessionLeaseScope };
 
-/** Loopback endpoint used in grants returned by the lease. */
+/** Server-wide identity stamped on every credential the lease issues. */
 export interface BrowserAutomationSessionLeaseConfiguration {
-  mcpUrl: string;
   worktreeIdentity: string;
 }
 
@@ -40,11 +39,9 @@ export interface BrowserAutomationSessionLeaseStage {
   expiresAt: number;
 }
 
-/** Plaintext credential returned once for a newly issued or refreshed lease. */
+/** Credential metadata returned for a newly issued or refreshed lease. */
 export interface BrowserAutomationSessionLeaseGrant {
   leaseId: string;
-  mcpUrl: string;
-  token: string;
   credentialId: string;
   expiresAt: number;
   allowedOperations: readonly BrowserAutomationPublicOperation[];
@@ -91,26 +88,7 @@ function browserV2AllowedOperations(
   return [...BROWSER_V2_CORE_OPERATIONS, "evaluate"];
 }
 
-function isLoopbackMcpUrl(url: URL): boolean {
-  return url.protocol === "http:"
-    && new Set(["127.0.0.1", "localhost", "[::1]"]).has(url.hostname)
-    && url.pathname === "/mcp"
-    && !url.username
-    && !url.password
-    && !url.search
-    && !url.hash;
-}
-
 function validateConfiguration(configuration: BrowserAutomationSessionLeaseConfiguration): void {
-  let url: URL;
-  try {
-    url = new URL(configuration.mcpUrl);
-  } catch {
-    throw new Error("Browser automation MCP URL is invalid");
-  }
-  if (!isLoopbackMcpUrl(url)) {
-    throw new Error("Browser automation MCP URL must be an uncredentialed loopback /mcp endpoint");
-  }
   if (configuration.worktreeIdentity.length < 1 || configuration.worktreeIdentity.length > 256) {
     throw new Error("Browser automation worktree identity is invalid");
   }
@@ -164,22 +142,14 @@ export class BrowserAutomationSessionLease {
     this.now = options.now ?? Date.now;
     validateLeaseLimits(this.pendingTtlMs, this.maxPending);
     this.credentials.onRemoved((claims) => this.releaseCredential(claims.credentialId));
-    if (options.mcpUrl !== undefined || options.worktreeIdentity !== undefined) {
-      if (!options.mcpUrl || !options.worktreeIdentity) {
-        throw new Error("Browser automation session lease configuration is incomplete");
-      }
-      this.configure({ mcpUrl: options.mcpUrl, worktreeIdentity: options.worktreeIdentity });
-    }
+    if (options.worktreeIdentity !== undefined) this.configure({ worktreeIdentity: options.worktreeIdentity });
   }
 
-  /** Configures the exact loopback endpoint used by future grants. */
+  /** Sets the worktree identity stamped on future credentials; it can be set only once. */
   configure(configuration: BrowserAutomationSessionLeaseConfiguration): void {
     validateConfiguration(configuration);
     if (this.configuration) {
-      if (
-        this.configuration.mcpUrl !== configuration.mcpUrl ||
-        this.configuration.worktreeIdentity !== configuration.worktreeIdentity
-      ) {
+      if (this.configuration.worktreeIdentity !== configuration.worktreeIdentity) {
         throw new Error("Browser automation session lease is already configured");
       }
       return;
@@ -187,7 +157,7 @@ export class BrowserAutomationSessionLease {
     this.configuration = { ...configuration };
   }
 
-  /** Returns whether the composition root supplied a usable MCP endpoint. */
+  /** Returns whether the composition root supplied the worktree identity credentials need. */
   isConfigured(): boolean {
     return this.configuration !== null;
   }
@@ -336,8 +306,6 @@ export class BrowserAutomationSessionLease {
     this.sessionToLease.set(pending.sessionKey, leaseId);
     return {
       leaseId,
-      mcpUrl: configuration.mcpUrl,
-      token: issued.token,
       credentialId: issued.credentialId,
       expiresAt: issued.expiresAt,
       allowedOperations: scope.allowedOperations,

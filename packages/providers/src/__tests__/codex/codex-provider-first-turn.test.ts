@@ -116,7 +116,7 @@ function emitMcpStartup(server: (typeof appServers)[number], name: string, statu
 
 function configuredLease(): BrowserAutomationSessionLease {
   const lease = new BrowserAutomationSessionLease();
-  lease.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "worktree-test" });
+  lease.configure({ worktreeIdentity: "worktree-test" });
   return lease;
 }
 
@@ -633,7 +633,6 @@ describe("CodexProvider first turn on new session", () => {
   it("revokes a browser credential when app-server startup fails", async () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     startError.current = new Error("handshake failed");
@@ -684,7 +683,6 @@ describe("CodexProvider first turn on new session", () => {
   it("continues without Mcode tools and releases the Browser grant when the mcode attach fails", async () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     const events: ProviderRuntimeEvent[] = [];
@@ -736,7 +734,6 @@ describe("CodexProvider first turn on new session", () => {
   it("releases the previous staged browser access for overlapping sends", async () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     const provider = makeProvider(undefined, lease);
@@ -777,7 +774,6 @@ describe("CodexProvider first turn on new session", () => {
   it("releases staged browser access when stopped before runtime acquisition", async () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     const provider = makeProvider(undefined, lease);
@@ -884,7 +880,6 @@ describe("CodexProvider first turn on new session", () => {
   it("does not shut down the shared lease when Codex stops", () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     const claudeGrant = lease.issue({
@@ -909,8 +904,8 @@ describe("CodexProvider first turn on new session", () => {
     provider.shutdown();
 
     expect(shutdown).not.toHaveBeenCalled();
-    expect(lease.credentials.authenticate(claudeGrant.token)).not.toBeNull();
-    expect(lease.credentials.authenticate(codexGrant.token)).not.toBeNull();
+    expect(lease.credentials.touch(claudeGrant.credentialId)).not.toBeNull();
+    expect(lease.credentials.touch(codexGrant.credentialId)).not.toBeNull();
   });
 
   it("sent turn/start after spawn when the runtime pool registers on the next tick", async () => {

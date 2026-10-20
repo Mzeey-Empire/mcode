@@ -53,7 +53,6 @@ import {
 import {
   BrowserAutomationBroker,
   BrowserAutomationCredentialRegistry,
-  BrowserAutomationMcpHandler,
   BrowserAutomationSessionLease,
   BrowserAutomationTelemetry,
 } from "../../features/browser-automation";
@@ -345,16 +344,11 @@ const browserAutomationTelemetry = new BrowserAutomationTelemetry({
   sink: (event) => logger.info("Browser automation lifecycle", event),
 });
 const browserAutomationBroker = new BrowserAutomationBroker({ telemetry: browserAutomationTelemetry });
-const browserAutomationMcpHandler = new BrowserAutomationMcpHandler({
-  credentials: browserAutomationCredentials,
-  broker: browserAutomationBroker,
-});
 const browserToolkit = new BrowserToolkit({
   lease: browserAutomationSessionLease,
   broker: browserAutomationBroker,
 });
 browserAutomationCredentials.onRemoved((revocation) => {
-  browserAutomationMcpHandler.releaseCredential(revocation.credentialId);
   browserToolkit.releaseCredential(revocation.credentialId);
   browserAutomationBroker.releaseProviderSession(
     revocation.providerId,
@@ -926,7 +920,6 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   threadDeletionTeardownService,
   threadCompletionService,
   browserAutomationBroker,
-  browserAutomationMcpHandler,
   mcodeMcpServer,
   reliabilityHarness,
   authToken: AUTH_TOKEN,
@@ -968,7 +961,6 @@ function listen(port: number): void {
       const browserMcpHost = HOST === "::1" ? "[::1]" : "127.0.0.1";
       mcodeMcpServer.setPort(listeningPort, browserMcpHost);
       browserAutomationSessionLease.configure({
-        mcpUrl: `http://${browserMcpHost}:${listeningPort}/mcp`,
         worktreeIdentity: WORKTREE_IDENTITY ?? "shared-server",
       });
 

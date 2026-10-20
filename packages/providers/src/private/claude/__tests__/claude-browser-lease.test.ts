@@ -25,7 +25,7 @@ const scope: BrowserAutomationSessionLeaseScope = {
 
 function configuredLease(): BrowserAutomationSessionLease {
   const lease = new BrowserAutomationSessionLease();
-  lease.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "worktree-1" });
+  lease.configure({ worktreeIdentity: "worktree-1" });
   return lease;
 }
 
@@ -153,7 +153,7 @@ describe("ClaudeProvider browser session lease lifecycle", () => {
     expect(runtime.stop).toHaveBeenCalledOnce();
     const options = mockQuery.mock.calls[0][0].options;
     expect(options.mcpServers).toEqual(mcodeServers);
-    expect(lease.credentials.authenticate(oldGrant.token)).toBeNull();
+    expect(lease.credentials.touch(oldGrant.credentialId)).toBeNull();
     expect((provider as any).host.browser.status()).toEqual({ active: 1, pending: 0 });
     const spawnedState = harness.spawnedState;
     expect(spawnedState).toBeDefined();
@@ -204,7 +204,7 @@ describe("ClaudeProvider browser session lease lifecycle", () => {
     provider.shutdown();
 
     expect(shutdown).toHaveBeenCalledOnce();
-    expect(lease.credentials.authenticate(nonClaudeGrant.token)).not.toBeNull();
-    expect(lease.credentials.authenticate(claudeGrant.token)).not.toBeNull();
+    expect(lease.credentials.touch(nonClaudeGrant.credentialId)).not.toBeNull();
+    expect(lease.credentials.touch(claudeGrant.credentialId)).not.toBeNull();
   });
 });

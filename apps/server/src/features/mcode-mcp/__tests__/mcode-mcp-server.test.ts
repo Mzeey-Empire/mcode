@@ -106,7 +106,6 @@ function createBrowserBroker() {
 function createHarness() {
   const authority = new McodeSessionAuthority();
   const lease = new BrowserAutomationSessionLease({
-    mcpUrl: "http://127.0.0.1:1/mcp",
     worktreeIdentity: "worktree-a",
   });
   const broker = createBrowserBroker();
@@ -391,6 +390,21 @@ describe("McodeMcpServer sessions", () => {
 
     expect(resultOf(await initialize(tokenA)).instructions).toBeUndefined();
     expect(resultOf(await initialize(tokenB)).instructions).toBe(MCODE_BROWSER_GUIDE);
+  });
+
+  it.each(["2024-11-05", "2025-03-26"])("negotiates MCP protocol version %s", async (protocolVersion) => {
+    const harness = createHarness();
+    const token = harness.attach(SESSION_A);
+    const { rpc } = await listen(harness);
+
+    const response = await rpc(token, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion, capabilities: {}, clientInfo: { name: "test", version: "1" } },
+    });
+
+    expect(resultOf(response).protocolVersion).toBe(protocolVersion);
   });
 
   it("lists Browser tools by the credential's capability and refuses what it does not allow", async () => {

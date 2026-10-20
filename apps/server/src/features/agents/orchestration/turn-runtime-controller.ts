@@ -29,10 +29,8 @@ import type { WorkspaceEnvironmentAutomaticSetupDispatch } from "../../projects/
 import { MemoryPressureService, type MemoryPressureSnapshot } from "../../../runtime/memory/memory-pressure-service.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { publishTurnPersisted } from "../execution/turn-persisted-publication.js";
-import {
-  InternalThreadControlMcpRuntime,
-  ThreadControlMutationReservationService,
-} from "../../thread-control/index.js";
+import { ThreadControlMutationReservationService } from "../../thread-control/index.js";
+import { McodeSessionAuthority } from "../../mcode-mcp/index.js";
 import { ScopedPreGrantService } from "../permissions/scoped-pre-grant.js";
 import { TurnErrorPolicy } from "../turns/turn-error-policy.js";
 import { TurnRuntimeRegistry } from "../turns/turn-runtime.js";
@@ -249,8 +247,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     private readonly memoryPressureService: MemoryPressureService,
     @inject(ScopedPreGrantService)
     private readonly scopedPreGrant: ScopedPreGrantService,
-    @inject(delay(() => InternalThreadControlMcpRuntime))
-    private readonly threadControlMcp: InternalThreadControlMcpRuntime | undefined,
+    @inject(delay(() => McodeSessionAuthority))
+    private readonly threadControlMcp: McodeSessionAuthority | undefined,
     @inject(delay(() => ThreadControlMutationReservationService))
     private readonly mutationReservations: ThreadControlMutationReservationService,
     @inject(ProviderEventIngress)

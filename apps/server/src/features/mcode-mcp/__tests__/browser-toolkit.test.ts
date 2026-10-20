@@ -119,6 +119,25 @@ describe("BrowserToolkit", () => {
     expect(toolkit.bind(session)).toBeNull();
   });
 
+  it("publishes MCP safety annotations and the required fields providers rely on", () => {
+    const tools = setup().toolkit.bind(session)?.tools ?? [];
+    const named = (name: string) => tools.find((tool) => tool.name === name);
+
+    expect(named("browser_inspect")?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+    expect(named("browser_evaluate")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      openWorldHint: true,
+    });
+    expect(named("browser_evaluate")?.inputSchema.required).toEqual([
+      "idempotencyKey",
+      "observationRef",
+      "deadlineMs",
+      "expression",
+    ]);
+    expect(tools.map((tool) => tool.name).join(" ")).not.toMatch(/browser_(status|navigate|snapshot|click|type)/);
+  });
+
   it("offers the Browser guide only when the credential may inspect", () => {
     const granted = setup().toolkit.bind(session);
     const withoutInspect = setup({

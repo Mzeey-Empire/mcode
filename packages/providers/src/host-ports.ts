@@ -67,8 +67,6 @@ export interface ProviderBrowserLeaseHandle {
 /** Browser credential issued for one staged Provider lease. */
 export interface ProviderBrowserLeaseGrant extends ProviderBrowserCredentialMetadata {
   leaseId: string;
-  mcpUrl: string;
-  token: string;
   allowedOperations: readonly string[];
 }
 
@@ -86,28 +84,6 @@ export interface ProviderBrowserPort {
   refresh(leaseId: string): ProviderBrowserLeaseRefreshResult;
   release(leaseId: string): { leaseId: string; released: boolean; credentialId?: string };
   revokeCredential(credentialId: string): boolean;
-}
-
-/** Input for one server-owned thread-control bootstrap. */
-export interface ProviderThreadControlRequest {
-  providerId: string;
-  sessionId: string;
-  threadId: string;
-  turnId?: string;
-  protocol: "claude" | "codex" | "http";
-}
-
-/** Authenticated HTTP MCP connection supplied by the server-owned thread-control authority. */
-export interface ProviderThreadControlHttpConnection {
-  name: string;
-  url: string;
-  headers: Record<string, string>;
-}
-
-/** Gives a Provider opaque thread-control bootstrap data for one scoped session. */
-export interface ProviderThreadControlPort {
-  bootstrap(request: ProviderThreadControlRequest): Promise<unknown | null>;
-  close(sessionId: string): Promise<void>;
 }
 
 /** Identity of the Provider session the per-session `mcode` MCP server attaches to. */
@@ -248,7 +224,6 @@ export interface ProviderHostPorts {
   environment: ProviderEnvironmentPort;
   processes: ProviderProcessPort;
   browser: ProviderBrowserPort;
-  threadControl: ProviderThreadControlPort;
   mcode: ProviderMcodePort;
   grants: ProviderGrantPort;
   events: ProviderEventSinkPort;

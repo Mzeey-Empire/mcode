@@ -173,7 +173,6 @@ async function createMcpConformanceFixture(): Promise<McpConformanceFixture> {
   const cleanupFaults = new BrowserConformanceFaultController();
   const dispatchQueue = createDispatchQueue(transportFaults);
   const lease = new BrowserAutomationSessionLease({
-    mcpUrl: "http://127.0.0.1:1/mcp",
     worktreeIdentity: "worktree-conformance",
     now: () => 1_000,
   });

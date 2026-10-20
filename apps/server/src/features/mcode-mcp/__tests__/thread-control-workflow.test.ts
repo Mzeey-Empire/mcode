@@ -1,26 +1,26 @@
 import "reflect-metadata";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { threads as threadTable } from "../../../../runtime/persistence/sqlite/schema.js";
-import { ApprovalService } from "../../../agents/approvals/approval-service.js";
+import { threads as threadTable } from "../../../runtime/persistence/sqlite/schema.js";
+import { ApprovalService } from "../../agents/approvals/approval-service.js";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadCreateBatchResultSchema } from "@mcode/contracts";
-import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
-import { ThreadControlApprovalRepo } from "../persistence/thread-control-approval-repo.js";
-import { ThreadControlAuditRepo } from "../persistence/thread-control-audit-repo.js";
-import { ThreadRepo } from "../../persistence/thread-repo.js";
-import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
-import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
+import { MessageRepo } from "../../agents/conversation/persistence/message-repo.js";
+import { ThreadControlApprovalRepo } from "../../thread-control/authority/persistence/thread-control-approval-repo.js";
+import { ThreadControlAuditRepo } from "../../thread-control/authority/persistence/thread-control-audit-repo.js";
+import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
+import { createThreadPersistenceTestRuntime } from "../../thread-control/testing/thread-persistence-test-runtime.js";
 let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
-import { McodeSessionAuthority } from "../../../mcode-mcp/mcode-session-authority.js";
-import { createInternalThreadControlMcpSession } from "../thread-control-mcp-transport.js";
-import { ThreadControlMutationReservationService } from "../thread-control-mutation-reservation-service.js";
-import { ThreadControlService } from "../thread-control-service.js";
-import type { GitRepositoryService, GitWorktreeService } from "../../../projects/index.js";
+import { McodeSessionAuthority } from "../mcode-session-authority.js";
+import { createThreadControlToolkit } from "../toolkits/thread-control-toolkit.js";
+import { ThreadControlMutationReservationService } from "../../thread-control/authority/thread-control-mutation-reservation-service.js";
+import { ThreadControlService } from "../../thread-control/authority/thread-control-service.js";
+import type { GitRepositoryService, GitWorktreeService } from "../../projects/index.js";
 
-vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
+vi.mock("../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 
-describe("internal thread-control MCP workflow", () => {
+describe("thread-control workflow through the mcode toolkit", () => {
   it("persists a cross-Project worktree workflow and keeps the child usable after partial failure", async () => {
     persistenceRuntime = createThreadPersistenceTestRuntime();
     const workspaces = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
@@ -120,20 +120,26 @@ describe("internal thread-control MCP workflow", () => {
     );
 
     const authority = new McodeSessionAuthority();
-    const lease = authority.activate({
-      sessionId: "workflow-session",
+    const sessionId = "workflow-session";
+    authority.activate({
+      sessionId,
       sourceThreadId: sourceThread.id,
       sourceTurnId: "source-turn",
       sourceProviderId: "codex",
       permissionMode: "full",
     });
-    const session = createInternalThreadControlMcpSession({ authority, service });
-    const call = (requestId: string, toolName: string, args: unknown) => session.dispatch({
-      bearerCredential: lease.credential,
-      requestId,
-      toolName,
-      arguments: args,
+    const bound = createThreadControlToolkit({ authority, service }).bind({
+      providerId: "codex",
+      sessionId,
+      threadId: sourceThread.id,
+      threadControl: true,
     });
+    const dispatch = async (requestId: string, toolName: string, args: unknown, signal = new AbortController().signal) => {
+      const tool = bound?.tools.find((candidate) => candidate.name === toolName);
+      if (!tool) throw new Error(`tool ${toolName} is not bound`);
+      return (await tool.call(args, { toolCallId: requestId, signal })).structuredContent;
+    };
+    const call = (requestId: string, toolName: string, args: unknown) => dispatch(requestId, toolName, args);
 
     const projectSearch = await call("search-projects", "workspace_search", { query: "Project" }) as { workspaces: Array<{ workspaceId: string }> };
     expect(projectSearch.workspaces.map((workspace) => workspace.workspaceId)).toEqual(
@@ -196,13 +202,12 @@ describe("internal thread-control MCP workflow", () => {
     });
     const waitAbort = new AbortController();
     waitAbort.abort();
-    await expect(session.dispatch({
-      bearerCredential: lease.credential,
-      requestId: "wait-for-attention",
-      toolName: "thread_wait",
-      arguments: { threadIds: [destinationThreadId], timeoutSeconds: 1 },
-      signal: waitAbort.signal,
-    })).resolves.toMatchObject({
+    await expect(dispatch(
+      "wait-for-attention",
+      "thread_wait",
+      { threadIds: [destinationThreadId], timeoutSeconds: 1 },
+      waitAbort.signal,
+    )).resolves.toMatchObject({
       status: "success",
       timedOut: true,
       results: [{ threadId: destinationThreadId, state: { status: "waiting_for_user" } }],

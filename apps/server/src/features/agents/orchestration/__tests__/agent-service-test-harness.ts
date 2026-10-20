@@ -49,7 +49,8 @@ import { ThreadRuntimePersistence, TURN_RUNTIME_PERSISTENCE } from "../../turns/
 import { TURN_FINALIZER } from "../../turns/turn-finalizer.js";
 import { TURN_ADMISSION_DISPATCH_COORDINATOR } from "../../turns/turn-admission-dispatch-coordinator.js";
 import { TURN_FEATURE_EFFECTS } from "../../turns/turn-feature-effects.js";
-import { InternalThreadControlMcpRuntime, ThreadControlMutationReservationService } from "../../../thread-control/index.js";
+import { McodeSessionAuthority } from "../../../mcode-mcp/index.js";
+import { ThreadControlMutationReservationService } from "../../../thread-control/index.js";
 import { ProviderEventIngress } from "../../../providers/composition/provider-event-ingress.js";
 import { ThreadBranchingService } from "../../../projects/worktrees/thread-branching-service.js";
 import { AgentService } from "../agent-service.js";
@@ -211,7 +212,7 @@ export function createAgentServiceForTest(
   narrativeStore: NarrativeStore,
   parentAssistantTextCheckpoints: ParentAssistantTextCheckpointService,
   fileService?: ConstructorParameters<typeof TurnAdmissionDispatchCoordinator>[12],
-  threadControlMcp?: InternalThreadControlMcpRuntime,
+  threadControlMcp?: McodeSessionAuthority,
   mutationReservations?: ThreadControlMutationReservationService,
   parentDurability?: ParentTurnDurability,
   workspaceEnvironmentService?: WorkspaceEnvironmentService,
@@ -288,7 +289,7 @@ export function createAgentServiceForTest(
   const testThreadControl = threadControlMcp ?? {
     activate: () => undefined,
     revoke: () => undefined,
-  } as unknown as InternalThreadControlMcpRuntime;
+  } as unknown as McodeSessionAuthority;
   const testContainer = container.createChildContainer();
   const gitRepository = new GitRepositoryService(workspaceRepo, new FakeGitExecutor());
   testContainer.registerInstance(TURN_RUNTIME_PERSISTENCE, runtimePersistence);
@@ -312,7 +313,7 @@ export function createAgentServiceForTest(
   testContainer.registerInstance("IProviderRegistry", providerRegistry);
   testContainer.registerInstance(MemoryPressureService, memoryPressureService);
   testContainer.registerInstance(ScopedPreGrantService, scopedPreGrant);
-  testContainer.registerInstance(InternalThreadControlMcpRuntime, testThreadControl);
+  testContainer.registerInstance(McodeSessionAuthority, testThreadControl);
   testContainer.registerInstance(
     ThreadControlMutationReservationService,
     mutationReservations ?? new ThreadControlMutationReservationService(),

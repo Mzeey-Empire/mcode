@@ -17,7 +17,7 @@ This document defines an Mcode migration plan.
 
 ## Decision
 
-Build one loopback-only MCP server named `mcode-browser`. Give each active provider session a short-lived, capability-scoped bearer credential. Route authenticated operations through the Mcode server to the connected Electron instance that owns the thread's Browser tabs. Execute operations against the existing adopted webview `webContents`.
+Build one loopback-only MCP server named `mcode`, shared with thread control. Give each active provider session a short-lived, capability-scoped bearer credential. Route authenticated operations through the Mcode server to the connected Electron instance that owns the thread's Browser tabs. Execute operations against the existing adopted webview `webContents`.
 
 Use the Browser v2 tools `browser_open`, `browser_inspect`, `browser_act`, and `browser_tabs`. Do not expose raw CDP over MCP. Restrict arbitrary page evaluation to Full Build sessions, execute it in an isolated world, and bound its input, output, and runtime.
 
@@ -178,7 +178,7 @@ Opening the browser through `browser_open` may reveal the existing right panel. 
 
 ## Tool Contract
 
-Use `browser_*` names because Browser is Mcode's product term. The MCP server name is `mcode-browser`.
+Use `browser_*` names because Browser is Mcode's product term. The MCP server name is `mcode`.
 
 | Tool | Purpose | Default classification |
 |---|---|---|
@@ -240,10 +240,10 @@ Provider adapters receive an MCP endpoint and per-session credential from one se
 
 | Provider | Integration path | Release gate |
 |---|---|---|
-| Codex | Add `mcode-browser` to app-server MCP configuration with the bearer token in a protected environment variable. | First provider, full live suite |
+| Codex | Add `mcode` to app-server MCP configuration with the bearer token in a protected environment variable. | First provider, full live suite |
 | Claude | Register the Streamable HTTP MCP server through the SDK session configuration and scoped header. | Contract parity with Codex |
 | Cursor | Replace the current empty ACP MCP server list with the scoped Mcode server entry when supported by the active protocol version. | Capability detection and a typed unsupported result |
-| GitHub Copilot | Register `mcode-browser` in the SDK session MCP configuration with the shared tool metadata. | Contract parity and live subscription check |
+| GitHub Copilot | Register `mcode` in the SDK session MCP configuration with the shared tool metadata. | Contract parity and live subscription check |
 
 Tool availability follows provider capability detection. If a provider version cannot accept HTTP MCP, hide the tools and report the missing capability in startup status. Do not advertise tools that will fail later.
 

@@ -921,7 +921,6 @@ function safeText(value) {
 async function runPhase(repoRoot, args, logPath) {
   const output = [];
   const environment = { ...process.env };
-  delete environment.MCODE_BROWSER_MCP_TOKEN;
   return await new Promise((resolve) => {
     const child = NodeChildProcess.spawn(process.execPath, args, {
       cwd: repoRoot,

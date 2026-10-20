@@ -144,7 +144,7 @@ function receiptText(
   receipt?: BrowserNarrativeReceipt,
 ): string {
   const lines = [
-    "MCP server: mcode-browser",
+    "MCP server: mcode",
     `MCP tool: ${result.operation}`,
     `Outcome: ${result.outcome}`,
   ];

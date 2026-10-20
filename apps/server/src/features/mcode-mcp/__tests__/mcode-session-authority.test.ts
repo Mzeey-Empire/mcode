@@ -22,6 +22,8 @@ const turn = (overrides: Partial<Parameters<McodeSessionAuthority["activate"]>[0
   ...overrides,
 });
 
+const session = { providerId: "claude", sessionId: "mcode-source", threadId: "source", threadControl: true };
+
 describe("McodeSessionAuthority", () => {
   it("keeps one opaque credential per session while rotating its active turn lease", () => {
     const authority = new McodeSessionAuthority();
@@ -32,7 +34,7 @@ describe("McodeSessionAuthority", () => {
 
     expect(retry.credential).toBe(first.credential);
     expect(nextTurn.credential).toBe(first.credential);
-    expect(authority.authorize(first.credential, "call-1")).toMatchObject({
+    expect(authority.authorizeThreadControl(session, "call-1")).toMatchObject({
       type: "internal",
       userId: "local-user",
       sourceTurnId: "turn-two",
@@ -43,28 +45,28 @@ describe("McodeSessionAuthority", () => {
 
   it("fails closed after revocation and aborts the lease signal", () => {
     const authority = new McodeSessionAuthority();
-    const lease = authority.activate(turn({ sourceProviderId: "codex" }));
+    authority.activate(turn({ sourceProviderId: "codex" }));
     const signal = authority.signal("mcode-source")!;
 
     authority.revoke("mcode-source");
 
     expect(signal.aborted).toBe(true);
-    expect(authority.authorize(lease.credential, "call-1")).toBeUndefined();
+    expect(() => authority.authorizeThreadControl(session, "call-1")).toThrow(McodeThreadControlDeniedError);
     expect(authority.signal("mcode-source")).toBeUndefined();
   });
 
   it("denies an ineligible turn from the start without inheriting a prior grant", () => {
     const authority = new McodeSessionAuthority();
-    const ineligible = authority.activate(turn({ sourceTurnId: "child-turn", eligible: false }));
-    expect(authority.authorize(ineligible.credential, "child-mcp-call")).toBeUndefined();
+    authority.activate(turn({ sourceTurnId: "child-turn", eligible: false }));
+    expect(() => authority.authorizeThreadControl(session, "child-mcp-call")).toThrow(McodeThreadControlDeniedError);
 
-    const eligible = authority.activate(turn({ sourceTurnId: "explicit-turn", eligible: true }));
-    expect(authority.authorize(eligible.credential, "parent-mcp-call")).toMatchObject({
+    authority.activate(turn({ sourceTurnId: "explicit-turn", eligible: true }));
+    expect(authority.authorizeThreadControl(session, "parent-mcp-call")).toMatchObject({
       sourceTurnId: "explicit-turn",
     });
 
-    const nextIneligible = authority.activate(turn({ sourceTurnId: "next-child-turn", eligible: false }));
-    expect(authority.authorize(nextIneligible.credential, "next-child-mcp-call")).toBeUndefined();
+    authority.activate(turn({ sourceTurnId: "next-child-turn", eligible: false }));
+    expect(() => authority.authorizeThreadControl(session, "next-child-mcp-call")).toThrow(McodeThreadControlDeniedError);
   });
 
   it("rejects unequal credential lengths before constant-time comparison", () => {

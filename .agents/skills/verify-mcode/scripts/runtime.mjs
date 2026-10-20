@@ -532,7 +532,6 @@ export async function runBun(repoRoot, args, logPath) {
 
 function childCommandEnvironment() {
   const environment = { ...process.env };
-  delete environment.MCODE_BROWSER_MCP_TOKEN;
   return environment;
 }
 

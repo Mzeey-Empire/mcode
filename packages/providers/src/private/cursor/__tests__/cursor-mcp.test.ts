@@ -26,15 +26,12 @@ function createHost(): ProviderHostPorts {
       issue: vi.fn((handle) => ({
         ...handle,
         credentialId: "credential-1",
-        token: "browser-token",
-        mcpUrl: "http://127.0.0.1:19400/mcp",
         allowedOperations: ["browser.list_tabs"],
       })),
       refresh: vi.fn(() => ({ ok: false as const, leaseId: "lease-1", reason: "unconfigured" as const })),
       release: vi.fn((leaseId: string) => ({ leaseId, released: true })),
       revokeCredential: vi.fn(() => false),
     },
-    threadControl: { bootstrap: vi.fn(async () => null), close: vi.fn(async () => undefined) },
     mcode: { attach: vi.fn(async () => attachment()), close: vi.fn(async () => undefined) },
     grants: { consume: vi.fn(() => false) },
     events: {

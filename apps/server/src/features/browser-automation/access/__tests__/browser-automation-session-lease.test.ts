@@ -18,7 +18,7 @@ const scope = (overrides: Partial<BrowserAutomationSessionLeaseScope> = {}) => (
 
 function configuredLease(options: ConstructorParameters<typeof BrowserAutomationSessionLease>[0] = {}) {
   const lease = new BrowserAutomationSessionLease(options);
-  lease.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "worktree-a" });
+  lease.configure({ worktreeIdentity: "worktree-a" });
   return lease;
 }
 
@@ -29,14 +29,14 @@ describe("BrowserAutomationSessionLease", () => {
     expect(staged.leaseId).toBeTypeOf("string");
     const grant = lease.issue(staged)!;
     expect(grant.leaseId).toBe(staged.leaseId);
-    expect(lease.credentials.authenticate(grant.token)?.threadId).toBe("thread-a");
+    expect(lease.credentials.touch(grant.credentialId)?.threadId).toBe("thread-a");
 
     const refreshed = lease.refresh(grant.leaseId);
     expect(refreshed.ok).toBe(true);
     if (!refreshed.ok) return;
     expect(refreshed.grant.credentialId).not.toBe(grant.credentialId);
-    expect(lease.credentials.authenticate(grant.token)).toBeNull();
-    expect(lease.credentials.authenticate(refreshed.grant.token)?.workspaceId).toBe("workspace-a");
+    expect(lease.credentials.touch(grant.credentialId)).toBeNull();
+    expect(lease.credentials.touch(refreshed.grant.credentialId)?.workspaceId).toBe("workspace-a");
 
     expect(lease.release(grant.leaseId)).toMatchObject({ released: true, leaseId: grant.leaseId });
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
@@ -53,9 +53,9 @@ describe("BrowserAutomationSessionLease", () => {
     }))!;
     const rotated = lease.issue(scope({ permissionCapability: "privileged" }))!;
 
-    expect(lease.credentials.authenticate(first.token)).toBeNull();
-    expect(lease.credentials.authenticate(second.token)?.threadId).toBe("thread-b");
-    expect(lease.credentials.authenticate(rotated.token)?.allowedOperations).toContain("evaluate");
+    expect(lease.credentials.touch(first.credentialId)).toBeNull();
+    expect(lease.credentials.touch(second.credentialId)?.threadId).toBe("thread-b");
+    expect(lease.credentials.touch(rotated.credentialId)?.allowedOperations).toContain("evaluate");
     expect(lease.status()).toEqual({ active: 2, pending: 0 });
   });
 
@@ -144,7 +144,7 @@ describe("BrowserAutomationSessionLease", () => {
 
     lease.issue(scope({ mcodeSessionId: "mcode-second" }));
     lease.shutdown();
-    expect(registry.authenticate(grant.token)).toBeNull();
+    expect(registry.touch(grant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
 });

@@ -209,7 +209,6 @@ describe("ClaudeProvider permission mode changes", () => {
     const credentials = new BrowserAutomationCredentialRegistry();
     const lease = new BrowserAutomationSessionLease(credentials);
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     provider = new ClaudeProvider(

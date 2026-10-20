@@ -41,7 +41,7 @@ const browserScope = (overrides: Partial<BrowserAutomationSessionLeaseScope> = {
 
 function configuredLease(): BrowserAutomationSessionLease {
   const lease = new BrowserAutomationSessionLease();
-  lease.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "worktree-a" });
+  lease.configure({ worktreeIdentity: "worktree-a" });
   return lease;
 }
 
@@ -100,7 +100,7 @@ describe("Cursor browser MCP configuration", () => {
 
     provider.close({ mcodeSessionId: "mcode-a" } as never);
 
-    expect(lease.credentials.authenticate(grant.token)).toBeNull();
+    expect(lease.credentials.touch(grant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
     expect(provider.liveSessionIds.has("mcode-a")).toBe(false);
   });
@@ -245,7 +245,7 @@ describe("Cursor browser MCP configuration", () => {
       env: {},
     })).rejects.toThrow("replacement failed");
 
-    expect(lease.credentials.authenticate(previousGrant.token)).toBeNull();
+    expect(lease.credentials.touch(previousGrant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
 
@@ -277,14 +277,14 @@ describe("Cursor browser MCP configuration", () => {
       env: {},
     });
 
-    expect(lease.credentials.authenticate(previousGrant.token)).toBeNull();
+    expect(lease.credentials.touch(previousGrant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
 
   it("closes the ACP runtime when a stale replacement lease stage expires", async () => {
     let now = 0;
     const lease = new BrowserAutomationSessionLease({ now: () => now });
-    lease.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "worktree-a" });
+    lease.configure({ worktreeIdentity: "worktree-a" });
     const previousGrant = lease.issue(browserScope())!;
     const staged = lease.stage(browserScope());
     now = staged.expiresAt;
@@ -313,7 +313,7 @@ describe("Cursor browser MCP configuration", () => {
 
     expect(provider.openLogicalSession).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
-    expect(lease.credentials.authenticate(previousGrant.token)).toBeNull();
+    expect(lease.credentials.touch(previousGrant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
 
@@ -477,7 +477,7 @@ describe("Cursor browser MCP configuration", () => {
 
     provider.close({ mcodeSessionId: "mcode-a" } as never);
 
-    expect(lease.credentials.authenticate(grant.token)?.mcodeSessionId).toBe("mcode-a");
+    expect(lease.credentials.touch(grant.credentialId)?.mcodeSessionId).toBe("mcode-a");
     lease.release(grant.leaseId);
   });
 
@@ -570,7 +570,7 @@ describe("Cursor browser MCP configuration", () => {
       url: "http://127.0.0.1:19400/mcp/mcode",
       headers: [{ name: "Authorization", value: "Bearer mcode-token" }],
     }]);
-    expect(lease.credentials.authenticate(previousGrant.token)).toBeNull();
+    expect(lease.credentials.touch(previousGrant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 1, pending: 0 });
   });
 
@@ -598,8 +598,8 @@ describe("Cursor browser MCP configuration", () => {
 
     await provider.shutdown();
 
-    expect(lease.credentials.authenticate(grant.token)).toBeNull();
-    expect(lease.credentials.authenticate(unrelatedGrant.token)?.providerId).toBe("claude");
+    expect(lease.credentials.touch(grant.credentialId)).toBeNull();
+    expect(lease.credentials.touch(unrelatedGrant.credentialId)?.providerId).toBe("claude");
     expect(lease.status()).toEqual({ active: 1, pending: 0 });
   });
 });

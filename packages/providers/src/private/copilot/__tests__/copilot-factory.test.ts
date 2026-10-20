@@ -59,7 +59,6 @@ function host(sink: DeterministicCanonicalSink): ProviderHostPorts {
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: vi.fn(() => ({})) }, processes: { attach: vi.fn(), terminateTree: vi.fn(async () => {}) },
     browser: { stage: vi.fn(() => ({ leaseId: "lease", expiresAt: 1_000 })), releaseSession: vi.fn(() => 0), isConfigured: () => false, issue: () => null, refresh: (leaseId) => ({ ok: false, leaseId, reason: "not-found" }), release: (leaseId) => ({ leaseId, released: true }), revokeCredential: () => false },
-    threadControl: { bootstrap: vi.fn(async () => null), close: vi.fn(async () => {}) },
     mcode: { attach: vi.fn(async () => null), close: vi.fn(async () => {}) },
     grants: { consume: vi.fn(() => false) }, events: sink,
   };
@@ -898,7 +897,7 @@ describe("Copilot public factory", () => {
   it("preserves native history while replacing permission-sensitive browser MCP configuration", async () => {
     const stage = vi.fn(() => ({ leaseId: "browser-lease", expiresAt: Date.now() + 60_000 }));
     const release = vi.fn((leaseId: string) => ({ leaseId, released: true }));
-    ports.browser = { ...ports.browser, isConfigured: () => true, stage, release, issue: (handle) => ({ ...handle, credentialId: "browser-credential", token: "fixture-token", mcpUrl: "http://127.0.0.1/browser", allowedOperations: ["browser.list_tabs"] }) };
+    ports.browser = { ...ports.browser, isConfigured: () => true, stage, release, issue: (handle) => ({ ...handle, credentialId: "browser-credential", allowedOperations: ["browser.list_tabs"] }) };
     ports.mcode.attach = vi.fn(async () => mcodeAttachment());
     await provider.sendTurn(request()); await finish();
     expect(sdk.create.mock.calls[0]?.[0].mcpServers).toEqual({ mcode: { type: "http", url: "http://127.0.0.1/mcp/mcode", headers: { Authorization: "Bearer mcode-token" }, tools: ["*"] } });
@@ -912,7 +911,7 @@ describe("Copilot public factory", () => {
     ["thread control only", { browser: false, threadControl: true }, { thread: true, browser: false }],
     ["browser only", { browser: true, threadControl: false }, { thread: false, browser: true }],
   ])("grants instructions from the attached toolkits: %s", async (_name, toolkits, expected) => {
-    ports.browser = { ...ports.browser, isConfigured: () => true, issue: (handle) => ({ ...handle, credentialId: "browser-credential", token: "browser-token", mcpUrl: "http://127.0.0.1/browser", allowedOperations: ["browser.list_tabs"] }) };
+    ports.browser = { ...ports.browser, isConfigured: () => true, issue: (handle) => ({ ...handle, credentialId: "browser-credential", allowedOperations: ["browser.list_tabs"] }) };
     ports.mcode.attach = vi.fn(async () => mcodeAttachment(toolkits));
     await provider.sendTurn(request()); await finish();
     const content: string = sdk.create.mock.calls[0]?.[0].systemMessage.content;

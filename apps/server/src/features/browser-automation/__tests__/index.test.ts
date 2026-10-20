@@ -7,7 +7,6 @@ describe("browser automation feature boundary", () => {
     expect(Object.keys(browserAutomation).sort()).toStrictEqual([
       "BrowserAutomationBroker",
       "BrowserAutomationCredentialRegistry",
-      "BrowserAutomationMcpHandler",
       "BrowserAutomationSessionLease",
       "BrowserAutomationTelemetry",
       "BrowserNarrativeEventSanitizer",

@@ -3,7 +3,6 @@ import { Lifecycle, type DependencyContainer } from "tsyringe";
 import {
   ExternalThreadControlMcpRuntime,
   ExternalThreadControlPairingService,
-  InternalThreadControlMcpRuntime,
   ThreadCompletionService,
   ThreadControlMutationReservationService,
   ThreadControlService,
@@ -39,11 +38,6 @@ export function registerThreadControlServices(container: DependencyContainer): v
   container.register(
     McodeSessionAuthority,
     { useClass: McodeSessionAuthority },
-    { lifecycle: Lifecycle.Singleton },
-  );
-  container.register(
-    InternalThreadControlMcpRuntime,
-    { useClass: InternalThreadControlMcpRuntime },
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(

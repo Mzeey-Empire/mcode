@@ -25,10 +25,7 @@ import { handleWorkspaceImageRequest } from "../../features/projects/files/trans
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir } from "@mcode/shared";
-import type {
-  BrowserAutomationHostConnectionAuthorization,
-  BrowserAutomationMcpHandler,
-} from "../../features/browser-automation/index.js";
+import type { BrowserAutomationHostConnectionAuthorization } from "../../features/browser-automation/index.js";
 import { EXTERNAL_THREAD_CONTROL_MCP_PATH } from "../../features/thread-control/index.js";
 import { MCODE_MCP_PATH, type McodeMcpServer } from "../../features/mcode-mcp/index.js";
 import type { ReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
@@ -63,8 +60,6 @@ export type WsServerDeps = RouterDeps & {
   instanceToken?: string | null;
   worktreeIdentity?: string | null;
   shutdown: () => void;
-  /** Handles the loopback-only browser MCP route when the feature is enabled. */
-  browserAutomationMcpHandler?: BrowserAutomationMcpHandler;
   /** Serves the loopback-only per-session `mcode` MCP route. */
   mcodeMcpServer?: McodeMcpServer;
   /** Optional opt-in packaged reliability controls. */
@@ -303,11 +298,6 @@ function handleSpecialHttpRequest(
     admitHttpRequest(res, admission, () => handleReliabilityRequest(req, res, harness, wss));
     return true;
   }
-  if (requestPath === "/mcp" && deps.browserAutomationMcpHandler) {
-    const handler = deps.browserAutomationMcpHandler;
-    admitHttpRequest(res, admission, () => handleBrowserAutomationMcpRequest(req, res, handler));
-    return true;
-  }
   if (requestPath === EXTERNAL_THREAD_CONTROL_MCP_PATH && deps.externalThreadControlMcpRuntime) {
     const runtime = deps.externalThreadControlMcpRuntime;
     admitHttpRequest(res, admission, () => handleThreadControlMcpRequest(req, res, runtime));
@@ -349,21 +339,6 @@ async function handleReliabilityRequest(
   } catch (error) {
     logger.error("Reliability harness request failed", { error: describeError(error) });
     sendHttpFailure(res, 500, "Reliability harness failure");
-  }
-}
-
-/** Starts a browser MCP request and returns its JSON-RPC failure response when required. */
-async function handleBrowserAutomationMcpRequest(
-  req: NodeHTTP.IncomingMessage,
-  res: NodeHTTP.ServerResponse,
-  handler: BrowserAutomationMcpHandler,
-): Promise<void> {
-  try {
-    await handler.handle(req, res);
-  } catch (error) {
-    logger.error("Browser automation MCP request failed", { error: describeError(error) });
-    sendHttpFailure(res, 500, JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Internal error" } }),
-      { "Content-Type": "application/json", "Cache-Control": "no-store" });
   }
 }
 

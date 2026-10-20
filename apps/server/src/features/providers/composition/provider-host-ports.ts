@@ -12,7 +12,6 @@ import type { EnvService } from "../../../runtime/environment/env-service.js";
 import type { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
 import type { CanonicalAgentBoundary } from "../../agents/index.js";
 import type { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
-import type { InternalThreadControlMcpRuntime } from "../../thread-control/index.js";
 import { killProcessTree } from "../../../runtime/process/containment/process-kill.js";
 import type { ProviderEventIngress } from "./provider-event-ingress.js";
 import type { ProjectedCommittedProviderEvent } from "../../agents/execution/execution-worker-handler.js";
@@ -55,7 +54,6 @@ export interface ProviderHostPortDependencies {
   envService: EnvService;
   jobObject: JobObject;
   browser: BrowserAutomationSessionLease;
-  threadControl: InternalThreadControlMcpRuntime;
   mcode: ProviderMcodePort;
   grants: ScopedPreGrantService;
   events: CanonicalAgentBoundary;
@@ -97,8 +95,6 @@ export function createProviderHostPorts(
         if (!grant) return null;
         return {
           leaseId: grant.leaseId,
-          mcpUrl: grant.mcpUrl,
-          token: grant.token,
           credentialId: grant.credentialId,
           expiresAt: grant.expiresAt,
           allowedOperations: [...grant.allowedOperations],
@@ -107,23 +103,6 @@ export function createProviderHostPorts(
       refresh: (leaseId) => dependencies.browser.refresh(leaseId),
       release: (leaseId) => dependencies.browser.release(leaseId),
       revokeCredential: (credentialId) => dependencies.browser.revokeCredential(credentialId),
-    },
-    threadControl: {
-      bootstrap: async (request) => {
-        switch (request.protocol) {
-          case "claude":
-            return dependencies.threadControl.createClaudeServer(request.sessionId) ?? null;
-          case "codex":
-            return await dependencies.threadControl.createCodexConfiguration(request.sessionId) ?? null;
-          case "http":
-            return await dependencies.threadControl.createHttpConnection(request.sessionId) ?? null;
-          default: {
-            const unsupportedProtocol: never = request.protocol;
-            throw new Error(`Unsupported Provider thread-control protocol: ${String(unsupportedProtocol)}`);
-          }
-        }
-      },
-      close: (sessionId) => dependencies.threadControl.retireTransport(sessionId),
     },
     mcode: dependencies.mcode,
     grants: {

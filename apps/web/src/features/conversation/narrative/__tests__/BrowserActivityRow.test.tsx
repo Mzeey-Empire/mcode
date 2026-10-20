@@ -86,7 +86,7 @@ describe("BrowserActivityRow", () => {
 
     expect(action).toHaveAttribute("aria-expanded", "true");
     expect(screen.getAllByText("Plain text")).toHaveLength(2);
-    expect(screen.getAllByText(/MCP server: mcode-browser/)).toHaveLength(2);
+    expect(screen.getAllByText(/MCP server: mcode/)).toHaveLength(2);
     expect(screen.getAllByText(/MCP tool: browser_act/)).toHaveLength(2);
     expect(container.textContent).not.toContain("mcp__mcode-browser");
   });

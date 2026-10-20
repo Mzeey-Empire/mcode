@@ -652,7 +652,7 @@ describe("Claude public factory core and capabilities", () => {
     const transport = installTransport();
     const { provider, input, events } = fixture();
     const browser = new BrowserAutomationSessionLease();
-    browser.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "fixture" });
+    browser.configure({ worktreeIdentity: "fixture" });
     input.host.browser = browser;
     input.host.mcode.attach = vi.fn(async () => mcodeAttachment());
     input.host.mcode.close = vi.fn(async () => undefined);
@@ -700,7 +700,7 @@ describe("Claude public factory core and capabilities", () => {
     const transport = installTransport();
     const { provider, input, events } = fixture();
     const browser = new BrowserAutomationSessionLease();
-    browser.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "fixture" });
+    browser.configure({ worktreeIdentity: "fixture" });
     input.host.browser = browser;
     input.host.mcode.attach = vi.fn(async () => mcodeAttachment(toolkits));
     await provider.sendTurn(request());
@@ -728,7 +728,7 @@ describe("Claude public factory core and capabilities", () => {
     installTransport();
     const { provider, input, events } = fixture();
     const browser = new BrowserAutomationSessionLease();
-    browser.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "fixture" });
+    browser.configure({ worktreeIdentity: "fixture" });
     const stage = vi.spyOn(browser, "stage");
     input.host.browser = browser;
     const attach = vi.fn(async () => mcodeAttachment());

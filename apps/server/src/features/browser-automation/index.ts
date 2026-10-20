@@ -10,9 +10,6 @@ export {
   type BrowserAutomationCredentialClaims,
 } from "./access/credential-registry.js";
 
-/** Handles the browser automation loopback MCP endpoint. */
-export { BrowserAutomationMcpHandler } from "./transport/mcp-handler.js";
-
 /** Maps provider permission settings to browser automation capability. */
 export {
   browserAutomationPermissionCapability,
