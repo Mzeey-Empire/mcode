@@ -25,10 +25,9 @@ function stopPercent(index: number, stops: number): number {
 }
 
 /**
- * A discrete slider for ordered levels such as reasoning effort: a slim neutral track inside a
- * 24px hit area, a stop dot per level, and a small thumb. The thumb is edge-aligned so it never
- * overhangs the track, and the stop dots sit in a rail inset by half a thumb so each dot lands
- * under the thumb's centre at that stop.
+ * A discrete slider for ordered levels such as reasoning effort. The thumb is edge-aligned so it
+ * never overhangs the track, and the stop dots sit in a rail inset by half a thumb so each dot
+ * lands under the thumb's centre at that stop.
  */
 export function SteppedSlider({
   value,
@@ -51,18 +50,17 @@ export function SteppedSlider({
         if (typeof next === "number" && next !== value) onValueChange(next);
       }}
       className={cn(
-        "group/slider flex w-full touch-none select-none items-center [--slider-thumb-size:1.4rem]",
+        "group/slider flex w-full touch-none select-none items-center [--slider-thumb-size:2.4rem]",
         className,
       )}
       data-slot="slider"
     >
-      {/* The control, not the track, is the pointer target, so a slim track keeps a 24px hit area. */}
-      <SliderPrimitive.Control className="flex h-6 w-full cursor-pointer items-center">
-        <SliderPrimitive.Track className="relative h-1 w-full rounded-full bg-ink/10 dark:bg-ink/15">
+      <SliderPrimitive.Control className="flex w-full cursor-pointer items-center py-1">
+        <SliderPrimitive.Track className="relative h-4.5 w-full rounded-full bg-selected dark:bg-control-border/30">
           {/* At the first stop the fill sits wholly under the thumb, yet anti-aliasing leaves a
               sliver showing at the shared left edge, so it is hidden there instead. */}
           <SliderPrimitive.Indicator
-            className={cn("rounded-full bg-ink/45", SNAP_MOTION_CLASS, valuePercent <= 0 && "opacity-0")}
+            className={cn("rounded-full bg-primary", SNAP_MOTION_CLASS, valuePercent <= 0 && "opacity-0")}
           />
           <span
             aria-hidden="true"
@@ -72,8 +70,8 @@ export function SteppedSlider({
               <span
                 key={index}
                 className={cn(
-                  "absolute top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full",
-                  index <= value ? "bg-ink/60" : "bg-ink/25",
+                  "absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full",
+                  index <= value ? "bg-primary-ink/50" : "bg-muted/60",
                 )}
                 style={{ left: `${stopPercent(index, stops)}%` }}
               />
@@ -88,11 +86,11 @@ export function SteppedSlider({
               SNAP_MOTION_CLASS,
             )}
           >
-            {/* Hover and press feedback live on this inner disc, not the Thumb: Base UI measures the
-                Thumb's box to place it, so resizing the Thumb would shift it off its stop. */}
+            {/* Press feedback scales this inner disc, not the Thumb: Base UI measures the Thumb's
+                box to place it, so scaling the Thumb would shift it off its stop. */}
             <span
               aria-hidden="true"
-              className="block size-full rounded-full bg-background ring-1 ring-ink/25 transition-[box-shadow,transform] duration-(--duration-fast) ease-(--ease-standard) group-hover/slider:ring-4 group-hover/slider:ring-ink/10 group-active/slider:scale-110 group-active/slider:ring-4 group-active/slider:ring-ink/15 motion-reduce:transition-none dark:bg-ink dark:ring-0 dark:group-hover/slider:ring-4"
+              className="block size-full rounded-full bg-background ring-1 ring-control-border/70 transition-transform duration-(--duration-fast) ease-(--ease-standard) group-active/slider:scale-105 motion-reduce:transition-none dark:bg-ink dark:ring-0"
             />
           </SliderPrimitive.Thumb>
         </SliderPrimitive.Track>
