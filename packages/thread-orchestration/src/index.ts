@@ -61,14 +61,14 @@ export function isInternalThreadTargetAllowed(
 }
 
 export {
-  MCODE_INSTRUCTIONS_MAX_CHARS,
-  buildMcodeInstructionPlan,
+  MCODE_INSTRUCTION_SECTION_MAX_BYTES,
+  buildMcodeInstructionSections,
   isExplicitMcodeThreadRequest,
-  renderMcodeInstructions,
+  renderMcodeInstructionSections,
 } from "./mcode-instructions.js";
-export { MCODE_BROWSER_GUIDE } from "./browser-operating-guide.js";
 export type {
-  BuildMcodeInstructionPlanInput,
-  McodeInstructionCapabilities,
-  McodeInstructionPlan,
+  BuildMcodeInstructionSectionsInput,
+  McodeAttachedToolkits,
+  McodeInstructionSection,
+  McodeInstructionSectionKey,
 } from "./mcode-instructions.js";

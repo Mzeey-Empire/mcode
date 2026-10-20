@@ -28,17 +28,12 @@ import {
 } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import { ErrorCode, McpError, ToolSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import {
-  getMcodeBrowserGuide,
-  getThreadControlGuide,
-} from "../../thread-control/authority/capability-guides/mcode-capability-guide.js";
 import type { ThreadControlService } from "../../thread-control/index.js";
 import type { McodeSession, McodeSessionAuthority } from "../mcode-session-authority.js";
 import {
   defineToolkit,
   type JsonSchemaObject,
   type McodeTool,
-  type McodeToolCall,
   type McodeToolkit,
 } from "../mcode-toolkit.js";
 
@@ -94,12 +89,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function structuredResult(value: unknown): CallToolResult {
   if (!isRecord(value)) throw new Error("Thread-control tool result must be an object");
   return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
-}
-
-function isEmptyArguments(args: unknown): boolean {
-  if (args === undefined || args === null) return true;
-  if (!isRecord(args)) return false;
-  return Object.keys(args).length === 0;
 }
 
 function combineAbortSignals(signals: ReadonlyArray<AbortSignal | undefined>): AbortSignal | undefined {
@@ -159,38 +148,18 @@ function serviceTool<Input extends AnySchema, Result extends AnySchema>(
   };
 }
 
-function guideTool(
-  context: ToolContext,
-  name: string,
-  description: string,
-  guide: () => { guide: string },
-): McodeTool<McodeSession> {
-  return {
-    name,
-    description,
-    inputSchema: EMPTY_INPUT_SCHEMA,
-    call: (args, session, call: McodeToolCall) => toToolResult(async () => {
-      context.authority.authorizeThreadControl(session, call.toolCallId);
-      if (!isEmptyArguments(args)) throw new Error(`${name} accepts no arguments`);
-      return structuredResult(guide());
-    }),
-  };
-}
-
 function createTools(context: ToolContext): McodeTool<McodeSession>[] {
   return [
-    guideTool(context, "mcode_browser_guide", "Read the Mcode Browser operating guide.", getMcodeBrowserGuide),
-    guideTool(context, "thread_control_guide", "Read the Mcode thread-control operating guide.", getThreadControlGuide),
     serviceTool(context, {
       name: "workspace_search",
-      description: "Search registered Mcode workspaces.",
+      description: "Resolve an explicitly named Project among registered Mcode workspaces. If no Project is named, use the active source thread's Project without discovery. Use returned workspaceId references for follow-up operations; never target the active source thread.",
       input: WorkspaceSearchInputSchema(),
       result: WorkspaceSearchResultSchema(),
       run: (service, authority, input) => service.workspaceSearch(authority, input),
     }),
     serviceTool(context, {
       name: "worktree_list",
-      description: "List tracked worktrees for one registered Mcode workspace.",
+      description: "List tracked worktrees only when resolving an explicit worktree or reference in a registered Mcode Project. Respect the requested worktree and use returned worktree references. Never target the active source thread.",
       input: WorktreeListInputSchema(),
       result: WorktreeListResultSchema(),
       omitListedOutput: true,
@@ -198,14 +167,14 @@ function createTools(context: ToolContext): McodeTool<McodeSession>[] {
     }),
     serviceTool(context, {
       name: "thread_create_batch",
-      description: "Create and start one to twenty normal Mcode threads in registered Projects. providerId/modelId select the provider and model; discover named options with thread_target_list first.",
+      description: "Create and start one to twenty normal, persistent Mcode threads only when explicitly requested, distinct from provider-native child agents. Default to the active source thread's Project without discovery; resolve an explicitly named Project with workspace_search and respect a requested worktree. Preserve the user's title and task in the prompt. For a new worktree use placement type new_worktree with the appropriate baseRef; omit branchName unless the user names a branch. Call thread_target_list before choosing a provider or model and pass exact returned providerId/modelId, including providerId when named; preserve named execution settings. Never target the active source thread. Track returned threadId with thread_get or thread_wait, inspect results before follow-up work, and use returned workspaceId, turnId, and worktree references.",
       input: ThreadCreateBatchInputSchema(),
       result: ThreadCreateBatchResultSchema(),
       run: (service, authority, input) => service.threadCreateBatch(authority, input),
     }),
     serviceTool(context, {
       name: "thread_target_list",
-      description: "List provider and model targets currently usable for new Mcode threads.",
+      description: "List provider and model targets currently usable for new Mcode threads. Call before choosing a provider or model; pass exact returned providerId/modelId to thread_create_batch. Never assume a static provider list or target the active source thread.",
       input: ThreadTargetListInputSchema(),
       result: ThreadTargetListResultSchema(),
       run: (service, authority) => service.threadTargetList(authority),
@@ -218,35 +187,35 @@ function createThreadTools(context: ToolContext): McodeTool<McodeSession>[] {
   return [
     serviceTool(context, {
       name: "thread_search",
-      description: "Search readable threads across registered Mcode Projects.",
+      description: "Discover readable threads across registered Mcode Projects. Use returned threadId and workspaceId for follow-up operations. Never target the active source thread.",
       input: ThreadSearchInputSchema(),
       result: ThreadSearchResultSchema(),
       run: (service, authority, input) => service.threadSearch(authority, input),
     }),
     serviceTool(context, {
       name: "thread_get",
-      description: "Read one bounded thread transcript.",
+      description: "Read one bounded transcript using a returned threadId. Inspect results before sending follow-up work. Never target the active source thread.",
       input: ThreadGetInputSchema(),
       result: ThreadGetResultSchema(),
       run: (service, authority, input) => service.threadGet(authority, input),
     }),
     serviceTool(context, {
       name: "thread_send",
-      description: "Send a message to another normal Mcode thread.",
+      description: "Assign or continue work in another normal Mcode thread using returned threadId and turnId references. Keep prompts faithful to the user's request and inspect results before follow-up work. Never target the active source thread.",
       input: ThreadSendInputSchema(),
       result: ThreadSendResultSchema(),
       run: (service, authority, input) => service.threadSend(authority, input),
     }),
     serviceTool(context, {
       name: "thread_stop",
-      description: "Stop another normal Mcode thread.",
+      description: "Stop work in another normal Mcode thread using returned threadId and turnId references. Never target the active source thread.",
       input: ThreadStopInputSchema(),
       result: ThreadStopResultSchema(),
       run: (service, authority, input) => service.threadStop(authority, input),
     }),
     serviceTool(context, {
       name: "thread_wait",
-      description: "Wait for exact readable threads to require attention or finish.",
+      description: "Wait for exact readable threads to require attention or reach a terminal state, using returned threadId references. Inspect results before sending follow-up work. Never target the active source thread.",
       input: ThreadWaitInputSchema(),
       result: ThreadWaitResultSchema(),
       run: (service, authority, input, signal) => service.threadWait(authority, input, signal),

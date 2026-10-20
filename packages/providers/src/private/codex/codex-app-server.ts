@@ -13,6 +13,7 @@ import * as NodePath from "node:path";
 import which from "which";
 import { resolveSubagentDisplayName, type TurnFailureKind, type TurnSteerOutcome } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import type { McodeInstructionSection } from "@mcode/thread-orchestration";
 import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
 import { CodexRpcClient, CodexRpcResponseError, CodexTransportError } from "./codex-rpc-client.js";
 import { listCodexModels } from "./codex-models.js";
@@ -21,6 +22,9 @@ import { parseCodexNotification } from "./codex-notification-validation.js";
 import { mapDecisionToCodexResponse } from "./codex-permission-mapper.js";
 import type { CodexQuestionRequest } from "./codex-plan-questions.js";
 import type {
+  AdditionalContextEntry,
+  ThreadInjectItemsParams,
+  ThreadInjectItemsResult,
   ThreadStartParams,
   ThreadStartResult,
   ThreadResumeParams,
@@ -118,13 +122,14 @@ function createCodexTurnStartParams(
   if (turnOptions?.model) params.model = turnOptions.model;
   if (turnOptions?.effort) params.effort = turnOptions.effort;
   if (turnOptions?.serviceTier) params.serviceTier = turnOptions.serviceTier;
+  if (turnOptions?.additionalContext) params.additionalContext = turnOptions.additionalContext;
   Object.assign(params, nativePlanTurnOptions(turnOptions));
   return params;
 }
 
 function nativePlanTurnOptions(options: CodexTurnOptions | undefined): Partial<TurnStartParams> {
   if (!options?.collaborationMode) return {};
-  return { collaborationMode: options.collaborationMode, additionalContext: options.additionalContext ?? {} };
+  return { collaborationMode: options.collaborationMode };
 }
 
 function fulfilledCodexResult<T>(result: PromiseSettledResult<T>): T | undefined {
@@ -278,61 +283,8 @@ export interface CodexAppServerOptions {
   configOverrides?: readonly string[];
   /** Completes the handshake after initialization without creating a thread. */
   catalogOnly?: boolean;
-  /** Capability-derived Mcode runtime guidance appended to native instructions. */
-  developerInstructions?: string;
-}
-
-/** Adds optional developer instructions to a native Codex thread payload. */
-export function addCodexDeveloperInstructions<T extends ThreadStartParams | ThreadResumeParams>(
-  params: T,
-  developerInstructions?: string,
-  configuredInstructions?: string | null,
-): T {
-  const composedInstructions = composeCodexDeveloperInstructions(configuredInstructions, developerInstructions);
-  return composedInstructions ? { ...params, developerInstructions: composedInstructions } : params;
-}
-
-/** Composes configured Codex instructions with Mcode runtime guidance. */
-export function composeCodexDeveloperInstructions(
-  configuredInstructions?: string | null,
-  developerInstructions?: string | null,
-): string | undefined {
-  const configured = configuredInstructions?.trim() ? configuredInstructions : undefined;
-  const runtime = developerInstructions?.trim() ? developerInstructions : undefined;
-  if (!runtime) return configured;
-  if (!configured) return runtime;
-  if (containsCodexInstructionBlock(configured, runtime)) return configured;
-  return `${configured}\n\n${runtime}`;
-}
-
-function containsCodexInstructionBlock(text: string, block: string): boolean {
-  let searchFrom = 0;
-  while (searchFrom < text.length) {
-    const index = text.indexOf(block, searchFrom);
-    if (index < 0) return false;
-    const end = index + block.length;
-    const startsAtBoundary = index === 0 || text[index - 1] === "\n";
-    const endsAtBoundary = end === text.length || text[end] === "\n" || (text[end] === "\r" && text[end + 1] === "\n");
-    if (startsAtBoundary && endsAtBoundary) return true;
-    searchFrom = index + 1;
-  }
-  return false;
-}
-
-function getConfiguredDeveloperInstructions(result: unknown): string | undefined {
-  if (typeof result !== "object" || result === null || Array.isArray(result)) {
-    throw new Error("Codex config/read returned an invalid response");
-  }
-  const config = (result as Record<string, unknown>).config;
-  if (typeof config !== "object" || config === null || Array.isArray(config)) {
-    throw new Error("Codex config/read returned an invalid response");
-  }
-  const configuredInstructions = (config as Record<string, unknown>).developer_instructions;
-  if (configuredInstructions === undefined || configuredInstructions === null) return undefined;
-  if (typeof configuredInstructions !== "string") {
-    throw new Error("Codex config/read returned an invalid response");
-  }
-  return configuredInstructions;
+  /** Toolkit-derived guidance delivered on main-thread user turns. */
+  instructionSections?: readonly McodeInstructionSection[];
 }
 
 /**
@@ -1035,6 +987,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   private lastActivity: { method: string; timestamp: number } | null = null;
 
   private readonly options: CodexAppServerOptions;
+  private readonly instructionContext: Record<string, AdditionalContextEntry>;
 
   /**
    * Creates a new CodexAppServer instance. Call `start()` to spawn the process.
@@ -1044,6 +997,9 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   constructor(options: CodexAppServerOptions) {
     super();
     this.options = options;
+    this.instructionContext = Object.fromEntries((options.instructionSections ?? []).map((section) => [
+      section.key, { value: section.text, kind: "application" },
+    ]));
     this.cliPath = options.cliPath;
   }
 
@@ -1119,6 +1075,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     }
     if (this.handleThreadStartedNotification(message.params, method, diagnosticMethod)) return;
     this.trackTurnNotification(message.params, method);
+    if (method === "item/completed") this.restoreInstructionsAfterCompaction(message.params);
     if (method === "serverRequest/resolved") {
       void this.options.questionResolved?.(message.params).catch(() => logger.warn("Codex question resolution was not recorded"));
     }
@@ -1129,6 +1086,25 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       return;
     }
     this.emit("notification", parsed);
+  }
+
+  private restoreInstructionsAfterCompaction(params: Record<string, unknown> | undefined): void {
+    if (params?.threadId !== this.threadId) return;
+    const item = params.item;
+    if (typeof item !== "object" || item === null || !("type" in item) || item.type !== "contextCompaction") return;
+    const threadId = this.threadId;
+    if (!threadId || Object.keys(this.instructionContext).length === 0) return;
+    // Codex drops context messages on compaction but still deduplicates the unchanged turn/start entries.
+    const items: ThreadInjectItemsParams["items"] = Object.entries(this.instructionContext).map(([key, entry]) => ({
+      type: "message",
+      role: "developer",
+      content: [{ type: "input_text", text: `<${key}>${entry.value}</${key}>` }],
+    }));
+    void this.rpc.sendRequest<ThreadInjectItemsParams, ThreadInjectItemsResult>(
+      "thread/inject_items", { threadId, items }, 10_000,
+    ).catch((error) => {
+      logger.warn("Codex instruction restore after compaction failed", { threadId, error: String(error) });
+    });
   }
 
   private handleThreadStartedNotification(
@@ -1266,6 +1242,9 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     if (!threadId) throw new Error("sendTurn called before thread was established");
     logger.debug("Codex turn/start sent", { threadId, model: turnOptions?.model });
     const params = createCodexTurnStartParams(threadId, input, turnOptions);
+    if (Object.keys(this.instructionContext).length > 0) {
+      params.additionalContext = { ...params.additionalContext, ...this.instructionContext };
+    }
     const result = await this.rpc.sendRequest<TurnStartParams, TurnStartResult>("turn/start", params, 60000);
     const turnId = result?.turnId ?? result?.turn?.id ?? null;
     this.recordStartedTurn(threadId, turnId);
@@ -1673,23 +1652,19 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     });
     this.rpc.sendNotification("initialized", {});
     if (this.options.catalogOnly) return;
-    const instructions = await this.resolveDeveloperInstructions(
-      this.options.workingDirectory,
-      this.options.developerInstructions,
-    );
-    await this.resumeCodexThread(instructions);
-    if (!this.threadId) await this.startCodexThread(instructions);
+    await this.resumeCodexThread();
+    if (!this.threadId) await this.startCodexThread();
   }
 
 
-  private async resumeCodexThread(instructions: string | undefined): Promise<void> {
+  private async resumeCodexThread(): Promise<void> {
     const resumeThreadId = this.options.resumeThreadId;
     if (!resumeThreadId) return;
     logger.info("Codex thread/resume attempted", { resumeThreadId });
     try {
       const result = await this.rpc.sendRequest<ThreadResumeParams, ThreadResumeResult>(
         "thread/resume",
-        this.resumeThreadParams(resumeThreadId, instructions),
+        this.resumeThreadParams(resumeThreadId),
         THREAD_HANDSHAKE_TIMEOUT_MS,
       );
       this._threadId = codexThreadIdFromResponse(result) ?? null;
@@ -1705,22 +1680,22 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     }
   }
 
-  private resumeThreadParams(resumeThreadId: string, instructions: string | undefined): ThreadResumeParams {
+  private resumeThreadParams(resumeThreadId: string): ThreadResumeParams {
     const params: ThreadResumeParams = { threadId: resumeThreadId };
     if (this.options.model) params.model = this.options.model;
     if (this.options.sandbox) params.sandbox = this.options.sandbox;
     if (this.options.approvalPolicy) params.approvalPolicy = this.options.approvalPolicy;
     if (this.options.workingDirectory) params.cwd = this.options.workingDirectory;
-    return addCodexDeveloperInstructions(params, instructions);
+    return params;
   }
 
-  private async startCodexThread(instructions: string | undefined): Promise<void> {
+  private async startCodexThread(): Promise<void> {
     const tracker = this.trackStartedCodexThread();
     let startResult: ThreadStartResult | null = null;
     try {
       startResult = await this.rpc.sendRequest<ThreadStartParams, ThreadStartResult>(
         "thread/start",
-        addCodexDeveloperInstructions(this.startThreadParams(), instructions),
+        this.startThreadParams(),
         THREAD_HANDSHAKE_TIMEOUT_MS,
       );
       logger.debug("Codex thread/start response", { result: startResult });
@@ -1763,21 +1738,4 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     };
   }
 
-  /** Resolves configured instructions before adding request-level runtime guidance. */
-  private async resolveDeveloperInstructions(
-    workingDirectory: string,
-    developerInstructions?: string,
-  ): Promise<string | undefined> {
-    if (!developerInstructions?.trim()) return undefined;
-    try {
-      const configResult = await this.readConfig(workingDirectory);
-      const configuredInstructions = getConfiguredDeveloperInstructions(configResult);
-      return composeCodexDeveloperInstructions(configuredInstructions, developerInstructions);
-    } catch (error) {
-      if (developerInstructions?.trim()) {
-        logger.warn("Codex config/read failed; omitting developer instructions", { error: String(error) });
-      }
-      return undefined;
-    }
-  }
 }

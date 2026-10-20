@@ -38,10 +38,9 @@ export interface BoundTool {
   call(args: unknown, call: McodeToolCall): Promise<CallToolResult>;
 }
 
-/** The tools and `initialize` instructions one toolkit offers to one session. */
+/** The tools one toolkit offers to one session. */
 export interface BoundToolkit {
   readonly tools: readonly BoundTool[];
-  readonly instructions: string | undefined;
 }
 
 /** A named group of tools that the `mcode` server exposes when a session is granted it. */
@@ -56,7 +55,6 @@ export function defineToolkit<Grant>(spec: {
   name: string;
   grant(session: McodeSession): Grant | null;
   tools: readonly McodeTool<Grant>[];
-  instructions?(grant: Grant): string | undefined;
 }): McodeToolkit {
   return {
     name: spec.name,
@@ -65,7 +63,6 @@ export function defineToolkit<Grant>(spec: {
       if (grant === null) return null;
       return {
         tools: spec.tools.map((tool) => bindTool(tool, grant)),
-        instructions: spec.instructions?.(grant),
       };
     },
   };

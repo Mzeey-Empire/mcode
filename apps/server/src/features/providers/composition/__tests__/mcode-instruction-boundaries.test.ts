@@ -6,20 +6,18 @@ import {
 } from "../../../../../../../packages/providers/src/private/cursor/cursor-provider.js";
 import { composeCopilotSystemMessage } from "../../../../../../../packages/providers/src/private/copilot/copilot-helpers.js";
 import {
-  buildMcodeInstructionPlan,
-  MCODE_BROWSER_GUIDE,
-  renderMcodeInstructions,
+  buildMcodeInstructionSections,
+  renderMcodeInstructionSections,
 } from "@mcode/thread-orchestration";
 
 describe("provider-native Mcode instruction boundaries", () => {
   it("delivers Cursor guidance once across accepted and unaccepted attempts", () => {
-    const runtime = renderMcodeInstructions(buildMcodeInstructionPlan({
-      browserAutomationGranted: true,
-      threadControlGranted: false,
+    const runtime = renderMcodeInstructionSections(buildMcodeInstructionSections({
+      toolkits: { browser: true, threadControl: false },
     }));
     const first = appendCursorMcodeInstructions("user rules", runtime, false);
     expect(first).toEqual({ instructionMarkdown: `user rules\n\n${runtime}`, included: true });
-    expect(first.instructionMarkdown).toContain(MCODE_BROWSER_GUIDE.trim());
+    expect(first.instructionMarkdown).toContain("use only the mcode MCP browser_* tools");
 
     const unacceptedRetry = appendCursorMcodeInstructions(first.instructionMarkdown, runtime, false);
     expect(unacceptedRetry).toEqual(first);

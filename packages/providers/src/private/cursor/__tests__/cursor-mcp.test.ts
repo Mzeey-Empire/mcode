@@ -8,7 +8,7 @@ import { AcpSessionRuntime } from "../../protocols/acp/acp-session-runtime.js";
 import { CursorProvider } from "../cursor-provider.js";
 
 const THREAD_TOOL = "thread_target_list";
-const BROWSER_TOOL = "browser_inspect";
+const BROWSER_GUIDANCE = "use only the mcode MCP browser_* tools";
 
 function attachment(toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true }): ProviderMcodeAttachment {
   return { serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "mcode-token", toolkits };
@@ -118,7 +118,7 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
       headers: [{ name: "Authorization", value: "Bearer mcode-token" }],
     }]);
     expect(promptText(fake)).toContain(THREAD_TOOL);
-    expect(promptText(fake)).toContain(BROWSER_TOOL);
+    expect(promptText(fake)).toContain(BROWSER_GUIDANCE);
   });
 
   it("attaches under the session id the Browser lease is staged for", async () => {
@@ -142,7 +142,7 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
     await startProvider(host, [fake]).sendTurn(turn());
 
     expect(promptText(fake)).toContain(THREAD_TOOL);
-    expect(promptText(fake)).not.toContain(BROWSER_TOOL);
+    expect(promptText(fake)).not.toContain(BROWSER_GUIDANCE);
     expect(host.browser.release).toHaveBeenCalledWith("lease-1");
   });
 
@@ -154,7 +154,7 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
 
     expect(openedServers(fake)).toEqual([]);
     expect(promptText(fake)).not.toContain(THREAD_TOOL);
-    expect(promptText(fake)).not.toContain(BROWSER_TOOL);
+    expect(promptText(fake)).not.toContain(BROWSER_GUIDANCE);
     expect(host.browser.release).toHaveBeenCalledWith("lease-1");
   });
 
@@ -168,7 +168,7 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
     expect(openedServers(first)).toHaveLength(1);
     expect(openedServers(second)).toEqual([]);
     expect(promptText(second)).not.toContain(THREAD_TOOL);
-    expect(promptText(second)).not.toContain(BROWSER_TOOL);
+    expect(promptText(second)).not.toContain(BROWSER_GUIDANCE);
     expect(host.mcode.close).toHaveBeenCalledWith("mcode-thread-1");
   });
 

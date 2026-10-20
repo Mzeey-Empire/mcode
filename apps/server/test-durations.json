@@ -307,7 +307,6 @@
   "src/features/thread-control/authority/__tests__/thread-control-mutation-reservation-service.test.ts": 57,
   "src/features/thread-control/authority/__tests__/thread-control-service.test.ts": 3980,
   "src/features/thread-control/authority/__tests__/thread-control-workflow.test.ts": 1720,
-  "src/features/thread-control/authority/capability-guides/__tests__/mcode-capability-guide.test.ts": 54,
   "src/features/thread-control/authority/persistence/__tests__/thread-control-approval-repo.test.ts": 1383,
   "src/features/thread-control/authority/persistence/__tests__/thread-control-audit-repo.test.ts": 420,
   "src/features/thread-control/cleanup/__tests__/cleanup-action-runner.test.ts": 969,

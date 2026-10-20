@@ -10,7 +10,6 @@ import {
   type BrowserAutomationResponse,
   type BrowserAutomationResult,
 } from "@mcode/contracts";
-import { MCODE_BROWSER_GUIDE } from "@mcode/thread-orchestration";
 import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type {
   BrowserAutomationBroker,
@@ -108,7 +107,6 @@ export class BrowserToolkit implements McodeToolkit {
       name: this.name,
       grant: (session) => this.grant(session),
       tools: OPERATIONS.map((operation) => this.tool(operation)),
-      instructions: (grant) => (grant.claims.allowedOperations.includes("inspect") ? MCODE_BROWSER_GUIDE : undefined),
     });
   }
 

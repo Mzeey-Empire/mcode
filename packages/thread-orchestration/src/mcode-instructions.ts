@@ -1,33 +1,38 @@
 /** Capability-derived runtime guidance shared by every provider adapter. */
 
-import { MCODE_BROWSER_GUIDE } from "./browser-operating-guide.js";
-
-export const MCODE_INSTRUCTIONS_MAX_CHARS = 4_000;
+/** Codex silently cuts the middle out of an additionalContext value above ~1,000 tokens (UTF-8 bytes / 4). */
+export const MCODE_INSTRUCTION_SECTION_MAX_BYTES = 4_000;
 
 const EXPLICIT_MCODE_THREAD_TOKEN = /\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait))\b/i;
 const NEGATED_MCODE_THREAD_REQUEST = /\b(?:do\s+not|don['’]?t|dont|never|without|no)\b[\s\S]{0,96}\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait))\b/i;
 const MCODE_THREAD_REQUEST_ACTION = /\b(?:create|start|open|launch|use|manage|list|search|send|stop|wait|get|target|delegate)\b/i;
 
-/** Capabilities proven available for one provider session. */
-export interface McodeInstructionCapabilities {
-  /** Thread-control tools listed by the session's `mcode` MCP server. */
-  threadControl?: true;
-  /** Browser lease issued and registered for this session. */
-  browserAutomation?: true;
+/** Stable section names used as Codex context tags. */
+export type McodeInstructionSectionKey =
+  | "mcode_identity"
+  | "mcode_provider_subagents"
+  | "mcode_nested_delegation"
+  | "mcode_thread_control"
+  | "mcode_browser"
+  | "mcode_repository_search";
+
+/** One self-contained concern delivered through a provider's native context. */
+export interface McodeInstructionSection {
+  readonly key: McodeInstructionSectionKey;
+  readonly text: string;
 }
 
-/** Structured runtime guidance plan before provider-specific formatting. */
-export interface McodeInstructionPlan {
-  capabilities: McodeInstructionCapabilities;
-  text: string;
+/** Toolkits attached to one provider session. */
+export interface McodeAttachedToolkits {
+  readonly threadControl: boolean;
+  readonly browser: boolean;
 }
 
-/** Inputs used to derive capabilities after provider setup succeeds. */
-export interface BuildMcodeInstructionPlanInput {
-  threadControlGranted: boolean;
-  browserAutomationGranted: boolean;
+/** Inputs for selecting runtime guidance after provider setup succeeds. */
+export interface BuildMcodeInstructionSectionsInput {
+  readonly toolkits: McodeAttachedToolkits;
   /** Optional provider-native model to use when a child must spawn another child. */
-  nestedDelegationModel?: string;
+  readonly nestedDelegationModel?: string;
 }
 
 /**
@@ -50,12 +55,17 @@ const IDENTITY_BLOCK = [
   "Mcode runtime guidance is advisory; MCP authorization and lease state remain authoritative.",
 ].join(" ");
 
+// The thread-control and Browser tool descriptions repeat these rules on purpose. With deferred tool loading, a description arrives only after the model has chosen a tool.
 const THREAD_CONTROL_BLOCK = [
-  "Use the mcode MCP server to manage Mcode threads only when explicitly asked by the user.",
-  "An Mcode thread is a persistent user-visible conversation controlled by thread_* tools.",
-  "For an explicit Mcode thread request, use workspace_search, worktree_list, thread_target_list, thread_create_batch, thread_search, thread_get, thread_send, thread_stop, and thread_wait as needed. Call thread_target_list before choosing a provider or model, pass exact returned IDs to thread_create_batch, and never assume or enumerate providers or models.",
-  "Never target the source thread.",
-].join(" ");
+  "Mcode thread control",
+  "- Use the mcode MCP thread_* tools only when the user explicitly asks for Mcode threads. An Mcode thread is a persistent user-visible conversation, different from provider-native child agents.",
+  "- If no Project is named, use the active source thread's Project without discovery. Resolve an explicitly named Project with workspace_search. Use worktree_list only to resolve an explicit worktree or reference.",
+  "- Create threads with thread_create_batch. Preserve the user's title and task in the prompt. For a new worktree, use placement type new_worktree with the appropriate baseRef, and set branchName only when the user names a branch.",
+  "- Call thread_target_list before choosing a provider or model, and pass the exact returned providerId and modelId. Pass any named provider or execution setting. Never assume or enumerate providers or models.",
+  "- Use returned workspaceId, threadId, turnId and worktree references for follow-up work. Use thread_search to discover, thread_get to read one bounded transcript, thread_send to assign or continue work, thread_stop to stop work, and thread_wait to wait for attention or a terminal state.",
+  "- Never target the active source thread. Keep prompts faithful to the user's request and inspect results before sending follow-up work.",
+  "- If these tools are missing from an initial tool listing, they may load lazily. Make one direct attempt before reporting them unavailable.",
+].join("\n");
 
 const PROVIDER_SUBAGENT_BLOCK = [
   "A child-agent or sub-agent request uses provider-native collaboration in the current turn.",
@@ -78,36 +88,46 @@ function nestedDelegationBlock(model: string | undefined): string | undefined {
   ].join(" ");
 }
 
-const BROWSER_BLOCK = MCODE_BROWSER_GUIDE.trim();
+const BROWSER_BLOCK = [
+  "Mcode Browser",
+  "- Boundary: for visible Browser or Mcode Preview requests, use only the mcode MCP browser_* tools. Never use bundled generic Browser, Chrome, Playwright or Node-REPL, and never launch another browser or profile.",
+  "- Browser-only tasks need no shell commands or local skill files. Keep narration minimal.",
+  "- Open: browser_open creates a sticky, agent-owned background tab and returns tab metadata and an observationRef, not a page observation.",
+  "- Inspect: browser_inspect is authoritative for readiness, tabs, capabilities, constraints, diagnostics, revision and observationRef. Inspect before the first action unless browser_open returned enough snapshot evidence. Tool discovery does not prove readiness.",
+  "- Target: use a semanticId from the latest inspection, then role plus accessibleName. Use CSS or coordinates only when no semantic target exists. Never guess an ambiguous target.",
+  "- Act: browser_act needs the latest observationRef, a fresh idempotencyKey, deadlineMs and a non-empty steps array, at most eight steps and 60 seconds. Never send `steps: []`.",
+  "- Verify: stop on failure, interruption, deadline or invalidation. Verify non-navigation effects with an assert step or a fresh inspection. Navigation and reload end the batch, so inspect again before another mutation.",
+  "- Interruptions: user input invalidates the observation. Stop or Take control interrupts execution, and Take control holds the Browser until Hand back. Release held input, keep completed effects and yield to the user.",
+  "- Recover: inspect the receipt and effect before retrying. Effects do not roll back, so never replay mutations automatically. Follow exactly one recovery instruction: inspect, reopen, wait, yield_to_user or do_not_retry.",
+  "- Evidence: request includeScreenshot only for visual evidence or when the user asks. Verify every success claim against current page evidence.",
+  "- Finish: call browser_tabs finalize before replying. Release claimed user tabs and close agent tabs by default. For a tab the user wants open, set disposition handoff and verify success.",
+  "- Evaluate: use browser_evaluate only when the live capability advertises it. All rules above apply.",
+  "- If these tools are missing from an initial tool listing, they may load lazily. Make one direct attempt before reporting them unavailable.",
+].join("\n");
 
-function capInstructionText(text: string): string {
-  if (text.length <= MCODE_INSTRUCTIONS_MAX_CHARS) return text;
-  const marker = "\n[ Mcode runtime guidance truncated at 4000 characters. ]";
-  return text.slice(0, MCODE_INSTRUCTIONS_MAX_CHARS - marker.length) + marker;
+const SECTION_REGISTRY: readonly {
+  key: McodeInstructionSectionKey;
+  text(input: BuildMcodeInstructionSectionsInput): string | undefined;
+}[] = [
+  { key: "mcode_identity", text: () => IDENTITY_BLOCK },
+  { key: "mcode_provider_subagents", text: () => PROVIDER_SUBAGENT_BLOCK },
+  { key: "mcode_nested_delegation", text: (input) => nestedDelegationBlock(input.nestedDelegationModel) },
+  { key: "mcode_thread_control", text: (input) => input.toolkits.threadControl ? THREAD_CONTROL_BLOCK : undefined },
+  { key: "mcode_browser", text: (input) => input.toolkits.browser ? BROWSER_BLOCK : undefined },
+  { key: "mcode_repository_search", text: () => REPOSITORY_SEARCH_BLOCK },
+];
+
+/** Builds ordered, self-contained guidance from the session's attached toolkits. */
+export function buildMcodeInstructionSections(
+  input: BuildMcodeInstructionSectionsInput,
+): readonly McodeInstructionSection[] {
+  return SECTION_REGISTRY.flatMap(({ key, text }) => {
+    const sectionText = text(input);
+    return sectionText === undefined ? [] : [{ key, text: sectionText }];
+  });
 }
 
-function appendBlockIfItFits(blocks: string[], block: string): void {
-  if ([...blocks, block].join("\n\n").length <= MCODE_INSTRUCTIONS_MAX_CHARS) blocks.push(block);
-}
-
-/** Builds canonical runtime guidance from capabilities proven at session setup. */
-export function buildMcodeInstructionPlan(
-  input: BuildMcodeInstructionPlanInput,
-): McodeInstructionPlan {
-  const capabilities: McodeInstructionCapabilities = {};
-  if (input.threadControlGranted) capabilities.threadControl = true;
-  if (input.browserAutomationGranted) capabilities.browserAutomation = true;
-
-  const blocks = [IDENTITY_BLOCK, PROVIDER_SUBAGENT_BLOCK];
-  const nestedBlock = nestedDelegationBlock(input.nestedDelegationModel);
-  if (nestedBlock) blocks.push(nestedBlock);
-  if (capabilities.threadControl) blocks.push(THREAD_CONTROL_BLOCK);
-  if (capabilities.browserAutomation) blocks.push(BROWSER_BLOCK);
-  appendBlockIfItFits(blocks, REPOSITORY_SEARCH_BLOCK);
-  return { capabilities, text: capInstructionText(blocks.join("\n\n")) };
-}
-
-/** Formats canonical guidance for a provider-native instruction field. */
-export function renderMcodeInstructions(plan: McodeInstructionPlan): string {
-  return plan.text;
+/** Joins sections for providers with a single native instruction field. */
+export function renderMcodeInstructionSections(sections: readonly McodeInstructionSection[]): string {
+  return sections.map((section) => section.text).join("\n\n");
 }

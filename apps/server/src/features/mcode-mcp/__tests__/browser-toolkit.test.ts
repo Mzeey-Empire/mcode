@@ -8,7 +8,6 @@ import {
   type BrowserAutomationResponse,
   type BrowserAutomationResult,
 } from "@mcode/contracts";
-import { MCODE_BROWSER_GUIDE } from "@mcode/thread-orchestration";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BrowserAutomationCredentialClaims } from "../../browser-automation/index.js";
 import type { McodeSession } from "../mcode-session-authority.js";
@@ -136,16 +135,6 @@ describe("BrowserToolkit", () => {
       "expression",
     ]);
     expect(tools.map((tool) => tool.name).join(" ")).not.toMatch(/browser_(status|navigate|snapshot|click|type)/);
-  });
-
-  it("offers the Browser guide only when the credential may inspect", () => {
-    const granted = setup().toolkit.bind(session);
-    const withoutInspect = setup({
-      claims: claimsWith({ permissionCapability: "interact", allowedOperations: ["open"] }),
-    }).toolkit.bind(session);
-
-    expect(granted?.instructions).toBe(MCODE_BROWSER_GUIDE);
-    expect(withoutInspect?.instructions).toBeUndefined();
   });
 
   it("refuses an operation the credential does not allow and evaluation without privilege", async () => {

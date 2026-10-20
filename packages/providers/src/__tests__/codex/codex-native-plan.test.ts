@@ -162,7 +162,7 @@ describe("Codex native planning", () => {
       await f.provider.sendTurn(turn);
       await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
       expect(f.starts()[0]?.params).toMatchObject({ collaborationMode: { mode: "plan",
-        settings: { model: "gpt-6.1-sol", reasoning_effort: "low", developer_instructions: null } }, additionalContext: {} });
+        settings: { model: "gpt-6.1-sol", reasoning_effort: "low", developer_instructions: null } } });
       f.child.complete();
       await vi.waitFor(() => expect(f.events.some(event => event.event.type === "ended")).toBe(true));
       await f.provider.sendTurn({ ...turn, turnId: "build", turnExecutionId: "build-execution", planTurn: undefined, interactionMode: "build" });

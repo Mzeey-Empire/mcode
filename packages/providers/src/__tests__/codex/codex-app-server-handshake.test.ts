@@ -461,163 +461,167 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     void child;
   }, 10_000);
 
-  it("appends configured instructions to thread/start in block order", async () => {
-    let configRequest: RpcRequest | undefined;
-    let startRequest: RpcRequest | undefined;
-    harnessFakeServer((req): Record<string, unknown> => {
-      if (req.method === "config/read") {
-        configRequest = req;
-        return { result: { config: { developer_instructions: "configured rules" } } };
+  it.each([
+    { mode: "start", resumeThreadId: undefined, handshakeMethods: ["thread/start"] },
+    { mode: "resume", resumeThreadId: "existing-thread", handshakeMethods: ["thread/resume"] },
+    { mode: "resume fallback", resumeThreadId: "existing-thread", handshakeMethods: ["thread/resume", "thread/start"] },
+  ])(
+    "delivers application sections on every user turn after $mode without overriding configured instructions",
+    async ({ mode, resumeThreadId, handshakeMethods }) => {
+      const requests: RpcRequest[] = [];
+      harnessFakeServer((req): Record<string, unknown> => {
+        requests.push(req);
+        if (req.method === "thread/resume" && mode === "resume fallback") {
+          return { error: { message: "thread not found" } };
+        }
+        if (req.method === "thread/start" || req.method === "thread/resume") {
+          return { result: { thread: { id: "main-thread" } } };
+        }
+        if (req.method === "turn/start") return { result: { turn: { id: "user-turn" } } };
+        return { result: {} };
+      });
+      const server = new CodexAppServer({
+        cliPath: "codex",
+        workingDirectory: "/tmp",
+        getSpawnEnv: () => ({}),
+        resumeThreadId,
+        instructionSections: [
+          { key: "mcode_identity", text: "runtime identity" },
+          { key: "mcode_browser", text: "runtime browser" },
+        ],
+      });
+
+      try {
+        await server.start();
+        await server.sendTurn("first");
+        await server.sendTurn("second", {
+          collaborationMode: {
+            mode: "plan",
+            settings: { model: "test-model", reasoning_effort: null, developer_instructions: null },
+          },
+          additionalContext: {
+            caller: { value: "caller context", kind: "untrusted" },
+            mcode_identity: { value: "caller collision", kind: "untrusted" },
+          },
+        });
+        await server.sendTurn("third", {
+          additionalContext: { caller: { value: "caller context", kind: "untrusted" } },
+        });
+
+        expect(requests.filter((req) => req.method === "config/read")).toEqual([]);
+        const handshakes = requests.filter((req) => req.method === "thread/start" || req.method === "thread/resume");
+        expect(handshakes.map((req) => req.method)).toEqual(handshakeMethods);
+        for (const request of handshakes) expect(request.params).not.toHaveProperty("developerInstructions");
+        const turns = requests.filter((req) => req.method === "turn/start");
+        expect(turns).toHaveLength(3);
+        expect(turns[0]?.params).toMatchObject({
+          threadId: "main-thread",
+          additionalContext: {
+            mcode_identity: { value: "runtime identity", kind: "application" },
+            mcode_browser: { value: "runtime browser", kind: "application" },
+          },
+        });
+        expect(turns[0]?.params?.additionalContext).toEqual({
+          mcode_identity: { value: "runtime identity", kind: "application" },
+          mcode_browser: { value: "runtime browser", kind: "application" },
+        });
+        expect(turns[1]?.params?.additionalContext).toEqual({
+          caller: { value: "caller context", kind: "untrusted" },
+          mcode_identity: { value: "runtime identity", kind: "application" },
+          mcode_browser: { value: "runtime browser", kind: "application" },
+        });
+        expect(turns[2]?.params?.additionalContext).toEqual({
+          caller: { value: "caller context", kind: "untrusted" },
+          mcode_identity: { value: "runtime identity", kind: "application" },
+          mcode_browser: { value: "runtime browser", kind: "application" },
+        });
+      } finally {
+        await server.kill();
       }
-      if (req.method === "thread/start") {
-        startRequest = req;
-        return { result: { thread: { id: "thread-instructions-start" } } };
-      }
+    },
+  );
+
+  it("restores tagged developer messages only after main-thread context compaction", async () => {
+    const injections: RpcRequest[] = [];
+    const { child } = harnessFakeServer((req): Record<string, unknown> => {
+      if (req.method === "thread/start") return { result: { thread: { id: "main-thread" } } };
+      if (req.method === "thread/inject_items") injections.push(req);
       return { result: {} };
     });
     const server = new CodexAppServer({
-      cliPath: "codex",
-      workingDirectory: "/tmp",
-      getSpawnEnv: () => ({}),
-      developerInstructions: "mcode runtime",
+      cliPath: "codex", workingDirectory: "/tmp", getSpawnEnv: () => ({}),
+      instructionSections: [
+        { key: "mcode_identity", text: "runtime identity" },
+        { key: "mcode_browser", text: "runtime browser" },
+      ],
     });
+    const notify = (threadId: string, type: string) => child.stdout.write(JSON.stringify({
+      jsonrpc: "2.0", method: "item/completed", params: { threadId, item: { type } },
+    }) + "\n");
 
-    await server.start();
-
-    expect(startRequest?.params).toEqual(expect.objectContaining({
-      cwd: "/tmp",
-      developerInstructions: "configured rules\n\nmcode runtime",
-    }));
-    expect(configRequest?.params).toEqual({ includeLayers: false, cwd: "/tmp" });
-    await server.kill();
-  }, 10_000);
-
-  it("appends configured instructions to thread/resume in block order", async () => {
-    let configRequest: RpcRequest | undefined;
-    let resumeRequest: RpcRequest | undefined;
-    harnessFakeServer((req): Record<string, unknown> => {
-      if (req.method === "config/read") {
-        configRequest = req;
-        return { result: { config: { developer_instructions: "configured rules" } } };
+    try {
+      await server.start();
+      notify("child-thread", "contextCompaction");
+      notify("main-thread", "agentMessage");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(injections).toEqual([]);
+      const timeoutSpy = vi.spyOn(global, "setTimeout");
+      try {
+        notify("main-thread", "contextCompaction");
+        await vi.waitFor(() => expect(injections).toHaveLength(1));
+        expect(timeoutSpy.mock.calls.map(([, delay]) => delay)).toContain(10_000);
+      } finally {
+        timeoutSpy.mockRestore();
       }
-      if (req.method === "thread/resume") {
-        resumeRequest = req;
-        return { result: { thread: { id: "thread-instructions-resume" } } };
-      }
+      expect(injections[0]?.params).toEqual({
+        threadId: "main-thread",
+        items: [
+          { type: "message", role: "developer", content: [{ type: "input_text", text: "<mcode_identity>runtime identity</mcode_identity>" }] },
+          { type: "message", role: "developer", content: [{ type: "input_text", text: "<mcode_browser>runtime browser</mcode_browser>" }] },
+        ],
+      });
+    } finally {
+      await server.kill();
+    }
+  });
+
+  it("warns on failed compaction restore and continues the main turn", async () => {
+    const { child } = harnessFakeServer((req): Record<string, unknown> => {
+      if (req.method === "thread/start") return { result: { thread: { id: "main-thread" } } };
+      if (req.method === "thread/inject_items") return { error: { code: -32000, message: "restore unavailable" } };
+      if (req.method === "turn/start") return { result: { turn: { id: "next-turn" } } };
       return { result: {} };
     });
     const server = new CodexAppServer({
-      cliPath: "codex",
-      workingDirectory: "/tmp",
-      getSpawnEnv: () => ({}),
-      resumeThreadId: "thread-existing",
-      developerInstructions: "mcode runtime",
+      cliPath: "codex", workingDirectory: "/tmp", getSpawnEnv: () => ({}),
+      instructionSections: [{ key: "mcode_identity", text: "runtime identity" }],
     });
+    const completed: unknown[] = [];
+    server.on("notification", (notification: unknown) => completed.push(notification));
 
-    await server.start();
-
-    expect(resumeRequest?.params).toEqual(expect.objectContaining({
-      cwd: "/tmp",
-      threadId: "thread-existing",
-      developerInstructions: "configured rules\n\nmcode runtime",
-    }));
-    expect(configRequest?.params).toEqual({ includeLayers: false, cwd: "/tmp" });
-    await server.kill();
-  }, 10_000);
-
-  it("continues thread/start without an override when config/read fails", async () => {
-    let startRequest: RpcRequest | undefined;
-    harnessFakeServer((req): Record<string, unknown> => {
-      if (req.method === "config/read") return { error: { message: "config unavailable" } };
-      if (req.method === "thread/start") {
-        startRequest = req;
-        return { result: { thread: { id: "thread-instructions-fallback" } } };
-      }
-      return { result: {} };
-    });
-    const server = new CodexAppServer({
-      cliPath: "codex",
-      workingDirectory: "/tmp",
-      getSpawnEnv: () => ({}),
-      developerInstructions: "mcode runtime",
-    });
-
-    await expect(server.start()).resolves.toBeUndefined();
-
-    expect(startRequest?.params).not.toHaveProperty("developerInstructions");
-    expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
-      "Codex config/read failed; omitting developer instructions",
-      expect.objectContaining({ error: expect.stringContaining("config unavailable") }),
-    );
-    await server.kill();
-  }, 10_000);
-
-  it("continues thread/start without an override when config/read is malformed", async () => {
-    let startRequest: RpcRequest | undefined;
-    harnessFakeServer((req): Record<string, unknown> => {
-      if (req.method === "config/read") return { result: { config: { developer_instructions: 42 } } };
-      if (req.method === "thread/start") {
-        startRequest = req;
-        return { result: { thread: { id: "thread-instructions-malformed" } } };
-      }
-      return { result: {} };
-    });
-    const server = new CodexAppServer({
-      cliPath: "codex",
-      workingDirectory: "/tmp",
-      getSpawnEnv: () => ({}),
-      developerInstructions: "mcode runtime",
-    });
-
-    await expect(server.start()).resolves.toBeUndefined();
-
-    expect(startRequest?.params).not.toHaveProperty("developerInstructions");
-    expect(vi.mocked(logger.warn)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
-      "Codex config/read failed; omitting developer instructions",
-      expect.objectContaining({ error: expect.stringContaining("invalid response") }),
-    );
-    await server.kill();
-  }, 10_000);
-
-  it("reuses composed instructions when recoverable resume falls back to thread/start", async () => {
-    let configReadCount = 0;
-    let resumeRequest: RpcRequest | undefined;
-    let startRequest: RpcRequest | undefined;
-    harnessFakeServer((req): Record<string, unknown> => {
-      if (req.method === "config/read") {
-        configReadCount += 1;
-        return { result: { config: { developer_instructions: "configured rules" } } };
-      }
-      if (req.method === "thread/resume") {
-        resumeRequest = req;
-        return { error: { message: "no rollout found for thread id thread-existing" } };
-      }
-      if (req.method === "thread/start") {
-        startRequest = req;
-        return { result: { thread: { id: "thread-instructions-fallback" } } };
-      }
-      return { result: {} };
-    });
-    const server = new CodexAppServer({
-      cliPath: "codex",
-      workingDirectory: "/tmp",
-      getSpawnEnv: () => ({}),
-      resumeThreadId: "thread-existing",
-      developerInstructions: "mcode runtime",
-    });
-
-    await expect(server.start()).resolves.toBeUndefined();
-
-    expect(configReadCount).toBe(1);
-    expect(resumeRequest?.params).toEqual(expect.objectContaining({
-      developerInstructions: "configured rules\n\nmcode runtime",
-    }));
-    expect(startRequest?.params).toEqual(expect.objectContaining({
-      developerInstructions: "configured rules\n\nmcode runtime",
-    }));
-    await server.kill();
-  }, 10_000);
+    try {
+      await server.start();
+      child.stdout.write(JSON.stringify({
+        jsonrpc: "2.0", method: "item/completed",
+        params: { threadId: "main-thread", item: { type: "contextCompaction" } },
+      }) + "\n");
+      await vi.waitFor(() => expect(logger.warn).toHaveBeenCalledWith(
+        "Codex instruction restore after compaction failed",
+        expect.objectContaining({ threadId: "main-thread" }),
+      ));
+      child.stdout.write(JSON.stringify({
+        jsonrpc: "2.0", method: "turn/completed",
+        params: { threadId: "main-thread", turn: { id: "compacting-turn", status: "completed" } },
+      }) + "\n");
+      await vi.waitFor(() => expect(completed).toContainEqual(expect.objectContaining({
+        method: "turn/completed", params: { threadId: "main-thread", turn: { id: "compacting-turn", status: "completed" } },
+      })));
+      expect(server.isAlive).toBe(true);
+      await expect(server.sendTurn("continue")).resolves.toBe("next-turn");
+    } finally {
+      await server.kill();
+    }
+  });
 
   it("fails a required resume of a missing thread instead of starting a fresh thread", async () => {
     let startCount = 0;
@@ -644,34 +648,6 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     expect(classifyCodexLocalFailure(failure)).toEqual({ kind: "fatal", code: "session_resume_unavailable" });
     expect(startCount).toBe(0);
     expect(server.threadId).toBeNull();
-    await server.kill();
-  }, 10_000);
-
-  it.each([
-    { name: "missing", config: {} },
-    { name: "blank", config: { developer_instructions: "  " } },
-  ])("sends Mcode instructions alone when config is $name", async ({ config }) => {
-    let startRequest: RpcRequest | undefined;
-    harnessFakeServer((req): Record<string, unknown> => {
-      if (req.method === "config/read") return { result: { config } };
-      if (req.method === "thread/start") {
-        startRequest = req;
-        return { result: { thread: { id: `thread-instructions-${config}` } } };
-      }
-      return { result: {} };
-    });
-    const server = new CodexAppServer({
-      cliPath: "codex",
-      workingDirectory: "/tmp",
-      getSpawnEnv: () => ({}),
-      developerInstructions: "mcode runtime",
-    });
-
-    await expect(server.start()).resolves.toBeUndefined();
-
-    expect(startRequest?.params).toEqual(expect.objectContaining({
-      developerInstructions: "mcode runtime",
-    }));
     await server.kill();
   }, 10_000);
 

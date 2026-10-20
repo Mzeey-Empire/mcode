@@ -160,6 +160,12 @@ export type TurnInputPart =
   | { type: "skill"; name: string; path: string }
   | { type: "mention"; name: string; path: string };
 
+/** One tagged context value accepted by Codex app-server. */
+export interface AdditionalContextEntry {
+  value: string;
+  kind: "untrusted" | "application";
+}
+
 /** Parameters for the `turn/start` RPC method. */
 export interface TurnStartParams {
   threadId: string;
@@ -169,7 +175,7 @@ export interface TurnStartParams {
     model: string; reasoning_effort: ReasoningEffort | null; developer_instructions: null;
   } };
   /** Codex rejects an array here, including an empty array. */
-  additionalContext?: Record<string, string>;
+  additionalContext?: Record<string, AdditionalContextEntry>;
   /** Override model for this turn. */
   model?: string | null;
   /** Override approval policy for this turn and subsequent turns. */
@@ -215,6 +221,18 @@ export type TurnInterruptResult = Record<string, never>;
 export interface ThreadCompactStartParams { threadId: string }
 /** Result returned by the `thread/compact/start` RPC method. The compaction turn id arrives only on `turn/started`. */
 export type ThreadCompactStartResult = Record<string, never>;
+
+/** Parameters for restoring context messages after compaction. */
+export interface ThreadInjectItemsParams {
+  threadId: string;
+  items: {
+    type: "message";
+    role: "developer";
+    content: { type: "input_text"; text: string }[];
+  }[];
+}
+/** Result returned by the `thread/inject_items` RPC method. */
+export type ThreadInjectItemsResult = Record<string, never>;
 
 /** Input for one Codex turn: message parts sent with `turn/start`, or a request for native context compaction. */
 export type CodexTurnInput = TurnInputPart[] | { kind: "compact" };

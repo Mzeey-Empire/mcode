@@ -75,8 +75,8 @@ import { CompositeUsageSource } from "./usage/composite-usage-source.js";
 import { SessionRuntime } from "../session-runtime.js";
 import type { ClaudeProviderPorts, ProviderFactoryConfiguration } from "../../factory-types.js";
 import {
-  buildMcodeInstructionPlan,
-  renderMcodeInstructions,
+  buildMcodeInstructionSections,
+  renderMcodeInstructionSections,
 } from "@mcode/thread-orchestration";
 
 import type {
@@ -2128,10 +2128,9 @@ export class ClaudeProvider
   ): ClaudeSdkQueryOptions {
     const { sdk, mcodeToolkits } = staged.baseOptions;
     // The Browser toolkit is listed per session, but the lease is issued after attach and can fail.
-    const instructions = renderMcodeInstructions(
-      buildMcodeInstructionPlan({
-        threadControlGranted: mcodeToolkits.threadControl,
-        browserAutomationGranted: mcodeToolkits.browser && browserGrant !== null,
+    const instructions = renderMcodeInstructionSections(
+      buildMcodeInstructionSections({
+        toolkits: { threadControl: mcodeToolkits.threadControl, browser: mcodeToolkits.browser && browserGrant !== null },
       }),
     );
     const options = {
