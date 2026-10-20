@@ -44,7 +44,8 @@ export function resolveSourceDbPath(preferredSource) {
  *
  * Reuses the existing database when `refresh` is false and its marker carries the current
  * {@link SEED_FILTER_VERSION}; a missing or older marker is rebuilt, which discards local data in it.
- * Any failure throws and leaves the existing database untouched.
+ * A failure before the rename leaves the existing database untouched. The marker is written last, so a
+ * failure after the rename makes the next launch rebuild.
  *
  * @param {{
  *   repoRoot?: string,
@@ -88,7 +89,8 @@ export function ensureRuntimeDatabase(options = {}) {
 
 /**
  * Removes copies left by a build that was killed before its cleanup ran. They are full-size databases of
- * private history, so they must not accumulate. A copy another build still has open is skipped.
+ * private history, so they must not accumulate. A copy another build still holds open cannot be deleted
+ * on Windows (EBUSY or EPERM); it is skipped and removed by a later build.
  */
 function removeAbandonedBuilds(dbDir, targetPath) {
   const prefix = `.${NodePath.basename(targetPath)}.seed-`;
@@ -102,7 +104,6 @@ function removeAbandonedBuilds(dbDir, targetPath) {
   }
 }
 
-/** Copies the donor read-only, then prunes the copy; the donor is never opened for writing. */
 function buildFilteredCopy(sourcePath, temporaryPath, limits) {
   const donor = new Database(sourcePath, { readonly: true });
   try {

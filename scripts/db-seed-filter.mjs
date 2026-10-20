@@ -1,9 +1,9 @@
 /**
  * Prunes a copy of a real Mcode database down to history that is safe to open in a development runtime.
  *
- * Boot recovery acts on many rows: it resumes turns, kills recorded process trees, removes worktrees, and
- * drains queues. A development server must therefore never inherit that machinery, so everything not
- * explicitly listed as history is emptied.
+ * Server startup acts on many rows: resume schedules, queued turns, recorded terminal process trees,
+ * cleanup jobs, and snapshot ref pins. A development server must never inherit them, so everything not
+ * explicitly listed as history or ledger is emptied.
  */
 
 /** Bump when the filter changes what a seeded database may contain; older seeds are rebuilt on launch. */
@@ -19,7 +19,8 @@ export const DEFAULT_MAX_FAMILIES_PER_WORKSPACE = 20;
 export const LEDGER_TABLES = ["__drizzle_migrations", "mcode_schema_compatibility"];
 
 /**
- * The only application tables whose rows survive. Every other table is emptied, so a table added later is
+ * The only application tables whose rows survive pruning. Every table outside this list and
+ * {@link LEDGER_TABLES} is emptied, so a table added later is
  * denied until someone decides its rows are safe history. Rows are scoped by their thread_id and
  * workspace_id columns; a test checks each name against the migrated schema.
  */
@@ -246,8 +247,8 @@ function pruneHistory(db, history) {
 }
 
 /**
- * Applies each foreign key's own delete action to rows whose parent is already missing in the donor, so
- * the copy is consistent even where the donor was not. Repeats because deleting a row can orphan its children.
+ * Settles rows whose parent is gone, whether pruning removed it or the donor never had it: a nullable key
+ * without ON DELETE CASCADE is set to NULL, any other row is deleted. Repeats because a delete can orphan more rows.
  */
 function removeOrphans(db, history) {
   let changes;
@@ -267,7 +268,7 @@ function removeOrphans(db, history) {
   } while (changes > 0);
 }
 
-/** Removes every binding that would let the development runtime resume, clean up, or act on a real checkout. */
+/** Clears the session, worktree, PR, and cleanup bindings that would let the development runtime resume or clean up real work. */
 function sanitizeKeptRows(db) {
   const threadColumns = columnsOf(db, "threads").map((column) => column.name);
   const cleared = [

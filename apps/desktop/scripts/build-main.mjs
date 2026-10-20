@@ -44,9 +44,9 @@ await Promise.all([
     outfile: "dist/main/main.cjs",
     external: ["electron"],
     define: {
-      // The main bundle is only used in packaged builds. Setting NODE_ENV
-      // at build time ensures getMcodeDir() returns ~/.mcode instead of throwing
-      // even for module-level constants evaluated before app code runs.
+      // Packaged builds have no NODE_ENV at runtime, so bake it in: getMcodeDir()
+      // must resolve ~/.mcode even for module-level constants evaluated before
+      // app code runs. Dev launchers override the directory with MCODE_DATA_DIR.
       "process.env.NODE_ENV": '"production"',
     },
   }),

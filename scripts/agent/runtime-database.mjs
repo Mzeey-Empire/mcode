@@ -16,7 +16,7 @@ const DATABASE_MARKER = ".agent-runtime-database";
 const MARKER_HEADER = "agent-runtime-snapshot\n";
 const MARKER_PATTERN = /^agent-runtime-snapshot\nseed-filter-version=(\d+)\n$/;
 
-/** Version of the marker written before the seed was filtered; it vouches for an unfiltered copy of a real database. */
+/** Older launchers wrote the bare header next to an unfiltered copy; reading it as version 0 forces a rebuild. */
 const UNFILTERED_SEED_VERSION = 0;
 
 /** Rejects a linked runtime root before setup inspects or removes its contents. */
