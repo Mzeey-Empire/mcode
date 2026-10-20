@@ -261,8 +261,10 @@ function PanelTab({
     <div
       data-panel-tab={item.id}
       data-active={active ? "true" : undefined}
+      // The header row drags the window and only buttons opt out. The pill's padding and the gap beside the
+      // close button are drag area, so the OS drops hover as the pointer nears the X and the X hides.
       className={cn(
-        "group/tab relative flex h-8 items-center gap-2 rounded-control pr-3 pl-2.5 text-sm/5 font-medium transition-colors",
+        "window-no-drag group/tab relative flex h-8 items-center gap-2 rounded-control pr-3 pl-2.5 text-sm/5 font-medium transition-colors",
         active ? TAB_SIZING[appearance].active : TAB_SIZING[appearance].inactive,
         active ? "bg-selected text-ink" : "text-muted hover:bg-hover hover:text-ink",
       )}
