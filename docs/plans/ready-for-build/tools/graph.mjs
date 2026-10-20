@@ -8,8 +8,8 @@
 //   node graph.mjs issues       write issue bodies to ./out/<id>.md (needs ./issue-map.json for numbers, optional)
 //   node graph.mjs titles       print ticket titles as JSON (used by publish.mjs)
 //   node graph.mjs verify       list tickets whose Verify line names no command the gate can run
-//   node graph.mjs route <id>   print a ticket's lane, risk and design flag (build-ticket skill, step 4)
-//   node graph.mjs gate <id>    run a ticket's ledger proofs, Verify tests, typecheck and lint (step 7)
+//   node graph.mjs route <id>   print a ticket's lane, risk and design flag
+//   node graph.mjs gate <id>    run a ticket's ledger proofs, Verify tests, typecheck and lint
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -502,15 +502,6 @@ async function ledgerRun(ticket, { rgOnly }) {
   return { code };
 }
 
-// The build-ticket skill's route table (.agents/skills/build-ticket/SKILL.md, step 4).
-function routeRow({ lane, risk }) {
-  if (lane === "frontend") return risk === "high" ? "You write; the Codex review panel reviews." : "You write; the Codex reviewer reviews.";
-  if (lane === "backend") return risk === "high" ? "Codex writes; you review, then the second Claude reviewer." : "Codex writes; you review.";
-  if (lane === "cleanup") return "Codex writes; the gate's ledger proofs, then you, review.";
-  if (lane === "mixed") return "Codex writes the contract, server and adapter part, then you write the UI part. You review the Codex part; the Codex review panel reviews the UI part.";
-  return null;
-}
-
 function route(id) {
   const r = graph.routes?.[id];
   if (!(id in graph.blockers) || !r) {
@@ -519,7 +510,6 @@ function route(id) {
   }
   console.log(`${id}  lane: ${r.lane}  risk: ${r.risk}  design: ${r.design}`);
   console.log(`why: ${r.why}`);
-  console.log(`route: ${routeRow(r)}`);
   return 0;
 }
 
