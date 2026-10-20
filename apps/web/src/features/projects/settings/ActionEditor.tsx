@@ -14,15 +14,24 @@ import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { PlayGlyph } from "./PlayGlyph";
 import { ActionIconPicker } from "../actions/ActionIconPicker";
 import {
+  ACTION_OPTION_KEYS,
+  ACTION_OPTIONS,
   COMMAND_PLATFORMS,
+  optionDisabledReason,
   platformHasScript,
+  readOption,
   scriptOf,
-  withFlag,
+  withOption,
   withPlatformScript,
+  withPreviewUrl,
+  type ActionOptionKey,
   type CommandPlatform,
+  type SettingsIssueField,
 } from "./settings-model";
 
 /** How a row's Play button behaves, decided by the panel because it depends on the thread and the saved file. */
@@ -34,8 +43,7 @@ export interface ActionPlay {
 
 interface ActionEditorProps {
   readonly action: WorkspaceEnvironmentAction;
-  /** Validation copy for this action, shown under the command. */
-  readonly issue: string | null;
+  readonly issues: Partial<Record<SettingsIssueField, string>>;
   readonly play: ActionPlay;
   /** Whether a stored approval exists for this In repo action, which offers "Forget approval". */
   readonly approved: boolean;
@@ -50,29 +58,79 @@ interface ActionEditorProps {
   readonly onForgetApproval: () => void;
 }
 
-const TOGGLES = [
-  { flag: "runOnStartup", label: "Run on startup", hint: "When a thread starts in a worktree" },
-  { flag: "runOnCleanup", label: "Run on cleanup", hint: "Before the worktree is removed" },
-] as const;
-
-function ToggleRow({ label, hint, checked, onChange }: {
+function ToggleRow({ label, hint, checked, disabledReason, onChange }: {
   readonly label: string;
-  readonly hint: string;
+  readonly hint: string | null;
   readonly checked: boolean;
+  readonly disabledReason: string | null;
   readonly onChange: (checked: boolean) => void;
 }) {
-  return (
-    <label className="flex min-h-11 items-center justify-between gap-3">
+  const row = (
+    <label className={cn("flex min-h-11 items-center justify-between gap-3", disabledReason && "opacity-50")}>
       <span className="flex min-w-0 flex-col">
         <span className="text-body-small text-ink">{label}</span>
-        <span className="text-caption text-muted">{hint}</span>
+        {hint ? <span className="text-caption text-muted">{hint}</span> : null}
       </span>
-      <Switch checked={checked} onCheckedChange={onChange} />
+      <Switch checked={checked} disabled={disabledReason !== null} onCheckedChange={onChange} />
     </label>
+  );
+  if (!disabledReason) return row;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={row} />
+      <TooltipContent>{disabledReason}</TooltipContent>
+    </Tooltip>
   );
 }
 
-function CommandEditor({ action, issue, onChange }: Pick<ActionEditorProps, "action" | "issue" | "onChange">) {
+function PreviewUrlField({ action, issue, onChange }: {
+  readonly action: WorkspaceEnvironmentAction;
+  readonly issue: string | undefined;
+  readonly onChange: (action: WorkspaceEnvironmentAction) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 pb-1.5">
+      <Input
+        size="compact"
+        aria-label="Preview URL"
+        aria-invalid={issue ? true : undefined}
+        placeholder="http://localhost:3000"
+        spellCheck={false}
+        value={typeof action.openPreview === "string" ? action.openPreview : ""}
+        className="rounded-md bg-background px-2.5 font-mono text-xs"
+        onChange={(event) => onChange(withPreviewUrl(action, event.target.value))}
+      />
+      {issue ? <FieldError>{issue}</FieldError> : null}
+    </div>
+  );
+}
+
+function OptionRows({ action, issues, onChange }: Pick<ActionEditorProps, "action" | "issues" | "onChange">) {
+  const row = (key: ActionOptionKey) => (
+    <ToggleRow
+      key={key}
+      label={ACTION_OPTIONS[key].label}
+      hint={ACTION_OPTIONS[key].hint}
+      checked={readOption(action, key)}
+      disabledReason={optionDisabledReason(action, key)}
+      onChange={(checked) => onChange(withOption(action, key, checked))}
+    />
+  );
+  return (
+    <div className="flex flex-col gap-0.5">
+      {ACTION_OPTION_KEYS.map((key) =>
+        key === "openPreview" && readOption(action, key) ? (
+          <div key={key} className="flex flex-col">
+            {row(key)}
+            <PreviewUrlField action={action} issue={issues.openPreview} onChange={onChange} />
+          </div>
+        ) : row(key),
+      )}
+    </div>
+  );
+}
+
+function CommandEditor({ action, issue, onChange }: Pick<ActionEditorProps, "action" | "onChange"> & { readonly issue: string | undefined }) {
   const [platform, setPlatform] = useState<CommandPlatform>("default");
   return (
     <div className="flex flex-col gap-1.5">
@@ -130,7 +188,7 @@ function MoreMenu({ approved, onDuplicate, onRemove, onForgetApproval }: Pick<Ac
 /** The expanded editor of one action: icon, name, command per platform, and its run triggers. */
 export function ActionEditor({
   action,
-  issue,
+  issues,
   play,
   approved,
   focusName,
@@ -175,18 +233,8 @@ export function ActionEditor({
         </IconButton>
         <MoreMenu approved={approved} onDuplicate={onDuplicate} onRemove={onRemove} onForgetApproval={onForgetApproval} />
       </div>
-      <CommandEditor action={action} issue={issue} onChange={onChange} />
-      <div className="flex flex-col gap-0.5">
-        {TOGGLES.map(({ flag, label, hint }) => (
-          <ToggleRow
-            key={flag}
-            label={label}
-            hint={hint}
-            checked={action[flag] === true}
-            onChange={(checked) => onChange(withFlag(action, flag, checked))}
-          />
-        ))}
-      </div>
+      <CommandEditor action={action} issue={issues.command} onChange={onChange} />
+      <OptionRows action={action} issues={issues} onChange={onChange} />
     </div>
   );
 }

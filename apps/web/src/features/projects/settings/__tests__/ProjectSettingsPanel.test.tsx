@@ -369,4 +369,68 @@ describe("ProjectSettingsPanel", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Run Build" })).toBeDisabled());
   });
+
+  describe("action options", () => {
+    const savedActions = () =>
+      (transport.saveWorkspaceEnvironment.mock.calls[0] as [string, WorkspaceEnvironmentReadResult["document"]])[1].actions;
+
+    it("disables the wait row with its reason until Run on startup is on", async () => {
+      const user = userEvent.setup();
+      render(<ProjectSettingsPanel workspaceId="workspace-1" />);
+      await openAction(user, "Build");
+      const wait = screen.getByRole("switch", { name: /^Wait for it to finish/ });
+      expect(wait).toHaveAttribute("aria-disabled", "true");
+
+      await user.hover(wait.closest("label") ?? wait);
+      expect(await screen.findByText("Requires Run on startup")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("switch", { name: /^Run on startup/ }));
+      expect(screen.getByRole("switch", { name: /^Wait for it to finish/ })).not.toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("drops a released gate when Run on startup turns off, so no inert key is saved", async () => {
+      const user = userEvent.setup();
+      render(<ProjectSettingsPanel workspaceId="workspace-1" />);
+      await openAction(user, "Build");
+      await user.click(screen.getByRole("switch", { name: /^Run on startup/ }));
+      await user.click(screen.getByRole("switch", { name: /^Wait for it to finish/ }));
+      await user.click(screen.getByRole("switch", { name: /^Run on startup/ }));
+      await user.click(screen.getByRole("switch", { name: /^Run when the thread settles/ }));
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledOnce());
+      expect(savedActions()[0]).toEqual({ ...build, runOnSettle: true });
+    });
+
+    it("puts a non-localhost preview URL error on the URL field and keeps Save off", async () => {
+      const user = userEvent.setup();
+      render(<ProjectSettingsPanel workspaceId="workspace-1" />);
+      await openAction(user, "Build");
+      expect(screen.queryByLabelText("Preview URL")).toBeNull();
+      await user.click(screen.getByRole("switch", { name: /^Open preview automatically/ }));
+      await user.type(screen.getByLabelText("Preview URL"), "https://example.com");
+
+      expect(await screen.findByText("Use a localhost URL")).toBeInTheDocument();
+      expect(screen.getByLabelText("Preview URL")).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByLabelText("Command")).not.toHaveAttribute("aria-invalid");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+      await user.clear(screen.getByLabelText("Preview URL"));
+      await user.type(screen.getByLabelText("Preview URL"), "http://localhost:5173");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledOnce());
+      expect(savedActions()[0]).toEqual({ ...build, openPreview: "http://localhost:5173" });
+    });
+
+    it("shows a chip for each trigger that is on in the collapsed row", async () => {
+      transport.readWorkspaceEnvironment.mockResolvedValue(
+        result([{ ...build, runOnSettle: true, runOnCleanup: true, waitForExit: false }]),
+      );
+      render(<ProjectSettingsPanel workspaceId="workspace-1" />);
+      const row = await screen.findByRole("button", { name: /^Build/ });
+      expect(within(row).getByText("On settle")).toBeInTheDocument();
+      expect(within(row).getByText("On cleanup")).toBeInTheDocument();
+      expect(within(row).queryByText("On startup")).toBeNull();
+    });
+  });
 });

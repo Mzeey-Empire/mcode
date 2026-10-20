@@ -15,7 +15,7 @@ import { EnvironmentConflictBanner } from "./EnvironmentConflictBanner";
 import { GeneralSection } from "./GeneralSection";
 import { useProjectSettingsDraftStore, type ProjectSettingsDraft } from "./projectSettingsDraftStore";
 import { SettingsSaveBar } from "./SettingsSaveBar";
-import { duplicateAction, jsonEqual, newAction, validateDocument, type SettingsIssue } from "./settings-model";
+import { duplicateAction, jsonEqual, newAction, validateDocument, type SettingsIssue, type SettingsIssueField } from "./settings-model";
 import { useProjectSettings } from "./useProjectSettings";
 
 const STORAGE_OPTIONS = [
@@ -56,13 +56,17 @@ function StorageRow({ mode, locked, onChange }: {
   );
 }
 
-/** Splits issues into the one under each action and the first that belongs to the whole document. */
+/** Splits issues into the first under each action field and the first that belongs to the whole document. */
 function groupIssues(issues: readonly SettingsIssue[]) {
-  const byAction = new Map<string, string>();
+  const byAction = new Map<string, Partial<Record<SettingsIssueField, string>>>();
   let document: string | null = null;
   for (const issue of issues) {
-    if (issue.actionId === null) document ??= issue.message;
-    else if (!byAction.has(issue.actionId)) byAction.set(issue.actionId, issue.message);
+    if (issue.actionId === null) {
+      document ??= issue.message;
+      continue;
+    }
+    const fields = byAction.get(issue.actionId) ?? {};
+    byAction.set(issue.actionId, { [issue.field]: issue.message, ...fields });
   }
   return { byAction, document };
 }
@@ -217,7 +221,7 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
           expandedActionId={entry.expandedActionId}
           focusNameActionId={newActionId}
           approvedActionIds={approvedActionIds}
-          issueFor={(actionId) => issues.byAction.get(actionId) ?? null}
+          issuesFor={(actionId) => issues.byAction.get(actionId) ?? {}}
           playFor={playFor}
           onExpand={(actionId) => setExpanded(workspaceId, actionId)}
           onChange={(next) =>
