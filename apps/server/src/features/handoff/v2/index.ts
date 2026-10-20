@@ -2,7 +2,7 @@
 export type {
   HandoffKind,
   HandoffSourceItem,
-  HandoffMessageRow,
+  HandoffMessageInput,
   HandoffCoverage,
   HandoffBudgetInput,
   HandoffSelection,
@@ -19,8 +19,11 @@ export {
   handoffBudgetBytes,
 } from "./budget.js";
 
-/** Convert stored message fields into replayable items. */
+/** Convert normalized messages into replayable items. */
 export { handoffItemsFromMessages } from "./items.js";
+
+/** Load normalized history from the thread's persisted messages and tool records. */
+export { loadHandoffMessages } from "./message-adapter.js";
 
 /** Select and render history, or report an exhausted preamble budget. */
 export { HandoffBudgetExhaustedError, selectHandoffHistory } from "./select.js";

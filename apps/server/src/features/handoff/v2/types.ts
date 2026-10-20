@@ -6,21 +6,21 @@ export interface HandoffSourceItem {
   /** Message sequence; null only for the plan item. */
   readonly sequence: number | null;
   readonly role: "user" | "assistant";
-  readonly kind: "message" | "tool_activity" | "plan";
+  readonly kind: "message" | "tool_call" | "files_changed" | "plan";
   /** Provider that produced the item; null for user messages without one. */
   readonly provider: string | null;
   readonly text: string;
 }
 
-/** Stored message fields needed to extract replayable history. */
-export interface HandoffMessageRow {
+/** Normalized message and tool records needed to extract replayable history. */
+export interface HandoffMessageInput {
   readonly sequence: number;
   readonly role: string;
   readonly content: string;
   readonly provider: string | null;
-  readonly tool_calls: string | null;
-  readonly files_changed: string | null;
-  readonly is_internal: number;
+  readonly tools: readonly { readonly toolName: string; readonly inputSummary: string }[];
+  readonly filesChanged: readonly string[];
+  readonly isInternal: boolean;
 }
 
 /** Provenance and sequence range covered by a handoff. */

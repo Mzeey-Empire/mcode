@@ -15,13 +15,18 @@ export const MIN_RESPONSE_RESERVE = 16_000;
 
 /** Compute space for history after the new message and response reservations. */
 export function handoffBudgetBytes(input: HandoffBudgetInput): number {
-  const window = input.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  let window = input.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  if (!Number.isFinite(window) || window <= 0) window = DEFAULT_CONTEXT_WINDOW;
+  const nativeContextTokens = input.nativeContextTokens ?? 0;
+  if (!Number.isFinite(nativeContextTokens)) {
+    throw new RangeError("Native context tokens must be finite.");
+  }
   let current = Buffer.byteLength(JSON.stringify(input.userText), "utf8");
   for (const attachment of input.attachments) {
     current += attachment.kind === "image" ? IMAGE_ATTACHMENT_RESERVE : FILE_ATTACHMENT_RESERVE;
   }
   const reserve = Math.max(MIN_RESPONSE_RESERVE, Math.ceil(window / 4));
   // Counting one token per UTF-8 byte conservatively budgets across provider tokenizers.
-  const remaining = window - (input.nativeContextTokens ?? 0) - current - reserve;
+  const remaining = window - nativeContextTokens - current - reserve;
   return Math.max(0, Math.min(HANDOFF_TOKEN_CAP, HANDOFF_BYTE_CAP, remaining));
 }
