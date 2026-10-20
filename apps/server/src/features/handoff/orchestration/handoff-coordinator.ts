@@ -23,10 +23,10 @@ import { broadcast } from "../../../application/transport/push.js";
 import {
   buildHandoffContent,
   buildConversationReplay,
-  CODEX_INLINE_INPUT_MAX_CHARS,
   replayBudgetChars,
   resolveForkSnapshot,
 } from "../artifacts/handoff-builder.js";
+import { CODEX_INLINE_INPUT_MAX_CHARS } from "../v2/input-cap.js";
 import { HandoffPipelineService } from "./handoff-pipeline.js";
 import { HandoffStorage } from "../persistence/handoff-storage.js";
 import type { AttachmentSource } from "../persistence/handoff-storage.js";

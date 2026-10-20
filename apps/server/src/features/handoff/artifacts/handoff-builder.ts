@@ -23,9 +23,6 @@ export interface HandoffInput {
 
 const MAX_ASSISTANT_TEXT = 2000;
 
-/** Largest first-turn input Codex accepts inline, so seeded Codex prompts must fit inside it. */
-export const CODEX_INLINE_INPUT_MAX_CHARS = 14_000;
-
 /**
  * Rough char budget for the conversation replay injected into the provider.
  * Uses 15% of the model's *maximum* context window at ~4 chars/token, leaving
