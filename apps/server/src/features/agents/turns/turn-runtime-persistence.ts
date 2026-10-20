@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import type { Thread, TurnOutcome } from "@mcode/contracts";
+import type { ProviderId, Thread, TurnOutcome } from "@mcode/contracts";
 
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 
@@ -15,9 +15,9 @@ export interface TurnRuntimePersistence {
   /** Store a provider-produced compaction summary. */
   recordCompactionSummary(threadId: string, summary: string): Promise<void>;
   /** Store a provider cursor that can resume a later turn. */
-  saveProviderCursor(threadId: string, cursor: string): Promise<void>;
+  saveProviderCursor(threadId: string, providerId: ProviderId, cursor: string): Promise<void>;
   /** Remove a cursor that the provider has invalidated. */
-  clearProviderCursor(threadId: string): Promise<void>;
+  clearProviderCursor(threadId: string, providerId: ProviderId): Promise<void>;
   /** Store a terminal lifecycle state selected by the runtime owner. */
   setRuntimeStatus(threadId: string, status: "paused" | "interrupted"): Promise<void>;
   /** Record the real terminal outcome before applying the legacy runtime status. */
@@ -44,12 +44,12 @@ export class ThreadRuntimePersistence implements TurnRuntimePersistence {
     return this.threads.updateCompactSummary(threadId, summary);
   }
 
-  async saveProviderCursor(threadId: string, cursor: string): Promise<void> {
-    await this.threads.updateSdkSessionId(threadId, cursor);
+  async saveProviderCursor(threadId: string, providerId: ProviderId, cursor: string): Promise<void> {
+    await this.threads.updateSdkSessionId(threadId, providerId, cursor);
   }
 
-  async clearProviderCursor(threadId: string): Promise<void> {
-    await this.threads.clearSdkSessionId(threadId);
+  async clearProviderCursor(threadId: string, providerId: ProviderId): Promise<void> {
+    await this.threads.clearSdkSessionId(threadId, providerId);
   }
 
   async setRuntimeStatus(threadId: string, status: "paused" | "interrupted"): Promise<void> {

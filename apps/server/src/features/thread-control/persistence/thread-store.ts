@@ -12,7 +12,6 @@ import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, Reasoni
 import {
   canonicalAgentThreads,
   cleanupJobs,
-  messages,
   pullRequestReviewLinks,
   threads,
   turnResumeSchedules,
@@ -354,6 +353,15 @@ function buildSettingsSet(settings: ThreadSettings): Partial<typeof threads.$inf
     if (value !== undefined) set[column] = serializeBooleanOverride(value as boolean | null);
   }
   return set as Partial<typeof threads.$inferInsert>;
+}
+
+/**
+ * SQL value for `sdk_session_id` when the thread's provider is set to `provider`: kept when the provider
+ * is unchanged, cleared when it changes. The old provider's row in `thread_provider_sessions` stays, so
+ * the session id is never carried to a provider that did not create it.
+ */
+function keepSessionOnlyForProvider(provider: string) {
+  return sql<string | null>`case when ${threads.provider} = ${provider} then ${threads.sdkSessionId} else null end`;
 }
 
 /** Maximum active sibling paths considered during one worktree ownership decision. */
@@ -995,7 +1003,7 @@ export class ThreadStore {
     const now = new Date().toISOString();
     const result = runChanges(this.orm
       .update(threads)
-      .set({ provider, updatedAt: now })
+      .set({ provider, sdkSessionId: keepSessionOnlyForProvider(provider), updatedAt: now })
       .where(eq(threads.id, id))
       );
 
@@ -1015,38 +1023,41 @@ export class ThreadStore {
   }
 
   /**
-   * Store the SDK-assigned session ID for later resume and mirror it as the thread's current provider's
-   * session in `thread_provider_sessions`. Returns true if a row was changed.
+   * Record the session a provider reported for the thread. The per-provider row is always written under
+   * the given provider. The legacy `threads.sdk_session_id` column is the active provider's session, so
+   * it is mirrored only when that provider owns the thread now. Returns false when the thread is gone.
    */
-  updateSdkSessionId(id: string, sdkSessionId: string): boolean {
+  updateSdkSessionId(id: string, providerId: string, sdkSessionId: string): boolean {
     return this.db.transaction(() => {
-      const now = new Date().toISOString();
-      const result = runChanges(this.orm
-        .update(threads)
-        .set({ sdkSessionId, updatedAt: now })
-        .where(eq(threads.id, id))
-        );
-      if (result.changes === 0) return false;
-      this.recordProviderSession(id, sdkSessionId);
+      const activeProvider = this.providerOf(id);
+      if (activeProvider === null) return false;
+      if (activeProvider === providerId) {
+        runChanges(this.orm
+          .update(threads)
+          .set({ sdkSessionId, updatedAt: new Date().toISOString() })
+          .where(eq(threads.id, id)));
+      }
+      this.recordProviderSession(id, providerId, sdkSessionId);
       return true;
     })();
   }
 
   /**
-   * Clear the SDK session ID for a thread and forget only the current provider's session. Returns true
-   * if a row was changed.
+   * Forget the provider's session on the thread. The legacy column is cleared only when that provider
+   * owns the thread now; another provider's session is never touched. Returns false when the thread is gone.
    */
-  clearSdkSessionId(id: string): boolean {
+  clearSdkSessionId(id: string, providerId: string): boolean {
     return this.db.transaction(() => {
-      const provider = this.providerOf(id);
-      const now = new Date().toISOString();
-      const result = runChanges(this.orm
-        .update(threads)
-        .set({ sdkSessionId: null, updatedAt: now })
-        .where(eq(threads.id, id))
-        );
-      if (provider !== null) this.providerSessions.remove(id, provider);
-      return result.changes > 0;
+      const activeProvider = this.providerOf(id);
+      if (activeProvider === null) return false;
+      if (activeProvider === providerId) {
+        runChanges(this.orm
+          .update(threads)
+          .set({ sdkSessionId: null, updatedAt: new Date().toISOString() })
+          .where(eq(threads.id, id)));
+      }
+      this.providerSessions.remove(id, providerId);
+      return true;
     })();
   }
 
@@ -1055,19 +1066,13 @@ export class ThreadStore {
   }
 
   /**
-   * Mirror the thread's session under the provider that owns the thread now. A repeated cursor for the
-   * session already recorded keeps its watermark: the session has not seen the messages other
-   * providers added since, and a later switch back must still send them.
+   * Remember the provider's session. A repeated cursor for the session already recorded keeps its
+   * watermark. A new session starts at 0 because a cursor report proves nothing about coverage; only a
+   * completed turn does, and it advances the mark through `markSeen`. A stale low mark costs one resend.
    */
-  private recordProviderSession(threadId: string, sessionId: string): void {
-    const providerId = this.providerOf(threadId);
-    if (providerId === null) return;
+  private recordProviderSession(threadId: string, providerId: string, sessionId: string): void {
     if (this.providerSessions.find(threadId, providerId)?.sessionId === sessionId) return;
-    const latest = this.orm.select({ sequence: sql<number>`coalesce(max(${messages.sequence}), 0)` })
-      .from(messages)
-      .where(eq(messages.threadId, threadId))
-      .get();
-    this.providerSessions.upsert({ threadId, providerId, sessionId, lastSeenSequence: latest?.sequence ?? 0 });
+    this.providerSessions.upsert({ threadId, providerId, sessionId, lastSeenSequence: 0 });
   }
 
   /** Link a GitHub PR to a thread. Returns true if a row was changed. */
@@ -1102,10 +1107,13 @@ export class ThreadStore {
   updateSettings(id: string, settings: ThreadSettings): boolean {
     const set = buildSettingsSet(settings);
     if (Object.keys(set).length === 0) return false;
+    const sessionAfterProviderChange = settings.provider === undefined
+      ? {}
+      : { sdkSessionId: keepSessionOnlyForProvider(settings.provider) };
 
     const result = runChanges(this.orm
       .update(threads)
-      .set({ ...set, updatedAt: new Date().toISOString() })
+      .set({ ...set, ...sessionAfterProviderChange, updatedAt: new Date().toISOString() })
       .where(eq(threads.id, id))
       );
     return result.changes > 0;

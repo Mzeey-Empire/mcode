@@ -46,7 +46,7 @@ describe("thread forking - data layer", () => {
 
   it("child does not copy parent sdk_session_id", async () => {
     const parent = threadRepo.listByWorkspace("ws-1")[0];
-    await threadRepo.updateSdkSessionId(parent.id, "sdk-parent-session");
+    await threadRepo.updateSdkSessionId(parent.id, parent.provider, "sdk-parent-session");
     const child = await threadRepo.create("ws-1", "child", "direct", "main", true, "claude", {
       parentThreadId: parent.id,
       forkedFromMessageId: "msg-fork",

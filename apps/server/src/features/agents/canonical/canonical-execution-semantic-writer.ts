@@ -1192,6 +1192,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     }
     const fileEvidence = mutation.input.fileEvidence;
     return {
+      providerId: mutation.input.providerId,
+      messageSequence: message?.sequence ?? null,
       messageId: message?.id ?? null,
       settledMessage,
       outcome: mutation.outcome,

@@ -204,7 +204,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
   it("nulls sdk_session_id when a sdk_session_invalidated event arrives", async () => {
     const workspace = await workspaceRepo.create("test-ws", process.cwd());
     const thread = await threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
-    await threadRepo.updateSdkSessionId(thread.id, "poison-sid");
+    await threadRepo.updateSdkSessionId(thread.id, "claude", "poison-sid");
     expect(threadRepo.findById(thread.id)?.sdk_session_id).toBe("poison-sid");
 
     providerStub.emit("event", {
@@ -220,7 +220,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
   it("leaves sdk_session_id intact for an unrelated System subtype", async () => {
     const workspace = await workspaceRepo.create("test-ws", process.cwd());
     const thread = await threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
-    await threadRepo.updateSdkSessionId(thread.id, "keep-sid");
+    await threadRepo.updateSdkSessionId(thread.id, "claude", "keep-sid");
 
     providerStub.emit("event", {
       type: AgentEventType.System,

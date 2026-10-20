@@ -9,13 +9,13 @@ const sessionInput = z.object({
   sessionId: z.string().min(1),
   lastSeenSequence: z.number().int().nonnegative(),
 });
-const sequenceInput = z.tuple([z.string(), z.string(), z.number().int().nonnegative()]);
+const markSeenInput = z.tuple([z.string(), z.string(), z.string().min(1), z.number().int().nonnegative()]);
 const keyInput = z.tuple([z.string(), z.string()]);
 
 /** Allowlisted writes to per-provider thread sessions on the shared writer. */
 export const threadProviderSessionWriteOperations = {
   upsert: databaseWriteOperation("threadProviderSession.upsert", z.tuple([sessionInput]), z.void()),
-  markSeen: databaseWriteOperation("threadProviderSession.markSeen", sequenceInput, z.void()),
+  markSeen: databaseWriteOperation("threadProviderSession.markSeen", markSeenInput, z.void()),
   remove: databaseWriteOperation("threadProviderSession.remove", keyInput, z.void()),
 };
 

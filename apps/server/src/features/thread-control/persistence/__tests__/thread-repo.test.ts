@@ -571,9 +571,8 @@ describe("ThreadRepo per-provider sessions", () => {
   let sessions: ThreadProviderSessionStore;
   let threadId: string;
 
-  function addMessage(id: string, sequence: number): void {
-    db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence, timestamp) VALUES (?, ?, 'user', 'x', ?, ?)")
-      .run(id, threadId, sequence, new Date().toISOString());
+  function legacySessionId(): string | null {
+    return threadRepo.findById(threadId)?.sdk_session_id ?? null;
   }
 
   beforeEach(() => {
@@ -585,71 +584,144 @@ describe("ThreadRepo per-provider sessions", () => {
     threadRepo.updateProvider(threadId, "claude");
   });
 
-  it("keeps one row per provider and clearing one provider leaves the other", () => {
-    addMessage("m1", 1);
-    addMessage("m2", 2);
-    threadRepo.updateSdkSessionId(threadId, "claude-session");
-    addMessage("m3", 3);
+  it("writes the row under the reported provider and leaves the active provider's session alone", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+
+    threadRepo.updateSdkSessionId(threadId, "codex", "codex-session");
+
+    expect(legacySessionId()).toBe("claude-session");
+    expect(sessions.find(threadId, "claude")?.sessionId).toBe("claude-session");
+    expect(sessions.find(threadId, "codex")).toMatchObject({ sessionId: "codex-session", lastSeenSequence: 0 });
+  });
+
+  it("mirrors a cursor into the legacy column only for the provider that owns the thread", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+    expect(legacySessionId()).toBe("claude-session");
+
     threadRepo.updateProvider(threadId, "codex");
-    threadRepo.updateSdkSessionId(threadId, "codex-session");
+    threadRepo.updateSdkSessionId(threadId, "codex", "codex-session");
+    expect(legacySessionId()).toBe("codex-session");
+  });
 
-    expect(sessions.listForThread(threadId).map((row) => [row.providerId, row.sessionId, row.lastSeenSequence])).toEqual([
-      ["claude", "claude-session", 2],
-      ["codex", "codex-session", 3],
-    ]);
+  it("clearing one provider removes only its row, and the legacy column only when it owns the thread", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+    threadRepo.updateSdkSessionId(threadId, "codex", "codex-session");
 
-    threadRepo.clearSdkSessionId(threadId);
-
+    threadRepo.clearSdkSessionId(threadId, "codex");
     expect(sessions.find(threadId, "codex")).toBeNull();
     expect(sessions.find(threadId, "claude")?.sessionId).toBe("claude-session");
-    expect(threadRepo.findById(threadId)?.sdk_session_id).toBeNull();
+    expect(legacySessionId()).toBe("claude-session");
+
+    threadRepo.clearSdkSessionId(threadId, "claude");
+    expect(sessions.find(threadId, "claude")).toBeNull();
+    expect(legacySessionId()).toBeNull();
   });
 
-  it("does not move the watermark when the same session id is reported again", () => {
-    addMessage("m1", 1);
-    threadRepo.updateSdkSessionId(threadId, "claude-session");
-    addMessage("m2", 2);
-
-    threadRepo.updateSdkSessionId(threadId, "claude-session");
-
-    expect(sessions.find(threadId, "claude")?.lastSeenSequence).toBe(1);
+  it("reports false for a thread that does not exist", () => {
+    expect(threadRepo.updateSdkSessionId("missing", "claude", "s")).toBe(false);
+    expect(threadRepo.clearSdkSessionId("missing", "claude")).toBe(false);
   });
 
-  it("replaces the provider's row and watermark when its session id changes", () => {
-    addMessage("m1", 1);
-    threadRepo.updateSdkSessionId(threadId, "first");
-    addMessage("m2", 2);
+  it("keeps the watermark when the same session id is reported again", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+    sessions.markSeen(threadId, "claude", "claude-session", 4);
 
-    threadRepo.updateSdkSessionId(threadId, "second");
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
 
-    expect(sessions.find(threadId, "claude")).toMatchObject({ sessionId: "second", lastSeenSequence: 2 });
+    expect(sessions.find(threadId, "claude")?.lastSeenSequence).toBe(4);
   });
 
-  it("records watermark 0 for a thread with no messages", () => {
-    threadRepo.updateSdkSessionId(threadId, "claude-session");
+  it("restarts the watermark at 0 when the provider reports a new session", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude", "first");
+    sessions.markSeen(threadId, "claude", "first", 4);
 
+    threadRepo.updateSdkSessionId(threadId, "claude", "second");
+
+    expect(sessions.find(threadId, "claude")).toMatchObject({ sessionId: "second", lastSeenSequence: 0 });
+  });
+
+  it("clears the active session when the provider changes but keeps the old provider's row", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+
+    threadRepo.updateSettings(threadId, { provider: "codex" });
+
+    expect(legacySessionId()).toBeNull();
+    expect(sessions.find(threadId, "claude")?.sessionId).toBe("claude-session");
+  });
+
+  it("clears the active session when updateProvider changes the provider", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+
+    threadRepo.updateProvider(threadId, "codex");
+
+    expect(legacySessionId()).toBeNull();
+  });
+
+  it("keeps the active session when a settings write names the provider it already has", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+
+    threadRepo.updateSettings(threadId, { provider: "claude", model: "opus" });
+
+    expect(legacySessionId()).toBe("claude-session");
+  });
+
+  it("markSeen only moves forward", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+
+    sessions.markSeen(threadId, "claude", "claude-session", 5);
+    sessions.markSeen(threadId, "claude", "claude-session", 3);
+
+    expect(sessions.find(threadId, "claude")?.lastSeenSequence).toBe(5);
+  });
+
+  it("markSeen ignores a provider without a row and a row that names another session", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+
+    sessions.markSeen(threadId, "codex", "claude-session", 5);
+    sessions.markSeen(threadId, "claude", "some-other-session", 5);
+
+    expect(sessions.find(threadId, "codex")).toBeNull();
     expect(sessions.find(threadId, "claude")?.lastSeenSequence).toBe(0);
   });
 
-  it("markSeen only moves forward and ignores a provider without a row", () => {
-    addMessage("m1", 1);
-    threadRepo.updateSdkSessionId(threadId, "claude-session");
-
-    sessions.markSeen(threadId, "claude", 5);
-    sessions.markSeen(threadId, "claude", 3);
-    sessions.markSeen(threadId, "codex", 5);
-
-    expect(sessions.find(threadId, "claude")?.lastSeenSequence).toBe(5);
-    expect(sessions.find(threadId, "codex")).toBeNull();
-  });
-
   it("removes a thread's provider sessions when the thread is hard-deleted", () => {
-    threadRepo.updateSdkSessionId(threadId, "claude-session");
-    threadRepo.updateProvider(threadId, "codex");
-    threadRepo.updateSdkSessionId(threadId, "codex-session");
+    threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+    threadRepo.updateSdkSessionId(threadId, "codex", "codex-session");
 
     threadRepo.hardDelete(threadId);
 
     expect(sessions.listForThread(threadId)).toEqual([]);
+  });
+
+  describe("resolve", () => {
+    it("returns the legacy column for the active provider, with the row's watermark when it names the same session", () => {
+      threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+      sessions.markSeen(threadId, "claude", "claude-session", 6);
+
+      expect(sessions.resolve(threadId, "claude")).toEqual({ sessionId: "claude-session", lastSeenSequence: 6 });
+    });
+
+    it("lets the legacy column win and reports unknown coverage when the row names a different session", () => {
+      threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+      sessions.markSeen(threadId, "claude", "claude-session", 6);
+      db.prepare("UPDATE threads SET sdk_session_id = 'rewritten-by-older-build' WHERE id = ?").run(threadId);
+
+      expect(sessions.resolve(threadId, "claude")).toEqual({ sessionId: "rewritten-by-older-build", lastSeenSequence: 0 });
+    });
+
+    it("has no active session when the legacy column is empty, even if a row remains", () => {
+      threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+      db.prepare("UPDATE threads SET sdk_session_id = NULL WHERE id = ?").run(threadId);
+
+      expect(sessions.resolve(threadId, "claude")).toBeNull();
+    });
+
+    it("returns the row for a provider that does not own the thread", () => {
+      threadRepo.updateSdkSessionId(threadId, "codex", "codex-session");
+      sessions.markSeen(threadId, "codex", "codex-session", 2);
+
+      expect(sessions.resolve(threadId, "codex")).toEqual({ sessionId: "codex-session", lastSeenSequence: 2 });
+      expect(sessions.resolve(threadId, "cursor")).toBeNull();
+    });
   });
 });

@@ -136,6 +136,10 @@ export type ProjectedCommittedProviderEvent = Omit<
 
 /** Writer-confirmed terminal projection surfaced after its durable finish. */
 export interface ExecutionTerminalPersistenceReceipt {
+  /** Provider the turn ran on. Session bookkeeping must not infer it from the thread, which may have moved on. */
+  readonly providerId: string;
+  /** Sequence of the turn's own assistant message, unlike `settledMessage`, which is the thread's newest. */
+  readonly messageSequence: number | null;
   readonly messageId: string | null;
   readonly settledMessage: { readonly id: string; readonly sequence: number } | null;
   readonly outcome: TurnOutcome;
