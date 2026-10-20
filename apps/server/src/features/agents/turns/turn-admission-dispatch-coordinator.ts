@@ -951,12 +951,13 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private resumeIdentities(prepared: PreparedCommand) {
-    const { command, thread, providerId } = prepared;
-    if (command.forceFreshSession || !thread.sdk_session_id || providerId !== thread.provider) return [];
+    const { providerId } = prepared;
+    const sessionId = this.storedSessionId(prepared);
+    if (!sessionId) return [];
     return [{
       providerId,
       scope: providerId === "codex" ? "thread" as const : "session" as const,
-      value: thread.sdk_session_id,
+      value: sessionId,
       provenance: "native" as const,
     }];
   }
@@ -1204,7 +1205,13 @@ export class TurnAdmissionDispatchCoordinator {
     const nextSequence = prepared.command.persistedUserMessage?.sequence
       ?? this.messages.getLatestSequenceIncludingInternal(prepared.command.threadId);
     void attachments;
-    return !prepared.command.forceFreshSession && nextSequence > 1 ? prepared.thread.sdk_session_id ?? undefined : undefined;
+    return nextSequence > 1 ? this.storedSessionId(prepared) : undefined;
+  }
+
+  /** The thread's native session id, or undefined when this turn must not resume it (forced fresh, or another provider owns it). */
+  private storedSessionId({ command, thread, providerId }: PreparedCommand): string | undefined {
+    if (command.forceFreshSession || providerId !== thread.provider) return undefined;
+    return thread.sdk_session_id ?? undefined;
   }
 
   private isThreadControlEligible(prepared: PreparedCommand): boolean {
