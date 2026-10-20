@@ -96,7 +96,10 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   mutationReservationToken?: string;
   /** Request whose plan acceptance commits with canonical parent start. */
   planImplement?: { requestId: string };
-  setupSkip?: { reason: "plan-implement"; sourceThreadId: string };
+  setupSkip?: {
+    reason: Extract<import("@mcode/contracts").ThreadStartupStepDetail, { phase: "setup" }>["skipReason"] & ("plan-implement" | "delegation");
+    sourceThreadId: string;
+  };
   /** Resolves the authoritative first-turn handshake before provider I/O continues. */
   onTurnStarted?: (snapshot: TurnRuntimeSnapshot) => void;
   /** Reports whether admission produced a turn before provider dispatch. */

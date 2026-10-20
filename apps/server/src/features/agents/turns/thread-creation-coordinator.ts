@@ -43,11 +43,14 @@ export type CreateAndSendCommand = Omit<
   model?: string;
   permissionMode?: PermissionMode | "default";
   provider?: ProviderId;
+  /** Trusted task title; ordinary composer starts derive their title from content. */
+  title?: string;
 };
 
 /** Trusted feature metadata, never populated from create-and-send wire params. */
 export interface CreateAndSendOptions {
-  setupSkip?: { reason: "plan-implement"; sourceThreadId: string };
+  setupSkip?: SendMessageCommand["setupSkip"];
+  turn?: Required<Pick<SendMessageCommand, "sourceTurnId" | "sourceThreadId" | "sourceProviderId" | "originSourceTurnId">>;
   worktreeStart?: { commit: string };
   planImplement?: { requestId: string };
   messageId?: string;
@@ -300,7 +303,7 @@ export class ThreadCreationCoordinator {
       workspaceId, content, model, permissionMode, approvalReviewMode, mode, branch: initialBranch(command), startFromOrigin, pullRequestNumber, worktreeBranchMode,
       existingWorktreePath, existingWorktreeBaseBranch, attachments, reasoningLevel,
       provider, interactionMode, parentThreadId, forkedFromMessageId,
-      title: titleFrom(displayContent ?? content), maxBudgetUsd, maxTurns,
+      title: command.title ?? titleFrom(displayContent ?? content), maxBudgetUsd, maxTurns,
       contextWindowMode, thinking, codexFastMode, devinMode, displayContent, mentions,
       previewAnnotations, selectedTextComments, goalObjective, orchestrationMode,
     };
@@ -352,7 +355,7 @@ export class ThreadCreationCoordinator {
   private async skipImplementSetup(params: BranchedInitialTurnParams, startupId: string | undefined): Promise<void> {
     this.validateSetupSkip(params);
     if (startupId) await this.startups()?.skip(startupId, "setup", {
-      phase: "setup", skipReason: "plan-implement",
+      phase: "setup", skipReason: params.options?.setupSkip?.reason,
     });
     await this.cancelIfRequested(startupId);
   }
@@ -466,6 +469,7 @@ export class ThreadCreationCoordinator {
   ) {
     return await this.admissions.admitInitialAutomaticTurn({
       ...command,
+      ...params.options?.turn,
       messageId: params.options?.messageId,
       planImplement: params.options?.planImplement,
       threadId,
@@ -505,6 +509,7 @@ export class ThreadCreationCoordinator {
       ...(startupId ? { startupId } : {}),
       command: {
         ...command,
+        ...params.options?.turn,
         planImplement: params.options?.planImplement,
         messageId: params.options?.messageId,
         setupSkip: params.options?.setupSkip,

@@ -103,7 +103,7 @@ function rowToThreadIdentity(row: ThreadRow): Pick<Thread,
 function rowToThreadLifecycle(row: ThreadRow): Pick<Thread,
   "deleted_at" | "user_completed_at" | "scheduled_deletion_at" | "cleanup_state" | "cleanup_reason"
   | "last_context_tokens" | "context_window" | "parent_thread_id" | "forked_from_message_id"
-  | "last_compact_summary" | "has_file_changes"
+  | "last_compact_summary" | "has_file_changes" | "delegation_coordinator_thread_id"
 > {
   return {
     deleted_at: row.deletedAt,
@@ -114,6 +114,7 @@ function rowToThreadLifecycle(row: ThreadRow): Pick<Thread,
     last_context_tokens: row.lastContextTokens ?? null,
     context_window: row.contextWindow ?? null,
     parent_thread_id: row.parentThreadId,
+    delegation_coordinator_thread_id: row.delegationCoordinatorThreadId,
     forked_from_message_id: row.forkedFromMessageId,
     last_compact_summary: row.lastCompactSummary,
     has_file_changes: row.hasFileChanges === 1,
@@ -212,6 +213,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: input.lineage?.parentThreadId ?? null,
+    delegation_coordinator_thread_id: null,
     forked_from_message_id: input.lineage?.forkedFromMessageId ?? null,
     last_compact_summary: null,
     has_file_changes: false,
