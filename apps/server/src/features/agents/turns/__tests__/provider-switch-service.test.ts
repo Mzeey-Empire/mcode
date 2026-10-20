@@ -28,19 +28,19 @@ function plannedSwitch(): PlannedSwitch {
 
 function buildService() {
   const commitProviderSwitch = vi.fn(async () => true);
-  const writeSwitchAudit = vi.fn(async () => undefined);
+  const writeHandoffAudit = vi.fn(async () => undefined);
   const execute = vi.fn(async () => undefined);
   const service = new ProviderSwitchService(
     { commitProviderSwitch } as never,
     {} as never,
     {} as never,
     {} as never,
-    { writeSwitchAudit } as never,
+    { writeHandoffAudit } as never,
     {} as never,
     { retryErroredTurn: vi.fn() } as never,
     { execute } as never,
   );
-  return { service, commitProviderSwitch, writeSwitchAudit, execute };
+  return { service, commitProviderSwitch, writeHandoffAudit, execute };
 }
 
 function armedTicket(service: ProviderSwitchService, turnId: string): ProviderSwitchTicket {
@@ -78,7 +78,7 @@ describe("ProviderSwitchService arm lifecycle", () => {
   });
 
   it("saves the switch on a second try when the first write fails", async () => {
-    const { service, commitProviderSwitch, writeSwitchAudit, execute } = buildService();
+    const { service, commitProviderSwitch, writeHandoffAudit, execute } = buildService();
     commitProviderSwitch.mockRejectedValueOnce(new Error("database is locked"));
     const ticket = armedTicket(service, "turn-a");
 
@@ -86,12 +86,12 @@ describe("ProviderSwitchService arm lifecycle", () => {
     await ticket.armed?.committing;
 
     expect(commitProviderSwitch).toHaveBeenCalledTimes(2);
-    expect(writeSwitchAudit).toHaveBeenCalledTimes(1);
+    expect(writeHandoffAudit).toHaveBeenCalledTimes(1);
     expect(execute).not.toHaveBeenCalled();
   });
 
   it("tells the user in the timeline when the accepted switch cannot be saved", async () => {
-    const { service, commitProviderSwitch, writeSwitchAudit, execute } = buildService();
+    const { service, commitProviderSwitch, writeHandoffAudit, execute } = buildService();
     commitProviderSwitch.mockRejectedValue(new Error("database is locked"));
     const ticket = armedTicket(service, "turn-a");
 
@@ -99,7 +99,7 @@ describe("ProviderSwitchService arm lifecycle", () => {
     await ticket.armed?.committing;
 
     expect(commitProviderSwitch).toHaveBeenCalledTimes(2);
-    expect(writeSwitchAudit).not.toHaveBeenCalled();
+    expect(writeHandoffAudit).not.toHaveBeenCalled();
     expect(execute).toHaveBeenCalledTimes(1);
     expect(execute.mock.calls[0]?.[1]).toMatchObject({
       threadId: THREAD_ID,

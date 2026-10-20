@@ -18,7 +18,7 @@ import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { ThreadService } from "../../thread-control/index.js";
 import { MessageRepo } from "../../agents/conversation/persistence/message-repo.js";
 import { HandoffStorage } from "../../handoff/index.js";
-import { handoffInputCharacterCap, loadHandoffMessages, planSwitchHandoff } from "../../handoff/v2/index.js";
+import { targetInputCharacterCap, loadHandoffMessages, planSwitchHandoff } from "../../handoff/v2/index.js";
 import { ToolCallRecordRepo } from "../../agents/tools/persistence/tool-call-record-repo.js";
 import { GitWorktreeService } from "../git/git-worktree-service.js";
 import type { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
@@ -101,7 +101,7 @@ export class ThreadBranchingService {
     const handoff = this.planHandoff(input, fork);
     const created = await this.createChild(input, fork.messageId, lifecycle);
     const thread = await this.configureChild(created.thread, input, inherited, fork.messageId);
-    await this.handoffs.writeSwitchAudit(thread.id, {
+    await this.handoffs.writeHandoffAudit(thread.id, {
       kind: "fork",
       fromProvider: fork.parent.provider,
       toProvider: input.provider,
@@ -134,7 +134,7 @@ export class ThreadBranchingService {
       throughSequence: fork.message.sequence,
       resumeWatermark: null,
       contextWindow: fork.parent.context_window,
-      inputCharacterCap: handoffInputCharacterCap(this.providers.resolve(input.provider)),
+      inputCharacterCap: targetInputCharacterCap(this.providers.resolve(input.provider)),
       userText: input.content,
       attachments: (input.attachments ?? []).map((attachment) => ({
         kind: attachment.mimeType.startsWith("image/") ? "image" : "file",

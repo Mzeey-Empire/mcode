@@ -71,10 +71,11 @@ describe("HandoffStorage", () => {
     expect(await storage.readLatest("t_none")).toBeNull();
   });
 
-  it("keeps a switch audit out of readLatest and returns it from readLatestSwitch", async () => {
+  it("keeps a switch audit out of readLatest and returns it from readLatestHandoffAudit", async () => {
     await storage.write("t_child", makeArtifact({ ladderStep: "B" }));
     await new Promise((r) => setTimeout(r, 10));
-    await storage.writeSwitchAudit("t_child", {
+    await storage.writeHandoffAudit("t_child", {
+      kind: "switch",
       fromProvider: "claude",
       toProvider: "codex",
       coveredSequences: [1, 2],
@@ -85,7 +86,7 @@ describe("HandoffStorage", () => {
     });
 
     expect((await storage.readLatest("t_child"))?.meta.ladderStep).toBe("B");
-    const audit = await storage.readLatestSwitch("t_child");
+    const audit = await storage.readLatestHandoffAudit("t_child");
     expect(audit).toContain("schemaVersion: 2");
     expect(audit).toContain("kind: switch");
     expect(audit).toContain("fromProvider: claude");
@@ -95,9 +96,9 @@ describe("HandoffStorage", () => {
     expect(audit).toContain("the replayed history");
   });
 
-  it("readLatestSwitch returns null for a thread that never switched", async () => {
+  it("readLatestHandoffAudit returns null for a thread that never switched", async () => {
     await storage.write("t_child", makeArtifact({ ladderStep: "B" }));
-    expect(await storage.readLatestSwitch("t_child")).toBeNull();
+    expect(await storage.readLatestHandoffAudit("t_child")).toBeNull();
   });
 
   it("copyAttachments duplicates source files into the child's attachments dir", async () => {
