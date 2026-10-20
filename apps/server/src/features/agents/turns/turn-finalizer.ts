@@ -738,7 +738,7 @@ export class TurnFinalizer {
         content: input.content,
         sequence: nextSeq,
         model: input.model,
-        provider: this.canonicalSink?.loadThread(threadId)?.providerId ?? this.threadRepo.findById(threadId)?.provider ?? null,
+        provider: this.assistantProvider(threadId),
         attachments: input.attachments.length > 0 ? input.attachments : undefined,
         isInternal: stageInternal,
       });
@@ -759,6 +759,11 @@ export class TurnFinalizer {
       });
       return null;
     }
+  }
+
+  /** The provider that ran the turn: canonical state leads because the thread row can lag a pending switch. */
+  private assistantProvider(threadId: string): string | null {
+    return this.canonicalSink?.loadThread(threadId)?.providerId ?? this.threadRepo.findById(threadId)?.provider ?? null;
   }
 
   private assistantMaterializationInput(threadId: string): AssistantMaterializationInput {

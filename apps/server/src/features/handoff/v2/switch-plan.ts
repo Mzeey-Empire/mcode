@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import { handoffBudgetBytes } from "./budget.js";
 import { handoffItemsFromMessages } from "./items.js";
 import { selectHandoffHistory } from "./select.js";
@@ -79,7 +79,7 @@ export function planSwitchHandoff(input: SwitchHandoffInput): SwitchHandoffPlan 
     userText: input.userText,
     attachments: input.attachments,
   });
-  const boundary = input.boundary ?? randomBytes(8).toString("hex");
+  const boundary = input.boundary ?? NodeCrypto.randomBytes(8).toString("hex");
   const selection = selectHandoffHistory({
     items: handoffItemsFromMessages(rows, null),
     budgetBytes,
