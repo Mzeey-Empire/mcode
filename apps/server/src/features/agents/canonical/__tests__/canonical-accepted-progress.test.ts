@@ -1094,6 +1094,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
   });
 
   it("accepts a Devin session cursor and empty native completion through the execution writer", async () => {
+    // The legacy column mirrors a cursor only for the thread's own provider, so the thread must run on Devin.
+    db.prepare("UPDATE threads SET provider = 'devin' WHERE id = ?").run(execution.threadId);
     await send(1, start("devin"));
     holdWrites();
     expect((await send(2, { kind: "event", phase: "running", nativeCursor: null,
@@ -1107,6 +1109,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await expect.poll(() => progress.depth().pending).toBe(0);
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
     expect(db.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get(execution.threadId)).toEqual({ sdk_session_id: "devin-native-session" });
+    expect(db.prepare("SELECT provider_id, session_id, last_seen_sequence FROM thread_provider_sessions WHERE thread_id = ?").all(execution.threadId))
+      .toEqual([{ provider_id: "devin", session_id: "devin-native-session", last_seen_sequence: 0 }]);
   });
 
   it("accepts a generic full assistant message after narration and tools before the terminal event", async () => {

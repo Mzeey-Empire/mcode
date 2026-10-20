@@ -40,7 +40,7 @@ import type { TurnOutcome } from "../turns/turn-outcome.js";
 import { ProviderEventIngress } from "../../providers/composition/provider-event-ingress.js";
 import { ExecutionFileEvidenceCoordinator } from "../execution/execution-file-evidence-coordinator.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
-import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution/execution-worker-handler.js";
+import type { ExecutionTerminalPersistenceReceipt, ExecutionWorkCommand, ExecutionWorkerResult } from "../execution/execution-worker-handler.js";
 import { WorkerOwnedTurnRuntime } from "../execution/worker-owned-turn-runtime.js";
 import type { WorkerOwnedProviderEventBatch } from "../../providers/composition/provider-host-ports.js";
 import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
@@ -131,6 +131,8 @@ interface WorkerOwnedTurn {
   deliveryAttempt: number;
   terminalCommitted: boolean;
   persistedPublished: boolean;
+  /** Kept so coverage is credited after the release effects, not at publication. */
+  terminalPersistence?: ExecutionTerminalPersistenceReceipt;
   terminalOutcome?: TurnOutcome;
   releaseStarted: boolean;
   /** The release scheduled by the committed Ended; a provider can start its next turn before it finishes. */
@@ -902,6 +904,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const persisted = result.kind === "committed" ? result.terminalPersistence : undefined;
     if (!persisted || active.persistedPublished) return;
     active.persistedPublished = true;
+    active.terminalPersistence = persisted;
     publishTurnPersisted(active.execution, persisted);
   }
 
@@ -923,6 +926,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       if (this.workerTurns.get(execution.threadId) === active) this.workerTurns.delete(execution.threadId);
       this.trackSessionEnded(execution.threadId, execution.executionId);
       if (active.terminalOutcome === "completed") this.featureEffects.refreshAfterTurn(execution.threadId);
+      if (active.terminalPersistence) await this.requireWorkerRuntime().recordCommittedCoverage(execution, active.terminalPersistence);
       this.disarmTurnRetryWindow(execution.threadId);
       this.clearTurnEndedState(execution.threadId);
       this.settlePinsInBackground(execution);
