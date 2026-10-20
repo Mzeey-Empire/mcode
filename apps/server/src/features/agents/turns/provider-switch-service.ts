@@ -47,6 +47,9 @@ interface ArmedSwitch {
   accepted: boolean;
   resumeUnavailable: boolean;
   committing: Promise<void> | null;
+  /** Settles when the turn's terminal event commits, which can land after the runtime is released. */
+  readonly terminal: Promise<void>;
+  readonly settleTerminal: () => void;
   unsubscribe: () => void;
 }
 
@@ -182,12 +185,16 @@ export class ProviderSwitchService {
    */
   arm(ticket: ProviderSwitchTicket, input: { threadId: string; turnId: string; settings: ProviderSwitchSettings }): void {
     this.armedByThread.get(input.threadId)?.armed?.unsubscribe();
+    let settleTerminal: () => void = () => undefined;
+    const terminal = new Promise<void>((resolve) => { settleTerminal = resolve; });
     const armed: ArmedSwitch = {
       turnId: input.turnId,
       settings: input.settings,
       accepted: false,
       resumeUnavailable: false,
       committing: null,
+      terminal,
+      settleTerminal,
       unsubscribe: () => undefined,
     };
     armed.unsubscribe = subscribeCommittedCanonicalEvents((events) => this.observe(ticket, input.threadId, armed, events));
@@ -217,7 +224,10 @@ export class ProviderSwitchService {
       if (payload.type === "turn.errored" && payload.failure?.code === SESSION_RESUME_UNAVAILABLE_CODE) {
         armed.resumeUnavailable = true;
       }
-      if (armed.accepted && isTerminal(payload.type)) armed.unsubscribe();
+      if (isTerminal(payload.type)) {
+        armed.settleTerminal();
+        if (armed.accepted) armed.unsubscribe();
+      }
     }
   }
 
@@ -265,6 +275,8 @@ export class ProviderSwitchService {
     if (!armed) return;
     try {
       await armed.committing;
+      // Release can fire before the terminal event commits; the resume verdict rides on that event.
+      if (!armed.accepted) await armed.terminal;
     } finally {
       armed.unsubscribe();
     }
