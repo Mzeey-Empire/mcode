@@ -92,6 +92,56 @@ describe("update installation lifecycle", () => {
     });
   });
 
+  it("shares one install run between concurrent callers", async () => {
+    let releaseTeardown: (() => void) | undefined;
+    const teardown = vi.fn(() => new Promise<void>((resolve) => { releaseTeardown = resolve; }));
+    current.lifecycle.setBeforeInstallHook(teardown);
+
+    const first = current.lifecycle.installUpdate();
+    const second = current.lifecycle.installUpdate();
+    expect(second).toBe(first);
+    releaseTeardown?.();
+
+    await expect(first).resolves.toBe(true);
+    expect(teardown).toHaveBeenCalledOnce();
+    expect(current.updater.quitAndInstall).toHaveBeenCalledOnce();
+  });
+
+  it("allows a new install run once the previous one failed", async () => {
+    const teardown = vi.fn().mockRejectedValueOnce(new Error("server teardown failed")).mockResolvedValue(undefined);
+    current.lifecycle.setBeforeInstallHook(teardown);
+
+    await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+    markDownloaded(current.status);
+    await expect(current.lifecycle.installUpdate()).resolves.toBe(true);
+
+    expect(teardown).toHaveBeenCalledTimes(2);
+  });
+
+  describe("refused installs", () => {
+    const blocked = (reason: string) => ({
+      state: "error",
+      message: `Update installation blocked: ${reason}`,
+      failedOperation: "install",
+    });
+
+    it.each([
+      ["the updater is not running", () => current.lifecycle.cleanup()],
+      ["updates install only from the packaged app", () => { current.application.isPackaged = false; }],
+      ["no downloaded update is ready to install", () => current.status.publish({ state: "idle" })],
+    ])("publishes %s", async (reason, arrange) => {
+      const teardown = vi.fn().mockResolvedValue(undefined);
+      current.lifecycle.setBeforeInstallHook(teardown);
+      arrange();
+
+      await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+
+      expect(current.status.get()).toEqual(blocked(reason));
+      expect(teardown).not.toHaveBeenCalled();
+      expect(current.updater.quitAndInstall).not.toHaveBeenCalled();
+    });
+  });
+
   it("resets the manual guard after installer failure", async () => {
     current.updater.quitAndInstall.mockImplementationOnce(() => {
       throw new Error("installer crashed");
@@ -185,6 +235,25 @@ describe("update installation lifecycle", () => {
     await expect(install).resolves.toBe(false);
     expect(current.updater.quitAndInstall).not.toHaveBeenCalled();
     expect(current.application.removeListener).toHaveBeenCalledOnce();
+    expect(current.status.get()).toEqual({
+      state: "error",
+      message: "Update installation blocked: the updater was reset while installing, try again",
+      failedOperation: "install",
+    });
+  });
+
+  it("reports an interruption when the updater is reset while the installer starts", async () => {
+    current.updater.quitAndInstall.mockImplementation(() => {
+      current.lifecycle.cleanup();
+    });
+
+    await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+
+    expect(current.status.get()).toEqual({
+      state: "error",
+      message: "Update installation blocked: the updater was reset while installing, try again",
+      failedOperation: "install",
+    });
   });
 
   it("resets the injected hook and guards before a later registration", async () => {
