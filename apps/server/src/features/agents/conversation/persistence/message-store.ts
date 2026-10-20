@@ -151,6 +151,7 @@ function rowToMessage(row: MessageRow): Message {
     reply_to_message_id: row.replyToMessageId,
     quoted_text: row.quotedText,
     model: row.model,
+    ...(row.provider ? { provider: row.provider } : {}),
     outcome: (row.outcome ?? null) as TurnOutcome | null,
     outcomeExecutionId: row.outcomeExecutionId ?? null,
     systemNotice: parseSystemNotice(row.systemNotice),

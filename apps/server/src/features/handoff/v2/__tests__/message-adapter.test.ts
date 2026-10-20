@@ -34,7 +34,7 @@ it("loads verbatim thread history, provider and real tool records with an exclus
       messageId: "handoff-answer", toolName: "Read", inputSummary: "a.ts",
       outputSummary: "file body", status: "completed", sortOrder: 1,
     });
-    const input = { db: owned.db, messageRepo, toolCallRecordRepo, threadId: thread.id };
+    const input = { messageRepo, toolCallRecordRepo, threadId: thread.id };
     const full = loadHandoffMessages(input);
     expect(handoffItemsFromMessages(full, null)).toEqual([
       { sequence: 1, role: "user", kind: "message", provider: null, text: "  question\n" },
