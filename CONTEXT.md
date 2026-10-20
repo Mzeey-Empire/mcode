@@ -750,9 +750,9 @@ user typed.
 The thread keeps its provider, model, and session until the incoming provider
 accepts the turn. A target that fails first leaves the thread unchanged. Each
 provider keeps its own native session on the thread. Switching back resumes the
-returning provider's session and sends only the turns it missed, unless more
-than 20 turns have passed or the resume fails; then it starts a fresh session
-with the full history. The outgoing provider's session stays recorded for that return trip.
+returning provider's session and sends only the turns it missed, unless the
+gap exceeds the delta-turn limit (`MAX_DELTA_TURNS`) or the resume fails; then
+it starts a fresh session with the full history. The outgoing provider's session stays recorded for that return trip.
 Composer options the target cannot honour (Fast, reasoning level, context-window
 mode) are dropped and recorded in the audit `handoff.md`.
 
@@ -877,8 +877,9 @@ targets:
 - **New local thread** - child thread in Direct mode + handoff.
 
 **Switch provider** - a [[cross-provider switch]]: *this same thread* continues
-(id, history, worktree unchanged) and only the provider driving it swaps, with a
-handoff generated from the outgoing provider. Swap-back is the same process.
+(id, history, worktree unchanged) and only the provider driving it swaps. The
+incoming provider gets a handoff built from the stored history without calling
+the outgoing one. Swap-back is the same process.
 
 Handoff is always-on for both - it is the mechanism, not a standalone menu item.
 The split keeps "spawn a copy" (Fork) visually distinct from "change this

@@ -81,6 +81,8 @@ export function planSwitchHandoff(input: SwitchHandoffInput): SwitchHandoffPlan 
   });
   const boundary = input.boundary ?? NodeCrypto.randomBytes(8).toString("hex");
   const selection = selectHandoffHistory({
+    // No separate plan item: a switch is built from stored rows alone, so a plan the model posted as a
+    // message is already replayed as that message. Passing one here would duplicate it.
     items: handoffItemsFromMessages(rows, null),
     budgetBytes,
     coverage,

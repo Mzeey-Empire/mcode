@@ -140,6 +140,10 @@ export class ThreadRepo {
     return changed;
   }
 
+  /**
+   * Make `settings.provider` the thread's provider and point `sdk_session_id` at that provider's own
+   * session, in one writer transaction. Called once the incoming provider accepted a switching turn.
+   */
   commitProviderSwitch(...input: Parameters<ThreadStore["commitProviderSwitch"]>): Promise<ReturnType<ThreadStore["commitProviderSwitch"]>> {
     return this.writer.execute(threadWriteOperations.commitProviderSwitch, input);
   }

@@ -19,7 +19,14 @@ export interface ReconciledOptions {
   readonly dropped: readonly DroppedOption[];
 }
 
-/** The provider that owns each option outright; every other provider drops it. */
+/**
+ * The provider that owns each option outright; every other provider drops it.
+ *
+ * Hardcoded because the capability descriptors (`ProviderCapabilityName`) name features such as
+ * `plan` and `permissions`, not composer options, and per-model catalogs only describe reasoning
+ * levels. Nothing declares which provider honours Fast or context-window mode, so a new provider
+ * that adds one of these options must be listed here.
+ */
 const OPTION_OWNER: Partial<Record<keyof SwitchableOptions, ProviderId>> = {
   contextWindow: "claude",
   thinking: "claude",
