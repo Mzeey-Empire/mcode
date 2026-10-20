@@ -5,7 +5,6 @@ import {
   ThreadWaitResultSchema,
   type BrowserAutomationPublicOperation,
 } from "@mcode/contracts";
-import { MCODE_BROWSER_GUIDE } from "@mcode/thread-orchestration";
 import { BrowserAutomationSessionLease } from "../../browser-automation/access/browser-automation-session-lease.js";
 import type { BrowserAutomationPermissionCapability } from "../../browser-automation/access/credential-registry.js";
 import {
@@ -375,7 +374,7 @@ describe("McodeMcpServer sessions", () => {
     expect(harness.service.threadSend).toHaveBeenNthCalledWith(2, expect.objectContaining({ sourceThreadId: "thread-b", sourceToolCallId: "send-b" }), expect.anything());
   });
 
-  it("offers the Browser guide as initialize instructions only to a session that may inspect", async () => {
+  it("omits initialize instructions for sessions with and without Browser access", async () => {
     const harness = createHarness();
     const tokenA = harness.attach(SESSION_A);
     const tokenB = harness.attach(SESSION_B);
@@ -389,7 +388,7 @@ describe("McodeMcpServer sessions", () => {
     });
 
     expect(resultOf(await initialize(tokenA)).instructions).toBeUndefined();
-    expect(resultOf(await initialize(tokenB)).instructions).toBe(MCODE_BROWSER_GUIDE);
+    expect(resultOf(await initialize(tokenB)).instructions).toBeUndefined();
   });
 
   it.each(["2024-11-05", "2025-03-26"])("negotiates MCP protocol version %s", async (protocolVersion) => {

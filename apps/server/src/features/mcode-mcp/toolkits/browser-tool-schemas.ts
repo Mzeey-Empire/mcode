@@ -131,14 +131,42 @@ export function browserInputSchema(operation: BrowserAutomationPublicOperation):
 export function browserToolDescription(operation: BrowserAutomationPublicOperation): string {
   switch (operation) {
     case "open":
-      return "Create one agent-owned background tab and return its initial Browser observation. Use a fresh idempotency key; this does not reveal or focus the Browser panel.";
+      return [
+        "Use only the mcode MCP server for Mcode's shared Preview. Never initialize or use bundled generic Browser/Chrome/Node-REPL, or launch another browser or profile.",
+        "For Browser-only tasks, do not run shell/terminal commands or read local skills/files; keep narration minimal.",
+        "Create a sticky, agent-owned background tab with a fresh idempotency key, without revealing or focusing the Browser panel.",
+        "Returns tab metadata and an observationRef, not a semantic page observation. Use browser_tabs to select, claim, release, close, or finalize tabs.",
+      ].join(" ");
     case "inspect":
-      return "Inspect Browser readiness and return the canonical session-specific capabilities, constraints, tabs, observationRef, diagnostics, and recovery guidance.";
+      return [
+        "Authoritative for Browser readiness, tabs, capabilities, constraints, diagnostics, revision, observationRef, and recovery guidance.",
+        "Inspect before the first action unless browser_open returned sufficient snapshot evidence. Tool discovery does not prove readiness.",
+        "Request includeScreenshot only for visual evidence or when the user asks. Verify every success claim against current page evidence.",
+        "Use only mcode MCP browser tools; Browser-only tasks need no shell commands or local skills/files.",
+      ].join(" ");
     case "act":
-      return "Execute up to eight ordered Browser steps against the latest observationRef. Use a fresh idempotency key and stop at any failure, interruption, deadline, navigation, or invalidation boundary.";
+      return [
+        "Use a semanticId from the latest inspection, then role plus accessibleName. Use CSS or coordinates only when no semantic target exists. Never guess an ambiguous target.",
+        "Requires the latest observationRef, a fresh idempotencyKey, deadlineMs, and a non-empty steps array. Never send `steps: []`.",
+        'Canonical click: `{ "observationRef": "<latest>", "idempotencyKey": "<fresh>", "deadlineMs": 30000, "steps": [{ "operation": "click", "target": { "semanticId": "<from-latest-inspect>" } }] }`.',
+        "Required fields include wait durationMs, click target, and assert text/target/url. Use at most eight steps and 60 seconds.",
+        "Stop on failure, interruption, deadline, or invalidation. Verify non-navigation effects with an assert step or fresh inspection. Navigation and reload end the batch; inspect again before another mutation.",
+        "User input invalidates the observation. Stop or Take control interrupts execution. Take control holds the Browser until Hand back, even after a new message. Release held input, keep completed effects, and yield to the user.",
+        "Inspect the receipt and effect before retrying. An applied receipt proves the action effect, not the intended outcome. Effects do not roll back. Never replay mutations automatically.",
+        "Follow exactly one recovery instruction: inspect, reopen, wait, yield_to_user, or do_not_retry.",
+      ].join(" ");
     case "tabs":
-      return "Select, claim, release, close, or finalize Browser tabs using the latest observationRef and a fresh idempotency key. Release claimed user tabs instead of closing them.";
+      return [
+        "Select, claim, release, close, or finalize Browser tabs using the latest observationRef and a fresh idempotency key.",
+        "Select and claim require tabId; finalize requires dispositions; release and close may omit tabId.",
+        "Call browser_tabs finalize before replying. Release claimed user tabs instead of closing them. Close agent tabs by default.",
+        "For a tab the user wants open or usable, set disposition handoff and verify success.",
+      ].join(" ");
     case "evaluate":
-      return "Run privileged open-world page evaluation only when live negotiation advertises this tool. Use the same observationRef, idempotency, interruption, receipt, effect, and recovery rules as Browser mutations.";
+      return [
+        "Use browser_evaluate for privileged open-world page evaluation only when the live capability advertises it.",
+        "All browser_act and browser_inspect rules apply, including readiness, targeting, observationRef, idempotency, interruption, receipts, effects, recovery, and current evidence.",
+        "Use only mcode MCP browser tools, never another browser or profile. Browser-only tasks need no shell commands or local skills/files.",
+      ].join(" ");
   }
 }

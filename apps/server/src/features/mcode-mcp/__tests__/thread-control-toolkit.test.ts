@@ -116,13 +116,11 @@ describe("thread-control toolkit", () => {
     );
   });
 
-  it("lists the eleven tools in order, with the guides first and no listed output for worktree_list", () => {
+  it("lists nine operational tools in order with no listed output for worktree_list", () => {
     const { bound } = setup({ lease: "none" });
 
     const tools = bound?.tools.filter((tool) => tool.listed) ?? [];
     expect(tools.map((tool) => tool.name)).toEqual([
-      "mcode_browser_guide",
-      "thread_control_guide",
       "workspace_search",
       "worktree_list",
       "thread_create_batch",
@@ -148,7 +146,6 @@ describe("thread-control toolkit", () => {
       isError: true,
       content: [{ type: "text", text: DENIED }],
     });
-    await expect(call("thread_control_guide")).resolves.toMatchObject({ isError: true });
     expect(service.workspaceSearch).not.toHaveBeenCalled();
   });
 
@@ -311,23 +308,6 @@ describe("thread-control toolkit", () => {
 
     await expect(pending).resolves.toMatchObject({ structuredContent: { status: "success", timedOut: true } });
     expect(service.threadWait.mock.calls[0]?.[2]?.aborted).toBe(true);
-  });
-
-  it("serves each guide scoped to its own tools and rejects arguments", async () => {
-    const { call } = setup();
-
-    await expect(call("mcode_browser_guide")).resolves.toMatchObject({
-      structuredContent: { guide: expect.stringContaining("browser_inspect") },
-      content: [{ type: "text", text: expect.not.stringContaining("thread_create_batch") }],
-    });
-    await expect(call("thread_control_guide")).resolves.toMatchObject({
-      structuredContent: { guide: expect.stringContaining("thread_create_batch") },
-      content: [{ type: "text", text: expect.not.stringContaining("browser_status") }],
-    });
-    await expect(call("thread_control_guide", { extra: true })).resolves.toMatchObject({
-      isError: true,
-      content: [{ type: "text", text: "thread_control_guide accepts no arguments" }],
-    });
   });
 
   it("turns a service failure into a tool error the model can read", async () => {

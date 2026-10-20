@@ -130,11 +130,6 @@ function listedTool(tool: BoundTool): Tool {
   };
 }
 
-function joinInstructions(toolkits: readonly BoundToolkit[]): string | undefined {
-  const parts = toolkits.flatMap((toolkit) => (toolkit.instructions ? [toolkit.instructions] : []));
-  return parts.length > 0 ? parts.join("\n\n") : undefined;
-}
-
 /**
  * Serves one MCP endpoint per Mcode server, with a bearer token per Provider
  * session. Each request resolves the session, binds the toolkits it is granted
@@ -288,7 +283,7 @@ export class McodeMcpServer {
     const bound = this.bindToolkits(session);
     const server = new Server(
       { name: "mcode", version: SERVER_VERSION },
-      { capabilities: { tools: {} }, instructions: joinInstructions(bound) },
+      { capabilities: { tools: {} } },
     );
     const tools = bound.flatMap((toolkit) => toolkit.tools);
     server.setRequestHandler(ListToolsRequestSchema, () => ({
