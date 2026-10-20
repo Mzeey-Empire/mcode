@@ -91,6 +91,10 @@ if (shouldPrintVersion(process.argv)) {
   app.exit(0);
 }
 
+// The startup lock, server stderr log and capture spills write straight into the
+// data directory, and the logger no longer creates it at import.
+NodeFS.mkdirSync(getMcodeDir(), { recursive: true });
+
 // ---------------------------------------------------------------------------
 // Application state
 // ---------------------------------------------------------------------------
