@@ -62,6 +62,7 @@ import {
 import { appendSelectedTextComments, appendPlanComments } from "./selected-text-comment-append.js";
 import { ApprovalReviewPolicy, type ApprovalReviewDecision } from "./approval-review-policy.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
+import type { ProviderSwitchService, ProviderSwitchTicket } from "./provider-switch-service.js";
 
 
 /** Automatic setup dispatch contract exposed to the turn command facade. */
@@ -183,6 +184,8 @@ export interface PreparedTurnDispatch {
   readonly workerOwned?: true;
   /** Discard any pooled provider session first, so a fresh-session turn cannot inherit its native history. */
   readonly replaceSession?: true;
+  /** A switch whose history cannot fit the target: the turn ends with this error instead of reaching the provider. */
+  readonly dispatchRefusal?: Error;
 }
 
 /** The stable outcome of handling a complete send command. */
@@ -203,6 +206,8 @@ interface PreparedCommand {
   readonly commandEffect: CommandEffectReceipt | null;
   readonly content: string;
   readonly automaticAttachments: PersistedAttachmentData | null;
+  /** Present when this send changes the thread's provider; the change commits only once the target accepts the turn. */
+  readonly providerSwitch?: ProviderSwitchTicket;
 }
 
 interface PersistedAttachmentData {
@@ -239,6 +244,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly platform: NodeJS.Platform,
     private readonly parentStartOwner?: TurnParentStartOwner,
     private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
+    private readonly providerSwitch?: ProviderSwitchService,
   ) {}
 
   /** Admit one command and return an immutable package for the runtime owner. */
@@ -276,10 +282,11 @@ export class TurnAdmissionDispatchCoordinator {
     }
     let lease: TurnRuntimeLease | undefined;
     try {
-      lease = runtime.reserve(command);
+      lease = runtime.reserve(prepared.value.providerSwitch?.command ?? command);
       this.reserveCommandEffect(prepared.value.commandEffect);
       return await this.commit(prepared.value, lease, runtime);
     } catch (error) {
+      if (prepared.value.providerSwitch) this.providerSwitch?.discard(prepared.value.providerSwitch);
       await this.cleanupAutomaticDraftCopies(prepared.value);
       if (lease) {
         await runtime.abort(lease);
@@ -463,6 +470,17 @@ export class TurnAdmissionDispatchCoordinator {
     }
   }
 
+  /** The command to run, plus the ticket when its provider differs from the thread's and history exists to carry over. */
+  private openProviderSwitch(
+    command: SendMessageCommand,
+    currentProvider: string,
+  ): Pick<PreparedCommand, "command" | "providerSwitch"> {
+    const ticket = this.providerSwitch?.open(command, currentProvider);
+    // A thread with no earlier messages has no history or native session to protect, so its first provider choice applies at once.
+    if (!ticket || !this.hasEarlierMessages(command)) return { command };
+    return { command: ticket.command, providerSwitch: ticket };
+  }
+
   private sameWorktreePath(left: string, right: string): boolean {
     return normalizeWorktreePath(left, this.platform) === normalizeWorktreePath(right, this.platform);
   }
@@ -497,7 +515,7 @@ export class TurnAdmissionDispatchCoordinator {
       return {
         kind: "ready",
         value: {
-          command,
+          ...this.openProviderSwitch(command, thread.provider),
           thread,
           workspace,
           providerId,
@@ -519,10 +537,11 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private async commit(
-    prepared: PreparedCommand,
+    initial: PreparedCommand,
     lease: TurnRuntimeLease,
     runtime: TurnRuntimeAdmissionAuthority,
   ): Promise<PreparedTurnDispatch> {
+    const prepared = initial.providerSwitch ? await this.planProviderSwitch(initial) : initial;
     await this.preparePlanFile(prepared.command, prepared.providerId);
     prepared.plan = this.plans.classify(prepared.command);
     const cwd = this.resolveWorkingDirectory(prepared);
@@ -543,6 +562,24 @@ export class TurnAdmissionDispatchCoordinator {
       }
       throw error;
     }
+  }
+
+  private hasEarlierMessages(command: SendMessageCommand): boolean {
+    return command.persistedUserMessage
+      ? command.persistedUserMessage.sequence > 1
+      : this.messages.getLatestSequenceIncludingInternal(command.threadId) > 0;
+  }
+
+  /** Settle a switch's history and target session once the thread is reserved, so the previous turn's rows are final. */
+  private async planProviderSwitch(prepared: PreparedCommand): Promise<PreparedCommand> {
+    const ticket = prepared.providerSwitch;
+    if (!ticket || !this.providerSwitch) return prepared;
+    const { command } = prepared;
+    const throughSequence = command.persistedUserMessage
+      ? command.persistedUserMessage.sequence - 1
+      : this.messages.getLatestSequenceIncludingInternal(command.threadId);
+    await this.providerSwitch.plan(ticket, { thread: prepared.thread, throughSequence });
+    return { ...prepared, command: ticket.command };
   }
 
   private async preparePlanFile(command: SendMessageCommand, providerId: ProviderId): Promise<void> {
@@ -586,7 +623,15 @@ export class TurnAdmissionDispatchCoordinator {
       contextSeed: prepared.thread.last_context_tokens ?? 0,
       contextWindow: prepared.thread.context_window,
       ...(this.parentStartOwner ? { workerOwned: true as const } : {}),
+      ...this.sessionDirectives(prepared),
+    };
+  }
+
+  private sessionDirectives(prepared: PreparedCommand): Pick<PreparedTurnDispatch, "replaceSession" | "dispatchRefusal"> {
+    const refusal = prepared.providerSwitch?.plan?.refusal;
+    return {
       ...(prepared.command.forceFreshSession ? { replaceSession: true as const } : {}),
+      ...(refusal ? { dispatchRefusal: refusal } : {}),
     };
   }
 
@@ -974,9 +1019,20 @@ export class TurnAdmissionDispatchCoordinator {
 
   private async publishCommittedEffects(prepared: PreparedCommand, sourceTurnId: string): Promise<void> {
     this.publishPlanAnswer(prepared.command);
-    await this.persistThreadSettings(prepared);
+    if (prepared.providerSwitch) this.armProviderSwitch(prepared, sourceTurnId);
+    else await this.persistThreadSettings(prepared);
     await this.plans.admitted(prepared.command.threadId, prepared.plan);
-    void sourceTurnId;
+  }
+
+  /** The thread keeps its provider, model and session until the target accepts this turn. */
+  private armProviderSwitch(prepared: PreparedCommand, sourceTurnId: string): void {
+    const { command, providerSwitch } = prepared;
+    if (!providerSwitch) return;
+    this.providerSwitch?.arm(providerSwitch, {
+      threadId: command.threadId,
+      turnId: sourceTurnId,
+      settings: { ...this.threadSettings(command, prepared.providerId), model: command.model ?? "claude-sonnet-4-6" },
+    });
   }
 
   private publishPlanAnswer(command: SendMessageCommand): void {
@@ -1043,8 +1099,14 @@ export class TurnAdmissionDispatchCoordinator {
       prepared.command.selectedTextComments,
     );
     const wirePayload = prepared.providerId === "codex" ? providerPayload : await this.injectMentionFileContents(prepared, providerPayload);
-    return revertedPaths.length === 0 ? wirePayload
+    const withNotice = revertedPaths.length === 0 ? wirePayload
       : `Note from Mcode: the user reverted your earlier changes to: ${revertedPaths.join(", ")} (restored to their state before that turn).\n${wirePayload}`;
+    return this.withHandoffPreamble(prepared, withNotice);
+  }
+
+  /** A switching send carries the earlier conversation inline; the stored user message stays what was typed. */
+  private withHandoffPreamble(prepared: PreparedCommand, payload: string): string {
+    return `${prepared.providerSwitch?.plan?.handoff.preamble ?? ""}${payload}`;
   }
 
   private withPlanInstructions(prepared: PreparedCommand): string {
@@ -1209,7 +1271,9 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   /** The thread's native session id, or undefined when this turn must not resume it (forced fresh, or another provider owns it). */
-  private storedSessionId({ command, thread, providerId }: PreparedCommand): string | undefined {
+  private storedSessionId({ command, thread, providerId, providerSwitch }: PreparedCommand): string | undefined {
+    // A switch resumes the target's own session only when its plan kept one; the thread's session belongs to the old provider.
+    if (providerSwitch) return providerSwitch.plan?.resumeSessionId ?? undefined;
     if (command.forceFreshSession || providerId !== thread.provider) return undefined;
     return thread.sdk_session_id ?? undefined;
   }

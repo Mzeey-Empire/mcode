@@ -20,6 +20,7 @@ import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import { PlanQuestionService } from "../planning/plan-question-service.js";
 import { TurnSnapshotRepo } from "../turns/persistence/turn-snapshot-repo.js";
 import { TurnDiffService } from "../turns/turn-diff-service.js";
+import { ProviderSwitchService } from "../turns/provider-switch-service.js";
 import { TurnDiffRepo } from "../turns/persistence/turn-diff-repo.js";
 import { TurnSteerRuntimePort } from "../steering/turn-steer-runtime-port.js";
 import { TurnSteerService } from "../steering/turn-steer-service.js";
@@ -177,6 +178,7 @@ export function registerAgentServices(container: DependencyContainer): void {
     { useClass: TurnRecoveryService },
     { lifecycle: Lifecycle.Singleton },
   );
+  container.register(ProviderSwitchService, { useClass: ProviderSwitchService }, { lifecycle: Lifecycle.Singleton });
   container.register(TurnResumeScheduleStore, { useClass: TurnResumeScheduleStore }, { lifecycle: Lifecycle.Singleton });
   container.register(TurnResumeScheduler, {
     useFactory: instanceCachingFactory((c) => new TurnResumeScheduler(
@@ -295,6 +297,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve<HostRuntime>("HostRuntime").platform,
       c.resolve(WorkerOwnedTurnRuntime).owner,
       c.resolve(TurnResumeScheduler),
+      c.resolve(ProviderSwitchService),
     )),
   });
   container.register(TurnConversationProjectionService, { useClass: TurnConversationProjectionService }, { lifecycle: Lifecycle.Singleton });

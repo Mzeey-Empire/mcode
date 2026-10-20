@@ -6,6 +6,14 @@ import { agentStorageTestWriter, registerAgentStorageTestProducer } from "../../
 import { TurnDiffService } from "../../turns/turn-diff-service.js";
 import { TurnDiffRepo } from "../../turns/persistence/turn-diff-repo.js";
 import { container, Lifecycle } from "tsyringe";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { HandoffStorage } from "../../../handoff/persistence/handoff-storage.js";
+import { ThreadProviderSessionRepo } from "../../../thread-control/persistence/thread-provider-session-repo.js";
+import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
+import { ProviderSwitchService } from "../../turns/provider-switch-service.js";
+import type { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
 import type {
   AgentEvent,
   IProviderRegistry,
@@ -225,6 +233,7 @@ export function createAgentServiceForTest(
   eventPublication?: AgentEventPublicationRegistry,
   threadStartups?: ThreadStartupService,
   writer: ApplicationDatabaseWriter = agentStorageTestWriter(db),
+  providerSwitch: ProviderSwitchService = createTestProviderSwitch({ db, writer, threadRepo, messageRepo, providerRegistry }),
 ): AgentService {
   if (!parentDurability) throw new Error("Parent turn durability is required by the test harness");
   const turnDiffs = new TurnDiffService(new TurnDiffRepo(db, writer));
@@ -273,6 +282,9 @@ export function createAgentServiceForTest(
     workspaceEnvironmentService,
     fileService,
     "linux",
+    undefined,
+    undefined,
+    providerSwitch,
   );
   const conversationProjection = new TurnConversationProjectionService(
     threadRepo,
@@ -318,6 +330,7 @@ export function createAgentServiceForTest(
     ThreadControlMutationReservationService,
     mutationReservations ?? new ThreadControlMutationReservationService(),
   );
+  testContainer.registerInstance(ProviderSwitchService, providerSwitch);
   testContainer.registerInstance(ProviderEventIngress, eventIngress);
   testContainer.registerInstance(TURN_FEATURE_EFFECTS, featureEffects);
   testContainer.registerInstance(AgentRuntimeCommandPort, runtimeCommands);
@@ -352,6 +365,23 @@ export function createAgentServiceForTest(
   testGoalLifecycles.set(service, resolvedGoals);
   registerAgentStorageTestProducer(db, () => drainAgentServicePersistenceForTest(service));
   return service;
+}
+
+/** A switch service over the test database whose audit copies land in a throwaway directory. */
+export function createTestProviderSwitch({ db, writer, threadRepo, messageRepo, providerRegistry, recovery }: {
+  db: Database; writer: ApplicationDatabaseWriter; threadRepo: ThreadRepo; messageRepo: MessageRepo;
+  providerRegistry: IProviderRegistry; recovery?: Pick<TurnRecoveryService, "retryErroredTurn">;
+}): ProviderSwitchService {
+  const mcodeDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-switch-"));
+  return new ProviderSwitchService(
+    threadRepo,
+    new ThreadProviderSessionRepo(db, writer),
+    messageRepo,
+    new ToolCallRecordRepo(db, writer),
+    HandoffStorage.forTesting({ mcodeDirFn: () => mcodeDir }),
+    providerRegistry,
+    recovery ?? { retryErroredTurn: () => Promise.reject(new Error("No recovery service in this test")) },
+  );
 }
 
 function createTestFeatureEffects({ db, messageRepo, threadRepo, providerRegistry, writer, runtimeCommands, parentDurability, planTurns, goals, subagents, taskPersistence }: {
