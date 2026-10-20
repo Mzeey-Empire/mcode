@@ -1,9 +1,10 @@
 /** Print read-only SQLite schema and table statistics with Bun SQLite. */
 import * as NodeFS from "node:fs";
 import { Database } from "bun:sqlite";
-import { resolveCliDbPath } from "./resolve-cli-db-path.mjs";
+import { getRuntimePaths } from "./agent/runtime-contract.mjs";
+import { scriptRoot } from "./utils.mjs";
 
-const dbPath = process.env.MCODE_DB_PATH ?? resolveCliDbPath();
+const dbPath = process.env.MCODE_DB_PATH ?? getRuntimePaths(scriptRoot).dbPath;
 console.log(`Database : ${dbPath}`);
 if (!NodeFS.existsSync(dbPath)) {
   console.log("Status   : not found (start the server to create it)");

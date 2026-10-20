@@ -9,13 +9,14 @@ import { AttachmentService } from "../../features/attachments/storage/attachment
 import { createWsServer } from "../transport/ws-server.js";
 import { broadcast, broadcastTerminalData, maxBufferedAmount, onSessionChange, sessionCount } from "../transport/push.js";
 import { PortPush } from "../transport/port-push.js";
+import { resolveServerBuildStage } from "../transport/application-rpc.js";
+import { appDisplayName } from "@mcode/contracts";
 import { IpcPushServer, generateIpcPath } from "../transport/ipc-push-server.js";
 import { logger, getMcodeDir } from "@mcode/shared";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
-import * as NodeChildProcess from "node:child_process";
 import { GitPushService } from "../../features/projects/git/git-push-service.js";
 import { GitCommitService } from "../../features/projects/git/commits/git-commit-service.js";
 import { CommitMessageGenerator } from "../../features/projects/git/commits/commit-message-generator.js";
@@ -190,10 +191,9 @@ recordStartupCheckpoint("bootstrap entered");
 // title. On Windows, Task Manager pulls the display name from the binary's
 // VERSIONINFO instead — that's set at packaging time by the build-server-binary
 // helper, so process.title has no effect there but is harmless to set. The
-// "(dev)" suffix tags the standalone dev server so it is distinguishable from a
-// packaged instance in `ps` and the console window title.
-process.title =
-  process.env.NODE_ENV === "production" ? "Mcode Server" : "Mcode Server (dev)";
+// stage suffix tells a dev or nightly server from a stable one in `ps` and the
+// console window title.
+process.title = appDisplayName(resolveServerBuildStage()).replace(/^Mcode/, "Mcode Server");
 
 const PREFERRED_PORT = parseInt(process.env.MCODE_PORT ?? "19400", 10);
 const MAX_PORT_ATTEMPTS = 10;
@@ -287,47 +287,6 @@ function inspectCleanShutdownMarker(): void {
 
 inspectCleanShutdownMarker();
 recordStartupCheckpoint("configuration resolved and shutdown marker inspected");
-
-/** Standalone dev: populate MCODE_GIT_BRANCH / MCODE_GIT_TOPLEVEL before DB path selection. */
-function applyDevGitCheckoutEnv(): void {
-  if (process.env.NODE_ENV === "production") return;
-  const cwd = process.cwd();
-  if (!process.env.MCODE_GIT_BRANCH) {
-    try {
-      const stdout = NodeChildProcess.execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-        cwd,
-        timeout: 3000,
-        encoding: "utf8",
-        windowsHide: true,
-      });
-      const branch = stdout.trim();
-      if (branch && branch !== "HEAD") {
-        process.env.MCODE_GIT_BRANCH = branch;
-      }
-    } catch {
-      // Not a git checkout or git missing; keep shared mcode.db
-    }
-  }
-  if (!process.env.MCODE_GIT_TOPLEVEL) {
-    try {
-      const stdout = NodeChildProcess.execFileSync("git", ["rev-parse", "--show-toplevel"], {
-        cwd,
-        timeout: 3000,
-        encoding: "utf8",
-        windowsHide: true,
-      });
-      const top = stdout.trim();
-      if (top) {
-        process.env.MCODE_GIT_TOPLEVEL = top;
-      }
-    } catch {
-      // Not a git checkout or git missing
-    }
-  }
-}
-
-applyDevGitCheckoutEnv();
-recordStartupCheckpoint("checkout environment resolved");
 
 // Initialize DI container (PtyPidRegistry needs the data dir path at construction time)
 const container = await runStartupOrExit(() => setupContainer(getMcodeDir()), startupFailureTarget(getMcodeDir()));

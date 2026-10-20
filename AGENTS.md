@@ -88,7 +88,7 @@ Before calling frontend or feature work done, verify all applicable dimensions:
 
 ## Dev servers & Runtime contract
 
-- Run `bun install` before `bun run agent:setup`. Setup snapshots the local Mcode database into `.dev/db/app.sqlite`, creates or validates `.dev/fixture-repo`, and builds runtime bundles. Run it only when those artifacts are absent or stale.
+- Run `bun install` before `bun run agent:setup`. Setup creates an empty `.dev/db/app.sqlite` when none exists, creates or validates `.dev/fixture-repo`, and builds runtime bundles. Run it only when those artifacts are absent or stale.
 - Use `bun run --shell system agent:up` to start the server and web app in the background. Add `--desktop` for Electron. Then run `bun run agent:ready`. It reads `.dev/ports.json` and polls every started surface.
 
   ```powershell
@@ -107,7 +107,7 @@ Before calling frontend or feature work done, verify all applicable dimensions:
 
 ## Test data
 
-The local database snapshot can contain representative user projects. Product and runtime tests must select and mutate only `.dev/fixture-repo`. Do not copy, register, or modify user projects or the live Mcode database.
+The local database starts empty; the server registers `.dev/fixture-repo` as its only project. When a test needs realistic history, stop the runtime and run `bun run db:seed` to load a filtered copy of the real database, then `bun run agent:reset` before any screenshot or recording, because the copy holds real project names and conversations. Product and runtime tests must select and mutate only `.dev/fixture-repo`. Do not copy, register, or modify user projects or the live Mcode database.
 
 ## How it works
 

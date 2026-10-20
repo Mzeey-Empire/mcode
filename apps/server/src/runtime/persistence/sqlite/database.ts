@@ -5,7 +5,7 @@
 import { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { getMcodeDir, logger, resolveDbPath } from "@mcode/shared";
+import { getMcodeDir, logger } from "@mcode/shared";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { bootstrapDrizzle } from "./bootstrap-drizzle.js";
 import {
@@ -135,8 +135,6 @@ const WRITE_LOCK_WAIT_MS = 30_000;
 /** Options for a file-backed application database connection. */
 export interface OpenDatabaseOptions {
   dbPath?: string;
-  branch?: string;
-  gitToplevel?: string;
   migrationBackupSpace?: MigrationBackupSpaceOptions;
   /** How long to wait for another connection's write transaction before refusing as busy. Tests shorten it. */
   writeLockWaitMs?: number;
@@ -319,8 +317,7 @@ function openAndMigrate(databasePath: string, catalogue: MigrationCatalogue, opt
  * open refuse as `database-busy`. A database that needs no migration, including one a newer build
  * migrated whose compatibility floor allows this build, is opened with no backup and no ledger change.
  *
- * In non-production, a linked git worktree uses `<toplevel>/.mcode-local/mcode.db`; otherwise a
- * branch opts in to `dbs/dev-<hash>.db`. Resolution matches `resolveDbPath` from `@mcode/shared`.
+ * The path comes from `resolveDatabasePath`.
  */
 export function openDatabase(opts?: OpenDatabaseOptions): Database {
   const resolvedPath = resolveDatabasePath(opts);
@@ -332,12 +329,12 @@ export function openDatabase(opts?: OpenDatabaseOptions): Database {
   return openAndMigrate(resolvedPath, catalogue, opts);
 }
 
-/** Resolve the application database filename without opening a writable connection. */
+/**
+ * Resolve the application database filename without opening a writable connection:
+ * the explicit option, then `MCODE_DB_PATH`, then `mcode.db` in the data directory.
+ */
 export function resolveDatabasePath(opts?: OpenDatabaseOptions): string {
-  return opts?.dbPath ?? process.env.MCODE_DB_PATH ?? resolveDbPath(getMcodeDir(), {
-    branch: opts?.branch ?? process.env.MCODE_GIT_BRANCH,
-    gitToplevel: opts?.gitToplevel ?? process.env.MCODE_GIT_TOPLEVEL,
-  });
+  return opts?.dbPath ?? process.env.MCODE_DB_PATH ?? NodePath.join(getMcodeDir(), "mcode.db");
 }
 
 /**

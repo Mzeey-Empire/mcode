@@ -8,10 +8,7 @@ describe("Test process data-dir isolation (#290)", () => {
     expect(process.env.MCODE_DATA_DIR).toBeTruthy();
   });
 
-  it("getMcodeDir() resolves to a test-scoped path, NOT ~/.mcode or ~/.mcode-dev", () => {
-    const dir = getMcodeDir();
-    const home = NodeOS.homedir();
-    expect(dir).not.toBe(NodePath.join(home, ".mcode"));
-    expect(dir).not.toBe(NodePath.join(home, ".mcode-dev"));
+  it("getMcodeDir() resolves to a test-scoped path, NOT ~/.mcode", () => {
+    expect(getMcodeDir()).not.toBe(NodePath.join(NodeOS.homedir(), ".mcode"));
   });
 });

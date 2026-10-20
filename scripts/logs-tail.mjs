@@ -4,12 +4,12 @@
  * Press Ctrl+C to exit.
  */
 import * as NodePath from 'node:path';
-import * as NodeOS from 'node:os';
 import * as NodeFS from 'node:fs';
 import * as NodeReadline from 'node:readline';
+import { getRuntimePaths } from './agent/runtime-contract.mjs';
+import { scriptRoot } from './utils.mjs';
 
-const dataDir = process.env.MCODE_DATA_DIR
-  ?? NodePath.join(NodeOS.homedir(), process.env.NODE_ENV === 'production' ? '.mcode' : '.mcode-dev');
+const dataDir = process.env.MCODE_DATA_DIR ?? getRuntimePaths(scriptRoot).devDir;
 const _d = new Date();
 const today = `${_d.getFullYear()}-${String(_d.getMonth() + 1).padStart(2, '0')}-${String(_d.getDate()).padStart(2, '0')}`;
 const logPath = NodePath.join(dataDir, 'logs', `mcode.log.${today}`);

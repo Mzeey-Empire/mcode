@@ -1,27 +1,31 @@
 /**
  * Centralized Mcode data directory resolution.
- * Reads the MCODE_DATA_DIR environment variable, falling back to
- * `~/.mcode` (production) or `~/.mcode-dev` (development).
+ * Dev runtimes get their directory from the launcher through `MCODE_DATA_DIR`
+ * (`<repo>/.dev`); only production builds fall back to `~/.mcode`.
  */
 
 import * as NodeCrypto from "node:crypto";
-import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 /**
  * Resolve the absolute path to the Mcode data directory.
- * Prefers the `MCODE_DATA_DIR` env var when set, otherwise falls back
- * to `~/.mcode` (production) or `~/.mcode-dev` (development).
  *
- * The dir name is evaluated at call time (not import time) so that
- * callers can set NODE_ENV before the first invocation.
+ * Returns `MCODE_DATA_DIR` when set, otherwise `~/.mcode` when `NODE_ENV` is
+ * `production`. Any other process must be started by a launcher that provides
+ * the directory, so a missing value throws instead of silently touching a
+ * location shared with other checkouts.
+ *
+ * `NODE_ENV` is read at call time (not import time) so that callers can set it
+ * before the first invocation.
  */
 export function getMcodeDir(): string {
   if (process.env.MCODE_DATA_DIR) return process.env.MCODE_DATA_DIR;
-  const dirName =
-    process.env.NODE_ENV !== "production" ? ".mcode-dev" : ".mcode";
-  return NodePath.join(NodeOS.homedir(), dirName);
+  if (process.env.NODE_ENV === "production") return NodePath.join(NodeOS.homedir(), ".mcode");
+  throw new Error(
+    "MCODE_DATA_DIR is not set. Start Mcode with `bun run dev`, `bun run dev:desktop`, or " +
+      "`bun run --shell system agent:up` so state stays under the checkout's .dev directory.",
+  );
 }
 
 /**
@@ -33,44 +37,4 @@ export function spillWorkspaceDirSegment(workspaceId: string): string {
   if (t.length === 0) return "unknown";
   if (/^[a-zA-Z0-9_-]{1,80}$/.test(t)) return t;
   return NodeCrypto.createHash("sha256").update(t).digest("hex").slice(0, 24);
-}
-
-/**
- * Returns true when `repoRoot/.git` is a file, meaning this checkout is a linked git worktree
- * rather than the primary repository directory.
- */
-export function isLinkedGitWorktree(repoRoot: string): boolean {
-  const gitPath = NodePath.join(repoRoot, ".git");
-  try {
-    return NodeFS.lstatSync(gitPath).isFile();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Resolve the SQLite database file path.
- *
- * In non-production, if `gitToplevel` points at a linked worktree (a `.git` pointer file rather
- * than a directory), returns `<gitToplevel>/.mcode-local/mcode.db` so each worktree keeps its DB inside the checkout.
- *
- * Otherwise in non-production with a branch name, returns `<mcodeDir>/dbs/dev-<hash>.db`.
- * Fallback: `<mcodeDir>/mcode.db`.
- */
-export function resolveDbPath(
-  mcodeDir: string,
-  opts?: { branch?: string; gitToplevel?: string },
-): string {
-  const isProduction = process.env.NODE_ENV === "production";
-  const gitToplevel = opts?.gitToplevel?.trim();
-  if (!isProduction && gitToplevel && isLinkedGitWorktree(gitToplevel)) {
-    return NodePath.join(gitToplevel, ".mcode-local", "mcode.db");
-  }
-
-  const branch = opts?.branch?.trim();
-  if (isProduction || !branch) {
-    return NodePath.join(mcodeDir, "mcode.db");
-  }
-  const hash = NodeCrypto.createHash("sha256").update(branch).digest("hex").slice(0, 12);
-  return NodePath.join(mcodeDir, "dbs", `dev-${hash}.db`);
 }

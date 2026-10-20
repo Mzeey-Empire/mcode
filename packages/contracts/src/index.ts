@@ -1626,3 +1626,6 @@ export {
   describeRefusal,
 } from "./startup-failure.js";
 export type { StartupRefusal, StartupFailureFile } from "./startup-failure.js";
+
+export { BuildStageSchema, appDisplayName, isNightlyVersion, resolveBuildStage } from "./build-stage.js";
+export type { BuildStage } from "./build-stage.js";

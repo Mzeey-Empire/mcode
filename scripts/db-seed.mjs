@@ -1,16 +1,25 @@
 #!/usr/bin/env bun
 /**
- * Safely snapshot a real production or dev database into the test/worktree sandbox.
- * Uses SQLite VACUUM INTO for online, corruption-safe single-file replication.
+ * Creates the worktree's development database: empty by default, or on request a filtered copy of the real one.
+ *
+ * The donor is only read through `VACUUM INTO`. The copy is pruned to recent, stopped history in
+ * {@link filterSeedDatabase}, then renamed over `.dev/db/app.sqlite`, so a failed build never touches the
+ * database a runtime may already be using.
  */
-import * as NodeFS from "node:fs";
 import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { Database } from "bun:sqlite";
 
-import { getRuntimePaths, resolveRepoRoot } from "./agent/runtime-contract.mjs";
+import {
+  markRuntimeDatabase,
+  prepareRuntimeDatabaseSnapshot,
+  readRuntimeDatabaseSeed,
+} from "./agent/runtime-database.mjs";
+import { resolveRepoRoot } from "./agent/runtime-contract.mjs";
+import { filterSeedDatabase } from "./db-seed-filter.mjs";
 
 /**
  * Resolves default source database path (`~/.mcode/mcode.db` or `~/.mcode-dev/mcode.db`).
@@ -31,182 +40,152 @@ export function resolveSourceDbPath(preferredSource) {
 }
 
 /**
- * Resolves target database path for the current repository worktree.
+ * Makes sure the worktree has a development database, starting an empty one when needed.
  *
- * @param {string} [preferredTarget]
- * @param {string} [repoRoot]
- * @returns {string}
+ * Real data never enters by default, so screenshots and recordings cannot leak it. Reuses a database
+ * the launchers created, empty or seeded through {@link seedRuntimeDatabase}, unless `refresh` is set.
+ * Anything else, including copies from an older seed, is replaced by an empty database.
+ *
+ * @param {{ repoRoot?: string, refresh?: boolean }} [options]
+ * @returns {{ status: "reused" | "created", targetPath: string }}
  */
-export function resolveTargetDbPath(preferredTarget, repoRoot = resolveRepoRoot()) {
-  if (preferredTarget) return NodePath.resolve(preferredTarget);
-
-  const runtime = getRuntimePaths(repoRoot);
-  if (NodeFS.existsSync(runtime.devDir)) {
-    return runtime.dbPath;
+export function ensureRuntimeDatabase(options = {}) {
+  const repoRoot = options.repoRoot ?? resolveRepoRoot();
+  const paths = prepareRuntimeDatabaseSnapshot(repoRoot);
+  if (!options.refresh && readRuntimeDatabaseSeed(repoRoot) !== null) {
+    return { status: "reused", targetPath: paths.dbPath };
   }
-
-  return NodePath.join(repoRoot, ".mcode-local", "mcode.db");
+  buildAndPublish(repoRoot, paths, "empty", (temporaryPath) => new Database(temporaryPath).close(true));
+  return { status: "created", targetPath: paths.dbPath };
 }
 
 /**
- * Safely deletes old target SQLite files and WAL/SHM artifacts.
+ * Replaces the worktree's development database with a filtered copy of the real one, for work that
+ * needs realistic history. Opt-in only: the copy holds real project names and conversations.
  *
- * @param {string} targetPath
+ * A failure before the rename leaves the existing database untouched. The marker is written last, so a
+ * failure after the rename makes the next launch start empty.
+ *
+ * @param {{
+ *   repoRoot?: string,
+ *   source?: string,
+ *   maxWorkspaces?: number,
+ *   maxFamiliesPerWorkspace?: number,
+ * }} [options]
+ * @returns {{ targetPath: string, sourcePath: string, kept: { workspaces: number, threads: number } }}
  */
-function cleanTargetFiles(targetPath) {
+export function seedRuntimeDatabase(options = {}) {
+  const repoRoot = options.repoRoot ?? resolveRepoRoot();
+  const paths = prepareRuntimeDatabaseSnapshot(repoRoot);
+  const sourcePath = resolveSourceDbPath(options.source);
+  if (!NodeFS.existsSync(sourcePath)) throw new Error(`Source database not found at: ${sourcePath}`);
+  let kept;
+  buildAndPublish(repoRoot, paths, "filtered", (temporaryPath) => {
+    kept = buildFilteredCopy(sourcePath, temporaryPath, options);
+  });
+  return { targetPath: paths.dbPath, sourcePath, kept };
+}
+
+function buildAndPublish(repoRoot, paths, seed, build) {
+  NodeFS.mkdirSync(paths.dbDir, { recursive: true });
+  removeAbandonedBuilds(paths.dbDir, paths.dbPath);
+  const temporaryPath = NodePath.join(paths.dbDir, `.${NodePath.basename(paths.dbPath)}.seed-${NodeCrypto.randomUUID()}`);
   try {
-    NodeFS.rmSync(targetPath, { force: true });
-    NodeFS.rmSync(`${targetPath}-wal`, { force: true });
-    NodeFS.rmSync(`${targetPath}-shm`, { force: true });
-  } catch (err) {
-    if (err && (err.code === "EBUSY" || err.code === "EPERM")) {
+    build(temporaryPath);
+    publishDatabase(temporaryPath, paths.dbPath);
+    markRuntimeDatabase(repoRoot, seed);
+  } finally {
+    NodeFS.rmSync(temporaryPath, { force: true });
+    NodeFS.rmSync(`${temporaryPath}-journal`, { force: true });
+  }
+}
+
+/**
+ * Removes copies left by a build that was killed before its cleanup ran. They are full-size databases of
+ * private history, so they must not accumulate. A copy another build still holds open cannot be deleted
+ * on Windows (EBUSY or EPERM); it is skipped and removed by a later build.
+ */
+function removeAbandonedBuilds(dbDir, targetPath) {
+  const prefix = `.${NodePath.basename(targetPath)}.seed-`;
+  for (const name of NodeFS.readdirSync(dbDir)) {
+    if (!name.startsWith(prefix)) continue;
+    try {
+      NodeFS.rmSync(NodePath.join(dbDir, name), { force: true });
+    } catch (error) {
+      if (!error || (error.code !== "EBUSY" && error.code !== "EPERM")) throw error;
+    }
+  }
+}
+
+function buildFilteredCopy(sourcePath, temporaryPath, limits) {
+  const donor = new Database(sourcePath, { readonly: true });
+  try {
+    donor.run(`VACUUM INTO '${temporaryPath.replaceAll("'", "''")}'`);
+  } finally {
+    donor.close(true);
+  }
+
+  const copy = new Database(temporaryPath);
+  try {
+    const kept = filterSeedDatabase(copy, limits);
+    // Deleting rows leaves their bytes in free pages, so rebuild the file to leave no private history behind.
+    copy.run("VACUUM");
+    return kept;
+  } finally {
+    copy.close(true);
+  }
+}
+
+/**
+ * Renames the finished copy over the target. The target is never removed first, so a rename that fails
+ * (for example because a running server holds it) leaves the old database as it was.
+ */
+function publishDatabase(temporaryPath, targetPath) {
+  try {
+    NodeFS.renameSync(temporaryPath, targetPath);
+  } catch (error) {
+    if (error && (error.code === "EBUSY" || error.code === "EPERM")) {
       throw new Error(
         `Target database is locked by a running process (${targetPath}). Stop the server ('bun run agent:down') before seeding.`,
       );
     }
-    throw err;
+    throw error;
   }
+  // A leftover WAL from the replaced database must not be replayed into the new file.
+  NodeFS.rmSync(`${targetPath}-wal`, { force: true });
+  NodeFS.rmSync(`${targetPath}-shm`, { force: true });
 }
 
 /**
- * Executes VACUUM INTO to replicate database to target.
- *
- * @param {string} sourcePath
- * @param {string} targetPath
- */
-function executeVacuumInto(sourcePath, targetPath) {
-  const sourceDb = new Database(sourcePath, { readonly: true });
-  try {
-    const escapedTarget = targetPath.replace(/'/g, "''");
-    sourceDb.run(`VACUUM INTO '${escapedTarget}'`);
-  } finally {
-    sourceDb.close(true);
-  }
-}
-
-/**
- * Reads row counts for key tables in seeded database.
- *
- * @param {string} targetPath
- * @returns {Record<string, number>}
- */
-function collectTableStats(targetPath) {
-  const stats = {};
-  if (!NodeFS.existsSync(targetPath)) return stats;
-
-  const targetDb = new Database(targetPath, { readonly: true });
-  try {
-    for (const table of ["workspaces", "threads", "messages", "settings"]) {
-      try {
-        const stmt = targetDb.prepare(`SELECT COUNT(*) as count FROM ${table}`);
-        const row = stmt.get();
-        stmt.finalize();
-        if (row && typeof row.count === "number") {
-          stats[table] = row.count;
-        }
-      } catch {
-        // Table may not exist in older schemas
-      }
-    }
-  } finally {
-    targetDb.close(true);
-  }
-
-  return stats;
-}
-
-/**
- * Snapshots the source SQLite database into the target location via VACUUM INTO.
- *
- * @param {{ source?: string, target?: string, repoRoot?: string }} [options]
- * @returns {{ sourcePath: string, targetPath: string, stats: Record<string, number> }}
- */
-export function seedDatabase(options = {}) {
-  const repoRoot = options.repoRoot ?? resolveRepoRoot();
-  const sourcePath = resolveSourceDbPath(options.source);
-  const targetPath = resolveTargetDbPath(options.target, repoRoot);
-
-  if (!NodeFS.existsSync(sourcePath)) {
-    throw new Error(`Source database not found at: ${sourcePath}`);
-  }
-
-  NodeFS.mkdirSync(NodePath.dirname(targetPath), { recursive: true });
-  const temporaryTargetPath = NodePath.join(
-    NodePath.dirname(targetPath),
-    `.${NodePath.basename(targetPath)}.seed-${NodeCrypto.randomUUID()}`,
-  );
-  try {
-    executeVacuumInto(sourcePath, temporaryTargetPath);
-    cleanTargetFiles(targetPath);
-    NodeFS.renameSync(temporaryTargetPath, targetPath);
-  } finally {
-    NodeFS.rmSync(temporaryTargetPath, { force: true });
-  }
-  const stats = collectTableStats(targetPath);
-
-  return { sourcePath, targetPath, stats };
-}
-
-/**
- * Seeds a development database without interrupting startup when the snapshot is unavailable.
- *
- * @param {{ source?: string, target?: string, repoRoot?: string, preserveExistingTarget?: boolean }} [options]
- */
-export function seedDatabaseForStartup(options = {}) {
-  const targetPath = resolveTargetDbPath(options.target, options.repoRoot);
-
-  if (options.preserveExistingTarget && targetDatabaseExists(targetPath)) {
-    console.warn("[database] Seed skipped: the development database already exists.");
-    return;
-  }
-
-  try {
-    seedDatabase(options);
-  } catch (error) {
-    console.warn(`[database] Seed skipped: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-function targetDatabaseExists(targetPath) {
-  return [targetPath, `${targetPath}-wal`, `${targetPath}-shm`]
-    .some((path) => NodeFS.existsSync(path));
-}
-
-/**
- * Parses CLI arguments for source and target options.
+ * Parses CLI arguments for the donor and the filter limits.
  *
  * @param {string[]} args
- * @returns {{ source?: string, target?: string }}
+ * @returns {{ source?: string, maxWorkspaces?: number, maxFamiliesPerWorkspace?: number }}
  */
 function parseCliArgs(args) {
-  let source;
-  let target;
-
+  const parsed = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--source" && args[i + 1]) {
-      source = args[++i];
-    } else if (args[i] === "--target" && args[i + 1]) {
-      target = args[++i];
+    const value = args[i + 1];
+    if (args[i] === "--source" && value) {
+      parsed.source = value;
+      i++;
+    } else if (args[i] === "--projects" && value) {
+      parsed.maxWorkspaces = Number(value);
+      i++;
+    } else if (args[i] === "--threads-per-project" && value) {
+      parsed.maxFamiliesPerWorkspace = Number(value);
+      i++;
     }
   }
-
-  return { source, target };
+  return parsed;
 }
 
 if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href) {
-  const { source, target } = parseCliArgs(process.argv.slice(2));
-
   try {
-    const { sourcePath, targetPath, stats } = seedDatabase({ source, target });
-    console.log(`Source DB : ${sourcePath}`);
-    console.log(`Target DB : ${targetPath}`);
-    console.log("Database seeded successfully via VACUUM INTO.");
-    if (Object.keys(stats).length > 0) {
-      console.log("Row counts:");
-      for (const [table, count] of Object.entries(stats)) {
-        console.log(`  ${table.padEnd(12)}: ${count}`);
-      }
-    }
+    const result = seedRuntimeDatabase(parseCliArgs(process.argv.slice(2)));
+    console.log(`Source DB : ${result.sourcePath}`);
+    console.log(`Target DB : ${result.targetPath}`);
+    console.log(`Kept      : ${result.kept.workspaces} workspaces, ${result.kept.threads} threads`);
   } catch (err) {
     console.error(`Failed to seed database: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);

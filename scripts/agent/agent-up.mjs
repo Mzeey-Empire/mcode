@@ -25,7 +25,7 @@ import { stopPid } from "./runtime-processes.mjs";
 import { stopRecordedRuntimePids } from "./agent-down.mjs";
 import { MANAGED_DESKTOP_SESSION_FILE, startManagedDesktop, stopManagedDesktop } from "./managed-desktop.mjs";
 import { isFixtureRepo } from "./fixture-repo.mjs";
-import { hasRuntimeDatabaseMarker } from "./runtime-database.mjs";
+import { hasRuntimeDatabaseMarker, readRuntimeDatabaseSeed } from "./runtime-database.mjs";
 import {
   prepareRuntimeDirectories as prepareSharedRuntimeDirectories,
   resolveElectronBinary as resolveSharedElectronBinary,
@@ -486,4 +486,9 @@ if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]
   const repoArg = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
   const repoRoot = repoArg ? NodePath.resolve(repoArg) : resolveRepoRoot();
   await agentUp(repoRoot, parseAgentUpOptions(process.argv.slice(2)));
+  if (readRuntimeDatabaseSeed(repoRoot) === "filtered") {
+    console.warn(
+      "The local database holds a filtered copy of your real data. Keep it out of screenshots and recordings; 'bun run agent:reset' empties it.",
+    );
+  }
 }

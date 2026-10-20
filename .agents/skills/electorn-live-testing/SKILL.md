@@ -79,7 +79,7 @@ Store screenshots, logs, and measurements under `.dev/verification/`. Keep explo
 
 ## Record before and after evidence
 
-UI changes carry a before and an after capture into the PR. Take the before capture before editing renderer code, or run the base build; keep conditions identical across both — same window size, same workflow, same data.
+UI changes carry a before and an after capture into the PR. Capture only on the default empty database. If `agent:up` warns that it holds a filtered copy of real data from `bun run db:seed`, run `bun run agent:reset` first. Take the before capture before editing renderer code, or run the base build; keep conditions identical across both — same window size, same workflow, same data.
 
 Photos are `electronPage.screenshot({ path })` under `.dev/verification/`. For video:
 

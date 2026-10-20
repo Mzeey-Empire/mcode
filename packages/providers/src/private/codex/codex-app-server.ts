@@ -1621,7 +1621,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       // Record the most recent non-benign line so a handshake failure can name
       // the real cause. Tool output, Rust tracing, and agent-generated content
       // are often muxed onto stderr; warn-level logs were drowning useful signal
-      // in .mcode-dev, so the line itself stays at debug.
+      // in the log, so the line itself stays at debug.
       this.stderrTail.add(line);
       logger.debug("Codex stderr", { line });
     });

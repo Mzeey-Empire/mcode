@@ -64,6 +64,8 @@ export interface DesktopWindowLifecycleHooks {
 export interface CreateWindowDependencies {
   /** Platform selected by the Electron composition root. */
   readonly platform: NodeJS.Platform;
+  /** Product name for this build, such as "Mcode (Dev)". */
+  readonly displayName: string;
   /** Return whether the desktop runs in development mode. */
   readonly isDesktopDev: () => boolean;
   /** Per-window feature hooks. */
@@ -77,6 +79,7 @@ export function createWindow(
   const window = new BrowserWindow({
     width: 1200,
     height: 800,
+    title: dependencies.displayName,
     icon: getWindowIconPath(dependencies.platform),
     // Keep window hidden until first paint to eliminate the blank white flash.
     show: false,
@@ -122,6 +125,8 @@ export function createWindow(
   });
 
   window.setMenuBarVisibility(false);
+  // The page loads with <title>Mcode</title>; without this it would replace the stage label.
+  window.on("page-title-updated", (event) => event.preventDefault());
   forwardRendererConsoleErrors(window);
   forwardFullScreenState(window);
 

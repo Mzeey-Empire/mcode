@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Provisions the per-worktree agent runtime: database snapshot, fixture repo, and bundles.
+ * Provisions the per-worktree agent runtime: local database, fixture repo, and bundles.
  */
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
@@ -15,10 +15,9 @@ import {
   getRuntimePaths,
   resolveRepoRoot,
 } from "./runtime-contract.mjs";
-import { markRuntimeDatabase, prepareRuntimeDatabaseSnapshot } from "./runtime-database.mjs";
 import { MANAGED_DESKTOP_SESSION_FILE } from "./managed-desktop.mjs";
 import { rebuildServerDevBundle } from "../build-server-dev-bundle.mjs";
-import { seedDatabase } from "../db-seed.mjs";
+import { ensureRuntimeDatabase } from "../db-seed.mjs";
 
 let agentSetupTestHooks = {};
 
@@ -26,7 +25,7 @@ let agentSetupTestHooks = {};
  * Installs process-local hooks for focused agentSetup tests.
  *
  * @param {Partial<{
- *   seedDatabase: typeof seedDatabase,
+ *   ensureRuntimeDatabase: typeof ensureRuntimeDatabase,
  *   seedFixtureRepo: typeof seedFixtureRepo,
  *   isFixtureRepo: typeof isFixtureRepo,
  *   rebuildServerDevBundle: typeof rebuildServerDevBundle,
@@ -51,7 +50,7 @@ export async function agentSetup(repoRoot = resolveRepoRoot()) {
   const operations = getSetupOperations();
 
   assertRuntimeStopped(repoRoot);
-  refreshRuntimeDatabase(repoRoot, operations.seedDb, operations.markDatabase);
+  operations.ensureDatabase({ repoRoot });
   if (!operations.fixtureIsReady(repoRoot)) {
     operations.seedFixture(repoRoot);
   }
@@ -61,8 +60,7 @@ export async function agentSetup(repoRoot = resolveRepoRoot()) {
 
 function getSetupOperations() {
   return {
-    seedDb: agentSetupTestHooks.seedDatabase ?? seedDatabase,
-    markDatabase: agentSetupTestHooks.markRuntimeDatabase ?? markRuntimeDatabase,
+    ensureDatabase: agentSetupTestHooks.ensureRuntimeDatabase ?? ensureRuntimeDatabase,
     seedFixture: agentSetupTestHooks.seedFixtureRepo ?? seedFixtureRepo,
     fixtureIsReady: agentSetupTestHooks.isFixtureRepo ?? isFixtureRepo,
     rebuildBundle: agentSetupTestHooks.rebuildServerDevBundle ?? rebuildServerDevBundle,
@@ -70,11 +68,9 @@ function getSetupOperations() {
   };
 }
 
-/** Refreshes the local SQLite snapshot through SQLite's safe backup path. */
-export function refreshRuntimeDatabase(repoRoot, snapshot = seedDatabase, markDatabase = markRuntimeDatabase) {
-  const paths = prepareRuntimeDatabaseSnapshot(repoRoot);
-  snapshot({ repoRoot, target: paths.dbPath });
-  markDatabase(repoRoot);
+/** Replaces the local database with an empty one. */
+export function refreshRuntimeDatabase(repoRoot, ensureDatabase = ensureRuntimeDatabase) {
+  ensureDatabase({ repoRoot, refresh: true });
 }
 
 function assertRuntimeStopped(repoRoot) {

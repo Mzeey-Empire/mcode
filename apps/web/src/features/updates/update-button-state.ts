@@ -1,3 +1,4 @@
+import { isNightlyVersion } from "@mcode/contracts";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 
 /** The step a Retry repeats, carried on the desktop error status. */
@@ -23,11 +24,6 @@ export interface UpdateButtonContext {
   readonly upToDateFlash: boolean;
   /** Version of the update being fetched, remembered from the last available status. */
   readonly pendingVersion: string | null;
-}
-
-/** Nightly builds carry `-nightly.` in their version (state 10). */
-export function isNightlyVersion(version: string): boolean {
-  return version.includes("-nightly.");
 }
 
 /** The short version text beside Download and Install; nightly builds read "nightly". */

@@ -31,6 +31,7 @@ vi.mock("electron", () => ({
     ]),
     commandLine: { appendSwitch: vi.fn() },
     setAppUserModelId: vi.fn(),
+    setAboutPanelOptions: vi.fn(),
   },
   BrowserWindow: {
     fromWebContents: vi.fn(),
@@ -56,6 +57,8 @@ vi.mock("@mcode/shared", () => ({
 }));
 
 vi.mock("@mcode/contracts", () => ({
+  appDisplayName: vi.fn().mockReturnValue("Mcode"),
+  resolveBuildStage: vi.fn().mockReturnValue("stable"),
   getExtension: vi.fn().mockReturnValue(""),
   isMcodeWorkspacePreviewUrl: vi.fn().mockReturnValue(false),
   SettingsSchema: vi.fn(() => ({

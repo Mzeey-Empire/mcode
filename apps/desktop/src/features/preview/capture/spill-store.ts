@@ -85,7 +85,7 @@ function scheduleGlobalBrowserCaptureSpillPrune(): void {
 
 /**
  * Writes full redacted excerpts under the Mcode app data directory so production and dev use
- * ~/.mcode / ~/.mcode-dev rather than the project tree or `.mcode-local/`.
+ * ~/.mcode (production) or the checkout's `.dev` (development) rather than the project tree.
  */
 export async function persistBrowserCaptureSpill(
   workspaceId: string,

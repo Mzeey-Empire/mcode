@@ -6,9 +6,8 @@
  */
 import * as NodeFS from 'node:fs';
 import * as NodeChildProcess from 'node:child_process';
-import * as NodePath from 'node:path';
-import * as NodeOS from 'node:os';
-import { resolveMainRoot } from './utils.mjs';
+import { getRuntimePaths } from './agent/runtime-contract.mjs';
+import { resolveMainRoot, scriptRoot } from './utils.mjs';
 import {
   isElectronBinaryInstalled,
   resolveElectronPackageDir,
@@ -69,8 +68,7 @@ check(
 );
 
 // 7. MCODE_DATA_DIR writable
-const dataDir = process.env.MCODE_DATA_DIR
-  ?? NodePath.join(NodeOS.homedir(), process.env.NODE_ENV === 'production' ? '.mcode' : '.mcode-dev');
+const dataDir = process.env.MCODE_DATA_DIR ?? getRuntimePaths(scriptRoot).devDir;
 check(
   `MCODE_DATA_DIR writable (${dataDir})`,
   () => {

@@ -77,7 +77,7 @@ import {
 import { stagedSnapshotIds } from "@/lib/staged-snapshot-ids";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
-import type { ApprovalRequest } from "@mcode/contracts";
+import type { ApprovalRequest, BuildStage } from "@mcode/contracts";
 import { setAttachmentTransportWsUrl } from "@/lib/attachment-url";
 import { LegacyTerminalClient } from "@/features/terminal/adapters/legacy/legacy-terminal-client";
 import type {
@@ -1262,6 +1262,7 @@ export function createWsTransport(
 
     // Meta
     getVersion: () => rpc<string>("app.version", {}),
+    getStage: () => rpc<BuildStage>("app.stage", {}),
 
     // Files
     listWorkspaceFiles: (workspaceId, threadId?) =>

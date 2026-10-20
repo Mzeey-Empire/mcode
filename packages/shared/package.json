@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./paths": "./src/paths/index.ts",
     "./node/host-runtime": "./src/node/host-runtime.ts",
     "./node/shutdown-deadlines": "./src/node/shutdown-deadlines.ts",
     "./model-effort": "./src/model-effort/index.ts",

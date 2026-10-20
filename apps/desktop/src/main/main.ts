@@ -25,6 +25,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { getLogPath, getMcodeDir, getRecentLogs, logger } from "@mcode/shared";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { appDisplayName, resolveBuildStage } from "@mcode/contracts";
 
 import {
   registerOpenInHandlers,
@@ -66,6 +67,10 @@ import { shouldPrintVersion } from "./cli-args.js";
 // a black renderer. Server data is already split via getMcodeDir(), but
 // Electron's userData is derived from app.getName() and must be set here,
 // before app.whenReady() and any other path-dependent call.
+//
+// Dev launchers put userData under the checkout's `.dev/electron`. The shared
+// `Mcode-Dev` directory remains only for launches that bypass them (`prod:desktop`
+// and a bare `electron .`), which have no per-checkout directory to use.
 const harnessUserDataDir = process.env.MCODE_ELECTRON_USER_DATA_DIR?.trim();
 const harnessCapabilityPath = process.env.MCODE_RELIABILITY_CAPABILITY_PATH?.trim();
 if (harnessUserDataDir && harnessCapabilityPath && NodePath.isAbsolute(harnessUserDataDir)) {
@@ -85,6 +90,10 @@ if (shouldPrintVersion(process.argv)) {
   console.log(app.getVersion());
   app.exit(0);
 }
+
+// The startup lock, server stderr log and capture spills write straight into the
+// data directory, and the logger no longer creates it at import.
+NodeFS.mkdirSync(getMcodeDir(), { recursive: true });
 
 // ---------------------------------------------------------------------------
 // Application state
@@ -480,11 +489,20 @@ if (hostRuntime.platform === "win32") {
   app.setAppUserModelId(APP_ID);
 }
 
-// Tag the dev main process so `ps`/console output distinguishes it from a
-// packaged instance. process.title does not change app.getName() or the
-// userData path, so dev and prod still share data-dir resolution. On packaged
+// Label every surface with the stage, never through app.setName(): userData is
+// derived from app.getName(), so renaming would move a packaged nightly's data.
+const displayName = appDisplayName(
+  resolveBuildStage({
+    agentRuntime: process.env.MCODE_AGENT_RUNTIME === "1",
+    version: app.getVersion(),
+  }),
+);
+app.setAboutPanelOptions({ applicationName: displayName });
+
+// Tag the main process so `ps`/console output distinguishes the stage.
+// process.title does not change app.getName() or the userData path. On packaged
 // Windows the Task Manager name comes from the exe VERSIONINFO, not this.
-process.title = isDesktopDev() ? "Mcode Desktop (dev)" : "Mcode Desktop";
+process.title = displayName.replace(/^Mcode/, "Mcode Desktop");
 
 app.whenReady().then(async () => {
   try {
@@ -500,6 +518,7 @@ app.whenReady().then(async () => {
     }
     const desktopWindow = createDesktopWindowFeature({
       platform: hostRuntime.platform,
+      displayName,
       isDesktopDev,
       lifecycleHooks: {
         disposePreviewForWindow,

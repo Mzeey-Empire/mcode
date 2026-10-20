@@ -1,9 +1,13 @@
 import { create } from "zustand";
+import { appDisplayName, type BuildStage } from "@mcode/contracts";
+import { getTransport } from "@/transport";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 
 interface UpdateState {
   /** App version reported by the Electron main process. Empty until hydrated. */
   version: string;
+  /** Build stage reported by the server. Null until loaded. */
+  stage: BuildStage | null;
   /** Most recent auto-updater status pushed from the main process. */
   status: UpdateStatus;
   /**
@@ -13,6 +17,8 @@ interface UpdateState {
   pendingVersion: string | null;
   /** Replace the version string. Called once at startup. */
   setVersion: (version: string) => void;
+  /** Fetch the build stage once at startup and label the document with it. */
+  loadStage: () => Promise<void>;
   /** Replace the current update status. Called by the IPC listener. */
   setStatus: (status: UpdateStatus) => void;
 }
@@ -39,6 +45,13 @@ export const useUpdateStore = create<UpdateState>((set) => ({
   version: "",
   status: { state: "idle" },
   pendingVersion: null,
+  stage: null,
   setVersion: (version) => set({ version }),
+  loadStage: async () => {
+    const stage = await getTransport().getStage();
+    set({ stage });
+    // Browser tabs show document.title; Electron pins its own native title.
+    document.title = appDisplayName(stage);
+  },
   setStatus: (status) => set((state) => ({ status, pendingVersion: pendingVersionFor(status, state.pendingVersion) })),
 }));

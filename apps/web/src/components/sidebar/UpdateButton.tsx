@@ -9,7 +9,8 @@ import { friendlyUpdateError } from "@/lib/update-error-message";
 import { cn } from "@/lib/utils";
 import { useUpdateStore } from "@/stores/updateStore";
 import { getTransport } from "@/transport";
-import { deriveUpdateButtonView, isNightlyVersion, type FailedUpdateOperation } from "@/features/updates/update-button-state";
+import { isNightlyVersion } from "@mcode/contracts";
+import { deriveUpdateButtonView, type FailedUpdateOperation } from "@/features/updates/update-button-state";
 import { InstallUpdateDialog } from "./InstallUpdateDialog";
 import { ReleaseNotesCard } from "./ReleaseNotesCard";
 

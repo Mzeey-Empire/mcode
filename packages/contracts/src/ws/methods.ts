@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BuildStageSchema } from "../build-stage.js";
 import { GitSearchCommitsParamsSchema, GitSearchCommitsResultSchema } from "../git.js";
 import {
   ListHeldSteersResultSchema, SettleUnknownSteerParamsSchema, SettleUnknownSteerResultSchema,
@@ -1412,6 +1413,11 @@ export const WS_METHODS = lazySchema(() => ({
   "app.version": {
     params: z.object({}),
     result: z.string(),
+  },
+  /** Returns the build stage so every client labels the same data the server is using. */
+  "app.stage": {
+    params: z.object({}),
+    result: BuildStageSchema(),
   },
   "toolCallRecord.list": {
     params: z.object({ messageId: z.string() }),

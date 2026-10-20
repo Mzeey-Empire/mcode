@@ -2,7 +2,7 @@ import { app } from "electron";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir } from "@mcode/shared";
-import { SettingsSchema as BundledSettingsSchema } from "@mcode/contracts";
+import { isNightlyVersion, SettingsSchema as BundledSettingsSchema } from "@mcode/contracts";
 
 /** Use the snapshot-provided schema when V8 has already initialized contracts. */
 const SettingsSchema =
@@ -31,11 +31,6 @@ const INTERVAL_MS_MAP: Record<string, number> = {
   never: Infinity,
 };
 
-/** Returns true when the supplied application version is a nightly build. */
-function isNightlyBuild(applicationVersion: string): boolean {
-  return applicationVersion.includes("-nightly.");
-}
-
 /** Read validated updater settings and apply the existing packaged defaults. */
 export function loadUpdaterSettings(
   applicationVersion = app.getVersion(),
@@ -47,7 +42,7 @@ export function loadUpdaterSettings(
 /** Return the packaged defaults for the current release line. */
 function updaterSettingsDefaults(applicationVersion: string): UpdaterSettings {
   return {
-    releaseLine: isNightlyBuild(applicationVersion) ? "nightly" : "stable",
+    releaseLine: isNightlyVersion(applicationVersion) ? "nightly" : "stable",
     autoDownload: true,
     autoInstallOnQuit: true,
     checkInterval: "4hours",

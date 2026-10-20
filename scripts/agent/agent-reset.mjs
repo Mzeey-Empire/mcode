@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Rebuilds the disposable agent runtime database after stopping runtime processes.
+ * Empties the disposable agent runtime database after stopping runtime processes.
  */
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
@@ -11,7 +11,7 @@ import { refreshRuntimeDatabase } from "./agent-setup.mjs";
 import { resolveRepoRoot } from "./runtime-contract.mjs";
 
 /**
- * Stops the runtime, refreshes its local database snapshot, and restarts it.
+ * Stops the runtime, replaces its local database with an empty one, and restarts it.
  *
  * @param {string} [repoRoot]
  * @param {{ down?: typeof agentDown, up?: typeof agentUp, refreshDatabase?: typeof refreshRuntimeDatabase }} [options]

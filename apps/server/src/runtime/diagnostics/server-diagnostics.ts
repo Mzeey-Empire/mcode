@@ -5,13 +5,13 @@
  * mcode.log.* — the process only gets Bun's bare stderr dump. These handlers
  * synchronously append a JSONL record to today's log and to a dedicated
  * server-fatal.log before exiting, so every crash leaves a full stack trace
- * on disk. The module deliberately avoids project imports: the failure being
- * recorded may live inside them.
+ * on disk. The module deliberately avoids project imports other than the pure data-dir
+ * rule: the failure being recorded may live inside them.
  */
 
 import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import { getMcodeDir } from "@mcode/shared/paths";
 
 /** Dedicated crash log, beside the rotated server-stderr logs under the data dir. */
 const FATAL_LOG_NAME = "server-fatal.log";
@@ -22,12 +22,6 @@ const LAG_CHECK_MS = 250;
 /** Stall duration beyond the check interval that warrants a log entry. */
 const LAG_WARN_MS = 500;
 
-function mcodeDir(): string {
-  if (process.env.MCODE_DATA_DIR) return process.env.MCODE_DATA_DIR;
-  const dirName = process.env.NODE_ENV !== "production" ? ".mcode-dev" : ".mcode";
-  return NodePath.join(NodeOS.homedir(), dirName);
-}
-
 function dailyLogPath(date: Date): string {
   // Local calendar date, matching winston-daily-rotate-file's default naming.
   const stamp = [
@@ -35,11 +29,12 @@ function dailyLogPath(date: Date): string {
     String(date.getMonth() + 1).padStart(2, "0"),
     String(date.getDate()).padStart(2, "0"),
   ].join("-");
-  return NodePath.join(mcodeDir(), "logs", `mcode.log.${stamp}`);
+  return NodePath.join(getMcodeDir(), "logs", `mcode.log.${stamp}`);
 }
 
-function appendJsonlSync(path: string, record: Record<string, unknown>): void {
+function appendJsonlSync(resolvePath: () => string, record: Record<string, unknown>): void {
   try {
+    const path = resolvePath();
     NodeFS.mkdirSync(NodePath.dirname(path), { recursive: true });
     NodeFS.appendFileSync(path, JSON.stringify(record) + "\n");
   } catch {
@@ -49,7 +44,7 @@ function appendJsonlSync(path: string, record: Record<string, unknown>): void {
 
 /** Append one record to today's log without going through winston's stream. */
 export function appendDailyLogSync(record: Record<string, unknown>): void {
-  appendJsonlSync(dailyLogPath(new Date()), {
+  appendJsonlSync(() => dailyLogPath(new Date()), {
     timestamp: new Date().toISOString(),
     ...record,
   });
@@ -88,8 +83,8 @@ export function recordFatalError(
     uptimeSeconds: Math.round(process.uptime() * 100) / 100,
     ...describeError(error),
   };
-  appendJsonlSync(dailyLogPath(new Date()), record);
-  appendJsonlSync(NodePath.join(mcodeDir(), FATAL_LOG_NAME), record);
+  appendJsonlSync(() => dailyLogPath(new Date()), record);
+  appendJsonlSync(() => NodePath.join(getMcodeDir(), FATAL_LOG_NAME), record);
 }
 
 /**

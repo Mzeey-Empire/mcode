@@ -2,8 +2,8 @@
  * Shared helper for vitest.config.ts files across the monorepo.
  *
  * Creates a per-run temp dir and sets MCODE_DATA_DIR so tests cannot touch
- * the developer's real ~/.mcode or ~/.mcode-dev (which is shared with
- * `bun run dev`). This is what prevented the unclean server restart in
+ * the developer's real ~/.mcode or the checkout's `.dev` (which `bun run dev`
+ * writes to). This is what prevented the unclean server restart in
  * issue #290: vitest and the live server were both writing to the same
  * log + sqlite files.
  *

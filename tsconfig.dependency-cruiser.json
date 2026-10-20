@@ -16,6 +16,7 @@
       "@mcode/shared/model-context": ["packages/shared/src/model-context/index.ts"],
       "@mcode/shared/model-effort": ["packages/shared/src/model-effort/index.ts"],
       "@mcode/shared/node/host-runtime": ["packages/shared/src/node/host-runtime.ts"],
+      "@mcode/shared/paths": ["packages/shared/src/paths/index.ts"],
       "@mcode/shared/usage": ["packages/shared/src/usage/index.ts"],
       "@mcode/thread-orchestration": ["packages/thread-orchestration/src"],
     }
