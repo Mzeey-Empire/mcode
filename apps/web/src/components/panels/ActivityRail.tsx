@@ -685,7 +685,7 @@ function ActivityRailView({
       <div
         aria-hidden={captionAction ? undefined : true}
         data-testid="activity-rail-caption-strip"
-        className="window-drag absolute top-0 right-0 flex h-row-comfortable w-(--container-right-rail) items-center justify-end border-l border-border bg-background pr-[0.8rem]"
+        className="window-drag absolute top-0 right-0 flex h-row-comfortable w-(--container-right-rail) items-center justify-end bg-page pr-[0.8rem]"
       >
         {captionAction}
       </div>
@@ -693,7 +693,7 @@ function ActivityRailView({
       <div
         data-testid="activity-rail-surface"
         className={cn(
-          "absolute top-row-comfortable right-0 bottom-0 flex flex-col items-stretch gap-1 overflow-hidden border-l border-border bg-background p-2 transition-[width] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+          "absolute top-row-comfortable right-0 bottom-0 flex flex-col items-stretch gap-1 overflow-hidden bg-page p-2 transition-[width] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
           expanded ? "w-(--container-right-rail-expanded)" : "w-(--container-right-rail)",
         )}
       >
