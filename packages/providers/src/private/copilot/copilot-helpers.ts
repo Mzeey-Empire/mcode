@@ -2,20 +2,6 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { QuotaCategory } from "@mcode/contracts";
-import type { ProviderThreadControlHttpConnection } from "../../host-ports.js";
-/** Builds the Copilot SDK's remote HTTP MCP configuration for one provider session. */
-export function buildCopilotInternalMcpServers(
-  connection: ProviderThreadControlHttpConnection,
-): Record<string, { type: "http"; url: string; headers: Record<string, string>; tools: ["*"] }> {
-  return {
-    [connection.name]: {
-      type: "http",
-      url: connection.url,
-      headers: connection.headers,
-      tools: ["*"],
-    },
-  };
-}
 
 /** Preserves existing Copilot user instructions while appending runtime guidance. */
 export function composeCopilotSystemMessage(
