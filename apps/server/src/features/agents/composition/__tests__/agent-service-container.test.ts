@@ -27,6 +27,7 @@ import { ThreadCreationCoordinator } from "../../turns/thread-creation-coordinat
 import { TURN_FEATURE_EFFECTS, TurnFeatureEffects } from "../../turns/turn-feature-effects.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { ThreadProviderSessionRepo } from "../../../thread-control/persistence/thread-provider-session-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
 import { PlanTurnService } from "../../planning/plan-turn-service.js";
@@ -345,6 +346,41 @@ describe("AgentService container composition", () => {
       heldWrite.mockRestore();
     }
     expect(container.resolve(MessageRepo).findById(event.messageId!)).toMatchObject({ content: "Session warning" });
+  });
+
+  it("credits the completed turn's reply to the session its provider reported", async () => {
+    const provider = fakeCodexProvider(async (request) => {
+      container.resolve(ThreadRepo).updateSdkSessionId(request.threadId, "codex", "codex-native");
+      await submitCodexEvent(workerRuntime!, request, 1, { type: "textDelta",
+        threadId: request.threadId, turnExecutionId: request.turnExecutionId,
+        delta: "owned answer", isFinalResponse: true });
+      await submitCodexEvent(workerRuntime!, request, 2, { type: "turnComplete",
+        threadId: request.threadId, turnExecutionId: request.turnExecutionId,
+        providerId: "codex", reason: "end_turn", costUsd: null, tokensIn: 1, tokensOut: 2,
+        totalProcessedTokens: 3, contextWindow: undefined, cacheReadTokens: undefined });
+      await submitCodexEvent(workerRuntime!, request, 3, { type: "ended",
+        threadId: request.threadId, turnExecutionId: request.turnExecutionId });
+    });
+    registerFakeCodex(provider);
+    const registry = container.resolve(AgentEventPublicationRegistry);
+    registry.bind(() => undefined);
+    registry.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-watermark", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Worker watermark", "direct", "main", true, "claude");
+
+    await container.resolve(AgentService).sendMessage({
+      threadId: thread.id, content: "hello", provider: "codex", model: "gpt-5.6-luna",
+      permissionMode: "full", reasoningLevel: "high", codexFastMode: false,
+    });
+    await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
+
+    // The save that persists the reply lands after the owner releases, so wait for it before reading.
+    const replyOf = () => container.resolve(MessageRepo).listIncludingInternal(thread.id).find((message) => message.role === "assistant");
+    await waitFor(() => replyOf() !== undefined);
+    const replySequence = replyOf()!.sequence;
+    const sessions = container.resolve(ThreadProviderSessionRepo);
+    await waitFor(() => sessions.find(thread.id, "codex")?.lastSeenSequence === replySequence);
+    expect(sessions.find(thread.id, "codex")).toMatchObject({ sessionId: "codex-native", lastSeenSequence: replySequence });
   });
 
   it("returns from Stop after a durable worker terminal that preserves partial text", async () => {
