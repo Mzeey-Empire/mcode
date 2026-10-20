@@ -1530,13 +1530,12 @@ export type { TerminalDataFrame } from "./ws/terminal-legacy-binary.js";
 export { lazySchema } from "./utils/lazySchema.js";
 
 // Handoff contract
-export { HANDOFF_MARKER, parseHandoffJson } from "./handoff.js";
-export type { HandoffMetadata } from "./handoff.js";
+export { HandoffAuditMetadataSchema } from "./handoff.js";
+export type { HandoffAuditMetadata } from "./handoff.js";
 
 // Provider interfaces
 export type {
   ProviderId,
-  SessionForkBehavior,
   NativePlanFileRef,
   PlanCapture,
   IAgentProvider,
@@ -1587,18 +1586,6 @@ export {
   isGoalCapable,
   isSessionEvictable,
 } from "./providers/interfaces.js";
-
-export type {
-  SessionForker,
-  ForkRequest,
-  HandoffArtifact,
-  HandoffMeta,
-  HandoffMode,
-  LadderStep,
-  ForkAnchorRole,
-  ForkHistoryBudget,
-  ProviderErrorClass,
-} from "./providers/session-forker.js";
 
 export {
   TurnUsageSchema,

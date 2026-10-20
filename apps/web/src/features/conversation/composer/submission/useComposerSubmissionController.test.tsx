@@ -88,7 +88,6 @@ function useHarness(
     execution: execution(executionOverrides),
     queue: {
       editing: null,
-      queueIfGenerating: () => false,
       discardEmptyEdit: () => false,
       finishEditing: vi.fn(),
       consumeEditForDispatch: vi.fn(),

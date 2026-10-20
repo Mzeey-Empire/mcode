@@ -65,7 +65,6 @@ interface ComposerContentSurfaceProps {
     readonly isStopPending: boolean;
     readonly provider?: string;
     readonly planPending: boolean;
-    readonly queuedSend: boolean;
     readonly needsWorkspace: boolean;
     readonly editingFromQueue: {
       readonly originalIndex: number;
@@ -787,11 +786,6 @@ export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
         />
       )}
       <ComposerInputSurface {...props} hidden={docked} />
-      {props.model.queuedSend && (
-        <p className="px-1 pt-1 text-xs text-muted/60">
-          queued · sends when handoff lands
-        </p>
-      )}
       <DraftWriteFailureNotice />
     </>
   );

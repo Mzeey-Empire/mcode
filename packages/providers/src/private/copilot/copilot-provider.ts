@@ -17,7 +17,6 @@ import type { CopilotProviderPorts } from "../../factory-types.js";
 import { providerBrowserPermissionCapability, type ProviderBrowserLeaseGrant, type ProviderHostPorts } from "../../host-ports.js";
 import { SessionRuntime, type ProtocolAdapter, type SpawnArgs, type SpawnResult } from "../session-runtime.js";
 import { CanonicalLiveEventPublisher, type CanonicalLiveEventRouting } from "../canonical-live-event-publisher.js";
-import { CopilotCleanForker } from "./copilot-clean-forker.js";
 import { composeCopilotSystemMessage, inferModelGroup, normalizeQuotaSnapshots, readUserInstructions, userSkillDirectories } from "./copilot-helpers.js";
 import { mapCopilotEvent, closeOpenChildren, type CopilotTurnState, type CopilotMappedEvent } from "./copilot-event-mapper.js";
 import { describeCopilotAuth } from "../status/provider-auth-checks.js";
@@ -46,13 +45,11 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   readonly id = "copilot" as const;
   readonly subagentReporting = SUBAGENT_REPORTING.copilot;
   readonly descriptor = Object.freeze({ id: this.id, capabilities: [
-    ...(["build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control", "session-resume"] as const).map((name) => ({ name, support: "supported" as const })),
+    ...(["build", "plan", "completion", "permissions", "usage", "session-eviction", "browser-access", "thread-control", "session-resume"] as const).map((name) => ({ name, support: "supported" as const })),
     { name: "turn-steer" as const, support: "unsupported" as const },
   ] });
   readonly supportsCompletion = true;
-  readonly sessionForkOnResume = "clean" as const;
   readonly maxInputCharactersPerTurn = 16_000;
-  readonly forker = new CopilotCleanForker(this);
   private readonly runtime: SessionRuntime<CopilotSessionState>;
   private readonly publisher: CanonicalLiveEventPublisher;
   private readonly admissions = new Map<string, { request: TurnRequest<"copilot">; controller: AbortController; utility?: boolean }>();
@@ -581,11 +578,6 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   /** Runs an isolated utility completion with native configuration discovery. */
   async complete(prompt: string, model: string, cwd: string, _options?: CompletionOptions): Promise<string> {
     return this.runUtility(prompt, cwd, model);
-  }
-  /** Queries an isolated side channel for server-coordinated clean handoff generation. */
-  async runSideChannelQuery(args: { parentThreadId: string; parentSdkSessionId: string; prompt: string; abortSignal?: AbortSignal; conversationHistory?: string; cwd: string }): Promise<string> {
-    const prompt = args.conversationHistory ? `Conversation history up to the fork point:\n\n${args.conversationHistory}\n\n---\n\n${args.prompt}` : args.prompt;
-    return this.runUtility(prompt, args.cwd, undefined, args.abortSignal);
   }
   private async runUtility(prompt: string, cwd: string, model?: string, signal?: AbortSignal): Promise<string> {
     signal?.throwIfAborted();

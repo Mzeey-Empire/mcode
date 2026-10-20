@@ -175,7 +175,6 @@ function handleTerminalData(data: unknown): void {
  * - `workspace.iconChanged` -- a project's chosen icon changed; replaces its cached icon
  * - `workspace.deleted` -- workspace hard-delete complete; removes it from local state
  * - `workspace.deleteFailed` -- workspace deletion permanently stuck; reloads workspace list
- * - `thread.handoff` -- handoff pipeline status for a child thread (generating, ready, fallback, error)
  */
 export function startPushListeners(): void {
   // Guard against double-init
@@ -669,24 +668,6 @@ export function startPushListeners(): void {
     pushEmitter.on("providers.statusChanged", (data) => {
       const parsed = WS_CHANNELS["providers.statusChanged"].safeParse(data);
       if (parsed.success) useProviderStatusStore.getState().apply(parsed.data);
-    }),
-  );
-
-  // thread.handoff: handoff pipeline status for a child thread (generating -> ready/fallback/error)
-  unsubs.push(
-    pushEmitter.on("thread.handoff", (data) => {
-      const payload = data as {
-        threadId: string;
-        status: "generating" | "ready" | "fallback" | "error";
-        ladderStep?: "B" | "D";
-        providerErrorOnGenerate?: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | null;
-      };
-      if (!payload.threadId || !payload.status) return;
-      useThreadStore.getState().setHandoffMeta(payload.threadId, {
-        status: payload.status,
-        ladderStep: payload.ladderStep,
-        providerErrorOnGenerate: payload.providerErrorOnGenerate,
-      });
     }),
   );
 

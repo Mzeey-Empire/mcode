@@ -271,7 +271,6 @@ async function buildService(
     memoryPressureService as MemoryPressureService,
     settingsService,
     availability,
-      { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       new NarrativeStore(
         messageRepo,
@@ -1664,7 +1663,6 @@ describe("AgentService Ended finalization", () => {
       memoryPressureService,
       settingsService,
       { assertUsable: vi.fn() } as unknown as ProviderAvailabilityService,
-      { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       narrative,
       new ParentAssistantTextCheckpointService(db, agentStorageTestWriter(db)),
@@ -1698,8 +1696,8 @@ describe("AgentService Ended finalization", () => {
     let handler: PlanQuestionHandler | undefined;
     const provider: IAgentProvider = Object.assign(providerEmitter, {
       id: "codex" as const, descriptor: { id: "codex" as const, capabilities: [] },
-      supportsCompletion: false, sessionForkOnResume: "unsupported" as const, maxInputCharactersPerTurn: 100_000,
-      forker: { fork: async () => { throw new Error("Unused fork"); } }, listModels: async () => [],
+      supportsCompletion: false,  maxInputCharactersPerTurn: 100_000,
+       listModels: async () => [],
       bindPlanQuestions: (bound: PlanQuestionHandler) => { handler = bound; },
       supportsNativePlanQuestions: async () => true,
     });

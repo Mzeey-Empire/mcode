@@ -11,8 +11,6 @@ import {
   getAttachmentTransportUrlSnapshot,
   subscribeToAttachmentTransportUrl,
 } from "@/lib/attachment-url";
-import { isHandoffMessage, parseHandoffJson } from "@/components/chat/handoff-utils";
-import { HandoffCard } from "@/components/chat/HandoffCard";
 import { FileAttachmentTile } from "@/components/chat/FileAttachmentTile";
 import { ImageAttachmentLightbox } from "@/components/chat/ImageAttachmentLightbox";
 import { SentBrowserNotesTile } from "@/features/preview/notes/SentBrowserNotesTile";
@@ -799,14 +797,11 @@ function UserMessageContent({
   );
 }
 
-/** Renders a system message, including structured handoffs and security notices. */
+/** Renders a system message, including security notices. */
 function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) {
   const currentSessionNotices = useThreadRecord(message.thread_id, (record) => record.sessionNotices);
   if (message.systemNotice?.scope === "session") return null;
   if (isCurrentComposerProviderNotice(message, currentSessionNotices)) return null;
-  if (isHandoffMessage(message.role, message.content) && parseHandoffJson(message.content)) {
-    return <HandoffCard content={message.content} />;
-  }
   if (message.systemNotice && TURN_REVERT_NOTICE_KINDS.has(message.systemNotice.kind)) return <TurnRevertReceipt message={message} />;
   if (message.systemNotice?.kind === "security") {
     return (

@@ -99,12 +99,12 @@ function buildService(database: OwnedTestDatabase) {
   const providerStub = wrapProviderEmitterForRuntimeEvents(Object.assign(new NodeEvents.EventEmitter(), {
     id: "claude" as const,
     descriptor: { id: "claude" as const, capabilities: [] },
-    forker: { fork: async () => { throw new Error("Unexpected fixture session fork"); } },
+
     stopSession: vi.fn(),
     shutdown: vi.fn(),
     listModels: async () => [],
     supportsCompletion: true,
-    sessionForkOnResume: "unsupported" as const,
+
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn<IAgentProvider["sendTurn"]>(
       () => Promise.resolve(),
@@ -130,7 +130,7 @@ function buildService(database: OwnedTestDatabase) {
   const nonGoalStub = wrapProviderEmitterForRuntimeEvents(Object.assign(new NodeEvents.EventEmitter(), {
     id: "gemini" as const,
     supportsCompletion: true,
-    sessionForkOnResume: "unsupported" as const,
+
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn<(params: { message: string; [k: string]: unknown }) => Promise<void>>(
       () => Promise.resolve(),
@@ -186,7 +186,6 @@ function buildService(database: OwnedTestDatabase) {
     memoryPressureService,
     settingsService,
     availability,
-      { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       container.resolve(NarrativeStore),
       new ParentAssistantTextCheckpointService(db, writer),

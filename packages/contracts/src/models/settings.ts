@@ -414,22 +414,6 @@ export const SettingsSchema = lazySchema(() =>
       })
       .default({}),
 
-    /** Chat behavior settings. */
-    chat: z
-      .object({
-        /** Handoff pipeline behavior settings. */
-        handoff: z
-          .object({
-            /**
-             * When true, show a banner in child fork threads when the handoff was
-             * produced by the local deterministic path because the provider was unavailable.
-             */
-            notifyOnLocalFallback: z.boolean().default(true),
-          })
-          .default({}),
-      })
-      .default({}),
-
     /** PR draft generation settings. */
     prDraft: z
       .object({})
@@ -660,15 +644,7 @@ export const PartialSettingsSchema = lazySchema(() =>
           .optional(),
       })
       .optional(),
-    chat: z
-      .object({
-        handoff: z
-          .object({
-            notifyOnLocalFallback: z.boolean().optional(),
-          })
-          .optional(),
-      })
-      .optional(),
+
     prDraft: z.object({}).optional(),
     preview: z
       .object({

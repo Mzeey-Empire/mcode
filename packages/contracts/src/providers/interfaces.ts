@@ -15,7 +15,6 @@ import type { ContextWindowMode, ReasoningLevel } from "../models/settings.js";
 import type { ProviderModelInfo } from "./models.js";
 import type { ProviderUsageInfo } from "./usage.js";
 import type { ProviderStatusFacts } from "./provider-status.js";
-import type { SessionForker } from "./session-forker.js";
 import type { Provider } from "../compat/agent-model.js";
 
 /**
@@ -35,9 +34,6 @@ export const SUBAGENT_REPORTING: Record<ProviderId, { childTranscript: boolean; 
   opencode: { childTranscript: false, childSteps: true },
   gemini: null,
 };
-
-/** How a provider's `resume` mechanism behaves when used to fork a session. */
-export type SessionForkBehavior = "clean" | "unsupported";
 
 /** Optional controls for one-shot utility completions. */
 export interface CompletionOptions {
@@ -211,25 +207,6 @@ export interface IAgentProvider {
    * Use `isCompletionCapable()` to narrow to `ICompletionCapable` before calling `complete()`.
    */
   readonly supportsCompletion: boolean;
-
-  /**
-   * How the provider's `resume` mechanism behaves when used to fork a session.
-   * Now metadata only (provenance + UI banner) — it no longer drives handoff
-   * dispatch. The handoff pipeline delegates to {@link forker} instead:
-   * - "clean": resuming creates a forked session; the original session is unaffected.
-   * - "unsupported": resuming is not supported or not yet verified.
-   */
-  readonly sessionForkOnResume: SessionForkBehavior;
-
-  /**
-   * The session-fork strategy for this provider's handoff generation. The
-   * handoff pipeline calls `provider.forker.fork(req)` instead of branching on
-   * {@link sessionForkOnResume}. Clean-resume providers use CleanForker (path
-   * B) and providers that cannot fork a session use DeterministicForker (path
-   * D). The forkers reach the providers' concrete side-channel methods
-   * directly; those methods are intentionally not on this interface.
-   */
-  readonly forker: SessionForker;
 
   /**
    * Maximum input characters the provider accepts per turn, across all roles

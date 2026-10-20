@@ -54,7 +54,6 @@ function useRunningThreadComposer() {
   const queue = useComposerQueueController({
     threadId: THREAD_ID,
     annotationScopeId: THREAD_ID,
-    handoffStatus: undefined,
     form,
   });
   const controller = useComposerSubmissionController({
@@ -68,7 +67,6 @@ function useRunningThreadComposer() {
     execution: execution(),
     queue: {
       editing: queue.editing,
-      queueIfGenerating: queue.queueIfGenerating,
       discardEmptyEdit: queue.discardEmptyEdit,
       finishEditing: queue.finishEditing,
       consumeEditForDispatch: queue.consumeEditForDispatch,

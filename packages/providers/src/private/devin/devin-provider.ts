@@ -25,7 +25,6 @@ import {
   type ApprovalRequestBody,
   type DevinModelFamily,
   type ProviderModelInfo,
-  type SessionForker,
   type Settings,
   type TurnFailure,
   type TurnRequest,
@@ -211,15 +210,12 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       { name: "plan", support: "supported" },
       { name: "permissions", support: "supported" },
       { name: "session-eviction", support: "supported" },
-      { name: "clean-fork", support: "supported" },
       { name: "session-resume", support: "supported" },
       { name: "turn-steer", support: "unsupported" },
     ],
   };
   readonly supportsCompletion = false;
-  readonly sessionForkOnResume = "unsupported" as const;
   readonly maxInputCharactersPerTurn = 16_000;
-  readonly forker: SessionForker;
 
   private readonly sessions: SessionRuntime<DevinAcpSessionEntry>;
   private readonly canonicalEvents: DevinCanonicalEventPublisher;
@@ -241,36 +237,6 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   ) {
     super();
     this.canonicalEvents = new DevinCanonicalEventPublisher(host.events);
-    this.forker = {
-      fork: async (request) => {
-        const markdown = await this.runSideChannelQuery({
-          prompt: request.prompt,
-          conversationHistory: request.conversationHistory,
-          cwd: request.cwd,
-        });
-        return {
-          markdown,
-          meta: {
-            schemaVersion: 1,
-            parentThreadId: request.parentThreadId,
-            forkedFromMessageId: request.forkedFromMessageId,
-            forkAnchorRole: request.forkAnchorRole,
-            childThreadId: request.childThreadId,
-            generatedBy: "provider",
-            provider: request.parentThread.provider,
-            ladderStep: "B",
-            mode: "full",
-            generatedAt: new Date().toISOString(),
-            characterCount: markdown.length,
-            parentSdkSessionId: request.parentThread.sdk_session_id ?? null,
-            providerErrorOnGenerate: null,
-            regenerationHistory: [],
-            attachments: [],
-            ...(request.historyBudget && { historyBudget: request.historyBudget }),
-          },
-        };
-      },
-    };
     this.sessions = new SessionRuntime<DevinAcpSessionEntry>(
       {
         spawn: (args) => this.spawnSession(args),
@@ -907,54 +873,6 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     results.push(...await Promise.allSettled([this.canonicalEvents.stopAdmissionAndDrain()]));
     const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
     if (failures.length > 0) throw new AggregateError(failures, "Devin provider shutdown failed");
-  }
-
-  /**
-   * Runs a throwaway Devin ACP session for handoff generation. A fresh session
-   * is used rather than `session/load` because loading the parent resumes it
-   * in place; Devin has no fork primitive.
-   */
-  async runSideChannelQuery(args: {
-    prompt: string;
-    conversationHistory?: string;
-    cwd: string;
-  }): Promise<string> {
-    const env = this.host.environment.snapshot();
-    const cliPath = await this.resolveCliPath();
-    if (!cliPath) throw new DevinCliMissingError(this.cliPath());
-    let text = "";
-    const runtime = await AcpSessionRuntime.start({
-      spawnSpec: {
-        command: cliPath,
-        args: ["acp"],
-        cwd: args.cwd,
-        env: { ...env },
-        shell: this.host.runtime.platform === "win32",
-      },
-      callbacks: {
-        onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }),
-        onSessionUpdate: async (update) => {
-          const u = update.update as Record<string, unknown>;
-          if (u.sessionUpdate !== "agent_message_chunk") return;
-          const content = u.content as { type?: string; text?: string } | undefined;
-          if (content?.type === "text" && typeof content.text === "string") text += content.text;
-        },
-      },
-      selectAuthMethod: () => undefined,
-      processes: this.host.processes,
-    });
-    try {
-      await runtime.initialize();
-      await this.authenticate(runtime, env);
-      await runtime.openSession({ cwd: args.cwd, mcpServers: [] });
-      const prompt = args.conversationHistory
-        ? `${args.conversationHistory}\n\n${args.prompt}`
-        : args.prompt;
-      await runtime.prompt({ prompt: [{ type: "text", text: prompt }] });
-      return text;
-    } finally {
-      await runtime.close().catch(() => undefined);
-    }
   }
 
   // ---------------------------------------------------------------------

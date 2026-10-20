@@ -10,6 +10,7 @@ export interface PlanSnapshot {
 // Import shared types for local use in the McodeTransport interface.
 import type {
   DiffStats,
+  HandoffAuditMetadata,
   ProjectIcon,
   TurnSteerParams,
   TurnSteerResult,
@@ -921,37 +922,11 @@ export interface McodeTransport {
   setBackground(background: boolean): Promise<void>;
 
   /**
-   * Read the latest handoff artifact for a child thread.
-   * Returns null when no handoff has been written for the thread.
+   * Read the latest v2 handoff audit for a thread.
+   * Returns null when no v2 audit has been written for the thread.
    */
   readLatestHandoff(threadId: string): Promise<{
     markdown: string;
-    meta: {
-      schemaVersion: 1;
-      parentThreadId: string;
-      forkedFromMessageId: string;
-      forkAnchorRole: "user" | "assistant";
-      childThreadId: string;
-      generatedBy: "provider" | "deterministic";
-      provider: string | null;
-      ladderStep: "B" | "D";
-      mode: "full" | "minimal";
-      generatedAt: string;
-      characterCount: number;
-      parentSdkSessionId: string | null;
-      providerErrorOnGenerate: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | "clean" | null;
-      regenerationHistory: Array<{
-        at: string;
-        ladderStep: "B" | "D";
-        reason: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | "clean" | "user-requested";
-      }>;
-      attachments: Array<{
-        id: string;
-        originalName: string;
-        sha256: string;
-        mime: string;
-        parentMessageId: string;
-      }>;
-    };
+    meta: HandoffAuditMetadata;
   } | null>;
 }

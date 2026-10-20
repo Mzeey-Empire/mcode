@@ -12,7 +12,6 @@ vi.mock("@/stores/threadStore", () => ({
   useThreadStore: (selector: (state: unknown) => unknown) =>
     selector({ sendMessage, refreshThreadGoal, clearThreadGoal }),
   scheduleDrainAfterEdit: vi.fn(),
-  getHandoffStatus: vi.fn(),
 }));
 
 vi.mock("@/stores/toastStore", () => ({

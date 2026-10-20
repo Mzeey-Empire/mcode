@@ -60,7 +60,7 @@ function buildService(db: Database) {
   const providerStub = Object.assign(new NodeEvents.EventEmitter(), {
     id: "claude" as const,
     supportsCompletion: true,
-    sessionForkOnResume: "unsupported" as const,
+
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn(() => Promise.resolve()),
   });
@@ -112,7 +112,6 @@ function buildService(db: Database) {
     memoryPressureService,
     settingsService,
     availability,
-      { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       container.resolve(NarrativeStore),
       new ParentAssistantTextCheckpointService(db, agentStorageTestWriter(db)),

@@ -1,7 +1,5 @@
 import { Spinner } from "@/components/ui/spinner";
-import { Skeleton } from "@/components/ui/skeleton";
 import { StickyUserMessage } from "@/components/chat/StickyUserMessage";
-import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import type { SelectedTextComment } from "@mcode/contracts";
 import { useEffect, useMemo, useState, type RefObject } from "react";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
@@ -13,7 +11,6 @@ import { SelectedTextCommentMarkers } from "./selection/SelectedTextCommentMarke
 
 /** Props for transcript controls that float above the virtual rows. */
 interface MessageListOverlaysProps {
-  readonly handoffStatus: "generating" | "ready" | "fallback" | "error" | undefined;
   readonly messages: Message[];
   readonly isLoadingMore: boolean;
   readonly isLoadingNewer: boolean;
@@ -38,13 +35,8 @@ interface MessageListOverlaysProps {
   readonly onJumpToLatest: () => void;
 }
 
-function shouldShowHandoffSkeleton(status: MessageListOverlaysProps["handoffStatus"], messages: Message[]) {
-  return status === "generating" && messages.filter((message) => message.role !== "system").length <= 1;
-}
-
 /** Renders transcript affordances that are independent of virtual row layout. */
 export function MessageListOverlays({
-  handoffStatus,
   messages,
   isLoadingMore,
   isLoadingNewer,
@@ -68,15 +60,6 @@ export function MessageListOverlays({
 
   return (
     <>
-      {shouldShowHandoffSkeleton(handoffStatus, messages) && (
-        <div className="px-4 py-4 sm:px-[var(--chat-gutter,--spacing(8))]">
-          <div className={`${PRIMARY_CONTENT_RAIL_CLASS} space-y-2`}>
-            <Skeleton className="h-3.5 w-3/4 animate-pulse rounded" />
-            <Skeleton className="h-3.5 w-1/2 animate-pulse rounded" />
-            <Skeleton className="h-3.5 w-2/3 animate-pulse rounded" />
-          </div>
-        </div>
-      )}
       {onSelectedTextComment && (
         <SelectedTextCommentControls
           key={renderedThreadId ?? "no-rendered-thread"}

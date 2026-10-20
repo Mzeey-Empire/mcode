@@ -113,7 +113,6 @@ function createAgentServiceHarness(automaticSetup?:
       })),
     } as never,
     availability as never,
-    {} as never,
     { clear: vi.fn() } as never,
     new NarrativeStore(
       messageRepo,

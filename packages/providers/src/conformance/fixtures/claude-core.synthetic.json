@@ -13,7 +13,6 @@
     "permissions",
     "usage",
     "session-eviction",
-    "clean-fork",
     "orchestration",
     "browser-access",
     "thread-control",

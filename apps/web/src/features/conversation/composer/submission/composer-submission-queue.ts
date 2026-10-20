@@ -2,19 +2,10 @@ import type { MessageMention, PreviewAnnotationBundle } from "@mcode/contracts";
 import { collectBrowserCaptureSpillPaths, releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
-import { browserNoteElements, removeTakenBrowserNotePages } from "../draft/draft-browser-notes";
-import { removeTakenDiffComments } from "../draft/draft-diff-comments";
-import { removeTakenFileComments } from "../draft/draft-file-comments";
 import type { ComposerAgentSelection, ComposerFormController } from "../draft/useComposerFormController";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
-import type { HandoffQueuedSend } from "../queue/useHandoffQueuedSend";
 import { queueHoldingDraftElements } from "../queue/queued-draft-holds";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
-
-/** Inputs for creating a deferred handoff payload. */
-export interface CreateHandoffQueuedSendOptions {
-  submission: PreparedComposerSubmission;
-}
 
 /** Inputs for persisting a queued existing-thread submit. */
 export interface QueueComposerSubmissionOptions {
@@ -30,25 +21,6 @@ export interface CompleteQueuedComposerSubmissionOptions {
   goalObjective?: string;
   form: ComposerFormController;
   finishEditing(): void;
-}
-
-/** Creates the full payload retained while a child-thread handoff is generating. */
-export function createHandoffQueuedSend({
-  submission,
-}: CreateHandoffQueuedSendOptions): HandoffQueuedSend {
-  const { snapshot, prepared } = submission;
-  const browserCaptureSpillPaths = collectBrowserCaptureSpillPaths(prepared.browserCaptures);
-  return {
-    content: prepared.content,
-    displayContent: prepared.displayContent,
-    mentions: snapshot.mentions,
-    previewAnnotations: submission.previewAnnotations,
-    goalObjective: submission.goalObjective,
-    orchestrationMode: snapshot.selection.orchestrationMode,
-    attachments: submission.attachmentMetas,
-    selection: snapshot.selection,
-    browserCaptureSpillPaths: browserCaptureSpillPaths.length > 0 ? browserCaptureSpillPaths : undefined,
-  };
 }
 
 /**
@@ -123,18 +95,4 @@ function optionalMentions(mentions: MessageMention[]): MessageMention[] | undefi
 /** Keeps fast-mode metadata scoped to Codex submissions. */
 function optionalCodexFastMode(selection: ComposerAgentSelection): boolean | undefined {
   return selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined;
-}
-
-/**
- * Removes the comments and notes a handoff-deferred submit took. That submit waits in
- * Composer memory with no queue entry to hold them under, so they leave the draft now.
- */
-export function removeHandoffTakenAnnotations(
-  annotationScopeId: string | undefined,
-  submission: PreparedComposerSubmission,
-): void {
-  if (!annotationScopeId || !submission.currentAnnotations) return;
-  removeTakenBrowserNotePages(annotationScopeId, browserNoteElements(submission.currentBrowserNotePages));
-  removeTakenDiffComments(annotationScopeId, submission.currentDiffComments);
-  removeTakenFileComments(annotationScopeId, submission.currentFileComments);
 }

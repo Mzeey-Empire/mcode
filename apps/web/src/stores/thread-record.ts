@@ -21,15 +21,6 @@ import {
   createCanonicalAgentReplica,
   type CanonicalAgentReplica,
 } from "./canonical-agent-replica";
-/**
- * Ephemeral metadata for a handoff artifact received via the `thread.handoff` push channel.
- * Mirrors the server-side `HandoffMeta` fields that the UI needs, plus the pipeline status.
- */
-export interface HandoffMeta {
-  status: "generating" | "ready" | "fallback" | "error";
-  ladderStep?: "B" | "D";
-  providerErrorOnGenerate?: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | null;
-}
 
 /** Per-thread configuration for permission scope, interaction mode, and optional reasoning level. */
 export interface ThreadSettings {
@@ -175,8 +166,6 @@ export interface ThreadRecord {
   planQuestionsStatus: "idle" | "pending" | "answered";
   /** Bumps whenever the question batch or its status changes, so an in-flight snapshot can tell it is stale. */
   planQuestionsRevision: number;
-
-  handoffMeta?: HandoffMeta;
   forkMode: ThreadForkMode | null;
 }
 
@@ -371,11 +360,4 @@ export function deleteThreadRecord(
   const next = new Map(records);
   next.delete(threadId);
   return next;
-}
-
-/** Derive handoff status from record metadata. */
-export function getHandoffStatus(
-  record: ThreadRecord,
-): "generating" | "ready" | "fallback" | "error" | undefined {
-  return record.handoffMeta?.status;
 }

@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import type { ApprovalRequestEnvelope } from "@mcode/contracts";
 
 /**
- * Verifies the off-band handoff bypass in ClaudeProvider.canUseTool (PRD #538):
+ * Verifies the plan-file Read grant in ClaudeProvider.canUseTool (PRD #538):
  * a Read pre-granted via ScopedPreGrantService is auto-allowed without emitting
  * a approval_request, and all other tool calls fall through to the normal
  * permission flow unchanged.
@@ -83,7 +83,7 @@ import { stubEnvService } from "./helpers/provider-fixture.js";
 import { stubJobObject } from "./helpers/provider-fixture.js";
 import { mockProviderHostRuntime } from "./helpers/mock-sdk-query.js";
 
-describe("ClaudeProvider scoped pre-grant (off-band handoff Read)", () => {
+describe("ClaudeProvider scoped pre-grant (plan-file Read)", () => {
   let provider: ClaudeProvider;
   let scopedPreGrant: ScopedPreGrantService;
 
@@ -114,7 +114,7 @@ describe("ClaudeProvider scoped pre-grant (off-band handoff Read)", () => {
 
   it("auto-allows a pre-granted Read without emitting a approval_request", async () => {
     const threadId = "thread-grant";
-    const grantedPath = "/tmp/mcode-handoff-thread-grant-123.md";
+    const grantedPath = "/tmp/mcode-plan-thread-grant-123.md";
     scopedPreGrant.issue({ threadId, toolName: "Read", path: grantedPath });
 
     await startTurn(threadId);

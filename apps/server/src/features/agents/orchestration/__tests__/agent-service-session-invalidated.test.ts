@@ -111,10 +111,10 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     providerStub = wrapProviderEmitterForRuntimeEvents(Object.assign(new NodeEvents.EventEmitter(), {
       id: "claude" as ProviderId,
       descriptor: { id: "claude" as const, capabilities: [] },
-      forker: { fork: async () => { throw new Error("Unexpected fixture session fork"); } },
+
       listModels: async () => [],
       supportsCompletion: false,
-      sessionForkOnResume: "unsupported" as const,
+
       maxInputCharactersPerTurn: 16_000,
       sendTurn: vi.fn(() => new Promise<void>(() => {})),
       stopSession: vi.fn(),
@@ -169,7 +169,6 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       memoryPressureServiceStub,
       settingsServiceStub,
       availabilityStub,
-      { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       new NarrativeStore(
         messageRepo,

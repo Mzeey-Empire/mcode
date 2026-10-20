@@ -1957,54 +1957,6 @@ describe("CodexProvider first turn on new session", () => {
     expect(events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended)).toHaveLength(2);
   });
 
-  it("keeps caller-specific policy for unsupported CLI versions", async () => {
-    checkCodexVersionMock.mockReturnValueOnce({ ok: true, version: "0.36.0" });
-    meetsMinVersionMock.mockReturnValueOnce(false);
-    const provider = makeProvider();
-    const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
-
-    await provider.sendTurn({
-      turnId: "test-turn",
-      turnExecutionId: "test-execution",
-      sessionId: "mcode-unsupported-version",
-      workspaceId: "workspace-test",
-      threadId: "unsupported-version",
-      message: "hello",
-      cwd: process.cwd(),
-      model: "gpt-5.4",
-      interactionMode: "build",
-      providerOptions: {},
-      permissionMode: "auto",
-    });
-
-    expect(events).toEqual([
-      {
-        event: {
-          type: AgentEventType.Error,
-          threadId: "unsupported-version",
-          error: "Codex CLI version 0.36.0 is not supported. Minimum required: 0.135.0. Update with: npm install -g @openai/codex",
-          failure: { kind: "fatal" },
-          turnExecutionId: "test-execution",
-        },
-      },
-      { event: { type: AgentEventType.Ended, threadId: "unsupported-version", turnExecutionId: "test-execution" } },
-    ]);
-
-    checkCodexVersionMock.mockReturnValueOnce({ ok: true, version: "0.36.0" });
-    meetsMinVersionMock.mockReturnValueOnce(false);
-    await expect(provider.runSideChannelQuery({
-      parentThreadId: "parent-thread",
-      parentSdkSessionId: "sdk-thread-1",
-      prompt: "Generate the handoff.",
-      cwd: process.cwd(),
-    })).rejects.toMatchObject({
-      code: "ETIMEDOUT",
-      message: "Codex CLI version 0.36.0 is too old for side-channel handoff",
-    });
-    expect(appServers).toHaveLength(0);
-  });
-
   it("starts the first turn from cached Skills without waiting for catalog I/O", async () => {
     const nativeSkill = {
       name: "review",
@@ -2569,45 +2521,6 @@ describe("CodexProvider first turn on new session", () => {
     ]);
   });
 
-  it("runs side-channel handoff turns at low effort", async () => {
-    const provider = makeProvider();
-
-    const result = provider.runSideChannelQuery({
-      parentThreadId: "parent-thread",
-      parentSdkSessionId: "sdk-thread-1",
-      prompt: "Generate the handoff.",
-      cwd: process.cwd(),
-    });
-
-    for (let i = 0; i < 20 && sendTurnMock.mock.calls.length === 0; i++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-
-    expect(sendTurnMock).toHaveBeenCalledWith(
-      [{ type: "text", text: "Generate the handoff." }],
-      { effort: "low" },
-    );
-
-    expect(appServers[0]).toBeDefined();
-    const sideChannelServer = appServers[0]!;
-    expect(sideChannelServer.options).toMatchObject({
-      sandbox: "read-only",
-      approvalPolicy: "on-request",
-      resumeThreadId: undefined,
-    });
-    expect(sideChannelServer.options).not.toHaveProperty("configOverrides");
-    sideChannelServer.emit("notification", {
-      method: "item/agentMessage/delta",
-      params: { delta: "# Handoff" },
-    });
-    sideChannelServer.emit("notification", {
-      method: "turn/completed",
-      params: { turn: { status: "completed" } },
-    });
-
-    await expect(result).resolves.toBe("# Handoff");
-  });
-
   it("closes the mcode session when the attach fails", async () => {
     const close = vi.fn().mockResolvedValue(undefined);
     const events: ProviderRuntimeEvent[] = [];
@@ -3053,21 +2966,5 @@ describe("CodexProvider first turn on new session", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("maps side-channel CLI preflight failures to transient errors before creating a server", async () => {
-    checkCodexVersionMock.mockReturnValueOnce({ ok: false, error: "Codex CLI unavailable" });
-    const provider = makeProvider();
-
-    await expect(provider.runSideChannelQuery({
-      parentThreadId: "parent-thread",
-      parentSdkSessionId: "sdk-thread-1",
-      prompt: "Generate the handoff.",
-      cwd: process.cwd(),
-    })).rejects.toMatchObject({
-      code: "ETIMEDOUT",
-      message: "Codex CLI unavailable",
-    });
-    expect(appServers).toHaveLength(0);
   });
 });

@@ -8,7 +8,6 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
 import type { ComposerExecutionTargetController } from "../execution/useComposerExecutionTarget";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
-import type { HandoffQueuedSend } from "../queue/useHandoffQueuedSend";
 import { beginDraftSubmission } from "../draft/draft-submission-lifecycle";
 import { completeSuccessfulComposerSubmission } from "./complete-composer-submission";
 import {
@@ -18,9 +17,7 @@ import {
 } from "./composer-submission-annotations";
 import {
   completeQueuedComposerSubmission,
-  createHandoffQueuedSend,
   queueComposerSubmission,
-  removeHandoffTakenAnnotations,
 } from "./composer-submission-queue";
 import {
   dispatchComposerTarget,
@@ -41,7 +38,6 @@ export interface PendingCheckoutConfirmation {
 /** Queue operations that participate in submit routing. */
 export interface ComposerSubmissionQueue {
   editing: ComposerQueueEdit | null;
-  queueIfGenerating(queued: HandoffQueuedSend): boolean;
   discardEmptyEdit(): boolean;
   finishEditing(): void;
   /**
@@ -215,13 +211,6 @@ export function useComposerSubmissionController({
       resolvePreviewAnnotations: queue.resolvePreviewAnnotations,
     });
     if (!submission) return "complete";
-    if (submission.snapshot.selectedTextComments.length === 0
-      && shouldDeferToHandoff({ threadId, branchFromMessageId, isNewThread })
-      && queue.queueIfGenerating(createHandoffQueuedSend({ submission }))) {
-      removeHandoffTakenAnnotations(annotationScopeId, submission);
-      completeQueued(submission);
-      return "complete";
-    }
     if (shouldQueueActiveSubmit({ threadId, isAgentRunning, branchFromMessageId, isNewThread, submission })) {
       queuePrepared(submission);
       return "complete";
@@ -248,7 +237,7 @@ export function useComposerSubmissionController({
     if (checkoutPending) return "checkout-pending";
     await executePreparedDispatch(submission, target);
     return "complete";
-  }, [annotationScopeId, branchFromMessageId, completeQueued, executePreparedDispatch, execution, form, isAgentRunning, isNewThread, startingThread, queue, queuePrepared, threadId, workspaceId]);
+  }, [annotationScopeId, branchFromMessageId, executePreparedDispatch, execution, form, isAgentRunning, isNewThread, startingThread, queue, queuePrepared, threadId, workspaceId]);
 
   const submit = useCallback(async () => {
     if (submitInFlightRef.current) return;
@@ -293,15 +282,6 @@ export function useComposerSubmissionController({
 /** Allows only workspace-backed new-thread submissions to enter transport. */
 function canSubmitWithoutWorkspace(isNewThread: boolean, workspaceId: string | undefined): boolean {
   return !isNewThread || Boolean(workspaceId);
-}
-
-/** Recognizes existing-thread sends that must wait for handoff context. */
-function shouldDeferToHandoff({
-  threadId,
-  branchFromMessageId,
-  isNewThread,
-}: Pick<UseComposerSubmissionControllerOptions, "threadId" | "branchFromMessageId" | "isNewThread">): boolean {
-  return Boolean(threadId && !branchFromMessageId && !isNewThread);
 }
 
 /** Checks active-turn queue policy against the stable submitted text. */
