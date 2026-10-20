@@ -71,6 +71,35 @@ describe("HandoffStorage", () => {
     expect(await storage.readLatest("t_none")).toBeNull();
   });
 
+  it("keeps a switch audit out of readLatest and returns it from readLatestSwitch", async () => {
+    await storage.write("t_child", makeArtifact({ ladderStep: "B" }));
+    await new Promise((r) => setTimeout(r, 10));
+    await storage.writeSwitchAudit("t_child", {
+      fromProvider: "claude",
+      toProvider: "codex",
+      coveredSequences: [1, 2],
+      omittedSequences: [3],
+      budgetBytes: 4096,
+      droppedOptions: [],
+      history: "the replayed history",
+    });
+
+    expect((await storage.readLatest("t_child"))?.meta.ladderStep).toBe("B");
+    const audit = await storage.readLatestSwitch("t_child");
+    expect(audit).toContain("schemaVersion: 2");
+    expect(audit).toContain("kind: switch");
+    expect(audit).toContain("fromProvider: claude");
+    expect(audit).toContain("coveredSequences: [1,2]");
+    expect(audit).toContain("omittedSequences: [3]");
+    expect(audit).toContain("budgetBytes: 4096");
+    expect(audit).toContain("the replayed history");
+  });
+
+  it("readLatestSwitch returns null for a thread that never switched", async () => {
+    await storage.write("t_child", makeArtifact({ ladderStep: "B" }));
+    expect(await storage.readLatestSwitch("t_child")).toBeNull();
+  });
+
   it("copyAttachments duplicates source files into the child's attachments dir", async () => {
     const srcDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "att-src-"));
     const srcFile = NodePath.join(srcDir, "screenshot.png");
