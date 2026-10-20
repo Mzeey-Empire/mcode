@@ -23,7 +23,6 @@ function plannedSwitch(): PlannedSwitch {
     staleSessionId: null,
     dropped: [],
     refusal: null,
-    userSequence: 1,
   };
 }
 

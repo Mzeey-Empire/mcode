@@ -37,8 +37,6 @@ export interface PlannedSwitch {
   readonly dropped: readonly DroppedOption[];
   /** Set when the history cannot fit the target; the turn is refused and the user's message stays whole. */
   readonly refusal: Error | null;
-  /** Sequence of the user message this send persists. */
-  readonly userSequence: number;
 }
 
 interface ArmedSwitch {
@@ -75,8 +73,6 @@ const FALLBACK_SELECTION_KEYS = [
 @injectable()
 export class ProviderSwitchService {
   private dispatch: ((command: SendMessageCommand) => Promise<void>) | undefined;
-  /** User rows a fallback attempt must not replay, because the failed attempt's copy of the message is one. */
-  private readonly fallbackSkips = new Map<string, readonly number[]>();
   /** The armed switch per thread; a thread runs one turn at a time, so an older arm is stale. */
   private readonly armedByThread = new Map<string, ProviderSwitchTicket>();
 
@@ -129,7 +125,8 @@ export class ProviderSwitchService {
     const row = this.sessions.find(thread.id, ticket.toProvider);
     const resume = this.resumeCandidate(ticket, thread.id, target);
     const reconciled = await reconcileCommand(ticket.command, ticket.toProvider, target);
-    const outcome = this.tryPlan(ticket, thread, this.handoffRows(thread.id), throughSequence, resume?.lastSeenSequence ?? null);
+    const rows = loadHandoffMessages({ messageRepo: this.messages, toolCallRecordRepo: this.toolCalls, threadId: thread.id });
+    const outcome = this.tryPlan(ticket, thread, rows, throughSequence, resume?.lastSeenSequence ?? null);
     const plan = settledPlan({ ticket, outcome, resume, staleSessionId: row?.sessionId ?? null, dropped: reconciled.dropped, throughSequence });
     ticket.plan = plan;
     // A delta continues the target's session or fails; only a fresh session may start from nothing.
@@ -139,14 +136,6 @@ export class ProviderSwitchService {
   private resumeCandidate(ticket: ProviderSwitchTicket, threadId: string, target: IAgentProvider): ResolvedProviderSession | null {
     if (ticket.command.forceFreshSession === true || !supportsSessionResume(target)) return null;
     return this.sessions.resolve(threadId, ticket.toProvider);
-  }
-
-  /** History for the handoff, minus rows a failed attempt already showed the user as its own message. */
-  private handoffRows(threadId: string): ReturnType<typeof loadHandoffMessages> {
-    const skipped = new Set(this.fallbackSkips.get(threadId) ?? []);
-    this.fallbackSkips.delete(threadId);
-    return loadHandoffMessages({ messageRepo: this.messages, toolCallRecordRepo: this.toolCalls, threadId })
-      .filter((message) => !skipped.has(message.sequence));
   }
 
   private tryPlan(
@@ -296,15 +285,15 @@ export class ProviderSwitchService {
     const dispatch = this.dispatch;
     if (!dispatch) throw new Error("Provider switch dispatch is not bound");
     const { threadId } = ticket.command;
-    const plan = ticket.plan;
-    if (plan) this.fallbackSkips.set(threadId, [plan.userSequence]);
     const selection = pickSelection(ticket.command);
     const runtime = { sendMessage: dispatch };
+    // The fresh attempt reuses the user's row: the history it replays then ends before that row, and the
+    // timeline shows the message once.
     await this.recovery.retryErroredTurn({ threadId, turnId: armed.turnId }, (retry) => sendAdmittedTurn(runtime, {
       ...retry,
       ...selection,
       forceFreshSession: true,
-    }));
+    }), { reuseUserMessage: true });
   }
 }
 
@@ -339,7 +328,6 @@ function settledPlan(input: {
     staleSessionId: resumeSessionId ? null : input.staleSessionId,
     dropped: input.dropped,
     refusal,
-    userSequence: throughSequence + 1,
   };
 }
 

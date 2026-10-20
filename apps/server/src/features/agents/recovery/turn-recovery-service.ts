@@ -50,6 +50,18 @@ export interface RecoverableTurn {
   readonly message: Message;
 }
 
+/** Command fields that attach an attempt to the turn's existing user row, which already owns the attachments. */
+function reusedUserMessage(
+  message: Message,
+  stored: NonNullable<Message["attachments"]>,
+  persisted: ReturnType<AttachmentService["prepareRetryAttachments"]>,
+): Pick<SendMessageCommand, "persistedUserMessage" | "attachments"> {
+  return {
+    attachments: [],
+    persistedUserMessage: { id: message.id, sequence: message.sequence, attachments: stored, persistedAttachments: persisted },
+  };
+}
+
 /** Reconciles interrupted executions and admits explicit retries and resumes of ended attempts. */
 @injectable()
 export class TurnRecoveryService {
@@ -110,8 +122,16 @@ export class TurnRecoveryService {
     return checkpoint.executionId;
   }
 
-  /** Admit a new attempt of the latest errored turn without replacing its provider session. */
-  async retryErroredTurn(input: TurnRetryParams, dispatch: TurnDispatch): Promise<TurnRetryResult> {
+  /**
+   * Admit a new attempt of the latest errored turn without replacing its provider session. With
+   * `reuseUserMessage` the attempt attaches to the turn's existing user row instead of storing a second copy,
+   * for callers that retry on the user's behalf and must not add a visible message.
+   */
+  async retryErroredTurn(
+    input: TurnRetryParams,
+    dispatch: TurnDispatch,
+    options: { readonly reuseUserMessage?: boolean } = {},
+  ): Promise<TurnRetryResult> {
     const target = this.requireRecoverableTurn(input, "Errored");
     if (target.message.is_internal) {
       // A failed resume attempt resumes again, so it keeps the native-session guard or reseeds a fresh session
@@ -119,10 +139,13 @@ export class TurnRecoveryService {
       const thread = { ...target.thread, model: input.model ?? target.thread.model };
       return { turnId: (await this.continueTurn({ ...target, thread }, dispatch)).turnId };
     }
-    const attachments = this.attachmentService.prepareRetryAttachments(target.thread.id, target.message.attachments ?? []);
+    const reuse = options.reuseUserMessage === true;
+    const stored = target.message.attachments ?? [];
+    const attachments = this.attachmentService.prepareRetryAttachments(target.thread.id, stored, { keepIds: reuse });
     const turnId = NodeCrypto.randomUUID();
     await this.dispatchAttempt(turnId, {
       ...this.retryCommand(target.thread, target.message, attachments, target.executionId),
+      ...(reuse ? reusedUserMessage(target.message, stored, attachments) : {}),
       model: input.model ?? this.optionalValue(target.thread.model),
     }, dispatch);
     return { turnId };

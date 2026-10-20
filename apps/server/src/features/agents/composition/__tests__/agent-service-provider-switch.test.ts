@@ -264,6 +264,13 @@ describe("provider switch on send", () => {
     expect(retry.message).toContain("ancient question");
     expect(retry.message).toContain("codex answer");
     await waitFor(() => thread().provider === "claude");
+    await settled(terminalCount());
+
+    // The two exchanges before the switch are rows 1-4; the user's message is row 5 and is not replayed.
+    expect(retry.message).toContain("Sequences: 1-4");
+    const userRows = container.resolve(MessageRepo).listIncludingInternal(threadId)
+      .filter((message) => message.role === "user" && message.content === "back on claude");
+    expect(userRows.map((message) => message.sequence)).toEqual([5]);
   });
 
   function thread() {
