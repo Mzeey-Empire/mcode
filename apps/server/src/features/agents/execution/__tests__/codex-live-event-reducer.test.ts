@@ -464,7 +464,7 @@ describe("CodexLiveEventReducer", () => {
     expect(boundSession).toMatchObject({ kind: "reduced", writer: [{ kind: "notice-session" }] });
     expect(reducer.reduce(event("turnStarted")).kind).toBe("reduced");
 
-    const notice = mapper.mapNotification({ method: "unknown/new-method", params: {} })[0]?.event;
+    const notice = mapper.mapNotification({ method: "warning", params: { message: "Heads up" } })[0]?.event;
     expect(notice?.type).toBe("system");
     if (!notice) return;
     expect(reducer.reduce(notice)).toEqual({
