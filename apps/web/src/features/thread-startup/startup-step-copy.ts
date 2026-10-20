@@ -40,12 +40,6 @@ export type StartupDecision =
   | "agent-failed"
   | "cancelled";
 
-/** The single line a started trail collapses to. */
-export interface StartupTrailSummary {
-  readonly duration: string;
-  readonly parts: readonly string[];
-}
-
 interface StepVerbs {
   readonly pending: string;
   readonly running: string;
@@ -266,9 +260,8 @@ export function startupDecision(startup: Pick<ThreadStartup, "state" | "phase" |
 }
 
 /** What a screen reader hears when the trail changes state. It never includes a ticking duration. */
-export function startupTrailAnnouncement(startup: Pick<ThreadStartup, "kind" | "state" | "steps"> & Partial<Pick<ThreadStartup, "block">> | undefined): string {
+export function startupTrailAnnouncement(startup: Pick<ThreadStartup, "kind" | "steps"> & Partial<Pick<ThreadStartup, "block">> | undefined): string {
   if (!startup) return "Preparing thread";
-  if (startup.state === "completed") return "Thread started";
   const current = latestStartedStep(startup);
   if (!current) return "Preparing thread";
   return awaitsApproval(current, startup.block) ? "Setup needs approval" : startupStepLabel(startup.kind, current);
@@ -285,22 +278,6 @@ export function placeholderTrailRows(kind: ThreadStartupKind): StartupTrailRow[]
     kind,
     steps: getThreadStartupPhases(kind).map((phase) => ({ phase, state: "pending" })),
   }, { now: 0 });
-}
-
-/** Collapses a completed startup to its total time, worktree folder and setup command. */
-export function startupTrailSummary(
-  startup: Pick<ThreadStartup, "steps" | "createdAt" | "updatedAt">,
-  setupCommand: string | undefined,
-): StartupTrailSummary {
-  const agentEnd = startup.steps.find((step) => step.phase === "agent")?.endedAt;
-  const duration = formatStartupDuration(Date.parse(agentEnd ?? startup.updatedAt) - Date.parse(startup.createdAt));
-  const worktree = startup.steps.find((step) => step.phase === "worktree")?.detail;
-  const setupRan = startup.steps.some((step) => step.phase === "setup" && step.state === "completed");
-  const parts = [
-    worktree?.phase === "worktree" ? worktree.folderName : undefined,
-    setupRan ? setupCommand : undefined,
-  ].filter((part): part is string => part !== undefined);
-  return { duration, parts };
 }
 
 /** Whether any step is running, which is the only time trail durations tick. */

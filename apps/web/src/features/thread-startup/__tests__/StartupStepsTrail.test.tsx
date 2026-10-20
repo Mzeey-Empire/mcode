@@ -423,9 +423,6 @@ describe("StartupStepsTrail", () => {
 
     rerender(<TooltipProvider><StartupStepsTrail startup={startup()} kind="managed-worktree" /></TooltipProvider>);
     expect(screen.getByRole("status")).toHaveTextContent(/^Running setup$/);
-
-    rerender(<TooltipProvider><StartupStepsTrail startup={startup({ state: "completed", phase: "agent", steps: [{ phase: "thread", state: "completed" }, { phase: "agent", state: "completed", startedAt: at(0), endedAt: at(8) }] })} kind="managed-worktree" /></TooltipProvider>);
-    expect(screen.getByRole("status")).toHaveTextContent(/^Thread started$/);
   });
 
   it("shows skipped setup and an opened worktree without durations", () => {
@@ -447,9 +444,9 @@ describe("StartupStepsTrail", () => {
     expect(screen.getByTestId("startup-step-setup")).toHaveTextContent(/^Skipped setupthread running here$/);
   });
 
-  it("collapses a completed startup to one row that expands back to its steps", async () => {
+  it("renders nothing once the startup has completed", () => {
     seedRun("bun install", { status: "completed", exitCode: 0 });
-    renderTrail({
+    const { container } = renderTrail({
       startup: startup({
         state: "completed",
         phase: "agent",
@@ -464,18 +461,8 @@ describe("StartupStepsTrail", () => {
       kind: "managed-worktree",
     });
 
-    const started = screen.getByTestId("startup-started-row");
-    expect(started).toHaveTextContent("Started in0:22· mcode-3f2a · bun install");
-    expect(screen.queryByTestId("startup-step-setup")).toBeNull();
-
-    await userEvent.click(started);
-    expect(rowLabels().map(([, , text]) => text)).toEqual([
-      "Created worktreemcode-3f2a0:02",
-      "Ran setupbun install0:12",
-      "Started thread0:08",
-    ]);
-    await userEvent.click(screen.getByTestId("startup-started-row"));
-    expect(screen.queryByTestId("startup-step-setup")).toBeNull();
+    expect(screen.queryByTestId("startup-trail")).toBeNull();
+    expect(container.textContent).toBe("");
   });
 
   it("cancels a live startup and applies the server's record", async () => {
