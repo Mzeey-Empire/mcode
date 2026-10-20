@@ -174,16 +174,6 @@ describe("Picker", () => {
     expect(onLoadMore).not.toHaveBeenCalled();
   });
 
-  it("shows the bottom fade only while rows remain below, and the top fade only once scrolled", () => {
-    const { container } = render(<PagedPicker />);
-    const fade = (edge: string) => container.querySelector(`[data-slot="picker-fade-${edge}"]`);
-    expect(fade("top")).toBeNull();
-    expect(fade("bottom")).not.toBeNull();
-    scrollListTo(0);
-    expect(fade("top")).not.toBeNull();
-    expect(fade("bottom")).toBeNull();
-  });
-
   it("moves the highlight with the arrow keys, skips disabled rows, and picks with Enter", () => {
     const onSelect = vi.fn();
     render(<PagedPicker onSelect={onSelect} />);
@@ -287,7 +277,7 @@ describe("Picker", () => {
     await waitFor(() => expect(screen.getAllByText("Protected branch").some((node) => !node.hidden)).toBe(true));
   });
 
-  it("draws icon tabs with their labels as names and the active label as a caption", () => {
+  it("draws icon tabs with their labels as accessible names", () => {
     const tabs = [
       { id: "branches", label: "Branches", icon: <span>B</span> },
       { id: "prs", label: "Pull requests", icon: <span>P</span>, disabled: true, disabledReason: "No remote" },
@@ -295,7 +285,6 @@ describe("Picker", () => {
     render(<PagedPicker tabs={tabs} />);
     expect(screen.getByRole("radio", { name: "Branches" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "Pull requests" })).toBeDisabled();
-    expect(screen.getByRole("radiogroup").parentElement).toHaveTextContent(/Branches$/);
   });
 
   it("names an enabled icon tab in a hover tooltip", async () => {

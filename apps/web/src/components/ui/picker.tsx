@@ -69,9 +69,9 @@ export interface PickerRowAction {
 /** One picker tab, drawn as a segment above the list. */
 export interface PickerTab {
   readonly id: string;
-  /** Visible name, or the accessible name and the muted caption when the tabs draw icons. */
+  /** Visible name, or the accessible name and hover tooltip when the tabs draw icons. */
   readonly label: string;
-  /** When every tab has one, tabs draw as icons and the active tab's label shows at the row's end. */
+  /** When every tab has one, tabs draw as icons alone. */
   readonly icon?: ReactNode;
   readonly disabled?: boolean;
   /** Why a disabled tab is unavailable, shown on hover. */
@@ -105,6 +105,10 @@ export interface PickerProps<T> {
   readonly emptySwitch?: { readonly tabId: string; readonly label: string };
   /** Content under the list, set off by a divider, such as a toggle row. */
   readonly footer?: ReactNode;
+  /** Set false to separate groups and the footer with space instead of hairlines. Defaults to true. */
+  readonly hairlines?: boolean;
+  /** Set false to mark the selected row by its fill alone, without the trailing check. Defaults to true. */
+  readonly selectedCheck?: boolean;
   readonly onSelect: (item: T) => void;
 }
 
@@ -127,7 +131,7 @@ interface ListRow<T> {
  * `aria-activedescendant`, Home and End reach its ends, and Enter picks the highlighted row.
  */
 export function Picker<T>(props: PickerProps<T>) {
-  const { query, onQueryChange, searchPlaceholder = "Search", items, renderItem, selectedKey, status } = props;
+  const { query, onQueryChange, searchPlaceholder = "Search", items, renderItem, selectedKey, status, hairlines = true, selectedCheck = true } = props;
   const listId = useId();
   const rows = useMemo<ListRow<T>[]>(() => items.map((item) => ({ item, row: renderItem(item) })), [items, renderItem]);
   const listKey = `${props.activeTab ?? ""}\u0000${query}`;
@@ -210,6 +214,8 @@ export function Picker<T>(props: PickerProps<T>) {
           onPick={select}
           onRunAction={runRowAction}
           onNearEnd={loadMore}
+          hairlines={hairlines}
+          selectedCheck={selectedCheck}
         />
       ) : null}
       {/* A failed page keeps the rows already loaded; only an empty list gives way to the status. */}
@@ -218,7 +224,7 @@ export function Picker<T>(props: PickerProps<T>) {
       ) : hasRows ? null : (
         <PickerEmptyState {...props} listId={listId} />
       )}
-      <PickerFooter loaded={items.length} total={props.total} countLabel={props.countLabel} footer={props.footer} />
+      <PickerFooter loaded={items.length} total={props.total} countLabel={props.countLabel} footer={props.footer} hairline={hairlines} />
     </div>
   );
 }
@@ -227,7 +233,7 @@ function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>,
   if (!tabs || tabs.length === 0) return null;
   const iconOnly = tabs.every((tab) => tab.icon != null);
   return (
-    <div className={cn("flex items-center px-0.5 pb-1.5", iconOnly ? "mb-1 gap-0.5 border-b border-border pt-0.5" : "gap-2")}>
+    <div className={cn("flex items-center px-0.5 pb-1.5", iconOnly ? "gap-0.5 pt-0.5" : "gap-2")}>
       <SegmentedControl
         size="compact"
         fill={!iconOnly}
@@ -244,11 +250,6 @@ function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>,
         value={activeTab ?? ""}
         onChange={(id) => onTabChange?.(id)}
       />
-      {iconOnly ? (
-        <span aria-hidden className="ml-auto min-w-0 pr-1.5 text-caption text-fade text-muted">
-          {tabs.find((tab) => tab.id === activeTab)?.label}
-        </span>
-      ) : null}
     </div>
   );
 }
@@ -258,14 +259,15 @@ interface PickerFooterProps {
   readonly total: number | null;
   readonly countLabel?: string;
   readonly footer?: ReactNode;
+  readonly hairline: boolean;
 }
 
-function PickerFooter({ loaded, total, countLabel, footer }: PickerFooterProps) {
+function PickerFooter({ loaded, total, countLabel, footer, hairline }: PickerFooterProps) {
   const count = countLabel ?? (total !== null ? `Showing ${loaded} of ${total}` : null);
   return (
     <>
       {count !== null ? <p className="px-2 pt-1 pb-2 text-caption text-muted">{count}</p> : null}
-      {footer ? <div className="border-t border-border p-2">{footer}</div> : null}
+      {footer ? <div className={cn("p-2", hairline ? "border-t border-border" : "mt-1 pt-3")}>{footer}</div> : null}
     </>
   );
 }
@@ -388,20 +390,18 @@ interface PickerListProps<T> {
   readonly onPick: (entry: ListRow<T>) => void;
   readonly onRunAction: (index: number) => void;
   readonly onNearEnd: () => void;
+  readonly hairlines: boolean;
+  readonly selectedCheck: boolean;
 }
 
 function PickerList<T>(props: PickerListProps<T>) {
-  const { listId, listKey, rows, activeIndex, selectedKey, onHighlight, onPick, onRunAction, onNearEnd } = props;
+  const { listId, listKey, rows, activeIndex, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck } = props;
   const listRef = useRef<HTMLUListElement>(null);
-  const [atTop, setAtTop] = useState(true);
-  const [atEnd, setAtEnd] = useState(true);
 
   const measure = useCallback(() => {
     const list = listRef.current;
     if (!list) return;
     const remaining = list.scrollHeight - list.scrollTop - list.clientHeight;
-    setAtTop(list.scrollTop <= 0);
-    setAtEnd(remaining <= 1);
     if (remaining <= LOAD_MORE_ROWS * ROW_PITCH_PX) onNearEnd();
   }, [onNearEnd]);
 
@@ -418,43 +418,37 @@ function PickerList<T>(props: PickerListProps<T>) {
   }, [listKey]);
   useLayoutEffect(measure, [measure, rows.length]);
 
+  // scroll-fade-y hides the scrollbar and fades only an edge that hides rows, so the first and last rows sit clear
+  // of any fade once scrolled to their end.
   return (
-    <div className="relative">
-      <ul
-        ref={listRef}
-        id={listId}
-        role="listbox"
-        onScroll={measure}
-        className="flex max-h-[17.2rem] flex-col gap-px overflow-y-auto pt-2"
-      >
-        {rows.map((entry, index) => (
-          <Fragment key={entry.row.key}>
-            <PickerGroupStart row={entry.row} previous={rows[index - 1]?.row} />
-            <PickerOption
-              id={optionId(listId, index)}
-              row={entry.row}
-              active={index === activeIndex}
-              selected={entry.row.key === selectedKey}
-              onHighlight={() => onHighlight(index)}
-              onPick={() => onPick(entry)}
-              onRunAction={() => onRunAction(index)}
-            />
-          </Fragment>
-        ))}
-      </ul>
-      {/* The fades say there is more to scroll, so each shows only while its edge is out of view. */}
-      {atTop ? null : (
-        <div aria-hidden data-slot="picker-fade-top" className="pointer-events-none absolute inset-x-0 top-0 h-3 bg-gradient-to-b from-panel to-transparent" />
-      )}
-      {atEnd ? null : (
-        <div aria-hidden data-slot="picker-fade-bottom" className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-panel to-transparent" />
-      )}
-    </div>
+    <ul
+      ref={listRef}
+      id={listId}
+      role="listbox"
+      onScroll={measure}
+      className="scroll-fade-y flex max-h-[17.2rem] flex-col gap-px pt-2"
+    >
+      {rows.map((entry, index) => (
+        <Fragment key={entry.row.key}>
+          <PickerGroupStart row={entry.row} previous={rows[index - 1]?.row} hairlines={hairlines} />
+          <PickerOption
+            id={optionId(listId, index)}
+            row={entry.row}
+            active={index === activeIndex}
+            selected={entry.row.key === selectedKey}
+            selectedCheck={selectedCheck}
+            onHighlight={() => onHighlight(index)}
+            onPick={() => onPick(entry)}
+            onRunAction={() => onRunAction(index)}
+          />
+        </Fragment>
+      ))}
+    </ul>
   );
 }
 
-/** Marks where a new group begins: its label when it has one, otherwise a divider. The first group needs a divider only when labelled. */
-function PickerGroupStart({ row, previous }: { readonly row: PickerRow; readonly previous: PickerRow | undefined }) {
+/** Marks where a new group begins: its label when it has one, otherwise a divider or a gap. The first group needs a mark only when labelled. */
+function PickerGroupStart({ row, previous, hairlines }: { readonly row: PickerRow; readonly previous: PickerRow | undefined; readonly hairlines: boolean }) {
   if (previous !== undefined && row.group === previous.group) return null;
   if (row.groupLabel) {
     return (
@@ -464,6 +458,7 @@ function PickerGroupStart({ row, previous }: { readonly row: PickerRow; readonly
     );
   }
   if (previous === undefined) return null;
+  if (!hairlines) return <li role="presentation" aria-hidden className="h-2 shrink-0" />;
   return (
     <li role="presentation" aria-hidden className="shrink-0 py-1">
       <div className="h-px bg-border" />
@@ -476,6 +471,7 @@ interface PickerOptionProps {
   readonly row: PickerRow;
   readonly active: boolean;
   readonly selected: boolean;
+  readonly selectedCheck: boolean;
   readonly onHighlight: () => void;
   readonly onPick: () => void;
   readonly onRunAction: () => void;
@@ -509,7 +505,7 @@ function optionDescriptions(id: string, row: PickerRow, reason: string | undefin
   };
 }
 
-function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, onRunAction, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
+function PickerOptionItem({ id, row, active, selected, selectedCheck, onHighlight, onPick, onRunAction, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
   const descriptions = optionDescriptions(id, row, reason);
   return (
     <li
@@ -533,13 +529,13 @@ function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, onRu
       )}
     >
       {/* A disabled row keeps its action for the pointer, so a starred row whose model went away can be unstarred. */}
-      <PickerOptionContent row={row} selected={selected} onRunAction={onRunAction} />
+      <PickerOptionContent row={row} selected={selected} selectedCheck={selectedCheck} onRunAction={onRunAction} />
       {descriptions.spans}
     </li>
   );
 }
 
-function PickerOptionContent({ row, selected, onRunAction }: { readonly row: PickerRow; readonly selected: boolean; readonly onRunAction: () => void }) {
+function PickerOptionContent({ row, selected, selectedCheck, onRunAction }: { readonly row: PickerRow; readonly selected: boolean; readonly selectedCheck: boolean; readonly onRunAction: () => void }) {
   return (
     <>
       {row.icon != null ? (
@@ -558,9 +554,11 @@ function PickerOptionContent({ row, selected, onRunAction }: { readonly row: Pic
       </span>
       {row.tag ? <span className="max-w-[60%] min-w-0 text-caption text-fade text-muted">{row.tag}</span> : null}
       {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
-      <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
-        {selected ? <CheckIcon className="size-[1.4rem] text-ink" /> : null}
-      </span>
+      {selectedCheck ? (
+        <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
+          {selected ? <CheckIcon className="size-[1.4rem] text-ink" /> : null}
+        </span>
+      ) : null}
     </>
   );
 }
