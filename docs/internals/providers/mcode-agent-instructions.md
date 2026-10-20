@@ -1,29 +1,23 @@
 # Mcode runtime agent instructions
 
-Mcode derives a short runtime instruction plan from capabilities proven during
-provider session setup. Identity guidance is always present. Thread-control
-guidance appears only after the session's `mcode` MCP server is attached with
-thread-control tools. Browser guidance appears only after a Browser lease
-is issued for that session. MCP authorization and lease state remain
-authoritative; instruction text does not grant permissions.
+Runtime guidance derives from the toolkits attached to the provider session.
+The shared builder selects short, self-contained sections so unrelated guidance
+cannot crowd out repository search or provider-native collaboration rules.
+Authorization and Browser leases remain authoritative; instruction text grants
+no permissions.
 
-The package `@mcode/thread-orchestration` owns capability semantics and canonical
-copy. Provider adapters render that plan through native fields:
+Each section stays under 4,000 UTF-8 bytes because Codex silently truncates the
+middle of longer `additionalContext` values. Codex receives one `application`
+entry per section on every main-thread `turn/start`, preserving Codex's own
+configured developer instructions. Codex deduplicates unchanged entries, but
+drops their messages during compaction without resending them. After main-thread
+compaction, Mcode restores the sections as tagged developer messages through
+`thread/inject_items`. Restore failures warn and leave the turn running.
 
-- Codex passes it as `developerInstructions` on `thread/start` and
-  `thread/resume`.
-- Claude appends it to the Claude Code `systemPrompt` preset.
-- Copilot appends it to existing user instructions in `systemMessage` for
-  create and resume.
-- Cursor retains it per logical ACP session and adds it to the first normal
-  prompt only. Cursor has no ACP session-level instruction field, so static
-  repository instructions are not modified.
+Claude joins sections in its `systemPrompt` append, Copilot in `systemMessage`,
+and Cursor in the first normal prompt of its logical ACP session. Ephemeral
+Codex completions receive no runtime sections.
 
-Output is capped at 4000 characters with an explicit truncation marker. Copy
-contains server and tool names, routing constraints, and no credentials, URLs,
-or filesystem paths.
-
-When an agent needs a named provider or model, runtime guidance routes it through
-`thread_target_list`; the exact returned `providerId` and `modelId` must then be
-passed to `thread_create_batch`. The guidance does not enumerate or guarantee a
-static provider list.
+Runtime sections provide routing decisions. Detailed operating rules live in
+the descriptions of the tools they govern, so Browser guidance has one delivery
+path. MCP initialization carries no instructions, and there are no guide tools.

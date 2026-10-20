@@ -12,7 +12,7 @@ import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { copilotApprovalBody, copilotSessionScope } from "./copilot-approval.js";
 import { PLAN_MAX_CONTENT_CHARS, providerRuntimeEvent, type NativePlanFileOutcome } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import { buildMcodeInstructionPlan, renderMcodeInstructions } from "@mcode/thread-orchestration";
+import { buildMcodeInstructionSections, renderMcodeInstructionSections } from "@mcode/thread-orchestration";
 import type { CopilotProviderPorts } from "../../factory-types.js";
 import { providerBrowserPermissionCapability, type ProviderBrowserLeaseGrant, type ProviderHostPorts } from "../../host-ports.js";
 import { SessionRuntime, type ProtocolAdapter, type SpawnArgs, type SpawnResult } from "../session-runtime.js";
@@ -260,9 +260,8 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   /** `sessionId` must be the id the Browser lease was staged under, or the mcode server finds no lease and drops Browser tools. */
   private async sessionOptions(request: TurnRequest<"copilot">, browser: ProviderBrowserLeaseGrant | null, sessionId: string) {
     const mcode = await this.host.mcode.attach({ providerId: this.id, sessionId, threadId: request.threadId, threadControl: true });
-    const instructions = renderMcodeInstructions(buildMcodeInstructionPlan({
-      threadControlGranted: mcode?.toolkits.threadControl ?? false,
-      browserAutomationGranted: Boolean(mcode?.toolkits.browser && browser),
+    const instructions = renderMcodeInstructionSections(buildMcodeInstructionSections({
+      toolkits: { threadControl: mcode?.toolkits.threadControl ?? false, browser: Boolean(mcode?.toolkits.browser && browser) },
     }));
     const mcpServers: Record<string, MCPServerConfig> = mcode
       ? { [mcode.serverName]: { type: "http", url: mcode.url, headers: { Authorization: `Bearer ${mcode.token}` }, tools: ["*"] } }

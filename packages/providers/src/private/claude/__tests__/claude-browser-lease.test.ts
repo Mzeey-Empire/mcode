@@ -1,5 +1,4 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { MCODE_BROWSER_GUIDE } from "@mcode/thread-orchestration";
 import {
   BrowserAutomationSessionLease,
   type BrowserAutomationSessionLeaseScope,
@@ -121,7 +120,7 @@ describe("ClaudeProvider browser session lease lifecycle", () => {
     mockQuery.mockReturnValue({ close: vi.fn() });
   });
 
-  it("appends the shared Browser v2 guide to the native system prompt", async () => {
+  it("appends the Browser section to the native system prompt", async () => {
     const lease = configuredLease();
     const harness = makeProvider(lease);
     (harness.provider as any).runtime.get = vi.fn(() => undefined);
@@ -129,10 +128,8 @@ describe("ClaudeProvider browser session lease lifecycle", () => {
     await (harness.provider as any).sendTurn(request());
 
     const append = mockQuery.mock.calls[0][0].options.systemPrompt.append;
-    expect(append).toContain("browser_inspect");
-    expect(append).toContain("yield_to_user");
-    expect(append).not.toContain("browser_status");
-    expect(append).toContain(MCODE_BROWSER_GUIDE.trim());
+    expect(append).toContain("For visible Browser or Mcode Preview requests, use only the mcode MCP browser_* tools.");
+    expect(append).toContain("Finalize tabs with browser_tabs before replying.");
     await (harness.provider as any).close(harness.spawnedState);
   });
 

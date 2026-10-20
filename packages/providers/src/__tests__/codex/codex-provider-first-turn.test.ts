@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach, assert } from "vitest"
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { MCODE_BROWSER_GUIDE } from "@mcode/thread-orchestration";
 
 vi.mock("@mcode/shared", () => ({
   getMcodeDir: () => process.env.MCODE_DATA_DIR ?? ".",
@@ -442,11 +441,13 @@ describe("CodexProvider first turn on new session", () => {
       'mcp_servers.mcode.bearer_token_env_var="MCODE_MCP_TOKEN"',
       'plugins."browser@openai-bundled".enabled=false',
     ]);
-    expect(server.options.developerInstructions).toContain("browser_inspect");
-    expect(server.options.developerInstructions).toContain("thread_target_list");
-    expect(server.options.developerInstructions).toContain("yield_to_user");
-    expect(server.options.developerInstructions).not.toContain("browser_status");
-    expect(server.options.developerInstructions).toContain(MCODE_BROWSER_GUIDE.trim());
+    expect(server.options.instructionSections?.map((section) => section.key)).toEqual([
+      "mcode_identity", "mcode_provider_subagents", "mcode_thread_control", "mcode_browser", "mcode_repository_search",
+    ]);
+    expect(server.options.instructionSections?.find((section) => section.key === "mcode_browser")?.text)
+      .toContain("use only the mcode MCP browser_* tools");
+    expect(server.options.instructionSections?.find((section) => section.key === "mcode_thread_control")?.text)
+      .toContain("thread_target_list");
     expect(server.spawnedEnv?.MCODE_MCP_TOKEN).toBe("session-token-fixture");
     expect(server.spawnedEnv).not.toHaveProperty("MCODE_BROWSER_MCP_TOKEN");
     expect(JSON.stringify(server.options.configOverrides)).not.toContain("session-token-fixture");
@@ -487,8 +488,8 @@ describe("CodexProvider first turn on new session", () => {
     await send;
 
     const server = appServers.at(-1)!;
-    expect(server.options.developerInstructions?.includes("thread_target_list")).toBe(expected.thread);
-    expect(server.options.developerInstructions?.includes("browser_inspect")).toBe(expected.browser);
+    expect(server.options.instructionSections?.some((section) => section.key === "mcode_thread_control")).toBe(expected.thread);
+    expect(server.options.instructionSections?.some((section) => section.key === "mcode_browser")).toBe(expected.browser);
     expect(server.options.configOverrides?.includes('plugins."browser@openai-bundled".enabled=false')).toBe(expected.plugin);
     // A Browser grant the server does not list would sit unused until it expires.
     expect(lease.status().active).toBe(expected.browser ? 1 : 0);
@@ -596,9 +597,9 @@ describe("CodexProvider first turn on new session", () => {
 
     const server = appServers.at(-1)!;
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(server.options.developerInstructions).toContain("provider-native collaboration");
-    expect(server.options.developerInstructions).toContain("preserve the exact requested brief");
-    expect(server.options.developerInstructions).toContain("does not authorize Mcode thread control");
+    expect(server.options.instructionSections?.find((section) => section.key === "mcode_provider_subagents")?.text).toContain("provider-native collaboration");
+    expect(server.options.instructionSections?.find((section) => section.key === "mcode_provider_subagents")?.text).toContain("preserve the exact requested brief");
+    expect(server.options.instructionSections?.find((section) => section.key === "mcode_provider_subagents")?.text).toContain("does not authorize Mcode thread control");
     expect(sendTurnMock).toHaveBeenCalledWith(
       [{ type: "text", text: childBrief }],
       { model, approvalsReviewer: "user" },
@@ -625,8 +626,8 @@ describe("CodexProvider first turn on new session", () => {
     });
 
     const server = appServers.at(-1)!;
-    expect(server.options.developerInstructions).toContain("gpt-5.6-sol");
-    expect(server.options.developerInstructions).toContain("parent spawn_agent call");
+    expect(server.options.instructionSections?.find((section) => section.key === "mcode_nested_delegation")?.text).toContain("gpt-5.6-sol");
+    expect(server.options.instructionSections?.find((section) => section.key === "mcode_nested_delegation")?.text).toContain("parent spawn_agent call");
     await provider.stopSession("mcode-nested-model-guidance");
   });
 
@@ -713,7 +714,7 @@ describe("CodexProvider first turn on new session", () => {
     );
     expect(appServers.at(-1)?.isAlive).toBe(true);
     expect(appServers.at(-1)?.options.configOverrides).toEqual([]);
-    expect(appServers.at(-1)?.options.developerInstructions).not.toContain("browser_inspect");
+    expect(appServers.at(-1)?.options.instructionSections?.map((section) => section.key)).not.toContain("mcode_browser");
     const failure = events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.McpServerStartupStatus);
     expect(failure).toHaveLength(1);
     expect(failure[0]?.event).toMatchObject({
@@ -1964,7 +1965,7 @@ describe("CodexProvider first turn on new session", () => {
         event: {
           type: AgentEventType.Error,
           threadId: "unsupported-version",
-          error: "Codex CLI version 0.36.0 is not supported. Minimum required: 0.37.0. Update with: npm install -g @openai/codex",
+          error: "Codex CLI version 0.36.0 is not supported. Minimum required: 0.135.0. Update with: npm install -g @openai/codex",
           failure: { kind: "fatal" },
           turnExecutionId: "test-execution",
         },
@@ -2899,7 +2900,7 @@ describe("CodexProvider first turn on new session", () => {
     expect(attach).not.toHaveBeenCalled();
     expect(server.options.configOverrides).toEqual([]);
     expect(server.spawnedEnv).not.toHaveProperty("MCODE_MCP_TOKEN");
-    expect(server.options.developerInstructions).not.toContain("thread_target_list");
+    expect(server.options.instructionSections?.map((section) => section.key)).not.toContain("mcode_thread_control");
     await provider.stopSession("mcode-ineligible");
   });
 

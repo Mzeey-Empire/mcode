@@ -1,33 +1,38 @@
 /** Capability-derived runtime guidance shared by every provider adapter. */
 
-import { MCODE_BROWSER_GUIDE } from "./browser-operating-guide.js";
-
-export const MCODE_INSTRUCTIONS_MAX_CHARS = 4_000;
+/** Codex silently cuts the middle out of an additionalContext value above ~1,000 tokens (UTF-8 bytes / 4). */
+export const MCODE_INSTRUCTION_SECTION_MAX_BYTES = 4_000;
 
 const EXPLICIT_MCODE_THREAD_TOKEN = /\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait))\b/i;
 const NEGATED_MCODE_THREAD_REQUEST = /\b(?:do\s+not|don['’]?t|dont|never|without|no)\b[\s\S]{0,96}\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait))\b/i;
 const MCODE_THREAD_REQUEST_ACTION = /\b(?:create|start|open|launch|use|manage|list|search|send|stop|wait|get|target|delegate)\b/i;
 
-/** Capabilities proven available for one provider session. */
-export interface McodeInstructionCapabilities {
-  /** Thread-control tools listed by the session's `mcode` MCP server. */
-  threadControl?: true;
-  /** Browser lease issued and registered for this session. */
-  browserAutomation?: true;
+/** Stable section names used as Codex context tags. */
+export type McodeInstructionSectionKey =
+  | "mcode_identity"
+  | "mcode_provider_subagents"
+  | "mcode_nested_delegation"
+  | "mcode_thread_control"
+  | "mcode_browser"
+  | "mcode_repository_search";
+
+/** One self-contained concern delivered through a provider's native context. */
+export interface McodeInstructionSection {
+  readonly key: McodeInstructionSectionKey;
+  readonly text: string;
 }
 
-/** Structured runtime guidance plan before provider-specific formatting. */
-export interface McodeInstructionPlan {
-  capabilities: McodeInstructionCapabilities;
-  text: string;
+/** Toolkits attached to one provider session. */
+export interface McodeAttachedToolkits {
+  readonly threadControl: boolean;
+  readonly browser: boolean;
 }
 
-/** Inputs used to derive capabilities after provider setup succeeds. */
-export interface BuildMcodeInstructionPlanInput {
-  threadControlGranted: boolean;
-  browserAutomationGranted: boolean;
+/** Inputs for selecting runtime guidance after provider setup succeeds. */
+export interface BuildMcodeInstructionSectionsInput {
+  readonly toolkits: McodeAttachedToolkits;
   /** Optional provider-native model to use when a child must spawn another child. */
-  nestedDelegationModel?: string;
+  readonly nestedDelegationModel?: string;
 }
 
 /**
@@ -51,10 +56,11 @@ const IDENTITY_BLOCK = [
 ].join(" ");
 
 const THREAD_CONTROL_BLOCK = [
-  "Use the mcode MCP server to manage Mcode threads only when explicitly asked by the user.",
-  "An Mcode thread is a persistent user-visible conversation controlled by thread_* tools.",
-  "For an explicit Mcode thread request, use workspace_search, worktree_list, thread_target_list, thread_create_batch, thread_search, thread_get, thread_send, thread_stop, and thread_wait as needed. Call thread_target_list before choosing a provider or model, pass exact returned IDs to thread_create_batch, and never assume or enumerate providers or models.",
+  "Use the mcode MCP thread_* tools only when the user explicitly asks for Mcode threads.",
+  "An Mcode thread is a persistent user-visible conversation, different from provider-native child agents.",
+  "Call thread_target_list before choosing a provider or model and pass exact returned IDs.",
   "Never target the source thread.",
+  "Follow each tool's description for its rules.",
 ].join(" ");
 
 const PROVIDER_SUBAGENT_BLOCK = [
@@ -78,36 +84,37 @@ function nestedDelegationBlock(model: string | undefined): string | undefined {
   ].join(" ");
 }
 
-const BROWSER_BLOCK = MCODE_BROWSER_GUIDE.trim();
+const BROWSER_BLOCK = [
+  "For visible Browser or Mcode Preview requests, use only the mcode MCP browser_* tools.",
+  "Do not launch or drive another browser, profile, Playwright, generic Chrome, or Node-REPL browser.",
+  "A Browser-only task needs no shell commands or local skill files.",
+  "Follow each browser tool's description for readiness, targeting, acting, recovery and finishing.",
+  "Finalize tabs with browser_tabs before replying.",
+].join(" ");
 
-function capInstructionText(text: string): string {
-  if (text.length <= MCODE_INSTRUCTIONS_MAX_CHARS) return text;
-  const marker = "\n[ Mcode runtime guidance truncated at 4000 characters. ]";
-  return text.slice(0, MCODE_INSTRUCTIONS_MAX_CHARS - marker.length) + marker;
+const SECTION_REGISTRY: readonly {
+  key: McodeInstructionSectionKey;
+  text(input: BuildMcodeInstructionSectionsInput): string | undefined;
+}[] = [
+  { key: "mcode_identity", text: () => IDENTITY_BLOCK },
+  { key: "mcode_provider_subagents", text: () => PROVIDER_SUBAGENT_BLOCK },
+  { key: "mcode_nested_delegation", text: (input) => nestedDelegationBlock(input.nestedDelegationModel) },
+  { key: "mcode_thread_control", text: (input) => input.toolkits.threadControl ? THREAD_CONTROL_BLOCK : undefined },
+  { key: "mcode_browser", text: (input) => input.toolkits.browser ? BROWSER_BLOCK : undefined },
+  { key: "mcode_repository_search", text: () => REPOSITORY_SEARCH_BLOCK },
+];
+
+/** Builds ordered, self-contained guidance from the session's attached toolkits. */
+export function buildMcodeInstructionSections(
+  input: BuildMcodeInstructionSectionsInput,
+): readonly McodeInstructionSection[] {
+  return SECTION_REGISTRY.flatMap(({ key, text }) => {
+    const sectionText = text(input);
+    return sectionText === undefined ? [] : [{ key, text: sectionText }];
+  });
 }
 
-function appendBlockIfItFits(blocks: string[], block: string): void {
-  if ([...blocks, block].join("\n\n").length <= MCODE_INSTRUCTIONS_MAX_CHARS) blocks.push(block);
-}
-
-/** Builds canonical runtime guidance from capabilities proven at session setup. */
-export function buildMcodeInstructionPlan(
-  input: BuildMcodeInstructionPlanInput,
-): McodeInstructionPlan {
-  const capabilities: McodeInstructionCapabilities = {};
-  if (input.threadControlGranted) capabilities.threadControl = true;
-  if (input.browserAutomationGranted) capabilities.browserAutomation = true;
-
-  const blocks = [IDENTITY_BLOCK, PROVIDER_SUBAGENT_BLOCK];
-  const nestedBlock = nestedDelegationBlock(input.nestedDelegationModel);
-  if (nestedBlock) blocks.push(nestedBlock);
-  if (capabilities.threadControl) blocks.push(THREAD_CONTROL_BLOCK);
-  if (capabilities.browserAutomation) blocks.push(BROWSER_BLOCK);
-  appendBlockIfItFits(blocks, REPOSITORY_SEARCH_BLOCK);
-  return { capabilities, text: capInstructionText(blocks.join("\n\n")) };
-}
-
-/** Formats canonical guidance for a provider-native instruction field. */
-export function renderMcodeInstructions(plan: McodeInstructionPlan): string {
-  return plan.text;
+/** Joins sections for providers with a single native instruction field. */
+export function renderMcodeInstructionSections(sections: readonly McodeInstructionSection[]): string {
+  return sections.map((section) => section.text).join("\n\n");
 }

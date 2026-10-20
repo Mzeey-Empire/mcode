@@ -16,7 +16,7 @@ import type { ApprovalOutcome, ApprovalChoice, TurnFailure } from "@mcode/contra
 import { classifyCodexLocalFailure } from "./codex-failure-classifier.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
-import { buildMcodeInstructionPlan, renderMcodeInstructions } from "@mcode/thread-orchestration";
+import { buildMcodeInstructionSections, type McodeInstructionSection } from "@mcode/thread-orchestration";
 import {
   providerBrowserPermissionCapability,
   type ProviderBrowserCredentialMetadata,
@@ -115,7 +115,7 @@ const STOP_SETTLE_TIMEOUT_MS = 10_000;
 /** Bound on a follow-up send's wait for a user-stop drain before it respawns instead. */
 const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
 const USAGE_WARMUP_RETRY_MS = 60_000;
-const CODEX_MIN_VERSION = "0.37.0";
+const CODEX_MIN_VERSION = "0.135.0";
 /** S07-00 captured native plan items and question responses on this CLI version. */
 const CODEX_NATIVE_PLAN_MIN_VERSION = "0.161.0";
 /** First CLI whose app-server answers `turn/steer` with `expectedTurnId`; older ones declare `turn-steer` unsupported. */
@@ -1310,14 +1310,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       || (request.resumeFrom !== undefined && !this.collaborationModeSetSessions.has(request.sessionId));
   }
 
-  private codexCollaborationOptions(request: TurnRequest<"codex">, nativePlan: boolean): Pick<CodexTurnOptions, "collaborationMode" | "additionalContext"> {
+  private codexCollaborationOptions(request: TurnRequest<"codex">, nativePlan: boolean): Pick<CodexTurnOptions, "collaborationMode"> {
     if (!nativePlan || !this.mayUseCollaborationMode(request)) return {};
     return {
       collaborationMode: {
         mode: request.planTurn ? "plan" : "default",
         settings: { model: request.model, reasoning_effort: request.reasoningLevel ?? null, developer_instructions: null },
       },
-      additionalContext: {},
     };
   }
 
@@ -1620,20 +1619,19 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     };
   }
 
-  private codexSpawnInstructions(context: CodexSpawnContext): string {
+  private codexSpawnInstructions(context: CodexSpawnContext): readonly McodeInstructionSection[] {
     const spawnModel = context.pendingSpawn?.turnOptions.model;
     // Luna variants lack Ultra orchestration, so a nested spawn must route to the same-generation Sol.
     const nestedDelegationModel = spawnModel?.endsWith("-luna") ? spawnModel.replace(/-luna$/, "-sol") : undefined;
-    return renderMcodeInstructions(buildMcodeInstructionPlan({
-      threadControlGranted: context.mcode?.toolkits.threadControl ?? false,
-      browserAutomationGranted: Boolean(context.mcode?.toolkits.browser && context.browserGrant),
+    return buildMcodeInstructionSections({
+      toolkits: { threadControl: context.mcode?.toolkits.threadControl ?? false, browser: Boolean(context.mcode?.toolkits.browser && context.browserGrant) },
       nestedDelegationModel,
-    }));
+    });
   }
 
   private createCodexAppServer(
     context: CodexSpawnContext,
-    developerInstructions: string,
+    instructionSections: readonly McodeInstructionSection[],
   ): CodexAppServer {
     return new CodexAppServer({
       cliPath: context.cliPath,
@@ -1644,7 +1642,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       approvalPolicy: context.approvalPolicy,
       resumeThreadId: context.resumeFrom || undefined,
       requireResume: context.pendingSpawn?.resumeRequired === true,
-      developerInstructions,
+      instructionSections,
       questionResolved: params => this.planQuestions.resolved(context.sessionId, params),
       questionHandler: async request => {
         const state = this.runtime.get(context.sessionId);

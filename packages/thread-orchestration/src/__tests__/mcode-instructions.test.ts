@@ -1,12 +1,20 @@
+import * as NodeBuffer from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
-  buildMcodeInstructionPlan,
+  buildMcodeInstructionSections,
   isExplicitMcodeThreadRequest,
-  MCODE_BROWSER_GUIDE,
-  MCODE_INSTRUCTIONS_MAX_CHARS,
+  MCODE_INSTRUCTION_SECTION_MAX_BYTES,
+  renderMcodeInstructionSections,
 } from "../index.js";
 
-describe("Mcode runtime instruction plan", () => {
+const toolkitCombinations = [
+  { threadControl: false, browser: false },
+  { threadControl: false, browser: true },
+  { threadControl: true, browser: false },
+  { threadControl: true, browser: true },
+];
+
+describe("Mcode runtime instruction sections", () => {
   it.each([
     "Spawn exactly one nested provider-native child named leaf_probe",
     "Delegate this task to a provider-native subagent",
@@ -25,91 +33,62 @@ describe("Mcode runtime instruction plan", () => {
     expect(isExplicitMcodeThreadRequest("Do not create an Mcode thread")).toBe(false);
   });
 
-  it("always includes identity and excludes ungranted capabilities", () => {
-    const plan = buildMcodeInstructionPlan({
-      threadControlGranted: false,
-      browserAutomationGranted: false,
-    });
-    expect(plan.text).toContain("Mcode-managed session");
-    expect(plan.text).not.toContain("MCP server");
+  it.each(toolkitCombinations)("selects guidance for attached toolkits: %j", (toolkits) => {
+    const sections = buildMcodeInstructionSections({ toolkits });
+    const keys = sections.map((section) => section.key);
+    expect(keys.includes("mcode_browser")).toBe(toolkits.browser);
+    expect(keys.includes("mcode_thread_control")).toBe(toolkits.threadControl);
+    expect(keys).toEqual([
+      "mcode_identity",
+      "mcode_provider_subagents",
+      ...(toolkits.threadControl ? ["mcode_thread_control"] : []),
+      ...(toolkits.browser ? ["mcode_browser"] : []),
+      "mcode_repository_search",
+    ]);
   });
 
-  it("bounds broad repository searches before they print captured traces", () => {
-    const plan = buildMcodeInstructionPlan({
-      threadControlGranted: false,
-      browserAutomationGranted: false,
+  it.each(toolkitCombinations)("retains repository search with a long nested model: %j", (toolkits) => {
+    const sections = buildMcodeInstructionSections({ toolkits, nestedDelegationModel: "m".repeat(3_000) });
+    expect(sections.at(-1)).toEqual({
+      key: "mcode_repository_search",
+      text: "For broad repository searches, first list files with rg -l. Exclude fixtures and captured traces (*.ndjson) unless the task targets them, and bound line output with rg --max-columns 240 before reading matches.",
     });
-
-    expect(plan.text).toContain("first list files with rg -l");
-    expect(plan.text).toContain("fixtures and captured traces (*.ndjson)");
-    expect(plan.text).toContain("rg --max-columns 240");
   });
 
-  it("includes only capabilities proven available", () => {
-    const plan = buildMcodeInstructionPlan({
-      threadControlGranted: true,
-      browserAutomationGranted: true,
-    });
-    expect(plan.capabilities).toEqual({ threadControl: true, browserAutomation: true });
-    expect(plan.text).toContain("Use the mcode MCP server to manage Mcode threads");
-    expect(plan.text).toContain("manage Mcode threads only when explicitly asked by the user");
-    expect(plan.text).toContain("Never target the source thread.");
-    expect(plan.text).not.toContain("mcode_internal_thread_control");
-    expect(plan.text).not.toMatch(/(?<!\$)mcode-browser/);
-    expect(plan.text).not.toMatch(/delegat(?:e|ed|ion|ing)/i);
-    expect(plan.text).toContain(MCODE_BROWSER_GUIDE.trim());
-    expect(plan.text).not.toContain("first list files with rg -l");
-    expect(plan.text).not.toContain("http://");
-    expect(plan.text).not.toContain("Bearer");
+  for (const nestedDelegationModel of [undefined, "模型".repeat(500)]) {
+    it.each(toolkitCombinations)(
+      "keeps each section within the UTF-8 context budget with unique tag keys: %j",
+      (toolkits) => {
+        const sections = buildMcodeInstructionSections({ toolkits, nestedDelegationModel });
+        for (const section of sections) {
+          expect(NodeBuffer.Buffer.byteLength(section.text, "utf8")).toBeLessThanOrEqual(MCODE_INSTRUCTION_SECTION_MAX_BYTES);
+          expect(section.key).toMatch(/^[a-z][a-z0-9_]*$/);
+        }
+        const keys = sections.map((section) => section.key);
+        expect(new Set(keys).size).toBe(keys.length);
+        expect(keys).toContain("mcode_repository_search");
+        expect(keys.includes("mcode_nested_delegation")).toBe(nestedDelegationModel !== undefined);
+      },
+    );
+  }
+
+  it("trims nested models and omits a blank model", () => {
+    const toolkits = { threadControl: false, browser: false };
+    const sections = buildMcodeInstructionSections({ toolkits, nestedDelegationModel: "  gpt-5.6-sol  " });
+    expect(sections.map((section) => section.key)).toEqual([
+      "mcode_identity", "mcode_provider_subagents", "mcode_nested_delegation", "mcode_repository_search",
+    ]);
+    expect(sections[2]?.text).toContain('"gpt-5.6-sol"');
+    expect(buildMcodeInstructionSections({ toolkits, nestedDelegationModel: "  " }).map((section) => section.key))
+      .not.toContain("mcode_nested_delegation");
   });
 
-  it("keeps the cap when the largest blocks and a long nested model are combined", () => {
-    const plan = buildMcodeInstructionPlan({
-      threadControlGranted: true,
-      browserAutomationGranted: true,
-      nestedDelegationModel: "m".repeat(MCODE_INSTRUCTIONS_MAX_CHARS),
-    });
-    expect(plan.text.length).toBeLessThanOrEqual(MCODE_INSTRUCTIONS_MAX_CHARS);
-    expect(plan.text).toMatch(/\[ Mcode runtime guidance truncated at 4000 characters\. \]$/);
-  });
-
-  it("routes explicit child-agent requests through provider collaboration", () => {
-    const plan = buildMcodeInstructionPlan({
-      threadControlGranted: true,
-      browserAutomationGranted: false,
-    });
-
-    expect(plan.text).toContain("child-agent or sub-agent request");
-    expect(plan.text).toContain("provider-native collaboration");
-    expect(plan.text).toContain("preserve the exact requested brief");
-    expect(plan.text).toContain("does not authorize Mcode thread control");
-  });
-
-  it("documents the nested-capable provider model when one is supplied", () => {
-    const plan = buildMcodeInstructionPlan({
-      threadControlGranted: false,
-      browserAutomationGranted: false,
-      nestedDelegationModel: "gpt-5.6-sol",
-    });
-
-    expect(plan.text).toContain("gpt-5.6-sol");
-    expect(plan.text).toContain("parent spawn_agent call");
-    expect(plan.text).toContain("Do not replace provider-native collaboration with shell commands");
-  });
-
-  it("makes the Mcode Preview Browser boundary and action shape authoritative", () => {
-    expect(MCODE_BROWSER_GUIDE).toContain("use only the mcode MCP server for Mcode's shared Preview");
-    expect(MCODE_BROWSER_GUIDE).toMatch(/never initialize or use bundled generic Browser\/Chrome\/Node-REPL/i);
-    expect(MCODE_BROWSER_GUIDE).toContain("Browser-only");
-    expect(MCODE_BROWSER_GUIDE).toContain("do not run shell/terminal commands or read local skills/files");
-    expect(MCODE_BROWSER_GUIDE).toContain("latest observationRef");
-    expect(MCODE_BROWSER_GUIDE).toContain("fresh idempotencyKey");
-    expect(MCODE_BROWSER_GUIDE).toContain("non-empty steps array");
-    expect(MCODE_BROWSER_GUIDE).toContain("wait durationMs");
-    expect(MCODE_BROWSER_GUIDE).toContain("click target");
-    expect(MCODE_BROWSER_GUIDE).toContain("assert text/target/url");
-    expect(MCODE_BROWSER_GUIDE).toContain('"steps": [{ "operation": "click"');
-    expect(MCODE_BROWSER_GUIDE).toContain("Never send `steps: []`");
-    expect(MCODE_BROWSER_GUIDE).toContain("set disposition handoff and verify success");
+  it("renders complete sections in order for native single-field delivery", () => {
+    const sections = buildMcodeInstructionSections({ toolkits: { threadControl: false, browser: false } });
+    expect(renderMcodeInstructionSections(sections)).toBe(
+      "You are operating inside an Mcode-managed session. Mcode runtime guidance is advisory; MCP authorization and lease state remain authoritative.\n\n"
+      + "A child-agent or sub-agent request uses provider-native collaboration in the current turn. Use collaboration tools, preserve the exact requested brief, and keep direct and nested parent relationships intact. A child-agent request does not authorize Mcode thread control; use thread tools only for an explicit Mcode thread request.\n\n"
+      + "For broad repository searches, first list files with rg -l. Exclude fixtures and captured traces (*.ndjson) unless the task targets them, and bound line output with rg --max-columns 240 before reading matches.",
+    );
   });
 });
