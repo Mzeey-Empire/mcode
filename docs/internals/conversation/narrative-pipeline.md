@@ -302,9 +302,13 @@ misclassified preamble or duplicate assistant bodies. Reasoning blocks
 are never promoted, tagged final, or matched against the answer:
 
 1. **`AssistantMessageBoundary`** (authoritative) — emitted from
-   `claude-provider.ts` when an SDK `assistant` message carries text and a
-   `stop_reason`. `{end_turn, stop_sequence, max_tokens}` → final response;
-   everything else (including `tool_use`) → preamble/thought.
+   `claude-event-mapper.ts` for each SDK `assistant` message that carries
+   text. `{end_turn, stop_sequence, max_tokens}` → final response;
+   everything else (including `tool_use`) → preamble/thought. The CLI yields
+   each finished block with a null `stop_reason` before the API reports the
+   real one, so main-thread boundaries wait for `message_delta`, the next
+   tool call (preamble), or the result (final). Classifying the null early
+   showed tool-free answers as a thought next to the streaming answer.
 2. **`TextDelta.isFinalResponse`** (stream hint) — best-effort flag set on
    `content_block_delta` when all tools have resolved and at least one tool
    fired this turn. May be absent on tool-free turns; boundary event wins.
