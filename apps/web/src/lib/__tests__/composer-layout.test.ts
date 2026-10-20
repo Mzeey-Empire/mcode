@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   LAYOUT_COLUMN_GAP_PX,
   canFitInlineSidebar,
@@ -24,6 +24,8 @@ describe("composer-layout", () => {
   });
 
   it("computes inline sidebar minimum from content need and the live sidebar width", () => {
+    // The sidebar clamp reads the window width, which the node environment lacks.
+    vi.stubGlobal("window", { innerWidth: 1440 });
     useSidebarWidthStore.getState().resetWidth();
     expect(minOuterWidthForInlineSidebar(600)).toBe(600 + LAYOUT_COLUMN_GAP_PX + 304);
 
@@ -33,6 +35,7 @@ describe("composer-layout", () => {
     useSidebarWidthStore.getState().setWidth(340);
     expect(minOuterWidthForInlineSidebar(600)).toBe(600 + LAYOUT_COLUMN_GAP_PX + 340);
     useSidebarWidthStore.getState().resetWidth();
+    vi.unstubAllGlobals();
   });
 
   it("reports side-by-side fit from content-row width", () => {
