@@ -6,7 +6,9 @@ import {
   isEmptyPreviewTabUrl,
   openUrlInPreview,
   openGitHubUrl,
+  openActionPreview,
 } from "../open-url-in-preview";
+import { usePreviewFocusStore } from "../../state/previewFocusStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createMockWorkspace, createMockThread } from "@/__tests__/mocks/transport";
@@ -412,5 +414,95 @@ describe("openGitHubUrl", () => {
     await vi.runAllTimersAsync();
     expect(mockOpenExternal).not.toHaveBeenCalled();
     expect(mockOpen).toHaveBeenCalled();
+  });
+});
+
+describe("openActionPreview", () => {
+  let mockOpen: ReturnType<typeof vi.fn>;
+  let mockOpenExternalUrl: ReturnType<typeof vi.fn>;
+  let showRightPanel: ReturnType<typeof vi.fn>;
+  let windowOpen: ReturnType<typeof vi.spyOn>;
+
+  function installBridge(listedUrl: string | null) {
+    window.desktopBridge = {
+      openExternalUrl: mockOpenExternalUrl,
+      preview: { tabs: { open: mockOpen, list: mockTabList(listedUrl) } },
+    } as unknown as typeof window.desktopBridge;
+  }
+
+  beforeEach(() => {
+    mockOpen = vi.fn().mockResolvedValue({ ok: true, data: { tabId: "tab-2", tabs: openedTabSet() } });
+    mockOpenExternalUrl = vi.fn().mockResolvedValue(undefined);
+    showRightPanel = vi.fn();
+    windowOpen = vi.spyOn(window, "open").mockReturnValue(null);
+    useDiffStore.setState({ showRightPanel, setRightPanelTab: vi.fn() } as Partial<ReturnType<typeof useDiffStore.getState>>);
+    usePreviewFocusStore.setState({ omniboxFocusTick: 0 });
+    const ws = createMockWorkspace({ id: "ws-1", path: "/tmp/workspace" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      activeThreadId: "thread-1",
+      threads: [
+        createMockThread({ id: "thread-1", workspace_id: ws.id }),
+        createMockThread({ id: "thread-2", workspace_id: ws.id }),
+      ],
+    });
+    installBridge("https://example.com");
+  });
+
+  afterEach(() => {
+    windowOpen.mockRestore();
+    delete (window as unknown as Record<string, unknown>).desktopBridge;
+    useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null, activeThreadId: null, threads: [] });
+  });
+
+  it("opens, activates and reveals on the active thread without moving keyboard focus", async () => {
+    await openActionPreview({ threadId: "thread-1", url: "http://localhost:5173/" });
+
+    expect(mockOpen).toHaveBeenCalledWith("thread-1", "ws-1", { activate: true, initialAddress: "http://localhost:5173/" });
+    expect(showRightPanel).toHaveBeenCalled();
+    expect(usePreviewFocusStore.getState().omniboxFocusTick).toBe(0);
+  });
+
+  it("opens an inactive tab on a background thread and leaves the panel alone", async () => {
+    await openActionPreview({ threadId: "thread-2", url: "http://localhost:5173/" });
+
+    expect(mockOpen).toHaveBeenCalledWith("thread-2", "ws-1", { activate: false, initialAddress: "http://localhost:5173/" });
+    expect(showRightPanel).not.toHaveBeenCalled();
+  });
+
+  it("leaves an existing tab on the same origin and path untouched", async () => {
+    installBridge("http://localhost:5173/?tab=logs#top");
+
+    await openActionPreview({ threadId: "thread-1", url: "http://localhost:5173/" });
+
+    expect(mockOpen).not.toHaveBeenCalled();
+    expect(showRightPanel).not.toHaveBeenCalled();
+  });
+
+  it("opens a new tab when only the port differs", async () => {
+    installBridge("http://localhost:3000/");
+
+    await openActionPreview({ threadId: "thread-1", url: "http://localhost:5173/" });
+
+    expect(mockOpen).toHaveBeenCalledOnce();
+  });
+
+  it("does nothing without the desktop bridge", async () => {
+    delete (window as unknown as Record<string, unknown>).desktopBridge;
+
+    await openActionPreview({ threadId: "thread-1", url: "http://localhost:5173/" });
+
+    expect(windowOpen).not.toHaveBeenCalled();
+    expect(showRightPanel).not.toHaveBeenCalled();
+  });
+
+  it("never falls back to an external browser when the tab cannot open", async () => {
+    mockOpen.mockResolvedValue({ ok: false, error: "failed" });
+
+    await openActionPreview({ threadId: "thread-1", url: "http://localhost:5173/" });
+
+    expect(mockOpenExternalUrl).not.toHaveBeenCalled();
+    expect(windowOpen).not.toHaveBeenCalled();
   });
 });

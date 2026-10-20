@@ -31,6 +31,7 @@ import { useThreadStartupStore } from "@/features/thread-startup";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 import { invalidateReviewOperandLists } from "@/components/diff/review-operand-lists";
 import { acceptTurnRevert } from "@/features/conversation/turn-revert/useTurnRevert";
+import { openActionPreview } from "@/features/preview/navigation/open-url-in-preview";
 
 /** Unsubscribe handles for all push listeners. */
 let unsubs: (() => void)[] = [];
@@ -296,6 +297,9 @@ export function startPushListeners(): void {
       const parsed = WS_CHANNELS["workspace.environment.action.updated"].safeParse(data);
       if (!parsed.success) return;
       applyActionRun(parsed.data.run, { focus: false });
+      if (parsed.data.openPreview) {
+        void openActionPreview({ threadId: parsed.data.threadId, url: parsed.data.openPreview.url });
+      }
     }),
   );
 

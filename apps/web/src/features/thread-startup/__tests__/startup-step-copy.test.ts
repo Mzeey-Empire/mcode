@@ -237,6 +237,34 @@ bun other`, checkoutPath: "/repo", terminal: null, environmentNames: [] },
     expect(view.terminalSessionId).toBe("install-pty");
   });
 
+  it("points Open terminal at a released action whose process keeps running", () => {
+    const view = startupSetupView(
+      [action("dev", "ready", "dev-run")],
+      { dev: run("dev", { status: "running" }) },
+    );
+    expect(view.terminalSessionId).toBe("dev-pty");
+  });
+
+  it("prefers a running or failed action over a released one", () => {
+    const released = run("dev", { status: "running" });
+    expect(startupSetupView(
+      [action("dev", "ready", "dev-run"), action("check", "running", "check-run")],
+      { dev: released, check: run("check") },
+    ).terminalSessionId).toBe("check-pty");
+    expect(startupSetupView(
+      [action("dev", "ready", "dev-run"), action("check", "failed", "check-run")],
+      { dev: released, check: run("check", { status: "failed", exitCode: 1 }) },
+    ).terminalSessionId).toBe("check-pty");
+  });
+
+  it("offers no terminal for a waited action that already exited", () => {
+    const view = startupSetupView(
+      [action("install", "ready", "install-run")],
+      { install: run("install", { status: "completed", exitCode: 0 }) },
+    );
+    expect(view.terminalSessionId).toBeNull();
+  });
+
   it("falls back to the action name for a run without a script", () => {
     const bare = run("check", { actionName: "Check", snapshot: { platform: "linux", script: null, checkoutPath: "/repo", terminal: null, environmentNames: [] } });
     expect(startupSetupView([action("check", "running", "check-run")], { check: bare }).commands).toEqual(["Check"]);

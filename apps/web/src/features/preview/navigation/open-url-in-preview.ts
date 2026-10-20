@@ -279,6 +279,48 @@ export function openUrlInPreview({
   }, 0);
 }
 
+function samePage(a: string | null, b: string): boolean {
+  if (a === null || !URL.canParse(a) || !URL.canParse(b)) return false;
+  const left = new URL(a);
+  const right = new URL(b);
+  return left.origin === right.origin && left.pathname === right.pathname;
+}
+
+async function canOpenPage(tabsApi: NonNullable<PreviewTabsApi>, threadId: string, workspaceId: string, url: string): Promise<boolean> {
+  const listed = await tabsApi.list(threadId, workspaceId);
+  return listed.ok && !listed.data.tabs.some((tab) => samePage(tab.url, url));
+}
+
+/** Options for {@link openActionPreview}. */
+export interface OpenActionPreviewOptions {
+  /** Loopback URL a Project action asked to preview. */
+  readonly url: string;
+  /** Thread whose action run produced the URL. */
+  readonly threadId: string;
+}
+
+/**
+ * Opens the preview a Project action asked for, without stealing focus or leaving the app.
+ * Unlike {@link openUrlInPreview} this never falls back to an external browser, because the
+ * request came from a background process rather than a click. A thread that already shows the
+ * page keeps its tab untouched, and a background thread gets an inactive tab.
+ */
+export async function openActionPreview({ url, threadId }: OpenActionPreviewOptions): Promise<void> {
+  const tabsApi = window.desktopBridge?.preview?.tabs;
+  if (!tabsApi?.list || !tabsApi.open) return;
+  const { threads, activeThreadId } = useWorkspaceStore.getState();
+  const workspaceId = threads.find((thread) => thread.id === threadId)?.workspace_id;
+  if (!workspaceId || !await canOpenPage(tabsApi, threadId, workspaceId, url)) return;
+
+  const active = threadId === activeThreadId;
+  if (active) revealPreviewPanel(threadId);
+  await usePreviewTabsStore.getState().openPage(workspaceId, threadId, {
+    activate: active,
+    focusOmnibox: false,
+    initialAddress: url,
+  });
+}
+
 /**
  * Opens a GitHub HTTPS URL in the system browser when plain-clicked, or in the
  * embedded preview (new tab) when Ctrl/Cmd+clicked.
