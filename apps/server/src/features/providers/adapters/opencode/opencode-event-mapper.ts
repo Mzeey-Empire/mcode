@@ -150,16 +150,10 @@ function malformedOutput(ctx: MapperContext): OpenCodeMappedOutput {
   };
 }
 
-function unknownEventOutput(type: string, ctx: MapperContext): OpenCodeMappedOutput {
-  void type;
+function unknownEventOutput(): OpenCodeMappedOutput {
   return {
     disposition: "diagnostic",
-    events: [withExecution({
-      type: "system",
-      threadId: ctx.threadId,
-      subtype: "provider.notice.unknown-event",
-      message: "The provider sent an update this client does not recognize. The thread continues normally.",
-    } satisfies AgentEvent, ctx)],
+    events: [],
     reason: "unknown-event-type",
   };
 }
@@ -611,12 +605,7 @@ function mapPartByType(part: Record<string, unknown>, properties: Record<string,
   if (typeof partType === "string" && STATE_ONLY_PART_TYPES.has(partType)) return { disposition: "state-only", events: [] };
   return {
     disposition: "diagnostic",
-    events: [withExecution({
-      type: "system",
-      threadId: ctx.threadId,
-      subtype: "provider.notice.unknown-part",
-      message: "The provider sent an update this client does not recognize. The thread continues normally.",
-    } satisfies AgentEvent, ctx)],
+    events: [],
     reason: "unknown-part-type",
   };
 }
@@ -790,7 +779,7 @@ function mapNormalized(normalized: NormalizedEnvelope, ctx: MapperContext): Open
   const exact = EXACT_HANDLERS[type];
   if (exact) return exact(properties, ctx);
   if (isNoiseType(type)) return { disposition: "ignored", events: [], reason: `noise:${type}` };
-  return unknownEventOutput(type, ctx);
+  return unknownEventOutput();
 }
 
 /**
