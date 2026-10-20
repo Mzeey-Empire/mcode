@@ -91,6 +91,26 @@ function ThreadOperationSubject({ subject }: { readonly subject: SubjectOf<"thre
   );
 }
 
+const ISOLATION_LABELS: Record<SubjectOf<"delegate_task">["isolation"], string> = {
+  shared: "shared checkout",
+  worktree: "new worktree",
+};
+
+function delegateTaskFacts(subject: SubjectOf<"delegate_task">): string {
+  const parts = [`${subject.providerId} · ${subject.modelId}`, ISOLATION_LABELS[subject.isolation]];
+  if (subject.commit) parts.push(`at ${subject.commit.slice(0, 7)}`);
+  return parts.join(" · ");
+}
+
+function DelegateTaskSubject({ subject }: { readonly subject: SubjectOf<"delegate_task"> }) {
+  return (
+    <SubjectBlock>
+      <p className="whitespace-pre-wrap break-words text-sm text-ink">{subject.title}</p>
+      <FactsLine>{delegateTaskFacts(subject)}</FactsLine>
+    </SubjectBlock>
+  );
+}
+
 /** What the request would do, in full. Questions render in the transcript, not here. */
 export function ApprovalSubject({ subject }: { readonly subject: ApprovalSubjectModel }) {
   switch (subject.kind) {
@@ -99,6 +119,7 @@ export function ApprovalSubject({ subject }: { readonly subject: ApprovalSubject
     case "fetch": return <FetchSubject subject={subject} />;
     case "tool": return <ToolSubject subject={subject} />;
     case "thread_operation": return <ThreadOperationSubject subject={subject} />;
+    case "delegate_task": return <DelegateTaskSubject subject={subject} />;
     case "question": return null;
   }
 }

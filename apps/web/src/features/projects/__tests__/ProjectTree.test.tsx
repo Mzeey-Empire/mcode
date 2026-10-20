@@ -295,6 +295,7 @@ function makeThread(
     codex_fast_mode: null,
     devin_mode: null,
     parent_thread_id: null,
+    delegation_coordinator_thread_id: null,
     forked_from_message_id: null,
     last_compact_summary: null,
     plan_phase: null,
@@ -302,6 +303,11 @@ function makeThread(
     has_file_changes: false,
     ...overrides,
   };
+}
+
+/** Reads the depth indent ThreadRow applies to its inner row element. */
+function rowIndent(row: HTMLElement | undefined): string | undefined {
+  return row?.querySelector<HTMLElement>("[style*='padding-left']")?.style.paddingLeft;
 }
 
 const WORKSPACE = {
@@ -994,6 +1000,28 @@ describe("ProjectTree thread interactions", () => {
     render(<ProjectTree />);
 
     expect(screen.getByText("No active threads", { exact: true })).toBeVisible();
+  });
+
+  it("nests a Delegated thread under its Coordinator and roots it when the Coordinator is absent", () => {
+    const coordinator = makeThread({ id: "coordinator", title: "Coordinator" });
+    const delegated = makeThread({
+      id: "delegated",
+      title: "Delegated",
+      delegation_coordinator_thread_id: "coordinator",
+    });
+    setupStoreMocks({ threads: [delegated, coordinator] });
+
+    const { unmount } = render(<ProjectTree />);
+
+    const nested = screen.getAllByTestId("thread-item");
+    expect(nested.map((row) => row.dataset.threadId)).toEqual(["coordinator", "delegated"]);
+    expect(rowIndent(nested[1])).toBe("16px");
+    unmount();
+
+    setupStoreMocks({ threads: [delegated] });
+    render(<ProjectTree />);
+
+    expect(rowIndent(screen.getByTestId("thread-item"))).toBe("4px");
   });
 
   it("caps the thread list at six rows and toggles the overflow", () => {

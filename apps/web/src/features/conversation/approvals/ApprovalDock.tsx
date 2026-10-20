@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
-import { CircleAlert, CircleHelp, Pencil, Send, Shield, Terminal, type LucideIcon } from "lucide-react";
+import { CircleAlert, CircleHelp, GitBranch, Pencil, Send, Shield, Terminal, type LucideIcon } from "lucide-react";
 import { useShallow } from "zustand/shallow";
 import type { ApprovalChoice, ApprovalSubject as ApprovalSubjectModel } from "@mcode/contracts";
 import { ProviderIcon } from "@/components/ui/provider-icon";
@@ -22,6 +22,7 @@ const SUBJECT_ICONS: Record<ApprovalSubjectModel["kind"], LucideIcon> = {
   fetch: Shield,
   tool: Shield,
   thread_operation: Send,
+  delegate_task: GitBranch,
   question: CircleHelp,
 };
 

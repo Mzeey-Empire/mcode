@@ -8,6 +8,7 @@ const SUBJECT_ACTIONS: Record<DockSubjectKind, string> = {
   file_edit: "edit a file",
   fetch: "fetch a page",
   tool: "use a tool",
+  delegate_task: "delegate a task",
 };
 
 const THREAD_OPERATION_ACTIONS: Record<ThreadOperation, string> = {
