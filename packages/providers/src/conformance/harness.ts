@@ -590,6 +590,10 @@ function createFakeHost(sink: DeterministicCanonicalSink, calls: string[]): Prov
       bootstrap: async () => { calls.push("threadControl.bootstrap"); return null; },
       close: async () => { calls.push("threadControl.close"); },
     },
+    mcode: {
+      attach: async () => { calls.push("mcode.attach"); return null; },
+      close: async () => { calls.push("mcode.close"); },
+    },
     grants: { consume: () => { calls.push("grants.consume"); return false; } },
     events: { submit: (batch) => sink.submit(batch) },
     turns: {

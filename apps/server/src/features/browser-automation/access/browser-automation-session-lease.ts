@@ -5,6 +5,7 @@ import {
 import * as NodeCrypto from "node:crypto";
 import {
   BrowserAutomationCredentialRegistry,
+  type BrowserAutomationCredentialClaims,
   type BrowserAutomationCredentialScope,
   type BrowserAutomationPermissionCapability,
 } from "./credential-registry.js";
@@ -189,6 +190,16 @@ export class BrowserAutomationSessionLease {
   /** Returns whether the composition root supplied a usable MCP endpoint. */
   isConfigured(): boolean {
     return this.configuration !== null;
+  }
+
+  /**
+   * Resolves the live Browser claims for one logical provider session and extends
+   * its idle expiry. Returns null when the session has no lease or it expired.
+   */
+  claimsFor(providerId: string, mcodeSessionId: string): BrowserAutomationCredentialClaims | null {
+    const leaseId = this.sessionToLease.get(this.sessionKey(providerId, mcodeSessionId));
+    const credentialId = leaseId ? this.active.get(leaseId)?.credentialId : undefined;
+    return credentialId ? this.credentials.touch(credentialId) : null;
   }
 
   /** Returns whether an active lease still owns a retained registry credential. */

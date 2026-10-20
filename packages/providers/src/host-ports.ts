@@ -110,6 +110,33 @@ export interface ProviderThreadControlPort {
   close(sessionId: string): Promise<void>;
 }
 
+/** Identity of the Provider session the per-session `mcode` MCP server attaches to. */
+export interface ProviderMcodeAttachRequest {
+  providerId: string;
+  /** Must equal the Browser lease `mcodeSessionId` for this session. */
+  sessionId: string;
+  threadId: string;
+  /** Whether the thread-control toolkit is listed; Codex passes its per-turn eligibility. */
+  threadControl: boolean;
+}
+
+/** How a Provider reaches its one `mcode` server and which toolkits it lists. */
+export interface ProviderMcodeAttachment {
+  serverName: "mcode";
+  url: string;
+  /** Opaque bearer for this session; never log or persist it. */
+  token: string;
+  toolkits: { browser: boolean; threadControl: boolean };
+}
+
+/** Gives a Provider its per-session `mcode` MCP server connection. */
+export interface ProviderMcodePort {
+  /** Returns null when the server is not listening or no toolkit applies to the session. */
+  attach(request: ProviderMcodeAttachRequest): Promise<ProviderMcodeAttachment | null>;
+  /** Rotates the token while a turn lease is active, otherwise closes the session. */
+  close(sessionId: string): Promise<void>;
+}
+
 /** Maps Mcode turn controls to the browser gateway capability. */
 export function providerBrowserPermissionCapability(
   permissionMode: string,
@@ -222,6 +249,7 @@ export interface ProviderHostPorts {
   processes: ProviderProcessPort;
   browser: ProviderBrowserPort;
   threadControl: ProviderThreadControlPort;
+  mcode: ProviderMcodePort;
   grants: ProviderGrantPort;
   events: ProviderEventSinkPort;
   turns: ProviderTurnPort;

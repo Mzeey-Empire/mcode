@@ -4,7 +4,7 @@ import * as NodeNet from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { InternalThreadControlMcpAuthority } from "../thread-control-mcp-authority.js";
+import { McodeSessionAuthority } from "../../../mcode-mcp/mcode-session-authority.js";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_MS,
   MAX_INTERNAL_MCP_REQUEST_BODY_BYTES,
@@ -22,8 +22,8 @@ function status(url: string, options: { headers?: Record<string, string>; body?:
   });
 }
 
-function runtime(): { runtime: InternalThreadControlMcpRuntime; authority: InternalThreadControlMcpAuthority } {
-  const authority = new InternalThreadControlMcpAuthority();
+function runtime(): { runtime: InternalThreadControlMcpRuntime; authority: McodeSessionAuthority } {
+  const authority = new McodeSessionAuthority();
   const instance = new InternalThreadControlMcpRuntime({} as never, authority);
   return { runtime: instance, authority };
 }

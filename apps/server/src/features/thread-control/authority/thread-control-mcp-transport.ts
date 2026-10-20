@@ -19,7 +19,7 @@ import {
   ThreadTargetListResultSchema,
 } from "@mcode/contracts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { InternalThreadControlMcpAuthority } from "./thread-control-mcp-authority.js";
+import type { McodeSessionAuthority } from "../../mcode-mcp/mcode-session-authority.js";
 import type { ThreadControlService } from "./thread-control-service.js";
 import { getMcodeBrowserGuide, getThreadControlGuide } from "./capability-guides/mcode-capability-guide.js";
 
@@ -42,7 +42,7 @@ export interface InternalThreadControlMcpSession {
 
 /** Dependencies required by the server-internal MCP transport. */
 export interface CreateInternalThreadControlMcpSessionOptions {
-  authority: InternalThreadControlMcpAuthority;
+  authority: McodeSessionAuthority;
   service: ThreadControlService;
 }
 
@@ -63,7 +63,7 @@ export function createInternalThreadControlMcpSession(
       ? undefined
       : options.authority.authorize(request.bearerCredential, sourceToolCallId);
     if (!authority) throw new InternalThreadControlMcpAuthorizationError();
-    const leaseSignal = options.authority.signal(request.bearerCredential);
+    const leaseSignal = options.authority.signalForCredential(request.bearerCredential);
     const signal = combineAbortSignals([leaseSignal, request.signal]);
     return dispatchInternalTool(options.service, authority, request.toolName, request.arguments, signal);
   };
@@ -193,7 +193,7 @@ type InternalToolHandler = (arguments_: unknown) => Promise<Record<string, unkno
 
 function dispatchInternalTool(
   service: ThreadControlService,
-  authority: NonNullable<ReturnType<InternalThreadControlMcpAuthority["authorize"]>>,
+  authority: NonNullable<ReturnType<McodeSessionAuthority["authorize"]>>,
   toolName: string,
   arguments_: unknown,
   signal: AbortSignal | undefined,
@@ -205,7 +205,7 @@ function dispatchInternalTool(
 
 function createToolHandlers(
   service: ThreadControlService,
-  authority: NonNullable<ReturnType<InternalThreadControlMcpAuthority["authorize"]>>,
+  authority: NonNullable<ReturnType<McodeSessionAuthority["authorize"]>>,
   signal: AbortSignal | undefined,
 ): Record<string, InternalToolHandler> {
   return {

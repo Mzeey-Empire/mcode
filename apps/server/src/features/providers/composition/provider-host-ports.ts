@@ -2,6 +2,7 @@ import type {
   ProviderEventBatch,
   ProviderEventCommitReceipt,
   ProviderHostPorts,
+  ProviderMcodePort,
   ProviderEventSubmissionReceipt,
   ProviderTurnPort,
 } from "@mcode/providers";
@@ -55,6 +56,7 @@ export interface ProviderHostPortDependencies {
   jobObject: JobObject;
   browser: BrowserAutomationSessionLease;
   threadControl: InternalThreadControlMcpRuntime;
+  mcode: ProviderMcodePort;
   grants: ScopedPreGrantService;
   events: CanonicalAgentBoundary;
   ingress: ProviderEventIngress;
@@ -123,6 +125,7 @@ export function createProviderHostPorts(
       },
       close: (sessionId) => dependencies.threadControl.retireTransport(sessionId),
     },
+    mcode: dependencies.mcode,
     grants: {
       consume: (request) => dependencies.grants.tryConsume(request),
     },

@@ -221,7 +221,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       browser: { stage: () => ({ leaseId: "lease", expiresAt: 1_000 }), releaseSession: () => 0, isConfigured: () => false,
         issue: () => null, refresh: (leaseId) => ({ ok: false, leaseId, reason: "not-found" }),
         release: (leaseId) => ({ leaseId, released: true }), revokeCredential: () => false },
-      threadControl: { bootstrap: async () => null, close: async () => {} }, events: { submit },
+      threadControl: { bootstrap: async () => null, close: async () => {} },
+      mcode: { attach: async () => null, close: async () => {} }, events: { submit },
     };
     const session = new CopilotPersistenceSession(); copilotSdk.session = session;
     const provider = createCopilotProvider({ configuration: { cliPath: "copilot", idleSessionTtlMs: 600_000 }, host,

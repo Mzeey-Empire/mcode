@@ -7,9 +7,9 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   constantTimeCredentialEqual,
-  InternalThreadControlMcpAuthority,
-  type ActivateInternalThreadControlMcpLease,
-} from "./thread-control-mcp-authority.js";
+  McodeSessionAuthority,
+  type ActivateMcodeSessionLease,
+} from "../../mcode-mcp/mcode-session-authority.js";
 import { createInternalThreadControlMcpSession } from "./thread-control-mcp-transport.js";
 import { ThreadControlService } from "./thread-control-service.js";
 
@@ -58,13 +58,13 @@ export class InternalThreadControlMcpRuntime {
 
   constructor(
     @inject(ThreadControlService) service: ThreadControlService,
-    @inject(InternalThreadControlMcpAuthority) private readonly authority: InternalThreadControlMcpAuthority,
+    @inject(McodeSessionAuthority) private readonly authority: McodeSessionAuthority,
   ) {
     this.transport = createInternalThreadControlMcpSession({ authority, service });
   }
 
   /** Activates the current intentional turn while preserving the pooled-session credential. */
-  activate(input: ActivateInternalThreadControlMcpLease): void {
+  activate(input: ActivateMcodeSessionLease): void {
     this.authority.activate(input);
   }
 
@@ -81,7 +81,7 @@ export class InternalThreadControlMcpRuntime {
 
   /** Retires native transport resources without revoking a turn admitted during cleanup. */
   async retireTransport(sessionId: string): Promise<void> {
-    this.authority.retireTransport(sessionId);
+    this.authority.retire(sessionId);
     await this.closeSessionTransports(sessionId);
   }
 

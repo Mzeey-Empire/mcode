@@ -32,6 +32,7 @@ function createHostPorts(): ProviderHostPorts {
       bootstrap: vi.fn(async () => null),
       close: vi.fn(async () => undefined),
     },
+    mcode: { attach: vi.fn(async () => null), close: vi.fn(async () => undefined) },
     grants: { consume: vi.fn(() => false) },
     events: { submit: vi.fn(async () => undefined) },
   };

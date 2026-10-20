@@ -58,11 +58,22 @@ describe("BrowserAutomationCredentialRegistry", () => {
     const first = registry.issue(scope("first"));
     const second = registry.issue(scope("second"));
     now = 1_050;
-    expect(registry.touch(first.credentialId)).toBe(true);
+    expect(registry.touch(first.credentialId)).toMatchObject({ credentialId: first.credentialId, providerSessionId: "first" });
     expect(registry.revokeProviderSession("cursor", "second")).toBe(1);
     expect(registry.authenticate(second.token)).toBeNull();
     now = 1_101;
     expect(registry.authenticate(first.token)).not.toBeNull();
+  });
+
+  it("returns null from touch once a credential idles out or is revoked", () => {
+    let now = 1_000;
+    const registry = new BrowserAutomationCredentialRegistry({ idleTtlMs: 100, absoluteTtlMs: 1_000, now: () => now });
+    const idle = registry.issue(scope("idle"));
+    const revoked = registry.issue(scope("revoked"));
+    registry.revoke(revoked.credentialId);
+    now = 1_100;
+    expect(registry.touch(idle.credentialId)).toBeNull();
+    expect(registry.touch(revoked.credentialId)).toBeNull();
   });
 
   it("extends idle expiry on use without extending the absolute lifetime", () => {

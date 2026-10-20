@@ -98,6 +98,29 @@ describe("BrowserAutomationSessionLease", () => {
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
 
+  it("resolves live claims by logical session and refuses released, rotated-away, or expired sessions", () => {
+    let now = 100;
+    const registry = new BrowserAutomationCredentialRegistry({ idleTtlMs: 10, absoluteTtlMs: 100, now: () => now });
+    const lease = configuredLease({ credentials: registry, now: () => now });
+    const grant = lease.issue(scope({ mcodeSessionId: "mcode-live", threadId: "thread-live" }))!;
+    lease.issue(scope({ mcodeSessionId: "mcode-other", threadId: "thread-other" }));
+
+    expect(lease.claimsFor("codex", "mcode-live")).toMatchObject({ threadId: "thread-live", credentialId: grant.credentialId });
+    expect(lease.claimsFor("claude", "mcode-live")).toBeNull();
+    expect(lease.claimsFor("codex", "mcode-unknown")).toBeNull();
+
+    now = 108;
+    expect(lease.claimsFor("codex", "mcode-live")).not.toBeNull();
+    now = 117;
+    expect(lease.claimsFor("codex", "mcode-live")).not.toBeNull();
+    now = 130;
+    expect(lease.claimsFor("codex", "mcode-live")).toBeNull();
+
+    const released = lease.issue(scope({ mcodeSessionId: "mcode-released" }))!;
+    lease.release(released.leaseId);
+    expect(lease.claimsFor("codex", "mcode-released")).toBeNull();
+  });
+
   it("reports a lease inactive after registry revocation", () => {
     const lease = configuredLease();
     const grant = lease.issue(scope())!;

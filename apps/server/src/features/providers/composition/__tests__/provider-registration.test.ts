@@ -16,6 +16,7 @@ function inertHost(platform: NodeJS.Platform) {
       refresh: io, release: io, revokeCredential: io,
     },
     threadControl: { bootstrap: io, close: io },
+    mcode: { attach: io, close: io },
     grants: { consume: io },
     events: { submit: io },
     turns: { open: io, settleBackgroundTool: io },

@@ -30,6 +30,7 @@ import type {
   BrowserAutomationMcpHandler,
 } from "../../features/browser-automation/index.js";
 import { EXTERNAL_THREAD_CONTROL_MCP_PATH } from "../../features/thread-control/index.js";
+import { MCODE_MCP_PATH, type McodeMcpServer } from "../../features/mcode-mcp/index.js";
 import type { ReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
 import type { ExecutionMailboxDepth } from "../../features/agents/execution/execution-mailbox-scheduler.js";
 
@@ -64,6 +65,8 @@ export type WsServerDeps = RouterDeps & {
   shutdown: () => void;
   /** Handles the loopback-only browser MCP route when the feature is enabled. */
   browserAutomationMcpHandler?: BrowserAutomationMcpHandler;
+  /** Serves the loopback-only per-session `mcode` MCP route. */
+  mcodeMcpServer?: McodeMcpServer;
   /** Optional opt-in packaged reliability controls. */
   reliabilityHarness?: ReliabilityHarnessAdapter;
   /** Content-free counts for active execution worker queues. */
@@ -310,6 +313,11 @@ function handleSpecialHttpRequest(
     admitHttpRequest(res, admission, () => handleThreadControlMcpRequest(req, res, runtime));
     return true;
   }
+  if (requestPath === MCODE_MCP_PATH && deps.mcodeMcpServer) {
+    const server = deps.mcodeMcpServer;
+    admitHttpRequest(res, admission, () => handleMcodeMcpRequest(req, res, server));
+    return true;
+  }
   return false;
 }
 
@@ -370,6 +378,21 @@ async function handleThreadControlMcpRequest(
   } catch (error) {
     logger.error("External thread-control MCP request failed", { error: describeError(error) });
     sendHttpFailure(res, 500, "");
+  }
+}
+
+/** Starts a per-session `mcode` MCP request and returns its JSON-RPC failure response when required. */
+async function handleMcodeMcpRequest(
+  req: NodeHTTP.IncomingMessage,
+  res: NodeHTTP.ServerResponse,
+  server: McodeMcpServer,
+): Promise<void> {
+  try {
+    await server.handle(req, res);
+  } catch (error) {
+    logger.error("Mcode MCP request failed", { error: describeError(error) });
+    sendHttpFailure(res, 500, JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Internal error" } }),
+      { "Content-Type": "application/json", "Cache-Control": "no-store" });
   }
 }
 

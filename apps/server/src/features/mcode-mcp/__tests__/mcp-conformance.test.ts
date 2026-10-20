@@ -16,15 +16,18 @@ import {
   createBrowserConformanceResourceSnapshot,
   type BrowserConformanceEventKind,
 } from "@mcode/browser-conformance";
-import { BrowserAutomationBroker } from "../../execution/broker.js";
-import { BrowserAutomationCredentialRegistry } from "../../access/credential-registry.js";
-import { BrowserAutomationMcpHandler } from "../mcp-handler.js";
+import { BrowserAutomationBroker } from "../../browser-automation/execution/broker.js";
+import { BrowserAutomationSessionLease } from "../../browser-automation/access/browser-automation-session-lease.js";
+import { McodeMcpServer } from "../mcode-mcp-server.js";
+import { McodeSessionAuthority } from "../mcode-session-authority.js";
+import { BrowserToolkit } from "../toolkits/browser-toolkit.js";
 
 const socket = { name: "conformance-host" } as never;
+const SESSION_ID = "mcode-conformance";
 
 let server: NodeHTTP.Server | undefined;
 let broker: BrowserAutomationBroker | undefined;
-let credentials: BrowserAutomationCredentialRegistry | undefined;
+let credentials: BrowserAutomationSessionLease["credentials"] | undefined;
 
 const MCP_OWNED_RACE_IDS = ["cleanup-late-event", "cleanup-disconnect"] as const;
 
@@ -101,7 +104,7 @@ interface McpConformanceFixture {
   readonly cleanupFaults: BrowserConformanceFaultController;
   readonly baselineReliability: ReturnType<BrowserAutomationBroker["reliabilityStatus"]>;
   readonly generation: number;
-  readonly issued: ReturnType<BrowserAutomationCredentialRegistry["issue"]>;
+  readonly issued: { readonly credentialId: string; readonly token: string };
   readonly scenario: ReturnType<typeof createBrowserConformanceScenario>;
   readonly endpoint: string;
   readonly nextDispatch: () => Promise<BrowserAutomationHostDispatch>;
@@ -151,12 +154,15 @@ function createMcpConformanceScenario() {
   });
 }
 
-async function startMcpConformanceServer(handler: BrowserAutomationMcpHandler): Promise<string> {
-  server = NodeHTTP.createServer((req, res) => void handler.handle(req, res));
+async function startMcpConformanceServer(mcode: McodeMcpServer): Promise<string> {
+  server = NodeHTTP.createServer((req, res) => void mcode.handle(req, res));
   await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("conformance server did not bind");
-  return `http://127.0.0.1:${address.port}/mcp`;
+  mcode.setPort(address.port);
+  const endpoint = mcode.endpoint();
+  if (!endpoint) throw new Error("conformance server has no endpoint");
+  return endpoint;
 }
 
 async function createMcpConformanceFixture(): Promise<McpConformanceFixture> {
@@ -166,13 +172,17 @@ async function createMcpConformanceFixture(): Promise<McpConformanceFixture> {
   const receiptFaults = new BrowserConformanceFaultController();
   const cleanupFaults = new BrowserConformanceFaultController();
   const dispatchQueue = createDispatchQueue(transportFaults);
-  credentials = new BrowserAutomationCredentialRegistry({ now: () => 1_000 });
+  const lease = new BrowserAutomationSessionLease({
+    mcpUrl: "http://127.0.0.1:1/mcp",
+    worktreeIdentity: "worktree-conformance",
+    now: () => 1_000,
+  });
+  credentials = lease.credentials;
   broker = new BrowserAutomationBroker({
     now: () => 1_000,
     send: (_socket, channel, data) => dispatchQueue.record(channel, data),
   });
   const activeBroker = broker;
-  const activeCredentials = credentials;
   const baselineReliability = activeBroker.reliabilityStatus();
   const registered = activeBroker.registerHost(socket, registration(), {
     desktopInstanceId: "desktop-conformance",
@@ -182,21 +192,29 @@ async function createMcpConformanceFixture(): Promise<McpConformanceFixture> {
   const generation = registered.generation;
   targetFaults.hit("target-registration");
   activeBroker.updateTargets(socket, "host-conformance", generation, [target(generation)]);
-  const issued = activeCredentials.issue({
+  const grant = lease.issue({
     providerId: "codex",
     providerSessionId: "provider-conformance",
-    mcodeSessionId: "mcode-conformance",
+    mcodeSessionId: SESSION_ID,
     threadId: "thread-conformance",
     workspaceId: "workspace-conformance",
-    worktreeIdentity: "worktree-conformance",
     permissionCapability: "interact",
     allowedOperations: ["inspect", "act"],
   });
-  const handler = new BrowserAutomationMcpHandler({
-    credentials: activeCredentials,
-    broker: activeBroker,
-    now: () => 1_000,
+  if (!grant) throw new Error("conformance lease was not issued");
+  const authority = new McodeSessionAuthority();
+  const { token } = authority.attach({
+    providerId: "codex",
+    sessionId: SESSION_ID,
+    threadId: "thread-conformance",
+    threadControl: false,
   });
+  const mcode = new McodeMcpServer({
+    authority,
+    toolkits: [new BrowserToolkit({ lease, broker: activeBroker, now: () => 1_000 })],
+    logger: { error: () => undefined },
+  });
+  const issued = { credentialId: grant.credentialId, token };
   return {
     race,
     transportFaults,
@@ -207,7 +225,7 @@ async function createMcpConformanceFixture(): Promise<McpConformanceFixture> {
     generation,
     issued,
     scenario: createMcpConformanceScenario(),
-    endpoint: await startMcpConformanceServer(handler),
+    endpoint: await startMcpConformanceServer(mcode),
     nextDispatch: dispatchQueue.nextDispatch,
   };
 }
@@ -220,7 +238,11 @@ function callMcpTool(
 ): Promise<Response> {
   return fetch(fixture.endpoint, {
     method: "POST",
-    headers: { authorization: `Bearer ${fixture.issued.token}`, "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${fixture.issued.token}`,
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id,

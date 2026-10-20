@@ -7,6 +7,7 @@ import { createProviderHostPorts, PROVIDER_TURN_PORT } from "./provider-host-por
 import type { ProviderTurnPort } from "@mcode/providers";
 import { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import { InternalThreadControlMcpRuntime } from "../../thread-control/index.js";
+import { McodeMcpServer, McodeProviderPort, McodeSessionAuthority } from "../../mcode-mcp/index.js";
 import { CanonicalAgentBoundary } from "../../agents/index.js";
 import { WorkerOwnedTurnRuntime } from "../../agents/execution/worker-owned-turn-runtime.js";
 import { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
@@ -61,6 +62,12 @@ export function registerProviderAdapters(container: DependencyContainer): void {
       jobObject: c.resolve<JobObject>("JobObject"),
       browser: c.resolve(BrowserAutomationSessionLease),
       threadControl: c.resolve(InternalThreadControlMcpRuntime),
+      mcode: new McodeProviderPort({
+        authority: c.resolve(McodeSessionAuthority),
+        // The server is built after the host ports, so it is resolved when a Provider attaches.
+        server: () => c.resolve(McodeMcpServer),
+        isBrowserConfigured: () => c.resolve(BrowserAutomationSessionLease).isConfigured(),
+      }),
       grants: c.resolve(ScopedPreGrantService),
       events: c.resolve(CanonicalAgentBoundary),
       ingress: c.resolve(ProviderEventIngress),

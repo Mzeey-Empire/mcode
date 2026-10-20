@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { InternalThreadControlMcpAuthority } from "../thread-control-mcp-authority.js";
+import { McodeSessionAuthority } from "../../../mcode-mcp/mcode-session-authority.js";
 import { createInternalThreadControlMcpSession } from "../thread-control-mcp-transport.js";
 import type { ThreadControlService } from "../thread-control-service.js";
 
 describe("internal thread-control MCP transport", () => {
   it("dispatches workspace_search through an active bearer lease", async () => {
-    const authority = new InternalThreadControlMcpAuthority();
+    const authority = new McodeSessionAuthority();
     const lease = authority.activate({
       sessionId: "pooled-provider-session",
       sourceThreadId: "source-thread",
@@ -35,7 +35,7 @@ describe("internal thread-control MCP transport", () => {
   });
 
   it("fails closed for revoked leases and unsupported tools", async () => {
-    const authority = new InternalThreadControlMcpAuthority();
+    const authority = new McodeSessionAuthority();
     const lease = authority.activate({
       sessionId: "pooled-provider-session",
       sourceThreadId: "source-thread",
@@ -75,7 +75,7 @@ describe("internal thread-control MCP transport", () => {
   });
 
   it("registers the internal thread-control tools and rejects forged tool authority", async () => {
-    const authority = new InternalThreadControlMcpAuthority();
+    const authority = new McodeSessionAuthority();
     const lease = authority.activate({
       sessionId: "pooled-provider-session",
       sourceThreadId: "source-thread",
@@ -143,7 +143,7 @@ describe("internal thread-control MCP transport", () => {
   });
 
   it("serves worktree_list through the MCP protocol and fails closed after revocation", async () => {
-    const authority = new InternalThreadControlMcpAuthority();
+    const authority = new McodeSessionAuthority();
     const lease = authority.activate({
       sessionId: "pooled-provider-session",
       sourceThreadId: "source-thread",
@@ -195,7 +195,7 @@ describe("internal thread-control MCP transport", () => {
   });
 
   it("dispatches thread_create_batch through the authenticated MCP protocol", async () => {
-    const authority = new InternalThreadControlMcpAuthority();
+    const authority = new McodeSessionAuthority();
     const lease = authority.activate({
       sessionId: "pooled-provider-session",
       sourceThreadId: "source-thread",
@@ -248,7 +248,7 @@ describe("internal thread-control MCP transport", () => {
   });
 
   it("validates send and stop result variants at the in-memory caller boundary", async () => {
-    const authority = new InternalThreadControlMcpAuthority();
+    const authority = new McodeSessionAuthority();
     const lease = authority.activate({
       sessionId: "pooled-provider-session",
       sourceThreadId: "source-thread",
@@ -291,7 +291,7 @@ describe("internal thread-control MCP transport", () => {
   });
 
   it("dispatches authenticated search, get, and wait calls without destination mutation", async () => {
-    const authority = new InternalThreadControlMcpAuthority();
+    const authority = new McodeSessionAuthority();
     const lease = authority.activate({
       sessionId: "pooled-provider-session",
       sourceThreadId: "source-thread",
@@ -364,7 +364,7 @@ describe("internal thread-control MCP transport", () => {
   });
 
   it("cancels an authenticated wait when its lease is revoked", async () => {
-    const authority = new InternalThreadControlMcpAuthority();
+    const authority = new McodeSessionAuthority();
     const lease = authority.activate({
       sessionId: "pooled-provider-session",
       sourceThreadId: "source-thread",
@@ -402,7 +402,7 @@ describe("internal thread-control MCP transport", () => {
   });
 
   it("aborts an authenticated wait when the request disconnects", async () => {
-    const authority = new InternalThreadControlMcpAuthority();
+    const authority = new McodeSessionAuthority();
     const lease = authority.activate({
       sessionId: "pooled-provider-session",
       sourceThreadId: "source-thread",

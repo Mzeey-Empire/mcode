@@ -57,6 +57,7 @@ function host(sink: DeterministicCanonicalSink): ProviderHostPorts {
     environment: { snapshot: vi.fn(() => ({})) }, processes: { attach: vi.fn(), terminateTree: vi.fn(async () => {}) },
     browser: { stage: vi.fn(() => ({ leaseId: "lease", expiresAt: 1_000 })), releaseSession: vi.fn(() => 0), isConfigured: () => false, issue: () => null, refresh: (leaseId) => ({ ok: false, leaseId, reason: "not-found" }), release: (leaseId) => ({ leaseId, released: true }), revokeCredential: () => false },
     threadControl: { bootstrap: vi.fn(async () => null), close: vi.fn(async () => {}) },
+    mcode: { attach: vi.fn(async () => null), close: vi.fn(async () => {}) },
     grants: { consume: vi.fn(() => false) }, events: sink,
   };
 }

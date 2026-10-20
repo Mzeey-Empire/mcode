@@ -169,18 +169,21 @@ export class BrowserAutomationCredentialRegistry {
     return { ...matched.claims, allowedOperations: [...matched.claims.allowedOperations] };
   }
 
-  /** Extends one credential from the current time without revealing its token. */
-  touch(credentialId: string): boolean {
+  /**
+   * Extends one credential from the current time without revealing its token and
+   * returns its claims, or null when it is unknown or expired.
+   */
+  touch(credentialId: string): BrowserAutomationCredentialClaims | null {
     const stored = this.credentials.get(credentialId);
-    if (!stored) return false;
+    if (!stored) return null;
     const now = this.now();
     if (stored.claims.expiresAt <= now || stored.idleExpiresAt <= now) {
       this.remove(credentialId);
-      return false;
+      return null;
     }
     stored.lastTouchedAt = now;
     stored.idleExpiresAt = Math.min(stored.claims.expiresAt, now + this.idleTtlMs);
-    return true;
+    return { ...stored.claims, allowedOperations: [...stored.claims.allowedOperations] };
   }
 
   /** Revokes one credential by its non-secret identifier. */

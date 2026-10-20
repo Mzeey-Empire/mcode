@@ -10,6 +10,7 @@ export function fixtureHost(overrides: Partial<ProviderHostPorts> = {}): Provide
     processes: { attach: () => undefined, terminateTree: async () => undefined },
     browser: new BrowserAutomationSessionLease(),
     threadControl: { bootstrap: async () => null, close: async () => undefined },
+    mcode: { attach: async () => null, close: async () => undefined },
     grants: { consume: () => false },
     turns: { open: async () => ({ kind: "declined", reason: "unavailable" }), settleBackgroundTool: async () => {} },
     events: { submit: async (batch) => ({ commit: { outcome: "committed", conversationRevision: 0, rosterRevision: 0, acceptedThrough: 0, durableThrough: 0, eventCount: batch.events.length }, delivery: { ingress: "queued" } }) },

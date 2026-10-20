@@ -188,6 +188,7 @@ export class CodexProvider extends PackageCodexProvider {
         bootstrap: async ({ sessionId }) => threadControl?.createCodexConfiguration?.(sessionId) ?? null,
         close: (sessionId) => threadControl?.close?.(sessionId) ?? Promise.resolve(),
       },
+      mcode: { attach: async () => null, close: async () => undefined },
       grants: { consume: () => false },
       events: eventSink ?? { submit: async () => { throw new Error("Canonical event sink is not configured for this fixture"); } },
     };

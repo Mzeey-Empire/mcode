@@ -14,6 +14,7 @@ export function mockShutdownHost(onEvent: (event: ProviderRuntimeEvent) => void)
       release: (leaseId) => ({ leaseId, released: false }), revokeCredential: () => false,
     },
     threadControl: { bootstrap: async () => null, close: async () => {} },
+    mcode: { attach: async () => null, close: async () => {} },
     grants: { consume: () => false },
     events: {
       submit: async (batch) => {

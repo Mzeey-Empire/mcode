@@ -12,7 +12,7 @@ import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
 let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
-import { InternalThreadControlMcpAuthority } from "../thread-control-mcp-authority.js";
+import { McodeSessionAuthority } from "../../../mcode-mcp/mcode-session-authority.js";
 import { createInternalThreadControlMcpSession } from "../thread-control-mcp-transport.js";
 import { ThreadControlMutationReservationService } from "../thread-control-mutation-reservation-service.js";
 import { ThreadControlService } from "../thread-control-service.js";
@@ -119,7 +119,7 @@ describe("internal thread-control MCP workflow", () => {
       new ThreadControlMutationReservationService(),
     );
 
-    const authority = new InternalThreadControlMcpAuthority();
+    const authority = new McodeSessionAuthority();
     const lease = authority.activate({
       sessionId: "workflow-session",
       sourceThreadId: sourceThread.id,
