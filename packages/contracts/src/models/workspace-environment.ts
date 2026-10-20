@@ -162,15 +162,44 @@ export type WorkspaceEnvironmentActionLaunchSnapshot = z.infer<
   ReturnType<typeof WorkspaceEnvironmentActionLaunchSnapshotSchema>
 >;
 
-/** Whether a user or thread startup initiated an action run. */
+/**
+ * Who owns an action run: `startup` is owned by the Setup gate, and `manual` is every other launch
+ * (a user click, or a run the server starts when a Turn settles).
+ */
 export const WorkspaceEnvironmentActionRunTriggerSchema = z.enum(["manual", "startup"]);
+
+/** Hosts the port monitor can report, and the only hosts an automatic preview may open. */
+const ACTION_PORT_HOSTS = ["localhost", "127.0.0.1", "::1", "0.0.0.0", "::"] as const;
+const ACTION_URL_MAX_LENGTH = 2_048;
+
+/**
+ * An http or https URL on one of the port monitor's hosts, trimmed, 1 to 2048 characters.
+ *
+ * A shared environment document is repository content, so it must not be able to make the app
+ * navigate to an arbitrary site without a click.
+ */
+export const WorkspaceEnvironmentLoopbackUrlSchema = z.string().trim().min(1).max(ACTION_URL_MAX_LENGTH)
+  .superRefine((value, ctx) => {
+    if (!isLoopbackUrl(value)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Use a localhost URL" });
+    }
+  });
+
+function isLoopbackUrl(value: string): boolean {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  // WHATWG URL keeps the brackets on IPv6 hosts; the port host set does not.
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  return ACTION_PORT_HOSTS.some((allowed) => allowed === host);
+}
 
 /** TCP reachability observed for a URL printed by an action run. */
 export const WorkspaceEnvironmentActionPortSchema = lazySchema(() => z.object({
   runId: z.string().min(1).max(256),
   port: z.number().int().min(1).max(65_535),
-  host: z.enum(["localhost", "127.0.0.1", "::1", "0.0.0.0", "::"]),
-  url: z.string().url().max(2_048),
+  host: z.enum(ACTION_PORT_HOSTS),
+  url: z.string().url().max(ACTION_URL_MAX_LENGTH),
   reachable: z.boolean(),
   detectedAt: z.string().datetime(),
 }).strict());
@@ -450,11 +479,58 @@ export const WorkspaceEnvironmentActionSchema = lazySchema(() =>
     icon: WorkspaceEnvironmentActionIconIdSchema.optional(),
     runOnStartup: z.boolean().optional(),
     runOnCleanup: z.boolean().optional(),
+    /** Only `false` is ever stored: absent keeps today's blocking Setup gate. Inert without `runOnStartup`. */
+    waitForExit: z.literal(false).optional(),
+    runOnSettle: z.boolean().optional(),
+    /** `true` opens the first URL the port monitor detects; a URL opens exactly that one. */
+    openPreview: z.union([z.literal(true), WorkspaceEnvironmentLoopbackUrlSchema]).optional(),
   }).passthrough(),
 );
 export type WorkspaceEnvironmentAction = z.infer<
   ReturnType<typeof WorkspaceEnvironmentActionSchema>
 >;
+
+/** When and how one Project action runs automatically. Derived, never stored. */
+export interface ActionSchedule {
+  /** null: not a Startup action. "release": the gate advances once the run is running. */
+  readonly startup: null | { readonly gate: "wait" | "release" };
+  readonly settle: boolean;
+  readonly cleanup: boolean;
+  /** null: no automatic preview. url null: open the first URL the port monitor detects. */
+  readonly preview: null | { readonly url: string | null };
+}
+
+/**
+ * The single reader of an action's scheduling keys. Applies parent-off-means-inert and every
+ * default, so callers never read `waitForExit` or `openPreview` directly.
+ */
+export function actionSchedule(action: WorkspaceEnvironmentAction): ActionSchedule {
+  const startup = action.runOnStartup === true
+    ? { gate: action.waitForExit === false ? "release" as const : "wait" as const }
+    : null;
+  return {
+    startup,
+    settle: action.runOnSettle === true,
+    cleanup: action.runOnCleanup === true,
+    preview: action.openPreview === undefined ? null : { url: action.openPreview === true ? null : action.openPreview },
+  };
+}
+
+/**
+ * Drops inert dependents and default values so stored bytes have one form per meaning. Other keys
+ * keep their order, so saving a shared document does not reshuffle it.
+ */
+export function normalizeAction(action: WorkspaceEnvironmentAction): WorkspaceEnvironmentAction {
+  const normalized = { ...action };
+  if (!(action.waitForExit === false && action.runOnStartup === true)) delete normalized.waitForExit;
+  if (action.runOnSettle !== true) delete normalized.runOnSettle;
+  return normalized;
+}
+
+/** Message for a launch refused because the scope already holds the maximum number of terminals. */
+export function terminalCapMessage(actionName: string): string {
+  return `${TERMINAL_MAX_PER_SCOPE} terminals are open. Close one to run ${actionName}.`;
+}
 
 /** Versioned workspace environment document for local or shared storage. */
 export const WorkspaceEnvironmentDocumentSchema = lazySchema(() =>
@@ -480,7 +556,7 @@ export const WorkspaceEnvironmentDocumentSchema = lazySchema(() =>
     if (document.actions.filter((action) => action.runOnStartup).length > WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom, path: ["actions"],
-        message: "At most 8 actions can run on startup.",
+        message: `At most ${WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX} actions can run on startup.`,
         params: { code: "TOO_MANY_STARTUP_ACTIONS", reason: "too_many_startup_actions" },
       });
     }
@@ -515,13 +591,15 @@ export function encodeEnvironmentDocument(document: WorkspaceEnvironmentDocument
   document: WorkspaceEnvironmentDocument;
   bytes: Uint8Array;
 } {
+  const actions = document.actions.map(normalizeAction);
+  // Any action key beyond these three needs a build that reads 0.1.0; an undefined value is not serialized.
   const hasNewFields = Object.keys(document).some((key) => !["version", "actions"].includes(key))
-    || document.actions.some((action) => action.icon !== undefined
-      || action.runOnStartup !== undefined
-      || action.runOnCleanup !== undefined
-      || Object.keys(action).some((key) => !["id", "name", "command", "icon", "runOnStartup", "runOnCleanup"].includes(key)));
+    || actions.some((action) => Object.entries(action).some(
+      ([key, value]) => value !== undefined && !["id", "name", "command"].includes(key),
+    ));
   const encodedDocument = WorkspaceEnvironmentDocumentSchema().parse({
     ...document,
+    actions,
     version: hasNewFields ? WORKSPACE_ENVIRONMENT_VERSION : WORKSPACE_ENVIRONMENT_LEGACY_VERSION,
   });
   return {

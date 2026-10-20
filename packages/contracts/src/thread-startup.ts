@@ -68,7 +68,12 @@ const fetchFields = {
   branch: z.string().trim().min(1).max(256).optional(),
 };
 
-/** One frozen startup action; scripts remain in the document and launch snapshot. */
+/**
+ * One frozen startup action; scripts remain in the document and launch snapshot.
+ *
+ * `ready` means the action holds the gate no longer: a waiting action has exited cleanly, and an
+ * action that does not wait for exit is running. It does not mean the process has finished.
+ */
 export const ThreadStartupActionSchema = lazySchema(() => z.object({
   actionId: WorkspaceEnvironmentActionIdSchema,
   scriptHash: z.string().regex(/^[a-f0-9]{64}$/),
