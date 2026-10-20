@@ -259,7 +259,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
 
   private async sessionOptions(request: TurnRequest<"copilot">, browser: ProviderBrowserLeaseGrant | null) {
     const connection = parseHttpConnection(await this.host.threadControl.bootstrap({ providerId: this.id, sessionId: request.sessionId, threadId: request.threadId, turnId: request.turnId, protocol: "http" }));
-    const instructions = renderMcodeInstructions(buildMcodeInstructionPlan({ sourceThreadId: request.threadId, threadControlGranted: Boolean(connection), browserAutomationGranted: Boolean(browser) }));
+    const instructions = renderMcodeInstructions(buildMcodeInstructionPlan({ threadControlGranted: Boolean(connection), browserAutomationGranted: Boolean(browser) }));
     return {
       configDir: await this.resolveConfigDirectory(),
       onPermissionRequest: (permission: NativePermissionRequest) => this.requestPermission(request.sessionId, permission),

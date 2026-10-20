@@ -3,8 +3,8 @@ export const MCODE_BROWSER_GUIDE = `Mcode Browser v2 Operating Guide (authentica
 
 Use this guide for visible Browser requests. The user need not invoke $mcode-browser.
 
-1. Boundary: use only mcode-browser for Mcode's shared Preview. Never initialize or use bundled generic Browser/Chrome/Node-REPL. Do not launch another browser or profile.
-2. Browser-only: do not run shell/terminal commands or read local skills/files. Use mcode-browser with minimal narration.
+1. Boundary: use only the mcode MCP server for Mcode's shared Preview. Never initialize or use bundled generic Browser/Chrome/Node-REPL. Do not launch another browser or profile.
+2. Browser-only: do not run shell/terminal commands or read local skills/files. Use the mcode MCP server with minimal narration.
 3. Open and select: browser_open creates a sticky, agent-owned background tab. It returns tab metadata and an observationRef, not a semantic page observation. Use browser_tabs to select, claim, release, close, or finalize tabs.
 4. Tabs: select and claim require tabId; finalize requires dispositions; release and close may omit tabId.
 5. Inspect: browser_inspect is authoritative for readiness, tabs, capabilities, constraints, diagnostics, revision, and observationRef. Inspect before the first action unless browser_open returned sufficient snapshot evidence. Tool discovery does not prove readiness.

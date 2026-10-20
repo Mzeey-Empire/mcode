@@ -2130,7 +2130,6 @@ export class ClaudeProvider
   }
 
   private createClaudeSpawnOptions(
-    args: SpawnArgs,
     staged: PendingSpawnTurn,
     browserGrant: BrowserAutomationSessionLeaseGrant | null,
     stderr: (data: string) => void,
@@ -2141,7 +2140,6 @@ export class ClaudeProvider
     );
     const instructions = renderMcodeInstructions(
       buildMcodeInstructionPlan({
-        sourceThreadId: args.threadId,
         threadControlGranted: Boolean(
           effectiveMcpServers.mcode_internal_thread_control,
         ),
@@ -2296,7 +2294,6 @@ export class ClaudeProvider
     const staged = this.takePendingClaudeSpawn(sessionId);
     const browser = this.issueClaudeBrowserGrant(sessionId);
     const options = this.createClaudeSpawnOptions(
-      args,
       staged,
       browser.grant,
       this.createClaudeStderrCapture(sessionId),

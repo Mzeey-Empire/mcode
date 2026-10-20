@@ -955,7 +955,7 @@ export class CursorProvider
       state = opened.state;
       state.mcodeLogicalSessionReloaded = opened.reloaded;
       this.throwIfPendingStop(sessionId);
-      this.configureSpawnedSession(state, threadId, browserGrant);
+      this.configureSpawnedSession(state, browserGrant);
     } catch (error) {
       await this.cleanupSpawnFailure(sessionId, state, browserGrant, browserStage, refreshedGrant);
       await this.clearFailedSpawn(sessionId);
@@ -1014,11 +1014,9 @@ export class CursorProvider
 
   private configureSpawnedSession(
     state: CursorAcpSessionEntry,
-    threadId: string,
     browserGrant: BrowserAutomationSessionLeaseGrant | null,
   ): void {
     state.mcodeRuntimeInstructions = renderMcodeInstructions(buildMcodeInstructionPlan({
-      sourceThreadId: threadId,
       threadControlGranted: this.isThreadControlMcpEnabled(state),
       browserAutomationGranted: Boolean(browserGrant),
     }));

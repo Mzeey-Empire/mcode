@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildMcodeInstructionPlan, isExplicitMcodeThreadRequest, MCODE_BROWSER_GUIDE } from "../index.js";
+import {
+  buildMcodeInstructionPlan,
+  isExplicitMcodeThreadRequest,
+  MCODE_BROWSER_GUIDE,
+  MCODE_INSTRUCTIONS_MAX_CHARS,
+} from "../index.js";
 
 describe("Mcode runtime instruction plan", () => {
   it.each([
@@ -26,8 +31,7 @@ describe("Mcode runtime instruction plan", () => {
       browserAutomationGranted: false,
     });
     expect(plan.text).toContain("Mcode-managed session");
-    expect(plan.text).not.toContain("mcode_internal_thread_control");
-    expect(plan.text).not.toContain("mcode-browser");
+    expect(plan.text).not.toContain("MCP server");
   });
 
   it("bounds broad repository searches before they print captured traces", () => {
@@ -43,27 +47,34 @@ describe("Mcode runtime instruction plan", () => {
 
   it("includes only capabilities proven available", () => {
     const plan = buildMcodeInstructionPlan({
-      sourceThreadId: "thread-source",
       threadControlGranted: true,
       browserAutomationGranted: true,
     });
-    expect(plan.capabilities).toEqual({
-      threadControl: { sourceThreadId: "thread-source" },
-      browserAutomation: true,
-    });
-    expect(plan.text).toContain("mcode_internal_thread_control");
+    expect(plan.capabilities).toEqual({ threadControl: true, browserAutomation: true });
+    expect(plan.text).toContain("Use the mcode MCP server to manage Mcode threads");
     expect(plan.text).toContain("manage Mcode threads only when explicitly asked by the user");
+    expect(plan.text).toContain("Never target the source thread.");
+    expect(plan.text).not.toContain("mcode_internal_thread_control");
+    expect(plan.text).not.toMatch(/(?<!\$)mcode-browser/);
     expect(plan.text).not.toMatch(/delegat(?:e|ed|ion|ing)/i);
     expect(plan.text).toContain(MCODE_BROWSER_GUIDE.trim());
     expect(plan.text).not.toContain("first list files with rg -l");
-    expect(plan.text).toContain("thread-source");
     expect(plan.text).not.toContain("http://");
     expect(plan.text).not.toContain("Bearer");
   });
 
+  it("keeps the cap when the largest blocks and a long nested model are combined", () => {
+    const plan = buildMcodeInstructionPlan({
+      threadControlGranted: true,
+      browserAutomationGranted: true,
+      nestedDelegationModel: "m".repeat(MCODE_INSTRUCTIONS_MAX_CHARS),
+    });
+    expect(plan.text.length).toBeLessThanOrEqual(MCODE_INSTRUCTIONS_MAX_CHARS);
+    expect(plan.text).toMatch(/\[ Mcode runtime guidance truncated at 4000 characters\. \]$/);
+  });
+
   it("routes explicit child-agent requests through provider collaboration", () => {
     const plan = buildMcodeInstructionPlan({
-      sourceThreadId: "thread-source",
       threadControlGranted: true,
       browserAutomationGranted: false,
     });
@@ -87,7 +98,7 @@ describe("Mcode runtime instruction plan", () => {
   });
 
   it("makes the Mcode Preview Browser boundary and action shape authoritative", () => {
-    expect(MCODE_BROWSER_GUIDE).toContain("use only mcode-browser for Mcode's shared Preview");
+    expect(MCODE_BROWSER_GUIDE).toContain("use only the mcode MCP server for Mcode's shared Preview");
     expect(MCODE_BROWSER_GUIDE).toMatch(/never initialize or use bundled generic Browser\/Chrome\/Node-REPL/i);
     expect(MCODE_BROWSER_GUIDE).toContain("Browser-only");
     expect(MCODE_BROWSER_GUIDE).toContain("do not run shell/terminal commands or read local skills/files");

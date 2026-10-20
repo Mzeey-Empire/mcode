@@ -663,6 +663,11 @@ describe("Claude public factory core and capabilities", () => {
     expect(options.mcpServers?.["mcode-browser"]).toMatchObject({ type: "http", url: "http://127.0.0.1:19400/mcp" });
     expect(options.settings).toMatchObject({ ultracode: true });
     expect(options.systemPrompt).toMatchObject({ append: expect.stringContaining("browser_inspect") });
+    assert(typeof options.systemPrompt === "object" && !Array.isArray(options.systemPrompt));
+    const append = options.systemPrompt.append ?? "";
+    expect(append).toContain("thread_target_list");
+    expect(append).not.toContain("Source thread:");
+    expect(append).not.toContain("thread-1");
     expect(await provider.getGoal("mcode-thread-1")).toMatchObject({ objective: "fixture objective" });
     assert(options.hooks);
     assert(options.hooks.Stop);

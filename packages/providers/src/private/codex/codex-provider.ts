@@ -1608,7 +1608,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     // Luna variants lack Ultra orchestration, so a nested spawn must route to the same-generation Sol.
     const nestedDelegationModel = spawnModel?.endsWith("-luna") ? spawnModel.replace(/-luna$/, "-sol") : undefined;
     return renderMcodeInstructions(buildMcodeInstructionPlan({
-      sourceThreadId: context.threadId,
       threadControlGranted: Boolean(context.internalMcp),
       browserAutomationGranted: Boolean(context.browserGrant),
       nestedDelegationModel,
