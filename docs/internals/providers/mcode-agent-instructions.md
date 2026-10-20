@@ -18,6 +18,9 @@ Claude joins sections in its `systemPrompt` append, Copilot in `systemMessage`,
 and Cursor in the first normal prompt of its logical ACP session. Ephemeral
 Codex completions receive no runtime sections.
 
-Runtime sections provide routing decisions. Detailed operating rules live in
-the descriptions of the tools they govern, so Browser guidance has one delivery
-path. MCP initialization carries no instructions, and there are no guide tools.
+The thread-control and Browser sections carry their full operating rules, and
+the descriptions of the tools they govern repeat them. The repetition is
+deliberate. A harness that loads tools lazily shows only tool names until the
+model searches, so a rule that lives only in a description arrives after the
+model has chosen a tool. MCP initialization carries no instructions, and there
+are no guide tools.

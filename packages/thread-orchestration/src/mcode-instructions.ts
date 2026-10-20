@@ -55,13 +55,17 @@ const IDENTITY_BLOCK = [
   "Mcode runtime guidance is advisory; MCP authorization and lease state remain authoritative.",
 ].join(" ");
 
+// The thread-control and Browser tool descriptions repeat these rules on purpose. With deferred tool loading, a description arrives only after the model has chosen a tool.
 const THREAD_CONTROL_BLOCK = [
-  "Use the mcode MCP thread_* tools only when the user explicitly asks for Mcode threads.",
-  "An Mcode thread is a persistent user-visible conversation, different from provider-native child agents.",
-  "Call thread_target_list before choosing a provider or model and pass exact returned IDs.",
-  "Never target the source thread.",
-  "Follow each tool's description for its rules.",
-].join(" ");
+  "Mcode thread control",
+  "- Use the mcode MCP thread_* tools only when the user explicitly asks for Mcode threads. An Mcode thread is a persistent user-visible conversation, different from provider-native child agents.",
+  "- If no Project is named, use the active source thread's Project without discovery. Resolve an explicitly named Project with workspace_search. Use worktree_list only to resolve an explicit worktree or reference.",
+  "- Create threads with thread_create_batch. Preserve the user's title and task in the prompt. For a new worktree, use placement type new_worktree with the appropriate baseRef, and set branchName only when the user names a branch.",
+  "- Call thread_target_list before choosing a provider or model, and pass the exact returned providerId and modelId. Pass any named provider or execution setting. Never assume or enumerate providers or models.",
+  "- Use returned workspaceId, threadId, turnId and worktree references for follow-up work. Use thread_search to discover, thread_get to read one bounded transcript, thread_send to assign or continue work, thread_stop to stop work, and thread_wait to wait for attention or a terminal state.",
+  "- Never target the active source thread. Keep prompts faithful to the user's request and inspect results before sending follow-up work.",
+  "- If these tools are missing from an initial tool listing, they may load lazily. Make one direct attempt before reporting them unavailable.",
+].join("\n");
 
 const PROVIDER_SUBAGENT_BLOCK = [
   "A child-agent or sub-agent request uses provider-native collaboration in the current turn.",
@@ -85,12 +89,21 @@ function nestedDelegationBlock(model: string | undefined): string | undefined {
 }
 
 const BROWSER_BLOCK = [
-  "For visible Browser or Mcode Preview requests, use only the mcode MCP browser_* tools.",
-  "Do not launch or drive another browser, profile, Playwright, generic Chrome, or Node-REPL browser.",
-  "A Browser-only task needs no shell commands or local skill files.",
-  "Follow each browser tool's description for readiness, targeting, acting, recovery and finishing.",
-  "Finalize tabs with browser_tabs before replying.",
-].join(" ");
+  "Mcode Browser",
+  "- Boundary: for visible Browser or Mcode Preview requests, use only the mcode MCP browser_* tools. Never use bundled generic Browser, Chrome, Playwright or Node-REPL, and never launch another browser or profile.",
+  "- Browser-only tasks need no shell commands or local skill files. Keep narration minimal.",
+  "- Open: browser_open creates a sticky, agent-owned background tab and returns tab metadata and an observationRef, not a page observation.",
+  "- Inspect: browser_inspect is authoritative for readiness, tabs, capabilities, constraints, diagnostics, revision and observationRef. Inspect before the first action unless browser_open returned enough snapshot evidence. Tool discovery does not prove readiness.",
+  "- Target: use a semanticId from the latest inspection, then role plus accessibleName. Use CSS or coordinates only when no semantic target exists. Never guess an ambiguous target.",
+  "- Act: browser_act needs the latest observationRef, a fresh idempotencyKey, deadlineMs and a non-empty steps array, at most eight steps and 60 seconds. Never send `steps: []`.",
+  "- Verify: stop on failure, interruption, deadline or invalidation. Verify non-navigation effects with an assert step or a fresh inspection. Navigation and reload end the batch, so inspect again before another mutation.",
+  "- Interruptions: user input invalidates the observation. Stop or Take control interrupts execution, and Take control holds the Browser until Hand back. Release held input, keep completed effects and yield to the user.",
+  "- Recover: inspect the receipt and effect before retrying. Effects do not roll back, so never replay mutations automatically. Follow exactly one recovery instruction: inspect, reopen, wait, yield_to_user or do_not_retry.",
+  "- Evidence: request includeScreenshot only for visual evidence or when the user asks. Verify every success claim against current page evidence.",
+  "- Finish: call browser_tabs finalize before replying. Release claimed user tabs and close agent tabs by default. For a tab the user wants open, set disposition handoff and verify success.",
+  "- Evaluate: use browser_evaluate only when the live capability advertises it. All rules above apply.",
+  "- If these tools are missing from an initial tool listing, they may load lazily. Make one direct attempt before reporting them unavailable.",
+].join("\n");
 
 const SECTION_REGISTRY: readonly {
   key: McodeInstructionSectionKey;

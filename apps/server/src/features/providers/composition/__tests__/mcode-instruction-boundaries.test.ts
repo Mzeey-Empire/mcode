@@ -17,7 +17,7 @@ describe("provider-native Mcode instruction boundaries", () => {
     }));
     const first = appendCursorMcodeInstructions("user rules", runtime, false);
     expect(first).toEqual({ instructionMarkdown: `user rules\n\n${runtime}`, included: true });
-    expect(first.instructionMarkdown).toContain("For visible Browser or Mcode Preview requests, use only the mcode MCP browser_* tools.");
+    expect(first.instructionMarkdown).toContain("use only the mcode MCP browser_* tools");
 
     const unacceptedRetry = appendCursorMcodeInstructions(first.instructionMarkdown, runtime, false);
     expect(unacceptedRetry).toEqual(first);

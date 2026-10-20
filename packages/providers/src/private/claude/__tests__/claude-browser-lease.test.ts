@@ -128,8 +128,8 @@ describe("ClaudeProvider browser session lease lifecycle", () => {
     await (harness.provider as any).sendTurn(request());
 
     const append = mockQuery.mock.calls[0][0].options.systemPrompt.append;
-    expect(append).toContain("For visible Browser or Mcode Preview requests, use only the mcode MCP browser_* tools.");
-    expect(append).toContain("Finalize tabs with browser_tabs before replying.");
+    expect(append).toContain("use only the mcode MCP browser_* tools");
+    expect(append).toContain("call browser_tabs finalize before replying");
     await (harness.provider as any).close(harness.spawnedState);
   });
 
