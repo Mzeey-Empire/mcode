@@ -185,7 +185,7 @@ describe("actionSchedule", () => {
 });
 
 describe("loopback preview URL", () => {
-  const parse = (value: unknown) => WorkspaceEnvironmentLoopbackUrlSchema.safeParse(value);
+  const parse = (value: unknown) => WorkspaceEnvironmentLoopbackUrlSchema().safeParse(value);
   const origin = "http://localhost:3000/";
 
   it.each([

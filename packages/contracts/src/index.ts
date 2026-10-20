@@ -91,7 +91,6 @@ export {
   WorkspaceEnvironmentDocumentSchema,
   WorkspaceEnvironmentLoopbackUrlSchema,
   actionSchedule,
-  normalizeAction,
   terminalCapMessage,
   encodeEnvironmentDocument,
   DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT,
@@ -106,6 +105,7 @@ export {
 } from "./models/workspace-environment.js";
 export type {
   ActionSchedule,
+  StartupGate,
   WorkspaceEnvironmentValidationReason,
   WorkspaceEnvironmentValidationIssue,
   WorkspaceEnvironmentCommand,

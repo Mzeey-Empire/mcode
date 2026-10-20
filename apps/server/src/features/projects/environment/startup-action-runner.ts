@@ -1,5 +1,5 @@
 import * as NodeCrypto from "node:crypto";
-import type { ThreadStartupAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { StartupGate, ThreadStartupAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { TerminalPlainTextDecoder } from "../../terminal/output/terminal-plain-text.js";
 import type { ProjectActionService } from "./project-action-service.js";
 
@@ -22,7 +22,7 @@ export interface StartupActionPlan {
   readonly actionId: string;
   readonly script: string | null;
   /** `wait` holds the gate until exit zero; `release` lets the gate pass once the run is running. Defaults to `wait`. */
-  readonly gate?: "wait" | "release";
+  readonly gate?: StartupGate;
 }
 
 /**
@@ -36,7 +36,7 @@ export class StartupActionRunner {
   private current: ThreadStartupAction | undefined;
   private awaitingApproval = false;
   /** Frozen beside the entries because the persisted entry schema is strict and has no gate field. */
-  private readonly gates = new Map<string, "wait" | "release">();
+  private readonly gates = new Map<string, StartupGate>();
   private launching = false;
   private stopped: "skip" | "cancel" | null = null;
   private work = Promise.resolve();

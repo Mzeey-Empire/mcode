@@ -98,7 +98,7 @@ export const WS_CHANNELS = {
     actionId: z.string().min(1).max(256),
     runId: z.string().min(1).max(256),
     run: WorkspaceEnvironmentActionRunSchema(),
-    openPreview: z.object({ url: WorkspaceEnvironmentLoopbackUrlSchema }).strict().optional(),
+    openPreview: z.object({ url: WorkspaceEnvironmentLoopbackUrlSchema() }).strict().optional(),
   }).strict(),
   /** Synchronizes durable user completion or reopen changes across clients. */
   "thread.lifecycleChanged": z.object({

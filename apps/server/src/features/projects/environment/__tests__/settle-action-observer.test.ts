@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { CanonicalAgentSemanticEnvelopeSchema } from "@mcode/contracts";
+import { logger } from "@mcode/shared";
 import type { CanonicalAgentEventEnvelope, WorkspaceEnvironmentAction } from "@mcode/contracts";
+import { WorkspaceEnvironmentServiceError } from "../workspace-environment-errors.js";
 import { SettleActionObserver, type SettleActionThread, type SettleTimers } from "../settle-action-observer.js";
 
 const AT = "2026-10-20T12:00:00.000Z";
@@ -21,15 +23,14 @@ function turnEvent(type: Payload, execution: number, threadId = THREAD): Canonic
   });
 }
 
-class ManualTimers implements SettleTimers {
+class ManualTimers {
   private next = 0;
   readonly pending = new Map<number, { callback: () => void; delayMs: number }>();
-  set(callback: () => void, delayMs: number): number {
+  readonly timers: SettleTimers = (callback, delayMs) => {
     const handle = ++this.next;
     this.pending.set(handle, { callback, delayMs });
-    return handle;
-  }
-  clear(handle: unknown): void { if (typeof handle === "number") this.pending.delete(handle); }
+    return () => { this.pending.delete(handle); };
+  };
   fireAll(): void {
     const due = [...this.pending.values()];
     this.pending.clear();
@@ -49,6 +50,7 @@ function harness(overrides: {
   pathExists?: boolean;
   onLaunch?: (state: { running: string[]; waiting: boolean }) => void;
   launchError?: Error;
+  launchRuns?: boolean;
 } = {}) {
   const timers = new ManualTimers();
   let listener: (events: readonly CanonicalAgentEventEnvelope[]) => void = () => undefined;
@@ -58,7 +60,7 @@ function harness(overrides: {
     launched.push({ slot, options });
     overrides.onLaunch?.(state);
     if (overrides.launchError && launched.length === 1) throw overrides.launchError;
-    return null;
+    return overrides.launchRuns ? ({ runId: "run" } as never) : null;
   });
   const thread: SettleActionThread | null = overrides.thread === null ? null : {
     id: THREAD, workspace_id: "workspace", mode: "local", worktree_path: null, ...overrides.thread,
@@ -72,7 +74,7 @@ function harness(overrides: {
     environment: { read: async () => ({ document: { actions: overrides.actions ?? [dev, startupOnly] } }) },
     actions: { launch },
     pathExists: async () => overrides.pathExists ?? true,
-    timers,
+    timers: timers.timers,
   });
   observer.start();
   return {
@@ -180,5 +182,22 @@ describe("SettleActionObserver", () => {
     expect(h.launched.map(({ slot }) => slot)).toEqual([
       { threadId: THREAD, actionId: "dev" }, { threadId: THREAD, actionId: "lint" },
     ]);
+  });
+
+  it("reports a service refusal once as a skip and a surprise as an error", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+    const error = vi.spyOn(logger, "error").mockImplementation(() => logger);
+    const refusal = new WorkspaceEnvironmentServiceError("WORKSPACE_ENVIRONMENT_NOT_FOUND", "Thread not found");
+    const refused = harness({ launchError: refusal });
+    refused.emit(turnEvent("turn.completed", 1));
+    await refused.settle();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(error).not.toHaveBeenCalled();
+
+    const surprised = harness({ launchError: new Error("boom") });
+    surprised.emit(turnEvent("turn.completed", 1));
+    await surprised.settle();
+    expect(error).toHaveBeenCalledOnce();
+    vi.restoreAllMocks();
   });
 });

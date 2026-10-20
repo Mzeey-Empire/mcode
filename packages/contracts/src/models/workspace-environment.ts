@@ -178,12 +178,13 @@ const ACTION_URL_MAX_LENGTH = 2_048;
  * A shared environment document is repository content, so it must not be able to make the app
  * navigate to an arbitrary site without a click.
  */
-export const WorkspaceEnvironmentLoopbackUrlSchema = z.string().trim().min(1).max(ACTION_URL_MAX_LENGTH)
-  .superRefine((value, ctx) => {
+export const WorkspaceEnvironmentLoopbackUrlSchema = lazySchema(() =>
+  z.string().trim().min(1).max(ACTION_URL_MAX_LENGTH).superRefine((value, ctx) => {
     if (!isLoopbackUrl(value)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Use a localhost URL" });
     }
-  });
+  }),
+);
 
 function isLoopbackUrl(value: string): boolean {
   if (!URL.canParse(value)) return false;
@@ -483,17 +484,20 @@ export const WorkspaceEnvironmentActionSchema = lazySchema(() =>
     waitForExit: z.literal(false).optional(),
     runOnSettle: z.boolean().optional(),
     /** `true` opens the first URL the port monitor detects; a URL opens exactly that one. */
-    openPreview: z.union([z.literal(true), WorkspaceEnvironmentLoopbackUrlSchema]).optional(),
+    openPreview: z.union([z.literal(true), WorkspaceEnvironmentLoopbackUrlSchema()]).optional(),
   }).passthrough(),
 );
 export type WorkspaceEnvironmentAction = z.infer<
   ReturnType<typeof WorkspaceEnvironmentActionSchema>
 >;
 
+/** How the Setup gate treats a startup action: `wait` holds it until exit zero, `release` lets it pass once the run is running. */
+export type StartupGate = "wait" | "release";
+
 /** When and how one Project action runs automatically. Derived, never stored. */
 export interface ActionSchedule {
   /** null: not a Startup action. "release": the gate advances once the run is running. */
-  readonly startup: null | { readonly gate: "wait" | "release" };
+  readonly startup: null | { readonly gate: StartupGate };
   readonly settle: boolean;
   readonly cleanup: boolean;
   /** null: no automatic preview. url null: open the first URL the port monitor detects. */
@@ -501,7 +505,7 @@ export interface ActionSchedule {
 }
 
 /**
- * The single reader of an action's scheduling keys. Applies parent-off-means-inert and every
+ * The server's single reader of an action's scheduling keys. Applies parent-off-means-inert and every
  * default, so callers never read `waitForExit` or `openPreview` directly.
  */
 export function actionSchedule(action: WorkspaceEnvironmentAction): ActionSchedule {

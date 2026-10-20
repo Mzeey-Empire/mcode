@@ -24,11 +24,8 @@ export interface SettleActionThread {
   readonly user_completed_at?: string | null;
 }
 
-/** Timer boundary, replaceable so tests advance time without sleeping. */
-export interface SettleTimers {
-  set(callback: () => void, delayMs: number): unknown;
-  clear(handle: unknown): void;
-}
+/** Timer boundary, replaceable so tests advance time without sleeping. `set` returns its own canceller. */
+export type SettleTimers = (callback: () => void, delayMs: number) => () => void;
 
 /** Collaborators of {@link SettleActionObserver}. */
 export interface SettleActionObserverOptions {
@@ -45,13 +42,10 @@ export interface SettleActionObserverOptions {
   readonly delayMs?: number;
 }
 
-const systemTimers: SettleTimers = {
-  set: (callback, delayMs) => {
-    const handle = setTimeout(callback, delayMs);
-    handle.unref();
-    return handle;
-  },
-  clear: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>); },
+const systemTimers: SettleTimers = (callback, delayMs) => {
+  const handle = setTimeout(callback, delayMs);
+  handle.unref();
+  return () => { clearTimeout(handle); };
 };
 
 /**
@@ -64,7 +58,7 @@ const systemTimers: SettleTimers = {
 export class SettleActionObserver {
   private unsubscribe: (() => void) | null = null;
   private readonly seenExecutions = new Set<string>();
-  private readonly timers = new Map<string, unknown>();
+  private readonly timers = new Map<string, () => void>();
   private readonly inFlight = new Set<Promise<void>>();
   private readonly warned = new Set<string>();
   private readonly timerApi: SettleTimers;
@@ -91,7 +85,7 @@ export class SettleActionObserver {
   async stop(): Promise<void> {
     this.unsubscribe?.();
     this.unsubscribe = null;
-    for (const handle of this.timers.values()) this.timerApi.clear(handle);
+    for (const cancel of this.timers.values()) cancel();
     this.timers.clear();
     await Promise.all(this.inFlight);
   }
@@ -107,9 +101,8 @@ export class SettleActionObserver {
   }
 
   private schedule(threadId: string): void {
-    const pending = this.timers.get(threadId);
-    if (pending !== undefined) this.timerApi.clear(pending);
-    this.timers.set(threadId, this.timerApi.set(() => {
+    this.timers.get(threadId)?.();
+    this.timers.set(threadId, this.timerApi(() => {
       this.timers.delete(threadId);
       const operation = this.settle(threadId).catch((error: unknown) => {
         logger.error("Run on settle failed", { threadId, error: error instanceof Error ? error.message : String(error) });
