@@ -180,32 +180,7 @@ export class GitWatcherService {
         }
         entry.timer = setTimeout(() => {
           entry.timer = null;
-          void this.handoffCheckoutService.syncCheckoutFromHead(threadId).then((result) => {
-            if (!result?.changed) return;
-            const { thread } = result;
-            try {
-              this.onThreadCheckoutChanged?.(thread.id);
-            } catch (err) {
-              logger.warn("GitWatcherService: checkout-change listener failed", {
-                threadId: thread.id,
-                error: err instanceof Error ? err.message : String(err),
-              });
-            }
-            broadcast("thread.checkoutChanged", {
-              threadId: thread.id,
-              workspaceId: thread.workspace_id,
-              branch: thread.branch,
-              checkoutState: thread.checkout_state,
-              baseBranch: thread.base_branch,
-              prNumber: thread.pr_number,
-              prStatus: thread.pr_status,
-            });
-          }).catch((err) => {
-            logger.warn("GitWatcherService: failed to sync thread checkout after HEAD change", {
-              threadId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          });
+          void this.publishCheckoutSync(threadId, this.handoffCheckoutService.syncCheckoutFromHead(threadId));
         }, DEBOUNCE_MS);
       });
 
@@ -228,6 +203,44 @@ export class GitWatcherService {
 
     this.threadWatchers.set(threadId, { watcher: fsWatcher, timer: null });
     logger.info("GitWatcherService: watching thread HEAD", { threadId, headDir, headName });
+
+    // A detached thread created before `head_sha` existed has no HEAD event coming to fill it in.
+    void this.publishCheckoutSync(threadId, this.handoffCheckoutService.backfillDetachedHeadSha(threadId));
+  }
+
+  /** Notify listeners and clients when a checkout sync changed the thread row. */
+  private async publishCheckoutSync(
+    threadId: string,
+    sync: Promise<Awaited<ReturnType<HandoffCheckoutService["syncCheckoutFromHead"]>>>,
+  ): Promise<void> {
+    try {
+      const result = await sync;
+      if (!result?.changed) return;
+      const { thread } = result;
+      try {
+        this.onThreadCheckoutChanged?.(thread.id);
+      } catch (err) {
+        logger.warn("GitWatcherService: checkout-change listener failed", {
+          threadId: thread.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      broadcast("thread.checkoutChanged", {
+        threadId: thread.id,
+        workspaceId: thread.workspace_id,
+        branch: thread.branch,
+        checkoutState: thread.checkout_state,
+        baseBranch: thread.base_branch,
+        headSha: thread.head_sha,
+        prNumber: thread.pr_number,
+        prStatus: thread.pr_status,
+      });
+    } catch (err) {
+      logger.warn("GitWatcherService: failed to sync thread checkout", {
+        threadId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   /**

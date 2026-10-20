@@ -98,8 +98,8 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.updateCheckoutToNamedBranch, [id, branch]);
   }
 
-  updateCheckoutFromHead(id: Parameters<ThreadStore["updateCheckoutFromHead"]>[0], branch: Parameters<ThreadStore["updateCheckoutFromHead"]>[1], checkoutState: Parameters<ThreadStore["updateCheckoutFromHead"]>[2], baseBranch: Parameters<ThreadStore["updateCheckoutFromHead"]>[3]): Promise<ReturnType<ThreadStore["updateCheckoutFromHead"]>> {
-    return this.writer.execute(threadWriteOperations.updateCheckoutFromHead, [id, branch, checkoutState, baseBranch]);
+  updateCheckoutFromHead(id: Parameters<ThreadStore["updateCheckoutFromHead"]>[0], branch: Parameters<ThreadStore["updateCheckoutFromHead"]>[1], checkoutState: Parameters<ThreadStore["updateCheckoutFromHead"]>[2], baseBranch: Parameters<ThreadStore["updateCheckoutFromHead"]>[3], headSha: Parameters<ThreadStore["updateCheckoutFromHead"]>[4]): Promise<ReturnType<ThreadStore["updateCheckoutFromHead"]>> {
+    return this.writer.execute(threadWriteOperations.updateCheckoutFromHead, [id, branch, checkoutState, baseBranch, headSha]);
   }
 
   softDelete(id: Parameters<ThreadStore["softDelete"]>[0]): Promise<ReturnType<ThreadStore["softDelete"]>> {

@@ -60,6 +60,7 @@ function resetState() {
         branch: "main",
         checkout_state: "named" as const,
         base_branch: null,
+        head_sha: null,
         worktree_managed: false,
         issue_number: null,
         pr_number: null,

@@ -96,6 +96,7 @@ export const threads = sqliteTable(
     branch: text("branch").notNull(),
     checkoutState: text("checkout_state").notNull().default("named"),
     baseBranch: text("base_branch"),
+    headSha: text("head_sha"),
     issueNumber: integer("issue_number"),
     prNumber: integer("pr_number"),
     prStatus: text("pr_status"),

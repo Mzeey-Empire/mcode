@@ -50,6 +50,16 @@ export class HandoffCheckoutService {
     return branch;
   }
 
+  /**
+   * Record the commit hash of a detached thread that predates `head_sha`, or whose creation path
+   * never read it. Every other thread is skipped so startup does not spawn Git for each worktree.
+   */
+  async backfillDetachedHeadSha(threadId: string): Promise<{ thread: Thread; changed: boolean } | null> {
+    const thread = this.threadRepo.findById(threadId);
+    if (!thread || thread.checkout_state !== "branchless" || thread.head_sha) return null;
+    return this.syncCheckoutFromHead(threadId);
+  }
+
   /** Synchronize a worktree thread's persisted checkout state from its Git HEAD. */
   async syncCheckoutFromHead(threadId: string): Promise<{ thread: Thread; changed: boolean } | null> {
     const thread = this.threadRepo.findById(threadId);
@@ -59,15 +69,22 @@ export class HandoffCheckoutService {
     const detached = !currentBranch || currentBranch === "HEAD";
     const branch = detached ? "HEAD" : currentBranch;
     const checkoutState = detached ? "branchless" : "named";
-    const baseBranch = detached
-      ? thread.base_branch ?? (thread.branch !== "HEAD" ? thread.branch : null)
-      : null;
+    const baseBranch = detached ? detachedBaseBranch(thread) : null;
+
+    // Only a detached checkout needs a hash to be told apart. A named branch is identified by its name.
+    const headSha = detached ? await this.gitRepository.getHeadShaAt(thread.worktree_path) : null;
 
     return this.threadRepo.updateCheckoutFromHead(
       threadId,
       branch,
       checkoutState,
       baseBranch,
+      headSha,
     );
   }
+}
+
+/** The branch a detached thread started from: its recorded base, else the named branch it just left. */
+function detachedBaseBranch(thread: Pick<Thread, "base_branch" | "branch">): string | null {
+  return thread.base_branch ?? (thread.branch !== "HEAD" ? thread.branch : null);
 }

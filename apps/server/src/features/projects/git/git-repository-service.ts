@@ -182,6 +182,18 @@ export class GitRepositoryService {
     }
   }
 
+  /** Get the abbreviated commit hash HEAD points at, or null when Git cannot resolve it. */
+  async getHeadShaAt(repoPath: string): Promise<string | null> {
+    try {
+      const { stdout } = await this.gitExecutor.exec(
+        ["-C", repoPath, "rev-parse", "--short", "HEAD"],
+      );
+      return stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Get the repository's default branch, or null when Git cannot identify one. */
   async getDefaultBranchAt(repoPath: string): Promise<string | null> {
     const cached = this.defaultBranchCache.get(repoPath);

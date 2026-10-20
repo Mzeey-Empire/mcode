@@ -42,7 +42,7 @@ export const threadWriteOperations = {
   updateWorktreePath: booleanByPair("thread.updateWorktreePath"),
   clearWorktreePath: booleanById("thread.clearWorktreePath"),
   updateCheckoutToNamedBranch: threadByPair("thread.updateCheckoutToNamedBranch"),
-  updateCheckoutFromHead: databaseWriteOperation("thread.updateCheckoutFromHead", z.tuple([z.string(), z.string(), z.enum(["named", "branchless"]), z.string().nullable()]), z.object({ thread, changed: z.boolean() }).nullable()),
+  updateCheckoutFromHead: databaseWriteOperation("thread.updateCheckoutFromHead", z.tuple([z.string(), z.string(), z.enum(["named", "branchless"]), z.string().nullable(), z.string().nullable()]), z.object({ thread, changed: z.boolean() }).nullable()),
   softDelete: booleanById("thread.softDelete"),
   hardDelete: databaseWriteOperation("thread.hardDelete", z.tuple([z.string(), z.object({ preserveActiveDescendants: z.boolean().optional() }).optional()]), z.boolean()),
   updateProvider: booleanByPair("thread.updateProvider"),

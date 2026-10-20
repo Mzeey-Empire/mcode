@@ -73,7 +73,7 @@ function rowToThread(row: ThreadRow): Thread {
 
 function rowToThreadIdentity(row: ThreadRow): Pick<Thread,
   "id" | "workspace_id" | "title" | "status" | "mode" | "worktree_path" | "branch"
-  | "checkout_state" | "base_branch" | "worktree_managed" | "issue_number" | "pr_number"
+  | "checkout_state" | "base_branch" | "head_sha" | "worktree_managed" | "issue_number" | "pr_number"
   | "pr_status" | "sdk_session_id" | "model" | "provider" | "created_at" | "updated_at"
 > {
   return {
@@ -86,6 +86,7 @@ function rowToThreadIdentity(row: ThreadRow): Pick<Thread,
     branch: row.branch,
     checkout_state: row.checkoutState === "branchless" ? "branchless" : "named",
     base_branch: row.baseBranch ?? null,
+    head_sha: row.headSha ?? null,
     worktree_managed: row.worktreeManaged === 1,
     issue_number: row.issueNumber,
     pr_number: row.prNumber,
@@ -181,6 +182,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     branch: input.branch,
     checkout_state: input.checkoutState,
     base_branch: input.baseBranch,
+    head_sha: null,
     worktree_managed: input.worktreeManaged,
     issue_number: null,
     pr_number: null,
@@ -795,7 +797,7 @@ export class ThreadStore {
   updateCheckoutToNamedBranch(id: string, branch: string): Thread | null {
     const now = new Date().toISOString();
     const result = runChanges(this.orm.update(threads)
-      .set({ branch, checkoutState: "named", updatedAt: now })
+      .set({ branch, checkoutState: "named", headSha: null, updatedAt: now })
       .where(eq(threads.id, id))
       );
     if (result.changes === 0) return null;
@@ -805,19 +807,23 @@ export class ThreadStore {
   /**
    * Persist an externally observed checkout state for a worktree thread.
    * Clears stale PR metadata only when the branch or checkout discriminator changed.
+   * A moved detached HEAD reports `changed` so clients refresh the label, but keeps the PR metadata.
    */
   updateCheckoutFromHead(
     id: string,
     branch: string,
     checkoutState: "named" | "branchless",
     baseBranch: string | null,
+    headSha: string | null,
   ): { thread: Thread; changed: boolean } | null {
     const current = this.findById(id);
     if (!current) return null;
 
-    const changed =
+    const refChanged =
       current.branch !== branch || current.checkout_state !== checkoutState;
     const nextBaseBranch = resolveNextBaseBranch(current, checkoutState, baseBranch);
+    const headMoved = current.head_sha !== headSha;
+    const changed = refChanged || headMoved;
     if (
       !changed &&
       current.base_branch === nextBaseBranch
@@ -832,8 +838,9 @@ export class ThreadStore {
         branch,
         checkoutState,
         baseBranch: nextBaseBranch,
-        prNumber: sql`CASE WHEN ${changed ? 1 : 0} THEN NULL ELSE ${threads.prNumber} END`,
-        prStatus: sql`CASE WHEN ${changed ? 1 : 0} THEN NULL ELSE ${threads.prStatus} END`,
+        headSha,
+        prNumber: sql`CASE WHEN ${refChanged ? 1 : 0} THEN NULL ELSE ${threads.prNumber} END`,
+        prStatus: sql`CASE WHEN ${refChanged ? 1 : 0} THEN NULL ELSE ${threads.prStatus} END`,
         updatedAt: now,
       })
       .where(eq(threads.id, id))

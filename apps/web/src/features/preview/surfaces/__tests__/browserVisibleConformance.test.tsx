@@ -235,6 +235,7 @@ function visibleThread(): Thread {
     branch: "main",
     checkout_state: "branchless",
     base_branch: "main",
+    head_sha: null,
     worktree_managed: true,
     issue_number: null,
     pr_number: null,

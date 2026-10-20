@@ -41,6 +41,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: "feat/test",
     checkout_state: "named",
     base_branch: null,
+    head_sha: null,
     worktree_managed: true,
     issue_number: null,
     pr_number: null,
