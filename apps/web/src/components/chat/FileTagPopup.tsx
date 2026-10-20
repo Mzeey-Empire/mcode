@@ -56,7 +56,7 @@ function SuggestionRowIcon({ item, isFile, isDark }: { item: MentionSuggestion; 
 }
 
 function AgentSuggestionRowText({ item, name, isDark }: { item: Extract<MentionSuggestion, { kind: "agent" }>; name: string; isDark: boolean }) {
-  return <span className="flex min-w-0 flex-1 items-baseline gap-1"><span className={cn("shrink-0 font-medium", isDark ? "text-ink" : "")}>{name}</span>{item.description ? <span className={cn("min-w-0 text-fade", isDark ? "text-muted group-hover:text-muted group-aria-selected:text-muted" : "text-muted group-hover:text-ink/70 group-focus-visible:text-ink/70 group-aria-selected:text-ink/70")}>{item.description}</span> : null}</span>;
+  return <span className="flex min-w-0 flex-1 items-baseline gap-1 overflow-hidden"><span className={cn("min-w-0 shrink text-fade font-medium", isDark ? "text-ink" : "")}>{name}</span>{item.description ? <span className={cn("min-w-12 flex-1 text-fade", isDark ? "text-muted group-hover:text-muted group-aria-selected:text-muted" : "text-muted group-hover:text-ink/70 group-focus-visible:text-ink/70 group-aria-selected:text-ink/70")}>{item.description}</span> : null}</span>;
 }
 
 function FileSuggestionRowText({ dir, name, isDark }: { dir: string; name: string; isDark: boolean }) {

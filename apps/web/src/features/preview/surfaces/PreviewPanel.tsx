@@ -173,6 +173,7 @@ export function PreviewPanel({
     setBubbleInputFocused,
     bubbleSlashState,
     bubbleSlashAnchorRect,
+    highlightBubbleSlash,
     retryBubbleSlash,
     filePopupAnchorRect,
   } = useDesignAnnotationState({
@@ -481,6 +482,7 @@ export function PreviewPanel({
             canSaveOpenBubble={canSaveOpenBubble}
             bubbleSlashState={bubbleSlashState}
             bubbleSlashAnchorRect={bubbleSlashAnchorRect}
+            highlightBubbleSlash={highlightBubbleSlash}
             dismissBubbleSlash={dismissBubbleSlash}
             retryBubbleSlash={retryBubbleSlash}
             bubbleFileSuggestions={bubbleFileSuggestions}

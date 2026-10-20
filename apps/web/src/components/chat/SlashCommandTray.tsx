@@ -27,6 +27,8 @@ interface SlashCommandTrayProps {
   selectedIndex: number;
   anchorRect: DOMRect | null;
   onSelect: (cmd: Command) => void;
+  /** Moves the selection when the pointer moves onto a row. Without it the pointer never selects. */
+  onHighlight?: (index: number) => void;
   onDismiss: () => void;
   onRetry: () => void;
   /** Compact annotation treatment; colours follow the app theme. */
@@ -50,6 +52,7 @@ export function SlashCommandTray({
   selectedIndex,
   anchorRect,
   onSelect,
+  onHighlight,
   onDismiss,
   onRetry,
   tone = "default",
@@ -57,18 +60,35 @@ export function SlashCommandTray({
   workspacePath,
 }: SlashCommandTrayProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerSelectedIndexRef = useRef<number | null>(null);
 
   // The list-bearing states carry the items; all others render no list.
   const items: Command[] =
     state.kind === "ready" || state.kind === "staleRevalidating" ? state.items : [];
   const isOpen = state.kind !== "closed";
 
-  // Scroll selected item into view
   useEffect(() => {
     if (!isOpen) return;
+    // A row the pointer chose is already under the pointer; scrolling it would slide the list away.
+    if (pointerSelectedIndexRef.current === selectedIndex) return;
+    pointerSelectedIndexRef.current = null;
     const el = scrollRef.current?.querySelector(`[data-index="${selectedIndex}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex, isOpen, items.length]);
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    // Chromium can report pointer events when the list scrolls under a still cursor. Only a
+    // real move selects, so wheel scrolling never steals the keyboard selection.
+    const last = lastPointerRef.current;
+    lastPointerRef.current = { x: event.clientX, y: event.clientY };
+    if (last && last.x === event.clientX && last.y === event.clientY) return;
+    const row = (event.target as Element).closest<HTMLElement>("[data-index]");
+    const index = row ? Number(row.dataset.index) : Number.NaN;
+    if (!Number.isInteger(index) || index === selectedIndex) return;
+    pointerSelectedIndexRef.current = index;
+    onHighlight?.(index);
+  };
 
   // Dismiss on outside click
   useEffect(() => {
@@ -124,8 +144,9 @@ export function SlashCommandTray({
                 role="listbox"
                 aria-label="Slash commands"
                 aria-activedescendant={items[selectedIndex] ? `slash-cmd-${selectedIndex}` : undefined}
-                className="overflow-y-auto"
+                className="scroll-fade-y"
                 style={{ maxHeight: VISIBLE_ITEMS * ITEM_HEIGHT }}
+                onPointerMove={handlePointerMove}
               >
                 {items.map((cmd, index) => (
                   <CommandRow
@@ -188,8 +209,9 @@ function CommandRow({
         onSelect(cmd);
       }}
       className={cn(
-        "h-10 w-full min-w-0 justify-start gap-2 overflow-hidden rounded-lg px-0 text-left hover:bg-hover",
-        selected && showSelectionFill && "bg-hover",
+        // The selection is the only fill; a separate hover fill would show a second highlighted row.
+        "h-10 w-full min-w-0 justify-start gap-2 overflow-hidden rounded-lg px-2 text-left hover:bg-transparent",
+        selected && showSelectionFill && "bg-hover hover:bg-hover",
       )}
     >
       <CommandIdentityMark command={cmd} />

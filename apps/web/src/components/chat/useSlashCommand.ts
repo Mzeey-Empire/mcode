@@ -218,6 +218,8 @@ export interface UseSlashCommandReturn {
    */
   onInputChange: (value: string, cursorPos?: number) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
+  /** Moves the selection to a row, for pointer movement over the list. */
+  onHighlight: (index: number) => void;
   onSelect: (cmd: Command, replaceText: (v: string) => void) => void;
   onDismiss: () => void;
   onRetry: () => void;
@@ -466,6 +468,16 @@ export function useSlashCommand({
     [displayedSelectedIndex, filtered, isOpen],
   );
 
+  const onHighlight = useCallback(
+    (index: number) => {
+      const command = filtered[index];
+      if (!command) return;
+      selectedCommandIdentityRef.current = commandIdentity(command);
+      setSelectedIndex(index);
+    },
+    [filtered],
+  );
+
   const onSelect = useCallback(
     (cmd: Command, replaceText: (v: string) => void) => {
       const value = lastInputRef.current;
@@ -516,6 +528,7 @@ export function useSlashCommand({
     anchorRect,
     onInputChange,
     onKeyDown,
+    onHighlight,
     onSelect,
     onDismiss,
     onRetry,

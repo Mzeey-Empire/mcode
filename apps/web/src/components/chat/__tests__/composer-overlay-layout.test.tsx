@@ -8,7 +8,7 @@ afterEach(cleanup);
 const anchorRect = new DOMRect(100, 500, 600, 120);
 
 describe("composer overlay layout", () => {
-  it("places nested attached content before the editor in normal flow and forwards its ref", () => {
+  it("docks nested attached content in the host before the editor and forwards its ref", () => {
     const ref = createRef<HTMLDivElement>();
     const { rerender } = render(
       <ComposerOverlayLayout>
