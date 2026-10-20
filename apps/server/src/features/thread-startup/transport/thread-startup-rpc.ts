@@ -10,6 +10,7 @@ import type { AgentService } from "../../agents/orchestration/agent-service.js";
 import type { WorkspaceEnvironmentService } from "../../projects/environment/workspace-environment-service.js";
 import type { ThreadStartupService } from "../thread-startup-service.js";
 import type { ThreadStartupFetchDecisions } from "../thread-startup-fetch-decisions.js";
+import { cancelThreadStartup } from "../cancel-thread-startup.js";
 
 type ThreadStartupRpcMethod =
   | "thread.startup.get"
@@ -47,30 +48,7 @@ const threadStartupHandlers: ThreadStartupHandlerMap = {
   "thread.startup.resolve": (deps, params) => deps.threadStartupFetchDecisions.resolve(
     deps.threadStartupService.get(params.startupId), params.action,
   ),
-  "thread.startup.cancel": async (deps, params) => {
-    const startup = await deps.threadStartupService.cancel(params.startupId);
-    if (startup.phase === "fetch") deps.threadStartupFetchDecisions.cancel(startup.startupId);
-    if (
-      !startup.threadId
-      || ["completed", "failed", "cancelled", "interrupted"].includes(startup.state)
-    ) return startup;
-
-    switch (startup.phase) {
-      case "setup":
-        await deps.workspaceEnvironmentService.stopAutomaticSetup({ threadId: startup.threadId });
-        return deps.threadStartupService.markCancelled(startup.startupId);
-      case "agent":
-        // Intent is committed before the stop, so a first provider frame racing it settles as cancelled,
-        // and a turn stopped before dispatch commits no turn fact for the observer. Once the stop
-        // resolves, the record is either already terminal (markCancelled keeps it) or cancelled.
-        await deps.agentService.stopSession(startup.threadId, { by: "user" });
-        return deps.threadStartupService.markCancelled(startup.startupId);
-      case "thread":
-      case "fetch":
-      case "worktree":
-        return startup;
-    }
-  },
+  "thread.startup.cancel": (deps, params) => cancelThreadStartup(deps, params.startupId),
   "thread.startup.retryAgent": async (deps, params) => {
     const startup = deps.threadStartupService.get(params.startupId);
     if (!startup?.threadId) throw new Error("This startup has no thread to retry");
