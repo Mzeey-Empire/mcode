@@ -479,7 +479,7 @@ export const WorkspaceEnvironmentActionSchema = lazySchema(() =>
     icon: WorkspaceEnvironmentActionIconIdSchema.optional(),
     runOnStartup: z.boolean().optional(),
     runOnCleanup: z.boolean().optional(),
-    /** Only `false` is ever stored: absent keeps today's blocking Setup gate. Inert without `runOnStartup`. */
+    /** Only `false` is ever stored: absent keeps the blocking Setup gate. Inert without `runOnStartup`. */
     waitForExit: z.literal(false).optional(),
     runOnSettle: z.boolean().optional(),
     /** `true` opens the first URL the port monitor detects; a URL opens exactly that one. */
