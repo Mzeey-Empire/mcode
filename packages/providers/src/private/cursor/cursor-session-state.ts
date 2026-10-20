@@ -44,7 +44,6 @@ export interface CursorAcpSessionEntry {
   workspaceId: string;
   browserPermissionCapability: "observe" | "interact" | "privileged";
   supportsHttpMcp: boolean;
-  threadControlMcpEnabled: boolean;
   mcodeRuntimeInstructions: string;
   mcodeRuntimeInstructionsSent: boolean;
   mcodeLogicalSessionReloaded: boolean;

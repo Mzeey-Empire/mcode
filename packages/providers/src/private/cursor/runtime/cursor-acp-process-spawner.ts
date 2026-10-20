@@ -156,7 +156,6 @@ export class CursorAcpProcessSpawner {
       cursorModelAppliedPair: null,
       pendingUserStopAbort: false,
       supportsHttpMcp: false,
-      threadControlMcpEnabled: true,
       mcodeRuntimeInstructions: "",
       mcodeRuntimeInstructionsSent: false,
       mcodeLogicalSessionReloaded: false,
