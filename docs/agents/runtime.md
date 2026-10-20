@@ -45,7 +45,7 @@ Use `seedLogin.authHeader` or the `mcode-auth` cookie for HTTP and WebSocket acc
 
 The runtime owns these paths in the current worktree:
 
-- `.dev/db/app.sqlite`: filtered SQLite seed owned by the launchers
+- `.dev/db/app.sqlite`: development database owned by the launchers, empty unless `bun run db:seed` filled it
 - `.dev/fixture-repo/`: fixture repository
 - `.dev/logs/`: server, web, and Electron logs
 - `.dev/pids/`: owned server, web, and desktop PIDs
@@ -56,7 +56,9 @@ Do not write to `.dev/` in another worktree. Stop a runtime through `agent:down`
 
 ## Database and write boundaries
 
-`agent:setup` (and `bun run db:seed`) reads the local Mcode database through `VACUUM INTO` and writes only the worktree-local `.dev/db/app.sqlite`. It never modifies the source database. The copy keeps the 8 most recently active projects and, in each, the 20 newest thread families with no running turn or active agent. Every table that is not explicitly listed as history is emptied, and kept rows lose their provider sessions, checkout paths, and PR links, so the dev server cannot resume, clean up, or poll real work. `bun run dev` and `bun run dev:desktop` reuse the seed while its `.dev/db/.agent-runtime-database` marker carries the current filter version, and rebuild it (discarding local data in it) when the marker is older or missing. A failed build leaves the existing database untouched. Filtered projects keep their real paths, so test and mutate only `.dev/fixture-repo`. The server registers that fixture repository when it starts.
+`agent:setup`, `bun run dev` and `bun run dev:desktop` start from an empty `.dev/db/app.sqlite`, and the server registers `.dev/fixture-repo` as its only project. Real data never enters by default, so screenshots and recordings cannot leak it. They reuse the database while its `.dev/db/.agent-runtime-database` marker is current, and replace it with an empty one (discarding local data in it) when the marker is older or missing. `bun run agent:reset` empties it on demand.
+
+`bun run db:seed` is the opt-in path to realistic history. With the runtime stopped, it reads the local Mcode database through `VACUUM INTO` and writes only the worktree-local `.dev/db/app.sqlite`. It never modifies the source database. The copy keeps the 8 most recently active projects and, in each, the 20 newest thread families with no running turn or active agent. Every table that is not explicitly listed as history is emptied, and kept rows lose their provider sessions, checkout paths, and PR links, so the dev server cannot resume, clean up, or poll real work. A failed build leaves the existing database untouched. Kept projects keep their real names, paths and conversations, so `agent:up` warns while the copy is loaded; test and mutate only `.dev/fixture-repo`, and run `agent:reset` before capturing anything for a pull request.
 
 Every dev launcher sets `MCODE_DATA_DIR` to `.dev` and `MCODE_DB_PATH` to `.dev/db/app.sqlite`. A server started without them outside a production build exits with an error naming the launchers instead of falling back to a shared directory. `bun run state:reset` deletes `.dev` and refuses any other directory; run `bun run agent:setup` afterwards.
 

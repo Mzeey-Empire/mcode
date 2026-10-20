@@ -1,5 +1,5 @@
 /**
- * Behavior tests for the filtered development database seed (scripts/db-seed.mjs).
+ * Behavior tests for the development database: empty by default, a filtered copy on request (scripts/db-seed.mjs).
  *
  * Donors are real migrated databases built in a temp directory. The real ~/.mcode is never read.
  */
@@ -11,10 +11,10 @@ import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 import { Database } from "bun:sqlite";
 
-import { ensureRuntimeDatabase } from "../../db-seed.mjs";
+import { ensureRuntimeDatabase, seedRuntimeDatabase } from "../../db-seed.mjs";
 import { HISTORY_TABLES, LEDGER_TABLES } from "../../db-seed-filter.mjs";
 import { getRuntimePaths } from "../runtime-contract.mjs";
-import { hasRuntimeDatabaseMarker } from "../runtime-database.mjs";
+import { hasRuntimeDatabaseMarker, readRuntimeDatabaseSeed } from "../runtime-database.mjs";
 
 const assert = NodeAssertStrict.default;
 const SERVER_DATABASE_MODULE = new URL(
@@ -128,12 +128,7 @@ function keptThreadIds(path) {
 }
 
 function seed(fixture, options = {}) {
-  return ensureRuntimeDatabase({
-    repoRoot: fixture.repoRoot,
-    refresh: true,
-    source: fixture.donorPath,
-    ...options,
-  });
+  return seedRuntimeDatabase({ repoRoot: fixture.repoRoot, source: fixture.donorPath, ...options });
 }
 
 NodeTest.test("a family with a live member is left out and stopped families are kept", async () => {
@@ -320,32 +315,45 @@ NodeTest.test("a failure while building leaves an existing target byte-identical
   });
 });
 
-NodeTest.test("without refresh a current seed is reused and a stale or missing marker is reseeded", async () => {
+NodeTest.test("a launch starts an empty database the server can open, without reading the donor", async () => {
+  await withSeedFixture(async (fixture) => {
+    editDatabase(fixture.donorPath, (db) => addWorkspace(db, "real-project", "2026-01-01T00:00:00.000Z"));
+
+    assert.equal(ensureRuntimeDatabase({ repoRoot: fixture.repoRoot }).status, "created");
+
+    assert.equal(readRuntimeDatabaseSeed(fixture.repoRoot), "empty");
+    const { openDatabase } = await import(SERVER_DATABASE_MODULE);
+    const db = openDatabase({ dbPath: fixture.targetPath });
+    try {
+      assert.deepEqual(db.query("SELECT id FROM workspaces").all(), [], "no real project leaks into a launch");
+    } finally {
+      db.close(true);
+    }
+  });
+});
+
+NodeTest.test("a launch keeps a current database and replaces an old or unmarked one with an empty one", async () => {
   await withSeedFixture((fixture) => {
-    editDatabase(fixture.donorPath, (db) => {
-      addWorkspace(db, "w1", "2026-01-01T00:00:00.000Z");
-    });
-    seed(fixture);
-    const markWork = () => editDatabase(fixture.targetPath, (db) => addWorkspace(db, "local-work", "2026-03-01T00:00:00.000Z"));
+    editDatabase(fixture.donorPath, (db) => addWorkspace(db, "w1", "2026-01-01T00:00:00.000Z"));
+    const launch = (options = {}) => ensureRuntimeDatabase({ repoRoot: fixture.repoRoot, ...options });
     const workspaceIds = () => readDatabase(fixture.targetPath, (db) => db.query("SELECT id FROM workspaces ORDER BY id").all().map((row) => row.id));
     const marker = NodePath.join(getRuntimePaths(fixture.repoRoot).dbDir, ".agent-runtime-database");
 
-    markWork();
-    seed(fixture, { refresh: false });
-    assert.deepEqual(workspaceIds(), ["local-work", "w1"], "current marker reuses the target");
+    seed(fixture);
+    assert.equal(launch().status, "reused");
+    assert.deepEqual(workspaceIds(), ["w1"], "an opted-in seed survives later launches");
 
     NodeFS.writeFileSync(marker, "agent-runtime-snapshot\n");
-    seed(fixture, { refresh: false });
-    assert.deepEqual(workspaceIds(), ["w1"], "marker from the unfiltered seed is reseeded");
+    assert.equal(launch().status, "created", "the unfiltered copy older launchers made is replaced");
+    assert.equal(readRuntimeDatabaseSeed(fixture.repoRoot), "empty");
 
-    markWork();
+    seed(fixture);
     NodeFS.rmSync(marker);
-    seed(fixture, { refresh: false });
-    assert.deepEqual(workspaceIds(), ["w1"], "missing marker is reseeded");
+    assert.equal(launch().status, "created", "an unmarked database is replaced");
 
-    markWork();
-    seed(fixture, { refresh: true });
-    assert.deepEqual(workspaceIds(), ["w1"], "refresh always reseeds");
+    seed(fixture);
+    assert.equal(launch({ refresh: true }).status, "created", "refresh always empties");
+    assert.equal(readRuntimeDatabaseSeed(fixture.repoRoot), "empty");
   });
 });
 
@@ -362,15 +370,16 @@ NodeTest.test("a build abandoned by a killed process is cleaned up by the next o
   });
 });
 
-NodeTest.test("a missing donor skips the seed on launch but fails an explicit refresh", async () => {
+NodeTest.test("seeding without a donor fails and leaves the database as it was", async () => {
   await withSeedFixture((fixture) => {
+    ensureRuntimeDatabase({ repoRoot: fixture.repoRoot });
+    const before = NodeFS.readFileSync(fixture.targetPath);
     NodeFS.rmSync(fixture.donorPath);
 
-    const result = seed(fixture, { refresh: false });
+    assert.throws(() => seed(fixture), /Source database not found/);
 
-    assert.equal(result.status, "no-donor");
-    assert.equal(NodeFS.existsSync(fixture.targetPath), false);
-    assert.throws(() => seed(fixture, { refresh: true }), /Source database not found/);
+    assert.ok(before.equals(NodeFS.readFileSync(fixture.targetPath)));
+    assert.equal(readRuntimeDatabaseSeed(fixture.repoRoot), "empty");
   });
 });
 

@@ -13,11 +13,15 @@ import {
 } from "./runtime-contract.mjs";
 
 const DATABASE_MARKER = ".agent-runtime-database";
-const MARKER_HEADER = "agent-runtime-snapshot\n";
-const MARKER_PATTERN = /^agent-runtime-snapshot\nseed-filter-version=(\d+)\n$/;
 
-/** Older launchers wrote the bare header next to an unfiltered copy; reading it as version 0 forces a rebuild. */
-const UNFILTERED_SEED_VERSION = 0;
+/**
+ * What the launchers put in the local database. Copies made by an older filter, and the bare
+ * header older launchers wrote next to an unfiltered copy, match neither and must be replaced.
+ */
+const MARKER_CONTENTS = {
+  empty: "agent-runtime-snapshot\nseed=empty\n",
+  filtered: `agent-runtime-snapshot\nseed=filtered-v${SEED_FILTER_VERSION}\n`,
+};
 
 /** Rejects a linked runtime root before setup inspects or removes its contents. */
 export function assertRuntimeRootSafe(repoRoot) {
@@ -34,8 +38,13 @@ export function prepareRuntimeDatabaseSnapshot(repoRoot) {
   return paths;
 }
 
-/** Marks a safely seeded local database with the filter version that produced it. */
-export function markRuntimeDatabase(repoRoot, seedVersion = SEED_FILTER_VERSION) {
+/**
+ * Marks the local database as created by the launchers.
+ *
+ * @param {string} repoRoot
+ * @param {"empty" | "filtered"} seed whether it started empty or from a filtered copy of real data
+ */
+export function markRuntimeDatabase(repoRoot, seed) {
   assertRuntimeRootSafe(repoRoot);
   const paths = getRuntimePaths(repoRoot);
   assertRuntimeDirectorySafe(paths.devDir, "runtime directory");
@@ -44,9 +53,8 @@ export function markRuntimeDatabase(repoRoot, seedVersion = SEED_FILTER_VERSION)
   const markerPath = NodePath.join(paths.dbDir, DATABASE_MARKER);
   assertRuntimeFileSafe(markerPath, "database marker", true);
   const temporaryMarkerPath = NodePath.join(paths.dbDir, `.${DATABASE_MARKER}.${NodeCrypto.randomUUID()}`);
-  const contents = `${MARKER_HEADER}seed-filter-version=${seedVersion}\n`;
   try {
-    NodeFS.writeFileSync(temporaryMarkerPath, contents, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    NodeFS.writeFileSync(temporaryMarkerPath, MARKER_CONTENTS[seed], { encoding: "utf8", flag: "wx", mode: 0o600 });
     NodeFS.renameSync(temporaryMarkerPath, markerPath);
   } finally {
     NodeFS.rmSync(temporaryMarkerPath, { force: true });
@@ -57,14 +65,16 @@ export function markRuntimeDatabase(repoRoot, seedVersion = SEED_FILTER_VERSION)
 
 /** Returns whether the launchers created the local database. */
 export function hasRuntimeDatabaseMarker(repoRoot) {
-  return readRuntimeDatabaseSeedVersion(repoRoot) !== null;
+  return readRuntimeDatabaseSeed(repoRoot) !== null;
 }
 
 /**
- * Returns the filter version that seeded the local database, 0 for the unfiltered legacy marker,
- * or null when the database is missing, unmarked, or the marker is not ours.
+ * Returns how the launchers created the local database, or null when it is missing, unmarked,
+ * made by an older seed, or the marker is not ours.
+ *
+ * @returns {"empty" | "filtered" | null}
  */
-export function readRuntimeDatabaseSeedVersion(repoRoot) {
+export function readRuntimeDatabaseSeed(repoRoot) {
   try {
     assertRuntimeRootSafe(repoRoot);
   } catch {
@@ -77,9 +87,9 @@ export function readRuntimeDatabaseSeedVersion(repoRoot) {
     assertRuntimeFileSafe(dbPath, "database");
     assertRuntimeFileSafe(markerPath, "database marker");
     const contents = NodeFS.readFileSync(markerPath, "utf8");
-    if (contents === MARKER_HEADER) return UNFILTERED_SEED_VERSION;
-    const match = MARKER_PATTERN.exec(contents);
-    return match ? Number(match[1]) : null;
+    if (contents === MARKER_CONTENTS.empty) return "empty";
+    if (contents === MARKER_CONTENTS.filtered) return "filtered";
+    return null;
   } catch {
     return null;
   }

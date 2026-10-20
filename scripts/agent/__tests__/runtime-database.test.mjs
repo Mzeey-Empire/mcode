@@ -5,33 +5,32 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
-import { SEED_FILTER_VERSION } from "../../db-seed-filter.mjs";
 import {
   assertRuntimeRootSafe,
   hasRuntimeDatabaseMarker,
   markRuntimeDatabase,
-  readRuntimeDatabaseSeedVersion,
+  readRuntimeDatabaseSeed,
 } from "../runtime-database.mjs";
 import { getRuntimePaths } from "../runtime-contract.mjs";
 import { agentSetup } from "../agent-setup.mjs";
 
-NodeTest.test("runtime database validates its bounded setup marker and reports the seed version", () => {
+NodeTest.test("runtime database marker reports how the database was created and rejects older markers", () => {
   const repo = makeRepo();
   try {
     const paths = getRuntimePaths(repo);
     NodeFS.mkdirSync(paths.dbDir, { recursive: true });
     NodeFS.writeFileSync(paths.dbPath, "snapshot\n");
-    markRuntimeDatabase(repo);
+    markRuntimeDatabase(repo, "filtered");
     NodeAssertStrict.default.equal(NodeFS.readFileSync(paths.dbPath, "utf8"), "snapshot\n");
     NodeAssertStrict.default.equal(hasRuntimeDatabaseMarker(repo), true);
-    NodeAssertStrict.default.equal(readRuntimeDatabaseSeedVersion(repo), SEED_FILTER_VERSION);
+    NodeAssertStrict.default.equal(readRuntimeDatabaseSeed(repo), "filtered");
+    markRuntimeDatabase(repo, "empty");
+    NodeAssertStrict.default.equal(readRuntimeDatabaseSeed(repo), "empty");
     const markerPath = NodePath.join(paths.dbDir, ".agent-runtime-database");
-    // The marker written before the seed was filtered is still ours, but older than any filter version.
-    NodeFS.writeFileSync(markerPath, "agent-runtime-snapshot\n");
-    NodeAssertStrict.default.equal(readRuntimeDatabaseSeedVersion(repo), 0);
-    NodeFS.writeFileSync(markerPath, "other\n");
-    NodeAssertStrict.default.equal(hasRuntimeDatabaseMarker(repo), false);
-    NodeAssertStrict.default.equal(readRuntimeDatabaseSeedVersion(repo), null);
+    for (const stale of ["agent-runtime-snapshot\n", "agent-runtime-snapshot\nseed=filtered-v0\n", "other\n"]) {
+      NodeFS.writeFileSync(markerPath, stale);
+      NodeAssertStrict.default.equal(hasRuntimeDatabaseMarker(repo), false, stale);
+    }
   } finally {
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }

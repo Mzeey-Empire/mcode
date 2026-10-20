@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Builds the worktree's development database from a filtered copy of the real one.
+ * Creates the worktree's development database: empty by default, or on request a filtered copy of the real one.
  *
  * The donor is only read through `VACUUM INTO`. The copy is pruned to recent, stopped history in
  * {@link filterSeedDatabase}, then renamed over `.dev/db/app.sqlite`, so a failed build never touches the
@@ -16,10 +16,10 @@ import { Database } from "bun:sqlite";
 import {
   markRuntimeDatabase,
   prepareRuntimeDatabaseSnapshot,
-  readRuntimeDatabaseSeedVersion,
+  readRuntimeDatabaseSeed,
 } from "./agent/runtime-database.mjs";
 import { resolveRepoRoot } from "./agent/runtime-contract.mjs";
-import { SEED_FILTER_VERSION, filterSeedDatabase } from "./db-seed-filter.mjs";
+import { filterSeedDatabase } from "./db-seed-filter.mjs";
 
 /**
  * Resolves default source database path (`~/.mcode/mcode.db` or `~/.mcode-dev/mcode.db`).
@@ -40,47 +40,60 @@ export function resolveSourceDbPath(preferredSource) {
 }
 
 /**
- * Makes sure the worktree has a filtered development database, building one when needed.
+ * Makes sure the worktree has a development database, starting an empty one when needed.
  *
- * Reuses the existing database when `refresh` is false and its marker carries the current
- * {@link SEED_FILTER_VERSION}; a missing or older marker is rebuilt, which discards local data in it.
- * A failure before the rename leaves the existing database untouched. The marker is written last, so a
- * failure after the rename makes the next launch rebuild.
+ * Real data never enters by default, so screenshots and recordings cannot leak it. Reuses a database
+ * the launchers created, empty or seeded through {@link seedRuntimeDatabase}, unless `refresh` is set.
+ * Anything else, including copies from an older seed, is replaced by an empty database.
  *
- * @param {{
- *   repoRoot?: string,
- *   refresh?: boolean,
- *   source?: string,
- *   maxWorkspaces?: number,
- *   maxFamiliesPerWorkspace?: number,
- * }} [options] `refresh` forces a rebuild and makes a missing donor an error.
- * @returns {{ status: "reused" | "seeded" | "no-donor", targetPath: string, sourcePath?: string, kept?: { workspaces: number, threads: number } }}
- *   `no-donor` means a launch found nothing to seed from, so the runtime starts from an empty database.
+ * @param {{ repoRoot?: string, refresh?: boolean }} [options]
+ * @returns {{ status: "reused" | "created", targetPath: string }}
  */
 export function ensureRuntimeDatabase(options = {}) {
   const repoRoot = options.repoRoot ?? resolveRepoRoot();
-  const refresh = options.refresh ?? false;
   const paths = prepareRuntimeDatabaseSnapshot(repoRoot);
-  const targetPath = paths.dbPath;
-
-  if (!refresh && readRuntimeDatabaseSeedVersion(repoRoot) === SEED_FILTER_VERSION) {
-    return { status: "reused", targetPath };
+  if (!options.refresh && readRuntimeDatabaseSeed(repoRoot) !== null) {
+    return { status: "reused", targetPath: paths.dbPath };
   }
+  buildAndPublish(repoRoot, paths, "empty", (temporaryPath) => new Database(temporaryPath).close(true));
+  return { status: "created", targetPath: paths.dbPath };
+}
 
+/**
+ * Replaces the worktree's development database with a filtered copy of the real one, for work that
+ * needs realistic history. Opt-in only: the copy holds real project names and conversations.
+ *
+ * A failure before the rename leaves the existing database untouched. The marker is written last, so a
+ * failure after the rename makes the next launch start empty.
+ *
+ * @param {{
+ *   repoRoot?: string,
+ *   source?: string,
+ *   maxWorkspaces?: number,
+ *   maxFamiliesPerWorkspace?: number,
+ * }} [options]
+ * @returns {{ targetPath: string, sourcePath: string, kept: { workspaces: number, threads: number } }}
+ */
+export function seedRuntimeDatabase(options = {}) {
+  const repoRoot = options.repoRoot ?? resolveRepoRoot();
+  const paths = prepareRuntimeDatabaseSnapshot(repoRoot);
   const sourcePath = resolveSourceDbPath(options.source);
-  if (!NodeFS.existsSync(sourcePath)) {
-    if (refresh) throw new Error(`Source database not found at: ${sourcePath}`);
-    return { status: "no-donor", targetPath };
-  }
+  if (!NodeFS.existsSync(sourcePath)) throw new Error(`Source database not found at: ${sourcePath}`);
+  let kept;
+  buildAndPublish(repoRoot, paths, "filtered", (temporaryPath) => {
+    kept = buildFilteredCopy(sourcePath, temporaryPath, options);
+  });
+  return { targetPath: paths.dbPath, sourcePath, kept };
+}
 
+function buildAndPublish(repoRoot, paths, seed, build) {
   NodeFS.mkdirSync(paths.dbDir, { recursive: true });
-  removeAbandonedBuilds(paths.dbDir, targetPath);
-  const temporaryPath = NodePath.join(paths.dbDir, `.${NodePath.basename(targetPath)}.seed-${NodeCrypto.randomUUID()}`);
+  removeAbandonedBuilds(paths.dbDir, paths.dbPath);
+  const temporaryPath = NodePath.join(paths.dbDir, `.${NodePath.basename(paths.dbPath)}.seed-${NodeCrypto.randomUUID()}`);
   try {
-    const kept = buildFilteredCopy(sourcePath, temporaryPath, options);
-    publishDatabase(temporaryPath, targetPath);
-    markRuntimeDatabase(repoRoot);
-    return { status: "seeded", targetPath, sourcePath, kept };
+    build(temporaryPath);
+    publishDatabase(temporaryPath, paths.dbPath);
+    markRuntimeDatabase(repoRoot, seed);
   } finally {
     NodeFS.rmSync(temporaryPath, { force: true });
     NodeFS.rmSync(`${temporaryPath}-journal`, { force: true });
@@ -169,7 +182,7 @@ function parseCliArgs(args) {
 
 if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href) {
   try {
-    const result = ensureRuntimeDatabase({ ...parseCliArgs(process.argv.slice(2)), refresh: true });
+    const result = seedRuntimeDatabase(parseCliArgs(process.argv.slice(2)));
     console.log(`Source DB : ${result.sourcePath}`);
     console.log(`Target DB : ${result.targetPath}`);
     console.log(`Kept      : ${result.kept.workspaces} workspaces, ${result.kept.threads} threads`);

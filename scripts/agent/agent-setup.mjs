@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Provisions the per-worktree agent runtime: database snapshot, fixture repo, and bundles.
+ * Provisions the per-worktree agent runtime: local database, fixture repo, and bundles.
  */
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
@@ -50,7 +50,7 @@ export async function agentSetup(repoRoot = resolveRepoRoot()) {
   const operations = getSetupOperations();
 
   assertRuntimeStopped(repoRoot);
-  operations.ensureDatabase({ repoRoot, refresh: true });
+  operations.ensureDatabase({ repoRoot });
   if (!operations.fixtureIsReady(repoRoot)) {
     operations.seedFixture(repoRoot);
   }
@@ -68,7 +68,7 @@ function getSetupOperations() {
   };
 }
 
-/** Rebuilds the local filtered database from the real one. */
+/** Replaces the local database with an empty one. */
 export function refreshRuntimeDatabase(repoRoot, ensureDatabase = ensureRuntimeDatabase) {
   ensureDatabase({ repoRoot, refresh: true });
 }

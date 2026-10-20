@@ -647,7 +647,7 @@ NodeTest.test("agentUp hides the console window for runtime child processes", as
   }
 });
 
-NodeTest.test("agentReset refreshes the local database snapshot before it starts the real runtime transition", async () => {
+NodeTest.test("agentReset empties the local database before it starts the real runtime transition", async () => {
   const repo = makeRepo();
   try {
     const paths = getRuntimePaths(repo);
@@ -672,13 +672,13 @@ NodeTest.test("agentReset refreshes the local database snapshot before it starts
   }
 });
 
-NodeTest.test("agentSetup snapshots the database before fixture and bundle work", async () => {
+NodeTest.test("agentSetup prepares the database, keeping an opted-in seed, before fixture and bundle work", async () => {
   const repo = makeRepo();
   const calls = [];
   const restoreHooks = setAgentSetupTestHooks({
     ensureRuntimeDatabase: ({ repoRoot, refresh }) => {
       NodeAssertStrict.default.equal(repoRoot, repo);
-      NodeAssertStrict.default.equal(refresh, true);
+      NodeAssertStrict.default.equal(refresh, undefined);
       calls.push("snapshot");
     },
     seedFixtureRepo: (repoRoot) => {
@@ -1399,7 +1399,7 @@ function provisionRuntime(repo) {
   const paths = getRuntimePaths(repo);
   NodeFS.mkdirSync(paths.dbDir, { recursive: true });
   NodeFS.writeFileSync(paths.dbPath, "test database\n");
-  markRuntimeDatabase(repo);
+  markRuntimeDatabase(repo, "empty");
   seedFixtureRepo(repo);
   const serverBundle = NodePath.resolve(repo, "apps", "desktop", "dist", "server", "server.cjs");
   NodeFS.mkdirSync(NodePath.dirname(serverBundle), { recursive: true });
