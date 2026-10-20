@@ -92,6 +92,7 @@ import { TurnRevertStore } from "../../features/agents/turns/persistence/turn-re
 import { RepositoryGitMutationLock } from "../../features/projects/git/repository-git-mutation-lock.js";
 import { SNAPSHOT_STORE_ID, type StoreId } from "../../features/projects/diffs/snapshots/snapshot-store-identity.js";
 import { AgentRuntimeCommandPort } from "../../features/agents/orchestration/agent-turn-command-port.js";
+import { DelegatedTaskService } from "../../features/thread-control/delegation/delegated-task-service.js";
 import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
 import { TURN_FINALIZER, TurnFinalizer } from "../../features/agents/turns/turn-finalizer.js";
 import {
@@ -335,6 +336,7 @@ workspaceEnvironmentService.setAutomaticSetupDispatcher({
 const turnRecoveryService = container.resolve(TurnRecoveryService);
 const turnResumeScheduler = container.resolve(TurnResumeScheduler);
 const threadControlService = container.resolve(ThreadControlService);
+const delegatedTaskService = container.resolve(DelegatedTaskService);
 const threadStartupService = container.resolve(ThreadStartupService);
 const threadStartupFetchDecisions = container.resolve(ThreadStartupFetchDecisions);
 const startupAgentPhaseObserver = container.resolve(StartupAgentPhaseObserver);
@@ -347,7 +349,19 @@ const mcodeMcpServer = new McodeMcpServer({
     browserToolkit,
     createThreadControlToolkit({
       authority: container.resolve(McodeSessionAuthority),
-      service: threadControlService,
+      service: {
+        workspaceSearch: threadControlService.workspaceSearch.bind(threadControlService),
+        worktreeList: threadControlService.worktreeList.bind(threadControlService),
+        threadTargetList: threadControlService.threadTargetList.bind(threadControlService),
+        threadSearch: threadControlService.threadSearch.bind(threadControlService),
+        threadGet: threadControlService.threadGet.bind(threadControlService),
+        threadSend: threadControlService.threadSend.bind(threadControlService),
+        threadStop: threadControlService.threadStop.bind(threadControlService),
+        threadWait: threadControlService.threadWait.bind(threadControlService),
+        delegate: delegatedTaskService.delegate.bind(delegatedTaskService),
+        status: delegatedTaskService.status.bind(delegatedTaskService),
+        cancel: delegatedTaskService.cancel.bind(delegatedTaskService),
+      },
     }),
   ],
   logger,

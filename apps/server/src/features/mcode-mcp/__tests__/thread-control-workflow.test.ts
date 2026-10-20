@@ -1,10 +1,7 @@
 import "reflect-metadata";
-import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/bun-sqlite";
-import { threads as threadTable } from "../../../runtime/persistence/sqlite/schema.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
 import { describe, expect, it, vi } from "vitest";
-import { ThreadCreateBatchResultSchema } from "@mcode/contracts";
+import { ThreadCreateBatchResultSchema, type WorkspaceSearchResult } from "@mcode/contracts";
 import { MessageRepo } from "../../agents/conversation/persistence/message-repo.js";
 import { ThreadControlApprovalRepo } from "../../thread-control/authority/persistence/thread-control-approval-repo.js";
 import { ThreadControlAuditRepo } from "../../thread-control/authority/persistence/thread-control-audit-repo.js";
@@ -12,15 +9,14 @@ import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { createThreadPersistenceTestRuntime } from "../../thread-control/testing/thread-persistence-test-runtime.js";
 let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
-import { McodeSessionAuthority } from "../mcode-session-authority.js";
-import { createThreadControlToolkit } from "../toolkits/thread-control-toolkit.js";
+import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import { ThreadControlMutationReservationService } from "../../thread-control/authority/thread-control-mutation-reservation-service.js";
 import { ThreadControlService } from "../../thread-control/authority/thread-control-service.js";
 import type { GitRepositoryService, GitWorktreeService } from "../../projects/index.js";
 
 vi.mock("../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 
-describe("thread-control workflow through the mcode toolkit", () => {
+describe("external creation followed by internal thread control", () => {
   it("persists a cross-Project worktree workflow and keeps the child usable after partial failure", async () => {
     persistenceRuntime = createThreadPersistenceTestRuntime();
     const workspaces = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
@@ -119,37 +115,22 @@ describe("thread-control workflow through the mcode toolkit", () => {
       new ThreadControlMutationReservationService(),
     );
 
-    const authority = new McodeSessionAuthority();
-    const sessionId = "workflow-session";
-    authority.activate({
-      sessionId,
-      sourceThreadId: sourceThread.id,
-      sourceTurnId: "source-turn",
-      sourceProviderId: "codex",
-      permissionMode: "full",
-    });
-    const bound = createThreadControlToolkit({ authority, service }).bind({
-      providerId: "codex",
-      sessionId,
-      threadId: sourceThread.id,
-      threadControl: true,
-    });
-    const dispatch = async (requestId: string, toolName: string, args: unknown, signal = new AbortController().signal) => {
-      const tool = bound?.tools.find((candidate) => candidate.name === toolName);
-      if (!tool) throw new Error(`tool ${toolName} is not bound`);
-      return (await tool.call(args, { toolCallId: requestId, signal })).structuredContent;
+    const authority: InternalThreadControlAuthority = {
+      type: "internal", userId: "local-user", sourceThreadId: sourceThread.id,
+      sourceTurnId: "source-turn", sourceToolCallId: "follow-up", sourceProviderId: "codex", permissionMode: "full",
     };
-    const call = (requestId: string, toolName: string, args: unknown) => dispatch(requestId, toolName, args);
-
-    const projectSearch = await call("search-projects", "workspace_search", { query: "Project" }) as { workspaces: Array<{ workspaceId: string }> };
+    const projectSearch: WorkspaceSearchResult = service.workspaceSearch(authority, { query: "Project", limit: 20 });
     expect(projectSearch.workspaces.map((workspace) => workspace.workspaceId)).toEqual(
       expect.arrayContaining([sourceWorkspace.id, destinationWorkspace.id]),
     );
-    await expect(call("list-destination-worktrees", "worktree_list", { workspaceId: destinationWorkspace.id })).resolves.toMatchObject({
+    await expect(service.worktreeList(authority, { workspaceId: destinationWorkspace.id })).resolves.toMatchObject({
       status: "found",
       worktrees: [{ worktreeId: "worktree-main" }],
     });
-    const batch = await call("create-batch", "thread_create_batch", {
+    const batch = await service.threadCreateBatch({
+      type: "external", integrationId: "integration-1", allowedWorkspaceIds: [destinationWorkspace.id],
+      scopes: ["threads:create", "worktrees:create", "execution:full"], limits: { callsPerMinute: 10, maxActiveThreads: 2 },
+    }, {
       items: [
         {
           workspaceId: destinationWorkspace.id,
@@ -176,48 +157,33 @@ describe("thread-control workflow through the mcode toolkit", () => {
     }
     const destinationThreadId = destinationResult.threadId;
     expect(threads.findById(destinationThreadId)).toMatchObject({ workspace_id: destinationWorkspace.id, title: "Issue 965 child" });
-    expect(drizzle(persistenceRuntime.database).select({
-      coordinatorThreadId: threadTable.delegationCoordinatorThreadId,
-      creatorTurnId: threadTable.delegationCreatorTurnId,
-      creatorToolCallId: threadTable.delegationCreatorToolCallId,
-      creationKind: threadTable.delegationCreationKind,
-    }).from(threadTable).where(eq(threadTable.id, destinationThreadId)).get()).toEqual({
-      coordinatorThreadId: sourceThread.id,
-      creatorTurnId: "source-turn",
-      creatorToolCallId: "create-batch",
-      creationKind: "thread_delegation",
-    });
+    expect(threads.findById(destinationThreadId)?.delegation_coordinator_thread_id).toBeNull();
 
-    await expect(call("search-created", "thread_search", { workspaceIds: [destinationWorkspace.id] })).resolves.toMatchObject({
+    await expect(service.threadSearch(authority, { workspaceIds: [destinationWorkspace.id], limit: 20 })).resolves.toMatchObject({
       threads: [{ threadId: destinationThreadId, workspaceId: destinationWorkspace.id }],
     });
-    await expect(call("read-created", "thread_get", { threadId: destinationThreadId })).resolves.toMatchObject({
+    await expect(service.threadGet(authority, { threadId: destinationThreadId, messageLimit: 20 })).resolves.toMatchObject({
       status: "found",
       workspaceId: destinationWorkspace.id,
       messages: [{ content: "Implement the workflow proof.", origin: { type: "composer" } }],
     });
-    await expect(call("follow-up", "thread_send", { threadId: destinationThreadId, message: "Continue with the regression." })).resolves.toMatchObject({
+    await expect(service.threadSend(authority, { threadId: destinationThreadId, message: "Continue with the regression." })).resolves.toMatchObject({
       status: "accepted",
       threadId: destinationThreadId,
     });
     const waitAbort = new AbortController();
     waitAbort.abort();
-    await expect(dispatch(
-      "wait-for-attention",
-      "thread_wait",
-      { threadIds: [destinationThreadId], timeoutSeconds: 1 },
-      waitAbort.signal,
-    )).resolves.toMatchObject({
+    await expect(service.threadWait(authority, { threadIds: [destinationThreadId], until: "attention_or_terminal", timeoutSeconds: 1 }, waitAbort.signal)).resolves.toMatchObject({
       status: "success",
       timedOut: true,
       results: [{ threadId: destinationThreadId, state: { status: "waiting_for_user" } }],
     });
-    await expect(call("stop-created", "thread_stop", { threadId: destinationThreadId })).resolves.toMatchObject({
+    await expect(service.threadStop(authority, { threadId: destinationThreadId })).resolves.toMatchObject({
       status: "accepted",
       threadId: destinationThreadId,
       state: { status: "stopped" },
     });
-    await expect(call("read-after-stop", "thread_get", { threadId: destinationThreadId })).resolves.toMatchObject({
+    await expect(service.threadGet(authority, { threadId: destinationThreadId, messageLimit: 20 })).resolves.toMatchObject({
       status: "found",
       thread: { state: { status: "stopped" } },
       messages: [
@@ -227,17 +193,7 @@ describe("thread-control workflow through the mcode toolkit", () => {
     });
 
     const restartedMessages = new MessageRepo(persistenceRuntime.reader, persistenceRuntime.writer);
-    expect(drizzle(persistenceRuntime.database).select({
-      coordinatorThreadId: threadTable.delegationCoordinatorThreadId,
-      creatorTurnId: threadTable.delegationCreatorTurnId,
-      creatorToolCallId: threadTable.delegationCreatorToolCallId,
-      creationKind: threadTable.delegationCreationKind,
-    }).from(threadTable).where(eq(threadTable.id, destinationThreadId)).get()).toEqual({
-      coordinatorThreadId: sourceThread.id,
-      creatorTurnId: "source-turn",
-      creatorToolCallId: "create-batch",
-      creationKind: "thread_delegation",
-    });
+    expect(threads.findById(destinationThreadId)?.delegation_coordinator_thread_id).toBeNull();
     expect(restartedMessages.listByThreadForThreadControl(destinationThreadId, 10, 100_000).messages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ content: "Continue with the regression.", sourceThreadId: sourceThread.id, sourceProviderId: "codex" }),

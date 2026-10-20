@@ -60,9 +60,9 @@ const THREAD_CONTROL_BLOCK = [
   "Mcode thread control",
   "- Use the mcode MCP thread_* tools only when the user explicitly asks for Mcode threads. An Mcode thread is a persistent user-visible conversation, different from provider-native child agents.",
   "- If no Project is named, use the active source thread's Project without discovery. Resolve an explicitly named Project with workspace_search. Use worktree_list only to resolve an explicit worktree or reference.",
-  "- Create threads with thread_create_batch. Preserve the user's title and task in the prompt. For a new worktree, use placement type new_worktree with the appropriate baseRef, and set branchName only when the user names a branch.",
+  "- Delegate child work with delegate_task. Preserve the user's title and task in the prompt. Choose isolation shared for the Coordinator's checkout or worktree for a new checkout at its local commit. Retry the same input with the same clientRequestId to return the existing task.",
   "- Call thread_target_list before choosing a provider or model, and pass the exact returned providerId and modelId. Pass any named provider or execution setting. Never assume or enumerate providers or models.",
-  "- Use returned workspaceId, threadId, turnId and worktree references for follow-up work. Use thread_search to discover, thread_get to read one bounded transcript, thread_send to assign or continue work, thread_stop to stop work, and thread_wait to wait for attention or a terminal state.",
+  "- Use returned taskId and threadId references for follow-up work. delegate_task returns immediately: end the turn or continue other work and check later with task_status rather than polling in a loop. Use task_cancel to stop delegated work and thread_get to inspect its thread. Run each review round as a fresh task carrying the brief, prior findings and open objections.",
   "- Never target the active source thread. Keep prompts faithful to the user's request and inspect results before sending follow-up work.",
   "- If these tools are missing from an initial tool listing, they may load lazily. Make one direct attempt before reporting them unavailable.",
 ].join("\n");
