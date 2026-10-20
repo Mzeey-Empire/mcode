@@ -15,13 +15,28 @@ export interface StartupActionTransition {
 }
 
 /** Action boundary shared by the production service and deterministic runner tests. */
-export type StartupProjectActions = Pick<ProjectActionService, "start" | "restart" | "get" | "stop" | "onUpdate" | "onCommandOutput">;
+export type StartupProjectActions = Pick<ProjectActionService, "launch" | "get" | "stop" | "onUpdate" | "onCommandOutput">;
 
-/** Runs a frozen startup sequence through normal action terminals; only exit zero advances it. */
+/** One frozen startup action: its script for hashing, and whether the gate waits for it to exit. */
+export interface StartupActionPlan {
+  readonly actionId: string;
+  readonly script: string | null;
+  /** `wait` holds the gate until exit zero; `release` lets the gate pass once the run is running. Defaults to `wait`. */
+  readonly gate?: "wait" | "release";
+}
+
+/**
+ * Runs a frozen startup sequence through normal action terminals.
+ *
+ * A `wait` action advances the sequence on exit zero. A `release` action advances it as soon as its run
+ * is running, so `ready` means the action no longer holds the gate, not that it finished.
+ */
 export class StartupActionRunner {
   private entries: ThreadStartupAction[] = [];
   private current: ThreadStartupAction | undefined;
   private awaitingApproval = false;
+  /** Frozen beside the entries because the persisted entry schema is strict and has no gate field. */
+  private readonly gates = new Map<string, "wait" | "release">();
   private launching = false;
   private stopped: "skip" | "cancel" | null = null;
   private work = Promise.resolve();
@@ -50,13 +65,21 @@ export class StartupActionRunner {
     }));
   }
 
-  /** Freeze ids and script hashes, retaining earlier exit-zero runs only when their scripts still match. */
-  start(actions: readonly { actionId: string; script: string | null }[], previous: readonly ThreadStartupAction[]): Promise<void> {
+  /**
+   * Freeze ids, gates and script hashes, retaining earlier successes only when their scripts still match.
+   *
+   * A released action succeeded only while its server is still up, so it is retained only when the same
+   * run is still running; otherwise it launches again instead of being marked skipped while dead.
+   */
+  start(actions: readonly StartupActionPlan[], previous: readonly ThreadStartupAction[]): Promise<void> {
     return this.enqueue(async () => {
-      this.entries = actions.map(({ actionId, script }) => {
+      this.gates.clear();
+      this.entries = actions.map(({ actionId, script, gate = "wait" }) => {
+        this.gates.set(actionId, gate);
         const scriptHash = NodeCrypto.createHash("sha256").update(script ?? "").digest("hex");
         const prior = previous.find((entry) => entry.actionId === actionId && entry.scriptHash === scriptHash
-          && (entry.outcome === "ready" || entry.outcome === "skipped"));
+          && (entry.outcome === "ready" || entry.outcome === "skipped")
+          && (gate === "wait" || this.isStillRunning(actionId, entry.runId)));
         return { actionId, scriptHash, runId: prior?.runId ?? null, outcome: prior ? "skipped" : "pending" };
       });
       if (await this.commit("running")) await this.next();
@@ -110,10 +133,7 @@ export class StartupActionRunner {
     this.tail.resetDecoder();
     let run: WorkspaceEnvironmentActionRun;
     try {
-      const options = { trigger: "startup" as const, expectedScriptHash: this.current.scriptHash };
-      run = service.get(slot)?.terminalSessionId
-        ? await service.restart(slot, options)
-        : await service.start(slot, options);
+      run = await service.launch(slot, { trigger: "startup", expectedScriptHash: this.current.scriptHash });
     } catch (error) {
       await this.fail(undefined, error instanceof Error ? error.message : String(error));
       return;
@@ -140,14 +160,25 @@ export class StartupActionRunner {
     }
     this.awaitingApproval = false;
     if (run.startedAt) this.addHeader(run);
-    if (run.status === "running") {
-      if (entry.outcome !== "running") {
-        entry.outcome = "running";
-        await this.commit("running");
-      }
+    if (run.status === "running") await this.observeRunning(entry);
+    else await this.settleRun(run, entry);
+  }
+
+  private async observeRunning(entry: ThreadStartupAction): Promise<void> {
+    if (this.gates.get(entry.actionId) === "release") {
+      entry.outcome = "ready";
+      if (await this.commit("running")) await this.next();
       return;
     }
-    await this.settleRun(run, entry);
+    if (entry.outcome !== "running") {
+      entry.outcome = "running";
+      await this.commit("running");
+    }
+  }
+
+  private isStillRunning(actionId: string, runId: string | null): boolean {
+    const run = this.options.projectActions.get({ threadId: this.options.threadId, actionId });
+    return run !== null && run.runId === runId && run.status === "running";
   }
 
   private async settleRun(run: WorkspaceEnvironmentActionRun, entry: ThreadStartupAction): Promise<void> {

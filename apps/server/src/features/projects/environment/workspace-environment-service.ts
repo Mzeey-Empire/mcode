@@ -5,6 +5,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import {
+  actionSchedule,
   DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT,
   encodeEnvironmentDocument,
   WORKSPACE_ENVIRONMENT_APPROVAL_CONTRACT_VERSION,
@@ -535,7 +536,7 @@ export class WorkspaceEnvironmentService {
     const environment = await this.readForThread(thread);
     const resolutions: WorkspaceEnvironmentActionCommandResolution[] = [];
     for (const action of environment.document.actions) {
-      if (action.runOnCleanup !== true) continue;
+      if (!actionSchedule(action).cleanup) continue;
       resolutions.push(await this.resolveCleanupCommand(environment.storageMode, thread, action, bounds));
     }
     return resolutions;
@@ -1106,7 +1107,10 @@ export class WorkspaceEnvironmentService {
       this.startupRunners.delete(thread.id);
       return;
     }
-    const startupActions = environment.document.actions.filter((action) => action.runOnStartup);
+    const startupActions = environment.document.actions.flatMap((action) => {
+      const startup = actionSchedule(action).startup;
+      return startup ? [{ action, gate: startup.gate }] : [];
+    });
     if (!startupActions.length) {
       await runner.cancel();
       this.startupRunners.delete(thread.id);
@@ -1114,8 +1118,8 @@ export class WorkspaceEnvironmentService {
       return;
     }
     const detail = this.options.threadStartups?.findByThreadId(thread.id)?.steps.find((step) => step.phase === "setup")?.detail;
-    await runner.start(startupActions.map((action) => ({
-      actionId: action.id, script: selectWorkspaceEnvironmentScript(action.command, this.platform()),
+    await runner.start(startupActions.map(({ action, gate }) => ({
+      actionId: action.id, script: selectWorkspaceEnvironmentScript(action.command, this.platform()), gate,
     })), detail?.phase === "setup" ? detail.actions ?? [] : []);
   }
 

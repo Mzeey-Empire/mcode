@@ -200,6 +200,19 @@ describe("startup actions through the real action service and port probe", () =>
     expect(f.dispatched).toEqual(["first-message"]);
   });
 
+  it("releases the gate while a waitForExit:false action keeps running and ignores its later exit", async () => {
+    const f = await harness({ actions: [{ ...action("dev", "vite"), waitForExit: false }] });
+    await f.service.queueAutomaticFirstTurn(queued());
+    await eventually(() => expect(f.gate()).toMatchObject({ gate: "released-by-pass", queuedTurns: [{ state: "dispatched" }] }));
+    const devSlot = { ...slot, actionId: "dev" };
+    expect(f.projectActions.get(devSlot)?.status).toBe("running");
+    expect(f.dispatched).toEqual(["first-message"]);
+    f.host.emitExit(f.commandId(), 1);
+    await eventually(() => expect(f.projectActions.get(devSlot)?.status).toBe("failed"));
+    expect(f.gate()).toMatchObject({ gate: "released-by-pass" });
+    expect(f.startups.get(f.startupId)?.block).toBeFalsy();
+  });
+
   it("keeps IPv6-only serving actions queued until Skip setup and leaves their commands running", async () => {
     const live = await listener("::1");
     const f = await harness();

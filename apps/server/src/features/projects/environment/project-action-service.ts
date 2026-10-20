@@ -1,6 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
+import { actionSchedule, terminalCapMessage } from "@mcode/contracts";
 import type {
   WorkspaceEnvironmentActionRun,
   WorkspaceEnvironmentActionPort,
@@ -38,6 +39,7 @@ import { WorkspaceEnvironmentService } from "./workspace-environment-service.js"
 import { WorkspaceEnvironmentServiceError } from "./workspace-environment-errors.js";
 import { ProjectActionRunRepo } from "./persistence/project-action-run-repo.js";
 import { ActionPortMonitor } from "./action-port-monitor.js";
+import { candidateFromConfiguredUrl } from "./action-port-detector.js";
 
 /** Clock used to timestamp Project Action lifecycle transitions. */
 export type ProjectActionClock = () => Date;
@@ -53,7 +55,37 @@ export const PROJECT_ACTION_RUN_ID_FACTORY_TOKEN = "ProjectActionRunIdFactory";
 
 export type { ProjectActionRunUpdate };
 
-type ProjectActionStartOptions = { trigger: WorkspaceEnvironmentActionRun["trigger"]; expectedScriptHash?: string };
+type ProjectActionStartOptions = {
+  trigger: WorkspaceEnvironmentActionRun["trigger"];
+  expectedScriptHash?: string;
+  skipUnapproved?: boolean;
+};
+
+/** Options for {@link ProjectActionService.launch}. */
+export type ProjectActionLaunchOptions = ProjectActionStartOptions;
+
+/** Whether a run has already announced its preview, so each run opens at most one tab. */
+export interface ProjectActionPreviewRequest {
+  readonly emitted: boolean;
+}
+
+/**
+ * Decides whether a run should now ask clients to open its preview.
+ *
+ * Due exactly when the run asked for one, has not announced it yet, is still running and its port
+ * monitor reports the URL reachable. The URL is the one that was probed, so what opens is what was
+ * checked.
+ */
+export function previewDue(
+  request: ProjectActionPreviewRequest | undefined,
+  run: Pick<WorkspaceEnvironmentActionRun, "runId" | "status" | "port">,
+): { readonly url: string } | null {
+  if (!request || request.emitted || run.status !== "running") return null;
+  if (!run.port?.reachable || run.port.runId !== run.runId) return null;
+  return { url: run.port.url };
+}
+
+class UnapprovedLaunchSkipped extends Error {}
 
 interface ProjectActionStartContext {
   readonly expectedRunId?: string;
@@ -63,6 +95,7 @@ interface ProjectActionStartContext {
   readonly reservation: StartingProjectAction;
   readonly trigger: WorkspaceEnvironmentActionRun["trigger"];
   readonly expectedScriptHash?: string;
+  readonly skipUnapproved?: boolean;
 }
 
 /** Owns Project Action slot exclusion, latest-run retention, and backend process lifecycle. */
@@ -73,6 +106,7 @@ export class ProjectActionService {
   }>();
   private readonly outputListeners = new Set<(run: WorkspaceEnvironmentActionRun, bytes: Uint8Array) => void>();
   private readonly active = new Map<string, ProjectActionSlotState>();
+  private readonly previews = new Map<string, { emitted: boolean }>();
   private readonly admission = new ProjectActionAdmissionGate();
   private readonly publisher: ProjectActionRunPublisher;
   private readonly runFactory: ProjectActionRunFactory;
@@ -138,6 +172,28 @@ export class ProjectActionService {
       if (retained) return retained;
     }
     return this.startNewRun(input, approvalStartOptions(retained, options));
+  }
+
+  /**
+   * Starts a fresh run for an automatic trigger and never answers with an earlier run.
+   *
+   * A run that is still running, or whose terminal is open, is replaced; `start` would hand back
+   * that retained result instead. With `skipUnapproved`, a run waiting for approval is left alone
+   * and so is an action whose command is not approved yet, so an unattended launch can neither
+   * create nor disturb approval work. That case returns `null`.
+   */
+  launch(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionLaunchOptions & { skipUnapproved: true }): Promise<WorkspaceEnvironmentActionRun | null>;
+  launch(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionLaunchOptions): Promise<WorkspaceEnvironmentActionRun>;
+  async launch(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionLaunchOptions): Promise<WorkspaceEnvironmentActionRun | null> {
+    if (!options.skipUnapproved) return await this.restart(input, options);
+    if (this.runs.get(input.threadId, input.actionId)?.status === "awaiting-approval") return null;
+    if ((await resolveProjectAction(this.environment, input.threadId, input.actionId)).kind === "awaiting-approval") return null;
+    try {
+      return await this.restart(input, options);
+    } catch (error) {
+      if (error instanceof UnapprovedLaunchSkipped) return null;
+      throw error;
+    }
   }
 
   private assertApprovalStillOpen(
@@ -230,7 +286,7 @@ export class ProjectActionService {
     }
   }
 
-  private createStartContext(input: WorkspaceEnvironmentActionStartInput): Omit<ProjectActionStartContext, "trigger" | "expectedScriptHash"> {
+  private createStartContext(input: WorkspaceEnvironmentActionStartInput): Omit<ProjectActionStartContext, "trigger" | "expectedScriptHash" | "skipUnapproved"> {
     const slot = slotKey(input.threadId, input.actionId);
     if (this.active.has(slot)) throw actionAlreadyRunningError();
     const thread = this.threads.findById(input.threadId);
@@ -263,6 +319,8 @@ export class ProjectActionService {
     if (resolved.kind === "launch") return await this.launchResolvedAction(context, resolved);
     if (resolved.kind === "unavailable") return this.publisher.persistAndPublish(this.runFactory.createUnavailable(this.runInput(context, resolved)));
     if (resolved.kind === "configuration") return this.publisher.persistAndPublish(this.runFactory.createFailed({ ...this.runInput(context, resolved), script: null }));
+    // Approval can be revoked between the caller's check and this resolution.
+    if (context.skipUnapproved) throw new UnapprovedLaunchSkipped();
     return this.retainPendingApproval(context, resolved);
   }
 
@@ -347,6 +405,7 @@ export class ProjectActionService {
     const active = this.active.get(context.slot);
     if (active && active.state !== "starting") {
       active.stopping = true;
+      this.previews.delete(active.run.runId);
       await this.runLifecycle.finish(context.slot, active.run.runId, 130);
       await this.runLifecycle.retryPendingFinalization(context.slot, active);
     }
@@ -381,11 +440,15 @@ export class ProjectActionService {
     this.active.set(context.slot, active);
     await this.publisher.persistAndPublish(active.run);
     const runId = active.run.runId;
+    const preview = actionSchedule(resolved.action).preview;
+    if (preview) this.previews.set(runId, { emitted: false });
     const monitor = new ActionPortMonitor(runId, () => this.runFactory.timestamp(), (port) => {
       void this.publishPort(context.slot, active, port).catch((error: unknown) => {
         logger.error("Project Action port publication failed", { runId, error: String(error) });
       });
     });
+    const configured = preview?.url ? candidateFromConfiguredUrl(preview.url) : null;
+    if (configured) monitor.pin(configured);
     const unsubscribe = [() => monitor.stop()];
     const tracked = this.terminals.get(context.slot);
     if (tracked) tracked.unsubscribe = unsubscribe;
@@ -404,7 +467,11 @@ export class ProjectActionService {
     const run = { ...active.run, revision: active.run.revision + 1, port };
     active.run = run;
     const persisted = await this.runs.updateIfCurrent(run);
-    if (persisted && active.run === run && active.state === "running") this.publisher.publish(run);
+    if (!persisted || active.run !== run || active.state !== "running") return;
+    const request = this.previews.get(run.runId);
+    const openPreview = previewDue(request, run);
+    if (request && openPreview) request.emitted = true;
+    this.publisher.publish(run, openPreview ?? undefined);
   }
 
   private async handleLaunchFailure(
@@ -477,6 +544,7 @@ export class ProjectActionService {
   }
 
   private finishAction(slot: string, runId: string, exitCode: number | null): void {
+    this.previews.delete(runId);
     const active = this.active.get(slot);
     if (active?.state === "running" && active.run.runId === runId) this.clearRunListeners(slot);
     void this.runLifecycle.finish(slot, runId, exitCode).catch((error: unknown) => {
@@ -569,7 +637,7 @@ function slotKey(threadId: string, actionId: string): string {
 function terminalCapError(actionName: string): WorkspaceEnvironmentServiceError {
   return new WorkspaceEnvironmentServiceError(
     "WORKSPACE_ENVIRONMENT_TERMINAL_CAP",
-    `8 terminals are open. Close one to run ${actionName}.`,
+    terminalCapMessage(actionName),
   );
 }
 

@@ -7,6 +7,7 @@ export interface ProjectActionRunUpdate {
   readonly actionId: string;
   readonly runId: string;
   readonly run: WorkspaceEnvironmentActionRun;
+  readonly openPreview?: { readonly url: string };
 }
 
 /** Persists and publishes retained Project Action run changes. */
@@ -29,12 +30,13 @@ export class ProjectActionRunPublisher {
   }
 
   /** Publishes a durable retained run without another persistence write. */
-  publish(run: WorkspaceEnvironmentActionRun): void {
+  publish(run: WorkspaceEnvironmentActionRun, openPreview?: { readonly url: string }): void {
     const update: ProjectActionRunUpdate = {
       threadId: run.threadId,
       actionId: run.actionId,
       runId: run.runId,
       run,
+      ...(openPreview ? { openPreview } : {}),
     };
     for (const listener of this.listeners) listener(update);
   }

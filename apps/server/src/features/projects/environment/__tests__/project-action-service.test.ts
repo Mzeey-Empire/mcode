@@ -4,13 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeNet from "node:net";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import {
   PreparedTerminalCommandApprovalMismatchError,
   PreparedTerminalCommandStartError,
   type ActionTerminal,
 } from "../../../terminal/backends/terminal-backend.js";
-import { ProjectActionService, PROJECT_ACTION_CLOCK_TOKEN, PROJECT_ACTION_RUN_ID_FACTORY_TOKEN } from "../project-action-service.js";
+import { ProjectActionService, PROJECT_ACTION_CLOCK_TOKEN, PROJECT_ACTION_RUN_ID_FACTORY_TOKEN, previewDue } from "../project-action-service.js";
 import { ProjectActionRunRepo } from "../persistence/project-action-run-repo.js";
 import { WorkspaceEnvironmentService } from "../workspace-environment-service.js";
 import { InMemoryPtyHostAdapter } from "../../../terminal/testing/in-memory-pty-host-adapter.js";
@@ -110,7 +110,7 @@ class ActionTestHost extends InMemoryPtyHostAdapter {
   }
 }
 
-async function actionFixture(shared = false, script = "vite --open http://localhost:5173/") {
+async function actionFixture(shared = false, script = "vite --open http://localhost:5173/", extra: Partial<WorkspaceEnvironmentAction> = {}) {
   const fixtureRoot = NodePath.resolve("../..", ".dev/fixture-repo");
   await NodeFSPromises.mkdir(fixtureRoot, { recursive: true });
   const root = await NodeFSPromises.mkdtemp(NodePath.join(fixtureRoot, "action-terminal-"));
@@ -124,7 +124,7 @@ async function actionFixture(shared = false, script = "vite --open http://localh
     mcodeDir: NodePath.join(root, "data"), platform: "windows",
     threads: fixture.threads, workspaces: fixture.workspaces, terminalCommands: fixture.commands,
   });
-  const document = { version: "0.0.1", actions: [{ id: "build", name: "Build", command: { default: script } }] };
+  const document = { version: "0.0.1", actions: [{ id: "build", name: "Build", command: { default: script }, ...extra }] };
   const sharedPath = NodePath.join(root, ".mcode/environment.json");
   if (shared) {
     await NodeFSPromises.mkdir(NodePath.dirname(sharedPath), { recursive: true });
@@ -654,6 +654,178 @@ describe("ProjectActionService with the in-memory PTY host", () => {
     }));
     expect(f.backend.listActiveSessions()).toEqual([]);
     expect(f.creates.mock.calls).toEqual([]);
+  });
+});
+
+describe("ProjectActionService.launch", () => {
+  it("answers a fresh run where start would hand back the stale completed one", async () => {
+    const f = await actionFixture();
+    const first = await f.actions.start(actionSlot);
+    f.host.emitExit(f.creates.mock.calls[0][0].sessionId, 0);
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.status).toBe("completed"));
+    await vi.waitFor(async () => expect(await f.actions.start(actionSlot)).toMatchObject({ runId: first.runId, status: "completed" }));
+
+    const launched = await f.actions.launch(actionSlot, { trigger: "startup" });
+
+    expect(launched).toMatchObject({ status: "running", trigger: "startup" });
+    expect(launched.runId).not.toBe(first.runId);
+    expect(f.actions.get(actionSlot)?.runId).toBe(launched.runId);
+  });
+
+  it("restarts a run that is still running, as an unattended manual run", async () => {
+    const f = await actionFixture();
+    f.host.interruptOnInput = true;
+    const first = await f.actions.start(actionSlot);
+
+    const relaunched = await f.actions.launch(actionSlot, { trigger: "manual", skipUnapproved: true });
+
+    if (!relaunched) throw new Error("An approved action must launch");
+    expect(relaunched).toMatchObject({ status: "running", trigger: "manual" });
+    expect(relaunched.runId).not.toBe(first.runId);
+  });
+
+  it("skips an unapproved shared command without creating a run, a terminal or a pending approval", async () => {
+    const f = await actionFixture(true);
+
+    expect(await f.actions.launch(actionSlot, { trigger: "manual", skipUnapproved: true })).toBeNull();
+
+    expect(f.actions.get(actionSlot)).toBeNull();
+    expect(f.backend.listActiveSessions()).toEqual([]);
+    expect(f.creates.mock.calls).toEqual([]);
+  });
+
+  it("leaves a run that is waiting for approval untouched", async () => {
+    const f = await actionFixture(true);
+    const pending = await f.actions.start(actionSlot);
+
+    expect(await f.actions.launch(actionSlot, { trigger: "manual", skipUnapproved: true })).toBeNull();
+
+    expect(f.actions.get(actionSlot)).toMatchObject({ runId: pending.runId, status: "awaiting-approval" });
+    expect(f.backend.listActiveSessions()).toHaveLength(1);
+    expect(f.backend.listActiveSessions()[0]).toMatchObject({ ptyId: pending.terminalSessionId });
+  });
+
+  it("runs an approved shared command when approval is skipped for unattended launches", async () => {
+    const f = await actionFixture(true);
+    const pending = await f.actions.start(actionSlot);
+    if (!pending.snapshot.approval) throw new Error("Missing shared approval");
+    await f.environment.approveCommand({ threadId: ACTION_TEST_THREAD, ...pending.snapshot.approval });
+    await f.actions.stop(actionSlot);
+
+    const launched = await f.actions.launch(actionSlot, { trigger: "manual", skipUnapproved: true });
+
+    expect(launched).toMatchObject({ status: "running", trigger: "manual" });
+  });
+
+  it("still asks for approval on an attended launch such as Setup", async () => {
+    const f = await actionFixture(true);
+
+    expect(await f.actions.launch(actionSlot, { trigger: "startup" })).toMatchObject({
+      status: "awaiting-approval", trigger: "startup",
+    });
+  });
+});
+
+type PreviewUpdate = { runId: string; openPreview?: { url: string } };
+const openPreviews = (updates: readonly PreviewUpdate[]) =>
+  updates.filter((update) => update.openPreview).map((update) => [update.runId, update.openPreview?.url]);
+
+describe("ProjectActionService preview", () => {
+  it("asks clients to open the detected URL once, however often reachability flaps", async () => {
+    const live = await portListener();
+    const url = `http://127.0.0.1:${live.port}/`;
+    const f = await actionFixture(false, "vite", { openPreview: true });
+    const updates: Array<PreviewUpdate & { run: WorkspaceEnvironmentActionRun }> = [];
+    f.actions.onUpdate((update) => updates.push(update));
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const run = await f.actions.start(actionSlot);
+    const confirmed = nextReachability(f.actions, true);
+    f.host.emitOutput(f.creates.mock.calls[0][0].sessionId, Buffer.from(`${url}\n`));
+    await confirmed;
+    expect(openPreviews(updates)).toEqual([[run.runId, url]]);
+
+    await live.close();
+    const dropped = nextReachability(f.actions, false);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await dropped;
+    await portListener("127.0.0.1", live.port);
+    const recovered = nextReachability(f.actions, true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await recovered;
+
+    expect(updates.map((update) => update.run.port?.reachable ?? null)).toEqual([null, true, false, true]);
+    expect(openPreviews(updates)).toEqual([[run.runId, url]]);
+  });
+
+  it("asks again for a new run of the same action", async () => {
+    const live = await portListener();
+    const url = `http://127.0.0.1:${live.port}/`;
+    const f = await actionFixture(false, "vite", { openPreview: true });
+    const updates: PreviewUpdate[] = [];
+    f.actions.onUpdate((update) => updates.push(update));
+    f.host.interruptOnInput = true;
+    const first = await f.actions.start(actionSlot);
+    f.host.emitOutput(f.creates.mock.calls[0][0].sessionId, Buffer.from(`${url}\n`));
+    await vi.waitFor(() => expect(openPreviews(updates)).toHaveLength(1));
+
+    const second = await f.actions.restart(actionSlot);
+    f.host.emitOutput(f.creates.mock.calls.at(-1)?.[0].sessionId ?? "", Buffer.from(`${url}\n`));
+    await vi.waitFor(() => expect(openPreviews(updates)).toHaveLength(2));
+
+    expect(openPreviews(updates)).toEqual([[first.runId, url], [second.runId, url]]);
+  });
+
+  it("never opens a preview for an action that did not ask for one", async () => {
+    const live = await portListener();
+    const f = await actionFixture();
+    const updates: PreviewUpdate[] = [];
+    f.actions.onUpdate((update) => updates.push(update));
+    await f.actions.start(actionSlot);
+    f.host.emitOutput(f.creates.mock.calls[0][0].sessionId, Buffer.from(`http://127.0.0.1:${live.port}/\n`));
+    await vi.waitFor(() => expect(f.actions.get(actionSlot)?.port?.reachable).toBe(true));
+    expect(openPreviews(updates)).toEqual([]);
+  });
+
+  it("judges and opens the configured URL even when the command prints a different live one", async () => {
+    const configured = await portListener();
+    await configured.close();
+    const printed = await portListener();
+    const configuredUrl = `http://127.0.0.1:${configured.port}/`;
+    const f = await actionFixture(false, "vite", { openPreview: configuredUrl });
+    const updates: PreviewUpdate[] = [];
+    f.actions.onUpdate((update) => updates.push(update));
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const run = await f.actions.start(actionSlot);
+    f.host.emitOutput(f.creates.mock.calls[0][0].sessionId, Buffer.from(`http://127.0.0.1:${printed.port}/\n`));
+    await portListener("127.0.0.1", configured.port);
+    const confirmed = nextReachability(f.actions, true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await confirmed;
+
+    expect(f.actions.get(actionSlot)?.port).toMatchObject({ port: configured.port, url: configuredUrl });
+    expect(openPreviews(updates)).toEqual([[run.runId, configuredUrl]]);
+  });
+});
+
+describe("previewDue", () => {
+  const port = { runId: "run-2", port: 5173, host: "localhost", url: "http://localhost:5173/", reachable: true, detectedAt: "2026-10-20T12:00:00.000Z" };
+  const run = (overrides: Partial<Pick<WorkspaceEnvironmentActionRun, "status" | "port">> = {}) => ({
+    runId: "run-2", status: "running" as const, port, ...overrides,
+  });
+
+  it("is due once the requested preview is reachable on a running run", () => {
+    expect(previewDue({ emitted: false }, run())).toEqual({ url: "http://localhost:5173/" });
+  });
+
+  it.each([
+    ["no request", undefined, run()],
+    ["already announced", { emitted: true }, run()],
+    ["run finished", { emitted: false }, run({ status: "completed" })],
+    ["no port yet", { emitted: false }, run({ port: null })],
+    ["port unreachable", { emitted: false }, run({ port: { ...port, reachable: false } })],
+    ["port left over from an earlier run", { emitted: false }, run({ port: { ...port, runId: "run-1" } })],
+  ])("is not due: %s", (_label, request, candidate) => {
+    expect(previewDue(request, candidate)).toBeNull();
   });
 });
 

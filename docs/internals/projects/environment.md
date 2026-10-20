@@ -69,10 +69,24 @@ script, output or exit result. The runner commits the attempt and the step's
 action projection in the same transaction.
 
 [StartupActionRunner](../../../apps/server/src/features/projects/environment/startup-action-runner.ts)
-uses the normal Action service and real action terminals. Only a current run's
-exit code 0 advances the sequence. A detected, reachable port proves only that
-some process accepts connections, so it never releases Setup. A long-running
-server holds the gate until it exits or the user chooses **Skip setup**.
+uses the normal Action service and real action terminals. By default a
+current run's exit code 0 advances the sequence. A detected, reachable port
+proves only that some process accepts connections, so it never releases Setup.
+A long-running server therefore holds the gate until it exits or the user
+chooses **Skip setup**, unless its action sets `waitForExit: false`. The
+document stores only that `false`, and `actionSchedule` is the one reader that
+turns it into a `wait` or `release` gate; the runner freezes the gate with the
+action ids and hashes.
+
+A `release` action advances the sequence as soon as its run is running, so its
+entry's `ready` means "no longer holds the gate", not "finished". Its later
+exit is ignored: a dev server that dies after the first prompt has been
+released must not block or fail Setup retroactively. Everything before the
+running state still blocks as for a `wait` action: launch failure, a pending
+approval and a changed script. Retry reuses a released entry only while its
+retained run is the same run and still running; a dead server relaunches
+instead of being counted as set up. Reuse of a `wait` entry stays hash-only
+because exit zero is a finished one-shot.
 No startup actions releases the gate as not required.
 
 The first failure stops the sequence, records `failedActionId` on the attempt
@@ -153,6 +167,14 @@ reserves one slot per Thread and Action before resolution. Starting an Action
 whose terminal is already open returns its retained run. Pending approval,
 running and exited terminals all count toward the eight-record scope limit.
 
+Automatic launches use `launch`, not `start`, because `start` would hand back
+a retained completed run instead of running again. `launch` replaces a running
+run, so a run-on-settle action still going from the previous Turn restarts.
+Settle runs are unattended: they pass `skipUnapproved`, which never opens a
+pending approval, never disturbs one that is waiting, and skips an unapproved
+shared command. They are recorded as `manual` because `startup` is reserved for
+runs the Setup gate owns and follows.
+
 A run waiting for approval has a terminal but no process. The client shows the
 approval card over that terminal and, on Run, approves the fingerprint then
 starts the Action. Starting creates a new run with a later `createdAt` on the
@@ -168,6 +190,14 @@ The terminal replay includes a synthesized command echo and both processes'
 output and is the output record for the Action's terminal tab. Retained runs
 store lifecycle metadata and confirmed port reachability. Command output only
 publishes a run update when a port is confirmed or its reachability changes.
+
+`openPreview` asks clients to open the Browser once. The server captures the
+request per run id at launch and attaches `openPreview: { url }` to the single
+`action.updated` broadcast where that run is running and its port is reachable.
+It is never stored on the run, so reconnecting, replaying a retained run or
+restarting the server cannot reopen a tab. A configured URL pins the port
+monitor to that URL, so the probed URL is the one that opens and detected
+output cannot replace it.
 
 The initial running result must be saved before the service subscribes to
 exit events. If retention fails after launch, the

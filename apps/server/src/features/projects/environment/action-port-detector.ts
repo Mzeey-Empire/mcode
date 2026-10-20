@@ -55,3 +55,20 @@ function parseCandidate(match: RegExpMatchArray): ActionPortCandidate | null {
 function isLocalHost(host: string): host is ActionPortCandidate["host"] {
   return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0" || host === "::";
 }
+
+/**
+ * Turns a configured preview URL into a probe candidate, or null when it is not a loopback URL.
+ *
+ * The URL is already validated by the environment schema; this repeats the host check because a
+ * candidate's `host` selects the probe address, and a default port is filled in from the scheme.
+ */
+export function candidateFromConfiguredUrl(value: string): ActionPortCandidate | null {
+  if (!URL.canParse(value)) return null;
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  const host = url.hostname.toLowerCase().replace(/[[\]]/gu, "");
+  if (!isLocalHost(host)) return null;
+  const port = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+  if (host === "0.0.0.0" || host === "::") url.hostname = "localhost";
+  return { host, port, url: url.href };
+}
