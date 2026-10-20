@@ -1900,7 +1900,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
     expect(screen.getByLabelText("Worktree mode")).toBeInTheDocument();
   });
 
-  it("shows a read-only preview on focus with project, HEAD branch, and provider labels", async () => {
+  it("shows a read-only preview on focus with project, detached branch, and provider labels", async () => {
     renderWithThread(
       makeThread({
         id: "thread-branchless",
@@ -1908,6 +1908,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
         mode: "worktree",
         checkout_state: "branchless",
         branch: "HEAD",
+        base_branch: "main",
         status: "paused",
         provider: "codex",
       }),
@@ -1920,7 +1921,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
     );
     expect(preview).toHaveTextContent("Branchless Thread");
     expect(screen.getByLabelText("Project, Test Project")).toBeInTheDocument();
-    expect(within(preview).getByLabelText("Branch, HEAD")).toBeInTheDocument();
+    expect(within(preview).getByLabelText("Branch, detached from main")).toBeInTheDocument();
     expect(within(preview).queryByLabelText(/^Provider,/)).toBeNull();
     expect(screen.getByLabelText("Provider, Codex")).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Status,/)).toBeNull();

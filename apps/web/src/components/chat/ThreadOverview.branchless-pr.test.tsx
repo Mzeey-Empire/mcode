@@ -857,7 +857,8 @@ describe("ThreadOverview branchless Create PR", () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
     await user.click(screen.getByTestId("thread-overview-local"));
-    expect(await screen.findByText("HEAD")).toBeInTheDocument();
+    expect(await screen.findByText("detached from release")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Copy branch")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("thread-overview-local"));
     expect(screen.queryByTestId("workspace-menu-branch")).not.toBeInTheDocument();
     expect(screen.queryByTestId("workspace-menu-create-pr")).not.toBeInTheDocument();
