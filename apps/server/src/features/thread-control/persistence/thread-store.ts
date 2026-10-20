@@ -20,6 +20,7 @@ import {
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 import { transcriptMessageVisibility } from "../../agents/conversation/persistence/transcript-visibility.js";
 import { SequenceAheadError } from "../attention/sequence-ahead-error.js";
+import { ThreadProviderSessionStore } from "./thread-provider-session-store.js";
 
 type ThreadRow = typeof threads.$inferSelect & {
   scheduledResume: typeof turnResumeSchedules.$inferSelect | null;
@@ -354,6 +355,15 @@ function buildSettingsSet(settings: ThreadSettings): Partial<typeof threads.$inf
   return set as Partial<typeof threads.$inferInsert>;
 }
 
+/**
+ * SQL value for `sdk_session_id` when the thread's provider is set to `provider`: kept when the provider
+ * is unchanged, cleared when it changes. The old provider's row in `thread_provider_sessions` stays, so
+ * the session id is never carried to a provider that did not create it.
+ */
+function keepSessionOnlyForProvider(provider: string) {
+  return sql<string | null>`case when ${threads.provider} = ${provider} then ${threads.sdkSessionId} else null end`;
+}
+
 /** Maximum active sibling paths considered during one worktree ownership decision. */
 export const MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS = 512;
 
@@ -378,9 +388,11 @@ export interface CompletedThreadDeadlineUpdate extends CompletedThreadRetentionR
 /** Repository for thread lifecycle operations against SQLite. */
 export class ThreadStore {
   private readonly orm: BunSQLiteDatabase;
+  private readonly providerSessions: ThreadProviderSessionStore;
 
   constructor(private readonly db: Database) {
     this.orm = drizzle(db);
+    this.providerSessions = new ThreadProviderSessionStore(db);
   }
 
   /** Create a new thread and return the fully-populated record. */
@@ -991,7 +1003,7 @@ export class ThreadStore {
     const now = new Date().toISOString();
     const result = runChanges(this.orm
       .update(threads)
-      .set({ provider, updatedAt: now })
+      .set({ provider, sdkSessionId: keepSessionOnlyForProvider(provider), updatedAt: now })
       .where(eq(threads.id, id))
       );
 
@@ -1010,28 +1022,57 @@ export class ThreadStore {
     return result.changes > 0;
   }
 
-  /** Store the SDK-assigned session ID for later resume. Returns true if a row was changed. */
-  updateSdkSessionId(id: string, sdkSessionId: string): boolean {
-    const now = new Date().toISOString();
-    const result = runChanges(this.orm
-      .update(threads)
-      .set({ sdkSessionId, updatedAt: now })
-      .where(eq(threads.id, id))
-      );
-
-    return result.changes > 0;
+  /**
+   * Record the session a provider reported for the thread. The per-provider row is always written under
+   * the given provider. The legacy `threads.sdk_session_id` column is the active provider's session, so
+   * it is mirrored only when that provider owns the thread now. Returns false when the thread is gone.
+   */
+  updateSdkSessionId(id: string, providerId: string, sdkSessionId: string): boolean {
+    return this.db.transaction(() => {
+      const activeProvider = this.providerOf(id);
+      if (activeProvider === null) return false;
+      if (activeProvider === providerId) {
+        runChanges(this.orm
+          .update(threads)
+          .set({ sdkSessionId, updatedAt: new Date().toISOString() })
+          .where(eq(threads.id, id)));
+      }
+      this.recordProviderSession(id, providerId, sdkSessionId);
+      return true;
+    })();
   }
 
-  /** Clear the SDK session ID for a thread. Returns true if a row was changed. */
-  clearSdkSessionId(id: string): boolean {
-    const now = new Date().toISOString();
-    const result = runChanges(this.orm
-      .update(threads)
-      .set({ sdkSessionId: null, updatedAt: now })
-      .where(eq(threads.id, id))
-      );
+  /**
+   * Forget the provider's session on the thread. The legacy column is cleared only when that provider
+   * owns the thread now; another provider's session is never touched. Returns false when the thread is gone.
+   */
+  clearSdkSessionId(id: string, providerId: string): boolean {
+    return this.db.transaction(() => {
+      const activeProvider = this.providerOf(id);
+      if (activeProvider === null) return false;
+      if (activeProvider === providerId) {
+        runChanges(this.orm
+          .update(threads)
+          .set({ sdkSessionId: null, updatedAt: new Date().toISOString() })
+          .where(eq(threads.id, id)));
+      }
+      this.providerSessions.remove(id, providerId);
+      return true;
+    })();
+  }
 
-    return result.changes > 0;
+  private providerOf(threadId: string): string | null {
+    return this.orm.select({ provider: threads.provider }).from(threads).where(eq(threads.id, threadId)).get()?.provider ?? null;
+  }
+
+  /**
+   * Remember the provider's session. A repeated cursor for the session already recorded keeps its
+   * watermark. A new session starts at 0 because a cursor report proves nothing about coverage; only a
+   * completed turn does, and it advances the mark through `markSeen`. A stale low mark costs one resend.
+   */
+  private recordProviderSession(threadId: string, providerId: string, sessionId: string): void {
+    if (this.providerSessions.find(threadId, providerId)?.sessionId === sessionId) return;
+    this.providerSessions.upsert({ threadId, providerId, sessionId, lastSeenSequence: 0 });
   }
 
   /** Link a GitHub PR to a thread. Returns true if a row was changed. */
@@ -1066,10 +1107,13 @@ export class ThreadStore {
   updateSettings(id: string, settings: ThreadSettings): boolean {
     const set = buildSettingsSet(settings);
     if (Object.keys(set).length === 0) return false;
+    const sessionAfterProviderChange = settings.provider === undefined
+      ? {}
+      : { sdkSessionId: keepSessionOnlyForProvider(settings.provider) };
 
     const result = runChanges(this.orm
       .update(threads)
-      .set({ ...set, updatedAt: new Date().toISOString() })
+      .set({ ...set, ...sessionAfterProviderChange, updatedAt: new Date().toISOString() })
       .where(eq(threads.id, id))
       );
     return result.changes > 0;

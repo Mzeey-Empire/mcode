@@ -101,7 +101,7 @@ describe("Cursor clean side-channel fork", () => {
     const parent = await threadRepo.create("ws-1", "Fix auth bug", "direct", "main", true, "cursor");
     await messageRepo.create(parent.id, "user", "Fix the auth bug", 1);
     await messageRepo.create(parent.id, "assistant", "Fixed the middleware.", 2);
-    await threadRepo.updateSdkSessionId(parent.id, "cursor-parent-session");
+    await threadRepo.updateSdkSessionId(parent.id, "cursor", "cursor-parent-session");
     const seededParent = threadRepo.findById(parent.id)!;
 
     const child = await threadRepo.create("ws-1", "Branch: add tests", "direct", "main", true, "cursor", {

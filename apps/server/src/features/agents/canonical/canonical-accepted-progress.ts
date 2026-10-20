@@ -19,6 +19,7 @@ import { ThreadProgressOwner } from "../execution/thread-progress-owner.js";
 import type { AcceptedProgressBatch, SavedProgressReceipt, ProgressSaveFailure } from "../execution/thread-progress-types.js";
 import type { ExecutionAcceptedReceipt, ExecutionSemanticOperation, ExecutionTerminalPersistenceReceipt } from "../execution/execution-worker-handler.js";
 import { publishTurnPersisted } from "../execution/turn-persisted-publication.js";
+import { coverageOf, type CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { CanonicalWriterAcknowledgementCapacity, type CanonicalAgentWriterClient } from "./canonical-agent-writer-client.js";
@@ -115,7 +116,7 @@ export class CanonicalAcceptedProgress {
   private readonly steerSaves = new Map<string, { threadId: string; resolve(): void; reject(error: Error): void }>();
 
   constructor(private readonly canonical: CanonicalAgentBoundary, private readonly writer: CanonicalAgentWriterClient,
-    private readonly planFiles?: PlanFileWriter) {
+    private readonly planFiles?: PlanFileWriter, private readonly completedTurns?: CompletedTurnWatermark) {
     this.saves = new AcceptedSaveScheduler({ writer: { append: (batch) => this.save(batch) },
       maxAttempts: 6, retryDelayMs: 1_000, retryable: isTransientSaveFailure,
       onSaved: async (batch, receipt) => this.saved(batch, receipt),
@@ -944,6 +945,7 @@ export class CanonicalAcceptedProgress {
       thread.waiters.clear();
     }
     await this.projectSavedPlans(batch);
+    await this.recordSavedCoverage(batch);
     await this.retireSavedReceipts(batch, completed, thread);
   }
 
@@ -956,6 +958,12 @@ export class CanonicalAcceptedProgress {
       logger.warn("Saved terminal publication failed", { threadId: batch.execution.threadId,
         executionId: batch.execution.executionId, errorType: error instanceof Error ? error.name : "unknown" });
     }
+  }
+
+  /** A saved completion proves its session saw the turn's reply; this runs after the other post-save effects. */
+  private async recordSavedCoverage(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): Promise<void> {
+    if (batch.write.kind !== "execution" || !batch.write.terminal) return;
+    await this.completedTurns?.record(coverageOf(batch.execution.threadId, batch.write.terminal));
   }
 
   private async projectSavedPlans(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): Promise<void> {
@@ -1140,7 +1148,8 @@ function acceptedTerminalPersistence(operation: ExecutionSemanticOperation, mess
   const mutation = operation.mutation;
   if (mutation.kind !== "finish-live-event") return undefined;
   const fileEvidence = mutation.input.fileEvidence;
-  return { messageId: message?.id ?? null, settledMessage: message ? { id: message.id, sequence: message.sequence } : null,
+  return { providerId: mutation.input.providerId, messageSequence: message?.sequence ?? null,
+    messageId: message?.id ?? null, settledMessage: message ? { id: message.id, sequence: message.sequence } : null,
     outcome: mutation.outcome, toolCallCount: mutation.projection.narrative.filter((item) => item.kind === "toolCall").length,
     filesChanged: [...fileEvidence?.filesChanged ?? []], ...(fileEvidence ? { fileEffects: fileEvidence.fileEffects } : {}) };
 }

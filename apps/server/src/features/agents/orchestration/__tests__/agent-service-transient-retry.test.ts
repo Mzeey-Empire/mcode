@@ -341,7 +341,7 @@ describe("AgentService transient-failure auto-retry", () => {
     // Dropping resumeFrom is not enough: the provider pools a warm session by
     // sessionName, so the retry must also force-evict it to truly spawn fresh.
     expect(discardSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
-    expect(threadRepo.clearSdkSessionId).toHaveBeenCalledWith(THREAD_ID);
+    expect(threadRepo.clearSdkSessionId).toHaveBeenCalledWith(THREAD_ID, "claude");
     expect(threadRepo.recordTurnOutcome).not.toHaveBeenCalledWith(THREAD_ID, "errored", expect.any(String));
   });
 

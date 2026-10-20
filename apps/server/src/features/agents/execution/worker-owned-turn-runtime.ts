@@ -14,6 +14,7 @@ import { ExecutionWorkerLossCoordinator, workerLossIncidentId } from "./executio
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
 import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
+import type { CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
 import { PlanFileWriter } from "../planning/plan-file-writer.js";
 
 const EXECUTION_WORKER_COUNT = 4;
@@ -43,10 +44,15 @@ export class WorkerOwnedTurnRuntime {
   private onRecovered: ((execution: ExecutionIdentity) => void) | undefined;
   private onPlanPhaseChanged: ((threadId: string) => void) | undefined;
 
-  constructor(writer: CanonicalAgentWriterClient, publication: AgentEventPublicationRegistry, canonical?: CanonicalAgentBoundary) {
+  constructor(
+    writer: CanonicalAgentWriterClient,
+    publication: AgentEventPublicationRegistry,
+    canonical?: CanonicalAgentBoundary,
+    completedTurns?: CompletedTurnWatermark,
+  ) {
     this.writer = writer;
     this.planFiles = canonical ? new PlanFileWriter((threadId) => canonical.loadAcceptedFeatureSeed(threadId).plans) : undefined;
-    this.progress = canonical ? new CanonicalAcceptedProgress(canonical, this.writer, this.planFiles) : undefined;
+    this.progress = canonical ? new CanonicalAcceptedProgress(canonical, this.writer, this.planFiles, completedTurns) : undefined;
     this.writerPort = new CanonicalExecutionWriterPort(
       this.writer,
       publishCanonicalAgentEvents,

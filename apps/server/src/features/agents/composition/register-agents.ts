@@ -56,6 +56,7 @@ import {
 import { TURN_FEATURE_EFFECTS, TurnFeatureEffects } from "../turns/turn-feature-effects.js";
 import { ThreadBranchingService } from "../../projects/worktrees/thread-branching-service.js";
 import { ThreadService } from "../../thread-control/index.js";
+import { ThreadProviderSessionRepo } from "../../thread-control/persistence/thread-provider-session-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
@@ -89,6 +90,7 @@ import { BackgroundToolSettlementEffect } from "../turns/background-tool-settlem
 import { ThreadCreationCoordinator } from "../turns/thread-creation-coordinator.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup-fetch-decisions.js";
+import { CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
 import { ProviderSessionCursorPersistence } from "../turns/provider-session-cursor-persistence.js";
 import { ProviderTurnEventApplication } from "../turns/provider-turn-event-application.js";
 import {
@@ -99,9 +101,12 @@ import { TurnRuntimeController } from "../orchestration/turn-runtime-controller.
 
 /** Register agent orchestration, event, recovery, and planning services. */
 export function registerAgentServices(container: DependencyContainer): void {
+  container.register(CompletedTurnWatermark, {
+    useFactory: instanceCachingFactory((c) => new CompletedTurnWatermark(c.resolve(ThreadProviderSessionRepo))),
+  });
   container.register(WorkerOwnedTurnRuntime, {
     useFactory: instanceCachingFactory((c) => {
-      return new WorkerOwnedTurnRuntime(c.resolve(CanonicalAgentWriterClient), c.resolve(AgentEventPublicationRegistry), c.resolve(CanonicalAgentBoundary));
+      return new WorkerOwnedTurnRuntime(c.resolve(CanonicalAgentWriterClient), c.resolve(AgentEventPublicationRegistry), c.resolve(CanonicalAgentBoundary), c.resolve(CompletedTurnWatermark));
     }),
   });
   container.register("WorkerOwnedTurnRuntime", {
@@ -257,6 +262,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(ParentAssistantTextCheckpointService),
       c.resolve(TurnDiffService),
       c.resolve(SnapshotRefPins),
+      c.resolve(CompletedTurnWatermark),
     )),
   });
   container.register<TurnFileEffects>(TURN_FILE_EFFECTS, {

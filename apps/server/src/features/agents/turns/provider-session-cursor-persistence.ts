@@ -25,18 +25,18 @@ export class ProviderSessionCursorPersistence {
       await this.save(providerId, event.threadId, event.subtype.slice("sdk_session_id:".length), executionId);
       return;
     }
-    if (event.subtype === "sdk_session_invalidated") await this.clear(event.threadId);
+    if (event.subtype === "sdk_session_invalidated") await this.clear(providerId, event.threadId);
   }
 
   /** Remove a stale cursor before a retry starts a fresh provider session. */
-  clearForRetry(threadId: string): Promise<void> {
-    return this.clear(threadId);
+  clearForRetry(providerId: ProviderId, threadId: string): Promise<void> {
+    return this.clear(providerId, threadId);
   }
 
   private async save(providerId: ProviderId, threadId: string, cursor: string, executionId?: string): Promise<void> {
     if (!cursor) return;
     try {
-      await this.runtime.saveProviderCursor(threadId, cursor);
+      await this.runtime.saveProviderCursor(threadId, providerId, cursor);
       if (!executionId) return;
       await this.parentTurns.recordNativeCursor(executionId, {
         providerId,
@@ -52,9 +52,9 @@ export class ProviderSessionCursorPersistence {
     }
   }
 
-  private async clear(threadId: string): Promise<void> {
+  private async clear(providerId: ProviderId, threadId: string): Promise<void> {
     try {
-      await this.runtime.clearProviderCursor(threadId);
+      await this.runtime.clearProviderCursor(threadId, providerId);
     } catch (error) {
       logger.warn("Failed to clear provider session cursor", {
         threadId,

@@ -1,6 +1,7 @@
 import { Lifecycle, type DependencyContainer } from "tsyringe";
 
 import { CleanupJobRepo } from "../cleanup/persistence/cleanup-job-repo.js";
+import { ThreadProviderSessionRepo } from "../persistence/thread-provider-session-repo.js";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 
 /** Register thread-control repositories and their string-keyed aliases. */
@@ -12,6 +13,14 @@ export function registerThreadRepositories(container: DependencyContainer): void
   );
   container.register("ThreadRepo", {
     useFactory: (c) => c.resolve(ThreadRepo),
+  });
+  container.register(
+    ThreadProviderSessionRepo,
+    { useClass: ThreadProviderSessionRepo },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register("ThreadProviderSessionRepo", {
+    useFactory: (c) => c.resolve(ThreadProviderSessionRepo),
   });
 }
 

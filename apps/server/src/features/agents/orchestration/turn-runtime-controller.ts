@@ -1888,7 +1888,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await this.evictRetrySession(threadId, dispatch);
     if (!this.getCurrentRetryDispatch(threadId, identity)) return false;
     this.applyThreadControlLease(dispatch.threadControl);
-    await this.clearRetrySessionCursor(threadId);
+    await this.clearRetrySessionCursor(dispatch.effectiveProvider, threadId);
     if (!this.getCurrentRetryDispatch(threadId, identity)) return false;
     this.logTransientRetry(threadId, dispatch, triggerErr);
     dispatch.attempt += 1;
@@ -1914,8 +1914,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Clear a stale native cursor before retrying against a fresh provider session. */
-  private async clearRetrySessionCursor(threadId: string): Promise<void> {
-    await this.eventApplication.clearSessionCursorForRetry(threadId);
+  private async clearRetrySessionCursor(providerId: ProviderId, threadId: string): Promise<void> {
+    await this.eventApplication.clearSessionCursorForRetry(providerId, threadId);
   }
 
   /** Record a bounded retry with the original error available for diagnosis. */

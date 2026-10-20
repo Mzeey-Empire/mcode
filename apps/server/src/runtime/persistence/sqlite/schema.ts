@@ -164,6 +164,23 @@ export const turnResumeSchedules = sqliteTable("turn_resume_schedules", {
   createdAt: text("created_at").notNull(),
 });
 
+/**
+ * One native provider session per provider that has run a thread. `last_seen_sequence` is the newest
+ * message sequence that session has seen, so a later switch back can send only the missed delta.
+ * `threads.sdk_session_id` stays the active provider's session and is mirrored here.
+ */
+export const threadProviderSessions = sqliteTable(
+  "thread_provider_sessions",
+  {
+    threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+    providerId: text("provider_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    lastSeenSequence: integer("last_seen_sequence").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.threadId, table.providerId] })],
+);
+
 /** Server-owned startup lifecycle records that can exist before their thread. */
 export const threadStartups = sqliteTable(
   "thread_startups",

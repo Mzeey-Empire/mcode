@@ -107,13 +107,13 @@ export class CanonicalCodexSystemErrorProjection {
 
   private applyCursor(executionId: string, providerId: ProviderId, event: SystemEvent): void {
     if (event.subtype === "sdk_session_invalidated") {
-      if (!this.threads.clearSdkSessionId(event.threadId)) throw new Error("Codex cursor thread is missing");
+      if (!this.threads.clearSdkSessionId(event.threadId, providerId)) throw new Error("Codex cursor thread is missing");
       return;
     }
     if (!event.subtype.startsWith("sdk_session_id:")) throw new Error("Codex cursor subtype is invalid");
     const cursor = event.subtype.slice("sdk_session_id:".length);
     if (!cursor) return;
-    if (!this.threads.updateSdkSessionId(event.threadId, cursor)
+    if (!this.threads.updateSdkSessionId(event.threadId, providerId, cursor)
       || !this.canonical.recordNativeCursor(executionId, {
         providerId, scope: providerId === "codex" ? "thread" : "session", value: cursor, provenance: "native",
       })) throw new Error("Codex cursor could not be persisted for this execution");

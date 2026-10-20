@@ -29,6 +29,7 @@ import { gitCommitRequestWriteHandlers } from "../../../features/projects/git/co
 import { turnSteerWriteHandlers } from "../../../features/agents/steering/persistence/turn-steer-write-operations.js";
 import { storeIdentityWriteHandlers } from "../../../features/projects/diffs/snapshots/snapshot-store-identity.js";
 import { buildThreadStoreWriteHandlers } from "../../../features/thread-control/persistence/thread-write-handlers.js";
+import { threadProviderSessionWriteHandlers } from "../../../features/thread-control/persistence/thread-provider-session-write-operations.js";
 import { buildCleanupJobStoreWriteHandlers } from "../../../features/thread-control/cleanup/persistence/cleanup-job-write-handlers.js";
 import { buildThreadControlApprovalStoreWriteHandlers } from "../../../features/thread-control/authority/persistence/thread-control-approval-write-handlers.js";
 import { buildThreadControlAuditStoreWriteHandlers } from "../../../features/thread-control/authority/persistence/thread-control-audit-write-handlers.js";
@@ -66,6 +67,7 @@ export function applicationDatabaseHandlers(db: Database): ReadonlyMap<string, (
     ...gitCommitRequestWriteHandlers(db),
     ...turnSteerWriteHandlers(db),
     ...buildThreadStoreWriteHandlers(db),
+    ...threadProviderSessionWriteHandlers(db),
     ...buildCleanupJobStoreWriteHandlers(db),
     ...buildThreadControlApprovalStoreWriteHandlers(db),
     ...buildThreadControlAuditStoreWriteHandlers(db),
