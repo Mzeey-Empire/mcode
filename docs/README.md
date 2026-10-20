@@ -106,6 +106,7 @@ Point-in-time decisions. New ADRs take the next free number below. Numbers
 - [0028: Branch compares a picked compare ref against a picked base](adr/0028-branch-operands-both-sides.md)
 - [0029: Browser control stays with the user until Hand back](adr/0029-browser-control-stays-with-the-user-until-hand-back.md)
 - [0030: One shared database, guarded by the ledger and a compatibility floor](adr/0030-shared-database-with-ledger-guard-and-compatibility-floor.md)
+- [0031: Handoff v2, one budgeted transcript selection for switch, fork, and recovery](adr/0031-handoff-v2-budgeted-transcript-selection.md)
 
 ## Agent runbooks
 
