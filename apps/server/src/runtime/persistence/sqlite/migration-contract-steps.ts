@@ -63,7 +63,11 @@ export const CONTRACT_STEPS: Readonly<Record<string, ContractStep>> = {
 };
 
 /** Migrations after the floor migration that are not auto-additive but do not break older builds. */
-export const COMPATIBLE_STEPS: Readonly<Record<string, CompatibleStep>> = {};
+export const COMPATIBLE_STEPS: Readonly<Record<string, CompatibleStep>> = {
+  "0094_bumpy_triathlon": {
+    reason: "Creates thread_provider_sessions and backfills it from threads.sdk_session_id with INSERT OR IGNORE. Older builds never read or write the new table and keep using the unchanged threads columns.",
+  },
+};
 
 /**
  * The statement that raises the floor to `when`, recording the contract step `tag` that raised it.

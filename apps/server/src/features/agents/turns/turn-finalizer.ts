@@ -25,6 +25,7 @@ import { persistTurnSnapshot } from "./persistence/turn-finalization-write-opera
 import { broadcast } from "../../../application/transport/push.js";
 import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import type { ThreadProviderSessionRepo } from "../../thread-control/persistence/thread-provider-session-repo.js";
 import type { TurnSnapshotRepo } from "./persistence/turn-snapshot-repo.js";
 import type { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
@@ -101,6 +102,7 @@ export class TurnFinalizer {
     private readonly parentAssistantTextCheckpoints?: ParentAssistantTextCheckpointService,
     private readonly turnDiffs?: TurnDiffService,
     private readonly pins?: TurnBaselinePins,
+    private readonly providerSessions?: Pick<ThreadProviderSessionRepo, "markSeen">,
   ) {}
 
   /** Append a streaming assistant-text delta for the current turn. */
@@ -396,6 +398,7 @@ export class TurnFinalizer {
     if (verifiedTerminal?.terminalOutcome !== outcome) {
       throw new Error(`Canonical terminal outcome was not verified: ${executionId}`);
     }
+    if (outcome === "completed") await this.markProviderSessionSeen(threadId, canonical.thread.providerId);
 
     const materialized = this.recoverCanonicalProjection(canonical.sink, turnId, projection, commitResult);
     if (!materialized) {
@@ -406,6 +409,15 @@ export class TurnFinalizer {
     await this.completeCanonicalFinalize(
       threadId, executionId, turnId, outcome, turnRef, projection, materialized, !projection.materialized, settleDiff,
     );
+  }
+
+  /**
+   * A completed turn means the provider's session saw every message up to the assistant reply. The
+   * turn's own provider is marked, not the thread's current one, so a switch queued behind this turn
+   * cannot credit the wrong session.
+   */
+  private async markProviderSessionSeen(threadId: string, providerId: string): Promise<void> {
+    await this.providerSessions?.markSeen(threadId, providerId, this.messageRepo.getLatestSequenceIncludingInternal(threadId));
   }
 
   private requireCanonicalThread(threadId: string, executionId: string) {

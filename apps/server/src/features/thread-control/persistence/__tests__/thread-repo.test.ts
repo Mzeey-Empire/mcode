@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ThreadStore as ThreadRepo, MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "../thread-store.js";
+import { ThreadProviderSessionStore } from "../thread-provider-session-store.js";
 import { TurnSnapshotStore as TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-snapshot-store.js";
 import { WorkspaceStore as WorkspaceRepo } from "../../../projects/persistence/workspace-store.js";
 
@@ -561,5 +562,94 @@ describe("Migration 019 backfill", () => {
     expect(threadRepo.findById(tWithChanges.id)?.has_file_changes).toBe(true);
     expect(threadRepo.findById(tEmptySnaps.id)?.has_file_changes).toBe(false);
     expect(threadRepo.findById(tNoSnaps.id)?.has_file_changes).toBe(false);
+  });
+});
+
+describe("ThreadRepo per-provider sessions", () => {
+  let db: Database;
+  let threadRepo: ThreadRepo;
+  let sessions: ThreadProviderSessionStore;
+  let threadId: string;
+
+  function addMessage(id: string, sequence: number): void {
+    db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence, timestamp) VALUES (?, ?, 'user', 'x', ?, ?)")
+      .run(id, threadId, sequence, new Date().toISOString());
+  }
+
+  beforeEach(() => {
+    db = openMemoryDatabase();
+    threadRepo = new ThreadRepo(db);
+    sessions = new ThreadProviderSessionStore(db);
+    const workspace = new WorkspaceRepo(db).create("sessions-ws", "/tmp/sessions-ws", false);
+    threadId = threadRepo.create(workspace.id, "t", "direct", "main").id;
+    threadRepo.updateProvider(threadId, "claude");
+  });
+
+  it("keeps one row per provider and clearing one provider leaves the other", () => {
+    addMessage("m1", 1);
+    addMessage("m2", 2);
+    threadRepo.updateSdkSessionId(threadId, "claude-session");
+    addMessage("m3", 3);
+    threadRepo.updateProvider(threadId, "codex");
+    threadRepo.updateSdkSessionId(threadId, "codex-session");
+
+    expect(sessions.listForThread(threadId).map((row) => [row.providerId, row.sessionId, row.lastSeenSequence])).toEqual([
+      ["claude", "claude-session", 2],
+      ["codex", "codex-session", 3],
+    ]);
+
+    threadRepo.clearSdkSessionId(threadId);
+
+    expect(sessions.find(threadId, "codex")).toBeNull();
+    expect(sessions.find(threadId, "claude")?.sessionId).toBe("claude-session");
+    expect(threadRepo.findById(threadId)?.sdk_session_id).toBeNull();
+  });
+
+  it("does not move the watermark when the same session id is reported again", () => {
+    addMessage("m1", 1);
+    threadRepo.updateSdkSessionId(threadId, "claude-session");
+    addMessage("m2", 2);
+
+    threadRepo.updateSdkSessionId(threadId, "claude-session");
+
+    expect(sessions.find(threadId, "claude")?.lastSeenSequence).toBe(1);
+  });
+
+  it("replaces the provider's row and watermark when its session id changes", () => {
+    addMessage("m1", 1);
+    threadRepo.updateSdkSessionId(threadId, "first");
+    addMessage("m2", 2);
+
+    threadRepo.updateSdkSessionId(threadId, "second");
+
+    expect(sessions.find(threadId, "claude")).toMatchObject({ sessionId: "second", lastSeenSequence: 2 });
+  });
+
+  it("records watermark 0 for a thread with no messages", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude-session");
+
+    expect(sessions.find(threadId, "claude")?.lastSeenSequence).toBe(0);
+  });
+
+  it("markSeen only moves forward and ignores a provider without a row", () => {
+    addMessage("m1", 1);
+    threadRepo.updateSdkSessionId(threadId, "claude-session");
+
+    sessions.markSeen(threadId, "claude", 5);
+    sessions.markSeen(threadId, "claude", 3);
+    sessions.markSeen(threadId, "codex", 5);
+
+    expect(sessions.find(threadId, "claude")?.lastSeenSequence).toBe(5);
+    expect(sessions.find(threadId, "codex")).toBeNull();
+  });
+
+  it("removes a thread's provider sessions when the thread is hard-deleted", () => {
+    threadRepo.updateSdkSessionId(threadId, "claude-session");
+    threadRepo.updateProvider(threadId, "codex");
+    threadRepo.updateSdkSessionId(threadId, "codex-session");
+
+    threadRepo.hardDelete(threadId);
+
+    expect(sessions.listForThread(threadId)).toEqual([]);
   });
 });

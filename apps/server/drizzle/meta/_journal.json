@@ -666,6 +666,13 @@
       "when": 1792493720858,
       "tag": "0093_thread_head_sha",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "6",
+      "when": 1792502571927,
+      "tag": "0094_bumpy_triathlon",
+      "breakpoints": true
     }
   ]
 }

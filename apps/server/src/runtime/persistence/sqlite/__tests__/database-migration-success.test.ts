@@ -119,6 +119,34 @@ describe("successful database migration recovery", () => {
     } finally { db.close(true); }
   });
 
+  it("backfills one provider session per thread that holds an SDK session, at the thread's latest message", () => {
+    const current = NodePath.join(process.cwd(), "drizzle");
+    const previous = NodePath.join(directory, "drizzle-through-0092");
+    copyMigrationsThrough(current, previous, "0092_rich_outlaw_kid");
+    const db = new Database(databasePath, { strict: true });
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(previous) });
+      db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run("ws", "Workspace", "/fixture");
+      const insertThread = db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, sdk_session_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      insertThread.run("with-history", "ws", "History", "main", "codex", "codex-native", "2026-01-02T00:00:00.000Z");
+      insertThread.run("no-messages", "ws", "Empty", "main", "claude", "claude-native", "2026-01-03T00:00:00.000Z");
+      insertThread.run("no-session", "ws", "Fresh", "main", "claude", null, "2026-01-04T00:00:00.000Z");
+      const insertMessage = db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES (?, ?, 'user', 'x', ?)");
+      insertMessage.run("h1", "with-history", 2);
+      insertMessage.run("h2", "with-history", 7);
+      insertMessage.run("n1", "no-session", 4);
+
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
+
+      expect(db.prepare("SELECT thread_id, provider_id, session_id, last_seen_sequence, updated_at FROM thread_provider_sessions ORDER BY thread_id").all()).toEqual([
+        { thread_id: "no-messages", provider_id: "claude", session_id: "claude-native", last_seen_sequence: 0, updated_at: "2026-01-03T00:00:00.000Z" },
+        { thread_id: "with-history", provider_id: "codex", session_id: "codex-native", last_seen_sequence: 7, updated_at: "2026-01-02T00:00:00.000Z" },
+      ]);
+      expect(db.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get("with-history")).toEqual({ sdk_session_id: "codex-native" });
+    } finally { db.close(true); }
+  });
+
   afterEach(() => {
     if (originalMigrationsDirectory === undefined) {
       delete process.env.MCODE_DRIZZLE_MIGRATIONS_DIR;

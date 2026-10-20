@@ -56,6 +56,7 @@ import {
 import { TURN_FEATURE_EFFECTS, TurnFeatureEffects } from "../turns/turn-feature-effects.js";
 import { ThreadBranchingService } from "../../projects/worktrees/thread-branching-service.js";
 import { ThreadService } from "../../thread-control/index.js";
+import { ThreadProviderSessionRepo } from "../../thread-control/persistence/thread-provider-session-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
@@ -257,6 +258,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(ParentAssistantTextCheckpointService),
       c.resolve(TurnDiffService),
       c.resolve(SnapshotRefPins),
+      c.resolve(ThreadProviderSessionRepo),
     )),
   });
   container.register<TurnFileEffects>(TURN_FILE_EFFECTS, {

@@ -12,6 +12,7 @@ import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, Reasoni
 import {
   canonicalAgentThreads,
   cleanupJobs,
+  messages,
   pullRequestReviewLinks,
   threads,
   turnResumeSchedules,
@@ -20,6 +21,7 @@ import {
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 import { transcriptMessageVisibility } from "../../agents/conversation/persistence/transcript-visibility.js";
 import { SequenceAheadError } from "../attention/sequence-ahead-error.js";
+import { ThreadProviderSessionStore } from "./thread-provider-session-store.js";
 
 type ThreadRow = typeof threads.$inferSelect & {
   scheduledResume: typeof turnResumeSchedules.$inferSelect | null;
@@ -378,9 +380,11 @@ export interface CompletedThreadDeadlineUpdate extends CompletedThreadRetentionR
 /** Repository for thread lifecycle operations against SQLite. */
 export class ThreadStore {
   private readonly orm: BunSQLiteDatabase;
+  private readonly providerSessions: ThreadProviderSessionStore;
 
   constructor(private readonly db: Database) {
     this.orm = drizzle(db);
+    this.providerSessions = new ThreadProviderSessionStore(db);
   }
 
   /** Create a new thread and return the fully-populated record. */
@@ -1010,28 +1014,60 @@ export class ThreadStore {
     return result.changes > 0;
   }
 
-  /** Store the SDK-assigned session ID for later resume. Returns true if a row was changed. */
+  /**
+   * Store the SDK-assigned session ID for later resume and mirror it as the thread's current provider's
+   * session in `thread_provider_sessions`. Returns true if a row was changed.
+   */
   updateSdkSessionId(id: string, sdkSessionId: string): boolean {
-    const now = new Date().toISOString();
-    const result = runChanges(this.orm
-      .update(threads)
-      .set({ sdkSessionId, updatedAt: now })
-      .where(eq(threads.id, id))
-      );
-
-    return result.changes > 0;
+    return this.db.transaction(() => {
+      const now = new Date().toISOString();
+      const result = runChanges(this.orm
+        .update(threads)
+        .set({ sdkSessionId, updatedAt: now })
+        .where(eq(threads.id, id))
+        );
+      if (result.changes === 0) return false;
+      this.recordProviderSession(id, sdkSessionId);
+      return true;
+    })();
   }
 
-  /** Clear the SDK session ID for a thread. Returns true if a row was changed. */
+  /**
+   * Clear the SDK session ID for a thread and forget only the current provider's session. Returns true
+   * if a row was changed.
+   */
   clearSdkSessionId(id: string): boolean {
-    const now = new Date().toISOString();
-    const result = runChanges(this.orm
-      .update(threads)
-      .set({ sdkSessionId: null, updatedAt: now })
-      .where(eq(threads.id, id))
-      );
+    return this.db.transaction(() => {
+      const provider = this.providerOf(id);
+      const now = new Date().toISOString();
+      const result = runChanges(this.orm
+        .update(threads)
+        .set({ sdkSessionId: null, updatedAt: now })
+        .where(eq(threads.id, id))
+        );
+      if (provider !== null) this.providerSessions.remove(id, provider);
+      return result.changes > 0;
+    })();
+  }
 
-    return result.changes > 0;
+  private providerOf(threadId: string): string | null {
+    return this.orm.select({ provider: threads.provider }).from(threads).where(eq(threads.id, threadId)).get()?.provider ?? null;
+  }
+
+  /**
+   * Mirror the thread's session under the provider that owns the thread now. A repeated cursor for the
+   * session already recorded keeps its watermark: the session has not seen the messages other
+   * providers added since, and a later switch back must still send them.
+   */
+  private recordProviderSession(threadId: string, sessionId: string): void {
+    const providerId = this.providerOf(threadId);
+    if (providerId === null) return;
+    if (this.providerSessions.find(threadId, providerId)?.sessionId === sessionId) return;
+    const latest = this.orm.select({ sequence: sql<number>`coalesce(max(${messages.sequence}), 0)` })
+      .from(messages)
+      .where(eq(messages.threadId, threadId))
+      .get();
+    this.providerSessions.upsert({ threadId, providerId, sessionId, lastSeenSequence: latest?.sequence ?? 0 });
   }
 
   /** Link a GitHub PR to a thread. Returns true if a row was changed. */
