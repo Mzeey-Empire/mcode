@@ -957,7 +957,8 @@ export class ThreadControlService {
   }
 
   private async recoverDelegationApproval(approval: PendingDelegatedTaskApproval): Promise<void> {
-    if (approval.operationPhase !== "pre_dispatch") {
+    const userAllowed = approval.operationPhase !== "pre_dispatch";
+    if (userAllowed) {
       await this.respondToClaimedApproval(approval, "allow");
       return;
     }
