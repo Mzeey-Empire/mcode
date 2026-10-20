@@ -69,6 +69,25 @@ describe("planSwitchHandoff", () => {
     expect(fresh.coverage.fromSequence).toBe(1);
   });
 
+  it("leaves room for the user's text inside the target's per-turn character cap", () => {
+    const rows = Array.from({ length: 10 }, (_, index) => row(index + 1, index % 2 === 0 ? "user" : "assistant", `${index} ${"x".repeat(900)}`));
+    const userText = "u".repeat(300);
+
+    const plan = planSwitchHandoff(input({ rows, throughSequence: rows.length, inputCharacterCap: 4_000, userText }));
+
+    expect(plan.preamble.length + userText.length).toBeLessThanOrEqual(4_000);
+    expect(plan.selection.selectedSequences.length).toBeGreaterThan(0);
+    expect(plan.selection.omittedSequences.length).toBeGreaterThan(0);
+  });
+
+  it("does not trim history to make room when the user's text alone reaches the cap", () => {
+    const capped = planSwitchHandoff(input({ inputCharacterCap: 100, userText: "u".repeat(100) }));
+    const uncapped = planSwitchHandoff(input({ userText: "u".repeat(100) }));
+
+    expect(capped.selection.selectedSequences).toEqual(uncapped.selection.selectedSequences);
+    expect(capped.preamble).toBe(uncapped.preamble);
+  });
+
   it("sends no preamble when the resumed target missed nothing", () => {
     const plan = planSwitchHandoff(input({ resumeWatermark: 6 }));
     expect(plan.mode).toBe("delta");

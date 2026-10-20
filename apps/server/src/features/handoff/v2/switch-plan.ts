@@ -37,6 +37,11 @@ export interface SwitchHandoffInput {
    */
   readonly resumeWatermark: number | null;
   readonly contextWindow: number | null;
+  /**
+   * Most characters the target accepts in one turn, or null when it states no limit. The fenced preamble
+   * plus the user's text must fit; the history is trimmed to leave room for the text, never the reverse.
+   */
+  readonly inputCharacterCap?: number | null;
   readonly userText: string;
   readonly attachments: HandoffBudgetInput["attachments"];
   /** Fixed in tests; random per handoff otherwise. */
@@ -72,14 +77,15 @@ export function planSwitchHandoff(input: SwitchHandoffInput): SwitchHandoffPlan 
     fromSequence: rows[0]?.sequence ?? afterSequence + 1,
     toSequence: input.throughSequence,
   };
-  const budgetBytes = handoffBudgetBytes({
+  const boundary = input.boundary ?? NodeCrypto.randomBytes(8).toString("hex");
+  const contextBudgetBytes = handoffBudgetBytes({
     contextWindow: input.contextWindow,
     // Native context use is not tracked per provider, so a resumed target is budgeted like a fresh one.
     nativeContextTokens: 0,
     userText: input.userText,
     attachments: input.attachments,
   });
-  const boundary = input.boundary ?? NodeCrypto.randomBytes(8).toString("hex");
+  const budgetBytes = Math.min(contextBudgetBytes, inputCapBudget(input, boundary));
   const selection = selectHandoffHistory({
     // No separate plan item: a switch is built from stored rows alone, so a plan the model posted as a
     // message is already replayed as that message. Passing one here would duplicate it.
@@ -101,4 +107,19 @@ function fencePreamble(history: string, boundary: string): string {
     "",
     "",
   ].join("\n");
+}
+
+/**
+ * Bytes of history the target's per-turn character cap leaves after the fence and the user's text.
+ *
+ * The history budget counts UTF-8 bytes and the cap counts string characters. A character is never more
+ * than its byte length, so spending the byte budget cannot overshoot the cap. When the user's text alone
+ * reaches the cap there is nothing to trim to, and the cap does not shrink the history: the message is
+ * never truncated to make room.
+ */
+function inputCapBudget(input: SwitchHandoffInput, boundary: string): number {
+  const cap = input.inputCharacterCap;
+  if (cap === undefined || cap === null || input.userText.length >= cap) return Number.POSITIVE_INFINITY;
+  const fenceOverhead = fencePreamble("x", boundary).length - 1;
+  return Math.max(0, cap - input.userText.length - fenceOverhead);
 }

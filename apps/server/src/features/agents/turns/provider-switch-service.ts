@@ -10,6 +10,7 @@ import {
 import { ProviderTurnError, SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
 import { logger } from "@mcode/shared";
 import { broadcast } from "../../../application/transport/push.js";
+import { CODEX_INLINE_INPUT_MAX_CHARS } from "../../handoff/artifacts/handoff-builder.js";
 import { HandoffStorage } from "../../handoff/persistence/handoff-storage.js";
 import { HandoffBudgetExhaustedError, loadHandoffMessages, planSwitchHandoff } from "../../handoff/v2/index.js";
 import type { SwitchHandoffPlan } from "../../handoff/v2/index.js";
@@ -155,6 +156,7 @@ export class ProviderSwitchService {
         throughSequence,
         resumeWatermark,
         contextWindow: thread.context_window ?? null,
+        inputCharacterCap: inputCharacterCap(this.providers.resolve(ticket.toProvider), ticket.toProvider),
         userText: command.content,
         attachments: attachmentKinds(command),
       });
@@ -396,4 +398,14 @@ function emptyHandoff(ticket: ProviderSwitchTicket, threadId: string, throughSeq
       fromSequence: throughSequence + 1, toSequence: throughSequence,
     },
   };
+}
+
+/**
+ * The most characters one turn may carry to the target. Codex also inlines its input into a prompt with a
+ * tighter ceiling than the provider declares, so the smaller of the two bounds the handoff.
+ */
+function inputCharacterCap(target: IAgentProvider, id: ProviderId): number {
+  return id === "codex"
+    ? Math.min(target.maxInputCharactersPerTurn, CODEX_INLINE_INPUT_MAX_CHARS)
+    : target.maxInputCharactersPerTurn;
 }

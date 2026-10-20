@@ -114,6 +114,22 @@ describe("provider switch on send", () => {
     expect(sessions().find(threadId, "claude")).toMatchObject({ sessionId: "claude-s1" });
   });
 
+  it("trims the replayed history so the message fits a target that accepts few characters per turn", async () => {
+    Object.assign(codex, { maxInputCharactersPerTurn: 4_000 });
+    for (const turn of [1, 2, 3, 4]) {
+      await completeTurn(claude, `question ${turn} ${"q".repeat(1_500)}`, `answer ${turn} ${"a".repeat(1_500)}`, "claude-s1");
+    }
+    const userText = "what did we decide?";
+
+    await completeTurn(codex, userText, "decided", "codex-s1");
+
+    const wire = lastRequest(codex).message;
+    expect(wire.length).toBeLessThanOrEqual(4_000);
+    expect(wire.endsWith(userText)).toBe(true);
+    expect(wire).toContain("answer 4 ");
+    expect(wire).not.toContain("question 1 ");
+  }, 60_000);
+
   it("keeps what the user typed in the timeline and the provider that produced each message", async () => {
     await completeTurn(claude, "first question", "first answer", "claude-s1");
     await completeTurn(codex, "second question", "second answer", "codex-s1");
