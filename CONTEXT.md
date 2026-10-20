@@ -356,14 +356,15 @@ not.
 A provider-native child conversation created from the current turn and
 persisted as a normal Mcode thread. Sub-agent threads may run in parallel and
 may themselves dispatch further sub-agents (nested). A sub-agent thread is
-distinct from a [[Delegated thread]] created through [[Thread control]].
+distinct from a [[Delegated thread]] created through [[Delegation]].
 
 ### Sub-agent call
 The parent-turn tool or action that creates or contacts a [[Sub-agent thread]].
 It remains part of the parent Turn. Each sub-agent call's events are attributed
 to its parent via `parentToolCallId` so the narrative timeline can nest them
-correctly. The phrase “use a sub-agent” means this provider-native behavior;
-it never authorizes [[Thread control]].
+correctly. The phrase “use a sub-agent” means this provider-native behavior
+when the Provider supports the chosen model. For another Provider, or a model
+the native tool lacks, the agent uses [[Delegation]] instead.
 
 Provider-native identity evidence links a sub-agent thread to its sub-agent
 call. A name or a heuristic alone does not establish that relationship.
@@ -381,8 +382,8 @@ reports back. The sub-agent thread's own narration is not streamed into the
 parent timeline; child detail separately shows its full timeline.
 
 ### Coordinator thread
-A thread that assigns work to one or more delegated threads and monitors their
-progress.
+A thread that assigns work to one or more delegated threads. Mcode notifies it
+when a delegated task finishes, fails, or needs an answer, so it does not poll.
 _Avoid_: Parent agent, orchestrator session
 
 ### Delegated thread
@@ -398,23 +399,28 @@ delegated thread has its own lifecycle and survives the coordinator stopping or
 disconnecting.
 _Avoid_: Sub-agent call, conversation fork
 
-### Thread control
-The capability to discover Projects and Threads, create a delegated thread,
-read it, send it work, stop it, or wait for its state. Thread control always
-excludes the active source thread so a Thread cannot target itself.
-_Avoid_: Sub-agent control, conversation-fork control
+### Delegation
+The capability of handing one task to a [[Delegated thread]], reading the
+task's status, and cancelling it. A Provider running inside an authenticated
+Mcode Thread reaches Delegation through its session's `mcode` MCP server, the
+same server that carries Browser automation. The Delegated thread works in
+the Coordinator's checkout or in a new Worktree, and never runs with a broader
+[[Permission mode]] than its Coordinator. A Thread cannot delegate to itself.
+_Avoid_: Thread control, Internal thread control, sub-agent control, Provider
+subagent API
 
-### Internal thread control
-Thread control exercised by a Provider running inside an authenticated Mcode
-Thread. It acts for the current user across registered Projects. The Provider
-reaches it through its session's `mcode` MCP server, the same server that
-carries Browser automation.
-_Avoid_: Provider subagent API
+### Thread launch
+The creation of an ordinary top-level Thread, with an explicit Workspace
+choice, for work the user wants as its own conversation. A launched Thread is
+not a [[Delegated thread]], so Mcode does not notify its creator when it
+finishes.
+_Avoid_: Delegation, Thread control
 
-### Paired external thread control
-Thread control exercised by an external integration paired with Mcode. It is
-limited to selected Projects, granted operations, and ownership rules.
-_Avoid_: Internal thread control, unrestricted MCP access
+### Paired external integration
+An external integration paired with Mcode that finds, creates, reads, sends
+work to, and stops Threads. It is limited to selected Projects, granted
+operations, and ownership rules.
+_Avoid_: Paired external thread control, unrestricted MCP access
 
 ### Message origin
 The durable source of an inbound user-role Message. A Message comes from the
