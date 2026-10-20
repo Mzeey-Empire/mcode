@@ -354,6 +354,7 @@ export function startPushListeners(): void {
         branch,
         checkoutState,
         baseBranch,
+        headSha,
         prNumber,
         prStatus,
       } = data as {
@@ -362,6 +363,7 @@ export function startPushListeners(): void {
         branch: string;
         checkoutState: "named" | "branchless";
         baseBranch: string | null;
+        headSha: string | null;
         prNumber: number | null;
         prStatus: string | null;
       };
@@ -369,8 +371,12 @@ export function startPushListeners(): void {
       useWorkspaceStore.setState((ws) => {
         const prUrlsByThreadId = { ...ws.prUrlsByThreadId };
         const checksById = { ...ws.checksById };
-        delete prUrlsByThreadId[threadId];
-        delete checksById[threadId];
+        // A detached HEAD that only moved to another commit keeps its PR link and checks.
+        const previous = ws.threads.find((t) => t.id === threadId);
+        if (!previous || previous.branch !== branch || previous.checkout_state !== checkoutState) {
+          delete prUrlsByThreadId[threadId];
+          delete checksById[threadId];
+        }
         return {
           threads: ws.threads.map((t) =>
             t.id === threadId
@@ -379,6 +385,7 @@ export function startPushListeners(): void {
                   branch,
                   checkout_state: checkoutState,
                   base_branch: baseBranch,
+                  head_sha: headSha ?? null,
                   pr_number: prNumber,
                   pr_status: prStatus,
                 }

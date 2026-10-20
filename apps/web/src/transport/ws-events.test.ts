@@ -98,6 +98,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: "feat/old",
     checkout_state: "named",
     base_branch: null,
+    head_sha: null,
     worktree_managed: true,
     issue_number: null,
     pr_number: 10,
@@ -324,6 +325,7 @@ describe("ws-events thread.checkoutChanged", () => {
       branch: "HEAD",
       checkoutState: "branchless",
       baseBranch: "feat/old",
+      headSha: "3f9a1c2",
       prNumber: null,
       prStatus: null,
     });
@@ -333,6 +335,7 @@ describe("ws-events thread.checkoutChanged", () => {
       branch: "HEAD",
       checkout_state: "branchless",
       base_branch: "feat/old",
+      head_sha: "3f9a1c2",
       pr_number: null,
       pr_status: null,
     });
@@ -340,6 +343,31 @@ describe("ws-events thread.checkoutChanged", () => {
     expect(state.checksById).toEqual({
       other: { aggregate: "no_checks", runs: [], fetchedAt: 2 },
     });
+  });
+
+  it("keeps PR and check caches when a detached HEAD only moves to another commit", () => {
+    startPushListeners();
+    const detached = {
+      threadId: "thread-1",
+      workspaceId: "ws-1",
+      branch: "HEAD",
+      checkoutState: "branchless" as const,
+      baseBranch: "feat/old",
+      prNumber: 10,
+      prStatus: "OPEN" as const,
+    };
+    pushEmitter.emit("thread.checkoutChanged", { ...detached, headSha: "3f9a1c2" });
+    useWorkspaceStore.setState({
+      prUrlsByThreadId: { "thread-1": "https://example.test/pr/10" },
+      checksById: { "thread-1": { aggregate: "passing", runs: [], fetchedAt: 1 } },
+    });
+
+    pushEmitter.emit("thread.checkoutChanged", { ...detached, headSha: "9b8e7d6" });
+
+    const state = useWorkspaceStore.getState();
+    expect(state.threads[0].head_sha).toBe("9b8e7d6");
+    expect(state.prUrlsByThreadId).toEqual({ "thread-1": "https://example.test/pr/10" });
+    expect(state.checksById["thread-1"]?.aggregate).toBe("passing");
   });
 });
 

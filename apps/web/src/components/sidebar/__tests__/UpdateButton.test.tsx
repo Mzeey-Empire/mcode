@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 import { useUpdateStore } from "@/stores/updateStore";
 import { ReleaseNotesCard } from "../ReleaseNotesCard";
-import { UP_TO_DATE_FLASH_MS, UpdateButton } from "../UpdateButton";
+import { AGENT_COUNT_DEADLINE_MS, UP_TO_DATE_FLASH_MS, UpdateButton } from "../UpdateButton";
 
 const getActiveAgentCount = vi.fn<() => Promise<number>>();
 
@@ -17,6 +17,7 @@ function createApp() {
     checkForUpdates: vi.fn<() => Promise<UpdateStatus>>().mockResolvedValue({ state: "idle" }),
     downloadUpdate: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     installUpdate: vi.fn<() => Promise<boolean>>().mockResolvedValue(true),
+    getUpdateStatus: vi.fn<() => Promise<UpdateStatus>>().mockResolvedValue({ state: "idle" }),
     installWhenIdle: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     cancelInstallWhenIdle: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   };
@@ -179,6 +180,110 @@ describe("Install", () => {
     await userEvent.click(screen.getByRole("button", { name: /Install/ }));
     expect(await screen.findByRole("dialog", { name: "Install update" })).toHaveTextContent("Agents may be running.");
     expect(app.installUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("Install on a nightly build", () => {
+  const nightly = "0.15.0-nightly.20261020.300";
+  const installBlocked: UpdateStatus = {
+    state: "error",
+    message: "Update installation blocked: no downloaded update is ready to install",
+    failedOperation: "install",
+  };
+
+  beforeEach(() => showStatus({ state: "downloaded", version: nightly, installWhenIdle: false }));
+
+  const clickInstall = async () => {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Install/ }));
+    });
+  };
+
+  it("installs on click with no agents running", async () => {
+    getActiveAgentCount.mockResolvedValue(0);
+    render(<UpdateButton />);
+    expect(screen.getByRole("button", { name: /Install/ })).toHaveTextContent("Installnightly");
+    await clickInstall();
+    expect(app.installUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("shows Installing and ignores repeat clicks until the desktop answers", async () => {
+    let finishInstall: ((started: boolean) => void) | undefined;
+    app.installUpdate.mockImplementation(() => new Promise<boolean>((resolve) => { finishInstall = resolve; }));
+    getActiveAgentCount.mockResolvedValue(0);
+    render(<UpdateButton />);
+    const pill = screen.getByRole("button", { name: /Install/ });
+
+    await act(async () => {
+      fireEvent.click(pill);
+      fireEvent.click(pill);
+    });
+
+    expect(screen.getByRole("status", { name: "Installing update" })).toHaveTextContent("Installing");
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(getActiveAgentCount).toHaveBeenCalledOnce();
+    expect(app.installUpdate).toHaveBeenCalledOnce();
+
+    await act(async () => finishInstall?.(true));
+    expect(screen.getByRole("button", { name: /Install/ })).toBeInTheDocument();
+  });
+
+  it("shows Retry update when the desktop refuses to install", async () => {
+    getActiveAgentCount.mockResolvedValue(0);
+    app.installUpdate.mockResolvedValue(false);
+    app.getUpdateStatus.mockResolvedValue(installBlocked);
+    render(<UpdateButton />);
+
+    await clickInstall();
+
+    expect(screen.getByRole("button", { name: "Retry update" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Installing update" })).toBeNull();
+  });
+
+  it("shows Retry update when the install request itself fails", async () => {
+    getActiveAgentCount.mockResolvedValue(0);
+    app.installUpdate.mockRejectedValue(new Error("ipc channel closed"));
+    app.getUpdateStatus.mockResolvedValue(installBlocked);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<UpdateButton />);
+
+    await clickInstall();
+
+    expect(screen.getByRole("button", { name: "Retry update" })).toBeInTheDocument();
+  });
+
+  it("asks first when the agent count never arrives", async () => {
+    vi.useFakeTimers();
+    getActiveAgentCount.mockReturnValue(new Promise<number>(() => {}));
+    render(<UpdateButton />);
+    await clickInstall();
+
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_COUNT_DEADLINE_MS - 1));
+    expect(screen.getByRole("status", { name: "Installing update" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Install update" })).toBeNull();
+
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(screen.getByRole("dialog", { name: "Install update" })).toHaveTextContent("Agents may be running.");
+    expect(screen.getByRole("button", { name: /Install/, hidden: true })).toBeInTheDocument();
+    expect(app.installUpdate).not.toHaveBeenCalled();
+  });
+
+  it("shows Installing and then the failure after Restart now", async () => {
+    let finishInstall: ((started: boolean) => void) | undefined;
+    app.installUpdate.mockImplementation(() => new Promise<boolean>((resolve) => { finishInstall = resolve; }));
+    app.getUpdateStatus.mockResolvedValue(installBlocked);
+    getActiveAgentCount.mockResolvedValue(2);
+    render(<UpdateButton />);
+    await clickInstall();
+    const dialog = await screen.findByRole("dialog", { name: "Install update" });
+
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Restart now" }));
+    });
+    expect(screen.getByRole("status", { name: "Installing update" })).toBeInTheDocument();
+
+    await act(async () => finishInstall?.(false));
+    expect(screen.getByRole("button", { name: "Retry update" })).toBeInTheDocument();
   });
 });
 

@@ -252,6 +252,7 @@ export function CommentEditorComposer({
         selectedIndex={slashCommand.selectedIndex}
         anchorRect={slashCommand.anchorRect}
         onSelect={handleSlashSelect}
+        onHighlight={slashCommand.onHighlight}
         onDismiss={slashCommand.onDismiss}
         onRetry={slashCommand.onRetry}
       />

@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { GitBranch } from "lucide-react";
 import {
   OVERVIEW_ROW_CLASS,
+  OverviewRowIcon,
   ThreadOverviewTooltipButton,
   ThreadOverviewWhen,
 } from "@/features/thread-overview/overview-row";
@@ -21,11 +22,13 @@ function CreateBranchEntry() {
         data-testid="thread-overview-create-branch"
         className={cn(
           OVERVIEW_ROW_CLASS,
-          "cursor-pointer justify-start text-xs text-primary hover:bg-primary/10 hover:text-primary",
+          "cursor-pointer justify-start text-primary hover:bg-primary/10 hover:text-primary",
         )}
         onClick={() => branchCreation.setOpen(true)}
       >
-        <GitBranch size={14} className="shrink-0 text-primary/80" />
+        <OverviewRowIcon className="text-primary/80 group-hover:text-primary/80">
+          <GitBranch />
+        </OverviewRowIcon>
         <span className="font-medium">Create branch</span>
       </Button>
     </ThreadOverviewTooltipButton>

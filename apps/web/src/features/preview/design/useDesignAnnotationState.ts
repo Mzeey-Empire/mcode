@@ -62,6 +62,7 @@ export function useDesignAnnotationState({
     onInputChange: onBubbleSlashInputChange,
     onKeyDown: onBubbleSlashKeyDown,
     onSelect: onBubbleSlashSelect,
+    onHighlight: highlightBubbleSlash,
     onDismiss: dismissBubbleSlash,
     onRetry: retryBubbleSlash,
   } = bubbleSlashCommand;
@@ -124,6 +125,7 @@ export function useDesignAnnotationState({
     setBubbleInputFocused,
     bubbleSlashState,
     bubbleSlashAnchorRect,
+    highlightBubbleSlash,
     retryBubbleSlash,
     filePopupAnchorRect,
   };

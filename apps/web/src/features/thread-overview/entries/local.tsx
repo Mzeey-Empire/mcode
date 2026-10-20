@@ -5,12 +5,12 @@ import { OverviewSideMenu } from "@/features/thread-overview/overview-side-menu"
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
-import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
+import { isDetachedCheckout, resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { cn } from "@/lib/utils";
 import { type Thread } from "@/transport";
 import { Check, ChevronDown, Copy, Laptop } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { OVERVIEW_ROW_CLASS } from "@/features/thread-overview/overview-row";
+import { OVERVIEW_ROW_CLASS, OverviewRowIcon } from "@/features/thread-overview/overview-row";
 
 type LocalCopyTarget = "path" | "branch";
 
@@ -28,9 +28,11 @@ function getThreadOverviewLocalMode(thread: Thread) {
 interface ThreadOverviewLocalMenuProps {
   worktreePath: string | null;
   branch: string;
+  /** False for a detached checkout, whose label is a description and not a ref to paste. */
+  branchCopyable: boolean;
 }
 
-function ThreadOverviewLocalMenu({ worktreePath, branch }: ThreadOverviewLocalMenuProps) {
+function ThreadOverviewLocalMenu({ worktreePath, branch, branchCopyable }: ThreadOverviewLocalMenuProps) {
   const [copied, setCopied] = useState<LocalCopyTarget | null>(null);
 
   const copyValue = useCallback(async (target: LocalCopyTarget, value: string) => {
@@ -77,16 +79,18 @@ function ThreadOverviewLocalMenu({ worktreePath, branch }: ThreadOverviewLocalMe
               {branch}
             </span>
           </span>
-          <Button
-            variant="ghost"
-            size="icon-compact"
-            type="button"
-            aria-label="Copy branch"
-            onClick={() => void copyValue("branch", branch)}
-            className="shrink-0"
-          >
-            {copied === "branch" ? <Check size={13} /> : <Copy size={13} />}
-          </Button>
+          {branchCopyable ? (
+            <Button
+              variant="ghost"
+              size="icon-compact"
+              type="button"
+              aria-label="Copy branch"
+              onClick={() => void copyValue("branch", branch)}
+              className="shrink-0"
+            >
+              {copied === "branch" ? <Check size={13} /> : <Copy size={13} />}
+            </Button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -121,13 +125,10 @@ function LocalEntry({ thread }: { thread: Thread }) {
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
-            <LocalModeIcon
-              size={14}
-              aria-hidden
-              data-testid="thread-overview-local-mode-icon"
-              className="shrink-0 text-muted transition-colors duration-150 group-hover:text-ink/80"
-            />
-            <span className="text-fade text-xs font-medium">{modeLabel}</span>
+            <OverviewRowIcon>
+              <LocalModeIcon data-testid="thread-overview-local-mode-icon" />
+            </OverviewRowIcon>
+            <span className="text-fade font-medium">{modeLabel}</span>
           </span>
           <ChevronDown
             size={13}
@@ -141,7 +142,7 @@ function LocalEntry({ thread }: { thread: Thread }) {
       }
     />
     <OverviewSideMenu rowRef={localRowRef} className="w-80">
-      <ThreadOverviewLocalMenu worktreePath={dirPath} branch={checkoutLabel} />
+      <ThreadOverviewLocalMenu worktreePath={dirPath} branch={checkoutLabel} branchCopyable={!isDetachedCheckout(thread)} />
     </OverviewSideMenu>
   </Popover>);
 }

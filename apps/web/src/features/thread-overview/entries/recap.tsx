@@ -132,7 +132,7 @@ function ThreadOverviewRecapRow({
   return (
     <div
       data-testid="thread-overview-recap"
-      className="w-full px-2.5 py-2.5"
+      className="w-full px-3 py-2.5"
     >
       <div className="flex min-w-0 items-center justify-between gap-2">
         <span className="shrink-0 text-xs font-medium text-muted">Recap</span>

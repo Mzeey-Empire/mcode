@@ -7,7 +7,12 @@ function seam(): HTMLElement {
   return screen.getByRole("separator", { name: "Resize sidebar" });
 }
 
+function setViewportWidth(width: number): void {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+}
+
 beforeEach(() => {
+  setViewportWidth(1920);
   useSidebarWidthStore.getState().resetWidth();
   // jsdom has no pointer capture; the seam only needs the call to succeed.
   HTMLElement.prototype.setPointerCapture = () => {};
@@ -23,7 +28,7 @@ describe("SidebarResizeSeam", () => {
 
     expect(seam()).toHaveAttribute("aria-orientation", "vertical");
     expect(seam()).toHaveAttribute("aria-valuemin", "220");
-    expect(seam()).toHaveAttribute("aria-valuemax", "340");
+    expect(seam()).toHaveAttribute("aria-valuemax", "544");
     expect(seam()).toHaveAttribute("aria-valuenow", "304");
     expect(seam()).toHaveAttribute("tabindex", "0");
   });
@@ -40,11 +45,11 @@ describe("SidebarResizeSeam", () => {
   });
 
   it("stops at the limits when stepping by keyboard", () => {
-    useSidebarWidthStore.getState().setWidth(336);
+    useSidebarWidthStore.getState().setWidth(540);
     render(<SidebarResizeSeam />);
 
     fireEvent.keyDown(seam(), { key: "ArrowRight" });
-    expect(seam()).toHaveAttribute("aria-valuenow", "340");
+    expect(seam()).toHaveAttribute("aria-valuenow", "544");
 
     act(() => useSidebarWidthStore.getState().setWidth(224));
     fireEvent.keyDown(seam(), { key: "ArrowLeft" });
@@ -61,12 +66,25 @@ describe("SidebarResizeSeam", () => {
     fireEvent.pointerMove(seam(), { pointerId: 1, clientX: 100 });
     expect(useSidebarWidthStore.getState().width).toBe(220);
 
-    fireEvent.pointerMove(seam(), { pointerId: 1, clientX: 600 });
-    expect(useSidebarWidthStore.getState().width).toBe(340);
+    fireEvent.pointerMove(seam(), { pointerId: 1, clientX: 900 });
+    expect(useSidebarWidthStore.getState().width).toBe(544);
 
-    fireEvent.pointerUp(seam(), { pointerId: 1, clientX: 600 });
+    fireEvent.pointerUp(seam(), { pointerId: 1, clientX: 900 });
     fireEvent.pointerMove(seam(), { pointerId: 1, clientX: 250 });
-    expect(useSidebarWidthStore.getState().width).toBe(340);
+    expect(useSidebarWidthStore.getState().width).toBe(544);
+  });
+
+  it("shrinks the width and its range when the window narrows", () => {
+    useSidebarWidthStore.getState().setWidth(520);
+    render(<SidebarResizeSeam />);
+
+    setViewportWidth(900);
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    expect(seam()).toHaveAttribute("aria-valuemax", "420");
+    expect(seam()).toHaveAttribute("aria-valuenow", "420");
   });
 
   it("ignores a secondary-button drag", () => {

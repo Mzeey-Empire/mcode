@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `head_sha` text;

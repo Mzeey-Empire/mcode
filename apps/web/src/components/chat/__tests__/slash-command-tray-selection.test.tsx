@@ -147,6 +147,30 @@ describe("SlashCommandTray selection indicator", () => {
     expect(unselectedRow).toHaveAttribute("aria-selected", "false");
   });
 
+  it("moves the selection only when the pointer itself moves", () => {
+    const highlighted: number[] = [];
+    render(
+      <SlashCommandTray
+        state={{ kind: "ready", items: COMMANDS }}
+        selectedIndex={0}
+        anchorRect={makeAnchorRect()}
+        onSelect={() => {}}
+        onHighlight={(index) => highlighted.push(index)}
+        onDismiss={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    const pointerMove = (row: HTMLElement, clientX: number, clientY: number) =>
+      fireEvent(row, new MouseEvent("pointermove", { bubbles: true, clientX, clientY }));
+
+    pointerMove(screen.getByRole("option", { name: /baz/ }), 10, 90);
+    pointerMove(screen.getByRole("option", { name: /bar/ }), 10, 90);
+    pointerMove(screen.getByRole("option", { name: /bar/ }), 10, 50);
+    pointerMove(screen.getByRole("option", { name: /foo/ }), 10, 10);
+
+    expect(highlighted).toEqual([2, 1]);
+  });
+
   it("renders long skill lists as ordinary rows", () => {
     renderLongPopup();
     expect(screen.getByRole("option", { name: /skill-00/ })).toBeInTheDocument();

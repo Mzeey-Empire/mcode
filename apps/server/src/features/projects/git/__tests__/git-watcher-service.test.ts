@@ -87,10 +87,12 @@ describe("GitWatcherService", () => {
           branch: "feat/thread",
           checkout_state: "named",
           base_branch: null,
+          head_sha: null,
           pr_number: null,
           pr_status: null,
         },
       }),
+      backfillDetachedHeadSha: vi.fn().mockResolvedValue(null),
     } as unknown as HandoffCheckoutService;
     service = new GitWatcherService(
       workspaceRepo,
@@ -126,6 +128,37 @@ describe("GitWatcherService", () => {
       branch: "feat/thread",
       checkoutState: "named",
       baseBranch: null,
+      headSha: null,
+      prNumber: null,
+      prStatus: null,
+    });
+  });
+
+  it("broadcasts the commit hash recorded for a detached thread when watching starts", async () => {
+    (handoffCheckoutService.backfillDetachedHeadSha as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      changed: true,
+      thread: {
+        id: "thread-1",
+        workspace_id: "ws-1",
+        branch: "HEAD",
+        checkout_state: "branchless",
+        base_branch: "main",
+        head_sha: "3f9a1c2",
+        pr_number: null,
+        pr_status: null,
+      },
+    });
+
+    await service.watchThreadWorktree("thread-1", "/repo-wt");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(broadcastMock).toHaveBeenCalledWith("thread.checkoutChanged", {
+      threadId: "thread-1",
+      workspaceId: "ws-1",
+      branch: "HEAD",
+      checkoutState: "branchless",
+      baseBranch: "main",
+      headSha: "3f9a1c2",
       prNumber: null,
       prStatus: null,
     });
@@ -157,6 +190,7 @@ describe("GitWatcherService", () => {
       branch: "feat/thread",
       checkoutState: "named",
       baseBranch: null,
+      headSha: null,
       prNumber: null,
       prStatus: null,
     });
@@ -172,6 +206,7 @@ describe("GitWatcherService", () => {
         branch: "feat/thread",
         checkout_state: "named",
         base_branch: null,
+        head_sha: null,
         pr_number: 12,
         pr_status: "OPEN",
       },

@@ -1,10 +1,24 @@
-import { useRef, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import {
-  SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   SIDEBAR_RESIZE_STEP,
+  sidebarMaxWidth,
   useSidebarWidthStore,
 } from "./sidebarWidthStore";
+
+function useViewportWidth(): number {
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const handleResize = () => {
+      setViewportWidth(window.innerWidth);
+      useSidebarWidthStore.getState().fitToViewport();
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+  return viewportWidth;
+}
 
 const KEY_DELTAS: Partial<Record<string, number>> = {
   ArrowLeft: -SIDEBAR_RESIZE_STEP,
@@ -19,6 +33,7 @@ export function SidebarResizeSeam() {
   const width = useSidebarWidthStore((s) => s.width);
   const setWidth = useSidebarWidthStore((s) => s.setWidth);
   const resetWidth = useSidebarWidthStore((s) => s.resetWidth);
+  const viewportWidth = useViewportWidth();
   const dragOriginRef = useRef<{ pointerX: number; width: number } | null>(null);
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -51,7 +66,7 @@ export function SidebarResizeSeam() {
       aria-orientation="vertical"
       aria-label="Resize sidebar"
       aria-valuemin={SIDEBAR_MIN_WIDTH}
-      aria-valuemax={SIDEBAR_MAX_WIDTH}
+      aria-valuemax={sidebarMaxWidth(viewportWidth)}
       aria-valuenow={width}
       tabIndex={0}
       data-testid="sidebar-resize-seam"

@@ -91,7 +91,7 @@ import { StatusMark } from "@/components/ui/status-mark";
 import { relativeTime } from "@/lib/time";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { ThreadStatusLane } from "@/features/thread-attention/ThreadStatusLane";
-import { threadRowLook, threadRowSetup, threadStartupRecord, useThreadRowState, type ThreadRowLook, type ThreadStartupMaps } from "@/features/thread-attention/thread-row-presentation";
+import { threadRowLook, threadRowSetup, threadStartupRecord, threadTitleTone, useThreadRowState, type ThreadRowLook, type ThreadStartupMaps, type ThreadTitleTone } from "@/features/thread-attention/thread-row-presentation";
 import { useThreadStartupStore, useWorkspaceStartupRecovery } from "@/features/thread-startup/state/thread-startup-store";
 import {
   deriveThreadRowState,
@@ -1372,7 +1372,6 @@ interface ThreadRowProps {
   workspaceName: string;
   thread: WorkspaceThread;
   depth: number;
-  checks?: ChecksStatus;
   isEditing: boolean;
   inlineEdit: InlineEditState | null;
   worktreesLoadedFor: string | null;
@@ -1399,7 +1398,6 @@ const ThreadRow = memo(function ThreadRow({
   workspaceName,
   thread,
   depth,
-  checks,
   isEditing,
   inlineEdit,
   worktreesLoadedFor,
@@ -1427,6 +1425,7 @@ const ThreadRow = memo(function ThreadRow({
     validWorktreePaths,
     availableProviders,
     startupPending,
+    isActive,
   );
   const lifecycle = useThreadLifecycleActions({
     thread,
@@ -1461,7 +1460,6 @@ const ThreadRow = memo(function ThreadRow({
         workspaceName,
         thread,
         depth,
-        checks,
         isEditing,
         inlineEdit,
         onInlineEditChange,
@@ -1481,6 +1479,7 @@ const ThreadRow = memo(function ThreadRow({
 
 interface ThreadRowPresentation {
   look: ThreadRowLook;
+  titleTone: ThreadTitleTone;
   isStaleWorktree: boolean;
   provider: string;
   unusable: boolean;
@@ -1504,7 +1503,6 @@ interface ThreadRowVisualProps {
   workspaceName: string;
   thread: WorkspaceThread;
   depth: number;
-  checks: ChecksStatus | undefined;
   isEditing: boolean;
   inlineEdit: InlineEditState | null;
   onInlineEditChange: (title: string) => void;
@@ -1526,10 +1524,12 @@ function createThreadRowPresentation(
   validWorktreePaths: Set<string>,
   availableProviders: ThreadRowProps["availableProviders"],
   startupPending: boolean,
+  isActive: boolean,
 ): ThreadRowPresentation {
   const isUserCompleted = thread.user_completed_at !== null;
   return {
     look: threadRowLook(rowState),
+    titleTone: threadTitleTone(rowState, isActive),
     isStaleWorktree: hasStaleThreadWorktree(thread, worktreesLoadedFor, validWorktreePaths),
     ...threadProviderPresentation(thread.provider, availableProviders),
     scaffoldDim: thread.clientPreparing || thread.clientError || startupPending ? "opacity-[0.72]" : false,
@@ -1699,7 +1699,6 @@ function ThreadRowVisual({
   workspaceName,
   thread,
   depth,
-  checks,
   isEditing,
   inlineEdit,
   onInlineEditChange,
@@ -1736,7 +1735,7 @@ function ThreadRowVisual({
           onInlineEditCancel={onInlineEditCancel}
         />
         <ThreadRowBranchLine thread={thread} presentation={presentation} />
-        <ThreadRowThirdLine thread={thread} checks={checks} presentation={presentation} lifecycle={lifecycle} />
+        <ThreadRowThirdLine thread={thread} presentation={presentation} lifecycle={lifecycle} />
       </div>
       <ThreadRowActions
         thread={thread}
@@ -1865,7 +1864,8 @@ function ThreadRowTitleLine({
       ) : (
         <div
           className={cn(
-            "text-fade min-w-0 flex-1 text-label text-ink",
+            "text-fade min-w-0 flex-1 text-label",
+            presentation.titleTone === "prominent" ? "text-ink" : "text-muted",
             presentation.isUserCompleted && "text-muted/55 line-through decoration-muted/55 decoration-1",
           )}
           data-testid="thread-title"
@@ -1892,23 +1892,19 @@ function ThreadRowBranchLine({ thread, presentation }: Pick<ThreadRowVisualProps
   const stale = presentation.isStaleWorktree;
   return (
     <div className="flex h-4 min-w-0 items-center gap-2 text-caption text-muted">
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-        <GitBranch size={12} aria-hidden />
-      </span>
+      <ThreadModeIcon thread={thread} stale={stale} />
       <div
         aria-label={`Branch, ${checkoutLabel}`}
         className={cn("text-fade min-w-0 flex-1 font-mono", stale && "text-error line-through")}
       >
         {checkoutLabel}
       </div>
-      <div className="flex w-[52px] shrink-0 items-center justify-end">
-        <div className="w-6 text-center tabular-nums">{relativeTime(thread.updated_at)}</div>
-        <ThreadModeIcon thread={thread} stale={stale} />
-      </div>
+      <div className="w-6 shrink-0 text-right tabular-nums">{relativeTime(thread.updated_at)}</div>
     </div>
   );
 }
 
+/** Leads the branch line, so the checkout mode (worktree or local) takes the place of a branch glyph. */
 function ThreadModeIcon({ thread, stale }: { thread: WorkspaceThread; stale: boolean }) {
   const isWorktree = thread.mode === "worktree";
   const label = isWorktree ? "Worktree" : "Local";
@@ -1918,7 +1914,7 @@ function ThreadModeIcon({ thread, stale }: { thread: WorkspaceThread; stale: boo
         <div
           aria-label={`${label} mode`}
           data-testid={isWorktree ? `thread-worktree-indicator-${thread.id}` : undefined}
-          className={cn("flex h-4 w-6 items-center justify-center", stale && "text-error")}
+          className={cn("flex h-4 w-4 shrink-0 items-center justify-center", stale && "text-error")}
         >
           {isWorktree ? <WorktreeModeIcon size={12} aria-hidden /> : <Laptop size={12} aria-hidden />}
         </div>
@@ -1931,10 +1927,9 @@ function ThreadModeIcon({ thread, stale }: { thread: WorkspaceThread; stale: boo
 /** The third line: a row state label when there is one, otherwise the most urgent thread context. */
 function ThreadRowThirdLine({
   thread,
-  checks,
   presentation,
   lifecycle,
-}: Pick<ThreadRowVisualProps, "thread" | "checks" | "presentation" | "lifecycle">) {
+}: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {
   const label = presentation.look.label;
   if (label) return <ThreadRowCaption className={label.className}>{label.text}</ThreadRowCaption>;
   // A retry in flight or its failure is newer news than the standing block it retries.
@@ -1952,7 +1947,7 @@ function ThreadRowThirdLine({
     return <ThreadRowCaption className="text-error" data-testid={`sidebar-unusable-${thread.id}`}>{presentation.unusableReason}</ThreadRowCaption>;
   }
   if (isPrable(thread) && thread.pr_number !== null) {
-    return <ThreadPrLine threadId={thread.id} prNumber={thread.pr_number} prStatus={thread.pr_status} checks={checks} dimmed={presentation.isUserCompleted} />;
+    return <ThreadPrLine threadId={thread.id} prNumber={thread.pr_number} prStatus={thread.pr_status} dimmed={presentation.isUserCompleted} />;
   }
   return null;
 }
@@ -2244,52 +2239,29 @@ function threadCountLabel(
   return `${count} ${state} ${count === 1 ? "thread" : "threads"}`;
 }
 
-const PR_CHECKS_WORD: Record<"passing" | "pending" | "failing", string> = {
-  passing: "Passing",
-  pending: "Pending",
-  failing: "Failing",
-};
-
-/** The PR word shown after the number: Merged wins over checks, which a merged PR no longer runs. */
-function threadPrStateWord(prStatus: string | null, checks: ChecksStatus | undefined): string | null {
-  if (prStatus?.toLowerCase() === "merged") return "Merged";
-  if (!checks || checks.aggregate === "no_checks") return null;
-  return PR_CHECKS_WORD[checks.aggregate];
-}
-
-/** The PR context line: number tinted by PR state, then its merge or checks word. */
+/** The PR context line: the PR icon and number, tinted by PR state. */
 function ThreadPrLine({
   threadId,
   prNumber,
   prStatus,
-  checks,
   dimmed,
 }: {
   threadId: string;
   prNumber: number;
   prStatus: string | null;
-  checks: ChecksStatus | undefined;
   dimmed: boolean;
 }) {
   const { Icon: PrIcon, color: prColor } = getPrVisual(prStatus);
-  const word = threadPrStateWord(prStatus, checks);
-  const wordColor = checks && word !== "Merged" && checks.aggregate !== "no_checks" ? getCiVisual(checks.aggregate).color : "text-muted";
   return (
     <div
-      aria-label={`PR #${prNumber}, ${prStatus ?? "open"}${word && word !== "Merged" ? `, checks ${word.toLowerCase()}` : ""}`}
+      aria-label={`PR #${prNumber}, ${prStatus ?? "open"}`}
       data-testid={`thread-pr-indicator-${threadId}`}
-      className={cn("flex h-4 min-w-0 items-center gap-1.5 text-caption text-muted", dimmed && "grayscale opacity-45")}
+      className={cn("flex h-5 min-w-0 items-center gap-1 text-caption text-muted", dimmed && "grayscale opacity-45")}
     >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-        <PrIcon size={12} aria-hidden className={prColor} />
+      <span className="flex size-5 shrink-0 items-center justify-center">
+        <PrIcon size={16} aria-hidden className={prColor} />
       </span>
-      <span className={cn("shrink-0 underline underline-offset-2", prColor)}>PR #{prNumber}</span>
-      {word ? (
-        <>
-          <span aria-hidden className="text-muted/45">·</span>
-          <span data-testid={`thread-pr-ci-${threadId}`} className={cn("text-fade min-w-0", wordColor)}>{word}</span>
-        </>
-      ) : null}
+      <span className={cn("shrink-0 font-medium underline underline-offset-2", prColor)}>PR #{prNumber}</span>
     </div>
   );
 }
@@ -2910,7 +2882,6 @@ function WorkspaceThreadSection({
               workspaceName={workspace.name}
               thread={item.thread}
               depth={item.depth}
-              checks={ctx.checksById[item.thread.id]}
               isEditing={ctx.inlineEdit?.threadId === item.thread.id}
               inlineEdit={
                 ctx.inlineEdit?.threadId === item.thread.id

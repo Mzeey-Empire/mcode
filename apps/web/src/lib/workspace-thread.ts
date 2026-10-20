@@ -69,6 +69,7 @@ function resolveCheckoutFields(params: PlaceholderWorkspaceThreadParams) {
     worktree_path: params.worktreePath ?? null,
     checkout_state: checkoutState,
     base_branch: params.baseBranch ?? (checkoutState === "branchless" ? params.branch : null),
+    head_sha: null,
     worktree_managed: params.worktreeManaged ?? params.transportMode === "worktree",
   };
 }

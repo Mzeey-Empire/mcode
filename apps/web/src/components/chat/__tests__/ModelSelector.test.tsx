@@ -131,7 +131,7 @@ describe("ModelSelector", () => {
     expect(dialog).toHaveTextContent("Codex is disabled. Enable it in Settings under Providers.");
   });
 
-  it("names each provider tab and shows the active tab's name", async () => {
+  it("names each provider tab and marks the active one", async () => {
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
       onSelect={vi.fn()} locked={false} />);
     await openPicker();
@@ -150,7 +150,7 @@ describe("ModelSelector", () => {
     expect(screen.getAllByRole("radio").map((tab) => tab.textContent)).toEqual(["Claude"]);
   });
 
-  it("checks the selected row and stars a model without choosing it", async () => {
+  it("marks the selected row and stars a model without choosing it", async () => {
     const onSelect = vi.fn();
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
       onSelect={onSelect} locked={false} />);

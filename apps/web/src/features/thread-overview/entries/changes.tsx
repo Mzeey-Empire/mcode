@@ -11,7 +11,7 @@ import { getTransport, type McodeTransport, type Thread } from "@/transport";
 import type { ReviewComparisonResult, TurnSnapshot } from "@mcode/contracts";
 import { Diff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LoadStatus, OVERVIEW_ROW_CLASS, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
+import { LoadStatus, OVERVIEW_ROW_CLASS, OverviewRowIcon, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
 type SnapshotDiffStat = { filePath: string; additions: number; deletions: number };
 
@@ -347,13 +347,10 @@ function ChangesEntry() {
       aria-label={`Changes, ${changedFilesLabel(changeSummary.files)}`}
       className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-between gap-2")}
     >
-      <span className="flex size-4 shrink-0 items-center justify-center">
-        <Diff
-          size={16}
-          className="text-muted transition-colors duration-150 group-hover:text-ink/80"
-        />
-      </span>
-      <span className="text-fade min-w-0 grow text-sm text-ink">Changes</span>
+      <OverviewRowIcon>
+        <Diff />
+      </OverviewRowIcon>
+      <span className="text-fade min-w-0 grow text-ink">Changes</span>
       <ThreadOverviewWhen when={isChangeSummaryLoading}>
         <span
           data-testid="thread-overview-change-loading"

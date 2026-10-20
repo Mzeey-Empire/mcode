@@ -11,7 +11,10 @@ const ATTACHED_RAIL_INSET_PX = 14;
 const VIEWPORT_PADDING_PX = 8;
 const FLOATING_GAP_PX = 4;
 
-/** Keeps attached overlays in the composer's layout so content reserves its own height. */
+/**
+ * Docks attached overlays on the composer's top edge. The host sits outside layout flow so an
+ * opening tray overlays the content above instead of moving the composer.
+ */
 export function ComposerOverlayLayout({ children, className }: {
   readonly children: ReactNode;
   readonly className?: string;
@@ -19,8 +22,12 @@ export function ComposerOverlayLayout({ children, className }: {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   return (
     <ComposerOverlayHost.Provider value={host}>
-      <div className={className}>
-        <div ref={setHost} data-testid="composer-overlay-host" />
+      <div className={cn("relative", className)}>
+        <div
+          ref={setHost}
+          data-testid="composer-overlay-host"
+          className="absolute inset-x-0 bottom-full z-(--layer-dropdown)"
+        />
         {children}
       </div>
     </ComposerOverlayHost.Provider>
@@ -59,8 +66,8 @@ function floatingWidth(anchorWidth: number, minWidth: number, maxWidth: number |
 }
 
 /**
- * Shared autocomplete overlay. Inside a composer layout an attached overlay joins the composer
- * as an in-flow rail; everywhere else it floats above its anchor as a popover.
+ * Shared autocomplete overlay. Inside a composer layout an attached overlay docks on the
+ * composer's top edge as a rail; everywhere else it floats above its anchor as a popover.
  */
 export const ComposerOverlaySurface = forwardRef<HTMLDivElement, ComposerOverlaySurfaceProps>(
   function ComposerOverlaySurface(

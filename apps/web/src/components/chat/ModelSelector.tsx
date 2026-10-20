@@ -630,6 +630,8 @@ export function ModelSelector({
           renderItem={renderItem}
           onSelect={(option) => handleSelectModel(option.modelId, option.providerId)}
           footer={settings}
+          hairlines={false}
+          selectedCheck={false}
         />
       </PopoverContent>
     </Popover>

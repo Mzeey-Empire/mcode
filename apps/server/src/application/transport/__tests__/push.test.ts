@@ -292,6 +292,7 @@ describe("broadcast", () => {
       branch: "feat/thread",
       checkoutState: "named",
       baseBranch: null,
+      headSha: null,
       prNumber: null,
       prStatus: null,
     });

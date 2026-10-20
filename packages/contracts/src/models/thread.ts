@@ -31,6 +31,8 @@ export const ThreadSchema = lazySchema(() =>
   branch: z.string(),
   checkout_state: ThreadCheckoutStateSchema.default("named"),
   base_branch: z.string().nullable().default(null),
+  /** Short commit hash of a detached checkout's HEAD. Null on a named branch or before the first HEAD read. */
+  head_sha: z.string().nullable().default(null),
   /** Whether the worktree was provisioned by the app (true) or attached externally (false). */
   worktree_managed: z.boolean(),
   issue_number: z.number().nullable(),

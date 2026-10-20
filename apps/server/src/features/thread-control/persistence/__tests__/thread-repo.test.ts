@@ -161,7 +161,7 @@ describe("ThreadRepo.updateCheckoutFromHead", () => {
     const thread = threadRepo.create(workspaceId, "t", "worktree", "release", true, "claude", undefined, "branchless", "release");
     threadRepo.updatePr(thread.id, 12, "OPEN");
 
-    const result = threadRepo.updateCheckoutFromHead(thread.id, "feat/new", "named", null);
+    const result = threadRepo.updateCheckoutFromHead(thread.id, "feat/new", "named", null, null);
 
     expect(result?.changed).toBe(true);
     expect(result?.thread).toMatchObject({
@@ -176,7 +176,7 @@ describe("ThreadRepo.updateCheckoutFromHead", () => {
   it("updates a named checkout to another named branch", () => {
     const thread = threadRepo.create(workspaceId, "t", "worktree", "feat/old");
 
-    const result = threadRepo.updateCheckoutFromHead(thread.id, "feat/new", "named", null);
+    const result = threadRepo.updateCheckoutFromHead(thread.id, "feat/new", "named", null, null);
 
     expect(result?.changed).toBe(true);
     expect(result?.thread.branch).toBe("feat/new");
@@ -186,7 +186,7 @@ describe("ThreadRepo.updateCheckoutFromHead", () => {
   it("updates a named checkout to detached HEAD with previous branch as base", () => {
     const thread = threadRepo.create(workspaceId, "t", "worktree", "feat/base");
 
-    const result = threadRepo.updateCheckoutFromHead(thread.id, "HEAD", "branchless", "feat/base");
+    const result = threadRepo.updateCheckoutFromHead(thread.id, "HEAD", "branchless", "feat/base", null);
 
     expect(result?.changed).toBe(true);
     expect(result?.thread).toMatchObject({
@@ -200,11 +200,40 @@ describe("ThreadRepo.updateCheckoutFromHead", () => {
     const thread = threadRepo.create(workspaceId, "t", "worktree", "feat/same");
     threadRepo.updatePr(thread.id, 34, "OPEN");
 
-    const result = threadRepo.updateCheckoutFromHead(thread.id, "feat/same", "named", null);
+    const result = threadRepo.updateCheckoutFromHead(thread.id, "feat/same", "named", null, null);
 
     expect(result?.changed).toBe(false);
     expect(result?.thread.pr_number).toBe(34);
     expect(result?.thread.pr_status).toBe("OPEN");
+  });
+
+  it("reports a detached HEAD that moved to another commit and keeps the PR metadata", () => {
+    const thread = threadRepo.create(workspaceId, "t", "worktree", "release", true, "claude", undefined, "branchless", "release");
+    threadRepo.updateCheckoutFromHead(thread.id, "HEAD", "branchless", "release", "aaaaaaa");
+    threadRepo.updatePr(thread.id, 56, "OPEN");
+
+    const result = threadRepo.updateCheckoutFromHead(thread.id, "HEAD", "branchless", "release", "bbbbbbb");
+
+    expect(result?.changed).toBe(true);
+    expect(result?.thread).toMatchObject({ head_sha: "bbbbbbb", pr_number: 56, pr_status: "OPEN" });
+  });
+
+  it("does not report a detached HEAD that stayed on the same commit", () => {
+    const thread = threadRepo.create(workspaceId, "t", "worktree", "release", true, "claude", undefined, "branchless", "release");
+    threadRepo.updateCheckoutFromHead(thread.id, "HEAD", "branchless", "release", "aaaaaaa");
+
+    const result = threadRepo.updateCheckoutFromHead(thread.id, "HEAD", "branchless", "release", "aaaaaaa");
+
+    expect(result?.changed).toBe(false);
+  });
+
+  it("drops the commit hash once the checkout is back on a named branch", () => {
+    const thread = threadRepo.create(workspaceId, "t", "worktree", "release", true, "claude", undefined, "branchless", "release");
+    threadRepo.updateCheckoutFromHead(thread.id, "HEAD", "branchless", "release", "aaaaaaa");
+
+    const result = threadRepo.updateCheckoutFromHead(thread.id, "feat/new", "named", null, null);
+
+    expect(result?.thread.head_sha).toBeNull();
   });
 });
 

@@ -57,6 +57,7 @@ interface DesignLayerProps {
   readonly canSaveOpenBubble: ReturnType<typeof useDesignAnnotationEditor>["canSaveOpenBubble"];
   readonly bubbleSlashState: ReturnType<typeof useDesignAnnotationState>["bubbleSlashState"];
   readonly bubbleSlashAnchorRect: ReturnType<typeof useDesignAnnotationState>["bubbleSlashAnchorRect"];
+  readonly highlightBubbleSlash: ReturnType<typeof useDesignAnnotationState>["highlightBubbleSlash"];
   readonly dismissBubbleSlash: ReturnType<typeof useDesignAnnotationState>["dismissBubbleSlash"];
   readonly retryBubbleSlash: ReturnType<typeof useDesignAnnotationState>["retryBubbleSlash"];
   readonly bubbleFileSuggestions: ReturnType<typeof useDesignAnnotationState>["bubbleFileSuggestions"];
@@ -101,6 +102,7 @@ export function DesignLayer({
   canSaveOpenBubble,
   bubbleSlashState,
   bubbleSlashAnchorRect,
+  highlightBubbleSlash,
   dismissBubbleSlash,
   retryBubbleSlash,
   bubbleFileSuggestions,
@@ -406,6 +408,7 @@ export function DesignLayer({
               }
             });
           }}
+          onHighlight={highlightBubbleSlash}
           onDismiss={dismissBubbleSlash}
           onRetry={retryBubbleSlash}
           tone="dark"

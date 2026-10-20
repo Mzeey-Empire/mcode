@@ -119,7 +119,7 @@ export function ChecksPopover({
         data-testid="thread-overview-ci-popover"
         className="w-[356px] overflow-hidden p-0"
       >
-        <div className="max-h-[320px] overflow-y-auto py-1 scrollbar-on-hover">
+        <div className="max-h-[320px] overflow-y-auto py-1">
           {sortedRuns.length > 0 ? (
             sortedRuns.map((run, index) => (
               <RunRow key={`${run.name}-${index}`} run={run} />

@@ -15,6 +15,8 @@ import { ReleaseNotesCard } from "./ReleaseNotesCard";
 
 /** How long "Up to date" holds after a user-started check finds nothing. */
 export const UP_TO_DATE_FLASH_MS = 3_000;
+/** How long Install waits for the running-agent count before asking the user instead. */
+export const AGENT_COUNT_DEADLINE_MS = 3_000;
 /** Hover delay before the release notes card opens. */
 export const RELEASE_NOTES_HOVER_DELAY_MS = 300;
 
@@ -47,7 +49,10 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
   const pendingVersion = useUpdateStore((s) => s.pendingVersion);
   const [upToDateFlash, setUpToDateFlash] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null);
+  const [installing, setInstalling] = useState(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // State lags a render behind, so a second click in the same tick would slip past `installing`.
+  const installLock = useRef(false);
 
   useEffect(() => () => {
     if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -62,14 +67,35 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
     flashTimer.current = setTimeout(() => setUpToDateFlash(false), UP_TO_DATE_FLASH_MS);
   };
 
-  const install = async (version: string) => {
-    const runningAgents = await readRunningAgents();
-    if (runningAgents === 0) {
-      await app.installUpdate();
-      return;
+  // Held from click until the desktop answers, so a slow teardown shows progress and repeat clicks do nothing.
+  const exclusiveInstall = async (work: () => Promise<void>) => {
+    if (installLock.current) return;
+    installLock.current = true;
+    setInstalling(true);
+    try {
+      await work();
+    } finally {
+      installLock.current = false;
+      setInstalling(false);
     }
-    setInstallPrompt({ version, runningAgents });
   };
+
+  const installNow = async () => {
+    const started = await app.installUpdate().catch((error: unknown) => {
+      console.error("[updates] installUpdate failed", error);
+      return false;
+    });
+    if (started) return;
+    // The desktop publishes why it refused; reading it back guarantees the Retry pill even if that push was missed.
+    useUpdateStore.getState().setStatus(await app.getUpdateStatus());
+  };
+
+  const install = (version: string) =>
+    exclusiveInstall(async () => {
+      const runningAgents = await readRunningAgents();
+      if (runningAgents === 0) return installNow();
+      setInstallPrompt({ version, runningAgents });
+    });
 
   const retry = (operation: FailedUpdateOperation) => {
     if (operation === "check") return void check();
@@ -89,7 +115,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
           onCancel={() => setInstallPrompt(null)}
           onRestartNow={() => {
             setInstallPrompt(null);
-            void app.installUpdate();
+            void exclusiveInstall(installNow);
           }}
           onInstallWhenIdle={() => {
             setInstallPrompt(null);
@@ -101,6 +127,18 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
   );
 
   function renderView(): ReactElement {
+    if (installing) {
+      return (
+        <span
+          role="status"
+          aria-label="Installing update"
+          className={cn("inline-flex h-8 items-center rounded-control bg-selected", FILLED_CLASS)}
+        >
+          <Spinner size={16} className="text-muted" />
+          <span className="text-fade">Installing…</span>
+        </span>
+      );
+    }
     switch (view.kind) {
       case "rest":
         return (
@@ -190,12 +228,19 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
   }
 }
 
-// An unreadable count is treated as "agents may be running" so Install never silently stops work.
+// An unreadable or late count is treated as "agents may be running" so Install never silently stops work.
+// The shared transport waits for its socket with no deadline, so the cap lives here.
 async function readRunningAgents(): Promise<number | null> {
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    deadlineTimer = setTimeout(() => resolve(null), AGENT_COUNT_DEADLINE_MS);
+  });
   try {
-    return await getTransport().getActiveAgentCount();
+    return await Promise.race([getTransport().getActiveAgentCount(), deadline]);
   } catch {
     return null;
+  } finally {
+    clearTimeout(deadlineTimer);
   }
 }
 

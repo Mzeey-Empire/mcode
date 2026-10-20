@@ -1068,6 +1068,7 @@ describe("routeMessage git.createBranch", () => {
       branch: "feat/from-thread",
       checkout_state: "named",
       base_branch: null,
+      head_sha: null,
       pr_number: null,
       pr_status: null,
     });
@@ -1105,6 +1106,7 @@ describe("routeMessage git.createBranch", () => {
         branch: "feat/from-thread",
         checkoutState: "named",
         baseBranch: null,
+        headSha: null,
         prNumber: null,
         prStatus: null,
       },

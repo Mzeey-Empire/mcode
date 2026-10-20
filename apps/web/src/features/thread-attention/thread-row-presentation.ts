@@ -32,6 +32,17 @@ export function threadRowLook(state: ThreadRowState): ThreadRowLook {
   }
 }
 
+/** How strongly a row title reads: `prominent` is full ink, `receded` is muted. */
+export type ThreadTitleTone = "prominent" | "receded";
+
+/**
+ * Quiet rows have nothing new, so their titles recede; the selected row keeps
+ * full ink so the thread the user is reading stays legible.
+ */
+export function threadTitleTone(state: ThreadRowState, selected: boolean): ThreadTitleTone {
+  return state.kind === "quiet" && !selected ? "receded" : "prominent";
+}
+
 /** Only a setup that is holding the thread's startup shapes its row. */
 export function threadRowSetup(startup: ThreadStartup | undefined): ThreadRowSetup {
   switch (startupDecision(startup)) {

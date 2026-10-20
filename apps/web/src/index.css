@@ -138,8 +138,8 @@
   --info: var(--blue-700);
   --pr-merged: var(--violet-700);
   --selection: color-mix(in oklch, var(--blue-500) 18%, transparent);
-  --scrollbar-thumb: var(--neutral-300);
-  --scrollbar-thumb-hover: var(--neutral-400);
+  --scrollbar-thumb: color-mix(in oklch, var(--ink) 18%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklch, var(--ink) 32%, transparent);
   --elevation-popover: 0 12px 32px #1418201f, 0 2px 6px #1418200f;
   --elevation-floating: 0 12px 32px #1418201f, 0 2px 6px #1418200f;
   --elevation-dialog: 0 12px 32px #1418201f, 0 2px 6px #1418200f;
@@ -187,8 +187,8 @@
   --info: var(--blue-400);
   --pr-merged: var(--violet-400);
   --selection: color-mix(in oklch, var(--blue-500) 30%, transparent);
-  --scrollbar-thumb: var(--neutral-400);
-  --scrollbar-thumb-hover: var(--neutral-300);
+  --scrollbar-thumb: color-mix(in oklch, var(--ink) 22%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklch, var(--ink) 38%, transparent);
   /* Menus and pickers use the screens' heavier shadow, not the style guide's
      0 8px 24px at 24% (decisions.md D2). */
   --elevation-popover: 0 16px 40px oklch(0 0 0 / 0.45);
@@ -381,6 +381,55 @@
   &[data-overflow-end] {
     --scroll-fade-end: var(--spacing-text-fade);
   }
+}
+
+/* A vertical list that shows it scrolls by fading 1.5rem at each edge that
+   hides content, in place of a scrollbar. Two scroll-driven animations ramp
+   the edge sizes over the first and last 1.5rem of scroll, so the top fade
+   appears once scrolled and the bottom fade leaves at the end. As with
+   text-fade, an inactive timeline (nothing to scroll) applies no animation,
+   leaving both edges at 0 and the list unmasked. The edges are registered
+   lengths because unregistered custom properties cannot interpolate. */
+@property --scroll-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --scroll-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@utility scroll-fade-y {
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: none;
+  scroll-padding-block: 1.5rem;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black var(--scroll-fade-top),
+    black calc(100% - var(--scroll-fade-bottom)),
+    transparent
+  );
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  @supports (animation-timeline: scroll()) {
+    animation: scroll-fade-y-top linear both, scroll-fade-y-bottom linear both;
+    animation-timeline: scroll(self block), scroll(self block);
+    animation-range: 0 1.5rem, calc(100% - 1.5rem) 100%;
+  }
+}
+
+@keyframes scroll-fade-y-top {
+  from { --scroll-fade-top: 0px; }
+  to { --scroll-fade-top: 1.5rem; }
+}
+
+@keyframes scroll-fade-y-bottom {
+  from { --scroll-fade-bottom: 1.5rem; }
+  to { --scroll-fade-bottom: 0px; }
 }
 
 /* Vertical clamp to N lines that ends in a 24px bottom fade when clamped. */
@@ -807,20 +856,51 @@ diffs-container:has([data-jump-highlight="true"]) {
     font-variant-ligatures: none;
   }
 
-  /* Thin scrollbars matching T3Code */
+  /* Scrollbars stay invisible until the pointer is over their container.
+     Wheel scrolling always has the pointer over the scroller, so :hover also
+     covers "while scrolling" without JS. Chromium ignores transitions on
+     scrollbar pseudo-elements, so the thumb switches without a fade.
+     The thumb reads its colour from a custom property that :hover sets on the
+     scroller itself: Chromium does not reliably repaint a selector like
+     `*:hover::-webkit-scrollbar-thumb`, but it does when the owner's own
+     style changes. Every element resets the property so a hovered ancestor
+     does not light up the scrollbars nested inside it. */
+  * {
+    --scrollbar-thumb-current: transparent;
+  }
+  *:hover {
+    --scrollbar-thumb-current: var(--scrollbar-thumb);
+  }
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
-  ::-webkit-scrollbar-track {
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
     background: transparent;
   }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
   ::-webkit-scrollbar-thumb {
-    background: var(--scrollbar-thumb);
+    background: var(--scrollbar-thumb-current);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
     background: var(--scrollbar-thumb-hover);
+  }
+
+  /* Firefox has no ::-webkit-scrollbar. Chromium 121+ drops the webkit
+     pseudo-elements on any element with scrollbar-color, so this stays
+     gated to engines without them. */
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: transparent transparent;
+    }
+    *:hover {
+      scrollbar-color: var(--scrollbar-thumb) transparent;
+    }
   }
 }
 
@@ -876,25 +956,6 @@ input[type="range"].settings-range::-moz-range-thumb {
   background: var(--ink);
   border: 2px solid var(--background);
   cursor: pointer;
-}
-
-/* Scrollbar hidden by default, visible on hover */
-.scrollbar-on-hover {
-  scrollbar-width: none;
-}
-.scrollbar-on-hover::-webkit-scrollbar {
-  width: 0;
-}
-.scrollbar-on-hover:hover {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-.scrollbar-on-hover:hover::-webkit-scrollbar {
-  width: 4px;
-}
-.scrollbar-on-hover:hover::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 2px;
 }
 
 @keyframes blink {

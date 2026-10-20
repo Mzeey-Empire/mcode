@@ -336,6 +336,7 @@ function ComposerEditorPopups({
         anchorRect={model.slashCommand.anchorRect}
         workspacePath={model.workspacePath}
         onSelect={actions.onSlashSelect}
+        onHighlight={model.slashCommand.onHighlight}
         onDismiss={model.slashCommand.onDismiss}
         onRetry={model.slashCommand.onRetry}
       />

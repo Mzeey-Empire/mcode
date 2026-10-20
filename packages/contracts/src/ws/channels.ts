@@ -124,6 +124,7 @@ export const WS_CHANNELS = {
       branch: z.string(),
       checkoutState: z.enum(["named", "branchless"]),
       baseBranch: z.string().nullable(),
+      headSha: z.string().nullable(),
       prNumber: z.number().nullable(),
       prStatus: z.string().nullable(),
     }),

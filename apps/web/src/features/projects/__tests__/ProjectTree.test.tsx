@@ -268,6 +268,7 @@ function makeThread(
     branch: "main",
     checkout_state: "named",
     base_branch: null,
+    head_sha: null,
     worktree_managed: false,
     issue_number: null,
     pr_number: null,
@@ -1639,7 +1640,7 @@ describe("ProjectTree action-required indicator", () => {
     setupStoreMocks({ thread: makeThread({ id: "thread-updated", title: "Updated Thread", updated_at: updatedAt }) });
     render(<ProjectTree />);
 
-    const row = screen.getByRole("button", { name: /^Provider, Claude Updated Thread Branch, main 5m /i });
+    const row = screen.getByRole("button", { name: /^Provider, Claude Updated Thread Local mode Branch, main 5m$/i });
     const exactTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(updatedAt));
     row.focus();
     expect(await screen.findByTestId("thread-preview-thread-updated")).toHaveTextContent(`Updated ${exactTime}`);
@@ -1841,31 +1842,32 @@ describe("ProjectTree PR-ability gating by mode", () => {
     expect(row).toContainElement(indicator);
   });
 
-  it("renders the merged PR visual for a worktree thread", () => {
+  it("renders a merged PR as a violet number, and never words the CI state", () => {
     renderWithThread(
       makeThread({ mode: "worktree", pr_number: 42, pr_status: "merged" }),
+      {
+        "thread-1": {
+          aggregate: "failing",
+          runs: [{ name: "build", status: "completed", conclusion: "failure" }],
+        },
+      },
     );
-    expect(screen.getByLabelText("PR #42, merged")).toHaveTextContent("PR #42·Merged");
+    const indicator = screen.getByLabelText("PR #42, merged");
+    expect(indicator).toHaveTextContent(/^PR #42$/);
+    expect(screen.getByText("PR #42")).toHaveClass("text-pr-merged");
   });
 
-  it.each([
-    ["passing", "Passing"],
-    ["failing", "Failing"],
-    ["pending", "Pending"],
-  ])("names %s checks after the PR number", (aggregate, word) => {
+  it("shows only the PR number on an open PR with failing checks", () => {
     renderWithThread(
       makeThread({ mode: "worktree", pr_number: 42, pr_status: "open" }),
       {
         "thread-1": {
-          aggregate,
-          runs: [{ name: "build", status: "completed", conclusion: "success" }],
+          aggregate: "failing",
+          runs: [{ name: "build", status: "completed", conclusion: "failure" }],
         },
       },
     );
-
-    expect(screen.getByLabelText(`PR #42, open, checks ${word.toLowerCase()}`)).toBeInTheDocument();
-    const checks = screen.getByTestId("thread-pr-ci-thread-1");
-    expect(checks).toHaveTextContent(word);
+    expect(screen.getByLabelText("PR #42, open")).toHaveTextContent(/^PR #42$/);
   });
 
   it("renders no status mark or PR line for a quiet non-PR row", () => {
@@ -1891,7 +1893,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
     expect(screen.getByLabelText("Worktree mode")).toBeInTheDocument();
   });
 
-  it("shows a read-only preview on focus with project, HEAD branch, and provider labels", async () => {
+  it("shows a read-only preview on focus with project, detached branch, and provider labels", async () => {
     renderWithThread(
       makeThread({
         id: "thread-branchless",
@@ -1899,6 +1901,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
         mode: "worktree",
         checkout_state: "branchless",
         branch: "HEAD",
+        base_branch: "main",
         status: "paused",
         provider: "codex",
       }),
@@ -1911,7 +1914,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
     );
     expect(preview).toHaveTextContent("Branchless Thread");
     expect(screen.getByLabelText("Project, Test Project")).toBeInTheDocument();
-    expect(within(preview).getByLabelText("Branch, HEAD")).toBeInTheDocument();
+    expect(within(preview).getByLabelText("Branch, detached from main")).toBeInTheDocument();
     expect(within(preview).queryByLabelText(/^Provider,/)).toBeNull();
     expect(screen.getByLabelText("Provider, Codex")).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Status,/)).toBeNull();

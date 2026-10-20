@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
+import { cn } from "@/lib/utils";
 import { GitPullRequest } from "lucide-react";
-import { ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
+import { OVERVIEW_ROW_CLASS, OverviewRowIcon, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
 function CommitEntry() {
   const { branchlessCreatePr, handleCommit } = useOverviewContext();
@@ -14,9 +15,11 @@ function CommitEntry() {
       type="button"
       data-testid="workspace-menu-commit"
       onClick={handleCommit}
-      className="h-8 w-full justify-start gap-2 px-2 text-left text-xs text-ink/75"
+      className={cn(OVERVIEW_ROW_CLASS, "justify-start text-ink/75")}
     >
-      <GitPullRequest size={14} className="shrink-0 text-muted" />
+      <OverviewRowIcon>
+        <GitPullRequest />
+      </OverviewRowIcon>
       <span className="font-medium">Commit…</span>
     </Button>
   </ThreadOverviewWhen>);

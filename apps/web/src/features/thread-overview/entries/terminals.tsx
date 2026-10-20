@@ -7,7 +7,7 @@ import { shellActionIconId } from "@/features/projects/actions/action-icons";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
 import { terminalTabLabels } from "@/features/terminal/surfaces/terminalTabs";
-import { OVERVIEW_ROW_CLASS } from "@/features/thread-overview/overview-row";
+import { OVERVIEW_ROW_CLASS, OverviewRowIcon } from "@/features/thread-overview/overview-row";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { openRightPanelTab } from "@/lib/right-panel-layout";
 import { cn } from "@/lib/utils";
@@ -90,8 +90,10 @@ function TerminalRowItem({ row, onOpen }: { readonly row: TerminalRow; readonly 
         onClick={() => onOpen(row.id)}
         className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start gap-2 hover:bg-transparent")}
       >
-        <ActionIcon iconId={row.icon.iconId} command={row.icon.command} size={16} />
-        <span className="min-w-0 flex-1 text-fade text-sm/5 text-ink">{row.name}</span>
+        <OverviewRowIcon>
+          <ActionIcon iconId={row.icon.iconId} command={row.icon.command} size={16} />
+        </OverviewRowIcon>
+        <span className="min-w-0 flex-1 text-fade text-ink">{row.name}</span>
         <span className="shrink-0 text-xs/4 text-muted group-focus-within/terminal:invisible group-hover/terminal:invisible">
           {rowMeta(row)}
         </span>
@@ -101,7 +103,7 @@ function TerminalRowItem({ row, onOpen }: { readonly row: TerminalRow; readonly 
         size="inline-sm"
         aria-label={`Stop ${row.name}`}
         onClick={() => stopTerminal(row.id)}
-        className="absolute top-1 right-2 hidden group-focus-within/terminal:flex group-hover/terminal:flex"
+        className="absolute top-1/2 right-3 hidden -translate-y-1/2 group-focus-within/terminal:flex group-hover/terminal:flex"
       >
         <span aria-hidden className="size-2 rounded-xs bg-ink" />
       </IconButton>
@@ -123,7 +125,7 @@ function TerminalsSection({ thread }: { readonly thread: Thread }) {
   };
   return (
     <section aria-label="Terminals" className="flex flex-col gap-1">
-      <h3 className="flex h-6 items-center px-2 text-xs/4 font-medium text-muted">Terminals</h3>
+      <h3 className="flex h-6 items-center px-3 text-xs/4 font-medium text-muted">Terminals</h3>
       {visible.map((row) => <TerminalRowItem key={row.id} row={row} onOpen={openTerminal} />)}
       {hidden > 0 ? (
         <Button
@@ -132,9 +134,9 @@ function TerminalsSection({ thread }: { readonly thread: Thread }) {
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded((value) => !value)}
-          className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start gap-2 text-sm/5 text-muted")}
+          className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start text-muted")}
         >
-          {expanded ? <ChevronUp className="size-3.5" aria-hidden /> : <ChevronDown className="size-3.5" aria-hidden />}
+          <OverviewRowIcon>{expanded ? <ChevronUp /> : <ChevronDown />}</OverviewRowIcon>
           {expanded ? "Show less" : `${hidden} more`}
         </Button>
       ) : null}

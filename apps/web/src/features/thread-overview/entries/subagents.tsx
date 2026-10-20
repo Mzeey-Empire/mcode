@@ -38,7 +38,7 @@ function SubagentsEntry({ thread }: { thread: Thread }) {
       className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start gap-2")}
     >
       <ProviderDiscStack providers={providers} />
-      <span className="shrink-0 text-xs tabular-nums text-muted">{copy}</span>
+      <span className="shrink-0 tabular-nums text-muted">{copy}</span>
     </Button>
   </ThreadOverviewWhen>);
 }
