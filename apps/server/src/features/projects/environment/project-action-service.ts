@@ -55,18 +55,16 @@ export const PROJECT_ACTION_RUN_ID_FACTORY_TOKEN = "ProjectActionRunIdFactory";
 
 export type { ProjectActionRunUpdate };
 
+/** Options shared by `start`, `restart` and `launch`. */
 type ProjectActionStartOptions = {
   trigger: WorkspaceEnvironmentActionRun["trigger"];
   expectedScriptHash?: string;
   skipUnapproved?: boolean;
 };
 
-/** Options for {@link ProjectActionService.launch}. */
-export type ProjectActionLaunchOptions = ProjectActionStartOptions;
-
 /** Whether a run has already announced its preview, so each run opens at most one tab. */
 export interface ProjectActionPreviewRequest {
-  readonly emitted: boolean;
+  emitted: boolean;
 }
 
 /**
@@ -106,7 +104,7 @@ export class ProjectActionService {
   }>();
   private readonly outputListeners = new Set<(run: WorkspaceEnvironmentActionRun, bytes: Uint8Array) => void>();
   private readonly active = new Map<string, ProjectActionSlotState>();
-  private readonly previews = new Map<string, { emitted: boolean }>();
+  private readonly previews = new Map<string, ProjectActionPreviewRequest>();
   private readonly admission = new ProjectActionAdmissionGate();
   private readonly publisher: ProjectActionRunPublisher;
   private readonly runFactory: ProjectActionRunFactory;
@@ -182,10 +180,15 @@ export class ProjectActionService {
    * and so is an action whose command is not approved yet, so an unattended launch can neither
    * create nor disturb approval work. That case returns `null`.
    */
-  launch(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionLaunchOptions & { skipUnapproved: true }): Promise<WorkspaceEnvironmentActionRun | null>;
-  launch(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionLaunchOptions): Promise<WorkspaceEnvironmentActionRun>;
-  async launch(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionLaunchOptions): Promise<WorkspaceEnvironmentActionRun | null> {
+  launch(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionStartOptions & { skipUnapproved: true }): Promise<WorkspaceEnvironmentActionRun | null>;
+  launch(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionStartOptions): Promise<WorkspaceEnvironmentActionRun>;
+  async launch(input: WorkspaceEnvironmentActionSlotInput, options: ProjectActionStartOptions): Promise<WorkspaceEnvironmentActionRun | null> {
     if (!options.skipUnapproved) return await this.restart(input, options);
+    // Restart stops the running command before it starts a new one, so a closing Thread must be
+    // refused first or a healthy run would be killed and not replaced.
+    const thread = this.threads.findById(input.threadId);
+    if (!thread) throw threadNotFoundError();
+    this.admission.assertThreadCanStart(thread, thread);
     if (this.runs.get(input.threadId, input.actionId)?.status === "awaiting-approval") return null;
     if ((await resolveProjectAction(this.environment, input.threadId, input.actionId)).kind === "awaiting-approval") return null;
     try {

@@ -717,6 +717,20 @@ describe("ProjectActionService.launch", () => {
     expect(launched).toMatchObject({ status: "running", trigger: "manual" });
   });
 
+  it("leaves a running command alone when its thread is closing", async () => {
+    const f = await actionFixture();
+    f.host.interruptOnInput = true;
+    const running = await f.actions.start(actionSlot);
+    const release = await f.actions.beginThreadTeardown(ACTION_TEST_THREAD);
+
+    await expect(f.actions.launch(actionSlot, { trigger: "manual", skipUnapproved: true })).rejects.toMatchObject({
+      code: "WORKSPACE_ENVIRONMENT_NOT_FOUND",
+    });
+
+    expect(f.actions.get(actionSlot)).toMatchObject({ runId: running.runId, status: "running" });
+    release();
+  });
+
   it("still asks for approval on an attended launch such as Setup", async () => {
     const f = await actionFixture(true);
 
