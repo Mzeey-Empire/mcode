@@ -521,7 +521,7 @@ describe("OpenCodeProvider subagent asks", () => {
 });
 
 describe("OpenCodeProvider notice dedup", () => {
-  it("shows each diagnostic and notice once across reconnects", async () => {
+  it("keeps diagnostics out of the timeline and shows notices once across reconnects", async () => {
     const unknown = { type: "session.frobnicate", properties: { sessionID: "ses_1" } };
     const reroute = {
       type: "session.next.model.switched",
@@ -535,7 +535,7 @@ describe("OpenCodeProvider notice dedup", () => {
     await provider.sendTurn({ ...turnRequest(), turnId: "turn-2", turnExecutionId: "66666666-6666-4666-8666-666666666666" });
 
     const events = submittedEvents(submitted);
-    expect(events.filter((event) => event.type === "system" && event.subtype === "provider.notice.unknown-event")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "system" && event.subtype === "provider.notice.unknown-event")).toEqual([]);
     expect(events.filter((event) => (
       event.type === "modelFallback"
       && event.requestedModel === "anthropic/claude-sonnet-4-6"

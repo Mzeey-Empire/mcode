@@ -283,9 +283,7 @@ describe("CodexEventMapper", () => {
     expect(startup({ name: "native-mcp", status: "ready" })).toEqual([]);
     const unknown = mapper.mapNotification({ jsonrpc: "2.0", method: "future/child-update",
       params: { threadId: "native-child" } });
-    expect(unknown).toMatchObject([{ event: { type: "system", subtype: "provider.notice.unknown-event",
-      message: "Codex sent an update this client does not recognize (future/child-update). The thread continues normally." },
-    extension: { child: { nativeThreadId: "native-child", nativeTurnId: "child-turn", parentCollaborationItemId: "spawn-child" } } }]);
+    expect(unknown).toEqual([]);
   });
 
   it("emits Agent toolUse for item/started collabAgentToolCall", () => {
@@ -1217,7 +1215,7 @@ describe("CodexEventMapper", () => {
       method: "item/completed",
       params: {},
     });
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "system", subtype: "provider.notice.unknown-event", systemNotice: { kind: "diagnostic" } }]);
+    expect(events).toEqual([]);
   });
 
   it("drains a malformed item completion before turn completion can promote pending text", () => {
@@ -1241,7 +1239,6 @@ describe("CodexEventMapper", () => {
     expect(delta.map((runtimeEvent) => runtimeEvent.event.type)).toEqual(["textDelta"]);
     expect(malformed.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "assistantMessageBoundary", threadId: "test-thread", isFinalResponse: false },
-      { type: "system", subtype: "provider.notice.unknown-event", systemNotice: { kind: "diagnostic" } },
     ]);
     expect(terminal.map((runtimeEvent) => runtimeEvent.event.type)).toEqual(["turnComplete"]);
     expect(terminal.some((runtimeEvent) => runtimeEvent.event.type === "message")).toBe(false);
@@ -1268,7 +1265,7 @@ describe("CodexEventMapper", () => {
       method: "item/completed",
       params: { item: { type: "unknown_item_type" } },
     });
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "system", subtype: "provider.notice.unknown-event", systemNotice: { kind: "diagnostic" } }]);
+    expect(events).toEqual([]);
   });
 
   it.each(["__proto__", "constructor", "toString"])("treats prototype item type %s as unknown", (type) => {
@@ -1278,7 +1275,7 @@ describe("CodexEventMapper", () => {
       params: { item: { type } },
     } as never);
 
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "system", subtype: "provider.notice.unknown-event", systemNotice: { kind: "diagnostic" } }]);
+    expect(events).toEqual([]);
   });
 
   // ---------------------------------------------------------------------------
@@ -3161,7 +3158,7 @@ describe("CodexEventMapper", () => {
       },
     });
 
-    expect(unknown.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "system", subtype: "provider.notice.unknown-event", systemNotice: { kind: "diagnostic" } }]);
+    expect(unknown).toEqual([]);
     expect(registered.map((runtimeEvent) => runtimeEvent.event)).toEqual([
       expect.objectContaining({ type: "toolUse", toolCallId: "collab-unrelated" }),
     ]);
@@ -3754,7 +3751,7 @@ describe("CodexEventMapper", () => {
       params: { threadId: "main-codex-thread", turn: { status: "completed" } },
     });
 
-    expect(unknown.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "system", subtype: "provider.notice.unknown-event", systemNotice: { kind: "diagnostic" } }]);
+    expect(unknown).toEqual([]);
     expect(main).toHaveLength(1);
     expect(main[0]!.event).toMatchObject({ type: "turnComplete" });
   });
@@ -4224,25 +4221,40 @@ describe("CodexEventMapper", () => {
   // Unrecognized notification method
   // ---------------------------------------------------------------------------
 
-  it("turns an unknown notification into a bounded diagnostic without blocking later terminal events", async () => {
+  it("keeps unknown notifications out of the timeline without blocking later terminal events", async () => {
     const { logger } = await import("@mcode/shared");
-    const events = mapper.mapNotification({
+    const result = mapper.mapNotificationWithDisposition({
       jsonrpc: "2.0",
       method: "unknown/method",
       params: {},
-    } as never);
+    });
 
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{
-      type: "system",
-      threadId: "test-thread",
-      subtype: "provider.notice.unknown-event",
-      message: "Codex sent an update this client does not recognize (unknown/method). The thread continues normally.",
-      systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "turn" },
-    }]);
+    expect(result).toEqual({
+      events: [],
+      disposition: { kind: "diagnostic", reason: "unknown-notification" },
+    });
     expect(logger.warn).toHaveBeenCalledWith(
       "CodexEventMapper: unrecognized notification",
       expect.objectContaining({ method: "unknown/method" }),
     );
+    expect(mapper.mapNotification({ jsonrpc: "2.0", method: "turn/completed",
+      params: { turn: { status: "completed" } } }).map(({ event }) => event.type)).toEqual(["turnComplete"]);
+  });
+
+  it("ignores provider read-state changes because Mcode owns read state", () => {
+    expect(mapper.mapNotificationWithDisposition({
+      jsonrpc: "2.0", method: "thread/readState/changed", params: {},
+    })).toEqual({
+      events: [],
+      disposition: { kind: "ignored-with-reason", reason: "mcode-owns-read-state" },
+    });
+  });
+
+  it("keeps malformed notifications out of the timeline with a diagnostic receipt", () => {
+    expect(mapper.mapNotificationWithDisposition({ method: 42 })).toEqual({
+      events: [],
+      disposition: { kind: "diagnostic", reason: "malformed-notification" },
+    });
   });
 
   it.each(["__proto__", "constructor", "toString"])("treats prototype method %s as unknown without blocking the terminal event", (method) => {
@@ -4258,10 +4270,7 @@ describe("CodexEventMapper", () => {
       params: { threadId: "main-thread", turn: { status: "completed" } },
     });
 
-    expect(unknown.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{
-      type: "system",
-      subtype: "provider.notice.unknown-event",
-    }]);
+    expect(unknown).toEqual([]);
     expect(terminal.map((runtimeEvent) => runtimeEvent.event.type)).toEqual(["turnComplete"]);
   });
 
@@ -4328,21 +4337,15 @@ describe("CodexEventMapper", () => {
     expect(event).not.toHaveProperty("systemNotice.configRange");
   });
 
-  it("contains malformed notice payloads in a bounded diagnostic without throwing", () => {
-    expect(() => mapper.mapNotification({
+  it("keeps malformed notice payloads out of the timeline with a diagnostic receipt", () => {
+    expect(mapper.mapNotificationWithDisposition({
       jsonrpc: "2.0",
       method: "configWarning",
       params: null,
-    } as never)).not.toThrow();
-
-    expect(mapper.mapNotification({
-      jsonrpc: "2.0",
-      method: "configWarning",
-      params: null,
-    } as never).map((mapped) => mapped.event)).toMatchObject([{
-      type: "system",
-      systemNotice: { kind: "diagnostic", scope: "turn" },
-    }]);
+    })).toEqual({
+      events: [],
+      disposition: { kind: "diagnostic", reason: "malformed-notification" },
+    });
   });
 
   it("does not leak a child-thread safety notice into the parent transcript", () => {
@@ -4365,11 +4368,7 @@ describe("CodexEventMapper", () => {
     });
 
     expect(result).toMatchObject({
-      events: [{ event: {
-        type: "system",
-        message: "Codex sent a notification for an unlinked provider thread.",
-        systemNotice: { kind: "diagnostic", scope: "session", origin: "unattributed-thread" },
-      } }],
+      events: [],
       disposition: { kind: "diagnostic", reason: "unattributed-thread" },
     });
     expect(logger.debug).toHaveBeenCalledWith("Codex notification disposition", {
@@ -4414,7 +4413,7 @@ describe("CodexEventMapper", () => {
       jsonrpc: "2.0", method: "item/autoApprovalReview/completed",
       params: { threadId: "codex-thread", turnId: "turn-current", startedAtMs: 6, completedAtMs: 7, reviewId: "review-timeout", review: { status: "timedOut" } },
     });
-    const malformed = mapper.mapNotification({
+    const malformed = mapper.mapNotificationWithDisposition({
       jsonrpc: "2.0", method: "item/autoApprovalReview/completed",
       params: { threadId: "codex-thread", turnId: "turn-current", reviewId: "review-3" },
     });
@@ -4433,7 +4432,10 @@ describe("CodexEventMapper", () => {
     expect(JSON.stringify([...started, ...completed, ...denied])).not.toContain("sensitive native rationale");
     expect(JSON.stringify([...started, ...completed, ...denied])).not.toContain("native action");
     expect(JSON.stringify([...started, ...completed, ...denied])).not.toContain("native risk");
-    expect(malformed.map((mapped) => mapped.event)).toMatchObject([{ type: "system", systemNotice: { kind: "diagnostic" } }]);
+    expect(malformed).toEqual({
+      events: [],
+      disposition: { kind: "diagnostic", reason: "malformed-notification" },
+    });
   });
 
   it.each([

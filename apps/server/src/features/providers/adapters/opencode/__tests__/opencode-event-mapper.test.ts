@@ -168,6 +168,7 @@ describe("mapOpenCodeEnvelope", () => {
     const unknown = mapOpenCodeEnvelope({ type: "session.frobnicate", properties: {} }, CTX);
     expect(unknown.disposition).toBe("diagnostic");
     expect(unknown.reason).toBe("unknown-event-type");
+    expect(unknown.events).toEqual([]);
 
     const wrappedUnknown = mapOpenCodeEnvelope({
       type: "bus",
@@ -175,6 +176,7 @@ describe("mapOpenCodeEnvelope", () => {
     }, CTX);
     expect(wrappedUnknown.disposition).toBe("diagnostic");
     expect(wrappedUnknown.reason).toBe("unknown-event-type");
+    expect(wrappedUnknown.events).toEqual([]);
   });
 
   it("ignores known noise with a reason and keeps lifecycle signals state-only", () => {
@@ -334,13 +336,19 @@ describe("mapOpenCodeEnvelope", () => {
     });
   });
 
-  it("keeps unknown event identities out of canonical diagnostics", () => {
+  it("keeps unknown events out of the timeline", () => {
     const unknown = mapOpenCodeEnvelope({ type: `x.${"y".repeat(2_000)}`, properties: {} }, CTX);
-    expect(unknown.disposition).toBe("diagnostic");
-    expect(unknown.events[0]).toMatchObject({
-      type: "system",
-      subtype: "provider.notice.unknown-event",
-      message: "The provider sent an update this client does not recognize. The thread continues normally.",
+    expect(unknown).toEqual({
+      disposition: "diagnostic", events: [], reason: "unknown-event-type",
+    });
+  });
+
+  it("keeps unknown message parts out of the timeline", () => {
+    expect(mapOpenCodeEnvelope({
+      type: "message.part.updated",
+      properties: { part: { type: "future-part" } },
+    }, CTX)).toEqual({
+      disposition: "diagnostic", events: [], reason: "unknown-part-type",
     });
   });
 
