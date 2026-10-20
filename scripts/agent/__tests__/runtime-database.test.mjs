@@ -5,11 +5,17 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
-import { assertRuntimeRootSafe, hasRuntimeDatabaseMarker, markRuntimeDatabase } from "../runtime-database.mjs";
+import { SEED_FILTER_VERSION } from "../../db-seed-filter.mjs";
+import {
+  assertRuntimeRootSafe,
+  hasRuntimeDatabaseMarker,
+  markRuntimeDatabase,
+  readRuntimeDatabaseSeedVersion,
+} from "../runtime-database.mjs";
 import { getRuntimePaths } from "../runtime-contract.mjs";
 import { agentSetup } from "../agent-setup.mjs";
 
-NodeTest.test("runtime database validates its bounded setup marker", () => {
+NodeTest.test("runtime database validates its bounded setup marker and reports the seed version", () => {
   const repo = makeRepo();
   try {
     const paths = getRuntimePaths(repo);
@@ -18,8 +24,14 @@ NodeTest.test("runtime database validates its bounded setup marker", () => {
     markRuntimeDatabase(repo);
     NodeAssertStrict.default.equal(NodeFS.readFileSync(paths.dbPath, "utf8"), "snapshot\n");
     NodeAssertStrict.default.equal(hasRuntimeDatabaseMarker(repo), true);
-    NodeFS.writeFileSync(NodePath.join(paths.dbDir, ".agent-runtime-database"), "other\n");
+    NodeAssertStrict.default.equal(readRuntimeDatabaseSeedVersion(repo), SEED_FILTER_VERSION);
+    const markerPath = NodePath.join(paths.dbDir, ".agent-runtime-database");
+    // The marker written before the seed was filtered is still ours, but older than any filter version.
+    NodeFS.writeFileSync(markerPath, "agent-runtime-snapshot\n");
+    NodeAssertStrict.default.equal(readRuntimeDatabaseSeedVersion(repo), 0);
+    NodeFS.writeFileSync(markerPath, "other\n");
     NodeAssertStrict.default.equal(hasRuntimeDatabaseMarker(repo), false);
+    NodeAssertStrict.default.equal(readRuntimeDatabaseSeedVersion(repo), null);
   } finally {
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }

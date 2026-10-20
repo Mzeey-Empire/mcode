@@ -24,6 +24,7 @@ import {
   ensureRuntimeRoot,
 } from "../../../scripts/agent/runtime-contract.mjs";
 import { seedFixtureRepo } from "../../../scripts/agent/fixture-repo.mjs";
+import { ensureRuntimeDatabase } from "../../../scripts/db-seed.mjs";
 import { ensureDependencies } from "../../../scripts/agent/ensure-dependencies.mjs";
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
@@ -42,6 +43,7 @@ const runtimePaths = ensureRuntimeRoot(repoRoot);
 NodeFS.mkdirSync(runtimePaths.dbDir, { recursive: true });
 NodeFS.mkdirSync(runtimePaths.logsDir, { recursive: true });
 NodeFS.mkdirSync(runtimePaths.electronDir, { recursive: true });
+ensureRuntimeDatabase({ repoRoot, refresh: false });
 const fixtureRepo = seedFixtureRepo(repoRoot);
 const runtimeStateEnv = buildRuntimeStateEnv(repoRoot, {
   MCODE_AGENT_FIXTURE_REPO: fixtureRepo,

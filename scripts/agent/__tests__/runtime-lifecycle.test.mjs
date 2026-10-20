@@ -676,12 +676,11 @@ NodeTest.test("agentSetup snapshots the database before fixture and bundle work"
   const repo = makeRepo();
   const calls = [];
   const restoreHooks = setAgentSetupTestHooks({
-    seedDatabase: ({ repoRoot, target }) => {
+    ensureRuntimeDatabase: ({ repoRoot, refresh }) => {
       NodeAssertStrict.default.equal(repoRoot, repo);
-      NodeAssertStrict.default.equal(target, getRuntimePaths(repo).dbPath);
+      NodeAssertStrict.default.equal(refresh, true);
       calls.push("snapshot");
     },
-    markRuntimeDatabase: (repoRoot) => { NodeAssertStrict.default.equal(repoRoot, repo); calls.push("mark"); },
     seedFixtureRepo: (repoRoot) => {
       NodeAssertStrict.default.equal(repoRoot, repo);
       calls.push("fixture");
@@ -699,7 +698,7 @@ NodeTest.test("agentSetup snapshots the database before fixture and bundle work"
 
   try {
     await agentSetup(repo);
-    NodeAssertStrict.default.deepEqual(calls, ["snapshot", "mark", "fixture", "bundle", "desktop"]);
+    NodeAssertStrict.default.deepEqual(calls, ["snapshot", "fixture", "bundle", "desktop"]);
   } finally {
     restoreHooks();
     NodeFS.rmSync(repo, { recursive: true, force: true });
@@ -712,7 +711,7 @@ NodeTest.test("agentSetup refuses to replace a database while owned runtime PID 
   NodeFS.mkdirSync(paths.pidsDir, { recursive: true });
   NodeFS.writeFileSync(NodePath.join(paths.pidsDir, "server.pid"), "12345\n");
   const restoreHooks = setAgentSetupTestHooks({
-    seedDatabase: () => { throw new Error("setup replaced the database while the runtime was active"); },
+    ensureRuntimeDatabase: () => { throw new Error("setup replaced the database while the runtime was active"); },
   });
   try {
     await NodeAssertStrict.default.rejects(() => agentSetup(repo), /Stop the agent runtime/);
@@ -731,7 +730,7 @@ NodeTest.test("agentSetup rejects linked runtime state before inspecting PID or 
   NodeFS.writeFileSync(NodePath.join(external, "electron-agent-runtime.json"), "{}\n");
   NodeFS.writeFileSync(sentinel, "external\n");
   let snapshotted = false;
-  const restoreHooks = setAgentSetupTestHooks({ seedDatabase: () => { snapshotted = true; } });
+  const restoreHooks = setAgentSetupTestHooks({ ensureRuntimeDatabase: () => { snapshotted = true; } });
   try {
     try {
       NodeFS.symlinkSync(external, NodePath.join(repo, ".dev"), process.platform === "win32" ? "junction" : "dir");
@@ -1271,8 +1270,11 @@ NodeTest.test("dev web single-instance flag preserves explicit false legacy mode
 });
 
 NodeTest.test("dev:server SIGTERM stops the Bun server without a Vite reference error", { timeout: 75_000 }, async () => {
+  // An empty home keeps the launcher from seeding this test from the developer's real ~/.mcode database.
+  const emptyHome = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "dev-web-home-"));
   const child = NodeChildProcess.spawn(process.execPath, ["scripts/dev-web.mjs", "--server-only"], {
     cwd: NodePath.resolve(process.cwd()),
+    env: { ...process.env, HOME: emptyHome, USERPROFILE: emptyHome },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -1296,6 +1298,7 @@ NodeTest.test("dev:server SIGTERM stops the Bun server without a Vite reference 
     NodeAssertStrict.default.doesNotMatch(errors, /ReferenceError.*vite/i);
   } finally {
     if (child.exitCode === null) child.kill("SIGTERM");
+    NodeFS.rmSync(emptyHome, { recursive: true, force: true });
   }
 });
 

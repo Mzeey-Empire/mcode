@@ -13,7 +13,7 @@ Provisioning and lifecycle are separate commands:
 | Command | Purpose |
 |---|---|
 | `bun install` | Install dependencies before runtime setup. |
-| `bun run agent:setup` | Safely snapshot the local Mcode database into `.dev/db/app.sqlite`, create or validate the fixture repository, and build runtime bundles. Run it only when an artifact is absent or stale, with the runtime stopped. |
+| `bun run agent:setup` | Build a filtered copy of the local Mcode database at `.dev/db/app.sqlite`, create or validate the fixture repository, and build runtime bundles. Run it only when an artifact is absent or stale, with the runtime stopped. |
 | `bun run --shell system agent:up` | Start the server and web app in the background. Fails fast when setup artifacts are absent. Returns without readiness waits. |
 | `bun run --shell system agent:up --desktop` | Start the server, web app, and Electron in the background. Returns without readiness waits. |
 | `bun run agent:ready` | Read `.dev/ports.json` and wait for every started runtime surface. |
@@ -45,7 +45,7 @@ Use `seedLogin.authHeader` or the `mcode-auth` cookie for HTTP and WebSocket acc
 
 The runtime owns these paths in the current worktree:
 
-- `.dev/db/app.sqlite`: local SQLite snapshot owned by setup
+- `.dev/db/app.sqlite`: filtered SQLite seed owned by the launchers
 - `.dev/fixture-repo/`: fixture repository
 - `.dev/logs/`: server, web, and Electron logs
 - `.dev/pids/`: owned server, web, and desktop PIDs
@@ -56,7 +56,7 @@ Do not write to `.dev/` in another worktree. Stop a runtime through `agent:down`
 
 ## Database and write boundaries
 
-`agent:setup` reads the local Mcode database through SQLite's backup path and writes only the worktree-local `.dev/db/app.sqlite`. It never modifies the source database. The snapshot can contain representative user projects, but product and runtime tests must select and mutate only `.dev/fixture-repo`. The server registers that fixture repository when it starts.
+`agent:setup` (and `bun run db:seed`) reads the local Mcode database through `VACUUM INTO` and writes only the worktree-local `.dev/db/app.sqlite`. It never modifies the source database. The copy keeps the 8 most recently active projects and, in each, the 20 newest thread families with no running turn or active agent. Every table that is not explicitly listed as history is emptied, and kept rows lose their provider sessions, checkout paths, and PR links, so the dev server cannot resume, clean up, or poll real work. `bun run dev` and `bun run dev:desktop` reuse the seed while its `.dev/db/.agent-runtime-database` marker carries the current filter version, and rebuild it (discarding local data in it) when the marker is older or missing. A failed build leaves the existing database untouched. Filtered projects keep their real paths, so test and mutate only `.dev/fixture-repo`. The server registers that fixture repository when it starts.
 
 Write in the repository working tree and this worktree's runtime paths. Do not edit `.env` files unless the task explicitly requires it.
 
