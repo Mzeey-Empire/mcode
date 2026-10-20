@@ -141,6 +141,77 @@ describe("ClaudeProvider AssistantMessageBoundary from stop_reason", () => {
     expect(boundaries[0]?.event.isFinalResponse).toBe(false);
   });
 
+  async function runStreamedTurn(messages: Array<Record<string, unknown>>, threadId: string) {
+    mockQuery.mockImplementation(mockSdkStream(messages));
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (runtimeEvent: ProviderRuntimeEvent) => events.push(runtimeEvent));
+    await provider.sendTurn({
+      turnExecutionId: "test-execution",
+      sessionId: `mcode-${threadId}`,
+      threadId,
+      message: "go",
+      cwd: "/tmp",
+      model: "claude-sonnet-4-6",
+      permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    return events.map((runtimeEvent) => runtimeEvent.event);
+  }
+
+  // The CLI yields each finished content block as its own assistant message before the API
+  // reports the stop reason, so these messages carry stop_reason null.
+  const streamedText = (text: string) => [
+    { type: "stream_event", event: { type: "message_start", message: { id: "msg-1" } } },
+    { type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text" } } },
+    { type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } } },
+    { type: "stream_event", event: { type: "content_block_stop", index: 0 } },
+    { type: "assistant", message: { id: "msg-1", content: [{ type: "text", text }], stop_reason: null } },
+  ];
+
+  it("classifies a streamed tool-free answer as final once message_delta reports end_turn", async () => {
+    const events = await runStreamedTurn([
+      ...streamedText("Ready when you are."),
+      { type: "stream_event", event: { type: "message_delta", delta: { stop_reason: "end_turn" } } },
+      { type: "stream_event", event: { type: "message_stop" } },
+      { type: "result", is_error: false, result: "Ready when you are.", usage: { output_tokens: 5 } },
+    ], "thread-streamed-final");
+
+    const boundaries = events.filter((event) => event.type === AgentEventType.AssistantMessageBoundary);
+    expect(boundaries.map((event) => event.isFinalResponse)).toEqual([true]);
+  });
+
+  it("classifies streamed text before a tool call as a preamble, ahead of the tool call", async () => {
+    const events = await runStreamedTurn([
+      ...streamedText("Let me read the file."),
+      {
+        type: "assistant",
+        message: { id: "msg-1", content: [{ type: "tool_use", id: "tu-3", name: "Read", input: { file_path: "/a.ts" } }], stop_reason: null },
+      },
+      { type: "stream_event", event: { type: "message_delta", delta: { stop_reason: "tool_use" } } },
+      { type: "result", is_error: false, result: "done", usage: { output_tokens: 3 } },
+    ], "thread-streamed-preamble");
+
+    const order = events
+      .filter((event) => event.type === AgentEventType.AssistantMessageBoundary || event.type === AgentEventType.ToolUse)
+      .map((event) => event.type === AgentEventType.AssistantMessageBoundary ? `boundary:${event.isFinalResponse}` : event.type);
+    expect(order).toEqual(["boundary:false", AgentEventType.ToolUse]);
+  });
+
+  it("classifies a tool-free answer as final when the turn ends without a message_delta", async () => {
+    const events = await runStreamedTurn([
+      { type: "assistant", message: { id: "msg-1", content: [{ type: "text", text: "Done." }], stop_reason: null } },
+      { type: "result", is_error: false, result: "Done.", usage: { output_tokens: 1 } },
+    ], "thread-unstreamed-final");
+
+    const boundaries = events.filter((event) => event.type === AgentEventType.AssistantMessageBoundary);
+    expect(boundaries.map((event) => event.isFinalResponse)).toEqual([true]);
+    const boundaryIndex = events.findIndex((event) => event.type === AgentEventType.AssistantMessageBoundary);
+    const messageIndex = events.findIndex((event) => event.type === AgentEventType.Message);
+    expect(boundaryIndex).toBeLessThan(messageIndex);
+  });
+
   it("does not emit AssistantMessageBoundary for text-free tool-only messages", async () => {
     mockQuery.mockImplementation(
       mockSdkStream([

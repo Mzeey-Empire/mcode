@@ -183,7 +183,7 @@ vi.mock("../MessageList", () => ({
     afterFirstUserContent?: ReactNode;
   }) => {
     return (
-      <div data-testid="message-list" data-display-thread-id={displayThreadId}>
+      <div data-testid="message-list" data-display-thread-id={displayThreadId} data-has-after-first-user-content={String(afterFirstUserContent !== undefined)}>
         {leadingContent}
         <div data-testid="queued-first-user-message">Build the feature</div>
         {afterFirstUserContent}
@@ -904,6 +904,8 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const visible = screen.getAllByTestId("message-list").find((el) => el.style.display !== "none");
     expect(visible).toBeDefined();
     expect(visible).toHaveAttribute("data-display-thread-id", persisted.id);
+    expect(visible).toHaveAttribute("data-has-after-first-user-content", "false");
+    expect(screen.queryByTestId("startup-trail")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-preparing-shell")).not.toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
     expect(chatViewTransportMock.getThreadStartup.mock.calls).toHaveLength(recoveryCallsBeforeAgentAdmission.get + 1);
@@ -1344,7 +1346,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
-    expect(screen.getByTestId("startup-started-row")).toHaveTextContent("Started in");
+    expect(screen.queryByTestId("startup-trail")).not.toBeInTheDocument();
   });
 
   it("holds the outgoing transcript while a selected cold thread hydrates", () => {

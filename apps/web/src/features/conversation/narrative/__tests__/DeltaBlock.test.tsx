@@ -6,25 +6,7 @@ vi.mock("@/components/chat/MarkdownContent", () => ({
   __esModule: true,
   default: ({ content, isStreaming }: { content: string; isStreaming?: boolean }) => (
     <div data-testid="markdown-content" data-streaming={String(isStreaming)}>
-      {content}
-    </div>
-  ),
-}));
-
-vi.mock("@/components/chat/MermaidBlock", () => ({
-  __esModule: true,
-  default: ({ code, isStreaming }: { code: string; isStreaming?: boolean }) => (
-    <div data-testid="mermaid-block" data-streaming={String(isStreaming)}>
-      {code}
-    </div>
-  ),
-}));
-
-vi.mock("@/components/chat/CodeBlock", () => ({
-  __esModule: true,
-  CodeBlock: ({ code, language }: { code: string; language: string }) => (
-    <div data-testid="code-block" data-language={language}>
-      {code}
+      <p>{content}</p>
     </div>
   ),
 }));
@@ -46,8 +28,8 @@ function makeRectList(rect: Partial<DOMRect>): DOMRectList {
 }
 
 describe("DeltaBlock", () => {
-  it("hides every streamed plan prefix before the typewriter or code skeleton can render it", async () => {
-    const summary = "A short summary.\n";
+  it("hides every streamed plan prefix before the reveal or code skeleton can render it", async () => {
+    const summary = "A short summary.\n\n";
     const fence = "````mcode-plan\n# Hidden\n```ts\nsecret();\n```\n````";
     const { container, rerender } = render(<DeltaBlock text={summary} isStreaming showCursor={false} />);
     await waitFor(() => expect(container.textContent).toBe(summary));
@@ -63,82 +45,57 @@ describe("DeltaBlock", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses plain text while streaming", () => {
-    render(<DeltaBlock text={"streaming text ".repeat(10)} isStreaming showCursor={false} />);
+  it("hides an unfinished paragraph while streaming", () => {
+    const { container } = render(<DeltaBlock text="Still typing the first par" isStreaming showCursor={false} />);
 
+    expect(container.textContent).toBe("");
     expect(screen.queryByTestId("markdown-content")).toBeNull();
-    expect(screen.getByText(/streaming text/)).toBeInTheDocument();
   });
 
-  it("renders a closed mermaid fence as a diagram part while streaming", async () => {
-    render(
-      <DeltaBlock
-        text={"before\n```mermaid\ngraph TD; A-->B;\n```\nafter"}
-        isStreaming
-        showCursor={false}
-      />,
-    );
+  it("renders finished paragraphs through markdown and holds back the one still streaming", async () => {
+    render(<DeltaBlock text={"**First** paragraph.\n\nSecond par"} isStreaming showCursor={false} />);
 
-    const block = await screen.findByTestId("mermaid-block");
-    await waitFor(() => expect(block.getAttribute("data-streaming")).toBe("false"));
-    await waitFor(() => expect(block.textContent).toBe("graph TD; A-->B;"));
+    const markdown = await screen.findByTestId("markdown-content");
+    expect(markdown.textContent).toBe("**First** paragraph.\n\n");
+    expect(markdown.getAttribute("data-streaming")).toBe("false");
+  });
+
+  it("shows everything once the stream settles", async () => {
+    const text = "First paragraph.\n\nSecond par";
+    const { rerender } = render(<DeltaBlock text={text} isStreaming showCursor={false} />);
+    await screen.findByTestId("markdown-content");
+
+    rerender(<DeltaBlock text={text} isStreaming={false} showCursor={false} />);
+
+    await waitFor(() => expect(screen.getByTestId("markdown-content").textContent).toBe(text));
+  });
+
+  it("shows a skeleton for a code fence still streaming in the tail", async () => {
+    render(<DeltaBlock text={"Intro.\n\n```ts\nconst a = 1;\n\nconst b"} isStreaming showCursor={false} />);
+
+    const skeleton = await screen.findByTestId("streaming-skeleton");
+    expect(skeleton.getAttribute("aria-label")).toBe("ts assembling");
+    expect((await screen.findByTestId("markdown-content")).textContent).toBe("Intro.\n\n");
   });
 
   it("shows a skeleton for a mermaid fence still streaming", async () => {
-    render(
-      <DeltaBlock text={"intro\n```mermaid\ngraph TD; A--"} isStreaming showCursor={false} />,
-    );
+    render(<DeltaBlock text={"intro\n```mermaid\ngraph TD; A--"} isStreaming showCursor={false} />);
 
     const skeleton = await screen.findByTestId("streaming-skeleton");
-    await waitFor(() => expect(skeleton.getAttribute("aria-label")).toBe("diagram assembling"));
-    expect(screen.queryByTestId("mermaid-block")).toBeNull();
-  });
-
-  it("renders a closed code fence with the code block chrome while streaming", async () => {
-    render(
-      <DeltaBlock
-        text={"intro\n```ts\nconst x = 1;\n```\ntail"}
-        isStreaming
-        showCursor={false}
-      />,
-    );
-
-    const block = await screen.findByTestId("code-block");
-    await waitFor(() => expect(block.textContent).toBe("const x = 1;"));
-    expect(block.getAttribute("data-language")).toBe("ts");
+    expect(skeleton.getAttribute("aria-label")).toBe("diagram assembling");
   });
 
   it("shows a skeleton for a table still receiving rows", async () => {
-    render(
-      <DeltaBlock text={"lead\n| A | B |\n| - | - |\n| 1 |"} isStreaming showCursor={false} />,
-    );
+    render(<DeltaBlock text={"lead\n| A | B |\n| - | - |\n| 1 |"} isStreaming showCursor={false} />);
 
     const skeleton = await screen.findByTestId("streaming-skeleton");
-    await waitFor(() => expect(skeleton.getAttribute("aria-label")).toBe("table assembling"));
-  });
-
-  it("renders a real table once a non-table line closes it", async () => {
-    render(
-      <DeltaBlock
-        text={"| A | B |\n| - | - |\n| 1 | 2 |\n\ndone"}
-        isStreaming
-        showCursor={false}
-      />,
-    );
-
-    await waitFor(() => {
-      const cells = screen.getAllByRole("columnheader").map((cell) => cell.textContent);
-      expect(cells).toEqual(["A", "B"]);
-    });
-    expect(screen.getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["1", "2"]);
+    expect(skeleton.getAttribute("aria-label")).toBe("table assembling");
   });
 
   it("swaps a trailing assembling skeleton for settled content once the stream ends", async () => {
     const text = "| A | B |\n| - | - |\n| 1 | 2 |";
     const { rerender } = render(<DeltaBlock text={text} isStreaming showCursor={false} />);
-
-    const skeleton = await screen.findByTestId("streaming-skeleton");
-    await waitFor(() => expect(skeleton.getAttribute("aria-label")).toBe("table assembling"));
+    await screen.findByTestId("streaming-skeleton");
 
     rerender(<DeltaBlock text={text} isStreaming={false} showCursor={false} />);
 
@@ -147,26 +104,12 @@ describe("DeltaBlock", () => {
     expect(screen.queryByTestId("streaming-skeleton")).toBeNull();
   });
 
-  it("uses the markdown adapter after settling", async () => {
-    render(<DeltaBlock text="**settled**" isStreaming={false} showCursor={false} />);
+  it("parks the caret at the start of the first line before anything commits", () => {
+    const { container } = render(<DeltaBlock text="Still typ" isStreaming showCursor />);
+    const caret = container.querySelector<HTMLElement>(".typing-cursor");
 
-    await waitFor(() => {
-      expect(screen.getByTestId("markdown-content").textContent).toBe("**settled**");
-      expect(screen.getByTestId("markdown-content").getAttribute("data-streaming")).toBe("false");
-    });
-  });
-
-  it("streams blank-line paragraphs as the same spaced paragraphs markdown settles to", async () => {
-    const { container: streaming } = render(
-      <DeltaBlock text={"First paragraph.\n\nSecond paragraph.\n\n \n\n "} isStreaming showCursor={false} />,
-    );
-
-    await waitFor(() =>
-      expect([...streaming.querySelectorAll("p")].map((p) => p.textContent)).toEqual([
-        "First paragraph.",
-        "Second paragraph.",
-      ]),
-    );
+    expect(caret?.style.transform).toBe("translate3d(0px, 0px, 0)");
+    expect(caret?.style.opacity).toBe("1");
   });
 
   it("parks a 2x18 caret after the last word, centred on its line", () => {
@@ -179,7 +122,7 @@ describe("DeltaBlock", () => {
       getClientRects: vi.fn(() => makeRectList({ right: 120, top: 28, height: 28 })),
     } as unknown as Range);
 
-    const { container } = render(<DeltaBlock text={"word ".repeat(40)} isStreaming showCursor />);
+    const { container } = render(<DeltaBlock text={`${"word ".repeat(40)}\n\n`} isStreaming showCursor />);
     const caret = container.querySelector<HTMLElement>(".typing-cursor");
 
     expect(caret?.style.width).toBe("2px");
@@ -189,7 +132,7 @@ describe("DeltaBlock", () => {
     expect(caret?.parentElement).toBe(container.firstElementChild);
   });
 
-  it("does not re-measure the cursor when displayed text is unchanged", () => {
+  it("does not re-measure the cursor when only the uncommitted tail grows", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
       left: 0,
       top: 0,
@@ -208,11 +151,11 @@ describe("DeltaBlock", () => {
     } as unknown as Range;
     const createRange = vi.spyOn(document, "createRange").mockReturnValue(range);
 
-    const text = "x".repeat(140);
+    const text = "Committed paragraph.\n\n";
     const { rerender } = render(<DeltaBlock text={text} isStreaming showCursor />);
     const firstMeasureCount = createRange.mock.calls.length;
 
-    rerender(<DeltaBlock text={text} isStreaming showCursor />);
+    rerender(<DeltaBlock text={`${text}Uncommitted tail that keeps growi`} isStreaming showCursor />);
 
     expect(firstMeasureCount).toBeGreaterThan(0);
     expect(createRange).toHaveBeenCalledTimes(firstMeasureCount);

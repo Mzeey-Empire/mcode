@@ -15,7 +15,6 @@ import {
   startupHasLiveStep,
   startupTrailRows,
   startupTrailAnnouncement,
-  startupTrailSummary,
   type StartupSetupView,
   type StartupTrailRow,
   type TrailPhase,
@@ -107,29 +106,6 @@ function TrailRow({ row, expanded, onToggle }: {
         </button>
       ) : null}
     </div>
-  );
-}
-
-function StartedRow({ startup, setupCommand, expanded, onToggle }: {
-  readonly startup: ThreadStartup;
-  readonly setupCommand: string | undefined;
-  readonly expanded: boolean;
-  readonly onToggle: () => void;
-}) {
-  const summary = startupTrailSummary(startup, setupCommand);
-  return (
-    <button
-      type="button"
-      data-testid="startup-started-row"
-      aria-expanded={expanded}
-      onClick={onToggle}
-      className="flex h-6 max-w-full items-center gap-2 text-left text-caption text-muted hover:text-ink"
-    >
-      <MarkSlot>{expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</MarkSlot>
-      <span className="shrink-0">Started in</span>
-      <span className="shrink-0 font-mono">{summary.duration}</span>
-      {summary.parts.length > 0 ? <span className="text-fade min-w-0 font-mono">· {summary.parts.join(" · ")}</span> : null}
-    </button>
   );
 }
 
@@ -290,20 +266,15 @@ function decisionStopPhase(startup: ThreadStartup | undefined): TrailPhase | und
 /**
  * Renders one thread startup as a quiet trail of steps under the first user message.
  *
- * A completed startup collapses to a single "Started in" row that expands back to the steps.
+ * A completed startup renders nothing.
  * A stopped startup shows the Paper 04f decision for its state, and none of them offers Cancel.
  */
 export function StartupStepsTrail({ startup, startupId, kind, actions, onOpenTerminal, onEditScript }: StartupStepsTrailProps) {
   const view = useStartupSetupView(startup);
   const cancel = useStartupCancel(startup, startupId);
   const liveCancel = startup?.state === "blocked" ? undefined : cancel;
-  const [stepsOpen, setStepsOpen] = useState(false);
   const [outputOpen, setOutputOpen] = useState(false);
   const toggleOutput = () => setOutputOpen((open) => !open);
-  const completedStartup = startup?.state === "completed" ? startup : undefined;
-  const startedRow = completedStartup
-    ? <StartedRow startup={completedStartup} setupCommand={view.commands[0]} expanded={stepsOpen} onToggle={() => setStepsOpen((open) => !open)} />
-    : null;
   const announcement = <p role="status" className="sr-only">{startupTrailAnnouncement(startup)}</p>;
   const stopPhase = decisionStopPhase(startup);
   const decision = (
@@ -312,11 +283,10 @@ export function StartupStepsTrail({ startup, startupId, kind, actions, onOpenTer
       <TrailActions startup={startup} view={view} outputOpen={outputOpen} onToggleOutput={toggleOutput} actions={actions} onCancel={liveCancel} />
     </>
   );
-  if (completedStartup && !stepsOpen) return <section aria-label="Thread startup" data-testid="startup-trail">{announcement}{startedRow}</section>;
+  if (startup?.state === "completed") return null;
   return (
     <section aria-label="Thread startup" data-testid="startup-trail" className="flex flex-col gap-0.5">
       {announcement}
-      {startedRow}
       <TrailSteps startup={startup} kind={kind} view={view} outputOpen={outputOpen} onToggleOutput={toggleOutput} onOpenTerminal={onOpenTerminal} onEditScript={onEditScript} stopPhase={stopPhase} decision={decision} />
       {stopPhase ? null : decision}
     </section>

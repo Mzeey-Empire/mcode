@@ -114,6 +114,8 @@ export type ClaudeMapOutcome = "none" | "turn_complete" | "result_error";
 /** Converts Claude SDK messages to provider-neutral events. */
 export class ClaudeEventMapper {
   private lastAssistantText = "";
+  // The CLI yields each finished block before the API reports stop_reason, so main-thread text waits for message_delta, a tool call, or the result.
+  private boundaryAwaitsStopReason = false;
   private lastInputTokens: number | undefined;
   private lastContextWindow: number | undefined;
   private compacting = false;
@@ -196,6 +198,7 @@ export class ClaudeEventMapper {
     this.reasoningItemByBlock.clear();
     this.reasoningMessageKey = undefined;
     this.lastAssistantText = "";
+    this.boundaryAwaitsStopReason = false;
     this.lastInputTokens = undefined;
     this.nativeSource = {};
     this.resetFailureEvidence();
@@ -298,16 +301,33 @@ export class ClaudeEventMapper {
       .join("");
     if (text) {
       this.lastAssistantText = text;
-      this.emit({
-        type: AgentEventType.AssistantMessageBoundary,
-        threadId: this.threadId,
-        isFinalResponse: finalStopReason(assistant?.stop_reason ?? null),
-      });
+      this.classifyAssistantText(assistant?.stop_reason ?? null, parentToolCallId);
     }
-    for (const block of content)
-      if (block.type === "tool_use") this.emitToolUse(block, parentToolCallId);
+    this.emitToolUses(content, parentToolCallId);
     if (parentToolCallId) this.reportSubagentRun(parentToolCallId, { model: runModel(objectValue(assistant).model) });
     return "none";
+  }
+
+  private classifyAssistantText(stopReason: string | null, parentToolCallId: string | undefined): void {
+    if (stopReason === null && !parentToolCallId) this.boundaryAwaitsStopReason = true;
+    else this.emitBoundary(finalStopReason(stopReason));
+  }
+
+  private emitToolUses(content: Message[], parentToolCallId: string | undefined): void {
+    for (const block of content) {
+      if (block.type !== "tool_use") continue;
+      if (!parentToolCallId) this.emitPendingBoundary(false);
+      this.emitToolUse(block, parentToolCallId);
+    }
+  }
+
+  private emitBoundary(isFinalResponse: boolean): void {
+    this.boundaryAwaitsStopReason = false;
+    this.emit({ type: AgentEventType.AssistantMessageBoundary, threadId: this.threadId, isFinalResponse });
+  }
+
+  private emitPendingBoundary(isFinalResponse: boolean): void {
+    if (this.boundaryAwaitsStopReason) this.emitBoundary(isFinalResponse);
   }
 
   /**
@@ -453,6 +473,7 @@ export class ClaudeEventMapper {
 
   private emitResultMessage(usage: Usage): void {
     if (!this.lastAssistantText) return;
+    this.emitPendingBoundary(true);
     this.emit({
       type: AgentEventType.Message,
       threadId: this.threadId,
@@ -511,6 +532,7 @@ export class ClaudeEventMapper {
 
   private resetResult(): void {
     this.lastAssistantText = "";
+    this.boundaryAwaitsStopReason = false;
     this.lastInputTokens = undefined;
   }
 
@@ -677,6 +699,7 @@ export class ClaudeEventMapper {
   private streamEvent(message: Message): ClaudeMapOutcome {
     const event = objectValue(message.event);
     const usage = (event.message as { usage?: Usage } | undefined)?.usage;
+    if (event.type === "message_delta" && !parentId(message)) this.settleBoundaryFromDelta(event);
     if (event.type === "message_start") this.startReasoningMessage(event);
     if (event.type === "message_start" && usage)
       this.emitContextEstimate(usage);
@@ -685,6 +708,10 @@ export class ClaudeEventMapper {
       this.emitDelta(objectValue(event.delta), event.index);
     if (event.type === "content_block_stop") this.closeReasoningBlock(event.index);
     return "none";
+  }
+  private settleBoundaryFromDelta(event: Message): void {
+    const stopReason = objectValue(event.delta).stop_reason;
+    if (typeof stopReason === "string") this.emitPendingBoundary(finalStopReason(stopReason));
   }
   private startReasoningMessage(event: Message): void {
     this.reasoningItemByBlock.clear();

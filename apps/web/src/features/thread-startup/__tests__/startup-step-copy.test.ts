@@ -7,7 +7,6 @@ import {
   startupDecision,
   startupSetupView,
   startupTrailRows,
-  startupTrailSummary,
 } from "../startup-step-copy";
 
 const T0 = "2026-09-02T12:00:00.000Z";
@@ -131,30 +130,6 @@ describe("placeholderTrailRows", () => {
     expect(placeholderTrailRows("attached-worktree").map((row) => row.label)).toEqual([
       "Open worktree", "Run setup", "Start thread",
     ]);
-  });
-});
-
-describe("startupTrailSummary", () => {
-  it("collapses to total time, folder and the setup command that ran", () => {
-    const summary = startupTrailSummary({
-      createdAt: at(0),
-      updatedAt: at(40),
-      steps: [
-        { phase: "worktree", state: "completed", detail: { phase: "worktree", mode: "created", folderName: "mcode-3f2a", path: "/w" } },
-        { phase: "setup", state: "completed" },
-        { phase: "agent", state: "completed", endedAt: at(22) },
-      ],
-    }, "bun install");
-    expect(summary).toEqual({ duration: "0:22", parts: ["mcode-3f2a", "bun install"] });
-  });
-
-  it("omits the setup command when setup was skipped", () => {
-    const summary = startupTrailSummary({
-      createdAt: at(0),
-      updatedAt: at(5),
-      steps: [{ phase: "setup", state: "skipped" }],
-    }, "bun install");
-    expect(summary).toEqual({ duration: "0:05", parts: [] });
   });
 });
 
