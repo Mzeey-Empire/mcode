@@ -13,8 +13,19 @@ describe("Browser narrative projection", () => {
     ["mcp:mcode-browser:browser_act", "browser_act"],
     ["mcode-browser.browser_tabs", "browser_tabs"],
     ["MCP__MCODE-BROWSER__BROWSER_EVALUATE", "browser_evaluate"],
+    ["mcp__mcode__browser_act", "browser_act"],
+    ["mcp:mcode/browser_inspect", "browser_inspect"],
+    ["mcode_browser_tabs", "browser_tabs"],
   ])("resolves %s", (toolName, expected) => {
     expect(resolveBrowserNarrativeTool(toolName)).toBe(expected);
+  });
+
+  it.each([
+    "mcp__mcode__thread_send",
+    "mcp__other__browser_act_x",
+    "mcp__other__browser_act",
+  ])("does not resolve %s from another server or tool", (toolName) => {
+    expect(resolveBrowserNarrativeTool(toolName)).toBeNull();
   });
 
   it.each([
