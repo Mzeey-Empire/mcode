@@ -48,6 +48,11 @@ NodeTest.test("runtime state env points dev commands at the worktree-local agent
     NodeAssertStrict.default.equal(env.MCODE_DB_PATH, NodePath.join(repo, ".dev", "db", "app.sqlite"));
     NodeAssertStrict.default.equal(env.MCODE_ELECTRON_USER_DATA_DIR, NodePath.join(repo, ".dev", "electron"));
     NodeAssertStrict.default.equal(env.MCODE_AGENT_FIXTURE_REPO, "fixture");
+    // The dev server must report the version a packaged build reports, not its "0.0.1" fallback.
+    const desktopManifest = JSON.parse(
+      NodeFS.readFileSync(new URL("../../../apps/desktop/package.json", import.meta.url), "utf8"),
+    );
+    NodeAssertStrict.default.equal(env.MCODE_VERSION, desktopManifest.version);
   } finally {
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }

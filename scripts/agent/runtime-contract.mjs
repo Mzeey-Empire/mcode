@@ -60,6 +60,12 @@ export function getRuntimePaths(repoRoot = resolveRepoRoot()) {
   };
 }
 
+/** Reads the version a packaged desktop build reports, so dev runs show it instead of the server's "0.0.1" fallback. */
+function readDesktopVersion() {
+  const manifest = new URL("../../apps/desktop/package.json", import.meta.url);
+  return JSON.parse(NodeFS.readFileSync(manifest, "utf8")).version;
+}
+
 /**
  * Builds the environment variables that point a dev process at the worktree-local runtime state.
  *
@@ -74,6 +80,7 @@ export function buildRuntimeStateEnv(repoRoot = resolveRepoRoot(), overrides = {
     MCODE_DATA_DIR: paths.devDir,
     MCODE_DB_PATH: paths.dbPath,
     MCODE_ELECTRON_USER_DATA_DIR: paths.electronDir,
+    MCODE_VERSION: readDesktopVersion(),
     ...overrides,
   };
 }

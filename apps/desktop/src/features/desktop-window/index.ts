@@ -17,6 +17,8 @@ import { registerThreadNotificationHandler } from "./notifications/handler.js";
 export interface DesktopWindowFeatureDependencies {
   /** Platform selected by the Electron composition root. */
   readonly platform: NodeJS.Platform;
+  /** Product name for this build, such as "Mcode (Dev)". */
+  readonly displayName: string;
   /** Return whether the desktop runs in development mode. */
   readonly isDesktopDev: () => boolean;
   /** Per-window Preview, Spellcheck, and Server Runtime operations. */
@@ -46,6 +48,7 @@ export function createDesktopWindowFeature(
 
   configureApplicationMenu({
     platform: dependencies.platform,
+    displayName: dependencies.displayName,
     getMainWindow: () => mainWindow,
   });
   registerDesktopWindowActionHandler();
@@ -54,6 +57,7 @@ export function createDesktopWindowFeature(
   const create = (): BrowserWindowType => {
     const window = createWindow({
       platform: dependencies.platform,
+      displayName: dependencies.displayName,
       isDesktopDev: dependencies.isDesktopDev,
       hooks: dependencies.lifecycleHooks,
     });

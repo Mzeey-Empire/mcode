@@ -90,7 +90,7 @@ describe("Desktop Window creation", () => {
   it("creates a hidden secure window with the current non-macOS title-bar options", () => {
     const hooks = createHooks();
 
-    createWindow({ platform: "linux", isDesktopDev: () => false, hooks });
+    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks });
 
     const options = createWindowTest.BrowserWindow.mock.calls[0][0] as Record<string, any>;
     expect(options).toMatchObject({
@@ -120,8 +120,23 @@ describe("Desktop Window creation", () => {
     expect(hooks.attachServerWindow).toHaveBeenCalledWith(createWindowTest.window);
   });
 
+  it("titles the window with the display name and keeps the page from renaming it", () => {
+    createWindow({
+      platform: "linux",
+      displayName: "Mcode (Dev)",
+      isDesktopDev: () => false,
+      hooks: createHooks(),
+    });
+
+    const options = createWindowTest.BrowserWindow.mock.calls[0][0] as Record<string, any>;
+    expect(options.title).toBe("Mcode (Dev)");
+    const event = { preventDefault: vi.fn() };
+    createWindowTest.emit("page-title-updated", event, "Mcode");
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+  });
+
   it("centres the macOS traffic lights on the 48px header row", () => {
-    createWindow({ platform: "darwin", isDesktopDev: () => false, hooks: createHooks() });
+    createWindow({ platform: "darwin", displayName: "Mcode", isDesktopDev: () => false, hooks: createHooks() });
     const options = createWindowTest.BrowserWindow.mock.calls[0][0] as Record<string, any>;
 
     expect(options.titleBarStyle).toBe("hiddenInset");
@@ -130,7 +145,7 @@ describe("Desktop Window creation", () => {
   });
 
   it("tells the renderer when full screen changes and after each load", () => {
-    createWindow({ platform: "darwin", isDesktopDev: () => false, hooks: createHooks() });
+    createWindow({ platform: "darwin", displayName: "Mcode", isDesktopDev: () => false, hooks: createHooks() });
 
     // Windows fires each event while isFullScreen() still reports the old state.
     createWindowTest.window.isFullScreen.mockReturnValue(false);
@@ -147,7 +162,7 @@ describe("Desktop Window creation", () => {
   });
 
   it("shows on first paint and clears the fallback timer", () => {
-    createWindow({ platform: "linux", isDesktopDev: () => false, hooks: createHooks() });
+    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks: createHooks() });
 
     createWindowTest.emit("ready-to-show");
     expect(createWindowTest.window.show).toHaveBeenCalledOnce();
@@ -156,7 +171,7 @@ describe("Desktop Window creation", () => {
   });
 
   it("shows after the bounded fallback when first paint does not occur", () => {
-    createWindow({ platform: "linux", isDesktopDev: () => false, hooks: createHooks() });
+    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks: createHooks() });
 
     vi.advanceTimersByTime(2999);
     expect(createWindowTest.window.show).not.toHaveBeenCalled();
@@ -166,7 +181,7 @@ describe("Desktop Window creation", () => {
 
   it("loads the development URL and opens restricted DevTools in development", () => {
     process.env.ELECTRON_RENDERER_URL = "http://localhost:5173";
-    createWindow({ platform: "linux", isDesktopDev: () => true, hooks: createHooks() });
+    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => true, hooks: createHooks() });
 
     expect(createWindowTest.window.loadURL).toHaveBeenCalledWith("http://localhost:5173");
     expect(createWindowTest.window.loadFile).not.toHaveBeenCalled();
@@ -175,7 +190,7 @@ describe("Desktop Window creation", () => {
   });
 
   it("loads the packaged renderer and does not open DevTools", () => {
-    createWindow({ platform: "linux", isDesktopDev: () => false, hooks: createHooks() });
+    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks: createHooks() });
 
     expect(createWindowTest.window.loadFile).toHaveBeenCalledWith(
       expect.stringMatching(/renderer[\\/]index\.html/),
@@ -185,7 +200,7 @@ describe("Desktop Window creation", () => {
   });
 
   it("forwards renderer console errors but skips ResizeObserver loop notices", () => {
-    createWindow({ platform: "linux", isDesktopDev: () => false, hooks: createHooks() });
+    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks: createHooks() });
 
     createWindowTest.emit("console-message", {
       level: "error",
@@ -207,7 +222,7 @@ describe("Desktop Window creation", () => {
 
   it("hardens Preview webviews and disposes resources only after close completes", () => {
     const hooks = createHooks();
-    createWindow({ platform: "linux", isDesktopDev: () => false, hooks });
+    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks });
     const preferences = { nodeIntegration: true };
     const params = { preload: "C:/attacker/preload.js" };
 
@@ -232,7 +247,7 @@ describe("Desktop Window creation", () => {
   it("prevents attachment when the prepared partition check refuses it", () => {
     const hooks = createHooks();
     hooks.hardenPreviewWebviewAttachment.mockReturnValue(false);
-    createWindow({ platform: "linux", isDesktopDev: () => false, hooks });
+    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks });
     const event = { preventDefault: vi.fn() };
     createWindowTest.emit("will-attach-webview", event, {}, { partition: "persist:foreign" });
     expect(event.preventDefault).toHaveBeenCalledTimes(1);

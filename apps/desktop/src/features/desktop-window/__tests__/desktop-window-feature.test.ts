@@ -116,6 +116,7 @@ import { createDesktopWindowFeature } from "../index.js";
 function dependencies() {
   return {
     platform: "linux" as const,
+    displayName: "Mcode",
     isDesktopDev: () => false,
     lifecycleHooks: {
       disposePreviewForWindow: vi.fn(),

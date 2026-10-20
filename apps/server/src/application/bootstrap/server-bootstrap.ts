@@ -9,6 +9,8 @@ import { AttachmentService } from "../../features/attachments/storage/attachment
 import { createWsServer } from "../transport/ws-server.js";
 import { broadcast, broadcastTerminalData, maxBufferedAmount, onSessionChange, sessionCount } from "../transport/push.js";
 import { PortPush } from "../transport/port-push.js";
+import { resolveServerBuildStage } from "../transport/application-rpc.js";
+import { appDisplayName } from "@mcode/contracts";
 import { IpcPushServer, generateIpcPath } from "../transport/ipc-push-server.js";
 import { logger, getMcodeDir } from "@mcode/shared";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
@@ -189,10 +191,9 @@ recordStartupCheckpoint("bootstrap entered");
 // title. On Windows, Task Manager pulls the display name from the binary's
 // VERSIONINFO instead — that's set at packaging time by the build-server-binary
 // helper, so process.title has no effect there but is harmless to set. The
-// "(dev)" suffix tags the standalone dev server so it is distinguishable from a
-// packaged instance in `ps` and the console window title.
-process.title =
-  process.env.NODE_ENV === "production" ? "Mcode Server" : "Mcode Server (dev)";
+// stage suffix tells a dev or nightly server from a stable one in `ps` and the
+// console window title.
+process.title = appDisplayName(resolveServerBuildStage()).replace(/^Mcode/, "Mcode Server");
 
 const PREFERRED_PORT = parseInt(process.env.MCODE_PORT ?? "19400", 10);
 const MAX_PORT_ATTEMPTS = 10;

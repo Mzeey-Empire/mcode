@@ -196,6 +196,7 @@ export type {
   SettleUnknownSteerResult,
 } from "@mcode/contracts";
 
+import type { BuildStage } from "@mcode/contracts";
 export type { PaginatedMessages, ConversationPage, ConversationTail, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord, TurnSnapshot } from "@mcode/contracts";
 
 /** Server response containing detected certified and persisted custom profiles. */
@@ -581,6 +582,8 @@ export interface McodeTransport {
 
   // Meta
   getVersion(): Promise<string>;
+  /** Build stage of the running server: dev, nightly, or stable. */
+  getStage(): Promise<BuildStage>;
 
   // File operations (@ file tagging)
   listWorkspaceFiles(workspaceId: string, threadId?: string): Promise<WorkspaceFileList>;

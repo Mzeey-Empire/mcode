@@ -618,6 +618,8 @@ export function App() {
   useEffect(() => {
     startPushListeners();
     useSettingsStore.getState().fetch();
+    // The stage only labels the title and About row; on failure they keep the plain "Mcode" name.
+    useUpdateStore.getState().loadStage().catch((error: unknown) => console.warn("Failed to load build stage", error));
     return () => stopPushListeners();
   }, []);
 

@@ -25,6 +25,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { getLogPath, getMcodeDir, getRecentLogs, logger } from "@mcode/shared";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { appDisplayName, resolveBuildStage } from "@mcode/contracts";
 
 import {
   registerOpenInHandlers,
@@ -484,11 +485,20 @@ if (hostRuntime.platform === "win32") {
   app.setAppUserModelId(APP_ID);
 }
 
-// Tag the dev main process so `ps`/console output distinguishes it from a
-// packaged instance. process.title does not change app.getName() or the
-// userData path, so dev and prod still share data-dir resolution. On packaged
+// Label every surface with the stage, never through app.setName(): userData is
+// derived from app.getName(), so renaming would move a packaged nightly's data.
+const displayName = appDisplayName(
+  resolveBuildStage({
+    agentRuntime: process.env.MCODE_AGENT_RUNTIME === "1",
+    version: app.getVersion(),
+  }),
+);
+app.setAboutPanelOptions({ applicationName: displayName });
+
+// Tag the main process so `ps`/console output distinguishes the stage.
+// process.title does not change app.getName() or the userData path. On packaged
 // Windows the Task Manager name comes from the exe VERSIONINFO, not this.
-process.title = isDesktopDev() ? "Mcode Desktop (dev)" : "Mcode Desktop";
+process.title = displayName.replace(/^Mcode/, "Mcode Desktop");
 
 app.whenReady().then(async () => {
   try {
@@ -504,6 +514,7 @@ app.whenReady().then(async () => {
     }
     const desktopWindow = createDesktopWindowFeature({
       platform: hostRuntime.platform,
+      displayName,
       isDesktopDev,
       lifecycleHooks: {
         disposePreviewForWindow,

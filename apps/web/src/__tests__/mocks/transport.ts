@@ -240,6 +240,7 @@ export const mockTransport: McodeTransport = {
   syncThreadPrs: vi.fn().mockResolvedValue([]),
   discoverConfig: vi.fn().mockResolvedValue({}),
   getVersion: vi.fn().mockResolvedValue("0.1.0"),
+  getStage: vi.fn().mockResolvedValue("stable"),
   readClipboardImage: vi.fn().mockResolvedValue(null),
   saveClipboardFile: vi.fn().mockResolvedValue(null),
   listWorkspaceFiles: vi.fn().mockResolvedValue({ paths: [], truncated: false }),

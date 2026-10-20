@@ -18,6 +18,8 @@ export interface ApplicationMenuApi {
 export interface ApplicationMenuOptions {
   /** Platform selected by the Electron composition root. */
   readonly platform: NodeJS.Platform;
+  /** Product name for this build, such as "Mcode (Dev)". */
+  readonly displayName: string;
   /** Return the current main window for renderer command fallback. */
   readonly getMainWindow: () => BrowserWindow | null;
   /** Override Electron menu operations in responsibility-local tests. */
@@ -96,7 +98,7 @@ export function configureApplicationMenu(options: ApplicationMenuOptions): void 
           click: () => sendCommand("settings.keyboard"),
         },
         {
-          label: "About Mcode",
+          label: `About ${options.displayName}`,
           click: () => sendCommand("settings.about"),
         },
       ],

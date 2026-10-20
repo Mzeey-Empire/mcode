@@ -22,6 +22,7 @@ vi.mock("@/stores/settingsStore", () => {
 });
 
 import { AboutSection, describeStatus } from "../AboutSection";
+import { useUpdateStore } from "@/stores/updateStore";
 
 describe("AboutSection release line", () => {
   beforeEach(() => {
@@ -114,5 +115,27 @@ describe("AboutSection provider CLI checks", () => {
 
     fireEvent.click(toggle);
     await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ updates: { providerCliChecks: true } }]));
+  });
+});
+
+describe("AboutSection version row", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useUpdateStore.setState({ version: "", stage: null });
+  });
+
+  it("names a dev build next to its version", () => {
+    useUpdateStore.setState({ version: "0.16.0", stage: "dev" });
+    render(<AboutSection />);
+    expect(screen.getByText("0.16.0").parentElement?.textContent).toBe("0.16.0Dev");
+  });
+
+  it("shows only the version for a stable build", () => {
+    useUpdateStore.setState({ version: "0.16.0", stage: "stable" });
+    render(<AboutSection />);
+    expect(screen.getByText("0.16.0").parentElement?.textContent).toBe("0.16.0");
   });
 });

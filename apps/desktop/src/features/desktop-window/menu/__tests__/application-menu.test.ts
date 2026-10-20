@@ -34,9 +34,10 @@ function menuFixture() {
     buildFromTemplate: vi.fn((template) => template),
     setApplicationMenu: vi.fn(),
   };
-  const configure = (platform: NodeJS.Platform) => {
+  const configure = (platform: NodeJS.Platform, displayName = "Mcode") => {
     configureApplicationMenu({
       platform,
+      displayName,
       getMainWindow: () => mainWindow as never,
       getFocusedWindow: () => focusedWindow as never,
       menu: menuApi,
@@ -94,6 +95,16 @@ describe("Desktop Window application menu", () => {
       { label: "Keyboard Shortcuts", click: expect.any(Function) },
       { label: "About Mcode", click: expect.any(Function) },
     ]);
+  });
+
+  it("labels the About item with the build's display name", () => {
+    const fixture = menuFixture();
+    fixture.configure("darwin", "Mcode (Dev)");
+
+    const template = fixture.menuApi.buildFromTemplate.mock.calls[0][0] as unknown as readonly MenuEntry[];
+    const help = template.find((entry) => entry.role === "help")?.submenu;
+    expect(help?.map((entry) => entry.label)).toContain("About Mcode (Dev)");
+    expect(help?.map((entry) => entry.label)).not.toContain("About Mcode");
   });
 
   it("routes commands to the focused window, then falls back to the main window", () => {

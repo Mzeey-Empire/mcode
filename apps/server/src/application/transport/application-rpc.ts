@@ -1,10 +1,19 @@
-import type { WsMethodName } from "@mcode/contracts";
+import { resolveBuildStage, type BuildStage, type WsMethodName } from "@mcode/contracts";
 
-type ApplicationRpcMethod = "app.version";
+type ApplicationRpcMethod = "app.version" | "app.stage";
 
 const applicationHandlers = {
   "app.version": () => process.env.MCODE_VERSION ?? "0.0.1",
+  "app.stage": () => resolveServerBuildStage(),
 } satisfies Record<ApplicationRpcMethod, () => string>;
+
+/** Build stage of this server process, from the dev launcher marker and its version. */
+export function resolveServerBuildStage(): BuildStage {
+  return resolveBuildStage({
+    agentRuntime: process.env.MCODE_AGENT_RUNTIME === "1",
+    version: process.env.MCODE_VERSION ?? "",
+  });
+}
 
 /** Checks whether a method belongs to the application-owned RPC family. */
 export function isApplicationRpcMethod(method: WsMethodName): method is ApplicationRpcMethod {
