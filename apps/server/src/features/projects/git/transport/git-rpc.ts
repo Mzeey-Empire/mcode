@@ -248,6 +248,7 @@ function broadcastThreadCheckoutChange(deps: GitRouterDeps, threadId: string): v
     branch: thread.branch,
     checkoutState: thread.checkout_state,
     baseBranch: thread.base_branch,
+    headSha: thread.head_sha,
     prNumber: thread.pr_number,
     prStatus: thread.pr_status,
   });
