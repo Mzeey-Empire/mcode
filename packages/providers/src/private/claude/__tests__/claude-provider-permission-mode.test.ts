@@ -205,7 +205,7 @@ describe("ClaudeProvider permission mode changes", () => {
     await provider.stopSession("mcode-scope");
   });
 
-  it("passes browser MCP through query options without touching process.env", async () => {
+  it("passes the one mcode server through query options without touching process.env", async () => {
     const credentials = new BrowserAutomationCredentialRegistry();
     const lease = new BrowserAutomationSessionLease(credentials);
     lease.configure({
@@ -218,7 +218,13 @@ describe("ClaudeProvider permission mode changes", () => {
       undefined,
       lease,
       undefined,
-      mockProviderHost(),
+      {
+        ...mockProviderHost(),
+        mcode: {
+          attach: async () => ({ serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "session-token-0123456789", toolkits: { browser: true, threadControl: true } }),
+          close: async () => undefined,
+        },
+      },
     );
 
     try {
@@ -235,14 +241,14 @@ describe("ClaudeProvider permission mode changes", () => {
         providerOptions: {},
       });
 
-      expect(sdkCalls[0]!.options.mcpServers).toMatchObject({
-        "mcode-browser": {
+      expect(sdkCalls[0]!.options.mcpServers).toEqual({
+        mcode: {
           type: "http",
-          url: "http://127.0.0.1:19400/mcp",
-          headers: { Authorization: expect.stringMatching(/^Bearer [A-Za-z0-9_-]{40,}$/) },
+          url: "http://127.0.0.1:19400/mcp/mcode",
+          headers: { Authorization: "Bearer session-token-0123456789" },
         },
       });
-      expect(process.env.MCODE_BROWSER_MCP_TOKEN).toBeUndefined();
+      expect(process.env.MCODE_MCP_TOKEN).toBeUndefined();
       await provider.stopSession("mcode-browser-claude");
     } finally {
       lease.shutdown();

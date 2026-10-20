@@ -26,7 +26,7 @@ export class ClaudeProvider extends RuntimeClaudeProvider {
     grants?: { tryConsume(request: { threadId: string; toolName: string; path: string }): boolean },
     browser?: ProviderHostPorts["browser"],
     _threadControl?: unknown,
-    suppliedHost?: Pick<ProviderHostPorts, "runtime" | "events">,
+    suppliedHost?: Pick<ProviderHostPorts, "runtime" | "events"> & Partial<Pick<ProviderHostPorts, "mcode">>,
   ) {
     let emit: ((event: unknown) => void) | undefined;
     const host = fixtureHost({

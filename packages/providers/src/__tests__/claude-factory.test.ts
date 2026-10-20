@@ -1,11 +1,10 @@
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { AgentEventType, ProviderRuntimeEventSchema, type ProviderRuntimeEvent, type TurnRequest } from "@mcode/contracts";
-import { createClaudeProvider, type ClaudeProviderBoundary, type ProviderFactoryInput, type ProviderEventDraft } from "../index.js";
+import { createClaudeProvider, type ClaudeProviderBoundary, type ProviderFactoryInput, type ProviderEventDraft, type ProviderMcodeAttachment } from "../index.js";
 import { DeterministicCanonicalSink } from "../conformance/deterministic-sink.js";
 import { fixtureHost } from "../private/claude/__tests__/helpers/provider-fixture.js";
 import { BrowserAutomationSessionLease } from "../private/claude/__tests__/helpers/provider-fixture.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as NodeURL from "node:url";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -22,6 +21,10 @@ const execution1 = "00000000-0000-4000-8000-000000000001";
 const execution2 = "00000000-0000-4000-8000-000000000002";
 function request(overrides: Partial<TurnRequest<"claude">> = {}): TurnRequest<"claude"> {
   return { turnId: "turn-1", turnExecutionId: execution1, deliveryAttempt: 1, sessionId: "mcode-thread-1", workspaceId: "workspace-1", threadId: "thread-1", message: "fixture", cwd: process.cwd(), model: "claude-sonnet-4-6", interactionMode: "build", permissionMode: "supervised", providerOptions: {}, ...overrides };
+}
+
+function mcodeAttachment(toolkits = { browser: true, threadControl: true }): ProviderMcodeAttachment {
+  return { serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "fixture-token", toolkits };
 }
 
 type NativeMessage = Record<string, unknown>;
@@ -645,22 +648,20 @@ describe("Claude public factory core and capabilities", () => {
     expect(provider.descriptor.capabilities).toContainEqual({ name: "child-cancellation", support: "unsupported" });
   });
 
-  it("composes plan controls, goals, orchestration, browser leases and validated SDK-local thread control", async () => {
+  it("composes plan controls, goals, orchestration, browser leases and one mcode server", async () => {
     const transport = installTransport();
     const { provider, input, events } = fixture();
     const browser = new BrowserAutomationSessionLease();
     browser.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "fixture" });
     input.host.browser = browser;
-    const mcpServer = new McpServer({ name: "fixture", version: "0" });
-    input.host.threadControl.bootstrap = vi.fn(async () => mcpServer);
-    input.host.threadControl.close = vi.fn(async () => undefined);
+    input.host.mcode.attach = vi.fn(async () => mcodeAttachment());
+    input.host.mcode.close = vi.fn(async () => undefined);
     await provider.setGoal("mcode-thread-1", "fixture objective");
     await provider.sendTurn(request({ interactionMode: "plan", planTurn: { kind: "planning", planFilePath: null }, orchestrationMode: "proactive" }));
     await completed(events, 1);
     const options = transport.optionsSeen[0];
     assert(options);
-    expect(options.mcpServers?.mcode_internal_thread_control).toMatchObject({ type: "sdk", instance: mcpServer });
-    expect(options.mcpServers?.["mcode-browser"]).toMatchObject({ type: "http", url: "http://127.0.0.1:19400/mcp" });
+    expect(options.mcpServers).toEqual({ mcode: { type: "http", url: "http://127.0.0.1:19400/mcp/mcode", headers: { Authorization: "Bearer fixture-token" } } });
     expect(options.settings).toMatchObject({ ultracode: true });
     expect(options.systemPrompt).toMatchObject({ append: expect.stringContaining("browser_inspect") });
     assert(typeof options.systemPrompt === "object" && !Array.isArray(options.systemPrompt));
@@ -685,10 +686,59 @@ describe("Claude public factory core and capabilities", () => {
     expect(await provider.clearGoal("mcode-thread-1")).toBe(true);
     await provider.discardSession("mcode-thread-1");
     expect(browser.status()).toEqual({ active: 0, pending: 0 });
-    expect(input.host.threadControl.close).toHaveBeenCalledWith("mcode-thread-1");
+    expect(input.host.mcode.close).toHaveBeenCalledWith("mcode-thread-1");
     await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: execution2 }));
     await completed(events, 2);
     expect(sdkQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["thread control only", { browser: false, threadControl: true }, { thread: true, browser: false }],
+    ["browser only", { browser: true, threadControl: false }, { thread: false, browser: true }],
+    ["neither", { browser: false, threadControl: false }, { thread: false, browser: false }],
+  ])("grants instructions from the attached toolkits: %s", async (_name, toolkits, expected) => {
+    const transport = installTransport();
+    const { provider, input, events } = fixture();
+    const browser = new BrowserAutomationSessionLease();
+    browser.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "fixture" });
+    input.host.browser = browser;
+    input.host.mcode.attach = vi.fn(async () => mcodeAttachment(toolkits));
+    await provider.sendTurn(request());
+    await completed(events, 1);
+    const prompt = transport.optionsSeen[0]?.systemPrompt;
+    assert(typeof prompt === "object" && !Array.isArray(prompt));
+    const append = prompt.append ?? "";
+    expect(append.includes("thread_target_list")).toBe(expected.thread);
+    expect(append.includes("browser_inspect")).toBe(expected.browser);
+  });
+
+  it("emits no Mcode server and grants nothing when the server declines to attach", async () => {
+    const transport = installTransport();
+    const { provider, events } = fixture();
+    await provider.sendTurn(request());
+    await completed(events, 1);
+    const options = transport.optionsSeen[0];
+    expect(options?.mcpServers).toEqual({});
+    assert(typeof options?.systemPrompt === "object" && !Array.isArray(options.systemPrompt));
+    expect(options.systemPrompt.append ?? "").not.toContain("thread_target_list");
+    expect(options.systemPrompt.append ?? "").not.toContain("browser_inspect");
+  });
+
+  it("attaches under the session id the Browser lease is staged for, not the resume or thread id", async () => {
+    installTransport();
+    const { provider, input, events } = fixture();
+    const browser = new BrowserAutomationSessionLease();
+    browser.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "fixture" });
+    const stage = vi.spyOn(browser, "stage");
+    input.host.browser = browser;
+    const attach = vi.fn(async () => mcodeAttachment());
+    input.host.mcode.attach = attach;
+    await provider.sendTurn(request({ resumeFrom: "NATIVE_RESUME" }));
+    await completed(events, 1);
+    const staged = stage.mock.calls[0]?.[0];
+    assert(staged);
+    expect(staged.providerSessionId).toBe("NATIVE_RESUME");
+    expect(attach).toHaveBeenCalledExactlyOnceWith({ providerId: "claude", sessionId: staged.mcodeSessionId, threadId: "thread-1", threadControl: true });
   });
 
   it("routes pooled PostCompact hooks to the consumed follow-up execution", async () => {
@@ -703,15 +753,15 @@ describe("Claude public factory core and capabilities", () => {
     expect(drafts.find((draft) => draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent" && draft.payload.item.payload.runtimeEvent.event.type === AgentEventType.CompactSummary)?.routing.executionId).toBe(execution2);
   });
 
-  it("stops a turn awaiting bootstrap without starting a query, then accepts a following turn", async () => {
+  it("stops a turn awaiting attach without starting a query, then accepts a following turn", async () => {
     installTransport();
     const { provider, input, events } = fixture();
     let release!: () => void;
-    const bootstrap = new Promise<void>((resolve) => { release = resolve; });
-    const bootstrapped = vi.fn(async () => { await bootstrap; return null; });
-    input.host.threadControl.bootstrap = bootstrapped;
+    const attach = new Promise<void>((resolve) => { release = resolve; });
+    const attached = vi.fn(async () => { await attach; return null; });
+    input.host.mcode.attach = attached;
     const sending = provider.sendTurn(request());
-    await vi.waitFor(() => expect(bootstrapped).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(attached).toHaveBeenCalledOnce());
     await provider.stopSession("mcode-thread-1");
     release();
     await sending;
