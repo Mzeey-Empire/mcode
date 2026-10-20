@@ -22,7 +22,6 @@ export async function cancelThreadStartup(deps: CancelThreadStartupDeps, startup
       await deps.workspaceEnvironmentService.stopAutomaticSetup({ threadId: startup.threadId });
       return deps.threadStartupService.markCancelled(startup.startupId);
     case "agent":
-      // Intent fences a first provider frame racing the stop, including a turn not admitted yet.
       await deps.agentService.stopSession(startup.threadId, { by: "user" });
       return deps.threadStartupService.markCancelled(startup.startupId);
     case "thread":

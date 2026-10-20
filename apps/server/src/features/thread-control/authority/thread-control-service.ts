@@ -704,7 +704,6 @@ export class ThreadControlService {
   private async respondToDelegationApproval(pending: PendingDelegatedTaskApproval, decision: ThreadApprovalDecision): Promise<boolean> {
     if (decision === "allow") {
       if (!this.delegatedTasks) throw new Error("Delegated task service is unavailable");
-      // Recovery relaunches only past this phase; earlier, a crash cannot tell allow from deny.
       await this.requirePhase(pending.approvalId, "dispatching");
       await this.delegatedTasks.launch(pending.approvalId);
     }

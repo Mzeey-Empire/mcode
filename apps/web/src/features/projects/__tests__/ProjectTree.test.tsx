@@ -305,7 +305,6 @@ function makeThread(
   };
 }
 
-/** Reads the depth indent ThreadRow applies to its inner row element. */
 function rowIndent(row: HTMLElement | undefined): string | undefined {
   return row?.querySelector<HTMLElement>("[style*='padding-left']")?.style.paddingLeft;
 }
