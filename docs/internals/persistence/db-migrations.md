@@ -209,16 +209,12 @@ not merge canonical and legacy history while serving a request. `turn.load` retu
 a bounded detail window. Clients request the next window with its validated detail
 cursor only while that turn remains visible.
 
-## Branch-specific databases (development)
+## Database location
 
-In a linked git worktree (where `.git` is a file pointing at the common git dir),
-dev mode uses `<toplevel>/.mcode-local/mcode.db` inside that checkout so schemas
-stay with the worktree.
-
-When developing in the primary repo directory (`main` checkout with `.git/` as a
-directory), `NODE_ENV` is not `production` and `MCODE_GIT_BRANCH` is set (or
-detected via `git rev-parse`), the DB file is `<mcodeDir>/dbs/dev-<hash>.db`
-instead of `<mcodeDir>/mcode.db`. Production stays on `~/.mcode/mcode.db`.
+The dev launchers (`bun run dev`, `bun run dev:desktop`, `bun run --shell system agent:up`) set
+`MCODE_DATA_DIR` to `<repo>/.dev` and `MCODE_DB_PATH` to `<repo>/.dev/db/app.sqlite`, so every
+checkout keeps its own database. `getMcodeDir()` throws when `MCODE_DATA_DIR` is unset outside a
+production build; production falls back to `~/.mcode/mcode.db`.
 
 ## Known limitation: FK pragmas inside transactions
 

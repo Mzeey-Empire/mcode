@@ -67,7 +67,7 @@ describe("appendBrowserCaptureFence", () => {
     const spillAppData =
       "browser-capture-spill/ws-default/550e8400-e29b-41d4-b716-446655440000.json";
     const spillAbs =
-      "C:\\Users\\me\\.mcode-dev\\browser-capture-spill\\ws-default\\550e8400-e29b-41d4-b716-446655440000.json";
+      "C:\\Users\\me\\.mcode\\browser-capture-spill\\ws-default\\550e8400-e29b-41d4-b716-446655440000.json";
     const row: AttachedBrowserCaptureV2 = {
       ...sampleCaptureV2,
       spillAppDataPath: spillAppData,

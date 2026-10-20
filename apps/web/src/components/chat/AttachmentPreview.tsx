@@ -41,7 +41,7 @@ function getBrowserCaptureSpillHints(capture: McodeBrowserCapture | undefined): 
   if (!rel && !abs) return undefined;
   const line = rel ?? abs ?? "";
   const title = [
-    "Full preview text is stored in the Mcode application data directory (for example ~/.mcode or %USERPROFILE%\\.mcode in production, ~/.mcode-dev in development), not inside your project folder.",
+    "Full preview text is stored in the Mcode application data directory (for example ~/.mcode or %USERPROFILE%\\.mcode in production, the checkout's .dev folder in development), not inside your project folder.",
     abs ? `Open this file:\n${abs}` : null,
     rel ? `Relative to that folder:\n${rel}` : null,
   ]

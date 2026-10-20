@@ -1,13 +1,10 @@
 import { defineConfig } from "drizzle-kit";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
+import { getRuntimePaths } from "../../scripts/agent/runtime-contract.mjs";
 
-/** Default SQLite URL for CLI commands (`db:migrate`, `db:push`, …). Override with `MCODE_DRIZZLE_DB`. */
-function defaultSqliteUrl(): string {
-  const dirName =
-    process.env.NODE_ENV === "production" ? ".mcode" : ".mcode-dev";
-  const filePath = NodePath.join(NodeOS.homedir(), dirName, "mcode.db");
-  return `file:${filePath.replace(/\\/g, "/")}`;
+/** CLI commands (`db:migrate`, `db:push`, …) target the checkout's seeded dev database. */
+function devSqliteUrl(): string {
+  const posixPath = getRuntimePaths().dbPath.replace(/\\/g, "/");
+  return `file:${posixPath}`;
 }
 
 export default defineConfig({
@@ -15,6 +12,6 @@ export default defineConfig({
   schema: "./src/runtime/persistence/sqlite/schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url: process.env.MCODE_DRIZZLE_DB ?? defaultSqliteUrl(),
+    url: devSqliteUrl(),
   },
 });

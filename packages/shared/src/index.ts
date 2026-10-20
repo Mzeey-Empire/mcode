@@ -2,12 +2,7 @@
 export { logger, getLogPath, getRecentLogs } from "./logging/index.js";
 
 // Paths
-export {
-  getMcodeDir,
-  spillWorkspaceDirSegment,
-  isLinkedGitWorktree,
-  resolveDbPath,
-} from "./paths/index.js";
+export { getMcodeDir, spillWorkspaceDirSegment } from "./paths/index.js";
 export {
   newHandoffUlid,
   resolveThreadHandoffsDir,

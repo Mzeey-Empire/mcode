@@ -58,6 +58,8 @@ Do not write to `.dev/` in another worktree. Stop a runtime through `agent:down`
 
 `agent:setup` (and `bun run db:seed`) reads the local Mcode database through `VACUUM INTO` and writes only the worktree-local `.dev/db/app.sqlite`. It never modifies the source database. The copy keeps the 8 most recently active projects and, in each, the 20 newest thread families with no running turn or active agent. Every table that is not explicitly listed as history is emptied, and kept rows lose their provider sessions, checkout paths, and PR links, so the dev server cannot resume, clean up, or poll real work. `bun run dev` and `bun run dev:desktop` reuse the seed while its `.dev/db/.agent-runtime-database` marker carries the current filter version, and rebuild it (discarding local data in it) when the marker is older or missing. A failed build leaves the existing database untouched. Filtered projects keep their real paths, so test and mutate only `.dev/fixture-repo`. The server registers that fixture repository when it starts.
 
+Every dev launcher sets `MCODE_DATA_DIR` to `.dev` and `MCODE_DB_PATH` to `.dev/db/app.sqlite`. A server started without them outside a production build exits with an error naming the launchers instead of falling back to a shared directory. `bun run state:reset` deletes `.dev` and refuses any other directory; run `bun run agent:setup` afterwards.
+
 Write in the repository working tree and this worktree's runtime paths. Do not edit `.env` files unless the task explicitly requires it.
 
 Linux desktop artifact verification caches the Ubuntu 22.04 image. The cache

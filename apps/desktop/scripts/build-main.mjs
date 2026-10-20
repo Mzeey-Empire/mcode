@@ -45,7 +45,7 @@ await Promise.all([
     external: ["electron"],
     define: {
       // The main bundle is only used in packaged builds. Setting NODE_ENV
-      // at build time ensures getMcodeDir() returns ~/.mcode (not ~/.mcode-dev)
+      // at build time ensures getMcodeDir() returns ~/.mcode instead of throwing
       // even for module-level constants evaluated before app code runs.
       "process.env.NODE_ENV": '"production"',
     },

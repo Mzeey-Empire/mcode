@@ -66,6 +66,10 @@ import { shouldPrintVersion } from "./cli-args.js";
 // a black renderer. Server data is already split via getMcodeDir(), but
 // Electron's userData is derived from app.getName() and must be set here,
 // before app.whenReady() and any other path-dependent call.
+//
+// Dev launchers put userData under the checkout's `.dev/electron`. The shared
+// `Mcode-Dev` directory remains only for launches that bypass them (`prod:desktop`
+// and a bare `electron .`), which have no per-checkout directory to use.
 const harnessUserDataDir = process.env.MCODE_ELECTRON_USER_DATA_DIR?.trim();
 const harnessCapabilityPath = process.env.MCODE_RELIABILITY_CAPABILITY_PATH?.trim();
 if (harnessUserDataDir && harnessCapabilityPath && NodePath.isAbsolute(harnessUserDataDir)) {

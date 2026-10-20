@@ -4,11 +4,12 @@
  * Useful for debugging where mcode stores its state.
  */
 import * as NodePath from "node:path";
-import { getMcodeDir } from "../packages/shared/src/index.ts";
-import { resolveCliDbPath } from "./resolve-cli-db-path.mjs";
+import { getRuntimePaths } from "./agent/runtime-contract.mjs";
+import { scriptRoot } from "./utils.mjs";
 
-const dataDir = process.env.MCODE_DATA_DIR ?? getMcodeDir();
-const dbPath = resolveCliDbPath();
+const paths = getRuntimePaths(scriptRoot);
+const dataDir = process.env.MCODE_DATA_DIR ?? paths.devDir;
+const dbPath = process.env.MCODE_DB_PATH ?? paths.dbPath;
 const logDir = NodePath.join(dataDir, "logs");
 
 console.log(`Data dir : ${dataDir}`);

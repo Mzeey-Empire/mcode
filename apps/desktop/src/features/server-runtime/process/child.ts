@@ -120,7 +120,6 @@ function createServerEnvironment(paths: ServerPaths, port: number, platform: Nod
     MCODE_VERSION: app.getVersion(),
     MCODE_STARTUP_ID: startupId,
   };
-  setGitEnvironment(env, paths.cwd);
   if (app.isPackaged) {
     env.MCODE_PACKAGED_RESOURCES_ROOT = process.resourcesPath;
     env.MCODE_DRIZZLE_MIGRATIONS_DIR = NodePath.join(paths.cwd, "drizzle");
@@ -131,37 +130,6 @@ function createServerEnvironment(paths: ServerPaths, port: number, platform: Nod
     if (platform === "linux") env.LD_LIBRARY_PATH = [NodePath.dirname(process.execPath), process.env.LD_LIBRARY_PATH].filter(Boolean).join(":");
   }
   return env;
-}
-
-function setGitEnvironment(env: Record<string, string>, cwd: string): void {
-  if (!isDesktopDev()) return;
-  if (!env.MCODE_GIT_BRANCH && !env.MCODE_GIT_TOPLEVEL) {
-    setCombinedGitEnvironment(env, cwd);
-    return;
-  }
-  for (const [name, args] of [["MCODE_GIT_BRANCH", ["rev-parse", "--abbrev-ref", "HEAD"]], ["MCODE_GIT_TOPLEVEL", ["rev-parse", "--show-toplevel"]]] as const) {
-    if (env[name]) continue;
-    try {
-      const value = NodeChildProcess.execFileSync("git", args, { encoding: "utf-8", timeout: 3_000, cwd, windowsHide: true }).trim();
-      if (value && value !== "HEAD") env[name] = value;
-    } catch {
-      // Git metadata is optional outside a checkout.
-    }
-  }
-}
-
-function setCombinedGitEnvironment(env: Record<string, string>, cwd: string): void {
-  try {
-    const [branch, topLevel] = NodeChildProcess.execFileSync(
-      "git",
-      ["rev-parse", "--abbrev-ref", "HEAD", "--show-toplevel"],
-      { encoding: "utf-8", timeout: 3_000, cwd, windowsHide: true },
-    ).trim().split(/\r?\n/);
-    if (branch && branch !== "HEAD") env.MCODE_GIT_BRANCH = branch;
-    if (topLevel && topLevel !== "HEAD") env.MCODE_GIT_TOPLEVEL = topLevel;
-  } catch {
-    // Git metadata is optional outside a checkout.
-  }
 }
 
 function createServerStderrStream(): NodeFS.WriteStream {
