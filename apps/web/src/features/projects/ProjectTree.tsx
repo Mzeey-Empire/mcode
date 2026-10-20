@@ -91,7 +91,7 @@ import { StatusMark } from "@/components/ui/status-mark";
 import { relativeTime } from "@/lib/time";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { ThreadStatusLane } from "@/features/thread-attention/ThreadStatusLane";
-import { threadRowLook, threadRowSetup, threadStartupRecord, useThreadRowState, type ThreadRowLook, type ThreadStartupMaps } from "@/features/thread-attention/thread-row-presentation";
+import { threadRowLook, threadRowSetup, threadStartupRecord, threadTitleTone, useThreadRowState, type ThreadRowLook, type ThreadStartupMaps, type ThreadTitleTone } from "@/features/thread-attention/thread-row-presentation";
 import { useThreadStartupStore, useWorkspaceStartupRecovery } from "@/features/thread-startup/state/thread-startup-store";
 import {
   deriveThreadRowState,
@@ -1427,6 +1427,7 @@ const ThreadRow = memo(function ThreadRow({
     validWorktreePaths,
     availableProviders,
     startupPending,
+    isActive,
   );
   const lifecycle = useThreadLifecycleActions({
     thread,
@@ -1481,6 +1482,7 @@ const ThreadRow = memo(function ThreadRow({
 
 interface ThreadRowPresentation {
   look: ThreadRowLook;
+  titleTone: ThreadTitleTone;
   isStaleWorktree: boolean;
   provider: string;
   unusable: boolean;
@@ -1526,10 +1528,12 @@ function createThreadRowPresentation(
   validWorktreePaths: Set<string>,
   availableProviders: ThreadRowProps["availableProviders"],
   startupPending: boolean,
+  isActive: boolean,
 ): ThreadRowPresentation {
   const isUserCompleted = thread.user_completed_at !== null;
   return {
     look: threadRowLook(rowState),
+    titleTone: threadTitleTone(rowState, isActive),
     isStaleWorktree: hasStaleThreadWorktree(thread, worktreesLoadedFor, validWorktreePaths),
     ...threadProviderPresentation(thread.provider, availableProviders),
     scaffoldDim: thread.clientPreparing || thread.clientError || startupPending ? "opacity-[0.72]" : false,
@@ -1865,7 +1869,8 @@ function ThreadRowTitleLine({
       ) : (
         <div
           className={cn(
-            "text-fade min-w-0 flex-1 text-label text-ink",
+            "text-fade min-w-0 flex-1 text-label",
+            presentation.titleTone === "prominent" ? "text-ink" : "text-muted",
             presentation.isUserCompleted && "text-muted/55 line-through decoration-muted/55 decoration-1",
           )}
           data-testid="thread-title"
