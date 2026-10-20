@@ -130,8 +130,9 @@ to schedule worktree cleanup.
 A worktree that has no named branch yet. It starts from a selected base
 branch and lets the thread run in isolation before the user decides whether
 the work needs a branch. In branch-facing UI, the checkout is shown as
-`detached from <base>` rather than as the selected base branch, or as
-`detached` when no base is recorded.
+`detached at <hash>` using the short commit hash of its HEAD, falling back to
+`detached from <base>` while the hash is unread and `detached` when no base is
+recorded either. The hash tells apart two detached threads on the same base.
 In Review comparisons, the compare side is shown as `HEAD` and the base remains
 the selected base branch for that worktree.
 _Avoid_: Headless worktree
@@ -844,8 +845,8 @@ When a thread has a plan, the Overview shows a plan row with the plan title
 and the latest version number. Clicking it opens the Plan tab. Older versions
 stay in the Plan tab.
 
-For branchless worktrees, the Overview shows the checkout as `detached from <base>`
-for the selected base branch and makes Create branch the next git action. After Create
+For branchless worktrees, the Overview shows the checkout as `detached at <hash>`
+(or `detached from <base>` before the hash is read) and makes Create branch the next git action. After Create
 branch succeeds, the Overview shows the named branch like any other worktree
 thread.
 

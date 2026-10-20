@@ -7,13 +7,14 @@ export function isDetachedCheckout(thread: Pick<Thread, "branch" | "checkout_sta
 
 /**
  * Resolves the user-facing checkout label for a thread row or header control. A detached checkout
- * names the base it started from when one is known, because a bare "HEAD" says nothing about where
- * the work sits.
+ * names its commit when the hash is known, because two detached threads on the same base are only
+ * told apart by where their HEAD sits. Without a hash it falls back to the base it started from.
  */
 export function resolveThreadCheckoutLabel(
-  thread: Pick<Thread, "branch" | "checkout_state" | "base_branch"> | null | undefined,
+  thread: Pick<Thread, "branch" | "checkout_state" | "base_branch" | "head_sha"> | null | undefined,
 ): string {
   if (!thread) return "detached";
   if (!isDetachedCheckout(thread)) return thread.branch;
+  if (thread.head_sha) return `detached at ${thread.head_sha}`;
   return thread.base_branch ? `detached from ${thread.base_branch}` : "detached";
 }
