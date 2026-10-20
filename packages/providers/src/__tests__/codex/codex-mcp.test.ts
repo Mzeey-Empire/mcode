@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { hasCodexInternalThreadControlMcp } from "../../private/codex/codex-provider.js";
+import { hasCodexMcodeMcp } from "../../private/codex/codex-provider.js";
 
-describe("Codex internal MCP configuration validation", () => {
-  it("accepts effective config containing the internal server", () => {
+describe("Codex mcode MCP configuration validation", () => {
+  it("accepts effective config containing the mcode server", () => {
     expect(
-      hasCodexInternalThreadControlMcp({
-        config: { mcp_servers: { mcode_internal_thread_control: { url: "http://fixture" } } },
+      hasCodexMcodeMcp({
+        config: { mcp_servers: { mcode: { url: "http://fixture" } } },
       }),
     ).toBe(true);
   });
 
-  it("rejects effective config without the internal server", () => {
-    expect(hasCodexInternalThreadControlMcp({ config: { mcp_servers: {} } })).toBe(false);
-    expect(hasCodexInternalThreadControlMcp({ config: { mcp_servers: null } })).toBe(false);
+  it("rejects effective config without the mcode server", () => {
+    expect(hasCodexMcodeMcp({ config: { mcp_servers: {} } })).toBe(false);
+    expect(hasCodexMcodeMcp({ config: { mcp_servers: null } })).toBe(false);
+    expect(hasCodexMcodeMcp({ config: { mcp_servers: { "mcode-browser": {} } } })).toBe(false);
   });
 });

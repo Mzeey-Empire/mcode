@@ -2,8 +2,8 @@
 
 Mcode derives a short runtime instruction plan from capabilities proven during
 provider session setup. Identity guidance is always present. Thread-control
-guidance appears only after the internal `mcode_internal_thread_control` MCP
-connection is established. Browser guidance appears only after a Browser lease
+guidance appears only after the session's `mcode` MCP server is attached with
+thread-control tools. Browser guidance appears only after a Browser lease
 is issued for that session. MCP authorization and lease state remain
 authoritative; instruction text does not grant permissions.
 

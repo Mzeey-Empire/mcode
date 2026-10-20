@@ -85,10 +85,10 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
   return { CodexAppServer: MockCodexAppServer };
 });
 
-import { BrowserAutomationSessionLease, CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
+import { BrowserAutomationSessionLease, CodexProvider, mcodeAttachment, stubEnvService } from "./codex-provider-test-fixture.js";
 import { AgentEventSchema, AgentEventType, ProviderRuntimeEventSchema } from "@mcode/contracts";
 import type { ApprovalRequestEnvelope, ProviderFileMutationStart, ProviderRuntimeEvent, ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts";
-import type { ProviderEventBatch, ProviderEventSinkPort, ProviderEventSubmissionReceipt } from "../../host-ports.js";
+import type { ProviderEventBatch, ProviderEventSinkPort, ProviderEventSubmissionReceipt, ProviderMcodeAttachRequest, ProviderMcodeAttachment } from "../../host-ports.js";
 
 const schemaValidExecutionId = "00000000-0000-4000-8000-000000000001";
 const acceptedEventReceipt: ProviderEventSubmissionReceipt = {
@@ -104,6 +104,20 @@ function submittedRuntimeEvents(batches: readonly ProviderEventBatch[]): Provide
     if (draft.payload.type !== "item.recorded" || draft.payload.item.payload.projection !== "providerRuntimeEvent") return [];
     return [ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent)];
   }));
+}
+
+/** Settles the startup wait the way a connected Codex app-server does. */
+function emitMcpStartup(server: (typeof appServers)[number], name: string, status: string): void {
+  server.emit("notification", {
+    method: "mcpServer/startupStatus/updated",
+    params: { threadId: "sdk-thread-1", name, status },
+  });
+}
+
+function configuredLease(): BrowserAutomationSessionLease {
+  const lease = new BrowserAutomationSessionLease();
+  lease.configure({ worktreeIdentity: "worktree-test" });
+  return lease;
 }
 
 function makeProvider(
@@ -125,10 +139,10 @@ function makeProvider(
     shutdown: vi.fn(async () => undefined),
   },
   browserAutomationLease = new BrowserAutomationSessionLease(),
-  threadControlMcp: {
-    createCodexConfiguration?: () => Promise<unknown>;
+  mcode: {
+    attach?: (request: ProviderMcodeAttachRequest) => Promise<ProviderMcodeAttachment | null>;
     close?: (sessionId: string) => Promise<void>;
-  } = undefined as never,
+  } = {},
   eventSink?: ProviderEventSinkPort,
 ): CodexProvider {
   return new CodexProvider(
@@ -137,7 +151,7 @@ function makeProvider(
     { persistGeneratedImageFromPath: vi.fn() } as never,
     catalogService as never,
     browserAutomationLease,
-    threadControlMcp as never,
+    mcode,
     eventSink,
   );
 }
@@ -230,7 +244,7 @@ describe("CodexProvider first turn on new session", () => {
     startGate.current = null;
     readConfigMock.mockReset();
     readConfigMock.mockResolvedValue({
-      config: { mcp_servers: { mcode_internal_thread_control: {} } },
+      config: { mcp_servers: { mcode: {} } },
     });
   });
 
@@ -397,16 +411,65 @@ describe("CodexProvider first turn on new session", () => {
     await provider.shutdown();
   });
 
-  it("passes loopback browser MCP config and a child-only bearer token", async () => {
-    const lease = new BrowserAutomationSessionLease();
-    const inheritedBrowserToken = process.env.MCODE_BROWSER_MCP_TOKEN;
-    lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
-      worktreeIdentity: "worktree-test",
-    });
-    const provider = makeProvider(undefined, lease);
+  it("passes one mcode server and a child-only bearer token", async () => {
+    const lease = configuredLease();
+    const inheritedToken = process.env.MCODE_MCP_TOKEN;
+    const stage = vi.spyOn(lease, "stage");
+    const attach = vi.fn().mockResolvedValue(mcodeAttachment());
+    const provider = makeProvider(undefined, lease, { attach });
 
-    await provider.sendTurn({
+    const send = provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: "test-execution",
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "inspect the page",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "supervised",
+      resumeFrom: "native-thread-to-resume",
+    });
+    await vi.waitFor(() => expect(appServers.at(-1)).toBeDefined());
+    emitMcpStartup(appServers.at(-1)!, "mcode", "ready");
+    await send;
+
+    const server = appServers.at(-1)!;
+    expect(server.options.configOverrides).toEqual([
+      'mcp_servers.mcode.url="http://127.0.0.1:19400/mcp/mcode"',
+      'mcp_servers.mcode.bearer_token_env_var="MCODE_MCP_TOKEN"',
+      'plugins."browser@openai-bundled".enabled=false',
+    ]);
+    expect(server.options.developerInstructions).toContain("browser_inspect");
+    expect(server.options.developerInstructions).toContain("thread_target_list");
+    expect(server.options.developerInstructions).toContain("yield_to_user");
+    expect(server.options.developerInstructions).not.toContain("browser_status");
+    expect(server.options.developerInstructions).toContain(MCODE_BROWSER_GUIDE.trim());
+    expect(server.spawnedEnv?.MCODE_MCP_TOKEN).toBe("session-token-fixture");
+    expect(server.spawnedEnv).not.toHaveProperty("MCODE_BROWSER_MCP_TOKEN");
+    expect(JSON.stringify(server.options.configOverrides)).not.toContain("session-token-fixture");
+    expect(process.env.MCODE_MCP_TOKEN).toBe(inheritedToken);
+    // The mcode server finds a Browser lease only under the session id it was staged with.
+    expect(attach).toHaveBeenCalledExactlyOnceWith({ providerId: "codex", sessionId, threadId, threadControl: true });
+    expect(stage.mock.calls[0]?.[0]).toMatchObject({ mcodeSessionId: sessionId, providerSessionId: "native-thread-to-resume" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await provider.stopSession(sessionId);
+    expect(lease.credentials.size()).toBe(1);
+    await provider.discardSession(sessionId);
+    expect(lease.credentials.size()).toBe(0);
+  });
+
+  it.each([
+    ["thread control only", { browser: false, threadControl: true }, { thread: true, browser: false, plugin: false }],
+    ["Browser only", { browser: true, threadControl: false }, { thread: false, browser: true, plugin: true }],
+    ["neither toolkit listed", { browser: false, threadControl: false }, { thread: false, browser: false, plugin: false }],
+  ])("grants instructions and the Browser plugin switch from the listed toolkits: %s", async (_name, toolkits, expected) => {
+    const lease = configuredLease();
+    const provider = makeProvider(undefined, lease, { attach: vi.fn().mockResolvedValue(mcodeAttachment(toolkits)) });
+
+    const send = provider.sendTurn({
       turnId: "test-turn",
       turnExecutionId: "test-execution",
       sessionId,
@@ -419,24 +482,74 @@ describe("CodexProvider first turn on new session", () => {
       providerOptions: {},
       permissionMode: "supervised",
     });
+    await vi.waitFor(() => expect(appServers.at(-1)).toBeDefined());
+    emitMcpStartup(appServers.at(-1)!, "mcode", "ready");
+    await send;
 
     const server = appServers.at(-1)!;
-    expect(server.options.configOverrides).toEqual([
-      'mcp_servers.mcode-browser.url="http://127.0.0.1:19400/mcp"',
-      'mcp_servers.mcode-browser.bearer_token_env_var="MCODE_BROWSER_MCP_TOKEN"',
-      'plugins."browser@openai-bundled".enabled=false',
-    ]);
-    expect(server.options.developerInstructions).toContain("browser_inspect");
-    expect(server.options.developerInstructions).toContain("yield_to_user");
-    expect(server.options.developerInstructions).not.toContain("browser_status");
-    expect(server.options.developerInstructions).toContain(MCODE_BROWSER_GUIDE.trim());
-    expect(server.spawnedEnv?.MCODE_BROWSER_MCP_TOKEN).toMatch(/^[A-Za-z0-9_-]{40,}$/);
-    expect(process.env.MCODE_BROWSER_MCP_TOKEN).toBe(inheritedBrowserToken);
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(server.options.developerInstructions?.includes("thread_target_list")).toBe(expected.thread);
+    expect(server.options.developerInstructions?.includes("browser_inspect")).toBe(expected.browser);
+    expect(server.options.configOverrides?.includes('plugins."browser@openai-bundled".enabled=false')).toBe(expected.plugin);
+    // A Browser grant the server does not list would sit unused until it expires.
+    expect(lease.status().active).toBe(expected.browser ? 1 : 0);
     await provider.stopSession(sessionId);
-    expect(lease.credentials.size()).toBe(1);
-    await provider.discardSession(sessionId);
-    expect(lease.credentials.size()).toBe(0);
+  });
+
+  it("attaches for Browser alone when the turn is not thread-control eligible", async () => {
+    const attach = vi.fn().mockResolvedValue(mcodeAttachment({ browser: true, threadControl: false }));
+    const provider = makeProvider(undefined, configuredLease(), { attach });
+
+    const send = provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: "test-execution",
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "inspect the page",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "supervised",
+      threadControlEligible: false,
+    });
+    await vi.waitFor(() => expect(appServers.at(-1)).toBeDefined());
+    emitMcpStartup(appServers.at(-1)!, "mcode", "ready");
+    await send;
+
+    expect(attach).toHaveBeenCalledExactlyOnceWith({ providerId: "codex", sessionId, threadId, threadControl: false });
+    await provider.stopSession(sessionId);
+  });
+
+  it("settles startup only on the mcode server's status", async () => {
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
+      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
+    });
+    let settled = false;
+
+    const send = provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: "test-execution",
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "inspect the page",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "supervised",
+    }).then(() => { settled = true; });
+    await vi.waitFor(() => expect(appServers.at(-1)).toBeDefined());
+    const server = appServers.at(-1)!;
+    emitMcpStartup(server, "mcode_internal_thread_control", "failed");
+    emitMcpStartup(server, "other-server", "ready");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    emitMcpStartup(server, "mcode", "ready");
+    await send;
+    expect(settled).toBe(true);
+    await provider.stopSession(sessionId);
   });
 
   it("does not disable the bundled Browser plugin without a Browser v2 grant", async () => {
@@ -520,11 +633,11 @@ describe("CodexProvider first turn on new session", () => {
   it("revokes a browser credential when app-server startup fails", async () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     startError.current = new Error("handshake failed");
-    const provider = makeProvider(undefined, lease);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const provider = makeProvider(undefined, lease, { attach: vi.fn().mockResolvedValue(mcodeAttachment()), close });
     const events: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
 
@@ -543,6 +656,7 @@ describe("CodexProvider first turn on new session", () => {
     });
 
     expect(lease.credentials.size()).toBe(0);
+    expect(close).toHaveBeenCalledWith("mcode-browser-spawn-failure");
     expect(appServers.at(-1)?.isAlive).toBe(false);
     expect(sendTurnMock).not.toHaveBeenCalled();
     expect(events).toEqual([
@@ -566,15 +680,14 @@ describe("CodexProvider first turn on new session", () => {
     ]);
   });
 
-  it("keeps Browser available when internal MCP configuration fails", async () => {
+  it("continues without Mcode tools and releases the Browser grant when the mcode attach fails", async () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     const events: ProviderRuntimeEvent[] = [];
     const provider = makeProvider(undefined, lease, {
-      createCodexConfiguration: vi.fn().mockRejectedValue(new Error("MCP config failed")),
+      attach: vi.fn().mockRejectedValue(new Error("MCP config failed")),
     });
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
 
@@ -593,19 +706,21 @@ describe("CodexProvider first turn on new session", () => {
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(lease.status()).toEqual({ active: 1, pending: 0 });
+    expect(lease.status()).toEqual({ active: 0, pending: 0 });
     expect(sendTurnMock).toHaveBeenCalledWith(
       [{ type: "text", text: "inspect the page" }],
       { model: "gpt-5.4", approvalsReviewer: "user" },
     );
     expect(appServers.at(-1)?.isAlive).toBe(true);
+    expect(appServers.at(-1)?.options.configOverrides).toEqual([]);
+    expect(appServers.at(-1)?.options.developerInstructions).not.toContain("browser_inspect");
     const failure = events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.McpServerStartupStatus);
     expect(failure).toHaveLength(1);
     expect(failure[0]?.event).toMatchObject({
       threadId: "browser-config-failure",
       providerId: "codex",
       serverThreadId: "sdk-thread-1",
-      name: "mcode_internal_thread_control",
+      name: "mcode",
       status: "failed",
       error: "MCP config failed",
       turnExecutionId: schemaValidExecutionId,
@@ -619,7 +734,6 @@ describe("CodexProvider first turn on new session", () => {
   it("releases the previous staged browser access for overlapping sends", async () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     const provider = makeProvider(undefined, lease);
@@ -660,7 +774,6 @@ describe("CodexProvider first turn on new session", () => {
   it("releases staged browser access when stopped before runtime acquisition", async () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     const provider = makeProvider(undefined, lease);
@@ -767,7 +880,6 @@ describe("CodexProvider first turn on new session", () => {
   it("does not shut down the shared lease when Codex stops", () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
       worktreeIdentity: "worktree-test",
     });
     const claudeGrant = lease.issue({
@@ -792,8 +904,8 @@ describe("CodexProvider first turn on new session", () => {
     provider.shutdown();
 
     expect(shutdown).not.toHaveBeenCalled();
-    expect(lease.credentials.authenticate(claudeGrant.token)).not.toBeNull();
-    expect(lease.credentials.authenticate(codexGrant.token)).not.toBeNull();
+    expect(lease.credentials.touch(claudeGrant.credentialId)).not.toBeNull();
+    expect(lease.credentials.touch(codexGrant.credentialId)).not.toBeNull();
   });
 
   it("sent turn/start after spawn when the runtime pool registers on the next tick", async () => {
@@ -2477,11 +2589,11 @@ describe("CodexProvider first turn on new session", () => {
     await expect(result).resolves.toBe("# Handoff");
   });
 
-  it("closes partial internal MCP authority when bootstrap fails", async () => {
+  it("closes the mcode session when the attach fails", async () => {
     const close = vi.fn().mockResolvedValue(undefined);
     const events: ProviderRuntimeEvent[] = [];
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      createCodexConfiguration: vi.fn().mockRejectedValue(new Error("MCP setup failed")),
+      attach: vi.fn().mockRejectedValue(new Error("MCP setup failed")),
       close,
     });
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
@@ -2516,7 +2628,7 @@ describe("CodexProvider first turn on new session", () => {
   it("continues the first turn when internal MCP startup reports failure", async () => {
     const close = vi.fn().mockResolvedValue(undefined);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      createCodexConfiguration: vi.fn().mockResolvedValue({ configOverrides: [], env: {} }),
+      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
@@ -2542,7 +2654,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "mcpServer/startupStatus/updated",
       params: {
         threadId: "sdk-thread-1",
-        name: "mcode_internal_thread_control",
+        name: "mcode",
         status: "failed",
         error: "fixture MCP failed to start",
       },
@@ -2565,7 +2677,7 @@ describe("CodexProvider first turn on new session", () => {
       threadId: "mcp-startup-failure",
       providerId: "codex",
       serverThreadId: "sdk-thread-1",
-      name: "mcode_internal_thread_control",
+      name: "mcode",
       status: "failed",
       error: "fixture MCP failed to start",
       turnExecutionId: schemaValidExecutionId,
@@ -2577,7 +2689,7 @@ describe("CodexProvider first turn on new session", () => {
   it("normalizes a legacy internal MCP error status without duplicating the failure event", async () => {
     const close = vi.fn().mockResolvedValue(undefined);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      createCodexConfiguration: vi.fn().mockResolvedValue({ configOverrides: [], env: {} }),
+      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
@@ -2603,7 +2715,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "mcpServer/startupStatus/updated",
       params: {
         threadId: "sdk-thread-1",
-        name: "mcode_internal_thread_control",
+        name: "mcode",
         status: "error",
         failureReason: "legacy fixture failure",
       },
@@ -2635,7 +2747,7 @@ describe("CodexProvider first turn on new session", () => {
   it("continues promptly when native internal MCP startup is cancelled", async () => {
     const close = vi.fn().mockResolvedValue(undefined);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      createCodexConfiguration: vi.fn().mockResolvedValue({ configOverrides: [], env: {} }),
+      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
@@ -2661,7 +2773,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "mcpServer/startupStatus/updated",
       params: {
         threadId: "sdk-thread-1",
-        name: "mcode_internal_thread_control",
+        name: "mcode",
         status: "cancelled",
       },
     });
@@ -2682,7 +2794,7 @@ describe("CodexProvider first turn on new session", () => {
       threadId: "mcp-cancelled",
       providerId: "codex",
       serverThreadId: "sdk-thread-1",
-      name: "mcode_internal_thread_control",
+      name: "mcode",
       status: "cancelled",
       turnExecutionId: schemaValidExecutionId,
     });
@@ -2694,7 +2806,7 @@ describe("CodexProvider first turn on new session", () => {
   });
 
   it.each([
-    ["missing registration", { config: { mcp_servers: {} } }, "Codex app-server did not register mcode_internal_thread_control in effective configuration"],
+    ["missing registration", { config: { mcp_servers: {} } }, "Codex app-server did not register mcode in effective configuration"],
     ["read failure", new Error("effective config unavailable"), "effective config unavailable"],
   ] as const)("continues when internal MCP effective config has a $0", async (_name, result, expectedError) => {
     if (result instanceof Error) {
@@ -2704,7 +2816,7 @@ describe("CodexProvider first turn on new session", () => {
     }
     const close = vi.fn().mockResolvedValue(undefined);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      createCodexConfiguration: vi.fn().mockResolvedValue({ configOverrides: [], env: {} }),
+      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
@@ -2732,7 +2844,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "mcpServer/startupStatus/updated",
       params: {
         threadId: "sdk-thread-1",
-        name: "mcode_internal_thread_control",
+        name: "mcode",
         status: "ready",
       },
     });
@@ -2753,7 +2865,7 @@ describe("CodexProvider first turn on new session", () => {
       threadId,
       providerId: "codex",
       serverThreadId: "sdk-thread-1",
-      name: "mcode_internal_thread_control",
+      name: "mcode",
       status: "failed",
       error: expectedError,
       turnExecutionId: schemaValidExecutionId,
@@ -2764,14 +2876,9 @@ describe("CodexProvider first turn on new session", () => {
     await provider.stopSession(sessionId);
   });
 
-  it("omits internal thread-control MCP configuration for an ineligible turn", async () => {
-    const createCodexConfiguration = vi.fn().mockResolvedValue({
-      configOverrides: ["mcp_servers.mcode_internal_thread_control.url=\"http://127.0.0.1\""],
-      env: { MCODE_INTERNAL_THREAD_CONTROL_TOKEN: "token" },
-    });
-    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      createCodexConfiguration,
-    });
+  it("omits the mcode server for an ineligible turn without a Browser lease", async () => {
+    const attach = vi.fn().mockResolvedValue(mcodeAttachment());
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), { attach });
 
     await provider.sendTurn({
       turnId: "test-turn",
@@ -2789,20 +2896,16 @@ describe("CodexProvider first turn on new session", () => {
     });
 
     const server = appServers.at(-1)!;
-    expect(createCodexConfiguration).not.toHaveBeenCalled();
-    expect(server.options.configOverrides).not.toContain(expect.stringContaining("mcode_internal_thread_control"));
-    expect(server.options.developerInstructions).not.toContain("mcode_internal_thread_control");
+    expect(attach).not.toHaveBeenCalled();
+    expect(server.options.configOverrides).toEqual([]);
+    expect(server.spawnedEnv).not.toHaveProperty("MCODE_MCP_TOKEN");
+    expect(server.options.developerInstructions).not.toContain("thread_target_list");
     await provider.stopSession("mcode-ineligible");
   });
 
   it("restarts a pooled session when Mcode thread-control eligibility changes", async () => {
-    const createCodexConfiguration = vi.fn().mockResolvedValue({
-      configOverrides: ["mcp_servers.mcode_internal_thread_control.url=\"http://127.0.0.1\""],
-      env: { MCODE_INTERNAL_THREAD_CONTROL_TOKEN: "token" },
-    });
-    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      createCodexConfiguration,
-    });
+    const attach = vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true }));
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), { attach });
 
     const request = {
       turnId: "test-turn",
@@ -2819,14 +2922,7 @@ describe("CodexProvider first turn on new session", () => {
     };
     const firstSend = provider.sendTurn({ ...request, threadControlEligible: true });
     await vi.waitFor(() => expect(appServers.at(-1)).toBeDefined());
-    appServers[0]!.emit("notification", {
-      method: "mcpServer/startupStatus/updated",
-      params: {
-        threadId: "sdk-thread-1",
-        name: "mcode_internal_thread_control",
-        status: "ready",
-      },
-    });
+    emitMcpStartup(appServers[0]!, "mcode", "ready");
     await firstSend;
     await provider.sendTurn({
       ...request,
@@ -2837,11 +2933,49 @@ describe("CodexProvider first turn on new session", () => {
 
     expect(appServers).toHaveLength(2);
     expect(appServers[0]?.options.configOverrides).toEqual([
-      'mcp_servers.mcode_internal_thread_control.url="http://127.0.0.1"',
+      'mcp_servers.mcode.url="http://127.0.0.1:19400/mcp/mcode"',
+      'mcp_servers.mcode.bearer_token_env_var="MCODE_MCP_TOKEN"',
     ]);
     expect(appServers[1]?.options.configOverrides).toEqual([]);
-    expect(createCodexConfiguration).toHaveBeenCalledTimes(1);
+    expect(attach).toHaveBeenCalledTimes(1);
     await provider.stopSession("mcode-eligibility-transition");
+  });
+
+  it("restarts a pooled session and attaches again once its Browser credential expires", async () => {
+    const attach = vi.fn().mockImplementation(async () => mcodeAttachment());
+    const provider = makeProvider(undefined, configuredLease(), { attach });
+    const request = {
+      turnId: "test-turn",
+      turnExecutionId: "test-execution",
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "inspect the page",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "supervised",
+    };
+
+    const first = provider.sendTurn(request);
+    await vi.waitFor(() => expect(appServers).toHaveLength(1));
+    emitMcpStartup(appServers[0]!, "mcode", "ready");
+    await first;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 60_000);
+      const second = provider.sendTurn({ ...request, turnExecutionId: "after-expiry" });
+      await vi.waitFor(() => expect(appServers).toHaveLength(2));
+      emitMcpStartup(appServers[1]!, "mcode", "ready");
+      await second;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(attach).toHaveBeenCalledTimes(2);
+    await provider.stopSession(sessionId);
   });
 
   it("continues after an internal MCP startup timeout and keeps the authority open", async () => {
@@ -2850,7 +2984,7 @@ describe("CodexProvider first turn on new session", () => {
       readConfigMock.mockImplementation(() => new Promise(() => undefined));
       const close = vi.fn().mockResolvedValue(undefined);
       const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-        createCodexConfiguration: vi.fn().mockResolvedValue({ configOverrides: [], env: {} }),
+        attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
         close,
       });
       const events: ProviderRuntimeEvent[] = [];
@@ -2888,9 +3022,9 @@ describe("CodexProvider first turn on new session", () => {
         threadId: "mcp-startup-timeout",
         providerId: "codex",
         serverThreadId: "sdk-thread-1",
-        name: "mcode_internal_thread_control",
+        name: "mcode",
         status: "failed",
-        error: "Codex internal MCP startup timed out",
+        error: "Codex mcode MCP startup timed out",
         turnExecutionId: schemaValidExecutionId,
       });
       expect(AgentEventSchema().parse(failures[0]?.event)).toEqual(failures[0]?.event);

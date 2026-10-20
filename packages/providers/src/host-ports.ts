@@ -67,8 +67,6 @@ export interface ProviderBrowserLeaseHandle {
 /** Browser credential issued for one staged Provider lease. */
 export interface ProviderBrowserLeaseGrant extends ProviderBrowserCredentialMetadata {
   leaseId: string;
-  mcpUrl: string;
-  token: string;
   allowedOperations: readonly string[];
 }
 
@@ -88,25 +86,30 @@ export interface ProviderBrowserPort {
   revokeCredential(credentialId: string): boolean;
 }
 
-/** Input for one server-owned thread-control bootstrap. */
-export interface ProviderThreadControlRequest {
+/** Identity of the Provider session the per-session `mcode` MCP server attaches to. */
+export interface ProviderMcodeAttachRequest {
   providerId: string;
+  /** Must equal the Browser lease `mcodeSessionId` for this session. */
   sessionId: string;
   threadId: string;
-  turnId?: string;
-  protocol: "claude" | "codex" | "http";
+  /** Whether the thread-control toolkit is listed; Codex passes its per-turn eligibility. */
+  threadControl: boolean;
 }
 
-/** Authenticated HTTP MCP connection supplied by the server-owned thread-control authority. */
-export interface ProviderThreadControlHttpConnection {
-  name: string;
+/** How a Provider reaches its one `mcode` server and which toolkits it lists. */
+export interface ProviderMcodeAttachment {
+  serverName: "mcode";
   url: string;
-  headers: Record<string, string>;
+  /** Opaque bearer for this session; never log or persist it. */
+  token: string;
+  toolkits: { browser: boolean; threadControl: boolean };
 }
 
-/** Gives a Provider opaque thread-control bootstrap data for one scoped session. */
-export interface ProviderThreadControlPort {
-  bootstrap(request: ProviderThreadControlRequest): Promise<unknown | null>;
+/** Gives a Provider its per-session `mcode` MCP server connection. */
+export interface ProviderMcodePort {
+  /** Returns null when the server is not listening or no toolkit applies to the session. */
+  attach(request: ProviderMcodeAttachRequest): Promise<ProviderMcodeAttachment | null>;
+  /** Rotates the token while a turn lease is active, otherwise closes the session. */
   close(sessionId: string): Promise<void>;
 }
 
@@ -221,7 +224,7 @@ export interface ProviderHostPorts {
   environment: ProviderEnvironmentPort;
   processes: ProviderProcessPort;
   browser: ProviderBrowserPort;
-  threadControl: ProviderThreadControlPort;
+  mcode: ProviderMcodePort;
   grants: ProviderGrantPort;
   events: ProviderEventSinkPort;
   turns: ProviderTurnPort;

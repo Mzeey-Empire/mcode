@@ -3,14 +3,13 @@ import { Lifecycle, type DependencyContainer } from "tsyringe";
 import {
   ExternalThreadControlMcpRuntime,
   ExternalThreadControlPairingService,
-  InternalThreadControlMcpAuthority,
-  InternalThreadControlMcpRuntime,
   ThreadCompletionService,
   ThreadControlMutationReservationService,
   ThreadControlService,
   ThreadDeletionTeardownService,
   ThreadTeardownService,
 } from "../index.js";
+import { McodeSessionAuthority } from "../../mcode-mcp/mcode-session-authority.js";
 import { ThreadControlApprovalRepo } from "../authority/persistence/thread-control-approval-repo.js";
 import { ThreadControlAuditRepo } from "../authority/persistence/thread-control-audit-repo.js";
 
@@ -37,13 +36,8 @@ export function registerThreadControlServices(container: DependencyContainer): v
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(
-    InternalThreadControlMcpAuthority,
-    { useClass: InternalThreadControlMcpAuthority },
-    { lifecycle: Lifecycle.Singleton },
-  );
-  container.register(
-    InternalThreadControlMcpRuntime,
-    { useClass: InternalThreadControlMcpRuntime },
+    McodeSessionAuthority,
+    { useClass: McodeSessionAuthority },
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(

@@ -106,15 +106,21 @@ function normalizedToolName(toolName: string): string {
   return toolName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
-/** Resolves provider-specific mcode-browser names to one Browser v2 narrative tool. */
+/**
+ * Resolves provider-specific names for the `mcode` MCP server to one Browser v2 narrative tool.
+ * The retired `mcode-browser` server forms stay so persisted history still resolves.
+ */
 export function resolveBrowserNarrativeTool(toolName: string): BrowserNarrativeTool | null {
   const normalized = normalizedToolName(toolName);
   for (const candidate of BROWSER_NARRATIVE_TOOLS) {
-    const canonicalMcpName = `mcode_browser_${candidate}`;
+    const mcodeName = `mcode_${candidate}`;
+    const legacyMcpName = `mcode_browser_${candidate}`;
     if (
       normalized === candidate
-      || normalized === canonicalMcpName
-      || normalized.endsWith(`_${canonicalMcpName}`)
+      || normalized === mcodeName
+      || normalized.endsWith(`_${mcodeName}`)
+      || normalized === legacyMcpName
+      || normalized.endsWith(`_${legacyMcpName}`)
     ) return candidate;
   }
   return null;

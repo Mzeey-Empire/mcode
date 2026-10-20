@@ -71,7 +71,7 @@ function createProvider(child: NativeProcess) {
       browser: { stage: () => ({ leaseId: "unused", expiresAt: 0 }), releaseSession: () => 0,
         isConfigured: () => false, issue: () => null, refresh: () => { throw new Error("Unused browser"); },
         release: leaseId => ({ leaseId, released: false }), revokeCredential: () => false },
-      threadControl: { bootstrap: async () => null, close: async () => {} }, grants: { consume: () => false },
+      mcode: { attach: async () => null, close: async () => {} }, grants: { consume: () => false },
       events: { submit: async () => { throw new Error("Unexpected canonical event"); } },
     },
     codex: { settings: { get: async () => ({ cliPath: "codex", fastMode: false }) },

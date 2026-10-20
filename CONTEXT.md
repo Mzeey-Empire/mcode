@@ -406,7 +406,9 @@ _Avoid_: Sub-agent control, conversation-fork control
 
 ### Internal thread control
 Thread control exercised by a Provider running inside an authenticated Mcode
-Thread. It acts for the current user across registered Projects.
+Thread. It acts for the current user across registered Projects. The Provider
+reaches it through its session's `mcode` MCP server, the same server that
+carries Browser automation.
 _Avoid_: Provider subagent API
 
 ### Paired external thread control
@@ -1126,8 +1128,8 @@ Distinct from opening the page in the user's external browser.
 Provider-neutral agent control of a live Preview tab. Browser automation uses
 the same page the user can see, so agent actions, page state, and debugging
 evidence stay attached to one shared browser session.
-Providers use the typed, scoped Browser v2 gateway. It is the only supported
-automation path.
+Providers reach the typed, scoped Browser v2 tools through their session's
+`mcode` MCP server. It is the only supported automation path.
 _Avoid_: a hidden agent-only browser
 
 ### Browser automation host

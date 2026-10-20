@@ -38,8 +38,8 @@ const requiredHostMethods = [
   ["processes", "terminateTree"],
   ["browser", "stage"],
   ["browser", "releaseSession"],
-  ["threadControl", "bootstrap"],
-  ["threadControl", "close"],
+  ["mcode", "attach"],
+  ["mcode", "close"],
   ["grants", "consume"],
   ["events", "submit"],
 ] as const;

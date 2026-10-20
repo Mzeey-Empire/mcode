@@ -25,9 +25,19 @@ const scope: BrowserAutomationSessionLeaseScope = {
 
 function configuredLease(): BrowserAutomationSessionLease {
   const lease = new BrowserAutomationSessionLease();
-  lease.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "worktree-1" });
+  lease.configure({ worktreeIdentity: "worktree-1" });
   return lease;
 }
+
+const attachment = {
+  serverName: "mcode" as const,
+  url: "http://127.0.0.1:19400/mcp/mcode",
+  token: "session-token",
+  toolkits: { browser: true, threadControl: true },
+};
+const mcodeServers = {
+  mcode: { type: "http", url: attachment.url, headers: { Authorization: "Bearer session-token" } },
+};
 
 function makeProvider(lease: BrowserAutomationSessionLease) {
   const provider = Object.create(ClaudeProvider.prototype) as ClaudeProvider;
@@ -75,7 +85,7 @@ function makeProvider(lease: BrowserAutomationSessionLease) {
     suppressEndedQueries: new Set(),
     suppressSessionStartHooks: new Set(),
     pendingPermissions: new Map(),
-    host: fixtureHost({ browser: lease }),
+    host: fixtureHost({ browser: lease, mcode: { attach: vi.fn(async () => attachment), close: vi.fn(async () => undefined) } }),
     configuration: { cliPath: process.execPath, idleSessionTtlMs: 600_000 },
     scopedPreGrant: { tryConsume: () => false },
     envService: { getEnv: () => ({}) },
@@ -142,12 +152,13 @@ describe("ClaudeProvider browser session lease lifecycle", () => {
 
     expect(runtime.stop).toHaveBeenCalledOnce();
     const options = mockQuery.mock.calls[0][0].options;
-    const token = options.mcpServers["mcode-browser"].headers.Authorization.slice("Bearer ".length);
-    expect(lease.credentials.authenticate(oldGrant.token)).toBeNull();
-    expect(lease.credentials.authenticate(token)).not.toBeNull();
+    expect(options.mcpServers).toEqual(mcodeServers);
+    expect(lease.credentials.touch(oldGrant.credentialId)).toBeNull();
     expect((provider as any).host.browser.status()).toEqual({ active: 1, pending: 0 });
     const spawnedState = harness.spawnedState;
     expect(spawnedState).toBeDefined();
+    expect(spawnedState.browserLease.leaseId).not.toBe(oldGrant.leaseId);
+    expect(lease.credentials.size()).toBe(1);
     await (provider as any).close(spawnedState);
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
@@ -193,7 +204,7 @@ describe("ClaudeProvider browser session lease lifecycle", () => {
     provider.shutdown();
 
     expect(shutdown).toHaveBeenCalledOnce();
-    expect(lease.credentials.authenticate(nonClaudeGrant.token)).not.toBeNull();
-    expect(lease.credentials.authenticate(claudeGrant.token)).not.toBeNull();
+    expect(lease.credentials.touch(nonClaudeGrant.credentialId)).not.toBeNull();
+    expect(lease.credentials.touch(claudeGrant.credentialId)).not.toBeNull();
   });
 });

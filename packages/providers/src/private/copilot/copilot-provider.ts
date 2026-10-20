@@ -5,20 +5,20 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { CopilotClient, approveAll } from "@github/copilot-sdk";
-import type { CopilotSession, SessionEvent, ModelInfo, PermissionRequest as NativePermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
+import type { CopilotSession, SessionEvent, MCPServerConfig, ModelInfo, PermissionRequest as NativePermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
 import { z } from "zod";
 import type { AgentEvent, ChildThreadEvidence, IAgentProvider, ISessionEvictable, ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ProviderIdentity, ProviderModelInfo, TurnRequest, CompletionOptions } from "@mcode/contracts";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { copilotApprovalBody, copilotSessionScope } from "./copilot-approval.js";
-import { BROWSER_AUTOMATION_OPERATION_METADATA, PLAN_MAX_CONTENT_CHARS, providerRuntimeEvent, type NativePlanFileOutcome } from "@mcode/contracts";
+import { PLAN_MAX_CONTENT_CHARS, providerRuntimeEvent, type NativePlanFileOutcome } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { buildMcodeInstructionPlan, renderMcodeInstructions } from "@mcode/thread-orchestration";
 import type { CopilotProviderPorts } from "../../factory-types.js";
-import { providerBrowserPermissionCapability, type ProviderBrowserLeaseGrant, type ProviderHostPorts, type ProviderThreadControlHttpConnection } from "../../host-ports.js";
+import { providerBrowserPermissionCapability, type ProviderBrowserLeaseGrant, type ProviderHostPorts } from "../../host-ports.js";
 import { SessionRuntime, type ProtocolAdapter, type SpawnArgs, type SpawnResult } from "../session-runtime.js";
 import { CanonicalLiveEventPublisher, type CanonicalLiveEventRouting } from "../canonical-live-event-publisher.js";
 import { CopilotCleanForker } from "./copilot-clean-forker.js";
-import { buildCopilotInternalMcpServers, composeCopilotSystemMessage, inferModelGroup, normalizeQuotaSnapshots, readUserInstructions, userSkillDirectories } from "./copilot-helpers.js";
+import { composeCopilotSystemMessage, inferModelGroup, normalizeQuotaSnapshots, readUserInstructions, userSkillDirectories } from "./copilot-helpers.js";
 import { mapCopilotEvent, closeOpenChildren, type CopilotTurnState, type CopilotMappedEvent } from "./copilot-event-mapper.js";
 import { describeCopilotAuth } from "../status/provider-auth-checks.js";
 import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
@@ -220,14 +220,14 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     const browserGrant = this.host.browser.issue(stage);
     try {
       const client = await this.getClient();
-      const options = await this.sessionOptions(request, browserGrant);
+      const options = await this.sessionOptions(request, browserGrant, args.sessionId);
       const operation = openCopilotSession(client, options, args.resumeFrom, request.resumeRequired === true);
       const session = await this.awaitNativeResource(operation, 30_000, "Copilot session startup");
       const planRoot = NodePath.join(options.configDir, "session-state", session.sessionId);
       return { state: { sessionId: args.sessionId, session, planRoot, cwd: args.cwd, request, browserGrant, browserCapability, nativeEventIds: new Set(), sessionGrants: new Set() }, pids: [] };
     } catch (error) {
       if (browserGrant) this.host.browser.release(browserGrant.leaseId);
-      await bounded(this.host.threadControl.close(args.sessionId), 5_000, "Copilot startup thread-control close");
+      await bounded(this.host.mcode.close(args.sessionId), 5_000, "Copilot startup mcode close");
       throw error;
     } finally {
       if (!browserGrant) this.host.browser.release(stage.leaseId);
@@ -257,9 +257,16 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     }
   }
 
-  private async sessionOptions(request: TurnRequest<"copilot">, browser: ProviderBrowserLeaseGrant | null) {
-    const connection = parseHttpConnection(await this.host.threadControl.bootstrap({ providerId: this.id, sessionId: request.sessionId, threadId: request.threadId, turnId: request.turnId, protocol: "http" }));
-    const instructions = renderMcodeInstructions(buildMcodeInstructionPlan({ sourceThreadId: request.threadId, threadControlGranted: Boolean(connection), browserAutomationGranted: Boolean(browser) }));
+  /** `sessionId` must be the id the Browser lease was staged under, or the mcode server finds no lease and drops Browser tools. */
+  private async sessionOptions(request: TurnRequest<"copilot">, browser: ProviderBrowserLeaseGrant | null, sessionId: string) {
+    const mcode = await this.host.mcode.attach({ providerId: this.id, sessionId, threadId: request.threadId, threadControl: true });
+    const instructions = renderMcodeInstructions(buildMcodeInstructionPlan({
+      threadControlGranted: mcode?.toolkits.threadControl ?? false,
+      browserAutomationGranted: Boolean(mcode?.toolkits.browser && browser),
+    }));
+    const mcpServers: Record<string, MCPServerConfig> = mcode
+      ? { [mcode.serverName]: { type: "http", url: mcode.url, headers: { Authorization: `Bearer ${mcode.token}` }, tools: ["*"] } }
+      : {};
     return {
       configDir: await this.resolveConfigDirectory(),
       onPermissionRequest: (permission: NativePermissionRequest) => this.requestPermission(request.sessionId, permission),
@@ -269,10 +276,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       enableConfigDiscovery: true,
       skillDirectories: userSkillDirectories(),
       systemMessage: composeCopilotSystemMessage(readUserInstructions(), instructions),
-      mcpServers: {
-        ...(connection ? buildCopilotInternalMcpServers(connection) : {}),
-        ...(browser ? { "mcode-browser": { type: "http" as const, url: browser.mcpUrl, headers: { Authorization: `Bearer ${browser.token}` }, tools: Object.values(BROWSER_AUTOMATION_OPERATION_METADATA).filter((metadata) => browser.allowedOperations.includes(metadata.operation)).map((metadata) => metadata.mcpName) } } : {}),
-      },
+      mcpServers,
     };
   }
 
@@ -525,7 +529,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     }
     finally {
       if (state.browserGrant) this.host.browser.release(state.browserGrant.leaseId);
-      await bounded(this.host.threadControl.close(state.sessionId), 5_000, "Copilot thread-control close");
+      await bounded(this.host.mcode.close(state.sessionId), 5_000, "Copilot mcode close");
     }
   }
   /** Cancels an admitted/running turn; preserves its session for an ordinary follow-up. */
@@ -702,13 +706,6 @@ function modelCapabilities(model: ModelInfo): Pick<ProviderModelInfo, "contextWi
 
 function isReasoningEffort(value: unknown): value is NonNullable<ProviderModelInfo["defaultReasoningEffort"]> { return typeof value === "string" && ["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value); }
 function isPolicyState(value: unknown): value is "enabled" | "disabled" | "unconfigured" { return typeof value === "string" && ["enabled", "disabled", "unconfigured"].includes(value); }
-const httpConnectionSchema = z.object({ name: z.string(), url: z.string().url(), headers: z.record(z.string(), z.string()) });
-function parseHttpConnection(value: unknown): ProviderThreadControlHttpConnection | undefined {
-  if (value === undefined || value === null) return undefined;
-  const result = httpConnectionSchema.safeParse(value);
-  if (!result.success) throw new Error("Invalid Copilot thread-control connection");
-  return result.data;
-}
 
 function nativeReasoningEffort(value: TurnRequest<"copilot">["reasoningLevel"]): "low" | "medium" | "high" | "xhigh" | undefined {
   if (value === "max") return "xhigh";

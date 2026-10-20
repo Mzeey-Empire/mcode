@@ -19,7 +19,6 @@ import { captureClaudePlanFileRef, isClaudePlanFilePath, isWritableClaudePlanPat
 import { z } from "zod";
 import * as NodePath from "node:path";
 import which from "which";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ClaudeOwnedProcess } from "./claude-process.js";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -80,24 +79,6 @@ import {
   renderMcodeInstructions,
 } from "@mcode/thread-orchestration";
 
-/** Merges exact internal and Browser MCP grants used by one Claude session. */
-export function mergeClaudeMcpServers(
-  base: Record<string, unknown>,
-  browserGrant: { mcpUrl: string; token: string } | null,
-): Record<string, unknown> {
-  return {
-    ...base,
-    ...(browserGrant
-      ? {
-          "mcode-browser": {
-            type: "http" as const,
-            url: browserGrant.mcpUrl,
-            headers: { Authorization: `Bearer ${browserGrant.token}` },
-          },
-        }
-      : {}),
-  };
-}
 import type {
   ProtocolAdapter,
   SpawnArgs,
@@ -110,7 +91,7 @@ import {
   type ProviderBrowserLeaseHandle as BrowserAutomationSessionLeaseStage,
 } from "../../host-ports.js";
 import type { SessionForker } from "@mcode/contracts";
-import type { ProviderBackgroundToolSettlement, ProviderHostPorts, ProviderTurnOpening, ProviderTurnRouting } from "../../host-ports.js";
+import type { ProviderBackgroundToolSettlement, ProviderHostPorts, ProviderMcodeAttachment, ProviderTurnOpening, ProviderTurnRouting } from "../../host-ports.js";
 import type { ProviderIdentity } from "@mcode/contracts";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
 import {
@@ -141,7 +122,6 @@ function userDenyNoteMessage(note: string): string {
  * Kept in one place so all paths stay in sync when upgrading the default.
  */
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5";
-const claudeMcpServerSchema = z.instanceof(McpServer);
 const claudePlanWriteSchema = z.object({ file_path: z.string() });
 
 /** Max queued messages before push() warns and drops. */
@@ -537,7 +517,7 @@ interface PendingSpawnTurn {
   /** Raw uuid (threadId) used as the `sessionId` option on a fresh (non-resume) spawn. */
   uuid: string;
   /** Fully-built SDK query options sans the resume/sessionId discriminator. */
-  baseOptions: Record<string, unknown>;
+  baseOptions: ClaudeBaseOptions;
   /**
    * Bare model id (no `[1m]` suffix) stored on the session state so
    * detectFallbackModel compares against the dated snapshot ids the SDK reports.
@@ -547,6 +527,24 @@ interface PendingSpawnTurn {
   contextWindowMode: ContextWindowMode | undefined;
   /** Orchestration mode encoded into the session's flag settings. */
   orchestrationMode: OrchestrationMode;
+}
+
+/** The one `mcode` HTTP entry for a Claude session, or none when the server did not attach. */
+function claudeMcodeMcpServers(mcode: ProviderMcodeAttachment | null): Record<string, unknown> {
+  if (!mcode) return {};
+  return {
+    [mcode.serverName]: {
+      type: "http",
+      url: mcode.url,
+      headers: { Authorization: `Bearer ${mcode.token}` },
+    },
+  };
+}
+
+/** SDK query options plus the toolkits the `mcode` server was attached with, which decide the instruction grants. */
+interface ClaudeBaseOptions {
+  sdk: Record<string, unknown>;
+  mcodeToolkits: ProviderMcodeAttachment["toolkits"];
 }
 
 interface PendingBrowserAccess {
@@ -1738,27 +1736,20 @@ export class ClaudeProvider
   private async createClaudeBaseOptions(
     context: ClaudeTurnContext,
     permissionMode: "bypassPermissions" | "default" | "plan",
-  ): Promise<Record<string, unknown>> {
-    const bootstrap = await this.host.threadControl.bootstrap({ providerId: this.id, sessionId: context.params.sessionId, threadId: context.threadId, protocol: "claude" });
-    const internalMcpServer = bootstrap == null ? null : claudeMcpServerSchema.parse(bootstrap);
+  ): Promise<ClaudeBaseOptions> {
+    // The session id must be the one the Browser lease was staged under, or the server lists no Browser tools.
+    const mcode = await this.host.mcode.attach({ providerId: this.id, sessionId: context.params.sessionId, threadId: context.threadId, threadControl: true });
     const autoCompactWindow = resolveAutoCompactWindow(
       context.params.contextWindowMode,
       context.model,
     );
-    return {
+    const sdk = {
       cwd: context.cwd,
       model: context.sdkModelSlug,
       settingSources: ["user", "project", "local"],
       systemPrompt: { type: "preset", preset: "claude_code" },
       tools: { type: "preset", preset: "claude_code" },
-      mcpServers: internalMcpServer
-        ? {
-            mcode_internal_thread_control: {
-              type: "sdk",
-              instance: internalMcpServer,
-            },
-          }
-        : {},
+      mcpServers: claudeMcodeMcpServers(mcode),
       disallowedTools: ["EnterPlanMode", "AskUserQuestion"],
       permissionMode,
       ...(context.params.permissionMode === "full" && { allowDangerouslySkipPermissions: true }),
@@ -1784,6 +1775,7 @@ export class ClaudeProvider
         context.params.maxTurns > 0 && { maxTurns: context.params.maxTurns }),
       hooks: this.createClaudeHooks(context),
     };
+    return { sdk, mcodeToolkits: mcode?.toolkits ?? { browser: false, threadControl: false } };
   }
 
   private createClaudeHooks(context: ClaudeTurnContext) {
@@ -1865,7 +1857,7 @@ export class ClaudeProvider
 
   private stageClaudeTurn(
     context: ClaudeTurnContext,
-    baseOptions: Record<string, unknown>,
+    baseOptions: ClaudeBaseOptions,
     resumeId: string,
     resume: boolean,
   ): void {
@@ -1885,7 +1877,7 @@ export class ClaudeProvider
 
   private async spawnClaudeTurn(
     context: ClaudeTurnContext,
-    baseOptions: Record<string, unknown>,
+    baseOptions: ClaudeBaseOptions,
     resumeId: string,
   ): Promise<void> {
     const first = await this.runClaudeSpawn(
@@ -1900,7 +1892,7 @@ export class ClaudeProvider
 
   private async runClaudeSpawn(
     context: ClaudeTurnContext,
-    baseOptions: Record<string, unknown>,
+    baseOptions: ClaudeBaseOptions,
     resumeId: string,
     resume: boolean,
   ): Promise<ClaudeSpawnOutcome> {
@@ -2084,7 +2076,7 @@ export class ClaudeProvider
       sdkPermissionMode,
     );
     if (this.pendingStops.delete(sessionId)) {
-      await this.host.threadControl.close(sessionId);
+      await this.host.mcode.close(sessionId);
       this.publishTurnEvent(routing, sessionId, { type: AgentEventType.Ended, threadId: tid, turnExecutionId: routing.executionId });
       await this.waitForCanonicalExecution(routing);
       return;
@@ -2130,27 +2122,20 @@ export class ClaudeProvider
   }
 
   private createClaudeSpawnOptions(
-    args: SpawnArgs,
     staged: PendingSpawnTurn,
     browserGrant: BrowserAutomationSessionLeaseGrant | null,
     stderr: (data: string) => void,
   ): ClaudeSdkQueryOptions {
-    const effectiveMcpServers = mergeClaudeMcpServers(
-      (staged.baseOptions.mcpServers ?? {}) as Record<string, unknown>,
-      browserGrant,
-    );
+    const { sdk, mcodeToolkits } = staged.baseOptions;
+    // The Browser toolkit is listed per session, but the lease is issued after attach and can fail.
     const instructions = renderMcodeInstructions(
       buildMcodeInstructionPlan({
-        sourceThreadId: args.threadId,
-        threadControlGranted: Boolean(
-          effectiveMcpServers.mcode_internal_thread_control,
-        ),
-        browserAutomationGranted: Boolean(browserGrant),
+        threadControlGranted: mcodeToolkits.threadControl,
+        browserAutomationGranted: mcodeToolkits.browser && browserGrant !== null,
       }),
     );
     const options = {
-      ...staged.baseOptions,
-      mcpServers: effectiveMcpServers,
+      ...sdk,
       systemPrompt: {
         type: "preset" as const,
         preset: "claude_code" as const,
@@ -2296,7 +2281,6 @@ export class ClaudeProvider
     const staged = this.takePendingClaudeSpawn(sessionId);
     const browser = this.issueClaudeBrowserGrant(sessionId);
     const options = this.createClaudeSpawnOptions(
-      args,
       staged,
       browser.grant,
       this.createClaudeStderrCapture(sessionId),
@@ -2319,7 +2303,7 @@ export class ClaudeProvider
       query = this.startClaudeSdkQuery(sessionId, queue, options, browser);
     } catch (error) {
       await ownedProcess.retire();
-      await this.host.threadControl.close(sessionId);
+      await this.host.mcode.close(sessionId);
       throw error;
     }
     this.releaseStagedClaudeBrowserAccess(sessionId, browser);
@@ -2369,7 +2353,7 @@ export class ClaudeProvider
   async close(state: ClaudeSessionState): Promise<void> {
     const results = await Promise.allSettled([
       Promise.resolve().then(() => { if (state.browserLease) this.host.browser.release(state.browserLease.leaseId); }),
-      Promise.resolve().then(() => this.host.threadControl.close(state.sessionId)),
+      Promise.resolve().then(() => this.host.mcode.close(state.sessionId)),
       Promise.resolve().then(() => state.query.close()),
       Promise.resolve().then(() => state.ownedProcess?.retire()),
     ]);

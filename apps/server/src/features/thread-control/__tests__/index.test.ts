@@ -8,8 +8,6 @@ describe("thread control feature boundary", () => {
       "EXTERNAL_THREAD_CONTROL_MCP_PATH",
       "ExternalThreadControlMcpRuntime",
       "ExternalThreadControlPairingService",
-      "InternalThreadControlMcpAuthority",
-      "InternalThreadControlMcpRuntime",
       "ThreadCompletionService",
       "ThreadControlMutationReservationService",
       "ThreadControlService",

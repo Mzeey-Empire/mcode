@@ -15,7 +15,7 @@ import type { ProviderIdentity } from "@mcode/agent-model";
 import {
   providerBrowserPermissionCapability,
   type ProviderHostPorts,
-  type ProviderThreadControlHttpConnection,
+  type ProviderMcodeAttachment,
 } from "../../host-ports.js";
 import type { CursorProviderPorts } from "../../factory-types.js";
 import { SessionRuntime } from "../session-runtime.js";
@@ -70,16 +70,16 @@ import {
 export { cursorSupportsHttpMcp } from "./acp/cursor-acp-capabilities.js";
 export { appendCursorMcodeInstructions } from "./runtime/cursor-turn-executor.js";
 
-/** Builds the ACP HTTP MCP configuration for one provider session. */
-export function buildCursorInternalMcpServers(
-  connection: ProviderThreadControlHttpConnection,
-): McpServer[] {
-  return [{
-    type: "http",
-    name: connection.name,
-    url: connection.url,
-    headers: Object.entries(connection.headers).map(([name, value]) => ({ name, value })),
-  }];
+/** Builds the one ACP HTTP MCP descriptor that exposes every Mcode toolkit; empty when no server attached. */
+export function buildCursorMcodeMcpServers(mcode: ProviderMcodeAttachment | null): McpServer[] {
+  return mcode
+    ? [{
+        type: "http",
+        name: mcode.serverName,
+        url: mcode.url,
+        headers: [{ name: "Authorization", value: `Bearer ${mcode.token}` }],
+      }]
+    : [];
 }
 
 type BrowserAutomationSessionLeaseGrant = CursorBrowserLeaseGrant;
@@ -112,30 +112,6 @@ const CURSOR_SUPPORTED_CAPABILITIES = [
 function cursorCliProbeBinaries(settings: Settings): string[] {
   const configured = settings.provider.cli.cursor?.trim();
   return configured ? [configured] : [getCatalogEntry("cursor").cliBinary, "agent"];
-}
-
-function isThreadControlHttpConnection(value: unknown): value is ProviderThreadControlHttpConnection {
-  if (!value || typeof value !== "object") return false;
-  const connection = value as Record<string, unknown>;
-  return typeof connection.name === "string"
-    && typeof connection.url === "string"
-    && typeof connection.headers === "object"
-    && connection.headers !== null
-    && !Array.isArray(connection.headers);
-}
-
-/** Builds the ACP HTTP MCP descriptor for one short-lived browser grant. */
-export function buildCursorBrowserMcpServers(
-  grant: Pick<BrowserAutomationSessionLeaseGrant, "mcpUrl" | "token"> | null,
-): McpServer[] {
-  return grant
-    ? [{
-        type: "http",
-        name: "mcode-browser",
-        url: grant.mcpUrl,
-        headers: [{ name: "Authorization", value: `Bearer ${grant.token}` }],
-      }]
-    : [];
 }
 
 /** Carries one-time guidance state only across a successful stored-session reload. */
@@ -205,10 +181,6 @@ export class CursorProvider
   private readonly skillService: CursorProviderPorts["skills"];
   private readonly envService: { getEnv(): Record<string, string> };
   private readonly browserAutomationLease: ProviderHostPorts["browser"];
-  private readonly threadControlMcp: {
-    createHttpConnection(sessionId: string): Promise<ProviderThreadControlHttpConnection | undefined>;
-    close(sessionId: string): Promise<void>;
-  };
   private acpClientBridge?: CursorAcpClientBridge;
   private processSpawner?: CursorAcpProcessSpawner;
   private turnExecutor?: CursorTurnExecutor;
@@ -226,19 +198,6 @@ export class CursorProvider
     this.skillService = cursorPorts.skills;
     this.envService = { getEnv: () => ({ ...host.environment.snapshot() }) };
     this.browserAutomationLease = host.browser;
-    this.threadControlMcp = {
-      createHttpConnection: async (sessionId) => {
-        const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
-        const connection = await host.threadControl.bootstrap({
-          providerId: this.id,
-          sessionId,
-          threadId,
-          protocol: "http",
-        });
-        return isThreadControlHttpConnection(connection) ? connection : undefined;
-      },
-      close: (sessionId) => host.threadControl.close(sessionId),
-    };
     this.runtime = new SessionRuntime<CursorSessionState>(this, {
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       processes: host.processes,
@@ -518,7 +477,10 @@ export class CursorProvider
   ): Promise<CursorSessionState | undefined> {
     const entry = this.runtime.get(context.sessionId);
     if (!entry) return undefined;
-    if (context.resume || entry.activeTurnState !== null) return entry;
+    if (entry.activeTurnState !== null) return entry;
+    // A session that started without the mcode server never gets it back by being reused, so the
+    // next turn respawns it (resuming the same ACP session) and tries the attach again.
+    if (context.resume && !entry.mcodeDegraded) return entry;
 
     await this.runtime.stop(context.sessionId);
     return undefined;
@@ -942,26 +904,70 @@ export class CursorProvider
         browserStage,
         refreshedGrant,
       );
-      const mcpServers = buildCursorBrowserMcpServers(browserGrant);
+      const attached = await this.attachMcode(sessionId, threadId, state);
+      browserGrant = this.releaseUnlistedBrowserGrant(browserGrant, attached);
 
-      // Thread control is optional. Retry on a fresh ACP process without it so
-      // a broken internal MCP cannot prevent a Cursor thread from starting.
-      const opened = await this.openSessionWithOptionalThreadControl(
+      // The mcode server is optional. Retry on a fresh ACP process without it so
+      // a broken MCP connection cannot prevent a Cursor thread from starting.
+      const opened = await this.openSessionWithOptionalMcode(
         state,
         resumeFrom !== undefined,
-        mcpServers,
+        attached,
         settings,
       );
       state = opened.state;
       state.mcodeLogicalSessionReloaded = opened.reloaded;
+      state.mcodeDegraded = state.supportsHttpMcp && opened.mcode === null;
+      browserGrant = this.releaseUnlistedBrowserGrant(browserGrant, opened.mcode);
       this.throwIfPendingStop(sessionId);
-      this.configureSpawnedSession(state, threadId, browserGrant);
+      this.configureSpawnedSession(state, opened.mcode, browserGrant);
     } catch (error) {
       await this.cleanupSpawnFailure(sessionId, state, browserGrant, browserStage, refreshedGrant);
       await this.clearFailedSpawn(sessionId);
       throw error;
     }
     return this.completeSpawn(sessionId, state);
+  }
+
+  /**
+   * `sessionId` must be the id the Browser lease was staged under, or the mcode
+   * server finds no lease and silently lists no Browser tools. A failed attach
+   * drops both toolkits rather than failing a session that can still run.
+   */
+  private async attachMcode(
+    sessionId: string,
+    threadId: string,
+    state: CursorAcpSessionEntry,
+  ): Promise<ProviderMcodeAttachment | null> {
+    if (!state.supportsHttpMcp) return null;
+    try {
+      const mcode = await this.host.mcode.attach({
+        providerId: this.id,
+        sessionId,
+        threadId,
+        threadControl: true,
+      });
+      if (!mcode) {
+        logger.warn("Cursor mcode MCP server is unavailable; continuing without Mcode tools", { threadId });
+      }
+      return mcode;
+    } catch (error) {
+      logger.warn("Cursor mcode MCP attach failed; continuing without Mcode tools", {
+        threadId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /** A Browser grant the server does not list would sit unused until it expires, so release it. */
+  private releaseUnlistedBrowserGrant(
+    browserGrant: BrowserAutomationSessionLeaseGrant | null,
+    mcode: ProviderMcodeAttachment | null,
+  ): BrowserAutomationSessionLeaseGrant | null {
+    if (!browserGrant || mcode?.toolkits.browser) return browserGrant;
+    this.releaseBrowserLeases(browserGrant);
+    return null;
   }
 
   private throwIfPendingStop(sessionId: string): void {
@@ -1014,13 +1020,12 @@ export class CursorProvider
 
   private configureSpawnedSession(
     state: CursorAcpSessionEntry,
-    threadId: string,
+    mcode: ProviderMcodeAttachment | null,
     browserGrant: BrowserAutomationSessionLeaseGrant | null,
   ): void {
     state.mcodeRuntimeInstructions = renderMcodeInstructions(buildMcodeInstructionPlan({
-      sourceThreadId: threadId,
-      threadControlGranted: this.isThreadControlMcpEnabled(state),
-      browserAutomationGranted: Boolean(browserGrant),
+      threadControlGranted: mcode?.toolkits.threadControl ?? false,
+      browserAutomationGranted: Boolean(mcode?.toolkits.browser && browserGrant),
     }));
     state.mcodeRuntimeInstructionsSent = false;
     if (!browserGrant) return;
@@ -1041,7 +1046,7 @@ export class CursorProvider
   private async clearFailedSpawn(sessionId: string): Promise<void> {
     this.pendingStops.delete(sessionId);
     this.pendingAcpRuntimes.delete(sessionId);
-    await this.threadControlMcp.close(sessionId);
+    await this.host.mcode.close(sessionId);
   }
 
   private completeSpawn(
@@ -1081,7 +1086,7 @@ export class CursorProvider
     if (!this.pendingBrowserGrants.has(state.mcodeSessionId) && !this.pendingBrowserLeases.has(state.mcodeSessionId)) {
       this.browserAutomationLease.releaseSession(this.id, state.mcodeSessionId);
     }
-    await this.threadControlMcp?.close(state.mcodeSessionId);
+    await this.host.mcode.close(state.mcodeSessionId);
   }
 
   private sameBrowserContext(left: CursorBrowserContext, right: CursorBrowserContext): boolean {
@@ -1143,31 +1148,26 @@ export class CursorProvider
     );
   }
 
-  private isThreadControlMcpEnabled(entry: CursorAcpSessionEntry): boolean {
-    return entry.supportsHttpMcp && entry.threadControlMcpEnabled !== false;
-  }
-
-  private async openSessionWithOptionalThreadControl(
+  private async openSessionWithOptionalMcode(
     initialState: CursorAcpSessionEntry,
     resume: boolean,
-    mcpServers: McpServer[],
+    mcode: ProviderMcodeAttachment | null,
     settings: Settings,
-  ): Promise<{ state: CursorAcpSessionEntry; reloaded: boolean }> {
+  ): Promise<{ state: CursorAcpSessionEntry; reloaded: boolean; mcode: ProviderMcodeAttachment | null }> {
     try {
       return {
         state: initialState,
-        reloaded: await this.openLogicalSession(initialState, resume, mcpServers),
+        reloaded: await this.openLogicalSession(initialState, resume, buildCursorMcodeMcpServers(mcode)),
+        mcode,
       };
     } catch (error) {
-      if (error instanceof SessionRecoveryFailedError || !this.isThreadControlMcpEnabled(initialState)) {
-        throw error;
-      }
+      if (error instanceof SessionRecoveryFailedError || !mcode) throw error;
 
-      logger.warn("Cursor thread-control MCP prevented session startup; retrying without it", {
+      logger.warn("Cursor mcode MCP prevented session startup; retrying without it", {
         threadId: initialState.threadId,
         error: error instanceof Error ? error.message : String(error),
       });
-      await this.disableThreadControlMcp(initialState);
+      await this.closeMcodeBestEffort(initialState);
       const fallbackState = await this.spawnChild(
         initialState.mcodeSessionId,
         initialState.threadId,
@@ -1181,11 +1181,11 @@ export class CursorProvider
           ?? this.pendingTurnRoutings.get(fallbackState.mcodeSessionId);
         if (routing) this.turnRoutingByState.set(fallbackState.activeTurnState, routing);
       }
-      fallbackState.threadControlMcpEnabled = false;
       try {
         return {
           state: fallbackState,
-          reloaded: await this.openLogicalSession(fallbackState, resume, mcpServers),
+          reloaded: await this.openLogicalSession(fallbackState, resume),
+          mcode: null,
         };
       } catch (fallbackError) {
         await fallbackState.acpRuntime.close();
@@ -1194,38 +1194,15 @@ export class CursorProvider
     }
   }
 
-  private async disableThreadControlMcp(entry: CursorAcpSessionEntry): Promise<void> {
-    entry.threadControlMcpEnabled = false;
+  private async closeMcodeBestEffort(entry: CursorAcpSessionEntry): Promise<void> {
     try {
-      await this.threadControlMcp.close(entry.mcodeSessionId);
+      await this.host.mcode.close(entry.mcodeSessionId);
     } catch (error) {
-      logger.warn("Cursor thread-control MCP cleanup failed", {
+      logger.warn("Cursor mcode MCP cleanup failed", {
         threadId: entry.threadId,
         error: error instanceof Error ? error.message : String(error),
       });
     }
-  }
-
-  private async openThreadControlMcp(
-    entry: CursorAcpSessionEntry,
-  ): Promise<ProviderThreadControlHttpConnection | undefined> {
-    if (!this.isThreadControlMcpEnabled(entry)) return undefined;
-
-    try {
-      const connection = await this.threadControlMcp.createHttpConnection(entry.mcodeSessionId);
-      if (connection) return connection;
-      logger.warn("Cursor thread-control MCP is unavailable; continuing without it", {
-        threadId: entry.threadId,
-      });
-    } catch (error) {
-      logger.warn("Cursor thread-control MCP setup failed; continuing without it", {
-        threadId: entry.threadId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    await this.disableThreadControlMcp(entry);
-    return undefined;
   }
 
   /** Ensures `entry.acpSessionId` is ready through a new, resumed, or loaded session. */
@@ -1237,16 +1214,11 @@ export class CursorProvider
     if (entry.acpSessionId && entry.acpRuntime.state.sessionId) return true;
 
     const stored = this.sdkSessionIds.get(entry.mcodeSessionId);
-    const internalMcp = await this.openThreadControlMcp(entry);
-    const effectiveMcpServers = [
-      ...(internalMcp ? buildCursorInternalMcpServers(internalMcp) : []),
-      ...mcpServers,
-    ];
     if (resume && stored) entry.acpSessionId = stored;
     const opened = await entry.acpRuntime.openSession({
       resumeFrom: resume ? stored : undefined,
       cwd: entry.cwd,
-      mcpServers: effectiveMcpServers,
+      mcpServers,
     });
     entry.replayTurnState = null;
     entry.acpSessionId = opened.sessionId;

@@ -10,8 +10,8 @@ const MCODE_THREAD_REQUEST_ACTION = /\b(?:create|start|open|launch|use|manage|li
 
 /** Capabilities proven available for one provider session. */
 export interface McodeInstructionCapabilities {
-  /** Internal thread-control MCP connection established for this session. */
-  threadControl?: { sourceThreadId: string };
+  /** Thread-control tools listed by the session's `mcode` MCP server. */
+  threadControl?: true;
   /** Browser lease issued and registered for this session. */
   browserAutomation?: true;
 }
@@ -24,7 +24,6 @@ export interface McodeInstructionPlan {
 
 /** Inputs used to derive capabilities after provider setup succeeds. */
 export interface BuildMcodeInstructionPlanInput {
-  sourceThreadId?: string;
   threadControlGranted: boolean;
   browserAutomationGranted: boolean;
   /** Optional provider-native model to use when a child must spawn another child. */
@@ -52,7 +51,7 @@ const IDENTITY_BLOCK = [
 ].join(" ");
 
 const THREAD_CONTROL_BLOCK = [
-  "Use the mcode_internal_thread_control MCP server to manage Mcode threads only when explicitly asked by the user.",
+  "Use the mcode MCP server to manage Mcode threads only when explicitly asked by the user.",
   "An Mcode thread is a persistent user-visible conversation controlled by thread_* tools.",
   "For an explicit Mcode thread request, use workspace_search, worktree_list, thread_target_list, thread_create_batch, thread_search, thread_get, thread_send, thread_stop, and thread_wait as needed. Call thread_target_list before choosing a provider or model, pass exact returned IDs to thread_create_batch, and never assume or enumerate providers or models.",
   "Never target the source thread.",
@@ -91,28 +90,18 @@ function appendBlockIfItFits(blocks: string[], block: string): void {
   if ([...blocks, block].join("\n\n").length <= MCODE_INSTRUCTIONS_MAX_CHARS) blocks.push(block);
 }
 
-const SAFE_THREAD_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
-
 /** Builds canonical runtime guidance from capabilities proven at session setup. */
 export function buildMcodeInstructionPlan(
   input: BuildMcodeInstructionPlanInput,
 ): McodeInstructionPlan {
-  const candidateThreadId = input.sourceThreadId?.trim();
-  const sourceThreadId = candidateThreadId && SAFE_THREAD_ID.test(candidateThreadId)
-    ? candidateThreadId
-    : undefined;
   const capabilities: McodeInstructionCapabilities = {};
-  if (input.threadControlGranted && sourceThreadId) {
-    capabilities.threadControl = { sourceThreadId };
-  }
+  if (input.threadControlGranted) capabilities.threadControl = true;
   if (input.browserAutomationGranted) capabilities.browserAutomation = true;
 
   const blocks = [IDENTITY_BLOCK, PROVIDER_SUBAGENT_BLOCK];
   const nestedBlock = nestedDelegationBlock(input.nestedDelegationModel);
   if (nestedBlock) blocks.push(nestedBlock);
-  if (capabilities.threadControl) {
-    blocks.push(`${THREAD_CONTROL_BLOCK} Source thread: ${capabilities.threadControl.sourceThreadId}.`);
-  }
+  if (capabilities.threadControl) blocks.push(THREAD_CONTROL_BLOCK);
   if (capabilities.browserAutomation) blocks.push(BROWSER_BLOCK);
   appendBlockIfItFits(blocks, REPOSITORY_SEARCH_BLOCK);
   return { capabilities, text: capInstructionText(blocks.join("\n\n")) };

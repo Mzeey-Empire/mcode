@@ -18,7 +18,7 @@ const scope = (overrides: Partial<BrowserAutomationSessionLeaseScope> = {}) => (
 
 function configuredLease(options: ConstructorParameters<typeof BrowserAutomationSessionLease>[0] = {}) {
   const lease = new BrowserAutomationSessionLease(options);
-  lease.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "worktree-a" });
+  lease.configure({ worktreeIdentity: "worktree-a" });
   return lease;
 }
 
@@ -29,14 +29,14 @@ describe("BrowserAutomationSessionLease", () => {
     expect(staged.leaseId).toBeTypeOf("string");
     const grant = lease.issue(staged)!;
     expect(grant.leaseId).toBe(staged.leaseId);
-    expect(lease.credentials.authenticate(grant.token)?.threadId).toBe("thread-a");
+    expect(lease.credentials.touch(grant.credentialId)?.threadId).toBe("thread-a");
 
     const refreshed = lease.refresh(grant.leaseId);
     expect(refreshed.ok).toBe(true);
     if (!refreshed.ok) return;
     expect(refreshed.grant.credentialId).not.toBe(grant.credentialId);
-    expect(lease.credentials.authenticate(grant.token)).toBeNull();
-    expect(lease.credentials.authenticate(refreshed.grant.token)?.workspaceId).toBe("workspace-a");
+    expect(lease.credentials.touch(grant.credentialId)).toBeNull();
+    expect(lease.credentials.touch(refreshed.grant.credentialId)?.workspaceId).toBe("workspace-a");
 
     expect(lease.release(grant.leaseId)).toMatchObject({ released: true, leaseId: grant.leaseId });
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
@@ -53,9 +53,9 @@ describe("BrowserAutomationSessionLease", () => {
     }))!;
     const rotated = lease.issue(scope({ permissionCapability: "privileged" }))!;
 
-    expect(lease.credentials.authenticate(first.token)).toBeNull();
-    expect(lease.credentials.authenticate(second.token)?.threadId).toBe("thread-b");
-    expect(lease.credentials.authenticate(rotated.token)?.allowedOperations).toContain("evaluate");
+    expect(lease.credentials.touch(first.credentialId)).toBeNull();
+    expect(lease.credentials.touch(second.credentialId)?.threadId).toBe("thread-b");
+    expect(lease.credentials.touch(rotated.credentialId)?.allowedOperations).toContain("evaluate");
     expect(lease.status()).toEqual({ active: 2, pending: 0 });
   });
 
@@ -98,6 +98,29 @@ describe("BrowserAutomationSessionLease", () => {
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
 
+  it("resolves live claims by logical session and refuses released, rotated-away, or expired sessions", () => {
+    let now = 100;
+    const registry = new BrowserAutomationCredentialRegistry({ idleTtlMs: 10, absoluteTtlMs: 100, now: () => now });
+    const lease = configuredLease({ credentials: registry, now: () => now });
+    const grant = lease.issue(scope({ mcodeSessionId: "mcode-live", threadId: "thread-live" }))!;
+    lease.issue(scope({ mcodeSessionId: "mcode-other", threadId: "thread-other" }));
+
+    expect(lease.claimsFor("codex", "mcode-live")).toMatchObject({ threadId: "thread-live", credentialId: grant.credentialId });
+    expect(lease.claimsFor("claude", "mcode-live")).toBeNull();
+    expect(lease.claimsFor("codex", "mcode-unknown")).toBeNull();
+
+    now = 108;
+    expect(lease.claimsFor("codex", "mcode-live")).not.toBeNull();
+    now = 117;
+    expect(lease.claimsFor("codex", "mcode-live")).not.toBeNull();
+    now = 130;
+    expect(lease.claimsFor("codex", "mcode-live")).toBeNull();
+
+    const released = lease.issue(scope({ mcodeSessionId: "mcode-released" }))!;
+    lease.release(released.leaseId);
+    expect(lease.claimsFor("codex", "mcode-released")).toBeNull();
+  });
+
   it("reports a lease inactive after registry revocation", () => {
     const lease = configuredLease();
     const grant = lease.issue(scope())!;
@@ -121,7 +144,7 @@ describe("BrowserAutomationSessionLease", () => {
 
     lease.issue(scope({ mcodeSessionId: "mcode-second" }));
     lease.shutdown();
-    expect(registry.authenticate(grant.token)).toBeNull();
+    expect(registry.touch(grant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
 });

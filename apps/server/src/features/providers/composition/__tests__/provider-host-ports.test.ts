@@ -108,14 +108,11 @@ describe("createProviderHostPorts", () => {
       browser: {
         issue: vi.fn(() => ({
           leaseId: "lease-1",
-          mcpUrl: "http://127.0.0.1:1234/mcp",
-          token: "opaque-token",
           credentialId: "credential-1",
           expiresAt: 123,
           allowedOperations: ["inspect"],
         })),
       },
-      threadControl: {},
       grants: {},
       events: {},
       ingress: {},
@@ -123,8 +120,6 @@ describe("createProviderHostPorts", () => {
 
     expect(ports.browser.issue({ leaseId: "lease-1", expiresAt: 123 })).toEqual({
       leaseId: "lease-1",
-      mcpUrl: "http://127.0.0.1:1234/mcp",
-      token: "opaque-token",
       credentialId: "credential-1",
       expiresAt: 123,
       allowedOperations: ["inspect"],
@@ -156,7 +151,6 @@ describe("createProviderHostPorts", () => {
       envService: { getEnv: () => ({ PATH: "test" }) },
       jobObject: { isWindowsJob: false },
       browser: {},
-      threadControl: {},
       grants: {},
       events: { commit },
       ingress: { acceptLegacyProjected },
@@ -202,7 +196,6 @@ describe("createProviderHostPorts", () => {
       envService: { getEnv: () => ({ PATH: "test" }) },
       jobObject: { isWindowsJob: false },
       browser: {},
-      threadControl: {},
       grants: {},
       events: { commit },
       ingress: { acceptLegacyProjected },

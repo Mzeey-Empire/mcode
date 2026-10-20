@@ -19,7 +19,7 @@ function deferred() {
 type Server = ReturnType<typeof createWsServer>;
 type HttpHandler = (request: NodeHTTP.IncomingMessage, response: NodeHTTP.ServerResponse) => Promise<void>;
 
-const specialPaths = ["/__mcode/reliability", "/mcp", "/mcp/external-thread-control"];
+const specialPaths = ["/__mcode/reliability", "/mcp/mcode", "/mcp/external-thread-control"];
 
 describe("transport admission and shutdown drain", () => {
   const servers: Server[] = [];
@@ -42,7 +42,7 @@ describe("transport admission and shutdown drain", () => {
       terminalService: { disconnectClient: () => undefined },
       resolveBrowserAutomationHostAuthorization: () => null,
       reliabilityHarness: { enabled: true, handleRequest: handler },
-      browserAutomationMcpHandler: { handle: handler },
+      mcodeMcpServer: { handle: handler },
       externalThreadControlMcpRuntime: { handleRequest: handler },
     } as never);
     servers.push(server);
@@ -106,7 +106,18 @@ describe("transport admission and shutdown drain", () => {
       response.writeHead(200).end("already sent");
       throw new Error("failure after response");
     });
-    await expect(httpRequest(server, "/mcp")).resolves.toEqual({ status: 200, body: "already sent" });
+    await expect(httpRequest(server, "/mcp/mcode")).resolves.toEqual({ status: 200, body: "already sent" });
+    await server.stopAdmissionAndDrain();
+  });
+
+  it("does not serve the retired bare /mcp route", async () => {
+    const handler = vi.fn(async (_request: NodeHTTP.IncomingMessage, response: NodeHTTP.ServerResponse) => {
+      response.writeHead(200).end("served");
+    });
+    const server = await startServer(handler);
+    const response = await httpRequest(server, "/mcp");
+    expect(response.status).toBe(404);
+    expect(handler).not.toHaveBeenCalled();
     await server.stopAdmissionAndDrain();
   });
 

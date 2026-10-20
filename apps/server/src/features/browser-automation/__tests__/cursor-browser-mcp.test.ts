@@ -11,7 +11,7 @@ import {
   type BrowserAutomationSessionLeaseStage,
 } from "../index.js";
 import {
-  buildCursorBrowserMcpServers,
+  buildCursorMcodeMcpServers,
   CursorProvider,
   cursorSupportsHttpMcp,
 } from "../../../../../../packages/providers/src/private/cursor/cursor-provider.js";
@@ -41,8 +41,12 @@ const browserScope = (overrides: Partial<BrowserAutomationSessionLeaseScope> = {
 
 function configuredLease(): BrowserAutomationSessionLease {
   const lease = new BrowserAutomationSessionLease();
-  lease.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "worktree-a" });
+  lease.configure({ worktreeIdentity: "worktree-a" });
   return lease;
+}
+
+function mcodeHost(attachment: unknown = null) {
+  return { mcode: { attach: vi.fn(async () => attachment), close: vi.fn(async () => undefined) } };
 }
 
 function createCursorProviderFixture(): any {
@@ -56,25 +60,27 @@ function createCursorProviderFixture(): any {
     waitForExecution: vi.fn(async () => undefined),
     stopAdmissionAndDrain: vi.fn(async () => undefined),
   };
-  provider.threadControlMcp = { close: vi.fn(async () => undefined) };
+  provider.host = mcodeHost();
   return provider;
 }
 
 describe("Cursor browser MCP configuration", () => {
-  it("uses ACP HTTP headers for a normal main-session grant", () => {
-    expect(buildCursorBrowserMcpServers({
-      mcpUrl: "http://127.0.0.1:19400/mcp",
+  it("describes the one mcode server with an ACP HTTP bearer header", () => {
+    expect(buildCursorMcodeMcpServers({
+      serverName: "mcode",
+      url: "http://127.0.0.1:19400/mcp/mcode",
       token: "opaque-token",
+      toolkits: { browser: true, threadControl: true },
     })).toEqual([{
       type: "http",
-      name: "mcode-browser",
-      url: "http://127.0.0.1:19400/mcp",
+      name: "mcode",
+      url: "http://127.0.0.1:19400/mcp/mcode",
       headers: [{ name: "Authorization", value: "Bearer opaque-token" }],
     }]);
   });
 
   it("omits MCP when HTTP capability or server configuration is unavailable", () => {
-    expect(buildCursorBrowserMcpServers(null)).toEqual([]);
+    expect(buildCursorMcodeMcpServers(null)).toEqual([]);
     expect(cursorSupportsHttpMcp({})).toBe(false);
     expect(cursorSupportsHttpMcp({ agentCapabilities: { mcpCapabilities: { http: false } } })).toBe(false);
     expect(cursorSupportsHttpMcp({ agentCapabilities: { mcpCapabilities: { http: true } } })).toBe(true);
@@ -90,10 +96,11 @@ describe("Cursor browser MCP configuration", () => {
     provider.pendingBrowserLeases = new Map();
     provider.pendingBrowserGrants = new Map();
     provider.liveSessionIds = new Set(["mcode-a"]);
+    provider.host = mcodeHost();
 
     provider.close({ mcodeSessionId: "mcode-a" } as never);
 
-    expect(lease.credentials.authenticate(grant.token)).toBeNull();
+    expect(lease.credentials.touch(grant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
     expect(provider.liveSessionIds.has("mcode-a")).toBe(false);
   });
@@ -226,6 +233,7 @@ describe("Cursor browser MCP configuration", () => {
     provider.pendingBrowserGrants = new Map();
     provider.pendingBrowserGrantContext = new Map();
     provider.liveSessionIds = new Set(["mcode-a"]);
+    provider.host = mcodeHost();
     provider.close({ mcodeSessionId: "mcode-a" } as never);
     provider.spawnChild = vi.fn().mockRejectedValue(new Error("replacement failed"));
 
@@ -237,7 +245,7 @@ describe("Cursor browser MCP configuration", () => {
       env: {},
     })).rejects.toThrow("replacement failed");
 
-    expect(lease.credentials.authenticate(previousGrant.token)).toBeNull();
+    expect(lease.credentials.touch(previousGrant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
 
@@ -256,6 +264,7 @@ describe("Cursor browser MCP configuration", () => {
     provider.pendingBrowserGrants = new Map();
     provider.pendingBrowserGrantContext = new Map();
     provider.liveSessionIds = new Set(["mcode-a"]);
+    provider.host = mcodeHost();
     provider.close({ mcodeSessionId: "mcode-a" } as never);
     provider.spawnChild = vi.fn().mockResolvedValue({ child, browserHttpMcpSupported: false });
     provider.openLogicalSession = vi.fn();
@@ -268,14 +277,14 @@ describe("Cursor browser MCP configuration", () => {
       env: {},
     });
 
-    expect(lease.credentials.authenticate(previousGrant.token)).toBeNull();
+    expect(lease.credentials.touch(previousGrant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
 
   it("closes the ACP runtime when a stale replacement lease stage expires", async () => {
     let now = 0;
     const lease = new BrowserAutomationSessionLease({ now: () => now });
-    lease.configure({ mcpUrl: "http://127.0.0.1:19400/mcp", worktreeIdentity: "worktree-a" });
+    lease.configure({ worktreeIdentity: "worktree-a" });
     const previousGrant = lease.issue(browserScope())!;
     const staged = lease.stage(browserScope());
     now = staged.expiresAt;
@@ -304,7 +313,7 @@ describe("Cursor browser MCP configuration", () => {
 
     expect(provider.openLogicalSession).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledOnce();
-    expect(lease.credentials.authenticate(previousGrant.token)).toBeNull();
+    expect(lease.credentials.touch(previousGrant.credentialId)).toBeNull();
     expect(lease.status()).toEqual({ active: 0, pending: 0 });
   });
 
@@ -393,95 +402,6 @@ describe("Cursor browser MCP configuration", () => {
     spawnMock.mockReset();
   });
 
-  it("continues a Cursor session when thread-control MCP bootstrap fails", async () => {
-    const openSession = vi.fn(async () => ({ sessionId: "acp-session", reloaded: false }));
-    const close = vi.fn(async () => undefined);
-    const provider = createCursorProviderFixture();
-    provider.sdkSessionIds = new Map();
-    provider.threadControlMcp = {
-      createHttpConnection: vi.fn().mockRejectedValue(new Error("thread control unavailable")),
-      close,
-    };
-    provider.emit = vi.fn();
-    const entry = {
-      mcodeSessionId: "mcode-a",
-      threadId: "thread-a",
-      cwd: ".",
-      acpSessionId: undefined,
-      supportsHttpMcp: true,
-      threadControlMcpEnabled: true,
-      acpRuntime: { openSession },
-    };
-
-    await provider.openLogicalSession(entry, false);
-
-    expect(openSession).toHaveBeenCalledExactlyOnceWith({
-      resumeFrom: undefined,
-      cwd: ".",
-      mcpServers: [],
-    });
-    expect(entry.acpSessionId).toBe("acp-session");
-    expect(entry.threadControlMcpEnabled).toBe(false);
-    expect(close).toHaveBeenCalledExactlyOnceWith("mcode-a");
-  });
-
-  it("retries ACP setup without thread-control MCP when Cursor rejects its connection", async () => {
-    const initialOpen = vi.fn().mockRejectedValue(new Error("MCP connection closed"));
-    const fallbackOpen = vi.fn(async () => ({ sessionId: "fallback-session", reloaded: false }));
-    const close = vi.fn(async () => undefined);
-    const provider = createCursorProviderFixture();
-    provider.sdkSessionIds = new Map();
-    provider.emit = vi.fn();
-    provider.threadControlMcp = {
-      createHttpConnection: vi.fn(async () => ({
-        name: "mcode-thread-control",
-        url: "http://127.0.0.1:19400/mcp",
-        headers: { Authorization: "Bearer opaque-token" },
-      })),
-      close,
-    };
-    const initial = {
-      mcodeSessionId: "mcode-a",
-      threadId: "thread-a",
-      cwd: ".",
-      permissionMode: "default",
-      supportsHttpMcp: true,
-      threadControlMcpEnabled: true,
-      acpRuntime: { openSession: initialOpen },
-    };
-    const fallback = {
-      mcodeSessionId: "mcode-a",
-      threadId: "thread-a",
-      cwd: ".",
-      permissionMode: "default",
-      supportsHttpMcp: true,
-      threadControlMcpEnabled: true,
-      acpRuntime: { openSession: fallbackOpen, close: vi.fn(async () => undefined) },
-    };
-    provider.spawnChild = vi.fn().mockResolvedValue(fallback);
-
-    const opened = await provider.openSessionWithOptionalThreadControl(initial, false, [], {});
-
-    expect(initialOpen).toHaveBeenCalledExactlyOnceWith({
-      resumeFrom: undefined,
-      cwd: ".",
-      mcpServers: [{
-        type: "http",
-        name: "mcode-thread-control",
-        url: "http://127.0.0.1:19400/mcp",
-        headers: [{ name: "Authorization", value: "Bearer opaque-token" }],
-      }],
-    });
-    expect(fallbackOpen).toHaveBeenCalledExactlyOnceWith({
-      resumeFrom: undefined,
-      cwd: ".",
-      mcpServers: [],
-    });
-    expect(opened).toMatchObject({ state: fallback, reloaded: false });
-    expect(fallback.threadControlMcpEnabled).toBe(false);
-    expect(close).toHaveBeenCalledExactlyOnceWith("mcode-a");
-  });
-
   it("returns a typed unsupported result for unknown or malformed Cursor child extensions", async () => {
     const provider = Object.create(CursorProvider.prototype) as any;
     provider.settingsService = { get: vi.fn(() => ({ provider: { cursor: {} } })) };
@@ -553,10 +473,11 @@ describe("Cursor browser MCP configuration", () => {
     provider.pendingPermissions = new Map();
     provider.pendingBrowserGrants = new Map([["mcode-a", grant]]);
     provider.liveSessionIds = new Set(["mcode-a"]);
+    provider.host = mcodeHost();
 
     provider.close({ mcodeSessionId: "mcode-a" } as never);
 
-    expect(lease.credentials.authenticate(grant.token)?.mcodeSessionId).toBe("mcode-a");
+    expect(lease.credentials.touch(grant.credentialId)?.mcodeSessionId).toBe("mcode-a");
     lease.release(grant.leaseId);
   });
 
@@ -586,9 +507,16 @@ describe("Cursor browser MCP configuration", () => {
       child: { pid: 105, kill: vi.fn() },
       browserCredential: undefined,
       browserHttpMcpSupported: true,
+      supportsHttpMcp: true,
     };
     let mcpServers: unknown;
     provider.id = "cursor";
+    provider.host = mcodeHost({
+      serverName: "mcode",
+      url: "http://127.0.0.1:19400/mcp/mcode",
+      token: "mcode-token",
+      toolkits: { browser: true, threadControl: true },
+    });
     provider.browserAutomationLease = lease;
     provider.settingsService = { get: vi.fn(() => ({})) };
     provider.pendingPermissions = new Map();
@@ -630,18 +558,20 @@ describe("Cursor browser MCP configuration", () => {
       interactionMode: "build",
     });
 
+    expect(provider.host.mcode.attach).toHaveBeenCalledExactlyOnceWith({
+      providerId: "cursor",
+      sessionId: "mcode-a",
+      threadId: "a",
+      threadControl: true,
+    });
     expect(mcpServers).toEqual([{
       type: "http",
-      name: "mcode-browser",
-      url: "http://127.0.0.1:19400/mcp",
-      headers: [{
-        name: "Authorization",
-        value: expect.stringMatching(/^Bearer /),
-      }],
+      name: "mcode",
+      url: "http://127.0.0.1:19400/mcp/mcode",
+      headers: [{ name: "Authorization", value: "Bearer mcode-token" }],
     }]);
-    const authorization = (mcpServers as any[])[0].headers[0].value as string;
-    expect(lease.credentials.authenticate(authorization.slice("Bearer ".length))?.mcodeSessionId).toBe("mcode-a");
-    expect(lease.credentials.authenticate(previousGrant.token)).toBeNull();
+    expect(lease.credentials.touch(previousGrant.credentialId)).toBeNull();
+    expect(lease.status()).toEqual({ active: 1, pending: 0 });
   });
 
   it("releases staged and refreshed leases during shutdown", async () => {
@@ -668,8 +598,8 @@ describe("Cursor browser MCP configuration", () => {
 
     await provider.shutdown();
 
-    expect(lease.credentials.authenticate(grant.token)).toBeNull();
-    expect(lease.credentials.authenticate(unrelatedGrant.token)?.providerId).toBe("claude");
+    expect(lease.credentials.touch(grant.credentialId)).toBeNull();
+    expect(lease.credentials.touch(unrelatedGrant.credentialId)?.providerId).toBe("claude");
     expect(lease.status()).toEqual({ active: 1, pending: 0 });
   });
 });

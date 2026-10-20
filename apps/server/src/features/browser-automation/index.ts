@@ -5,10 +5,10 @@ export {
 } from "./execution/broker.js";
 
 /** Stores and revokes browser automation credentials. */
-export { BrowserAutomationCredentialRegistry } from "./access/credential-registry.js";
-
-/** Handles the browser automation loopback MCP endpoint. */
-export { BrowserAutomationMcpHandler } from "./transport/mcp-handler.js";
+export {
+  BrowserAutomationCredentialRegistry,
+  type BrowserAutomationCredentialClaims,
+} from "./access/credential-registry.js";
 
 /** Maps provider permission settings to browser automation capability. */
 export {

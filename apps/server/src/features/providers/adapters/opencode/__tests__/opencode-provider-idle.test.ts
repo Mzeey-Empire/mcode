@@ -35,7 +35,6 @@ function testProvider(http: never) {
     runtime: { platform: "win32" },
     environment: { snapshot: () => ({}) },
     browser: {},
-    threadControl: {},
     grants: {},
   };
   const provider = new OpenCodeProvider(settingsService as never, envService as never, host as never);

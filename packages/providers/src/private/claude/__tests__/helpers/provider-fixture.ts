@@ -9,7 +9,7 @@ export function fixtureHost(overrides: Partial<ProviderHostPorts> = {}): Provide
     environment: { snapshot: () => ({}) },
     processes: { attach: () => undefined, terminateTree: async () => undefined },
     browser: new BrowserAutomationSessionLease(),
-    threadControl: { bootstrap: async () => null, close: async () => undefined },
+    mcode: { attach: async () => null, close: async () => undefined },
     grants: { consume: () => false },
     turns: { open: async () => ({ kind: "declined", reason: "unavailable" }), settleBackgroundTool: async () => {} },
     events: { submit: async (batch) => ({ commit: { outcome: "committed", conversationRevision: 0, rosterRevision: 0, acceptedThrough: 0, durableThrough: 0, eventCount: batch.events.length }, delivery: { ingress: "queued" } }) },
@@ -25,7 +25,7 @@ export class ClaudeProvider extends RuntimeClaudeProvider {
     grants?: { tryConsume(request: { threadId: string; toolName: string; path: string }): boolean },
     browser?: ProviderHostPorts["browser"],
     _threadControl?: unknown,
-    suppliedHost?: Pick<ProviderHostPorts, "runtime" | "events">,
+    suppliedHost?: Pick<ProviderHostPorts, "runtime" | "events"> & Partial<Pick<ProviderHostPorts, "mcode">>,
   ) {
     let emit: ((event: unknown) => void) | undefined;
     const host = fixtureHost({
@@ -67,21 +67,21 @@ export type BrowserAutomationSessionLeaseScope = ProviderBrowserLeaseRequest;
 
 /** Test credential authority retained by browser lease tests. */
 export class BrowserAutomationCredentialRegistry {
-  private readonly tokens = new Map<string, ProviderBrowserLeaseGrant>();
-  register(grant: ProviderBrowserLeaseGrant): void { this.tokens.set(grant.token, grant); }
-  revoke(grant: ProviderBrowserLeaseGrant): void { this.tokens.delete(grant.token); }
-  authenticate(token: string): ProviderBrowserLeaseGrant | null { return this.tokens.get(token) ?? null; }
-  size(): number { return this.tokens.size; }
+  private readonly grants = new Map<string, ProviderBrowserLeaseGrant>();
+  register(grant: ProviderBrowserLeaseGrant): void { this.grants.set(grant.credentialId, grant); }
+  revoke(grant: ProviderBrowserLeaseGrant): void { this.grants.delete(grant.credentialId); }
+  touch(credentialId: string): ProviderBrowserLeaseGrant | null { return this.grants.get(credentialId) ?? null; }
+  size(): number { return this.grants.size; }
 }
 
 /** Deterministic browser authority, exercising provider use of the real port contract. */
 export class BrowserAutomationSessionLease implements ProviderBrowserPort {
-  private configuredUrl: string | undefined;
+  private configured = false;
   private readonly pending = new Map<string, ProviderBrowserLeaseRequest>();
   private readonly active = new Map<string, { scope: ProviderBrowserLeaseRequest; grant: ProviderBrowserLeaseGrant }>();
   constructor(readonly credentials = new BrowserAutomationCredentialRegistry()) {}
-  configure(options: { mcpUrl: string; worktreeIdentity: string }): void { this.configuredUrl = options.mcpUrl; }
-  isConfigured(): boolean { return this.configuredUrl !== undefined; }
+  configure(_options: { worktreeIdentity: string }): void { this.configured = true; }
+  isConfigured(): boolean { return this.configured; }
   stage(request: ProviderBrowserLeaseRequest): ProviderBrowserLeaseHandle {
     const leaseId = crypto.randomUUID();
     this.pending.set(leaseId, request);
@@ -90,9 +90,9 @@ export class BrowserAutomationSessionLease implements ProviderBrowserPort {
   issue(stage: ProviderBrowserLeaseHandle | ProviderBrowserLeaseRequest): ProviderBrowserLeaseGrant | null {
     const handle = "leaseId" in stage ? stage : this.stage(stage);
     const scope = this.pending.get(handle.leaseId);
-    if (!scope || !this.configuredUrl) return null;
+    if (!scope || !this.configured) return null;
     this.pending.delete(handle.leaseId);
-    const grant = { leaseId: handle.leaseId, expiresAt: Date.now() + 60_000, credentialId: crypto.randomUUID(), token: crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", ""), mcpUrl: this.configuredUrl, allowedOperations: [] };
+    const grant = { leaseId: handle.leaseId, expiresAt: Date.now() + 60_000, credentialId: crypto.randomUUID(), allowedOperations: [] };
     this.active.set(handle.leaseId, { scope, grant });
     this.credentials.register(grant);
     return grant;

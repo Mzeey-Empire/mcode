@@ -7,6 +7,8 @@ import type {
   ProviderBrowserLeaseRequest,
   ProviderEventSinkPort,
   ProviderHostPorts,
+  ProviderMcodeAttachment,
+  ProviderMcodeAttachRequest,
 } from "../../host-ports.js";
 import type { TurnRequest } from "@mcode/contracts";
 
@@ -18,29 +20,29 @@ interface TestPendingLease {
 
 /** Small in-memory credential registry used by provider tests without server DI. */
 export class TestCredentialRegistry {
-  private readonly tokens = new Set<string>();
+  private readonly credentialIds = new Set<string>();
 
   /** Returns the number of credentials retained by the fixture. */
   size(): number {
-    return this.tokens.size;
+    return this.credentialIds.size;
   }
 
-  /** Returns a truthy authentication result for a currently retained token. */
-  authenticate(token: string): object | null {
-    return this.tokens.has(token) ? {} : null;
+  /** Returns a truthy result for a currently retained credential. */
+  touch(credentialId: string): object | null {
+    return this.credentialIds.has(credentialId) ? {} : null;
   }
 
-  add(token: string): void {
-    this.tokens.add(token);
+  add(credentialId: string): void {
+    this.credentialIds.add(credentialId);
   }
 
-  remove(token: string): void {
-    this.tokens.delete(token);
+  remove(credentialId: string): void {
+    this.credentialIds.delete(credentialId);
   }
 
   /** Clears all credentials when the owning lease shuts down. */
   clear(): void {
-    this.tokens.clear();
+    this.credentialIds.clear();
   }
 }
 
@@ -57,11 +59,11 @@ export function stubEnvService(): { getEnv(): Record<string, string> } {
 export class BrowserAutomationSessionLease {
   readonly credentials = new TestCredentialRegistry();
   private readonly pending = new Map<string, TestPendingLease>();
-  private readonly active = new Map<string, { token: string; credentialId: string; scope: TestBrowserScope }>();
+  private readonly active = new Map<string, { credentialId: string; scope: TestBrowserScope }>();
   private configured = false;
 
-  /** Configures the endpoint used in generated grants. */
-  configure(_configuration: { mcpUrl: string; worktreeIdentity: string }): void {
+  /** Marks the lease usable, as server composition does once it knows the worktree identity. */
+  configure(_configuration: { worktreeIdentity: string }): void {
     this.configured = true;
   }
 
@@ -85,14 +87,11 @@ export class BrowserAutomationSessionLease {
     const pending = this.pending.get(stage.leaseId);
     this.pending.delete(stage.leaseId);
     if (!pending || !this.configured) return null;
-    const token = NodeCrypto.randomBytes(32).toString("base64url");
     const credentialId = NodeCrypto.randomUUID();
-    this.credentials.add(token);
-    this.active.set(stage.leaseId, { token, credentialId, scope: pending.scope });
+    this.credentials.add(credentialId);
+    this.active.set(stage.leaseId, { credentialId, scope: pending.scope });
     return {
       leaseId: stage.leaseId,
-      mcpUrl: "http://127.0.0.1:19400/mcp",
-      token,
       credentialId,
       expiresAt: stage.expiresAt,
       allowedOperations: pending.scope.permissionCapability === "observe"
@@ -107,7 +106,7 @@ export class BrowserAutomationSessionLease {
     const active = this.active.get(leaseId);
     if (!active) return { leaseId, released: false };
     this.active.delete(leaseId);
-    this.credentials.remove(active.token);
+    this.credentials.remove(active.credentialId);
     return { leaseId, released: true, credentialId: active.credentialId };
   }
 
@@ -116,7 +115,7 @@ export class BrowserAutomationSessionLease {
     let released = 0;
     for (const [leaseId, active] of this.active) {
       if (active.scope.providerId === providerId && active.scope.mcodeSessionId === sessionId) {
-        this.credentials.remove(active.token);
+        this.credentials.remove(active.credentialId);
         this.active.delete(leaseId);
         released += 1;
       }
@@ -135,7 +134,7 @@ export class BrowserAutomationSessionLease {
     for (const [leaseId, active] of this.active) {
       if (active.credentialId !== credentialId) continue;
       this.active.delete(leaseId);
-      this.credentials.remove(active.token);
+      this.credentials.remove(active.credentialId);
       return true;
     }
     return true;
@@ -154,6 +153,13 @@ export class BrowserAutomationSessionLease {
   }
 }
 
+/** Builds the attachment the server hands a Codex session; tests override the toolkits they exercise. */
+export function mcodeAttachment(
+  toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true },
+): ProviderMcodeAttachment {
+  return { serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "session-token-fixture", toolkits };
+}
+
 /** Builds the package-private Codex Provider with local test authorities. */
 export class CodexProvider extends PackageCodexProvider {
   readonly settingsService!: { get(): unknown | Promise<unknown> };
@@ -164,8 +170,8 @@ export class CodexProvider extends PackageCodexProvider {
     attachments: CodexProviderPorts["attachments"],
     catalog: CodexProviderPorts["catalog"],
     browser = new BrowserAutomationSessionLease(),
-    threadControl?: {
-      createCodexConfiguration?: (sessionId: string) => Promise<unknown>;
+    mcode?: {
+      attach?: (request: ProviderMcodeAttachRequest) => Promise<ProviderMcodeAttachment | null>;
       close?: (sessionId: string) => Promise<void>;
     },
     eventSink?: ProviderEventSinkPort,
@@ -184,9 +190,9 @@ export class CodexProvider extends PackageCodexProvider {
         release: (leaseId) => browser.release(leaseId),
         revokeCredential: (credentialId) => browser.revokeCredential(credentialId),
       },
-      threadControl: {
-        bootstrap: async ({ sessionId }) => threadControl?.createCodexConfiguration?.(sessionId) ?? null,
-        close: (sessionId) => threadControl?.close?.(sessionId) ?? Promise.resolve(),
+      mcode: {
+        attach: (request) => mcode?.attach?.(request) ?? Promise.resolve(null),
+        close: (sessionId) => mcode?.close?.(sessionId) ?? Promise.resolve(),
       },
       grants: { consume: () => false },
       events: eventSink ?? { submit: async () => { throw new Error("Canonical event sink is not configured for this fixture"); } },

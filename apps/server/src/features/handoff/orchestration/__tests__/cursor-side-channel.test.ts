@@ -47,7 +47,7 @@ describe("Cursor clean side-channel fork", () => {
         release: (leaseId) => ({ leaseId, released: false }),
         revokeCredential: () => false,
       },
-      threadControl: { bootstrap: async () => null, close: async () => undefined },
+      mcode: { attach: async () => null, close: async () => undefined },
       grants: { consume: () => false },
       events: { submit: async () => { throw new Error("The handoff side-channel must not publish runtime events"); } },
     };

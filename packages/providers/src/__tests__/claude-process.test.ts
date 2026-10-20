@@ -97,11 +97,11 @@ describe("Claude factory SDK process ownership", () => {
     await vi.waitFor(() => expect(host.processes.terminateTree).toHaveBeenCalledExactlyOnceWith(child.pid));
   });
 
-  it("still closes and retires the query when thread-control cleanup rejects", async () => {
+  it("still closes and retires the query when mcode cleanup rejects", async () => {
     const { provider, host, child } = fixture();
     const transport = installTransport();
     await provider.sendTurn(turn());
-    host.threadControl.close = async () => { throw new Error("thread-control cleanup failed"); };
+    host.mcode.close = async () => { throw new Error("mcode cleanup failed"); };
     await expect(provider.stopSession("mcode-thread-1")).rejects.toThrow("Claude session cleanup failed");
     expect(transport.close).toHaveBeenCalledOnce();
     expect(host.processes.terminateTree).toHaveBeenCalledExactlyOnceWith(child.pid);

@@ -44,11 +44,11 @@ export function mergeCodexUsageInfo(
   };
 }
 
-/** Returns whether a Codex effective configuration contains the internal thread-control MCP server. */
-export function hasCodexInternalThreadControlMcp(effectiveConfig: unknown): boolean {
+/** Returns whether a Codex effective configuration registers the per-session `mcode` MCP server. */
+export function hasCodexMcodeMcp(effectiveConfig: unknown): boolean {
   if (!isRecord(effectiveConfig) || !isRecord(effectiveConfig.config)) return false;
   const mcpServers = effectiveConfig.config.mcp_servers;
-  return isRecord(mcpServers) && Object.hasOwn(mcpServers, "mcode_internal_thread_control");
+  return isRecord(mcpServers) && Object.hasOwn(mcpServers, "mcode");
 }
 
 /** Builds native Codex input parts from a message, attachments, skills, and mentions. */

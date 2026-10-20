@@ -28,10 +28,7 @@ function createHostPorts(): ProviderHostPorts {
       release: vi.fn((leaseId: string) => ({ leaseId, released: false })),
       revokeCredential: vi.fn(() => false),
     },
-    threadControl: {
-      bootstrap: vi.fn(async () => null),
-      close: vi.fn(async () => undefined),
-    },
+    mcode: { attach: vi.fn(async () => null), close: vi.fn(async () => undefined) },
     grants: { consume: vi.fn(() => false) },
     events: { submit: vi.fn(async () => undefined) },
   };

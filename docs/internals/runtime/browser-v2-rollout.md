@@ -1,7 +1,8 @@
 # Browser v2 operations
 
 Browser v2 is the only Browser automation path. Every provider receives the
-same scoped MCP gateway and the same current tool contract:
+same current tool contract through the `mcode` MCP server of its session
+(`/mcp/mcode`):
 
 - `browser_open`
 - `browser_inspect`

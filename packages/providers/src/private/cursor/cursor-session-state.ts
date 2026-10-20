@@ -44,10 +44,11 @@ export interface CursorAcpSessionEntry {
   workspaceId: string;
   browserPermissionCapability: "observe" | "interact" | "privileged";
   supportsHttpMcp: boolean;
-  threadControlMcpEnabled: boolean;
   mcodeRuntimeInstructions: string;
   mcodeRuntimeInstructionsSent: boolean;
   mcodeLogicalSessionReloaded: boolean;
+  /** Set when Cursor supports HTTP MCP but the session started without the `mcode` server. */
+  mcodeDegraded: boolean;
 }
 
 /** Identifies a state entry owned by the shared session runtime. */

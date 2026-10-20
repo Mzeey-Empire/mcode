@@ -19,7 +19,7 @@ export function mockShutdownHost(
       refresh: (leaseId) => ({ ok: false, leaseId, reason: "unconfigured" }),
       release: (leaseId) => ({ leaseId, released: false }), revokeCredential: () => false,
     },
-    threadControl: { bootstrap: async () => null, close: async () => {} },
+    mcode: { attach: async () => null, close: async () => {} },
     grants: { consume: () => false },
     turns,
     events: {

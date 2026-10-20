@@ -33,15 +33,13 @@ export interface BrowserAutomationCredentialClaims extends BrowserAutomationCred
   expiresAt: number;
 }
 
-/** Newly issued plaintext credential and its non-secret metadata. */
+/** Newly issued credential metadata. */
 export interface IssuedBrowserAutomationCredential {
-  token: string;
   credentialId: string;
   expiresAt: number;
 }
 
 interface StoredCredential {
-  digest: Buffer;
   claims: BrowserAutomationCredentialClaims;
   idleExpiresAt: number;
   lastTouchedAt: number;
@@ -58,10 +56,6 @@ export interface BrowserAutomationCredentialRegistryOptions {
   absoluteTtlMs?: number;
   maxCredentials?: number;
   now?: () => number;
-}
-
-function digestToken(token: string): Buffer {
-  return NodeCrypto.createHash("sha256").update(token, "utf8").digest();
 }
 
 function validateScope(scope: BrowserAutomationCredentialScope): void {
@@ -125,7 +119,7 @@ export class BrowserAutomationCredentialRegistry {
     validateRegistryLimits(this.idleTtlMs, this.absoluteTtlMs, this.maxCredentials);
   }
 
-  /** Issues an opaque credential while retaining only its SHA-256 digest. */
+  /** Issues a bounded credential identified by an opaque, non-secret id. */
   issue(scope: BrowserAutomationCredentialScope): IssuedBrowserAutomationCredential {
     validateScope(scope);
     const now = this.now();
@@ -133,7 +127,6 @@ export class BrowserAutomationCredentialRegistry {
     while (this.credentials.size >= this.maxCredentials) this.evictLeastRecentlyUsed();
 
     const credentialId = NodeCrypto.randomBytes(16).toString("hex");
-    const token = NodeCrypto.randomBytes(32).toString("base64url");
     const claims: BrowserAutomationCredentialClaims = {
       ...scope,
       allowedOperations: [...scope.allowedOperations],
@@ -143,44 +136,28 @@ export class BrowserAutomationCredentialRegistry {
     };
     const idleExpiresAt = Math.min(claims.expiresAt, now + this.idleTtlMs);
     this.credentials.set(credentialId, {
-      digest: digestToken(token),
       claims,
       idleExpiresAt,
       lastTouchedAt: now,
     });
-    return { token, credentialId, expiresAt: idleExpiresAt };
+    return { credentialId, expiresAt: idleExpiresAt };
   }
 
-  /** Authenticates an opaque token using constant-time digest comparison. */
-  authenticate(token: string): BrowserAutomationCredentialClaims | null {
-    if (token.length < 20 || token.length > 256) return null;
-    const now = this.now();
-    this.sweepExpired(now);
-    const candidate = digestToken(token);
-    let matched: StoredCredential | null = null;
-    for (const stored of this.credentials.values()) {
-      if (NodeCrypto.timingSafeEqual(stored.digest, candidate)) {
-        matched = stored;
-      }
-    }
-    if (!matched) return null;
-    matched.lastTouchedAt = now;
-    matched.idleExpiresAt = Math.min(matched.claims.expiresAt, now + this.idleTtlMs);
-    return { ...matched.claims, allowedOperations: [...matched.claims.allowedOperations] };
-  }
-
-  /** Extends one credential from the current time without revealing its token. */
-  touch(credentialId: string): boolean {
+  /**
+   * Extends one credential from the current time and
+   * returns its claims, or null when it is unknown or expired.
+   */
+  touch(credentialId: string): BrowserAutomationCredentialClaims | null {
     const stored = this.credentials.get(credentialId);
-    if (!stored) return false;
+    if (!stored) return null;
     const now = this.now();
     if (stored.claims.expiresAt <= now || stored.idleExpiresAt <= now) {
       this.remove(credentialId);
-      return false;
+      return null;
     }
     stored.lastTouchedAt = now;
     stored.idleExpiresAt = Math.min(stored.claims.expiresAt, now + this.idleTtlMs);
-    return true;
+    return { ...stored.claims, allowedOperations: [...stored.claims.allowedOperations] };
   }
 
   /** Revokes one credential by its non-secret identifier. */
@@ -200,7 +177,7 @@ export class BrowserAutomationCredentialRegistry {
     return removed;
   }
 
-  /** Returns the number of currently retained live credential digests. */
+  /** Returns the number of currently retained live credentials. */
   size(): number {
     this.sweepExpired(this.now());
     return this.credentials.size;

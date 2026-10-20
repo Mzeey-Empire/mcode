@@ -54,10 +54,15 @@ import {
 import {
   BrowserAutomationBroker,
   BrowserAutomationCredentialRegistry,
-  BrowserAutomationMcpHandler,
   BrowserAutomationSessionLease,
   BrowserAutomationTelemetry,
 } from "../../features/browser-automation";
+import {
+  BrowserToolkit,
+  McodeMcpServer,
+  McodeSessionAuthority,
+  createThreadControlToolkit,
+} from "../../features/mcode-mcp";
 import {
   ExternalThreadControlMcpRuntime,
   ExternalThreadControlPairingService,
@@ -298,12 +303,12 @@ const browserAutomationTelemetry = new BrowserAutomationTelemetry({
   sink: (event) => logger.info("Browser automation lifecycle", event),
 });
 const browserAutomationBroker = new BrowserAutomationBroker({ telemetry: browserAutomationTelemetry });
-const browserAutomationMcpHandler = new BrowserAutomationMcpHandler({
-  credentials: browserAutomationCredentials,
+const browserToolkit = new BrowserToolkit({
+  lease: browserAutomationSessionLease,
   broker: browserAutomationBroker,
 });
 browserAutomationCredentials.onRemoved((revocation) => {
-  browserAutomationMcpHandler.releaseCredential(revocation.credentialId);
+  browserToolkit.releaseCredential(revocation.credentialId);
   browserAutomationBroker.releaseProviderSession(
     revocation.providerId,
     revocation.providerSessionId,
@@ -335,6 +340,19 @@ const startupAgentPhaseObserver = container.resolve(StartupAgentPhaseObserver);
 startupAgentPhaseObserver.start();
 const externalThreadControlPairingService = container.resolve(ExternalThreadControlPairingService);
 const externalThreadControlMcpRuntime = container.resolve(ExternalThreadControlMcpRuntime);
+const mcodeMcpServer = new McodeMcpServer({
+  authority: container.resolve(McodeSessionAuthority),
+  toolkits: [
+    browserToolkit,
+    createThreadControlToolkit({
+      authority: container.resolve(McodeSessionAuthority),
+      service: threadControlService,
+    }),
+  ],
+  logger,
+});
+// Providers resolve the server when they attach, which happens after bootstrap finishes.
+container.registerInstance(McodeMcpServer, mcodeMcpServer);
 const gitComparison = container.resolve(GitComparisonService);
 const gitRepository = container.resolve(GitRepositoryService);
 const gitWorktrees = container.resolve(GitWorktreeService);
@@ -861,7 +879,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   threadDeletionTeardownService,
   threadCompletionService,
   browserAutomationBroker,
-  browserAutomationMcpHandler,
+  mcodeMcpServer,
   reliabilityHarness,
   authToken: AUTH_TOKEN,
   singleInstance: SINGLE_INSTANCE,
@@ -900,8 +918,8 @@ function listen(port: number): void {
       recordStartupCheckpoint("HTTP listener opened");
 
       const browserMcpHost = HOST === "::1" ? "[::1]" : "127.0.0.1";
+      mcodeMcpServer.setPort(listeningPort, browserMcpHost);
       browserAutomationSessionLease.configure({
-        mcpUrl: `http://${browserMcpHost}:${listeningPort}/mcp`,
         worktreeIdentity: WORKTREE_IDENTITY ?? "shared-server",
       });
 
@@ -1078,6 +1096,8 @@ async function shutdown(): Promise<void> {
 
   shutdownCoordinator.setPhase("close external thread-control runtime");
   await externalThreadControlMcpRuntime.close();
+  shutdownCoordinator.setPhase("close mcode MCP server");
+  await mcodeMcpServer.close();
 
   removeIpcSocket(ipcPath, hostRuntime.platform);
 

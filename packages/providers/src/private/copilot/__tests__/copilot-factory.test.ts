@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CopilotSession, PermissionRequest, SessionConfig, SessionEvent } from "@github/copilot-sdk";
 import { ProviderRuntimeEventSchema, type TurnRequest } from "@mcode/contracts";
-import { createCopilotProvider, type CopilotProviderBoundary, type ProviderHostPorts } from "../../../index.js";
+import { createCopilotProvider, type CopilotProviderBoundary, type ProviderHostPorts, type ProviderMcodeAttachment } from "../../../index.js";
 import { DeterministicCanonicalSink } from "../../../conformance/deterministic-sink.js";
 import { loadProviderFixtureManifest } from "../../../conformance/fixture-safety.js";
 import * as NodeURL from "node:url";
@@ -48,6 +48,9 @@ class FakeSession {
   }
 }
 
+function mcodeAttachment(toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true }): ProviderMcodeAttachment {
+  return { serverName: "mcode", url: "http://127.0.0.1/mcp/mcode", token: "mcode-token", toolkits };
+}
 function request(overrides: Partial<TurnRequest<"copilot">> = {}): TurnRequest<"copilot"> {
   return { turnId: "turn-1", turnExecutionId: "00000000-0000-4000-8000-000000000001", sessionId: "mcode-thread-1", workspaceId: "fixture-workspace", threadId: "thread-1", message: "fixture message", cwd: "/fixture", model: "model", permissionMode: "full", approvalReviewMode: "manual", interactionMode: "build", providerOptions: {}, ...overrides };
 }
@@ -56,7 +59,7 @@ function host(sink: DeterministicCanonicalSink): ProviderHostPorts {
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: vi.fn(() => ({})) }, processes: { attach: vi.fn(), terminateTree: vi.fn(async () => {}) },
     browser: { stage: vi.fn(() => ({ leaseId: "lease", expiresAt: 1_000 })), releaseSession: vi.fn(() => 0), isConfigured: () => false, issue: () => null, refresh: (leaseId) => ({ ok: false, leaseId, reason: "not-found" }), release: (leaseId) => ({ leaseId, released: true }), revokeCredential: () => false },
-    threadControl: { bootstrap: vi.fn(async () => null), close: vi.fn(async () => {}) },
+    mcode: { attach: vi.fn(async () => null), close: vi.fn(async () => {}) },
     grants: { consume: vi.fn(() => false) }, events: sink,
   };
 }
@@ -894,14 +897,72 @@ describe("Copilot public factory", () => {
   it("preserves native history while replacing permission-sensitive browser MCP configuration", async () => {
     const stage = vi.fn(() => ({ leaseId: "browser-lease", expiresAt: Date.now() + 60_000 }));
     const release = vi.fn((leaseId: string) => ({ leaseId, released: true }));
-    ports.browser = { ...ports.browser, isConfigured: () => true, stage, release, issue: (handle) => ({ ...handle, credentialId: "browser-credential", token: "fixture-token", mcpUrl: "http://127.0.0.1/browser", allowedOperations: ["browser.list_tabs"] }) };
-    ports.threadControl.bootstrap = vi.fn(async () => ({ name: "mcode", url: "http://127.0.0.1/thread-control", headers: { Authorization: "fixture-auth" } }));
+    ports.browser = { ...ports.browser, isConfigured: () => true, stage, release, issue: (handle) => ({ ...handle, credentialId: "browser-credential", allowedOperations: ["browser.list_tabs"] }) };
+    ports.mcode.attach = vi.fn(async () => mcodeAttachment());
     await provider.sendTurn(request()); await finish();
-    expect(sdk.create.mock.calls[0]?.[0].mcpServers).toEqual(expect.objectContaining({ mcode: { type: "http", url: "http://127.0.0.1/thread-control", headers: { Authorization: "fixture-auth" }, tools: ["*"] } }));
+    expect(sdk.create.mock.calls[0]?.[0].mcpServers).toEqual({ mcode: { type: "http", url: "http://127.0.0.1/mcp/mcode", headers: { Authorization: "Bearer mcode-token" }, tools: ["*"] } });
     await provider.sendTurn(request({ interactionMode: "plan", turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002" })); await finish();
     expect(sdk.resume).toHaveBeenCalledWith(session.sessionId, expect.objectContaining({ enableConfigDiscovery: true, workingDirectory: "/fixture" }));
     expect(stage).toHaveBeenLastCalledWith(expect.objectContaining({ permissionCapability: "observe", providerSessionId: session.sessionId }));
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["thread control only", { browser: false, threadControl: true }, { thread: true, browser: false }],
+    ["browser only", { browser: true, threadControl: false }, { thread: false, browser: true }],
+  ])("grants instructions from the attached toolkits: %s", async (_name, toolkits, expected) => {
+    ports.browser = { ...ports.browser, isConfigured: () => true, issue: (handle) => ({ ...handle, credentialId: "browser-credential", allowedOperations: ["browser.list_tabs"] }) };
+    ports.mcode.attach = vi.fn(async () => mcodeAttachment(toolkits));
+    await provider.sendTurn(request()); await finish();
+    const content: string = sdk.create.mock.calls[0]?.[0].systemMessage.content;
+    expect(content.includes("thread_target_list")).toBe(expected.thread);
+    expect(content.includes("browser_inspect")).toBe(expected.browser);
+    await provider.stopSession("mcode-thread-1");
+  });
+
+  it("emits no Mcode server and grants no toolkit when the server declines to attach", async () => {
+    await provider.sendTurn(request()); await finish();
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const content = options.systemMessage && "content" in options.systemMessage ? options.systemMessage.content ?? "" : "";
+    expect(options.mcpServers).toEqual({});
+    expect(content).not.toContain("thread_target_list");
+    expect(content).not.toContain("browser_inspect");
+  });
+
+  it("attaches under the session id the Browser lease is staged for", async () => {
+    const stage = vi.fn(() => ({ leaseId: "browser-lease", expiresAt: Date.now() + 60_000 }));
+    ports.browser = { ...ports.browser, stage };
+    const attach = vi.fn(async () => mcodeAttachment());
+    ports.mcode.attach = attach;
+    await provider.sendTurn(request({ sessionId: "mcode-thread-1", resumeFrom: "native-resume" })); await finish();
+    const staged = stage.mock.calls[0] as unknown as [{ mcodeSessionId: string; providerSessionId: string }];
+    expect(staged[0].providerSessionId).not.toBe(staged[0].mcodeSessionId);
+    expect(attach).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ providerId: "copilot", sessionId: staged[0].mcodeSessionId, threadId: "thread-1" }));
+  });
+
+  it("offers a session approval for a Browser tool under the one mcode server name", async () => {
+    ports.mcode.attach = vi.fn(async () => mcodeAttachment());
+    await provider.sendTurn(request({ permissionMode: "supervised" }));
+    const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
+    const [serverName] = Object.keys(options.mcpServers ?? {});
+    const browserAct: PermissionRequest = { kind: "mcp", serverName, toolName: "browser_act", args: {} };
+    const result = options.onPermissionRequest(browserAct, { sessionId: session.sessionId });
+    const pending = pendingApproval();
+    expect(pending.body.choices).toContainEqual(expect.objectContaining({ id: "allow-session", description: "MCP server: mcode; tool: browser_act" }));
+    await respond(pending.requestId, "allow-session");
+    expect(await result).toEqual({ kind: "approved" });
+    expect(await options.onPermissionRequest(browserAct, { sessionId: session.sessionId })).toEqual({ kind: "approved" });
+    await finish();
+  });
+
+  it("closes the mcode session on eviction and when startup fails", async () => {
+    await provider.sendTurn(request()); await finish();
+    await provider.evictNonBusySessions("fixture idle eviction");
+    expect(ports.mcode.close).toHaveBeenCalledWith("mcode-thread-1");
+    vi.mocked(ports.mcode.close).mockClear();
+    sdk.create.mockRejectedValueOnce(new Error("startup failed"));
+    await expect(provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002" }))).rejects.toThrow();
+    expect(ports.mcode.close).toHaveBeenCalledWith("mcode-thread-1");
   });
 
   it("accumulates native usage once at idle and excludes thinking messages from response content", async () => {
