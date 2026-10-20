@@ -64,6 +64,9 @@ export const CONTRACT_STEPS: Readonly<Record<string, ContractStep>> = {
 
 /** Migrations after the floor migration that are not auto-additive but do not break older builds. */
 export const COMPATIBLE_STEPS: Readonly<Record<string, CompatibleStep>> = {
+  "0095_worried_anthem": {
+    reason: "The unique retry key belongs only to the new delegated_tasks table. Older builds never insert into that table, so their writes are unchanged.",
+  },
   "0094_bumpy_triathlon": {
     reason: "Creates thread_provider_sessions and backfills it from threads.sdk_session_id with INSERT OR IGNORE. Older builds never read or write the new table and keep using the unchanged threads columns.",
   },
