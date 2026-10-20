@@ -1810,7 +1810,7 @@ describe("PreviewPanel: full panel state", () => {
 
     const marker = screen.getByRole("button", { name: "Edit annotation 1" });
     const outline = screen.getByTestId("preview-annotation-outline");
-    expect(marker).toHaveStyle({ left: "10px", top: "14px" });
+    expect(marker).toHaveStyle({ left: "18px", top: "2px" });
     expect(outline).toHaveStyle({ left: "20px", top: "24px", width: "120px", height: "32px" });
 
     act(() => {
@@ -1819,7 +1819,7 @@ describe("PreviewPanel: full panel state", () => {
         .report("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", PREVIEW_WEBVIEW_FALLBACK_TAB_ID, { x: 5, y: 100 });
     });
 
-    expect(marker).toHaveStyle({ left: "5px", top: "-86px" });
+    expect(marker).toHaveStyle({ left: "13px", top: "-98px" });
     expect(outline).toHaveStyle({ left: "15px", top: "-76px" });
   });
 
@@ -1859,7 +1859,7 @@ describe("PreviewPanel: full panel state", () => {
         .report("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", PREVIEW_WEBVIEW_FALLBACK_TAB_ID, { x: 0, y: 250 });
     });
 
-    expect(screen.getByRole("button", { name: "Edit annotation 1" })).toHaveStyle({ top: "64px" });
+    expect(screen.getByRole("button", { name: "Edit annotation 1" })).toHaveStyle({ top: "52px" });
   });
 
   it("numbers markers from 1 on each page and hides the markers of other pages", () => {

@@ -7,6 +7,7 @@ import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
 import { removePreviewNote, savePreviewNote } from "../notes/previewNotes";
 import type { PreviewPageScroll } from "../state/previewPageScrollStore";
 import { Button } from "@/components/ui/button";
+import { ANNOTATION_MARKER_TAIL_TIP, AnnotationMarker } from "@/components/ui/annotation-marker";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SlashCommandTray } from "@/components/chat/SlashCommandTray";
@@ -67,7 +68,7 @@ interface DesignLayerProps {
 
 const SAVED_OUTLINE_SHADOW = "0 0 0 2px color-mix(in srgb, var(--color-primary) 55%, transparent)";
 
-const MARKER_RADIUS_PX = 10;
+const MARKER_SIZE_PX = 24;
 
 /** Renders the saved-note outlines and numbered markers, the open note bubble and its editor without adding a DOM wrapper. */
 export function DesignLayer({
@@ -226,14 +227,21 @@ export function DesignLayer({
                     <button
                       type="button"
                       data-testid="preview-annotation-marker"
-                      className="pointer-events-auto absolute z-(--layer-dropdown) flex size-5 items-center justify-center rounded-full bg-primary text-caption font-bold tabular-nums text-primary-ink shadow-floating"
-                      style={{ left: bounds.x - MARKER_RADIUS_PX, top: bounds.y - MARKER_RADIUS_PX }}
+                      className="pointer-events-auto absolute z-(--layer-dropdown) flex size-6 rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                      style={{
+                        left: bounds.x - ANNOTATION_MARKER_TAIL_TIP.x * MARKER_SIZE_PX,
+                        top: bounds.y - ANNOTATION_MARKER_TAIL_TIP.y * MARKER_SIZE_PX,
+                      }}
                       onClick={() => {
                         setEditingAnnotationId(annotation.id);
                       }}
                       aria-label={`Edit annotation ${annotation.displayNumber}`}
                     >
-                      {annotation.displayNumber}
+                      <AnnotationMarker
+                        displayNumber={annotation.displayNumber}
+                        className="size-6 text-primary"
+                        numberClassName="text-caption text-primary-ink"
+                      />
                     </button>
                   }
                 />
