@@ -52,3 +52,21 @@ describe("approvalStore.hydrate", () => {
     ]);
   });
 });
+
+describe("approvalStore.clearThread", () => {
+  beforeEach(() => {
+    useApprovalStore.setState({ approvals: [] });
+  });
+
+  it("keeps a delegation approval waiting after the Coordinator's turn ends", () => {
+    const delegation = createMockApproval({
+      requestId: "req-task", threadId: "thread-a",
+      subject: { kind: "delegate_task", taskId: "req-task", title: "Fix flaky test", providerId: "codex", modelId: "gpt-5.6-luna", isolation: "worktree", commit: "9267e789dbb2" },
+    });
+    useApprovalStore.getState().hydrate([requestA, delegation]);
+
+    useApprovalStore.getState().clearThread("thread-a");
+
+    expect(approvalStates()).toEqual([["req-task", "thread-a", false]]);
+  });
+});
