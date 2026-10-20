@@ -66,8 +66,8 @@ function ToggleRow({ label, hint, checked, disabledReason, onChange }: {
   readonly onChange: (checked: boolean) => void;
 }) {
   const row = (
-    <label className={cn("flex min-h-11 items-center justify-between gap-3", disabledReason && "opacity-50")}>
-      <span className="flex min-w-0 flex-col">
+    <label className="flex min-h-11 items-center justify-between gap-3">
+      <span className={cn("flex min-w-0 flex-col", disabledReason && "opacity-50")}>
         <span className="text-body-small text-ink">{label}</span>
         {hint ? <span className="text-caption text-muted">{hint}</span> : null}
       </span>
