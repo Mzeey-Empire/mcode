@@ -223,6 +223,11 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     const accepted = requireTask(await f.service.delegate(f.source, { ...f.input, clientRequestId: "review-2" }));
     await f.approvals.claim(accepted.taskId);
     await f.control.recoverApprovals();
+    expect(f.threads.listByWorkspace(f.workspace.id)).toHaveLength(1);
+    expect(requireTask(await f.service.status(f.source, { taskId: accepted.taskId })).state).toEqual({ status: "waiting", reason: "approval" });
+    await f.approvals.claim(accepted.taskId);
+    await f.approvals.setOperationPhase(accepted.taskId, "dispatching");
+    await f.control.recoverApprovals();
     await f.control.recoverApprovals();
     expect(f.threads.listByWorkspace(f.workspace.id)).toHaveLength(2);
     await vi.waitFor(async () => expect(requireTask(await f.service.status(f.source, { taskId: accepted.taskId })).state)

@@ -704,6 +704,8 @@ export class ThreadControlService {
   private async respondToDelegationApproval(pending: PendingDelegatedTaskApproval, decision: ThreadApprovalDecision): Promise<boolean> {
     if (decision === "allow") {
       if (!this.delegatedTasks) throw new Error("Delegated task service is unavailable");
+      // Recovery relaunches only past this phase; earlier, a crash cannot tell allow from deny.
+      await this.requirePhase(pending.approvalId, "dispatching");
       await this.delegatedTasks.launch(pending.approvalId);
     }
     const status = decision === "allow" ? "approved" : "rejected";
@@ -937,7 +939,7 @@ export class ThreadControlService {
       return;
     }
     if (approval.operation === "delegate_task") {
-      await this.respondToClaimedApproval(approval, "allow");
+      await this.recoverDelegationApproval(approval);
       return;
     }
     if ("operation" in approval && (approval.operation === "thread_send" || approval.operation === "thread_stop")) {
@@ -953,6 +955,18 @@ export class ThreadControlService {
       threadId: approval.threadId,
     });
     (await this.failRecovery(approval));
+  }
+
+  private async recoverDelegationApproval(approval: PendingDelegatedTaskApproval): Promise<void> {
+    if (approval.operationPhase !== "pre_dispatch") {
+      await this.respondToClaimedApproval(approval, "allow");
+      return;
+    }
+    if (!(await this.approvals.requeueDispatch(approval.approvalId))) {
+      await this.failRecovery(approval);
+      return;
+    }
+    this.publishThreadApproval(approval.approvalId);
   }
 
   private async recoverMutationApproval(approval: PendingThreadSendApproval | PendingThreadStopApproval): Promise<void> {
