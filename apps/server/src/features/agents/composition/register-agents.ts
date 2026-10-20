@@ -106,7 +106,7 @@ export function registerAgentServices(container: DependencyContainer): void {
   });
   container.register(WorkerOwnedTurnRuntime, {
     useFactory: instanceCachingFactory((c) => {
-      return new WorkerOwnedTurnRuntime(c.resolve(CanonicalAgentWriterClient), c.resolve(AgentEventPublicationRegistry), c.resolve(CanonicalAgentBoundary));
+      return new WorkerOwnedTurnRuntime(c.resolve(CanonicalAgentWriterClient), c.resolve(AgentEventPublicationRegistry), c.resolve(CanonicalAgentBoundary), c.resolve(CompletedTurnWatermark));
     }),
   });
   container.register("WorkerOwnedTurnRuntime", {

@@ -11,9 +11,10 @@ import { ExecutionProviderEventOwnership } from "./execution-provider-event-owne
 import { ExecutionThreadWorkerPort } from "./execution-worker-port.js";
 import type { ExecutionIdentity, ExecutionLease } from "./execution-mailbox-protocol.js";
 import { ExecutionWorkerLossCoordinator, workerLossIncidentId } from "./execution-worker-loss-coordinator.js";
-import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
+import type { ExecutionTerminalPersistenceReceipt, ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
 import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
+import { coverageOf, type CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
 import { PlanFileWriter } from "../planning/plan-file-writer.js";
 
 const EXECUTION_WORKER_COUNT = 4;
@@ -43,10 +44,15 @@ export class WorkerOwnedTurnRuntime {
   private onRecovered: ((execution: ExecutionIdentity) => void) | undefined;
   private onPlanPhaseChanged: ((threadId: string) => void) | undefined;
 
-  constructor(writer: CanonicalAgentWriterClient, publication: AgentEventPublicationRegistry, canonical?: CanonicalAgentBoundary) {
+  constructor(
+    writer: CanonicalAgentWriterClient,
+    publication: AgentEventPublicationRegistry,
+    canonical?: CanonicalAgentBoundary,
+    private readonly completedTurns?: CompletedTurnWatermark,
+  ) {
     this.writer = writer;
     this.planFiles = canonical ? new PlanFileWriter((threadId) => canonical.loadAcceptedFeatureSeed(threadId).plans) : undefined;
-    this.progress = canonical ? new CanonicalAcceptedProgress(canonical, this.writer, this.planFiles) : undefined;
+    this.progress = canonical ? new CanonicalAcceptedProgress(canonical, this.writer, this.planFiles, completedTurns) : undefined;
     this.writerPort = new CanonicalExecutionWriterPort(
       this.writer,
       publishCanonicalAgentEvents,
@@ -74,6 +80,11 @@ export class WorkerOwnedTurnRuntime {
     this.owner = new ExecutionMailboxOwner(this.scheduler);
     this.providerEvents = new ExecutionProviderEventOwnership(this.owner);
     this.progress?.bindPermanentFailure(async (execution) => this.recoverRejected(execution));
+  }
+
+  /** Credit a committed terminal to the session that ran it; the accepted path does this when its save lands. */
+  recordCommittedCoverage(execution: ExecutionIdentity, persisted: ExecutionTerminalPersistenceReceipt): Promise<void> {
+    return this.completedTurns?.record(coverageOf(execution.threadId, persisted)) ?? Promise.resolve();
   }
 
   /** Notify the runtime controller only after writer-backed worker-loss recovery releases the lease. */
