@@ -12,7 +12,6 @@ import type {
   GoalState,
   ProviderFileMutationStart,
   ProviderRuntimeEvent,
-  SystemNoticeMetadata,
 } from "@mcode/contracts";
 import {
   BoundedToolOutputBuffer,
@@ -54,10 +53,6 @@ export interface CodexPendingFileMutationStart extends ProviderFileMutationStart
   nativeThreadId?: string;
   nativeTurnId?: string;
 }
-
-const NOTICE_KIND_BY_SUBTYPE: Record<string, SystemNoticeMetadata["kind"]> = {
-  "provider.notice.unknown-event": "diagnostic",
-};
 
 /** Joins reasoning summary and content parts as markdown paragraphs, live and on completion alike. */
 const REASONING_PART_SEPARATOR = "\n\n";
@@ -1654,7 +1649,7 @@ export class CodexEventMapper {
 
   private malformedNotification(): CodexMappedEvent[] {
     this.disposition = { kind: "diagnostic", reason: "malformed-notification" };
-    return this.notice("provider.notice.unknown-event", "Codex sent a malformed notification.");
+    return [];
   }
 
   private readonly noticeSessionId = NodeCrypto.randomUUID();
@@ -1794,21 +1789,18 @@ export class CodexEventMapper {
   private notice(
     subtype: string,
     message: string,
-    extra: Pick<SystemNoticeMetadata, "configPath" | "configRange" | "scope" | "origin"> = {},
   ): CodexMappedEvent[] {
-    const kind = NOTICE_KIND_BY_SUBTYPE[subtype] ?? "diagnostic";
     return [{
       type: AgentEventType.System,
       threadId: this.threadId,
       subtype,
       message: this.boundedText(message, "Codex reported an update."),
       systemNotice: {
-        kind,
-        presentation: kind === "model-rerouted" ? "toast" : "timeline",
-        scope: kind === "configuration" || kind === "deprecation" ? "session" : "turn",
+        kind: "diagnostic",
+        presentation: "timeline",
+        scope: "turn",
         sessionId: this.noticeSessionId,
         noticeKey: NodeCrypto.createHash("sha256").update(this.noticeSessionId + subtype + message).digest("hex"),
-        ...extra,
       },
     }];
   }
@@ -1834,7 +1826,7 @@ export class CodexEventMapper {
       return [];
     }
     this.disposition = { kind: "diagnostic", reason: "unattributed-thread" };
-    return this.notice("provider.notice.unknown-event", "Codex sent a notification for an unlinked provider thread.", { scope: "session", origin: "unattributed-thread" });
+    return [];
   }
 
   private mapKnownChildNotification(notification: CodexNotification): CodexMappedEvent[] {
@@ -1945,8 +1937,9 @@ export class CodexEventMapper {
 
   private unknownNotification(nativeMethod: string): CodexMappedEvent[] {
     const method = this.boundedText(nativeMethod, "unknown").slice(0, 128);
+    this.disposition = { kind: "diagnostic", reason: "unknown-notification" };
     logger.warn("CodexEventMapper: unrecognized notification", { method });
-    return this.notice("provider.notice.unknown-event", `Codex sent an update this client does not recognize (${method}). The thread continues normally.`);
+    return [];
   }
 
   private mapMainItemStarted(notification: CodexNotification): CodexMappedEvent[] {

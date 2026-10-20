@@ -1061,6 +1061,9 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     normalized: { type: string; properties: Record<string, unknown> } | null,
     settler: OpenCodeTurnSettler,
   ): void {
+    if (mapped.disposition === "diagnostic") {
+      logger.warn("OpenCode notification disposition", { threadId, reason: mapped.reason });
+    }
     if (mapped.reason === "permission-request" || mapped.reason === "question-request") {
       this.maybeEmitAsk(req, endpoint, upstreamId, normalized, mapped.reason);
     }

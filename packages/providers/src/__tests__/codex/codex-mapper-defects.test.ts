@@ -177,7 +177,7 @@ describe("CodexEventMapper defect regressions", () => {
       },
     });
 
-    const events = mapper.mapNotification({
+    const result = mapper.mapNotificationWithDisposition({
       jsonrpc: "2.0",
       method: "item/completed",
       params: {
@@ -192,7 +192,10 @@ describe("CodexEventMapper defect regressions", () => {
       },
     });
 
-    expect(events).toMatchObject([{ event: { type: "system", subtype: "provider.notice.unknown-event" } }]);
+    expect(result).toEqual({
+      events: [],
+      disposition: { kind: "diagnostic", reason: "unattributed-thread" },
+    });
   });
 
   it("does not flush spawnAgent with empty receiverThreadIds as Sub-agent finished", () => {
