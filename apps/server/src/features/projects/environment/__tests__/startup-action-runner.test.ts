@@ -6,7 +6,6 @@ import { StartupActionRunner, type StartupActionTransition, type StartupProjectA
 class FakeActions implements StartupProjectActions {
   readonly runs = new Map<string, WorkspaceEnvironmentActionRun>();
   readonly launched: string[] = [];
-  readonly restarted: string[] = [];
   readonly stopped: string[] = [];
   readonly approvals = new Set<string>();
   private readonly listeners = new Set<Parameters<StartupProjectActions["onUpdate"]>[0]>();
@@ -22,6 +21,7 @@ class FakeActions implements StartupProjectActions {
     this.outputs.add(listener);
     return () => { this.outputs.delete(listener); };
   }
+  async launch(slot: { actionId: string }, _options?: unknown) { return this.start(slot); }
   async start({ actionId }: { actionId: string }) {
     this.launched.push(actionId);
     const pending = this.approvals.has(actionId);
@@ -36,10 +36,6 @@ class FakeActions implements StartupProjectActions {
     this.emit(run);
     return run;
   }
-  async restart(slot: { actionId: string }) {
-    this.restarted.push(slot.actionId);
-    return this.start(slot);
-  }
   async stop(slot: { actionId: string }) {
     this.stopped.push(slot.actionId);
     this.exit(slot.actionId, null);
@@ -49,6 +45,10 @@ class FakeActions implements StartupProjectActions {
     const run = this.require(actionId);
     this.emit({ ...run, revision: run.revision + 1, exitCode,
       status: exitCode === 0 ? "completed" : "failed", finishedAt: "2026-10-16T12:00:01.000Z" });
+  }
+  running(actionId: string) {
+    const run = this.require(actionId);
+    this.emit({ ...run, revision: run.revision + 1, status: "running", startedAt: "2026-10-16T12:00:00.000Z" });
   }
   port(actionId: string) {
     const run = this.require(actionId);
@@ -91,6 +91,7 @@ function harness(projectActions = new FakeActions()) {
 }
 
 const sequence = ["install", "check"].map((actionId) => ({ actionId, script: `echo ${actionId}` }));
+const released = [{ actionId: "dev", script: "echo dev", gate: "release" as const }, sequence[1]!];
 const eventually = (assertion: () => void) => vi.waitFor(assertion, { interval: 1 });
 
 describe("StartupActionRunner", () => {
@@ -138,12 +139,12 @@ describe("StartupActionRunner", () => {
     expect(retry.transitions[0]?.actions.map((entry) => [entry.outcome, entry.runId])).toEqual([
       ["skipped", "run-1"], ["pending", null],
     ]);
-    expect(h.projectActions.restarted).toEqual(["check"]);
+    expect(h.projectActions.launched).toEqual(["install", "check", "check"]);
     h.projectActions.exit("check", 3);
     await eventually(() => expect(retry.transitions.at(-1)?.state).toBe("failed"));
     const edited = harness(h.projectActions);
     await edited.runner.start([{ actionId: "install", script: "new install" }, sequence[1]!], previous);
-    expect(h.projectActions.restarted).toEqual(["check", "install"]);
+    expect(h.projectActions.launched).toEqual(["install", "check", "check", "install"]);
   });
 
   it("holds for approval and follows the approved run's new identity", async () => {
@@ -180,13 +181,13 @@ describe("StartupActionRunner", () => {
     const h = harness();
     let release = () => undefined;
     const launch = new Promise<void>((resolve) => { release = () => resolve(); });
-    const start = h.projectActions.start.bind(h.projectActions);
-    vi.spyOn(h.projectActions, "start").mockImplementation(async (slot) => {
+    const launchAction = h.projectActions.launch.bind(h.projectActions);
+    vi.spyOn(h.projectActions, "launch").mockImplementation(async (slot, options) => {
       await launch;
-      return start(slot);
+      return launchAction(slot, options);
     });
     const starting = h.runner.start(sequence, []);
-    await eventually(() => expect(h.projectActions.start).toHaveBeenCalledOnce());
+    await eventually(() => expect(h.projectActions.launch).toHaveBeenCalledOnce());
     const cancelling = h.runner.cancel();
     release();
     await Promise.all([starting, cancelling]);
@@ -239,12 +240,80 @@ describe("StartupActionRunner", () => {
 
   it("turns launch failures into a blocked action with the error detail", async () => {
     const h = harness();
-    vi.spyOn(h.projectActions, "start").mockRejectedValue(new Error("8 terminals are open"));
+    vi.spyOn(h.projectActions, "launch").mockRejectedValue(new Error("8 terminals are open"));
     await h.runner.start(sequence, []);
     expect(h.transitions.at(-1)).toMatchObject({
       state: "failed", failedActionId: "install", detail: "8 terminals are open",
       actions: [{ outcome: "failed", runId: null }, { outcome: "pending" }],
     });
     expect(h.passes()).toBe(0);
+  });
+
+  describe("release gate", () => {
+    it("advances once the released run is running and ignores its later exit", async () => {
+      const h = harness();
+      await h.runner.start(released, []);
+      await eventually(() => expect(h.projectActions.launched).toEqual(["dev", "check"]));
+      expect(h.transitions.at(-1)?.actions.map((entry) => entry.outcome)).toEqual(["ready", "running"]);
+      h.projectActions.exit("dev", 1);
+      h.projectActions.exit("check", 0);
+      await eventually(() => expect(h.passes()).toBe(1));
+      expect(h.transitions.map((transition) => transition.state)).not.toContain("failed");
+      expect(h.errors).toEqual([]);
+    });
+
+    it("passes when the released action is the last one", async () => {
+      const h = harness();
+      await h.runner.start([released[0]!], []);
+      await eventually(() => expect(h.passes()).toBe(1));
+      expect(h.transitions.at(-1)?.actions.map((entry) => entry.outcome)).toEqual(["ready"]);
+    });
+
+    it("still blocks when the released launch fails", async () => {
+      const h = harness();
+      vi.spyOn(h.projectActions, "launch").mockRejectedValue(new Error("8 terminals are open"));
+      await h.runner.start(released, []);
+      expect(h.transitions.at(-1)).toMatchObject({ state: "failed", failedActionId: "dev", detail: "8 terminals are open" });
+      expect(h.passes()).toBe(0);
+    });
+
+    it("holds at approval instead of releasing a run that has not started", async () => {
+      const h = harness();
+      h.projectActions.approvals.add("dev");
+      await h.runner.start(released, []);
+      expect(h.transitions.at(-1)?.state).toBe("awaiting-approval");
+      expect(h.projectActions.launched).toEqual(["dev"]);
+      expect(h.transitions.at(-1)?.actions.map((entry) => entry.outcome)).toEqual(["pending", "pending"]);
+    });
+
+    it("rejects a changed script instead of releasing the frozen action", async () => {
+      const h = harness();
+      h.projectActions.approvals.add("dev");
+      await h.runner.start(released, []);
+      const run = h.projectActions.get({ actionId: "dev" });
+      if (!run) throw new Error("Missing pending run");
+      h.projectActions.runs.set("dev", { ...run, snapshot: { ...run.snapshot, script: "changed script" } });
+      h.projectActions.running("dev");
+      await eventually(() => expect(h.transitions.at(-1)).toMatchObject({ state: "failed", failedActionId: "dev" }));
+      expect(h.projectActions.launched).toEqual(["dev"]);
+    });
+
+    it("retry keeps a live released run and relaunches a dead one", async () => {
+      const first = harness();
+      await first.runner.start(released, []);
+      await eventually(() => expect(first.projectActions.launched).toEqual(["dev", "check"]));
+      const previous = first.transitions.at(-1)?.actions ?? [];
+
+      const live = harness(first.projectActions);
+      await live.runner.start(released, previous);
+      expect(live.transitions[0]?.actions.map((entry) => [entry.outcome, entry.runId])).toEqual([["skipped", "run-1"], ["pending", null]]);
+      expect(first.projectActions.launched).toEqual(["dev", "check", "check"]);
+
+      first.projectActions.exit("dev", 1);
+      const dead = harness(first.projectActions);
+      await dead.runner.start(released, previous);
+      expect(dead.transitions[0]?.actions.map((entry) => entry.outcome)).toEqual(["pending", "pending"]);
+      await eventually(() => expect(first.projectActions.launched).toEqual(["dev", "check", "check", "dev", "check"]));
+    });
   });
 });

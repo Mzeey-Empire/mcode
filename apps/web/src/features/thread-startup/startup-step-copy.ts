@@ -94,7 +94,7 @@ export interface StartupSetupView {
   readonly commands: readonly string[];
   /** The action run waiting for the user's approval, if any. */
   readonly pending: WorkspaceEnvironmentActionRun | undefined;
-  /** Terminal of the running action, else of the failed one, for the card's Open terminal. */
+  /** Terminal of the running action, else of the failed one, else of a released action still serving, for the card's Open terminal. */
   readonly terminalSessionId: string | null;
 }
 
@@ -113,6 +113,10 @@ export function startupSetupView(
   });
   const terminalOf = (outcome: ThreadStartupAction["outcome"]) =>
     launched.find(({ entry }) => entry.outcome === outcome)?.run.terminalSessionId ?? null;
+  // A waitForExit:false action is "ready" while its process keeps running. A waited "ready" action has
+  // exited, so its run is no longer "running" and its finished terminal stays out of the choice.
+  const releasedTerminal =
+    launched.find(({ entry, run }) => entry.outcome === "ready" && run.status === "running")?.run.terminalSessionId ?? null;
   return {
     commands: actions.flatMap((entry) => {
       const run = runs[entry.actionId];
@@ -120,7 +124,7 @@ export function startupSetupView(
       return [isLaunchedBySequence(entry, run) ? setupCommandLine(run.snapshot.script) ?? run.actionName : run.actionName];
     }),
     pending: launched.find(({ run }) => run.status === "awaiting-approval")?.run,
-    terminalSessionId: terminalOf("running") ?? terminalOf("failed"),
+    terminalSessionId: terminalOf("running") ?? terminalOf("failed") ?? releasedTerminal,
   };
 }
 

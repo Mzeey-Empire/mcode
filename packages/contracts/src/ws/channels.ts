@@ -24,7 +24,7 @@ import { TurnOutcomeSchema } from "../models/turn-outcome.js";
 import { TurnSavingStatusSchema } from "../models/turn-runtime.js";
 import { ProviderCatalogChangeSchema } from "../providers/capability-catalog.js";
 import { ProviderModelInfoSchema } from "../providers/models.js";
-import { WorkspaceEnvironmentActionRunSchema } from "../models/workspace-environment.js";
+import { WorkspaceEnvironmentActionRunSchema, WorkspaceEnvironmentLoopbackUrlSchema } from "../models/workspace-environment.js";
 import { ThreadStartupSchema } from "../thread-startup.js";
 import { LegacyTerminalChannels } from "./terminal-legacy.js";
 
@@ -87,12 +87,18 @@ export const WS_CHANNELS = {
   }),
   /** Publishes a complete authoritative startup snapshot after each lifecycle change. */
   "thread.startup.updated": ThreadStartupSchema(),
-  /** Publishes the latest retained result for one Project Action slot. */
+  /**
+   * Publishes the latest retained result for one Project Action slot.
+   *
+   * `openPreview` is a one-time instruction, never part of the retained run, so reconnecting or
+   * replaying state cannot reopen a tab.
+   */
   "workspace.environment.action.updated": z.object({
     threadId: z.string().min(1).max(256),
     actionId: z.string().min(1).max(256),
     runId: z.string().min(1).max(256),
     run: WorkspaceEnvironmentActionRunSchema(),
+    openPreview: z.object({ url: WorkspaceEnvironmentLoopbackUrlSchema() }).strict().optional(),
   }).strict(),
   /** Synchronizes durable user completion or reopen changes across clients. */
   "thread.lifecycleChanged": z.object({

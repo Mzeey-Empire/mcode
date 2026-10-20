@@ -27,7 +27,7 @@ class FixtureActions implements StartupProjectActions {
   }
   onCommandOutput() { return () => undefined; }
 
-  async start(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun> {
+  async launch(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun> {
     const resolved = await this.resolve(input);
     const timestamp = new Date().toISOString();
     const run: WorkspaceEnvironmentActionRun = {
@@ -44,8 +44,6 @@ class FixtureActions implements StartupProjectActions {
     }
     return run;
   }
-
-  async restart(input: WorkspaceEnvironmentActionSlotInput) { return this.start(input); }
 
   async stop(input: WorkspaceEnvironmentActionSlotInput): Promise<WorkspaceEnvironmentActionRun | null> {
     const command = this.commands.get(key(input));

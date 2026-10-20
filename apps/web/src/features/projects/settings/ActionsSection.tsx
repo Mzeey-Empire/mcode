@@ -5,7 +5,7 @@ import { Button, IconButton } from "@/components/ui/button";
 import { PlayGlyph } from "./PlayGlyph";
 import { ActionIcon } from "../actions/ActionIcon";
 import { ActionEditor, type ActionPlay } from "./ActionEditor";
-import { scriptOf } from "./settings-model";
+import { optionChips, scriptOf, type SettingsIssueField } from "./settings-model";
 
 function Chip({ children }: { readonly children: string }) {
   return (
@@ -39,8 +39,7 @@ function CollapsedRow({ action, play, restoreFocus, onToggle }: {
         <ActionIcon iconId={action.icon} command={command} size={16} />
         <span className="shrink-0 text-body-small font-medium text-ink">{action.name}</span>
         <span className="text-fade min-w-0 flex-1 overflow-clip text-left font-mono text-xs whitespace-nowrap text-muted">{command}</span>
-        {action.runOnStartup ? <Chip>On startup</Chip> : null}
-        {action.runOnCleanup ? <Chip>On cleanup</Chip> : null}
+        {optionChips(action).map((chip) => <Chip key={chip}>{chip}</Chip>)}
       </Button>
       <IconButton
         shape="round"
@@ -61,7 +60,7 @@ interface ActionsSectionProps {
   /** The action added in this session, whose name field takes focus and selection. */
   readonly focusNameActionId: string | null;
   readonly approvedActionIds: readonly string[];
-  readonly issueFor: (actionId: string) => string | null;
+  readonly issuesFor: (actionId: string) => Partial<Record<SettingsIssueField, string>>;
   readonly playFor: (action: WorkspaceEnvironmentAction) => ActionPlay;
   readonly onExpand: (actionId: string | null) => void;
   readonly onChange: (action: WorkspaceEnvironmentAction) => void;
@@ -76,7 +75,7 @@ export function ActionsSection({
   expandedActionId,
   focusNameActionId,
   approvedActionIds,
-  issueFor,
+  issuesFor,
   playFor,
   onExpand,
   onChange,
@@ -106,7 +105,7 @@ export function ActionsSection({
             {expanded ? (
               <ActionEditor
                 action={action}
-                issue={issueFor(action.id)}
+                issues={issuesFor(action.id)}
                 play={playFor(action)}
                 approved={approvedActionIds.includes(action.id)}
                 focusName={action.id === focusNameActionId ? "select" : action.id === openedActionId ? "caret" : null}

@@ -10,6 +10,7 @@ export class ActionPortMonitor {
   private port: WorkspaceEnvironmentActionPort | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  private pinned = false;
 
   constructor(
     private readonly runId: string,
@@ -17,9 +18,21 @@ export class ActionPortMonitor {
     private readonly publish: (port: WorkspaceEnvironmentActionPort) => void,
   ) {}
 
+  /**
+   * Restricts the monitor to one configured URL and starts probing it now, so reachability is
+   * judged on the exact URL the action asked to open rather than on whatever the command prints.
+   */
+  pin(candidate: ActionPortCandidate): void {
+    if (this.stopped || this.pinned) return;
+    this.pinned = true;
+    this.candidates.push(candidate);
+    void this.probe(candidate);
+    this.schedule(1_000);
+  }
+
   /** Consumes only command output, never the terminal's synthesized echo. */
   write(bytes: Uint8Array): void {
-    if (this.stopped) return;
+    if (this.stopped || this.pinned) return;
     for (const candidate of this.detector.write(bytes)) {
       this.candidates.push(candidate);
       void this.probe(candidate);

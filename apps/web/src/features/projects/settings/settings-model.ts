@@ -2,7 +2,9 @@ import {
   WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES,
   WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES,
   WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES,
-  WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX,
+  WorkspaceEnvironmentActionSchema,
+  WorkspaceEnvironmentDocumentSchema,
+  workspaceEnvironmentValidationIssues,
   type WorkspaceEnvironmentAction,
   type WorkspaceEnvironmentCommand,
   type WorkspaceEnvironmentDocument,
@@ -33,12 +35,15 @@ const REASON_COPY: Partial<Record<WorkspaceEnvironmentValidationReason, string>>
   command_too_large: `These commands are too long together. The limit is ${kilobytes(WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES)}.`,
   document_too_large: `Too many actions to save. The limit is ${kilobytes(WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES)}.`,
   null_byte: "Commands can't contain null characters.",
-  too_many_startup_actions: `At most ${WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX} actions can run on startup.`,
 };
 
-/** A validation problem tied to one action, or to the whole document when `actionId` is null. */
+/** The editor field an action issue sits under. */
+export type SettingsIssueField = "command" | "openPreview";
+
+/** A validation problem tied to one action's field, or to the whole document when `actionId` is null. */
 export interface SettingsIssue {
   readonly actionId: string | null;
+  readonly field: SettingsIssueField;
   readonly reason: WorkspaceEnvironmentValidationReason;
   readonly message: string;
 }
@@ -74,14 +79,78 @@ export function withPlatformScript(
   return script.length === 0 ? rest : { ...rest, [platform]: script };
 }
 
-/** Sets or clears a boolean flag, so an unchecked flag is absent from the saved file. */
-export function withFlag(
-  action: WorkspaceEnvironmentAction,
-  flag: "runOnStartup" | "runOnCleanup",
-  on: boolean,
-): WorkspaceEnvironmentAction {
-  const { [flag]: _previous, ...rest } = action;
-  return on ? { ...rest, [flag]: true } : rest;
+/** Action keys the editor shows as switches: every schema key except identity, command and icon. */
+export type ActionOptionKey = Exclude<
+  keyof ReturnType<typeof WorkspaceEnvironmentActionSchema>["shape"],
+  "id" | "name" | "command" | "icon"
+>;
+
+/** How one option renders: its switch row and, when set, the chip on the collapsed action row. */
+export interface ActionOptionRow {
+  readonly label: string;
+  /** Muted second line, omitted for rows whose label already says enough. */
+  readonly hint: string | null;
+  /** The option this one is inert without. Turning the parent off clears it. */
+  readonly dependsOn: ActionOptionKey | null;
+  readonly chip: string | null;
+}
+
+/** Every action option in display order. A new schema key without a row here fails typecheck. */
+export const ACTION_OPTIONS = {
+  runOnStartup: { label: "Run on startup", hint: "When a thread starts in a worktree", dependsOn: null, chip: "On startup" },
+  waitForExit: { label: "Wait for it to finish before the agent starts", hint: null, dependsOn: "runOnStartup", chip: null },
+  runOnSettle: { label: "Run when the thread settles", hint: null, dependsOn: null, chip: "On settle" },
+  runOnCleanup: { label: "Run on cleanup", hint: "Before the worktree is removed", dependsOn: null, chip: "On cleanup" },
+  openPreview: { label: "Open preview automatically when this action runs", hint: null, dependsOn: null, chip: null },
+} as const satisfies Record<ActionOptionKey, ActionOptionRow>;
+
+/** Option keys in display order, derived from the table so the two cannot drift. */
+export const ACTION_OPTION_KEYS = Object.keys(ACTION_OPTIONS) as readonly ActionOptionKey[];
+
+/** Whether an option's switch reads as on. `waitForExit` is on unless explicitly `false`. */
+export function readOption(action: WorkspaceEnvironmentAction, key: ActionOptionKey): boolean {
+  if (key === "waitForExit") return action.waitForExit !== false;
+  if (key === "openPreview") return action.openPreview !== undefined;
+  return action[key] === true;
+}
+
+function withoutKey(action: WorkspaceEnvironmentAction, key: ActionOptionKey): WorkspaceEnvironmentAction {
+  const { [key]: _previous, ...rest } = action;
+  return rest;
+}
+
+function dependentsOf(key: ActionOptionKey): ActionOptionKey[] {
+  return ACTION_OPTION_KEYS.filter((other) => ACTION_OPTIONS[other].dependsOn === key);
+}
+
+/**
+ * Sets one option so a default value is absent from the saved file, and clears dependents when
+ * their parent turns off so no inert key is left behind.
+ */
+export function withOption(action: WorkspaceEnvironmentAction, key: ActionOptionKey, on: boolean): WorkspaceEnvironmentAction {
+  const rest = withoutKey(action, key);
+  if (key === "waitForExit") return on ? rest : { ...rest, waitForExit: false };
+  if (!on) return dependentsOf(key).reduce(withoutKey, rest);
+  return key === "openPreview" ? { ...rest, openPreview: true } : { ...rest, [key]: true };
+}
+
+/** Sets the preview URL. A blank URL means "open the first URL the action prints". */
+export function withPreviewUrl(action: WorkspaceEnvironmentAction, url: string): WorkspaceEnvironmentAction {
+  return { ...action, openPreview: url.trim().length === 0 ? true : url };
+}
+
+/** Why an option is unavailable, such as "Requires Run on startup", or null when it can be changed. */
+export function optionDisabledReason(action: WorkspaceEnvironmentAction, key: ActionOptionKey): string | null {
+  const parent = ACTION_OPTIONS[key].dependsOn;
+  return parent && !readOption(action, parent) ? `Requires ${ACTION_OPTIONS[parent].label}` : null;
+}
+
+/** Chips for the collapsed row, one per option that is on and has a chip. */
+export function optionChips(action: WorkspaceEnvironmentAction): string[] {
+  return ACTION_OPTION_KEYS.flatMap((key) => {
+    const chip = ACTION_OPTIONS[key].chip;
+    return chip && readOption(action, key) && !optionDisabledReason(action, key) ? [chip] : [];
+  });
 }
 
 /** A new action that is waiting for its command. */
@@ -111,30 +180,43 @@ export function jsonEqual(a: unknown, b: unknown): boolean {
   return recordsEqual(a as Record<string, unknown>, b as Record<string, unknown>);
 }
 
+function fieldOf(path: readonly (string | number)[]): SettingsIssueField {
+  return path[2] === "openPreview" ? "openPreview" : "command";
+}
+
+/** Whether the contract schema owns this check's copy, so the editor does not restate it. */
+function isSchemaOwnedIssue(issue: WorkspaceEnvironmentValidationIssue): boolean {
+  return issue.reason === "too_many_startup_actions" || fieldOf(issue.path) === "openPreview";
+}
+
 /** Local checks that mirror the server so Save can stay off without a round trip. */
 export function validateDocument(document: WorkspaceEnvironmentDocument): SettingsIssue[] {
   const issues: SettingsIssue[] = [];
   for (const action of document.actions) {
     if (!commandHasScript(action.command)) {
-      issues.push({ actionId: action.id, reason: "empty_script", message: REASON_COPY.empty_script ?? "" });
+      issues.push({ actionId: action.id, field: "command", reason: "empty_script", message: REASON_COPY.empty_script ?? "" });
     }
   }
-  if (document.actions.filter((action) => action.runOnStartup).length > WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX) {
-    issues.push({
-      actionId: null,
-      reason: "too_many_startup_actions",
-      message: REASON_COPY.too_many_startup_actions ?? "",
-    });
+  const parsed = WorkspaceEnvironmentDocumentSchema().safeParse(document);
+  if (!parsed.success) {
+    for (const issue of workspaceEnvironmentValidationIssues(parsed.error)) {
+      if (isSchemaOwnedIssue(issue)) issues.push(toSettingsIssue(issue, document));
+    }
   }
   return issues;
 }
 
-/** Maps a server issue's path (`["actions", index, ...]`) onto the action it names. */
+/** Maps a server issue's path (`["actions", index, field, ...]`) onto the action and field it names. */
 export function toSettingsIssue(
   issue: WorkspaceEnvironmentValidationIssue,
   document: WorkspaceEnvironmentDocument,
 ): SettingsIssue {
   const [scope, index] = issue.path;
   const action = scope === "actions" && typeof index === "number" ? document.actions[index] : undefined;
-  return { actionId: action?.id ?? null, reason: issue.reason, message: issueCopy(issue.reason, issue.message) };
+  return {
+    actionId: action?.id ?? null,
+    field: fieldOf(issue.path),
+    reason: issue.reason,
+    message: issueCopy(issue.reason, issue.message),
+  };
 }

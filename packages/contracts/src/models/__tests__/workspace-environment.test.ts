@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
+import { WS_CHANNELS } from "../../ws/channels.js";
 import {
+  actionSchedule,
   DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT,
   encodeEnvironmentDocument,
+  normalizeAction,
   WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES,
   WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES,
   WorkspaceEnvironmentCommandSchema,
   WorkspaceEnvironmentDocumentSchema,
   WorkspaceEnvironmentActionRunSchema,
   WorkspaceEnvironmentErrorSchema,
+  WorkspaceEnvironmentLoopbackUrlSchema,
   WorkspaceEnvironmentAutomaticSetupSnapshotSchema,
   WorkspaceEnvironmentAutomaticSetupStopInputSchema,
   WorkspaceEnvironmentAutomaticSetupRetryInputSchema,
@@ -71,6 +75,203 @@ describe("encodeEnvironmentDocument", () => {
 
   it("rejects promotion while legacy Setup is still present", () => {
     expect(() => encodeEnvironmentDocument({ ...validDocument, setup: validCommand, future: true })).toThrow();
+  });
+
+  it("encodes a legacy-flag document with the same bytes as before the scheduling keys existed", () => {
+    const action = { id: "run", name: "Run", command: validCommand, icon: "bolt", runOnStartup: true, runOnCleanup: false };
+    const encoded = encodeEnvironmentDocument({ version: "0.0.1", actions: [action] });
+    expect(new TextDecoder().decode(encoded.bytes)).toBe(
+      '{"version":"0.1.0","actions":[{"id":"run","name":"Run","command":{"default":"bun run dev"},"icon":"bolt","runOnStartup":true,"runOnCleanup":false}]}',
+    );
+  });
+
+  it("keeps an undefined legacy value from promoting the document", () => {
+    const encoded = encodeEnvironmentDocument({
+      version: "0.1.0", actions: [{ id: "run", name: "Run", command: validCommand, icon: undefined }],
+    });
+    expect(encoded.document.version).toBe("0.0.1");
+  });
+
+  it.each([
+    ["waitForExit without runOnStartup", { waitForExit: false as const }],
+    ["waitForExit with runOnStartup off", { runOnStartup: false, waitForExit: false as const }],
+    ["a false runOnSettle", { runOnSettle: false }],
+  ])("drops the inert or default key for %s", (_label, metadata) => {
+    const input = { version: "0.1.0", actions: [{ id: "run", name: "Run", command: validCommand, ...metadata }] };
+    const encoded = encodeEnvironmentDocument(input);
+    const stored = encoded.document.actions[0];
+    expect(stored).not.toHaveProperty("waitForExit");
+    expect(stored).not.toHaveProperty("runOnSettle");
+    expect(JSON.parse(new TextDecoder().decode(encoded.bytes))).toEqual(encoded.document);
+  });
+
+  it("falls back to 0.0.1 when dropping inert keys leaves only legacy keys", () => {
+    const encoded = encodeEnvironmentDocument({
+      version: "0.1.0", actions: [{ id: "run", name: "Run", command: validCommand, runOnSettle: false }],
+    });
+    expect(new TextDecoder().decode(encoded.bytes)).toBe(
+      '{"version":"0.0.1","actions":[{"id":"run","name":"Run","command":{"default":"bun run dev"}}]}',
+    );
+  });
+
+  it.each([
+    { runOnStartup: true, waitForExit: false as const },
+    { runOnSettle: true },
+    { openPreview: true as const },
+    { openPreview: "http://localhost:5173/app" },
+  ])("round-trips %j at 0.1.0 without reordering keys", (metadata) => {
+    const action = { id: "run", name: "Run", command: validCommand, ...metadata };
+    const encoded = encodeEnvironmentDocument({ version: "0.0.1", actions: [action] });
+    expect(encoded.document).toEqual({ version: "0.1.0", actions: [action] });
+    const bytes = new TextDecoder().decode(encoded.bytes);
+    expect(WorkspaceEnvironmentDocumentSchema().parse(JSON.parse(bytes))).toEqual(encoded.document);
+    expect(Object.keys(JSON.parse(bytes).actions[0])).toEqual(Object.keys(action));
+  });
+
+  it("keeps the order of keys that follow an inert key it removes", () => {
+    const encoded = encodeEnvironmentDocument({
+      version: "0.1.0",
+      actions: [{ id: "run", name: "Run", command: validCommand, waitForExit: false, runOnCleanup: true, openPreview: true }],
+    });
+    expect(Object.keys(encoded.document.actions[0] ?? {})).toEqual(["id", "name", "command", "runOnCleanup", "openPreview"]);
+  });
+});
+
+describe("normalizeAction", () => {
+  const base = { id: "run", name: "Run", command: validCommand };
+
+  it("keeps waitForExit false only while runOnStartup is on", () => {
+    expect(normalizeAction({ ...base, runOnStartup: true, waitForExit: false })).toEqual({ ...base, runOnStartup: true, waitForExit: false });
+    expect(normalizeAction({ ...base, runOnStartup: false, waitForExit: false })).toEqual({ ...base, runOnStartup: false });
+  });
+
+  it("does not mutate its input", () => {
+    const action = { ...base, waitForExit: false as const };
+    normalizeAction(action);
+    expect(action).toHaveProperty("waitForExit", false);
+  });
+
+  it("leaves unknown keys alone", () => {
+    expect(normalizeAction({ ...base, futureAction: [1] })).toEqual({ ...base, futureAction: [1] });
+  });
+});
+
+describe("actionSchedule", () => {
+  const base = { id: "run", name: "Run", command: validCommand };
+
+  it("keeps today's behavior for an action with no scheduling keys", () => {
+    expect(actionSchedule(base)).toEqual({ startup: null, settle: false, cleanup: false, preview: null });
+  });
+
+  it("gates on exit unless waitForExit is false", () => {
+    expect(actionSchedule({ ...base, runOnStartup: true }).startup).toEqual({ gate: "wait" });
+    expect(actionSchedule({ ...base, runOnStartup: true, waitForExit: false }).startup).toEqual({ gate: "release" });
+  });
+
+  it("ignores waitForExit when the action does not run on startup", () => {
+    expect(actionSchedule({ ...base, waitForExit: false }).startup).toBeNull();
+    expect(actionSchedule({ ...base, runOnStartup: false, waitForExit: false }).startup).toBeNull();
+  });
+
+  it("reads settle and cleanup as booleans", () => {
+    expect(actionSchedule({ ...base, runOnSettle: true, runOnCleanup: true })).toMatchObject({ settle: true, cleanup: true });
+    expect(actionSchedule({ ...base, runOnSettle: false, runOnCleanup: false })).toMatchObject({ settle: false, cleanup: false });
+  });
+
+  it("opens the detected URL when preview is on without one, and the configured URL otherwise", () => {
+    expect(actionSchedule({ ...base, openPreview: true }).preview).toEqual({ url: null });
+    expect(actionSchedule({ ...base, openPreview: "http://localhost:3000/x" }).preview).toEqual({ url: "http://localhost:3000/x" });
+  });
+});
+
+describe("loopback preview URL", () => {
+  const parse = (value: unknown) => WorkspaceEnvironmentLoopbackUrlSchema().safeParse(value);
+  const origin = "http://localhost:3000/";
+
+  it.each([
+    "http://localhost:5173/app?x=1#top",
+    "https://localhost",
+    "http://127.0.0.1:8080",
+    "http://[::1]:3000/",
+    "http://0.0.0.0:3000/",
+    "HTTP://LOCALHOST:3000/",
+  ])("accepts %s", (url) => {
+    expect(parse(url).success).toBe(true);
+  });
+
+  it("stores the trimmed URL", () => {
+    expect(parse("  http://localhost:3000/  ").data).toBe("http://localhost:3000/");
+  });
+
+  it.each([
+    "https://example.com/",
+    "http://localhost.evil.com/",
+    "http://localhost@evil.com/",
+    "http://127.0.0.1.nip.io/",
+    "http://192.168.1.5:3000/",
+    "ftp://localhost/",
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+    "localhost:3000",
+    "not a url",
+    "",
+    "   ",
+    123,
+    false,
+  ])("rejects %j", (value) => {
+    expect(parse(value).success).toBe(false);
+  });
+
+  it("accepts exactly 2048 characters and rejects 2049", () => {
+    const atLimit = origin + "a".repeat(2_048 - origin.length);
+    expect(parse(atLimit).success).toBe(true);
+    expect(parse(`${atLimit}a`).success).toBe(false);
+  });
+
+  it("reports a bad host on the openPreview field with the copy the editor shows", () => {
+    const parsed = WorkspaceEnvironmentDocumentSchema().safeParse({
+      version: "0.1.0",
+      actions: [{ id: "run", name: "Run", command: validCommand, openPreview: "https://example.com/" }],
+    });
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(workspaceEnvironmentValidationIssues(parsed.error)).toEqual([
+      { path: ["actions", 0, "openPreview"], code: "CUSTOM", reason: "invalid_value", message: "Use a localhost URL" },
+    ]);
+  });
+
+  it("rejects openPreview false and waitForExit true so neither is ever stored", () => {
+    for (const metadata of [{ openPreview: false }, { waitForExit: true }]) {
+      const parsed = WorkspaceEnvironmentDocumentSchema().safeParse({
+        version: "0.1.0", actions: [{ id: "run", name: "Run", command: validCommand, ...metadata }],
+      });
+      expect(parsed.success).toBe(false);
+    }
+  });
+});
+
+describe("workspace.environment.action.updated push", () => {
+  const run = {
+    threadId: "thread-1", workspaceId: "workspace-1", actionId: "web", runId: "run-1", revision: 1,
+    terminalSessionId: "terminal-1", trigger: "manual", port: null, actionName: "Web", status: "running",
+    snapshot: { platform: "windows", script: "bun run dev", checkoutPath: "C:\\repo", terminal: null, environmentNames: [] },
+    createdAt: "2026-10-20T12:00:00.000Z", startedAt: "2026-10-20T12:00:00.000Z", finishedAt: null, exitCode: null,
+  };
+  const envelope = { threadId: "thread-1", actionId: "web", runId: "run-1", run };
+  const channel = WS_CHANNELS["workspace.environment.action.updated"];
+
+  it("accepts an update with and without the one-time preview instruction", () => {
+    expect(channel.safeParse(envelope).success).toBe(true);
+    expect(channel.safeParse({ ...envelope, openPreview: { url: "http://localhost:5173/" } }).data?.openPreview).toEqual({ url: "http://localhost:5173/" });
+  });
+
+  it("refuses a preview instruction that points off the loopback hosts", () => {
+    expect(channel.safeParse({ ...envelope, openPreview: { url: "https://example.com/" } }).success).toBe(false);
+    expect(channel.safeParse({ ...envelope, openPreview: { url: "http://localhost:5173/", extra: 1 } }).success).toBe(false);
+  });
+
+  it("keeps the preview instruction out of the retained run", () => {
+    expect(WorkspaceEnvironmentActionRunSchema().safeParse({ ...run, openPreview: { url: "http://localhost:5173/" } }).success).toBe(false);
   });
 });
 
@@ -277,6 +478,8 @@ describe("workspace environment contracts", () => {
     });
     expect(ninth.success).toBe(false);
     if (ninth.success) throw new Error("Expected the startup limit");
-    expect(workspaceEnvironmentValidationIssues(ninth.error).map((issue) => issue.reason)).toEqual(["too_many_startup_actions"]);
+    expect(workspaceEnvironmentValidationIssues(ninth.error)).toEqual([expect.objectContaining({
+      reason: "too_many_startup_actions", message: "At most 8 actions can run on startup.",
+    })]);
   });
 });

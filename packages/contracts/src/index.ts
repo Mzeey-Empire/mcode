@@ -89,6 +89,9 @@ export {
   WorkspaceEnvironmentActionIdSchema,
   WorkspaceEnvironmentActionIconIdSchema,
   WorkspaceEnvironmentDocumentSchema,
+  WorkspaceEnvironmentLoopbackUrlSchema,
+  actionSchedule,
+  terminalCapMessage,
   encodeEnvironmentDocument,
   DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT,
   WorkspaceEnvironmentReadResultSchema,
@@ -101,6 +104,8 @@ export {
   workspaceEnvironmentValidationIssues,
 } from "./models/workspace-environment.js";
 export type {
+  ActionSchedule,
+  StartupGate,
   WorkspaceEnvironmentValidationReason,
   WorkspaceEnvironmentValidationIssue,
   WorkspaceEnvironmentCommand,

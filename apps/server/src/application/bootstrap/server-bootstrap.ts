@@ -132,6 +132,7 @@ import { BackgroundToolSettlementEffect } from "../../features/agents/turns/back
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
 import { PlanService, type PlanImplementRuntime } from "../../features/agents/planning/plan-service.js";
 import { PlanImplementStartupObserver } from "../../features/agents/planning/plan-implement-startup-observer.js";
+import { SettleActionObserver } from "../../features/projects/environment/settle-action-observer.js";
 import { AGENT_TURN_COMMAND_PORT } from "../../features/agents/orchestration/agent-turn-command-port.js";
 import { ThreadControlMutationReservationService } from "../../features/thread-control/authority/thread-control-mutation-reservation-service.js";
 import { ScopedPreGrantService } from "../../features/agents/permissions/scoped-pre-grant.js";
@@ -500,6 +501,14 @@ const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, pl
   git: gitWorktrees,
 });
 const planImplementStartupObserver = new PlanImplementStartupObserver(planService, threadStartupService);
+const settleActionObserver = new SettleActionObserver({
+  subscribe: subscribeCommittedCanonicalEvents,
+  threads: threadRepo,
+  runningThreadIds: () => agentService.runtimeAccess().activeThreadIds(),
+  isWaiting: (threadId) => threadAttentionService.get(threadId)?.waiting != null,
+  environment: workspaceEnvironmentService,
+  actions: projectActionService,
+});
 const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undefined, {
   streamAssistant: (threadId) => agentReliability.streamAssistantText(threadId),
 });
@@ -1036,6 +1045,7 @@ async function bootstrapServer(): Promise<void> {
     await planTurnService.recoverNativeQuestions();
     await planService.recoverInterrupted();
     planImplementStartupObserver.start();
+    settleActionObserver.start();
     await turnResumeScheduler.start();
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();
@@ -1128,6 +1138,7 @@ async function shutdown(): Promise<void> {
 
   // 6. Contain Project command sessions before their Terminal dependency shuts down.
   shutdownCoordinator.setPhase("shutdown Project commands");
+  await captureCleanupFailure(() => settleActionObserver.stop());
   await captureCleanupFailure(() => projectActionService.dispose());
   await captureCleanupFailure(() => workspaceEnvironmentService.dispose());
 

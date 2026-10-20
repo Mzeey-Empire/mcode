@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ActionPortDetector } from "../action-port-detector.js";
+import { ActionPortDetector, candidateFromConfiguredUrl } from "../action-port-detector.js";
 
 describe("ActionPortDetector", () => {
   it("normalizes wildcard URLs and deduplicates by printed host and port", () => {
@@ -50,5 +50,18 @@ describe("ActionPortDetector", () => {
     detector.write(Buffer.from("http://localhost:3000/\n"));
     detector.confirm();
     expect(detector.write(Buffer.from("http://localhost:4000/\n"))).toEqual([]);
+  });
+});
+describe("candidateFromConfiguredUrl", () => {
+  it("fills the scheme default port and keeps the URL the action configured", () => {
+    expect(candidateFromConfiguredUrl("http://localhost/app")).toEqual({ host: "localhost", port: 80, url: "http://localhost/app" });
+    expect(candidateFromConfiguredUrl("https://127.0.0.1")).toEqual({ host: "127.0.0.1", port: 443, url: "https://127.0.0.1/" });
+    expect(candidateFromConfiguredUrl("http://[::1]:5173/")).toEqual({ host: "::1", port: 5173, url: "http://[::1]:5173/" });
+  });
+
+  it("refuses non-loopback hosts and non-http schemes", () => {
+    expect(candidateFromConfiguredUrl("http://192.168.1.4:3000/")).toBeNull();
+    expect(candidateFromConfiguredUrl("ftp://localhost:21/")).toBeNull();
+    expect(candidateFromConfiguredUrl("not a url")).toBeNull();
   });
 });
