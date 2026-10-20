@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { SelectedTextComment } from "@mcode/contracts";
+import { AnnotationMarker } from "@/components/ui/annotation-marker";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
@@ -200,10 +201,14 @@ export function SelectedTextCommentMarkers({
                 key={marker.commentId}
                 data-testid="selected-text-comment-pending-marker"
                 aria-hidden="true"
-                className="absolute flex size-8 items-center justify-center rounded-full bg-primary/80 text-xs font-semibold leading-none text-primary-ink shadow-floating ring-1 ring-background/80 tabular-nums"
+                className="absolute flex size-8"
                 style={{ top: marker.top, left: marker.left }}
               >
-                {marker.displayNumber}
+                <AnnotationMarker
+                  displayNumber={marker.displayNumber}
+                  className="size-8 text-primary/80"
+                  numberClassName="text-xs text-primary-ink"
+                />
               </span>
             );
           }
@@ -216,7 +221,7 @@ export function SelectedTextCommentMarkers({
               data-testid="selected-text-comment-marker"
               data-selected-text-comment-marker-id={marker.commentId}
               aria-label={`Open comment ${marker.displayNumber}`}
-              className="pointer-events-auto absolute flex size-8 items-center justify-center rounded-full bg-primary/80 p-0 text-primary-ink shadow-floating ring-1 ring-background/80 hover:bg-primary focus-visible:bg-primary"
+              className="group/marker pointer-events-auto absolute flex size-8 rounded-full p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent active:inset-ring-0"
               style={{ top: marker.top, left: marker.left }}
               onMouseEnter={() => setHoveredCommentId(marker.commentId)}
               onMouseLeave={() => setHoveredCommentId((current) => current === marker.commentId ? null : current)}
@@ -224,7 +229,11 @@ export function SelectedTextCommentMarkers({
               onBlur={() => setFocusedCommentId((current) => current === marker.commentId ? null : current)}
               onClick={() => onOpenComment(comment)}
             >
-              <span className="text-xs font-semibold leading-none tabular-nums">{marker.displayNumber}</span>
+              <AnnotationMarker
+                displayNumber={marker.displayNumber}
+                className="size-8 text-primary/80 group-hover/marker:text-primary group-focus-visible/marker:text-primary"
+                numberClassName="text-xs text-primary-ink"
+              />
             </Button>
           );
         })}

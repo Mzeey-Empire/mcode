@@ -9,6 +9,7 @@ import {
   getAttachmentTransportUrlSnapshot,
   subscribeToAttachmentTransportUrl,
 } from "@/lib/attachment-url";
+import { AnnotationMarker } from "@/components/ui/annotation-marker";
 import { cn } from "@/lib/utils";
 import { readSentNotes, type SentNotesModel, type SentNotesPage } from "./sentBrowserNotes";
 
@@ -22,7 +23,6 @@ export interface SentBrowserNotesTileProps {
   readonly variant?: "bubble" | "row";
 }
 
-const MARKER_CLASS = "flex size-[18px] shrink-0 items-center justify-center rounded-full bg-primary text-caption font-bold tabular-nums text-primary-ink";
 const EDGE_CLASS = "absolute inset-0 rounded-md border bg-background";
 
 function Thumbnail({ src, stacked }: { readonly src: string | null; readonly stacked: boolean }) {
@@ -47,7 +47,7 @@ function Thumbnail({ src, stacked }: { readonly src: string | null; readonly sta
 function NoteRowBody({ number, target, text }: { readonly number: number; readonly target: string; readonly text: string }) {
   return (
     <>
-      <span className={MARKER_CLASS}>{number}</span>
+      <AnnotationMarker displayNumber={number} className="-my-0.5 size-5 text-primary" numberClassName="text-caption text-primary-ink" />
       <span className="flex min-w-0 grow basis-0 flex-col">
         <span className="text-fade font-code text-caption text-muted">{target}</span>
         <span className="whitespace-pre-wrap break-words text-body-small text-ink">{text}</span>

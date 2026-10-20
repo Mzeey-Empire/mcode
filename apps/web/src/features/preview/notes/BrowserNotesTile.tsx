@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MousePointer2, X } from "lucide-react";
+import { AnnotationMarker } from "@/components/ui/annotation-marker";
 import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
 import { useDiffStore } from "@/stores/diffStore";
@@ -119,9 +120,11 @@ function NoteRow({
         data-testid="browser-note-row"
         className="flex min-w-0 flex-1 items-start gap-[10px] rounded-lg py-1.5 pl-[10px] pr-1.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       >
-        <span className="flex size-[18px] shrink-0 items-center justify-center rounded-full bg-primary text-caption font-bold tabular-nums text-primary-ink">
-          {note.displayNumber}
-        </span>
+        <AnnotationMarker
+          displayNumber={note.displayNumber}
+          className="-my-0.5 size-5 text-primary"
+          numberClassName="text-caption text-primary-ink"
+        />
         <span className="flex min-w-0 grow basis-0 flex-col">
           <span className="text-fade font-code text-caption text-muted">{target}</span>
           <span className="whitespace-pre-wrap break-words text-body-small text-ink">{note.note}</span>
