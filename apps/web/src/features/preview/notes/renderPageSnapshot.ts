@@ -11,8 +11,8 @@ export interface PageSnapshotMarker {
 const MARKER_SIZE_CSS_PX = 24;
 const MARKER_VIEWBOX = 24;
 const MARKER_STROKE_VIEWBOX = 2;
-// lucide-react does not export raw path data; this is lucide's `message-circle` path (v0.577.0),
-// so the snapshot bubble matches the `AnnotationMarker` drawn in the live page.
+// Copied from lucide-react 0.577.0's MessageCircle to avoid an internal deep import; the snapshot
+// and live marker must use the same geometry.
 const MARKER_BUBBLE_PATH =
   "M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719";
 const OUTLINE_WIDTH_CSS_PX = 2;
