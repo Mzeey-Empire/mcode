@@ -58,12 +58,15 @@ and recovery. No provider writes the handoff.
   the current plan from `<mcodeDir>/threads/<id>/plan.md` when one exists.
   Reasoning, tool output bodies, and attachments are not replayed.
 - **Selection order**: the latest user message, the latest assistant message,
-  the first user message, then newest to oldest until the budget is spent.
-  Selected items keep full text, order, role, and source provider. An item is
-  either selected whole or omitted.
+  the first user message, the plan, then newest to oldest until the budget is
+  spent. Selected items keep full text, order, role, and source provider. An
+  item is either selected whole or omitted. Each tool call is its own item, so
+  one large message cannot crowd out a file edit.
 - **Rendering** wraps each item in a header (`role`, `provider`, `sequence`)
   under a preamble that says the material is history, not new instructions,
-  and lists how many items were omitted with their sequence numbers.
+  and lists the omitted message sequences as compressed ranges. A sequence
+  counts as omitted when any message at that sequence was left out; tool-call
+  items name their parent message and do not count as coverage.
 - **Budget**: `min(HANDOFF_TOKEN_CAP, HANDOFF_BYTE_CAP, window - native - current - reserve)`,
   counting one token per UTF-8 byte. Defaults follow T3 Code: cap 16,000,
   byte cap 64,000, reserve `max(16,000, window / 4)`, a 128,000 window when
