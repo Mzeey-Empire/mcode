@@ -145,7 +145,7 @@ export class BrowserAutomationSessionLease {
     if (options.worktreeIdentity !== undefined) this.configure({ worktreeIdentity: options.worktreeIdentity });
   }
 
-  /** Sets the worktree identity stamped on future credentials; it can be set only once. */
+  /** Sets the worktree identity stamped on future credentials; a later call must repeat the same identity. */
   configure(configuration: BrowserAutomationSessionLeaseConfiguration): void {
     validateConfiguration(configuration);
     if (this.configuration) {
