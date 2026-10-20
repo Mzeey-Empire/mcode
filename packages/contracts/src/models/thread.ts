@@ -94,6 +94,7 @@ export const ThreadSchema = lazySchema(() =>
   default_open_in_app: z.string().nullable(),
   /** ID of the parent thread this was branched from. Null for root threads. */
   parent_thread_id: z.string().nullable(),
+  delegation_coordinator_thread_id: z.string().nullable(),
   /** ID of the message in the parent thread that marks the fork point. */
   forked_from_message_id: z.string().nullable(),
   /** Most recent compaction summary from the AI provider. Used to seed branched thread replays. */

@@ -28,6 +28,12 @@ export const ApprovalFilePatchSchema = lazySchema(() => z.object({
   additions: z.number().int().nonnegative(), deletions: z.number().int().nonnegative(),
   patch: z.string().max(262_144).optional(), patchTruncated: z.boolean().optional(),
 }).strict());
+/** Display facts for a protected task launch before its child thread exists. */
+export const DelegateTaskApprovalSubjectSchema = lazySchema(() => z.object({
+  kind: z.literal("delegate_task"), taskId: z.string().min(1).max(128), title: z.string().min(1).max(256),
+  providerId: z.string().min(1).max(128), modelId: z.string().min(1).max(128),
+  isolation: z.enum(["shared", "worktree"]), commit: z.string().max(64).optional(),
+}).strict());
 /** Complete scope of the operation being authorized. */
 export const ApprovalSubjectSchema = lazySchema(() => z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("command"), command: z.string().min(1).max(65_536),
@@ -37,6 +43,7 @@ export const ApprovalSubjectSchema = lazySchema(() => z.discriminatedUnion("kind
   z.object({ kind: z.literal("tool"), toolName: z.string().min(1).max(200), preview: z.string().max(65_536).optional() }).strict(),
   z.object({ kind: z.literal("thread_operation"), operation: z.enum(["thread_create_batch", "thread_send", "thread_stop"]),
     targetThreadId: z.string(), targetTitle: z.string().max(200).optional(), message: z.string().max(THREAD_SEND_MESSAGE_MAX_LENGTH).optional() }).strict(),
+  DelegateTaskApprovalSubjectSchema(),
   z.object({ kind: z.literal("question"), questions: z.array(ApprovalQuestionSchema()).min(1).max(10) }).strict(),
 ]));
 /** Meaning of an adapter-owned choice, independent of its label. */

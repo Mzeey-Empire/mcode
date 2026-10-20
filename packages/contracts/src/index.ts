@@ -4,6 +4,23 @@ export * from "./models/next-message-draft.js";
 export * from "./models/turn-steer.js";
 export * from "./models/task-list-tools.js";
 export {
+  DelegateTaskInputSchema,
+  DelegateTaskResultSchema,
+  TaskStateSchema,
+  TaskStatusInputSchema,
+  TaskStatusResultSchema,
+  TaskCancelInputSchema,
+  TaskCancelResultSchema,
+  type DelegateTaskInput,
+  type DelegateTaskResult,
+  type TaskState,
+  type TaskStatusInput,
+  type TaskStatusResult,
+  type TaskCancelInput,
+  type TaskCancelResult,
+} from "./thread-control.js";
+
+export {
   ThreadStatusSchema,
   ThreadModeSchema,
   MessageRoleSchema,
@@ -965,6 +982,7 @@ export {
   ApprovalRequestBodySchema,
   ApprovalOutcomeSchema,
   ApprovalSubjectSchema,
+  DelegateTaskApprovalSubjectSchema,
   ApprovalResponseSchema,
   ApprovalRespondResultSchema,
   ApprovalQuestionOptionSchema,

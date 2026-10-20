@@ -129,6 +129,62 @@ export type WorktreeListResult = z.infer<ReturnType<typeof WorktreeListResultSch
 const executionId = z.string().trim().min(1).max(THREAD_CREATE_EXECUTION_ID_MAX_LENGTH);
 const gitRef = z.string().trim().min(1).max(THREAD_CREATE_GIT_REF_MAX_LENGTH);
 
+/** Live state of the delegated task's original turn, which may be resumed. */
+export const TaskStateSchema = lazySchema(() => z.discriminatedUnion("status", [
+  z.object({ status: z.literal("working"), phase: z.enum(["preparing", "running"]) }).strict(),
+  z.object({ status: z.literal("waiting"), reason: z.enum(["approval", "needs_input", "setup_blocked"]) }).strict(),
+  z.object({ status: z.literal("finished"), outcome: z.enum(["completed", "failed", "cancelled", "interrupted", "denied"]),
+    summary: z.string().max(8_000).optional(), error: z.string().max(8_000).optional() }).strict(),
+]));
+/** Current delegated-task state, derived from authoritative lifecycle records. */
+export type TaskState = z.infer<ReturnType<typeof TaskStateSchema>>;
+
+/** Launch one task on the Coordinator's Project with an explicit execution target. */
+export const DelegateTaskInputSchema = lazySchema(() => z.object({
+  clientRequestId: opaqueId,
+  title: z.string().trim().min(1).max(THREAD_CREATE_TITLE_MAX_LENGTH),
+  prompt: z.string().min(1).max(THREAD_CREATE_PROMPT_MAX_LENGTH),
+  providerId: executionId,
+  modelId: executionId,
+  isolation: z.enum(["shared", "worktree"]),
+  permissionMode: PermissionModeSchema.optional(),
+}).strict());
+/** Parsed task delegation request. */
+export type DelegateTaskInput = z.infer<ReturnType<typeof DelegateTaskInputSchema>>;
+
+const taskRejection = lazySchema(() => z.object({ status: z.literal("rejected"), error: ThreadControlErrorSchema() }).strict());
+
+/** Durable receipt returned immediately after delegation admission. */
+export const DelegateTaskResultSchema = lazySchema(() => z.union([
+  z.object({ taskId: opaqueId, threadId: opaqueId.optional(), state: TaskStateSchema(), effectivePermissionMode: PermissionModeSchema }).strict(),
+  taskRejection(),
+]));
+/** Delegation receipt or authority-safe rejection. */
+export type DelegateTaskResult = z.infer<ReturnType<typeof DelegateTaskResultSchema>>;
+
+/** Identify a task belonging to the active Coordinator. */
+export const TaskStatusInputSchema = lazySchema(() => z.object({ taskId: opaqueId }).strict());
+/** Task status request. */
+export type TaskStatusInput = z.infer<ReturnType<typeof TaskStatusInputSchema>>;
+/** Current state of the original task turn, independent of later thread turns. */
+export const TaskStatusResultSchema = lazySchema(() => z.union([
+  z.object({ taskId: opaqueId, threadId: opaqueId.optional(), state: TaskStateSchema() }).strict(),
+  taskRejection(),
+]));
+/** Task status or a non-enumerating rejection. */
+export type TaskStatusResult = z.infer<ReturnType<typeof TaskStatusResultSchema>>;
+/** Identify the task to cancel within the Coordinator's scope. */
+export const TaskCancelInputSchema = lazySchema(() => z.object({ taskId: opaqueId }).strict());
+/** Task cancellation request. */
+export type TaskCancelInput = z.infer<ReturnType<typeof TaskCancelInputSchema>>;
+/** Cancellation result, including a supervised stop approval when needed. */
+export const TaskCancelResultSchema = lazySchema(() => z.union([
+  z.object({ taskId: opaqueId, state: TaskStateSchema(), stopApprovalId: opaqueId.optional() }).strict(),
+  taskRejection(),
+]));
+/** Task cancellation receipt or rejection. */
+export type TaskCancelResult = z.infer<ReturnType<typeof TaskCancelResultSchema>>;
+
 /** Input accepted by the read-only thread_target_list tool. */
 export const ThreadTargetListInputSchema = lazySchema(() => z.object({}).strict());
 /** Read-only thread target discovery input. */
