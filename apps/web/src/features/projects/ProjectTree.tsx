@@ -2251,14 +2251,14 @@ const PR_CHECKS_WORD: Record<"passing" | "pending" | "failing", string> = {
   failing: "Failing",
 };
 
-/** The PR word shown after the number: Merged wins over checks, which a merged PR no longer runs. */
+/** The checks word shown after the number. A merged PR shows none: its violet number already says merged. */
 function threadPrStateWord(prStatus: string | null, checks: ChecksStatus | undefined): string | null {
-  if (prStatus?.toLowerCase() === "merged") return "Merged";
+  if (prStatus?.toLowerCase() === "merged") return null;
   if (!checks || checks.aggregate === "no_checks") return null;
   return PR_CHECKS_WORD[checks.aggregate];
 }
 
-/** The PR context line: number tinted by PR state, then its merge or checks word. */
+/** The PR context line: number tinted by PR state, then its checks word when it has one. */
 function ThreadPrLine({
   threadId,
   prNumber,
@@ -2274,17 +2274,17 @@ function ThreadPrLine({
 }) {
   const { Icon: PrIcon, color: prColor } = getPrVisual(prStatus);
   const word = threadPrStateWord(prStatus, checks);
-  const wordColor = checks && word !== "Merged" && checks.aggregate !== "no_checks" ? getCiVisual(checks.aggregate).color : "text-muted";
+  const wordColor = checks && checks.aggregate !== "no_checks" ? getCiVisual(checks.aggregate).color : "text-muted";
   return (
     <div
-      aria-label={`PR #${prNumber}, ${prStatus ?? "open"}${word && word !== "Merged" ? `, checks ${word.toLowerCase()}` : ""}`}
+      aria-label={`PR #${prNumber}, ${prStatus ?? "open"}${word ? `, checks ${word.toLowerCase()}` : ""}`}
       data-testid={`thread-pr-indicator-${threadId}`}
-      className={cn("flex h-4 min-w-0 items-center gap-1.5 text-caption text-muted", dimmed && "grayscale opacity-45")}
+      className={cn("flex h-5 min-w-0 items-center gap-1 text-caption text-muted", dimmed && "grayscale opacity-45")}
     >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-        <PrIcon size={12} aria-hidden className={prColor} />
+      <span className="flex size-5 shrink-0 items-center justify-center">
+        <PrIcon size={16} aria-hidden className={prColor} />
       </span>
-      <span className={cn("shrink-0 underline underline-offset-2", prColor)}>PR #{prNumber}</span>
+      <span className={cn("shrink-0 font-medium underline underline-offset-2", prColor)}>PR #{prNumber}</span>
       {word ? (
         <>
           <span aria-hidden className="text-muted/45">·</span>

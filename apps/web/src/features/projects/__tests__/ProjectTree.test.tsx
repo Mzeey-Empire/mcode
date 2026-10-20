@@ -1841,11 +1841,20 @@ describe("ProjectTree PR-ability gating by mode", () => {
     expect(row).toContainElement(indicator);
   });
 
-  it("renders the merged PR visual for a worktree thread", () => {
+  it("renders a merged PR as a violet number with no state word, even when checks exist", () => {
     renderWithThread(
       makeThread({ mode: "worktree", pr_number: 42, pr_status: "merged" }),
+      {
+        "thread-1": {
+          aggregate: "passing",
+          runs: [{ name: "build", status: "completed", conclusion: "success" }],
+        },
+      },
     );
-    expect(screen.getByLabelText("PR #42, merged")).toHaveTextContent("PR #42·Merged");
+    const indicator = screen.getByLabelText("PR #42, merged");
+    expect(indicator).toHaveTextContent(/^PR #42$/);
+    expect(screen.getByText("PR #42")).toHaveClass("text-pr-merged");
+    expect(screen.queryByTestId("thread-pr-ci-thread-1")).toBeNull();
   });
 
   it.each([

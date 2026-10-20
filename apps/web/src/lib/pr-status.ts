@@ -11,7 +11,7 @@ export interface PrStateVisual {
 export function getPrVisual(state: string | null | undefined): PrStateVisual {
   switch (state?.toLowerCase()) {
     case "merged":
-      return { Icon: GitMerge, color: "text-primary/70" };
+      return { Icon: GitMerge, color: "text-pr-merged" };
     case "closed":
       return { Icon: GitPullRequest, color: "text-destructive/70" };
     default:
