@@ -90,6 +90,7 @@ import { BackgroundToolSettlementEffect } from "../turns/background-tool-settlem
 import { ThreadCreationCoordinator } from "../turns/thread-creation-coordinator.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup-fetch-decisions.js";
+import { CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
 import { ProviderSessionCursorPersistence } from "../turns/provider-session-cursor-persistence.js";
 import { ProviderTurnEventApplication } from "../turns/provider-turn-event-application.js";
 import {
@@ -100,6 +101,9 @@ import { TurnRuntimeController } from "../orchestration/turn-runtime-controller.
 
 /** Register agent orchestration, event, recovery, and planning services. */
 export function registerAgentServices(container: DependencyContainer): void {
+  container.register(CompletedTurnWatermark, {
+    useFactory: instanceCachingFactory((c) => new CompletedTurnWatermark(c.resolve(ThreadProviderSessionRepo))),
+  });
   container.register(WorkerOwnedTurnRuntime, {
     useFactory: instanceCachingFactory((c) => {
       return new WorkerOwnedTurnRuntime(c.resolve(CanonicalAgentWriterClient), c.resolve(AgentEventPublicationRegistry), c.resolve(CanonicalAgentBoundary));
@@ -258,7 +262,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(ParentAssistantTextCheckpointService),
       c.resolve(TurnDiffService),
       c.resolve(SnapshotRefPins),
-      c.resolve(ThreadProviderSessionRepo),
+      c.resolve(CompletedTurnWatermark),
     )),
   });
   container.register<TurnFileEffects>(TURN_FILE_EFFECTS, {

@@ -25,7 +25,7 @@ import { persistTurnSnapshot } from "./persistence/turn-finalization-write-opera
 import { broadcast } from "../../../application/transport/push.js";
 import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import type { ThreadProviderSessionRepo } from "../../thread-control/persistence/thread-provider-session-repo.js";
+import type { CompletedTurnWatermark } from "./completed-turn-watermark.js";
 import type { TurnSnapshotRepo } from "./persistence/turn-snapshot-repo.js";
 import type { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
@@ -102,7 +102,7 @@ export class TurnFinalizer {
     private readonly parentAssistantTextCheckpoints?: ParentAssistantTextCheckpointService,
     private readonly turnDiffs?: TurnDiffService,
     private readonly pins?: TurnBaselinePins,
-    private readonly providerSessions?: Pick<ThreadProviderSessionRepo, "markSeen">,
+    private readonly completedTurns?: CompletedTurnWatermark,
   ) {}
 
   /** Append a streaming assistant-text delta for the current turn. */
@@ -308,6 +308,9 @@ export class TurnFinalizer {
       return;
     }
     await this.persistCompatibilityFinalize(threadId, executionId, outcome, turnRef, materialized, settleDiff);
+    // No canonical turn names its provider here, so the thread's provider stands in for it.
+    const provider = this.threadRepo.findById(threadId)?.provider;
+    if (provider) await this.recordCoverage(threadId, provider, outcome, materialized.id);
   }
 
   private async discardUnmaterializedTurn(threadId: string, turnRef: TurnRef | undefined, outcome: TurnOutcome, executionId: string | undefined): Promise<void> {
@@ -398,8 +401,6 @@ export class TurnFinalizer {
     if (verifiedTerminal?.terminalOutcome !== outcome) {
       throw new Error(`Canonical terminal outcome was not verified: ${executionId}`);
     }
-    if (outcome === "completed") await this.markProviderSessionSeen(threadId, canonical.thread.providerId);
-
     const materialized = this.recoverCanonicalProjection(canonical.sink, turnId, projection, commitResult);
     if (!materialized) {
       await this.discardCanonicalProjection(threadId, executionId, turnRef);
@@ -409,15 +410,18 @@ export class TurnFinalizer {
     await this.completeCanonicalFinalize(
       threadId, executionId, turnId, outcome, turnRef, projection, materialized, !projection.materialized, settleDiff,
     );
+    await this.recordCoverage(threadId, canonical.thread.providerId, outcome, materialized.id);
   }
 
   /**
-   * A completed turn means the provider's session saw every message up to the assistant reply. The
-   * turn's own provider is marked, not the thread's current one, so a switch queued behind this turn
-   * cannot credit the wrong session.
+   * A completed turn means the provider's session saw every message up to its own assistant reply. The
+   * mark is bound to that reply, not the thread's newest message, so a replayed finalize cannot credit
+   * messages another provider added since. This runs after the turn's other effects.
    */
-  private async markProviderSessionSeen(threadId: string, providerId: string): Promise<void> {
-    await this.providerSessions?.markSeen(threadId, providerId, this.messageRepo.getLatestSequenceIncludingInternal(threadId));
+  private async recordCoverage(threadId: string, providerId: string, outcome: TurnOutcome, assistantMessageId: string): Promise<void> {
+    if (outcome !== "completed") return;
+    const reply = this.messageRepo.listIncludingInternal(threadId).find((message) => message.id === assistantMessageId);
+    await this.completedTurns?.record({ threadId, providerId, outcome, sequence: reply?.sequence ?? null });
   }
 
   private requireCanonicalThread(threadId: string, executionId: string) {

@@ -229,8 +229,8 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   /** Clear a stale provider cursor before the runtime retries with a fresh session. */
-  async clearSessionCursorForRetry(threadId: string): Promise<void> {
-    await this.sessionCursors.clearForRetry(threadId);
+  async clearSessionCursorForRetry(providerId: ProviderId, threadId: string): Promise<void> {
+    await this.sessionCursors.clearForRetry(providerId, threadId);
   }
 
   /** Finish the parent text checkpoint before an explicit user stop finalizes it. */

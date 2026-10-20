@@ -19,6 +19,7 @@ const booleanOutput = z.boolean();
 const nullableThread = thread.nullable();
 const booleanById = (name: string) => databaseWriteOperation(name, idInput, booleanOutput);
 const booleanByPair = (name: string) => databaseWriteOperation(name, pairInput, booleanOutput);
+const tripleInput = z.tuple([z.string(), z.string(), z.string()]);
 const threadByPair = (name: string) => databaseWriteOperation(name, pairInput, nullableThread);
 
 /** Allowlisted complete thread lifecycle operations on the shared writer. */
@@ -47,8 +48,8 @@ export const threadWriteOperations = {
   hardDelete: databaseWriteOperation("thread.hardDelete", z.tuple([z.string(), z.object({ preserveActiveDescendants: z.boolean().optional() }).optional()]), z.boolean()),
   updateProvider: booleanByPair("thread.updateProvider"),
   updateModel: booleanByPair("thread.updateModel"),
-  updateSdkSessionId: booleanByPair("thread.updateSdkSessionId"),
-  clearSdkSessionId: booleanById("thread.clearSdkSessionId"),
+  updateSdkSessionId: databaseWriteOperation("thread.updateSdkSessionId", tripleInput, booleanOutput),
+  clearSdkSessionId: booleanByPair("thread.clearSdkSessionId"),
   updatePr: databaseWriteOperation("thread.updatePr", z.tuple([z.string(), z.number(), z.string()]), z.boolean()),
   updateContextUsage: databaseWriteOperation("thread.updateContextUsage", z.tuple([z.string(), z.number(), z.number().optional()]), z.boolean()),
   updateSettings: databaseWriteOperation("thread.updateSettings", z.tuple([z.string(), settings]), z.boolean()),

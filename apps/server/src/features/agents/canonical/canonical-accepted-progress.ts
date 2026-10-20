@@ -1140,7 +1140,8 @@ function acceptedTerminalPersistence(operation: ExecutionSemanticOperation, mess
   const mutation = operation.mutation;
   if (mutation.kind !== "finish-live-event") return undefined;
   const fileEvidence = mutation.input.fileEvidence;
-  return { messageId: message?.id ?? null, settledMessage: message ? { id: message.id, sequence: message.sequence } : null,
+  return { providerId: mutation.input.providerId, messageSequence: message?.sequence ?? null,
+    messageId: message?.id ?? null, settledMessage: message ? { id: message.id, sequence: message.sequence } : null,
     outcome: mutation.outcome, toolCallCount: mutation.projection.narrative.filter((item) => item.kind === "toolCall").length,
     filesChanged: [...fileEvidence?.filesChanged ?? []], ...(fileEvidence ? { fileEffects: fileEvidence.fileEffects } : {}) };
 }

@@ -13,6 +13,7 @@ import { NarrativeStore } from "../../conversation/narrative/narrative-store.js"
 import { TurnFinalizer, type TurnBaselinePins } from "../turn-finalizer.js";
 import { deriveTurnAssistantMessageId } from "../turn-assistant-message-id.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { CompletedTurnWatermark } from "../completed-turn-watermark.js";
 import { ThreadProviderSessionRepo } from "../../../thread-control/persistence/thread-provider-session-repo.js";
 import type { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import { TurnSnapshotRepo } from "../persistence/turn-snapshot-repo.js";
@@ -368,8 +369,13 @@ describe("TurnFinalizer canonical commit recovery", () => {
   const executionId = "00000000-0000-4000-8000-000000000010";
   const turnId = "canonical-turn-1";
 
-  async function buildCanonicalHarness(toolCallCount = 1) {
+  /**
+   * The thread belongs to codex while the turn runs as claude, the shape of a provider switch, so a
+   * finalize that credits the thread's provider instead of the turn's lands on the wrong row.
+   */
+  async function buildCanonicalHarness(toolCallCount = 1, threadProvider = "codex") {
     const db = openFinalizerDatabase();
+    fixtureDatabase(db).prepare("UPDATE threads SET provider = ? WHERE id = ?").run(threadProvider, THREAD);
     const messageRepo = new MessageRepo(db, writerFor(db));
     const threadRepo = new ThreadRepo(db, writerFor(db));
     const toolRepo = new ToolCallRecordRepo(db, writerFor(db));
@@ -409,7 +415,7 @@ describe("TurnFinalizer canonical commit recovery", () => {
       checkpoints,
       undefined,
       undefined,
-      providerSessions,
+      new CompletedTurnWatermark(providerSessions),
     );
     finalizer.bufferAssistantBody(THREAD, "answer", "claude-sonnet-4-6");
     narrativeStore.beginTurn(THREAD);
@@ -558,7 +564,7 @@ describe("TurnFinalizer canonical commit recovery", () => {
     `).get()).toEqual({ count: 2 });
   });
 
-  it("advances only the turn's provider session watermark to the reply it just produced", async () => {
+  it("advances the turn's own provider session to the reply it produced, not the thread's provider", async () => {
     const { finalizer, providerSessions } = await buildCanonicalHarness();
     await providerSessions.upsert({ threadId: THREAD, providerId: "claude", sessionId: "claude-native", lastSeenSequence: 0 });
     await providerSessions.upsert({ threadId: THREAD, providerId: "codex", sessionId: "codex-native", lastSeenSequence: 0 });
@@ -568,6 +574,28 @@ describe("TurnFinalizer canonical commit recovery", () => {
     // The user prompt is sequence 1 and the assistant reply is sequence 2.
     expect(providerSessions.find(THREAD, "claude")?.lastSeenSequence).toBe(2);
     expect(providerSessions.find(THREAD, "codex")?.lastSeenSequence).toBe(0);
+  });
+
+  it("does not credit messages another provider added when a finalize is replayed", async () => {
+    const { db, finalizer, providerSessions } = await buildCanonicalHarness();
+    await providerSessions.upsert({ threadId: THREAD, providerId: "claude", sessionId: "claude-native", lastSeenSequence: 0 });
+    await finalizer.finalize(THREAD, "completed", Promise.resolve(), executionId);
+    await insertMessage(db, "other-user", "user", "asked codex", 3);
+    await insertMessage(db, "other-assistant", "assistant", "codex answered", 4);
+
+    await finalizer.finalize(THREAD, "completed", Promise.resolve(), executionId);
+
+    expect(providerSessions.find(THREAD, "claude")?.lastSeenSequence).toBe(2);
+  });
+
+  it("advances the session on the compatibility path, which has no canonical turn", async () => {
+    const { db, finalizer, providerSessions } = await buildCanonicalHarness(1, "claude");
+    await providerSessions.upsert({ threadId: THREAD, providerId: "claude", sessionId: "claude-native", lastSeenSequence: 0 });
+    fixtureDatabase(db).prepare("UPDATE threads SET sdk_session_id = 'claude-native' WHERE id = ?").run(THREAD);
+
+    await finalizer.finalize(THREAD, "completed");
+
+    expect(providerSessions.find(THREAD, "claude")?.lastSeenSequence).toBe(2);
   });
 
   it("leaves the watermark alone when the turn did not complete", async () => {

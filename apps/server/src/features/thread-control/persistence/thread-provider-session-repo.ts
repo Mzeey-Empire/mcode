@@ -2,9 +2,9 @@ import { inject, injectable } from "tsyringe";
 import type { Database } from "bun:sqlite";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ThreadProviderSessionStore } from "./thread-provider-session-store.js";
-import type { ThreadProviderSession, UpsertThreadProviderSessionInput } from "./thread-provider-session-store.js";
+import type { ResolvedProviderSession, ThreadProviderSession, UpsertThreadProviderSessionInput } from "./thread-provider-session-store.js";
 import { threadProviderSessionWriteOperations } from "./thread-provider-session-write-operations.js";
-export type { ThreadProviderSession, UpsertThreadProviderSessionInput } from "./thread-provider-session-store.js";
+export type { ResolvedProviderSession, ThreadProviderSession, UpsertThreadProviderSessionInput } from "./thread-provider-session-store.js";
 
 /**
  * Which native session each provider holds on a thread, and how far into the thread it has seen.
@@ -23,6 +23,14 @@ export class ThreadProviderSessionRepo {
     return this.reader.find(threadId, providerId);
   }
 
+  /**
+   * Resolve the session the provider would resume on the thread, with the sequence it has seen through.
+   * The thread's current provider always resolves to `threads.sdk_session_id`; see the store for why.
+   */
+  resolve(threadId: string, providerId: string): ResolvedProviderSession | null {
+    return this.reader.resolve(threadId, providerId);
+  }
+
   /** Return every provider session on the thread. */
   listForThread(threadId: string): ThreadProviderSession[] {
     return this.reader.listForThread(threadId);
@@ -33,9 +41,12 @@ export class ThreadProviderSessionRepo {
     return this.writer.execute(threadProviderSessionWriteOperations.upsert, [input]);
   }
 
-  /** Advance the provider's watermark after a turn it ran. No-op when the provider has no row. */
-  markSeen(threadId: string, providerId: string, lastSeenSequence: number): Promise<void> {
-    return this.writer.execute(threadProviderSessionWriteOperations.markSeen, [threadId, providerId, lastSeenSequence]);
+  /**
+   * Advance the watermark of the session a finished turn ran on, to that turn's own last message
+   * sequence. No-op when the provider's row names another session.
+   */
+  markSeen(threadId: string, providerId: string, sessionId: string, lastSeenSequence: number): Promise<void> {
+    return this.writer.execute(threadProviderSessionWriteOperations.markSeen, [threadId, providerId, sessionId, lastSeenSequence]);
   }
 
   /** Forget the provider's session on the thread. Other providers' sessions stay. */

@@ -118,12 +118,12 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.updateModel, [id, model]);
   }
 
-  updateSdkSessionId(id: Parameters<ThreadStore["updateSdkSessionId"]>[0], sdkSessionId: Parameters<ThreadStore["updateSdkSessionId"]>[1]): Promise<ReturnType<ThreadStore["updateSdkSessionId"]>> {
-    return this.writer.execute(threadWriteOperations.updateSdkSessionId, [id, sdkSessionId]);
+  updateSdkSessionId(id: Parameters<ThreadStore["updateSdkSessionId"]>[0], providerId: Parameters<ThreadStore["updateSdkSessionId"]>[1], sdkSessionId: Parameters<ThreadStore["updateSdkSessionId"]>[2]): Promise<ReturnType<ThreadStore["updateSdkSessionId"]>> {
+    return this.writer.execute(threadWriteOperations.updateSdkSessionId, [id, providerId, sdkSessionId]);
   }
 
-  clearSdkSessionId(id: Parameters<ThreadStore["clearSdkSessionId"]>[0]): Promise<ReturnType<ThreadStore["clearSdkSessionId"]>> {
-    return this.writer.execute(threadWriteOperations.clearSdkSessionId, [id]);
+  clearSdkSessionId(id: Parameters<ThreadStore["clearSdkSessionId"]>[0], providerId: Parameters<ThreadStore["clearSdkSessionId"]>[1]): Promise<ReturnType<ThreadStore["clearSdkSessionId"]>> {
+    return this.writer.execute(threadWriteOperations.clearSdkSessionId, [id, providerId]);
   }
 
   updatePr(id: Parameters<ThreadStore["updatePr"]>[0], prNumber: Parameters<ThreadStore["updatePr"]>[1], prStatus: Parameters<ThreadStore["updatePr"]>[2]): Promise<ReturnType<ThreadStore["updatePr"]>> {

@@ -9,7 +9,7 @@
 import type { Database } from "bun:sqlite";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { threadProviderSessions } from "../../../runtime/persistence/sqlite/schema.js";
+import { threadProviderSessions, threads } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 
 /** One provider's native session for a thread and the newest message sequence it has seen. */
@@ -25,6 +25,12 @@ export interface ThreadProviderSession {
 export interface UpsertThreadProviderSessionInput {
   threadId: string;
   providerId: string;
+  sessionId: string;
+  lastSeenSequence: number;
+}
+
+/** The native session a provider would resume on a thread and how much of the thread it has seen. */
+export interface ResolvedProviderSession {
   sessionId: string;
   lastSeenSequence: number;
 }
@@ -80,17 +86,42 @@ export class ThreadProviderSessionStore {
   }
 
   /**
-   * Record that the provider's session has seen messages through the sequence. No-op without a row.
+   * Resolve the session the provider would resume on the thread. For the thread's current provider the
+   * legacy `threads.sdk_session_id` wins, because older builds sharing the database rewrite only that
+   * column. Its watermark comes from the row only when the row names the same session; otherwise coverage
+   * is unknown and 0 makes the next send resend. Any other provider resolves to its row. Null when the
+   * provider has no session to resume.
+   */
+  resolve(threadId: string, providerId: string): ResolvedProviderSession | null {
+    const thread = this.orm.select({ provider: threads.provider, sdkSessionId: threads.sdkSessionId }).from(threads)
+      .where(eq(threads.id, threadId))
+      .get();
+    const row = this.find(threadId, providerId);
+    if (thread?.provider !== providerId) return row ? { sessionId: row.sessionId, lastSeenSequence: row.lastSeenSequence } : null;
+    if (!thread.sdkSessionId) return null;
+    return {
+      sessionId: thread.sdkSessionId,
+      lastSeenSequence: row?.sessionId === thread.sdkSessionId ? row.lastSeenSequence : 0,
+    };
+  }
+
+  /**
+   * Record that the provider's session has seen messages through the sequence. No-op without a row, or
+   * when the row names a different session: a mark earned by one session says nothing about another.
    * The mark only moves forward, so a replayed or late finalization cannot make the next switch
    * resend what the session already saw.
    */
-  markSeen(threadId: string, providerId: string, lastSeenSequence: number): void {
+  markSeen(threadId: string, providerId: string, sessionId: string, lastSeenSequence: number): void {
     runChanges(this.orm.update(threadProviderSessions)
       .set({
         lastSeenSequence: sql`max(${threadProviderSessions.lastSeenSequence}, ${lastSeenSequence})`,
         updatedAt: new Date().toISOString(),
       })
-      .where(and(eq(threadProviderSessions.threadId, threadId), eq(threadProviderSessions.providerId, providerId))));
+      .where(and(
+        eq(threadProviderSessions.threadId, threadId),
+        eq(threadProviderSessions.providerId, providerId),
+        eq(threadProviderSessions.sessionId, sessionId),
+      )));
   }
 
   /** Forget the provider's session on the thread. Other providers' sessions stay. */

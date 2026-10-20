@@ -356,7 +356,7 @@ describe("draft image admission", () => {
 describe("session resume across providers", () => {
   async function threadWithSession(threadProvider: ProviderId) {
     const f = await fixture(threadProvider);
-    await f.threads.updateSdkSessionId(f.thread.id, "claude-session");
+    await f.threads.updateSdkSessionId(f.thread.id, threadProvider, "claude-session");
     await f.messages.create(f.thread.id, "user", "Earlier prompt", 1);
     await f.messages.create(f.thread.id, "assistant", "Earlier answer", 2);
     return f;
@@ -380,5 +380,22 @@ describe("session resume across providers", () => {
         { providerId: "claude", scope: "session", value: "claude-session", provenance: "native" },
       ]);
     }
+  });
+
+  it("does not resume the old provider's session after a switch whose new provider failed before reporting one", async () => {
+    const f = await threadWithSession("claude");
+    const switched = await f.send([], { provider: "codex" });
+    if (switched.kind !== "dispatch") throw new Error("Expected admission");
+    const retried = await f.send([], { provider: "codex" });
+    if (retried.kind !== "dispatch") throw new Error("Expected admission");
+    expect(retried.request.resumeFrom).toBeUndefined();
+    expect(retried.parentStartInput.providerIdentities).toEqual([]);
+  });
+
+  it("starts a fresh session when the send forces one, even on the thread's own provider", async () => {
+    const f = await threadWithSession("claude");
+    const result = await f.send([], { forceFreshSession: true });
+    if (result.kind !== "dispatch") throw new Error("Expected admission");
+    expect(result.request.resumeFrom).toBeUndefined();
   });
 });
