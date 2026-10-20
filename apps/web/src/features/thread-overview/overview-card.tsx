@@ -62,7 +62,7 @@ export function OverviewCard({ subject, entries, headerActions, presentation, cl
             {headerActions.map(({ id, Action }) => <Action key={id} subject={subject} />)}
           </div>
           {OVERVIEW_SECTIONS.map((section) => (
-            <div key={section} data-overview-section={section} className="overview-section flex flex-col gap-1">
+            <div key={section} data-overview-section={section} className="overview-section -mx-3 flex flex-col gap-1">
               {entries.filter((entry) => entry.section === section).map(({ id, Entry }) => (
                 <div key={id} data-overview-entry={id} className="contents">
                   <Entry subject={subject} />

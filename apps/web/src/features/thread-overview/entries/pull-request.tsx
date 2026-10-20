@@ -13,6 +13,7 @@ import { ChevronDown, GitPullRequest, Plus } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type MouseEvent } from "react";
 import {
   OVERVIEW_ROW_CLASS,
+  OverviewRowIcon,
   ThreadOverviewTooltipButton,
   ThreadOverviewWhen,
 } from "@/features/thread-overview/overview-row";
@@ -112,7 +113,7 @@ export function getCiStatusRingStyle(checks: ChecksStatus): CSSProperties {
 
 function ThreadOverviewCiStatusCircle({ checks }: { checks: ChecksStatus }) {
   return (
-    <span className="flex size-3.5 shrink-0 items-center justify-center">
+    <span className="flex size-5 shrink-0 items-center justify-center">
       <span
         aria-hidden
         data-testid="thread-overview-ci-status-circle"
@@ -150,11 +151,13 @@ function ThreadOverviewPrActionRow({
             data-testid="workspace-menu-commit"
             className={cn(
               OVERVIEW_ROW_CLASS,
-              "cursor-pointer justify-start text-xs text-ink/75 hover:bg-hover/40 hover:text-ink",
+              "cursor-pointer justify-start text-ink/75 hover:bg-hover/40 hover:text-ink",
             )}
             onClick={onCommit}
           >
-            <GitPullRequest size={14} className="shrink-0 text-muted" />
+            <OverviewRowIcon>
+              <GitPullRequest />
+            </OverviewRowIcon>
             <span className="font-medium">Commit…</span>
           </Button>
         </ThreadOverviewTooltipButton>
@@ -175,12 +178,14 @@ function ThreadOverviewPrActionRow({
           data-testid="workspace-menu-create-pr"
           className={cn(
             OVERVIEW_ROW_CLASS,
-            "cursor-pointer justify-start text-xs text-ink/75 hover:bg-hover/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50",
+            "cursor-pointer justify-start text-ink/75 hover:bg-hover/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50",
           )}
           onClick={onCreatePr}
           disabled={!hasCommitsAhead}
         >
-          <GitPullRequest size={14} className="shrink-0 text-muted" />
+          <OverviewRowIcon>
+            <GitPullRequest />
+          </OverviewRowIcon>
           <span className="font-medium">Create PR</span>
         </Button>
       </ThreadOverviewTooltipButton>
@@ -240,7 +245,7 @@ function ThreadOverviewPrActiveRow({
               event.stopPropagation();
               setChecksOpen((open) => !open);
             }}
-            className="flex h-7 w-full cursor-pointer justify-between gap-3 border-transparent bg-transparent px-2 text-left text-muted hover:bg-hover/40 hover:text-ink dark:hover:bg-hover/40"
+            className="flex h-7 w-full cursor-pointer justify-between gap-3 border-transparent bg-transparent px-3 text-left text-muted hover:bg-hover/40 hover:text-ink dark:hover:bg-hover/40"
           >
             <span className="flex min-w-0 items-center gap-2">
               <ThreadOverviewCiStatusCircle checks={checks} />
@@ -263,9 +268,9 @@ function ThreadOverviewPrActiveRow({
       status.label ? (
         <span
           data-testid="thread-overview-pr-status"
-          className="inline-flex h-7 w-full items-center gap-2 px-2 font-mono text-xs text-muted"
+          className="inline-flex h-7 w-full items-center gap-2 px-3 font-mono text-xs text-muted"
         >
-          <span aria-hidden className="size-3.5 shrink-0" />
+          <span aria-hidden className="size-5 shrink-0" />
           <span className="text-fade">{status.label}</span>
         </span>
       ) : null
@@ -275,6 +280,7 @@ function ThreadOverviewPrActiveRow({
     <div data-testid="thread-overview-pr" className="space-y-1">
       <SplitButton
         variant="ghost"
+        size="default"
         className="w-full"
         menuLabel="More pull request actions"
         menuBeside="left"
@@ -282,14 +288,16 @@ function ThreadOverviewPrActiveRow({
         actionProps={{
           "data-testid": "workspace-menu-open-pr",
           "aria-label": `Open pull request, ${rowLabel}`,
-          className: "flex-1 justify-start px-2",
+          className: "flex-1 justify-start gap-2 px-3 text-body-small",
         }}
         menu={
           <DropdownMenuItem data-testid="workspace-menu-new-pr" label="Create new PR" icon={<Plus />} onClick={onCreatePr} />
         }
       >
-        <GitPullRequest aria-hidden className="size-3.5 text-muted" />
-        <span className={cn("text-fade text-xs", !detailText && "font-mono tabular-nums")}>{rowLabel}</span>
+        <OverviewRowIcon>
+          <GitPullRequest />
+        </OverviewRowIcon>
+        <span className={cn("text-fade", !detailText && "font-mono tabular-nums")}>{rowLabel}</span>
       </SplitButton>
       {checksSummary}
     </div>

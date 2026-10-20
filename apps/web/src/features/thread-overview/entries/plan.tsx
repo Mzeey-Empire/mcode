@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import type { PlanVersion } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
-import { OVERVIEW_ROW_CLASS } from "@/features/thread-overview/overview-row";
+import { OVERVIEW_ROW_CLASS, OverviewRowIcon } from "@/features/thread-overview/overview-row";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { cn } from "@/lib/utils";
 import { useDiffStore } from "@/stores/diffStore";
@@ -47,13 +47,10 @@ function PlanEntry({ thread }: { thread: Thread }) {
       aria-label={rowLabel(latest, progress)}
       className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-between gap-2")}
     >
-      <span className="flex size-4 shrink-0 items-center justify-center">
-        <FileText
-          size={16}
-          className="text-muted transition-colors duration-150 group-hover:text-ink/80"
-        />
-      </span>
-      <span className="text-fade min-w-0 grow text-sm text-ink">{latest.title}</span>
+      <OverviewRowIcon>
+        <FileText />
+      </OverviewRowIcon>
+      <span className="text-fade min-w-0 grow text-ink">{latest.title}</span>
       <span className="shrink-0 text-xs tabular-nums text-muted">{trailing}</span>
     </Button>
   );

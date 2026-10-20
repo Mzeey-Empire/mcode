@@ -16,7 +16,7 @@ import {
 import type { ServerTile } from "@/features/preview";
 import type { ThreadOverviewBrowserTab } from "@/features/thread-overview/entries/browser";
 import { type BrowserRowState, deriveBrowserRow } from "@/features/thread-overview/entries/browser-row-model";
-import { OVERVIEW_ROW_CLASS } from "@/features/thread-overview/overview-row";
+import { OVERVIEW_ROW_CLASS, OverviewRowIcon } from "@/features/thread-overview/overview-row";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { cn } from "@/lib/utils";
 import { useDiffStore } from "@/stores/diffStore";
@@ -67,7 +67,7 @@ function RowText({ state }: { state: BrowserRowState }) {
   if (state.kind === "open") {
     return (
       <>
-        <span className="min-w-0 text-fade text-xs font-medium">{page.title}</span>
+        <span className="min-w-0 text-fade font-medium">{page.title}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-xs tabular-nums text-muted">
           {page.host}
           {state.otherPages > 0 ? <span data-testid="thread-overview-browser-more">+{state.otherPages}</span> : null}
@@ -81,9 +81,9 @@ function RowText({ state }: { state: BrowserRowState }) {
     : `${state.tile.name} isn't running`;
   return (
     <>
-      <span className="shrink-0 text-xs font-medium">{lead}</span>
+      <span className="shrink-0 font-medium">{lead}</span>
       {state.kind === "server-stopped" ? null : (
-        <span className="min-w-0 text-fade text-xs text-muted">{page.title}</span>
+        <span className="min-w-0 text-fade text-muted">{page.title}</span>
       )}
     </>
   );
@@ -147,7 +147,9 @@ export function ThreadOverviewBrowserRow({ thread, pages, activeTabId }: ThreadO
         onClick={() => openBrowserOnPage(thread, state.page.tabId)}
         className={cn(OVERVIEW_ROW_CLASS, "min-w-0 flex-1 cursor-pointer justify-start gap-2")}
       >
-        <PageGlyph state={state} />
+        <OverviewRowIcon>
+          <PageGlyph state={state} />
+        </OverviewRowIcon>
         <RowText state={state} />
       </Button>
       <BrowserRowAction state={state} thread={thread} start={start} isRequesting={isRequesting} />

@@ -11,7 +11,7 @@ import { newThreadWorkspaceMeta, type TargetLabel } from "@/features/conversatio
 import { useNewThreadTargetSelection, type TargetPick } from "@/features/conversation/composer/execution/useComposerTargetSelection";
 import { WorkspaceModeMenuGroup } from "@/features/conversation/composer/execution/WorkspaceTargetMenu";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { OVERVIEW_ROW_CLASS } from "@/features/thread-overview/overview-row";
+import { OVERVIEW_ROW_CLASS, OverviewRowIcon } from "@/features/thread-overview/overview-row";
 import { OverviewSideMenu } from "@/features/thread-overview/overview-side-menu";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { basename } from "@/lib/path";
@@ -33,8 +33,6 @@ function useNewThreadTarget(workspaceId: string): NewThreadTarget | null {
   return { workspace, mode: newThreadComposerMode(workspace.is_git_repo, newThreadMode) };
 }
 
-const ROW_ICON_CLASS = "size-3.5 shrink-0 text-muted transition-colors duration-150 group-hover:text-ink/80";
-
 interface TargetRowContentProps {
   Icon: ComponentType<{ className?: string }>;
   children: ReactNode;
@@ -45,8 +43,10 @@ interface TargetRowContentProps {
 function TargetRowContent({ Icon, children, open }: TargetRowContentProps) {
   return (<>
     <span className="flex min-w-0 items-center gap-2">
-      <Icon aria-hidden className={ROW_ICON_CLASS} />
-      <span className="text-fade text-xs">{children}</span>
+      <OverviewRowIcon>
+        <Icon />
+      </OverviewRowIcon>
+      <span className="text-fade">{children}</span>
     </span>
     {open === undefined ? null : (
       <ChevronDown

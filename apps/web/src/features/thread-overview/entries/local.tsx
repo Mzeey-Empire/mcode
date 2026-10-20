@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { type Thread } from "@/transport";
 import { Check, ChevronDown, Copy, Laptop } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { OVERVIEW_ROW_CLASS } from "@/features/thread-overview/overview-row";
+import { OVERVIEW_ROW_CLASS, OverviewRowIcon } from "@/features/thread-overview/overview-row";
 
 type LocalCopyTarget = "path" | "branch";
 
@@ -121,13 +121,10 @@ function LocalEntry({ thread }: { thread: Thread }) {
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
-            <LocalModeIcon
-              size={14}
-              aria-hidden
-              data-testid="thread-overview-local-mode-icon"
-              className="shrink-0 text-muted transition-colors duration-150 group-hover:text-ink/80"
-            />
-            <span className="text-fade text-xs font-medium">{modeLabel}</span>
+            <OverviewRowIcon>
+              <LocalModeIcon data-testid="thread-overview-local-mode-icon" />
+            </OverviewRowIcon>
+            <span className="text-fade font-medium">{modeLabel}</span>
           </span>
           <ChevronDown
             size={13}

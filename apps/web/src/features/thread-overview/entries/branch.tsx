@@ -17,6 +17,7 @@ import { Check, ChevronDown, GitBranch, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   OVERVIEW_ROW_CLASS,
+  OverviewRowIcon,
   ThreadOverviewTooltipButton,
   ThreadOverviewWhen,
 } from "@/features/thread-overview/overview-row";
@@ -326,11 +327,10 @@ function BranchEntry({ thread }: { thread: Thread }) {
             )}
           >
             <span className="flex min-w-0 items-center gap-2">
-              <GitBranch
-                size={14}
-                className="shrink-0 text-muted transition-colors duration-150 group-hover:text-ink/80"
-              />
-              <span className="text-fade text-xs font-medium">{checkoutLabel}</span>
+              <OverviewRowIcon>
+                <GitBranch />
+              </OverviewRowIcon>
+              <span className="text-fade font-medium">{checkoutLabel}</span>
             </span>
             <ChevronDown
               size={13}

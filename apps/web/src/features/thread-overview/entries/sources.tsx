@@ -26,7 +26,7 @@ function ThreadOverviewSources({ sources, onOpen }: ThreadOverviewSourcesProps) 
   if (sources.length === 0) return null;
 
   return (
-    <div data-testid="thread-overview-sources" className="flex w-full flex-col gap-1.5 px-2 py-1.5">
+    <div data-testid="thread-overview-sources" className="flex w-full flex-col gap-1.5 px-3 py-1.5">
       <span className="text-xs font-medium text-muted">
         Sources
       </span>

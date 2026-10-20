@@ -104,7 +104,7 @@ function ThreadOverviewRepositoryRow({
       <div className="min-h-0 overflow-hidden">
         <div
           data-testid="thread-overview-repository"
-          className="flex w-full flex-col gap-1.5 px-2 py-1.5"
+          className="flex w-full flex-col gap-1.5 px-3 py-1.5"
         >
           <span className="font-mono text-xs font-medium uppercase leading-tight tracking-[0.18em] text-muted">
             REPOSITORY

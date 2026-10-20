@@ -71,7 +71,7 @@ function ThreadOverviewUsage({
       <div
         data-testid="thread-overview-usage"
         aria-label={`Usage, ${summary}`}
-        className="flex h-8 w-full items-center justify-between gap-3 px-2 text-xs text-muted"
+        className="flex h-row-default w-full items-center justify-between gap-3 px-3 text-body-small text-muted"
       >
         <span className="font-medium">Usage</span>
         <span className="shrink-0 tabular-nums">{summary}</span>
@@ -80,7 +80,7 @@ function ThreadOverviewUsage({
   }
 
   return (
-    <section data-testid="thread-overview-usage" aria-label={`Usage, ${summary}`} className="px-2 pb-2">
+    <section data-testid="thread-overview-usage" aria-label={`Usage, ${summary}`} className="px-3 pb-2">
       <div className="flex h-6 items-center text-xs font-medium text-muted">Usage</div>
       <div className="flex flex-col gap-3">
         {categories.map((category) => (
