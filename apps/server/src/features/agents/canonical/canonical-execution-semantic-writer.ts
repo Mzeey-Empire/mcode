@@ -1193,8 +1193,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const fileEvidence = mutation.input.fileEvidence;
     return {
       providerId: mutation.input.providerId,
-      messageSequence: message?.sequence ?? null,
-      messageId: message?.id ?? null,
+      ...terminalMessageIdentity(message),
       settledMessage,
       outcome: mutation.outcome,
       toolCallCount: persisted.toolCallCount,
@@ -1307,6 +1306,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 }
 
 /** Strip raw file contents the way the wire publication does so canonical replay cannot leak them. */
+function terminalMessageIdentity(message: { readonly id: string; readonly sequence: number } | null | undefined) {
+  return { messageId: message?.id ?? null, messageSequence: message?.sequence ?? null };
+}
+
 function sanitizePublicationEvent(event: AgentEvent): AgentEvent {
   if (event.type === AgentEventType.ToolUse) {
     return { ...event, toolInput: sanitizePublicToolInput(event.toolInput, event.toolName) };
