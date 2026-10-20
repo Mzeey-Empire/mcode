@@ -61,7 +61,7 @@ describe("codex-trace", () => {
   it("summarizes MCP startup status with bounded redacted diagnostics", () => {
     const s = summarizeCodexNotificationParams("mcpServer/startupStatus/updated", {
       threadId: "thread-1",
-      name: "mcode_internal_thread_control",
+      name: "mcode",
       status: "failed",
       failureReason: "Bearer super-secret-credential caused startup failure",
       error: "authorization=another-secret-value",
@@ -69,7 +69,7 @@ describe("codex-trace", () => {
 
     expect(s).toMatchObject({
       threadId: "thread-1",
-      name: "mcode_internal_thread_control",
+      name: "mcode",
       status: "failed",
       errorPreview: "authorization=[redacted]",
       failureReasonPreview: "Bearer [redacted] caused startup failure",
@@ -81,11 +81,11 @@ describe("codex-trace", () => {
   it("summarizes ready MCP startup status without diagnostics", () => {
     expect(
       summarizeCodexNotificationParams("mcpServer/startupStatus/updated", {
-        name: "mcode_internal_thread_control",
+        name: "mcode",
         status: "ready",
       }),
     ).toEqual({
-      name: "mcode_internal_thread_control",
+      name: "mcode",
       status: "ready",
       errorPreview: undefined,
       failureReasonPreview: undefined,
@@ -94,7 +94,7 @@ describe("codex-trace", () => {
 
   it("retains a bounded diagnostic preview", () => {
     const summary = summarizeCodexNotificationParams("mcpServer/startupStatus/updated", {
-      name: "mcode_internal_thread_control",
+      name: "mcode",
       status: "failed",
       failureReason: "x".repeat(400),
     });

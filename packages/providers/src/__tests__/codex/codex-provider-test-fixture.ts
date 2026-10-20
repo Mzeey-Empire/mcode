@@ -7,6 +7,8 @@ import type {
   ProviderBrowserLeaseRequest,
   ProviderEventSinkPort,
   ProviderHostPorts,
+  ProviderMcodeAttachment,
+  ProviderMcodeAttachRequest,
 } from "../../host-ports.js";
 import type { TurnRequest } from "@mcode/contracts";
 
@@ -154,6 +156,13 @@ export class BrowserAutomationSessionLease {
   }
 }
 
+/** Builds the attachment the server hands a Codex session; tests override the toolkits they exercise. */
+export function mcodeAttachment(
+  toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true },
+): ProviderMcodeAttachment {
+  return { serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "session-token-fixture", toolkits };
+}
+
 /** Builds the package-private Codex Provider with local test authorities. */
 export class CodexProvider extends PackageCodexProvider {
   readonly settingsService!: { get(): unknown | Promise<unknown> };
@@ -164,8 +173,8 @@ export class CodexProvider extends PackageCodexProvider {
     attachments: CodexProviderPorts["attachments"],
     catalog: CodexProviderPorts["catalog"],
     browser = new BrowserAutomationSessionLease(),
-    threadControl?: {
-      createCodexConfiguration?: (sessionId: string) => Promise<unknown>;
+    mcode?: {
+      attach?: (request: ProviderMcodeAttachRequest) => Promise<ProviderMcodeAttachment | null>;
       close?: (sessionId: string) => Promise<void>;
     },
     eventSink?: ProviderEventSinkPort,
@@ -184,11 +193,11 @@ export class CodexProvider extends PackageCodexProvider {
         release: (leaseId) => browser.release(leaseId),
         revokeCredential: (credentialId) => browser.revokeCredential(credentialId),
       },
-      threadControl: {
-        bootstrap: async ({ sessionId }) => threadControl?.createCodexConfiguration?.(sessionId) ?? null,
-        close: (sessionId) => threadControl?.close?.(sessionId) ?? Promise.resolve(),
+      threadControl: { bootstrap: async () => null, close: async () => undefined },
+      mcode: {
+        attach: (request) => mcode?.attach?.(request) ?? Promise.resolve(null),
+        close: (sessionId) => mcode?.close?.(sessionId) ?? Promise.resolve(),
       },
-      mcode: { attach: async () => null, close: async () => undefined },
       grants: { consume: () => false },
       events: eventSink ?? { submit: async () => { throw new Error("Canonical event sink is not configured for this fixture"); } },
     };

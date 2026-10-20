@@ -23,6 +23,7 @@ import {
   type ProviderBrowserLeaseGrant,
   type ProviderBrowserLeaseHandle,
   type ProviderHostPorts,
+  type ProviderMcodeAttachment,
 } from "../../host-ports.js";
 import type { CodexProviderPorts } from "../../factory-types.js";
 import { SessionRuntime } from "../session-runtime.js";
@@ -73,7 +74,7 @@ import {
 } from "./codex-canonical-event-publisher.js";
 import {
   buildCodexInput,
-  hasCodexInternalThreadControlMcp,
+  hasCodexMcodeMcp,
   isCodexCompactCommand,
   mapCodexRateLimitsToUsage,
   mergeCodexUsageInfo,
@@ -100,7 +101,7 @@ import { createCliStatusRunner, readCliStatusVersion, resolveCliStatusBinary } f
 import { describeCodexAuth } from "../status/provider-auth-checks.js";
 
 export {
-  hasCodexInternalThreadControlMcp,
+  hasCodexMcodeMcp,
   mapCodexRateLimitsToUsage,
   mergeCodexUsageInfo,
 } from "./codex-input-mapper.js";
@@ -108,6 +109,8 @@ export {
 const SIDE_CHANNEL_TIMEOUT_MS = 120_000;
 const USAGE_WARMUP_TIMEOUT_MS = 10_000;
 const CODEX_MCP_STARTUP_TIMEOUT_MS = 10_000;
+/** Child-only env var carrying the `mcode` bearer token, so the token never appears in argv or config. */
+const CODEX_MCODE_TOKEN_ENV = "MCODE_MCP_TOKEN";
 const STOP_SETTLE_TIMEOUT_MS = 10_000;
 /** Bound on a follow-up send's wait for a user-stop drain before it respawns instead. */
 const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
@@ -253,23 +256,23 @@ function transientHandoffError(message: string): Error & { code: string } {
   return err;
 }
 
-type CodexInternalMcpStartupOutcome =
+type CodexMcodeStartupOutcome =
   | { status: "ready" }
   | { status: "failed"; source: "native"; error?: string }
   | { status: "timeout"; error: string }
   | { status: "cancelled" };
 
-function observeCodexInternalMcpStartup(server: CodexAppServer): {
-  promise: Promise<CodexInternalMcpStartupOutcome>;
+function observeCodexMcodeStartup(server: CodexAppServer): {
+  promise: Promise<CodexMcodeStartupOutcome>;
   cancel: () => void;
 } {
   let settled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let resolvePromise!: (outcome: CodexInternalMcpStartupOutcome) => void;
-  const promise = new Promise<CodexInternalMcpStartupOutcome>((resolve) => {
+  let resolvePromise!: (outcome: CodexMcodeStartupOutcome) => void;
+  const promise = new Promise<CodexMcodeStartupOutcome>((resolve) => {
     resolvePromise = resolve;
   });
-  const finish = (outcome: CodexInternalMcpStartupOutcome): void => {
+  const finish = (outcome: CodexMcodeStartupOutcome): void => {
     if (settled) return;
     settled = true;
     if (timer) clearTimeout(timer);
@@ -277,29 +280,29 @@ function observeCodexInternalMcpStartup(server: CodexAppServer): {
     resolvePromise(outcome);
   };
   const onNotification = (notification: unknown): void => {
-    const outcome = codexInternalMcpStartupOutcome(notification);
+    const outcome = codexMcodeStartupOutcome(notification);
     if (outcome) finish(outcome);
   };
   server.on("notification", onNotification);
   timer = setTimeout(
-    () => finish({ status: "timeout", error: "Codex internal MCP startup timed out" }),
+    () => finish({ status: "timeout", error: "Codex mcode MCP startup timed out" }),
     CODEX_MCP_STARTUP_TIMEOUT_MS,
   );
   return { promise, cancel: () => finish({ status: "cancelled" }) };
 }
 
-function codexInternalMcpStartupOutcome(notification: unknown): CodexInternalMcpStartupOutcome | undefined {
+function codexMcodeStartupOutcome(notification: unknown): CodexMcodeStartupOutcome | undefined {
   const value = notification as { method?: unknown; params?: Record<string, unknown> };
   if (value.method !== "mcpServer/startupStatus/updated") return undefined;
-  if (value.params?.name !== "mcode_internal_thread_control") return undefined;
+  if (value.params?.name !== "mcode") return undefined;
   const status = typeof value.params.status === "string" ? value.params.status : "";
   if (status === "ready") return { status: "ready" };
   if (status === "cancelled") return { status: "cancelled" };
   if (status !== "failed" && status !== "error") return undefined;
-  return failedCodexInternalMcpStartup(value.params);
+  return failedCodexMcodeStartup(value.params);
 }
 
-function failedCodexInternalMcpStartup(params: Record<string, unknown>): CodexInternalMcpStartupOutcome {
+function failedCodexMcodeStartup(params: Record<string, unknown>): CodexMcodeStartupOutcome {
   const error = typeof params.error === "string" ? params.error : typeof params.failureReason === "string" ? params.failureReason : undefined;
   return error ? { status: "failed", source: "native", error } : { status: "failed", source: "native" };
 }
@@ -377,7 +380,7 @@ interface CodexSessionState {
   workspaceId: string;
   /** Browser permission class fixed to the provider process at spawn. */
   browserPermissionCapability: "observe" | "interact" | "privileged";
-  /** Whether this session was started with the internal Mcode thread-control MCP. */
+  /** Whether this session was started with the Mcode thread-control toolkit. */
   threadControlEligible: boolean;
 }
 
@@ -409,12 +412,9 @@ interface PreparedCodexTurn {
   threadControlEligible: boolean;
 }
 
-type CodexInternalMcp = { configOverrides: string[]; env: Record<string, string> };
-
-interface CodexInternalMcpSetup {
-  internalMcp: CodexInternalMcp | undefined;
+interface CodexMcodeSetup {
+  mcode: ProviderMcodeAttachment | null;
   setupError: string | undefined;
-  close: () => Promise<void>;
 }
 
 interface CodexSpawnContext {
@@ -430,9 +430,9 @@ interface CodexSpawnContext {
   stagedExecutionId: string | undefined;
   threadControlEligible: boolean;
   browserAccess: { stage: BrowserAutomationSessionLeaseStage; workspaceId: string; permissionCapability: "observe" | "interact" | "privileged" } | undefined;
-  internalMcp: CodexInternalMcp | undefined;
-  internalMcpSetupError: string | undefined;
-  closeInternalMcpAuthority: () => Promise<void>;
+  mcode: ProviderMcodeAttachment | null;
+  mcodeSetupError: string | undefined;
+  closeMcode: () => Promise<void>;
   browserGrant: ProviderBrowserLeaseGrant | null;
   spawnEnv: Record<string, string>;
 }
@@ -973,8 +973,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return ended;
   }
 
-  /** Reports a local internal MCP setup failure without changing turn lifecycle state. */
-  private emitInternalMcpStartupFailure(
+  /** Reports a local mcode MCP setup failure without changing turn lifecycle state. */
+  private emitMcodeStartupFailure(
     threadId: string,
     serverThreadId: string,
     error: string,
@@ -985,7 +985,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       threadId,
       providerId: this.id,
       serverThreadId,
-      name: "mcode_internal_thread_control",
+      name: "mcode",
       status: "failed",
       error,
       ...(turnExecutionId ? { turnExecutionId } : {}),
@@ -1517,19 +1517,18 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    */
   async spawn(args: SpawnArgs): Promise<SpawnResult<CodexSessionState>> {
     const context = await this.prepareCodexSpawn(args);
-    const { internalMcp, threadId } = context;
-    const browserTokenEnvName = "MCODE_BROWSER_MCP_TOKEN";
+    const { mcode, threadId } = context;
     const mcodeInstructions = this.codexSpawnInstructions(context);
 
-    const server = this.createCodexAppServer(context, mcodeInstructions, browserTokenEnvName);
+    const server = this.createCodexAppServer(context, mcodeInstructions);
     const mapper = this.createCodexEventMapper(threadId, context.sessionId);
     this.activeCodexServers.set(context.sessionId, server);
     try {
       this.attachCodexServerEvents(context, server, mapper);
-      const internalMcpStartup = internalMcp ? observeCodexInternalMcpStartup(server) : undefined;
-      const internalMcpStartupOutcome = await this.startCodexAppServer(context, server, internalMcpStartup, browserTokenEnvName);
-      this.reportCodexInternalMcpSetupFailure(context, server, internalMcpStartupOutcome);
-      await this.verifyCodexInternalMcpSetup(context, server, internalMcpStartup, internalMcpStartupOutcome);
+      const mcodeStartup = mcode ? observeCodexMcodeStartup(server) : undefined;
+      const mcodeStartupOutcome = await this.startCodexAppServer(context, server, mcodeStartup);
+      this.reportCodexMcodeSetupFailure(context, server, mcodeStartupOutcome);
+      await this.verifyCodexMcodeMcpSetup(context, server, mcodeStartup, mcodeStartupOutcome);
       this.refreshUsageFromServer(server, threadId);
 
       this.attachCodexThreadIdentity(context, server, mapper);
@@ -1547,12 +1546,14 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const settings = await this.codexPorts.settings.get();
     const pendingSpawn = this.pendingSpawnTurns.get(args.sessionId);
     const threadControlEligible = pendingSpawn?.threadControlEligible === true;
-    const internalMcpSetup = await this.bootstrapCodexInternalMcp(args, threadControlEligible, pendingSpawn?.turnExecutionId);
     const browserAccess = this.pendingBrowserAccess.get(args.sessionId);
-    const browserGrant = browserAccess ? this.host.browser.issue(browserAccess.stage) : null;
+    const issuedGrant = browserAccess ? this.host.browser.issue(browserAccess.stage) : null;
     this.pendingBrowserAccess.delete(args.sessionId);
+    const closeMcode = this.codexMcodeSessionCloser(args.sessionId);
+    const mcodeSetup = await this.attachCodexMcode(args, threadControlEligible, issuedGrant !== null, closeMcode);
+    const browserGrant = this.releaseUnlistedBrowserGrant(issuedGrant, mcodeSetup.mcode);
     const spawnEnv = { ...args.env };
-    if (browserGrant) spawnEnv.MCODE_BROWSER_MCP_TOKEN = browserGrant.token;
+    if (mcodeSetup.mcode) spawnEnv[CODEX_MCODE_TOKEN_ENV] = mcodeSetup.mcode.token;
     return {
       args,
       cliPath: settings.cliPath,
@@ -1566,39 +1567,55 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       stagedExecutionId: pendingSpawn?.turnExecutionId,
       threadControlEligible,
       browserAccess,
-      internalMcp: internalMcpSetup.internalMcp,
-      internalMcpSetupError: internalMcpSetup.setupError,
-      closeInternalMcpAuthority: internalMcpSetup.close,
+      mcode: mcodeSetup.mcode,
+      mcodeSetupError: mcodeSetup.setupError,
+      closeMcode,
       browserGrant,
       spawnEnv,
     };
   }
 
-  private async bootstrapCodexInternalMcp(
+  /**
+   * `sessionId` must be the id the Browser lease was staged under, or the mcode
+   * server finds no lease and lists no Browser tools. A failed attach drops both
+   * toolkits rather than failing a session that can still run.
+   */
+  private async attachCodexMcode(
     args: SpawnArgs,
     threadControlEligible: boolean,
-    turnExecutionId: string | undefined,
-  ): Promise<CodexInternalMcpSetup> {
-    const close = this.codexInternalMcpAuthorityCloser(args.sessionId);
-    if (!threadControlEligible) return { internalMcp: undefined, setupError: undefined, close };
+    hasBrowserGrant: boolean,
+    close: () => Promise<void>,
+  ): Promise<CodexMcodeSetup> {
+    if (!threadControlEligible && !hasBrowserGrant) return { mcode: null, setupError: undefined };
     try {
-      const internalMcp = await this.host.threadControl.bootstrap({ providerId: this.id, sessionId: args.sessionId, threadId: args.threadId, turnId: turnExecutionId ?? args.threadId, protocol: "codex" }) as CodexInternalMcp | undefined;
-      return { internalMcp, setupError: undefined, close };
+      const mcode = await this.host.mcode.attach({ providerId: this.id, sessionId: args.sessionId, threadId: args.threadId, threadControl: threadControlEligible });
+      if (!mcode) logger.warn("Codex mcode MCP server is unavailable; continuing without Mcode tools", { threadId: args.threadId });
+      return { mcode, setupError: undefined };
     } catch (error) {
       await close();
-      return { internalMcp: undefined, setupError: error instanceof Error ? error.message : String(error), close };
+      return { mcode: null, setupError: error instanceof Error ? error.message : String(error) };
     }
   }
 
-  private codexInternalMcpAuthorityCloser(sessionId: string): () => Promise<void> {
+  /** A Browser grant the server does not list would sit unused until it expires, so release it. */
+  private releaseUnlistedBrowserGrant(
+    grant: ProviderBrowserLeaseGrant | null,
+    mcode: ProviderMcodeAttachment | null,
+  ): ProviderBrowserLeaseGrant | null {
+    if (!grant || mcode?.toolkits.browser) return grant;
+    this.host.browser.release(grant.leaseId);
+    return null;
+  }
+
+  private codexMcodeSessionCloser(sessionId: string): () => Promise<void> {
     let closed = false;
     return async () => {
       if (closed) return;
       closed = true;
       try {
-        await this.host.threadControl.close(sessionId);
+        await this.host.mcode.close(sessionId);
       } catch (error) {
-        logger.warn("Codex internal MCP authority close failed", { sessionId, error: error instanceof Error ? error.message : String(error) });
+        logger.warn("Codex mcode session close failed", { sessionId, error: error instanceof Error ? error.message : String(error) });
       }
     };
   }
@@ -1608,8 +1625,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     // Luna variants lack Ultra orchestration, so a nested spawn must route to the same-generation Sol.
     const nestedDelegationModel = spawnModel?.endsWith("-luna") ? spawnModel.replace(/-luna$/, "-sol") : undefined;
     return renderMcodeInstructions(buildMcodeInstructionPlan({
-      threadControlGranted: Boolean(context.internalMcp),
-      browserAutomationGranted: Boolean(context.browserGrant),
+      threadControlGranted: context.mcode?.toolkits.threadControl ?? false,
+      browserAutomationGranted: Boolean(context.mcode?.toolkits.browser && context.browserGrant),
       nestedDelegationModel,
     }));
   }
@@ -1617,7 +1634,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private createCodexAppServer(
     context: CodexSpawnContext,
     developerInstructions: string,
-    browserTokenEnvName: string,
   ): CodexAppServer {
     return new CodexAppServer({
       cliPath: context.cliPath,
@@ -1641,20 +1657,20 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
         ? (request) => this.handleApprovalRequest(context.sessionId, context.threadId, request)
         : undefined,
       processAttachment: this.host.processes,
-      getSpawnEnv: () => ({ ...context.spawnEnv, ...context.internalMcp?.env }),
-      configOverrides: this.codexAppServerConfigOverrides(context, browserTokenEnvName),
+      getSpawnEnv: () => ({ ...context.spawnEnv }),
+      configOverrides: this.codexAppServerConfigOverrides(context),
     });
   }
 
-  private codexAppServerConfigOverrides(context: CodexSpawnContext, browserTokenEnvName: string): string[] {
-    const browserOverrides = context.browserGrant
-      ? [
-          `mcp_servers.mcode-browser.url=${JSON.stringify(context.browserGrant.mcpUrl)}`,
-          `mcp_servers.mcode-browser.bearer_token_env_var=${JSON.stringify(browserTokenEnvName)}`,
-          'plugins."browser@openai-bundled".enabled=false',
-        ]
-      : [];
-    return [...(context.internalMcp?.configOverrides ?? []), ...browserOverrides];
+  private codexAppServerConfigOverrides({ mcode, browserGrant }: CodexSpawnContext): string[] {
+    if (!mcode) return [];
+    const overrides = [
+      `mcp_servers.${mcode.serverName}.url=${JSON.stringify(mcode.url)}`,
+      `mcp_servers.${mcode.serverName}.bearer_token_env_var=${JSON.stringify(CODEX_MCODE_TOKEN_ENV)}`,
+    ];
+    // The bundled Browser plugin would duplicate the Browser toolkit the mcode server now serves.
+    if (browserGrant) overrides.push('plugins."browser@openai-bundled".enabled=false');
+    return overrides;
   }
 
   private createCodexEventMapper(threadId: string, sessionId: string): CodexEventMapper {
@@ -1835,27 +1851,26 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async startCodexAppServer(
     context: CodexSpawnContext,
     server: CodexAppServer,
-    startup: ReturnType<typeof observeCodexInternalMcpStartup> | undefined,
-    browserTokenEnvName: string,
-  ): Promise<CodexInternalMcpStartupOutcome | undefined> {
+    startup: ReturnType<typeof observeCodexMcodeStartup> | undefined,
+  ): Promise<CodexMcodeStartupOutcome | undefined> {
     try {
       return await this.startCodexAppServerWithMcp(server, startup);
     } catch (error) {
       if (context.browserGrant) this.host.browser.release(context.browserGrant.leaseId);
       startup?.cancel();
-      await context.closeInternalMcpAuthority();
+      await context.closeMcode();
       if (startup) await server.kill().catch(() => undefined);
       throw error;
     } finally {
-      delete context.spawnEnv[browserTokenEnvName];
+      delete context.spawnEnv[CODEX_MCODE_TOKEN_ENV];
       this.pendingBrowserAccess.delete(context.sessionId);
     }
   }
 
   private async startCodexAppServerWithMcp(
     server: CodexAppServer,
-    startup: ReturnType<typeof observeCodexInternalMcpStartup> | undefined,
-  ): Promise<CodexInternalMcpStartupOutcome | undefined> {
+    startup: ReturnType<typeof observeCodexMcodeStartup> | undefined,
+  ): Promise<CodexMcodeStartupOutcome | undefined> {
     if (!startup) {
       await server.start();
       return undefined;
@@ -1864,34 +1879,34 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return outcome;
   }
 
-  private reportCodexInternalMcpSetupFailure(
+  private reportCodexMcodeSetupFailure(
     context: CodexSpawnContext,
     server: CodexAppServer,
-    outcome: CodexInternalMcpStartupOutcome | undefined,
+    outcome: CodexMcodeStartupOutcome | undefined,
   ): void {
-    if (context.internalMcpSetupError) {
-      this.emitInternalMcpStartupFailure(context.threadId, server.threadId ?? context.threadId, context.internalMcpSetupError, context.stagedExecutionId);
+    if (context.mcodeSetupError) {
+      this.emitMcodeStartupFailure(context.threadId, server.threadId ?? context.threadId, context.mcodeSetupError, context.stagedExecutionId);
       return;
     }
     if (outcome?.status === "timeout") {
-      this.emitInternalMcpStartupFailure(context.threadId, server.threadId ?? context.threadId, outcome.error, context.stagedExecutionId);
+      this.emitMcodeStartupFailure(context.threadId, server.threadId ?? context.threadId, outcome.error, context.stagedExecutionId);
     }
   }
 
-  private async verifyCodexInternalMcpSetup(
+  private async verifyCodexMcodeMcpSetup(
     context: CodexSpawnContext,
     server: CodexAppServer,
-    startup: ReturnType<typeof observeCodexInternalMcpStartup> | undefined,
-    outcome: CodexInternalMcpStartupOutcome | undefined,
+    startup: ReturnType<typeof observeCodexMcodeStartup> | undefined,
+    outcome: CodexMcodeStartupOutcome | undefined,
   ): Promise<void> {
-    if (!context.internalMcp || outcome?.status !== "ready") return;
+    if (!context.mcode || outcome?.status !== "ready") return;
     try {
       const effectiveConfig = await server.readConfig(context.cwd);
-      if (!hasCodexInternalThreadControlMcp(effectiveConfig)) throw new Error("Codex app-server did not register mcode_internal_thread_control in effective configuration");
+      if (!hasCodexMcodeMcp(effectiveConfig)) throw new Error("Codex app-server did not register mcode in effective configuration");
     } catch (error) {
       startup?.cancel();
-      await context.closeInternalMcpAuthority();
-      this.emitInternalMcpStartupFailure(context.threadId, server.threadId ?? context.threadId, error instanceof Error ? error.message : String(error), context.stagedExecutionId);
+      await context.closeMcode();
+      this.emitMcodeStartupFailure(context.threadId, server.threadId ?? context.threadId, error instanceof Error ? error.message : String(error), context.stagedExecutionId);
     }
   }
 
@@ -2482,7 +2497,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    */
   async close(state: CodexSessionState): Promise<void> {
     if (this.activeCodexServers.get(state.sessionId) === state.server) this.activeCodexServers.delete(state.sessionId);
-    await this.host.threadControl.close(state.sessionId);
+    await this.host.mcode.close(state.sessionId);
     const turnExecutionId = executionForDrain(state);
     this.projectCodexAssistantBoundary(state.mapper, state.sessionId, (event) => {
       const runtimeEvent = providerRuntimeEvent(turnExecutionId ? { ...event, turnExecutionId } : event);

@@ -197,7 +197,7 @@ describe("CodexEventMapper", () => {
       method: "mcpServer/startupStatus/updated",
       params: {
         threadId: "codex-thread",
-        name: "mcode_internal_thread_control",
+        name: "mcode",
         status: "error",
         error: "connection refused",
       },
@@ -209,7 +209,7 @@ describe("CodexEventMapper", () => {
         threadId: "test-thread",
         providerId: "codex",
         serverThreadId: "codex-thread",
-        name: "mcode_internal_thread_control",
+        name: "mcode",
         status: "failed",
         error: "connection refused",
       },
