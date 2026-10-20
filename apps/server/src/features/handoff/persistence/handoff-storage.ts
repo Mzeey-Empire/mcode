@@ -30,9 +30,10 @@ export interface AttachmentSource {
   parentMessageId: string;
 }
 
-/** What a provider switch records about the history it replayed and the options it dropped. */
+/** What an inline handoff records about replayed history and dropped options. */
 export interface SwitchAudit {
-  readonly fromProvider: string;
+  readonly kind?: "switch" | "fork";
+  readonly fromProvider: string | null;
   readonly toProvider: string;
   readonly coveredSequences: readonly number[];
   readonly omittedSequences: readonly number[];
@@ -85,7 +86,7 @@ export class HandoffStorage {
   async readLatest(threadId: string): Promise<HandoffArtifact | null> {
     const handoffsRoot = resolveThreadHandoffsDir(this.mcodeDirFn(), threadId);
     if (!NodeFS.existsSync(handoffsRoot)) return null;
-    // A switch audit is markdown only, so it has no handoff.json and is not a fork artifact.
+    // V2 audits are markdown only; legacy artifacts require the handoff.json sidecar.
     const entries = (await NodeFSPromises.readdir(handoffsRoot))
       .filter((entry) => NodeFS.existsSync(NodePath.join(handoffsRoot, entry, "handoff.json")));
     const latest = entries.sort().at(-1);
@@ -99,10 +100,9 @@ export class HandoffStorage {
   }
 
   /**
-   * Persist the audit copy of a provider-switch handoff as `handoff.md`.
+   * Persist the audit copy of a v2 switch or fork handoff as `handoff.md`.
    *
-   * It carries no `handoff.json`: the sidecar describes a fork's parent and child, which a switch has
-   * neither of, so {@link readLatest} skips switch audits.
+   * It carries no legacy `handoff.json`, so {@link readLatest} skips v2 audits.
    */
   async writeSwitchAudit(threadId: string, audit: SwitchAudit): Promise<string> {
     const ulid = newHandoffUlid();
@@ -110,7 +110,7 @@ export class HandoffStorage {
     await NodeFSPromises.mkdir(handoffDir, { recursive: true });
     const frontmatter = [
       "schemaVersion: 2",
-      "kind: switch",
+      `kind: ${audit.kind ?? "switch"}`,
       `fromProvider: ${audit.fromProvider}`,
       `toProvider: ${audit.toProvider}`,
       `coveredSequences: ${JSON.stringify(audit.coveredSequences)}`,
@@ -122,7 +122,7 @@ export class HandoffStorage {
     return ulid;
   }
 
-  /** The newest switch audit's markdown, or null when the thread never switched. */
+  /** The newest v2 switch or fork audit's markdown, or null when none exists. */
   async readLatestSwitch(threadId: string): Promise<string | null> {
     const handoffsRoot = resolveThreadHandoffsDir(this.mcodeDirFn(), threadId);
     if (!NodeFS.existsSync(handoffsRoot)) return null;

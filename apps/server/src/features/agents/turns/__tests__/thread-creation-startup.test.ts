@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import * as NodePath from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createThreadPersistenceTestRuntime } from "../../../thread-control/testing/thread-persistence-test-runtime.js";
 let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
@@ -14,6 +15,7 @@ import { WorktreeSafetyService } from "../../../projects/git/worktree-safety-ser
 import { createOriginFixture, git } from "../../../projects/git/__tests__/start-from-origin-fixture.js";
 import { routeThreadStartupRpc } from "../../../thread-startup/transport/thread-startup-rpc.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
 import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
@@ -192,15 +194,17 @@ async function branchHarness() {
   const messages = new MessageRepo(persistenceRuntime.reader, persistenceRuntime.writer);
   const parent = await base.threads.create(base.workspace.id, "Parent", "direct", "main", true, "claude");
   const fork = await messages.create(parent.id, "user", "Start here", 1);
-  const handoffs = { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "Parent handoff" })) };
+  const handoffs = HandoffStorage.forTesting({ mcodeDirFn: () => NodePath.dirname(base.db.filename) });
   const worktrees = { listWorktrees: vi.fn(async () => [{ path: "/project/existing", branch: "feature/existing" }]) };
   const branching = new ThreadBranchingService(
     base.threads,
     messages,
     base.threadService,
     worktrees as never,
-    handoffs as never,
+    handoffs,
     { platform: "win32" } as never,
+    new ToolCallRecordRepo(persistenceRuntime.reader, persistenceRuntime.writer),
+    { resolve: (id) => ({ id, maxInputCharactersPerTurn: 16_000 }) },
   );
   const makeCoordinator = (startupService = base.startups) => new ThreadCreationCoordinator(
     base.threads, () => base.threadService, base.admissions as never, base.gitRepository,
@@ -261,7 +265,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     const created = await coordinator.createInitialTurn({ workspaceId: workspace.id, content: "Branch here",
       mode: "worktree", branch: "main", existingWorktreePath: "/project/existing", parentThreadId: parent.id,
       forkedFromMessageId: fork.id, startupId: managedStartupId });
-    expect(created).toMatchObject({ kind: "dispatch", command: { content: "Branch here", providerWireOverride: "Parent handoff" } });
+    expect(created).toMatchObject({ kind: "dispatch", command: { content: "Branch here", handoffPreamble: expect.stringContaining("Start here") } });
     expect(admissions.admitInitialAutomaticTurn).not.toHaveBeenCalled();
     expect(startups.get(managedStartupId)).toMatchObject({ kind: "attached-worktree", phase: "agent", steps: [
       { phase: "thread", state: "completed" },
@@ -338,7 +342,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     const created = await makeCoordinator().createInitialTurn({ workspaceId: workspace.id, content: "Branch here",
       mode: "direct", branch: "feature/pr", pullRequestNumber: 42, parentThreadId: parent.id,
       forkedFromMessageId: fork.id, startupId: directStartupId });
-    expect(created).toMatchObject({ kind: "dispatch", command: { content: "Branch here", providerWireOverride: "Parent handoff" } });
+    expect(created).toMatchObject({ kind: "dispatch", command: { content: "Branch here", handoffPreamble: expect.stringContaining("Start here") } });
     expect(gitRepository.fetchBranch).not.toHaveBeenCalled();
     expect(startups.get(directStartupId)?.steps.map((step) => step.phase)).toEqual(["thread", "agent"]);
   });
@@ -477,7 +481,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
 
   it("keeps a failed branch bound when its child still exists", async () => {
     const { workspace, threads, startups, parent, fork, handoffs, makeCoordinator } = await branchHarness();
-    handoffs.deliverHandoff.mockRejectedValueOnce(new Error("Handoff failed"));
+    vi.spyOn(handoffs, "writeSwitchAudit").mockRejectedValueOnce(new Error("Handoff failed"));
     await expect(makeCoordinator().createInitialTurn({
       workspaceId: workspace.id, content: "Branch directly", parentThreadId: parent.id,
       forkedFromMessageId: fork.id, startupId: directStartupId,
@@ -497,7 +501,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
       await new Promise<void>((resolve) => { finishBranch = resolve; });
       return {
         thread: lifecycle ? await lifecycle.createAndBindDirectThread({ args: [workspace.id, "Child", "direct", "main", true, "claude", { parentThreadId: parent.id, forkedFromMessageId: "origin-message" }, "named", null] }) : await threads.create(workspace.id, "Child", "direct", "main", true, "claude", { parentThreadId: parent.id, forkedFromMessageId: "origin-message" }),
-        providerWireOverride: "Parent handoff",
+        handoffPreamble: "Parent handoff",
       };
     }) };
     const makeCoordinator = (startupService = startups) => new ThreadCreationCoordinator(
@@ -522,7 +526,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     const [created, concurrentReplay] = await Promise.all([first, second]);
     expect(created).toMatchObject({
       kind: "dispatch", startupId: directStartupId,
-      command: { threadId: created.thread.id, providerWireOverride: "Parent handoff" },
+      command: { threadId: created.thread.id, handoffPreamble: "Parent handoff" },
     });
     expect(concurrentReplay).toMatchObject({ kind: "replay", thread: { id: created.thread.id } });
     await coordinator.startInitialAgent(directStartupId);
@@ -548,7 +552,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
       });
       await lifecycle?.onManagedThreadPersisted(thread);
       await threads.updateWorktreePath(thread.id, "/project/branched");
-      return { thread: { ...thread, worktree_path: "/project/branched" }, providerWireOverride: "Parent handoff" };
+      return { thread: { ...thread, worktree_path: "/project/branched" }, handoffPreamble: "Parent handoff" };
     }) };
     const makeCoordinator = (startupService = startups) => new ThreadCreationCoordinator(
       threads, () => threadService, admissions as never, gitRepository,

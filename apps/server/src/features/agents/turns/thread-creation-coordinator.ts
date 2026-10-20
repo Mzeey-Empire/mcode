@@ -750,6 +750,7 @@ export class ThreadCreationCoordinator {
     const provisioned = await branching.create({
       workspaceId: params.workspaceId,
       content: params.content,
+      attachments: params.attachments,
       model: params.model,
       permissionMode: params.permissionMode,
       mode: params.mode,
@@ -771,7 +772,7 @@ export class ThreadCreationCoordinator {
     }, this.branchedLifecycle(startup));
     await this.finishBranchedStartup(startup, provisioned.thread);
     const providerWireOverride = await this.initialPlanPrompt(provisioned.thread.id, params.provider,
-      params.interactionMode, provisioned.providerWireOverride);
+      params.interactionMode, params.content);
     return {
       kind: "dispatch",
       ...(startup ? { startupId: startup.startupId } : {}),
@@ -796,6 +797,7 @@ export class ThreadCreationCoordinator {
         codexFastMode: provisioned.codexFastMode,
         devinMode: provisioned.devinMode,
         providerWireOverride,
+        handoffPreamble: provisioned.handoffPreamble,
         displayContent: params.displayContent,
         mentions: params.mentions,
         previewAnnotations: params.previewAnnotations,

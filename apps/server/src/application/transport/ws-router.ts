@@ -61,6 +61,7 @@ import {
   routeWorkspaceThreadRpc,
 } from "../../features/projects/lifecycle/transport/workspace-thread-rpc.js";
 import type { HandoffCheckoutService, HandoffStorage } from "../../features/handoff/index.js";
+import { HandoffBudgetExhaustedError } from "../../features/handoff/v2/index.js";
 import type {
   GithubService,
   PullRequestMutationService,
@@ -510,8 +511,10 @@ function steerRouteError(id: string, error: unknown, message: string): WebSocket
     ...(steer.code === "steer_rejected" ? { data: { detail: steer.detail ?? "" } } : {}) } };
 }
 
-function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
+/** Preserve domain failure codes in the error response sent to the requesting client. */
+export function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
   const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof HandoffBudgetExhaustedError) return { id: request.id, error: { code: error.code, message } };
   const domain = domainRouteError(request.id, error, message);
   if (domain) return domain;
   if (error instanceof TerminalBackendError) {

@@ -1,4 +1,6 @@
 import * as NodeCrypto from "node:crypto";
+import type { IAgentProvider } from "@mcode/contracts";
+import { CODEX_INLINE_INPUT_MAX_CHARS } from "../artifacts/handoff-builder.js";
 import { handoffBudgetBytes } from "./budget.js";
 import { handoffItemsFromMessages } from "./items.js";
 import { selectHandoffHistory } from "./select.js";
@@ -13,7 +15,7 @@ export const MAX_DELTA_TURNS = 20;
 /** Whether the target keeps its native session or starts over. */
 export type SwitchHandoffMode = "delta" | "fresh";
 
-/** History sent with the first message after a provider switch. */
+/** History sent with the first message after a provider switch or fork. */
 export interface SwitchHandoffPlan {
   readonly mode: SwitchHandoffMode;
   /** Fenced text to prepend to the wire prompt; empty when there is no history to replay. */
@@ -24,8 +26,9 @@ export interface SwitchHandoffPlan {
 
 /** Inputs for {@link planSwitchHandoff}. */
 export interface SwitchHandoffInput {
+  readonly kind?: "switch" | "fork";
   readonly threadId: string;
-  readonly fromProvider: string;
+  readonly fromProvider: string | null;
   readonly toProvider: string;
   /** Every stored row of the thread, internal rows included. */
   readonly rows: readonly HandoffMessageInput[];
@@ -71,7 +74,7 @@ export function planSwitchHandoff(input: SwitchHandoffInput): SwitchHandoffPlan 
 
   const coverage: HandoffCoverage = {
     threadId: input.threadId,
-    kind: "switch",
+    kind: input.kind ?? "switch",
     fromProvider: input.fromProvider,
     toProvider: input.toProvider,
     fromSequence: rows[0]?.sequence ?? afterSequence + 1,
@@ -87,7 +90,7 @@ export function planSwitchHandoff(input: SwitchHandoffInput): SwitchHandoffPlan 
   });
   const budgetBytes = Math.min(contextBudgetBytes, inputCapBudget(input, boundary));
   const selection = selectHandoffHistory({
-    // No separate plan item: a switch is built from stored rows alone, so a plan the model posted as a
+    // No separate plan item: history is built from stored rows alone, so a plan the model posted as a
     // message is already replayed as that message. Passing one here would duplicate it.
     items: handoffItemsFromMessages(rows, null),
     budgetBytes,
@@ -95,6 +98,13 @@ export function planSwitchHandoff(input: SwitchHandoffInput): SwitchHandoffPlan 
     boundary,
   });
   return { mode, preamble: fencePreamble(selection.text, boundary), selection, coverage };
+}
+
+/** Apply the adapter's turn limit and Codex's inline delivery ceiling consistently. */
+export function handoffInputCharacterCap(target: Pick<IAgentProvider, "id" | "maxInputCharactersPerTurn">): number {
+  return target.id === "codex"
+    ? Math.min(target.maxInputCharactersPerTurn, CODEX_INLINE_INPUT_MAX_CHARS)
+    : target.maxInputCharactersPerTurn;
 }
 
 function fencePreamble(history: string, boundary: string): string {

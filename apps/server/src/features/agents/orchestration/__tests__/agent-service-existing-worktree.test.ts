@@ -1082,7 +1082,7 @@ describe("AgentService.createAndSend defaults", () => {
     };
     threadBranching.create.mockResolvedValue({
       thread: child,
-      providerWireOverride: "<branch-handoff>Historical context</branch-handoff>",
+      handoffPreamble: "<branch-handoff>Historical context</branch-handoff>",
     });
 
     await service.createAndSend({

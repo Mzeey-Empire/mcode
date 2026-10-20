@@ -3,8 +3,9 @@ import { validateBranchName } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type {
   ContextWindowMode,
+  CreateAndSendInput,
   DevinMode,
-  ForkHistoryBudget,
+  IAgentProvider,
   InteractionMode,
   Message,
   OrchestrationMode,
@@ -16,18 +17,17 @@ import type {
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { ThreadService } from "../../thread-control/index.js";
 import { MessageRepo } from "../../agents/conversation/persistence/message-repo.js";
-import { HandoffCoordinator } from "../../handoff/index.js";
+import { HandoffStorage } from "../../handoff/index.js";
+import { handoffInputCharacterCap, loadHandoffMessages, planSwitchHandoff } from "../../handoff/v2/index.js";
+import { ToolCallRecordRepo } from "../../agents/tools/persistence/tool-call-record-repo.js";
 import { GitWorktreeService } from "../git/git-worktree-service.js";
 import type { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
-
-const FORK_HISTORY_BUDGET_BYTES = 1_000_000;
-const FORK_HISTORY_PAGE_SIZE = 100;
-const FORK_HISTORY_MAX_MESSAGES = 500;
 
 /** Inputs that establish a child thread and its provider-only handoff. */
 export interface CreateBranchedThreadInput {
   workspaceId: string;
   content: string;
+  attachments?: CreateAndSendInput["attachments"];
   model: string;
   permissionMode: PermissionMode | "default";
   mode: "direct" | "worktree";
@@ -51,7 +51,7 @@ export interface CreateBranchedThreadInput {
 /** The fully persisted child thread and its private first-turn handoff payload. */
 export interface ProvisionedBranchedThread {
   thread: Thread;
-  providerWireOverride: string;
+  handoffPreamble: string;
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   codexFastMode?: boolean;
@@ -68,8 +68,6 @@ export interface BranchedThreadLifecycle {
 type Fork = {
   parent: Thread;
   message: Message;
-  messages: Message[];
-  budget: ForkHistoryBudget;
   messageId: string;
 };
 
@@ -88,35 +86,60 @@ export class ThreadBranchingService {
     @inject(MessageRepo) private readonly messages: MessageRepo,
     @inject(ThreadService) private readonly threadService: ThreadService,
     @inject(GitWorktreeService) private readonly worktrees: GitWorktreeService,
-    @inject(HandoffCoordinator) private readonly handoffs: HandoffCoordinator,
+    @inject(HandoffStorage) private readonly handoffs: HandoffStorage,
     @inject("HostRuntime") private readonly hostRuntime: HostRuntime,
+    @inject(ToolCallRecordRepo) private readonly toolCalls: ToolCallRecordRepo,
+    @inject("IProviderRegistry") private readonly providers: {
+      resolve(id: ProviderId): Pick<IAgentProvider, "id" | "maxInputCharactersPerTurn">;
+    },
   ) {}
 
   /** Create the child and durable handoff before the runtime owner dispatches its first turn. */
   async create(input: CreateBranchedThreadInput, lifecycle?: BranchedThreadLifecycle): Promise<ProvisionedBranchedThread> {
     const fork = this.loadFork(input);
     const inherited = this.inheritSettings(fork.parent, input);
+    const handoff = this.planHandoff(input, fork);
     const created = await this.createChild(input, fork.messageId, lifecycle);
     const thread = await this.configureChild(created.thread, input, inherited, fork.messageId);
-    const handoff = await this.handoffs.deliverHandoff({
-      parentThread: fork.parent,
-      childThreadId: thread.id,
-      childProvider: input.provider,
-      forkMessage: fork.message,
-      forkedMessages: fork.messages,
-      historyBudget: fork.budget,
-      userMessage: input.content,
-      model: input.model,
+    await this.handoffs.writeSwitchAudit(thread.id, {
+      kind: "fork",
+      fromProvider: fork.parent.provider,
+      toProvider: input.provider,
+      coveredSequences: handoff.selection.selectedSequences,
+      omittedSequences: handoff.selection.omittedSequences,
+      budgetBytes: handoff.selection.budgetBytes,
+      droppedOptions: [],
+      history: handoff.preamble,
     });
     return {
       thread,
-      providerWireOverride: handoff.providerWireOverride,
+      handoffPreamble: handoff.preamble,
       contextWindowMode: inherited.contextWindowMode,
       thinking: inherited.thinking,
       codexFastMode: inherited.codexFastMode,
       devinMode: inherited.devinMode,
       warnings: "warnings" in created ? created.warnings : undefined,
     };
+  }
+
+  private planHandoff(input: CreateBranchedThreadInput, fork: Fork) {
+    return planSwitchHandoff({
+      kind: "fork",
+      threadId: fork.parent.id,
+      fromProvider: fork.parent.provider,
+      toProvider: input.provider,
+      rows: loadHandoffMessages({
+        messageRepo: this.messages, toolCallRecordRepo: this.toolCalls, threadId: fork.parent.id,
+      }),
+      throughSequence: fork.message.sequence,
+      resumeWatermark: null,
+      contextWindow: fork.parent.context_window,
+      inputCharacterCap: handoffInputCharacterCap(this.providers.resolve(input.provider)),
+      userText: input.content,
+      attachments: (input.attachments ?? []).map((attachment) => ({
+        kind: attachment.mimeType.startsWith("image/") ? "image" : "file",
+      })),
+    });
   }
 
   private loadFork(input: CreateBranchedThreadInput): Fork {
@@ -127,12 +150,7 @@ export class ThreadBranchingService {
     const messageId = input.forkedFromMessageId ?? this.lastMessageId(input.parentThreadId);
     const message = this.messages.findByIdInThread(input.parentThreadId, messageId);
     if (!message) throw new Error(`Fork message not found in parent thread: ${messageId}`);
-    const history = this.messages.listByThreadUpToSequenceBudgeted(input.parentThreadId, message.sequence, {
-      maxBytes: FORK_HISTORY_BUDGET_BYTES,
-      pageSize: FORK_HISTORY_PAGE_SIZE,
-      maxRows: FORK_HISTORY_MAX_MESSAGES,
-    });
-    return { parent, message, messages: history.messages, budget: history.budget, messageId };
+    return { parent, message, messageId };
   }
 
   private lastMessageId(threadId: string): string {
