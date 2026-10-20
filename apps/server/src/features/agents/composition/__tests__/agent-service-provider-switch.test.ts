@@ -444,6 +444,12 @@ describe("provider switch on send", () => {
     const userRows = container.resolve(MessageRepo).listIncludingInternal(threadId)
       .filter((message) => message.role === "user" && message.content === "back on claude");
     expect(userRows.map((message) => message.sequence)).toEqual([5]);
+
+    // Recovery reuses the switch's own handoff: one fenced history, no second copy seeded by recovery.
+    expect(retry.message.match(/\[mcode-handoff:begin /g)).toHaveLength(1);
+    expect(retry.message.match(/ancient question/g)).toHaveLength(1);
+    expect(retry.message.endsWith("back on claude")).toBe(true);
+    expect(await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId)).toContain("kind: switch");
   });
 
   function notices(): string[] {

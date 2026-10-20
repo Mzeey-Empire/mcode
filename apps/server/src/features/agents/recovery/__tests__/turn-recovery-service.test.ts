@@ -27,6 +27,7 @@ import { AttachmentService } from "../../../attachments/storage/attachment-servi
 import type { SendMessageCommand } from "../../orchestration/agent-service.js";
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
 import { turnRecoveryErrorCode } from "../turn-recovery-error.js";
+import { HandoffStorage } from "../../../handoff/persistence/handoff-storage.js";
 import { notifyCommittedCanonicalEvents } from "../../canonical/committed-canonical-events.js";
 import { chooseResumePath, RESUME_CONTINUATION_PROMPT } from "../turn-resume.js";
 import type { CanonicalAgentEventEnvelope, PreviewAnnotationBundle, ThreadStartup } from "@mcode/contracts";
@@ -35,6 +36,8 @@ const NOW = "2026-08-10T09:00:00.000Z";
 const THREAD_ID = "00000000-0000-4000-8000-000000000021";
 const TURN_ID = "turn-recovery";
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000015";
+// What closes the fenced handoff before the wire's own text, as the provider switch delivers it.
+const HANDOFF_FENCE_TAIL = "The user's new message follows.\n\n";
 
 describe("TurnRecoveryService", () => {
   let db: Database;
@@ -98,18 +101,32 @@ describe("TurnRecoveryService", () => {
   describe("turn recovery actions", () => {
     let service: TurnRecoveryService;
     let attachments: AttachmentService;
+    let handoffs: HandoffStorage;
+    let handoffDir: string;
+    // Codex's inline ceiling (14000) is tighter than this declared cap, so the ceiling is what bounds a seeded input.
+    let inputCap = 100_000;
 
     beforeEach(() => {
       vi.stubEnv("MCODE_DATA_DIR", NodePath.dirname(db.filename));
       attachments = new AttachmentService();
+      handoffDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "recovery-handoff-"));
+      handoffs = HandoffStorage.forTesting({ mcodeDirFn: () => handoffDir });
+      inputCap = 100_000;
       service = new TurnRecoveryService(runtimeSink, threadRepo, attachments, defaultCheckpoints, startupRepo,
-        messageRepo, providerRegistry(true));
+        messageRepo, providerRegistry(true), new ToolCallRecordRepo(db, agentStorageTestWriter(db)), handoffs);
+    });
+
+    afterEach(() => {
+      NodeFS.rmSync(handoffDir, { recursive: true, force: true });
     });
 
     function providerRegistry(supportsSessionResume: boolean) {
-      const provider = { descriptor: { capabilities: [
-        { name: "session-resume", support: supportsSessionResume ? "supported" : "unsupported" },
-      ] } };
+      const provider = {
+        get maxInputCharactersPerTurn() { return inputCap; },
+        descriptor: { capabilities: [
+          { name: "session-resume", support: supportsSessionResume ? "supported" : "unsupported" },
+        ] },
+      };
       return { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
     }
 
@@ -338,6 +355,19 @@ describe("TurnRecoveryService", () => {
       expect(sink.loadTurn(TURN_ID)?.ending).toEqual({ outcome: "errored",
         failure: { kind: "fatal", provider: "codex", message: "Invalid model" } });
     });
+    it("leaves history to the caller when a retry runs on a fresh session, so a switch's handoff is not doubled", async () => {
+      failTurn();
+      const commands: SendMessageCommand[] = [];
+      await service.retryErroredTurn({ threadId: THREAD_ID, turnId: TURN_ID }, async (command) => {
+        commands.push({ ...command, forceFreshSession: true });
+        await admit(command);
+      }, { reuseUserMessage: true });
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).toMatchObject({ content: "repeat only when asked", forceFreshSession: true });
+      expect(commands[0]!.providerWireOverride).toBeUndefined();
+      expect(await handoffs.readLatestHandoffAudit(THREAD_ID)).toBeNull();
+    });
+
     describe("resumeTurn", () => {
       const UNAVAILABLE = { kind: "fatal", provider: "codex", message: "Session gone", code: "session_resume_unavailable" } as const;
 
@@ -430,8 +460,8 @@ describe("TurnRecoveryService", () => {
         expect(seeded).toMatchObject({ content: RESUME_CONTINUATION_PROMPT, attachments: [], forceFreshSession: true,
           internalUserMessage: true, retryOfExecutionId: sink.loadTurn(nativeTurnId)?.executionId });
         expect(Object.hasOwn(seeded!, "resumeRequired")).toBe(false);
-        expect(seeded!.providerWireOverride).toContain("User: repeat only when asked");
-        expect(seeded!.providerWireOverride?.endsWith(`\n\n---\n\n${RESUME_CONTINUATION_PROMPT}`)).toBe(true);
+        expect(seeded!.providerWireOverride).toContain("repeat only when asked");
+        expect(seeded!.providerWireOverride?.endsWith(`${HANDOFF_FENCE_TAIL}${RESUME_CONTINUATION_PROMPT}`)).toBe(true);
         expect(sink.loadTurn(nativeTurnId)).toMatchObject({ status: "Errored", attemptOf: TURN_ID });
         expect(sink.loadTurn(result.turnId)).toMatchObject({ status: "Running", attemptOf: TURN_ID });
         expect(sink.loadTurn(TURN_ID)?.status).toBe("Interrupted");
@@ -462,7 +492,7 @@ describe("TurnRecoveryService", () => {
         expect(result.mode).toBe("seeded-session");
         expect(commands).toHaveLength(1);
         expect(commands[0]).toMatchObject({ forceFreshSession: true, retryOfExecutionId: EXECUTION_ID, internalUserMessage: true });
-        expect(commands[0]!.providerWireOverride).toContain("User: repeat only when asked");
+        expect(commands[0]!.providerWireOverride).toContain("repeat only when asked");
         expect(commands[0]!.providerWireOverride).not.toContain("Partial work after the input");
         expect(sink.loadTurn(result.turnId)).toMatchObject({ attemptOf: TURN_ID });
       });
@@ -490,6 +520,81 @@ describe("TurnRecoveryService", () => {
         const wire = commands[0]?.providerWireOverride ?? "";
         expect(wire.length).toBeLessThanOrEqual(14_000);
         expect(wire.endsWith(RESUME_CONTINUATION_PROMPT)).toBe(true);
+        expect(wire).toContain("Omitted message sequences: [1]");
+      });
+
+      /** A completed first turn, then an interrupted second turn, so the thread has history to replay. */
+      function interruptedSecondTurn(firstAnswer: string): string {
+        const answer = messageRepo.createAssistantIdempotent({ id: "first-answer", threadId: THREAD_ID, content: firstAnswer, sequence: 2 });
+        sink.finishParentTurn({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+          providerId: "codex", providerIdentities: [], outcome: "completed", projectTurn: () => ({ message: answer, narrative: [] }) });
+        const secondTurnId = "turn-second";
+        sink.startParentTurn({
+          thread: { id: THREAD_ID, workspaceId: "workspace-recovery", providerId: "codex", createdAt: NOW },
+          turnId: secondTurnId, executionId: NodeCrypto.randomUUID(), permissionMode: "supervised", providerIdentities: [],
+          projectUserMessage: () => messageRepo.create(THREAD_ID, "user", "now rename the helper", 3),
+        });
+        interruptTurn(secondTurnId);
+        return secondTurnId;
+      }
+
+      async function resumeSeeded(turnId: string): Promise<string> {
+        const commands: SendMessageCommand[] = [];
+        await service.resumeTurn({ threadId: THREAD_ID, turnId }, async (command) => {
+          commands.push(command);
+          await admit(command);
+        });
+        return commands[0]?.providerWireOverride ?? "";
+      }
+
+      it("seeds the selected history inline within the target's input cap and names what it left out", async () => {
+        const turnId = interruptedSecondTurn("big answer ".repeat(500));
+        inputCap = 2_000;
+        const wire = await resumeSeeded(turnId);
+        expect(wire).toMatch(/^\[mcode-handoff:begin boundary=[0-9a-f]+\]\n/);
+        expect(wire).toContain("repeat only when asked");
+        expect(wire).toContain("now rename the helper");
+        expect(wire).not.toContain("big answer");
+        expect(wire).toContain("Omitted message sequences: [2]");
+        expect(wire.endsWith(`${HANDOFF_FENCE_TAIL}${RESUME_CONTINUATION_PROMPT}`)).toBe(true);
+        expect(wire.length).toBeLessThanOrEqual(inputCap);
+      });
+
+      it("fails with handoff_budget_exhausted instead of sending a truncated message when the preamble cannot fit", async () => {
+        const turnId = interruptedSecondTurn("first answer");
+        // A window this small leaves no history budget after the response reserve.
+        db.prepare("UPDATE threads SET context_window = ? WHERE id = ?").run(10_000, THREAD_ID);
+        const dispatch = vi.fn(rejectDispatch);
+        await expect(service.resumeTurn({ threadId: THREAD_ID, turnId }, dispatch))
+          .rejects.toMatchObject({ code: "handoff_budget_exhausted" });
+        expect(dispatch).not.toHaveBeenCalled();
+        expect(sink.loadTurn(turnId)?.status).toBe("Interrupted");
+        expect(sink.loadCheckpoint(sink.loadTurn(turnId)!.executionId!)?.phase).not.toBe("retried");
+        expect(await handoffs.readLatestHandoffAudit(THREAD_ID)).toBeNull();
+      });
+
+      it("records a recovery handoff listing the covered and omitted sequences", async () => {
+        const turnId = interruptedSecondTurn("big answer ".repeat(500));
+        inputCap = 2_000;
+        const wire = await resumeSeeded(turnId);
+        const record = await handoffs.readLatestHandoffAudit(THREAD_ID);
+        expect(record).toContain("schemaVersion: 2");
+        expect(record).toContain("kind: recovery");
+        expect(record).toContain("fromProvider: codex");
+        expect(record).toContain("coveredSequences: [1,3]");
+        expect(record).toContain("omittedSequences: [2]");
+        // The record holds the history exactly as the target received it.
+        expect(wire).toContain(record!.slice(record!.indexOf("Handoff history")).trimEnd());
+      });
+
+      it("does not write a recovery record when the native session continues", async () => {
+        withNativeSession();
+        interruptTurn();
+        await resume(async (command) => {
+          await admit(command);
+          notifyCommittedCanonicalEvents([providerStarted(sourceTurnId(command))]);
+        });
+        expect(await handoffs.readLatestHandoffAudit(THREAD_ID)).toBeNull();
       });
 
       it("answers native-session when the provider neither starts nor ends within the wait bound", async () => {
@@ -550,7 +655,7 @@ describe("TurnRecoveryService", () => {
         });
         expect(commands).toHaveLength(1);
         expect(commands[0]).toMatchObject({ forceFreshSession: true, internalUserMessage: true, model: "gpt-5.5" });
-        expect(commands[0]!.providerWireOverride).toContain("User: repeat only when asked");
+        expect(commands[0]!.providerWireOverride).toContain("repeat only when asked");
       });
 
       function limitTurn(output: "none" | "partial-answer"): void {

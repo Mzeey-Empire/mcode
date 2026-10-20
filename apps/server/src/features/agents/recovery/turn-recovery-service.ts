@@ -8,16 +8,17 @@ import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { ThreadStartupRepo } from "../../thread-startup/persistence/thread-startup-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
-import { buildConversationReplay, replayBudgetChars } from "../../handoff/artifacts/handoff-builder.js";
-import { TurnRecoveryError } from "./turn-recovery-error.js";
+import { HandoffStorage } from "../../handoff/persistence/handoff-storage.js";
 import {
-  buildSeededResumeWire,
-  chooseResumePath,
-  NativeResumeWatch,
-  RESUME_CONTINUATION_PROMPT,
-  seededReplayBudget,
-  type ResumePathInput,
-} from "./turn-resume.js";
+  buildFencedHandoff,
+  HandoffBudgetExhaustedError,
+  loadHandoffMessages,
+  targetInputCharacterCap,
+  type FencedHandoff,
+} from "../../handoff/v2/index.js";
+import { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
+import { TurnRecoveryError } from "./turn-recovery-error.js";
+import { chooseResumePath, NativeResumeWatch, RESUME_CONTINUATION_PROMPT, type ResumePathInput } from "./turn-resume.js";
 import type { SendMessageCommand } from "../orchestration/agent-service.js";
 import type {
   AgentTurnEnding,
@@ -34,9 +35,6 @@ const UNPROVED_EXECUTION_REASON =
   "The provider could not prove that this execution was still active after restart.";
 // Long enough for a provider to reopen its session, short enough to answer inside the client's request timeout.
 const NATIVE_RESUME_WAIT_MS = 15_000;
-const SEED_HISTORY_MAX_ROWS = 500;
-// Seed history is read by bytes; four bytes per character covers any UTF-8 text the character budget admits.
-const SEED_HISTORY_BYTES_PER_CHAR = 4;
 
 /** Dispatches one turn command; resolves once admission completes. */
 type TurnDispatch = (command: SendMessageCommand) => Promise<void>;
@@ -74,6 +72,8 @@ export class TurnRecoveryService {
     @inject(ThreadStartupRepo) private readonly startupRepo: ThreadStartupRepo,
     @inject(MessageRepo) private readonly messages: MessageRepo,
     @inject("IProviderRegistry") private readonly providers: IProviderRegistry,
+    @inject(ToolCallRecordRepo) private readonly toolCalls: ToolCallRecordRepo,
+    @inject(HandoffStorage) private readonly handoffStorage: HandoffStorage,
   ) {}
 
   /**
@@ -265,23 +265,69 @@ export class TurnRecoveryService {
     retryOfExecutionId: string,
     dispatch: TurnDispatch,
   ): Promise<string> {
+    // Built before dispatch so a history that cannot fit fails the resume instead of sending a truncated message.
+    const handoff = this.seededResumeHandoff(target);
     const turnId = NodeCrypto.randomUUID();
     await this.dispatchAttempt(turnId, {
       ...this.continuationCommand(target, retryOfExecutionId),
       forceFreshSession: true,
-      providerWireOverride: this.seededResumeWire(target),
+      providerWireOverride: `${handoff.preamble}${RESUME_CONTINUATION_PROMPT}`,
     }, dispatch);
+    await this.writeRecoveryAudit(target.thread, handoff);
     return turnId;
   }
 
-  private seededResumeWire(target: RecoverableTurn): string {
-    const providerId = ProviderIdSchema.parse(target.thread.provider);
-    const budget = seededReplayBudget(providerId, replayBudgetChars(target.thread.model ?? ""));
-    const history = this.messages.listByThreadUpToSequenceBudgeted(target.thread.id, target.message.sequence, {
-      maxBytes: budget * SEED_HISTORY_BYTES_PER_CHAR,
-      maxRows: SEED_HISTORY_MAX_ROWS,
-    });
-    return buildSeededResumeWire(buildConversationReplay(history.messages, budget));
+  /**
+   * The thread's history up to the interrupted turn's prompt, budgeted for the fresh session that replaces the lost
+   * one. Only this path seeds history: a retry on the thread's own session already has it, and a provider switch
+   * builds its own handoff for the command it sends.
+   */
+  private seededResumeHandoff(target: RecoverableTurn): FencedHandoff {
+    const { thread } = target;
+    const providerId = ProviderIdSchema.parse(thread.provider);
+    try {
+      return buildFencedHandoff({
+        kind: "recovery",
+        threadId: thread.id,
+        fromProvider: providerId,
+        toProvider: providerId,
+        rows: loadHandoffMessages({ messageRepo: this.messages, toolCallRecordRepo: this.toolCalls, threadId: thread.id }),
+        afterSequence: 0,
+        throughSequence: target.message.sequence,
+        contextWindow: thread.context_window ?? null,
+        inputCharacterCap: targetInputCharacterCap(this.providers.resolve(providerId), providerId),
+        userText: RESUME_CONTINUATION_PROMPT,
+        attachments: [],
+      });
+    } catch (error) {
+      if (!(error instanceof HandoffBudgetExhaustedError)) throw error;
+      throw new TurnRecoveryError(
+        error.code,
+        `The conversation cannot be replayed into a fresh session within its context window. ${error.message}`,
+        { cause: error },
+      );
+    }
+  }
+
+  private async writeRecoveryAudit(thread: Thread, handoff: FencedHandoff): Promise<void> {
+    if (handoff.preamble === "") return;
+    const providerId = ProviderIdSchema.parse(thread.provider);
+    try {
+      await this.handoffStorage.writeHandoffAudit(thread.id, {
+        kind: "recovery",
+        fromProvider: providerId,
+        toProvider: providerId,
+        coveredSequences: handoff.selection.selectedSequences,
+        omittedSequences: handoff.selection.omittedSequences,
+        budgetBytes: handoff.selection.budgetBytes,
+        droppedOptions: [],
+        history: handoff.selection.text,
+      });
+    } catch (error) {
+      // The audit is a record of what was sent; losing it must not fail an attempt the provider already accepted.
+      logger.error("Recovery handoff audit was not written", { threadId: thread.id,
+        error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   private async dispatchAttempt(turnId: string, command: SendMessageCommand, dispatch: TurnDispatch): Promise<void> {

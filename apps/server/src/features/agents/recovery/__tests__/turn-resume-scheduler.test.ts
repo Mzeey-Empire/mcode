@@ -1,6 +1,8 @@
 import "reflect-metadata";
 import { TurnRevertStore } from "../../turns/persistence/turn-revert-store.js";
 import * as NodePath from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodeCrypto from "node:crypto";
 import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
@@ -10,6 +12,7 @@ import type { IAgentProvider, IProviderRegistry, ScheduledTurnResume } from "@mc
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
 import { GitRepositoryService } from "../../../projects/git/git-repository-service.js";
@@ -81,6 +84,7 @@ describe("TurnResumeScheduler", () => {
   let threads: ThreadRepo;
   let store: TurnResumeScheduleStore;
   let recovery: TurnRecoveryService;
+  let handoffDir: string;
   let scheduler: TurnResumeScheduler;
   let clock: FakeClock;
   let messages: MessageStore;
@@ -124,10 +128,13 @@ describe("TurnResumeScheduler", () => {
     store = new TurnResumeScheduleStore(db, writer);
     messages = new MessageStore(db);
     // Without a resumable provider session the resume seeds a fresh one, so admission settles without a live provider.
-    const provider = { descriptor: { capabilities: [{ name: "session-resume", support: "unsupported" as const }] } };
+    const provider = { maxInputCharactersPerTurn: 100_000, descriptor: { capabilities: [{ name: "session-resume", support: "unsupported" as const }] } };
+    // The seeded resume writes a handoff record, which must not land in the developer's real data directory.
+    handoffDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "resume-scheduler-handoff-"));
     recovery = new TurnRecoveryService(boundary, threads, new AttachmentService(),
       new ParentAssistantTextCheckpointService(db, writer), new ThreadStartupRepo(db, writer), new MessageRepo(db, writer),
-      { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} });
+      { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} },
+      new ToolCallRecordRepo(db, writer), HandoffStorage.forTesting({ mcodeDirFn: () => handoffDir }));
     startTurn(TURN_ID, EXECUTION_ID);
     limitTurn();
     clock = new FakeClock();
@@ -149,6 +156,7 @@ describe("TurnResumeScheduler", () => {
   afterEach(async () => {
     await scheduler.shutdown();
     await closeAgentStorageTestDatabases();
+    NodeFS.rmSync(handoffDir, { recursive: true, force: true });
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
