@@ -240,7 +240,7 @@ export function DesignLayer({
                       <AnnotationMarker
                         displayNumber={annotation.displayNumber}
                         className="size-6 text-primary"
-                        numberClassName="text-caption leading-none text-primary-ink"
+                        numberClassName="text-caption text-primary-ink"
                       />
                     </button>
                   }
