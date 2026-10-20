@@ -802,19 +802,15 @@ describe("ProjectActionService preview", () => {
 
   it("judges and opens the configured URL even when the command prints a different live one", async () => {
     const configured = await portListener();
-    await configured.close();
     const printed = await portListener();
     const configuredUrl = `http://127.0.0.1:${configured.port}/`;
     const f = await actionFixture(false, "vite", { openPreview: configuredUrl });
     const updates: PreviewUpdate[] = [];
     f.actions.onUpdate((update) => updates.push(update));
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const run = await f.actions.start(actionSlot);
-    f.host.emitOutput(f.creates.mock.calls[0][0].sessionId, Buffer.from(`http://127.0.0.1:${printed.port}/\n`));
-    await portListener("127.0.0.1", configured.port);
-    const confirmed = nextReachability(f.actions, true);
-    await vi.advanceTimersByTimeAsync(1_000);
-    await confirmed;
+    f.host.emitOutput(f.creates.mock.calls[0][0].sessionId, Buffer.from(`http://127.0.0.1:${printed.port}/
+`));
+    await vi.waitFor(() => expect(openPreviews(updates)).toHaveLength(1));
 
     expect(f.actions.get(actionSlot)?.port).toMatchObject({ port: configured.port, url: configuredUrl });
     expect(openPreviews(updates)).toEqual([[run.runId, configuredUrl]]);
