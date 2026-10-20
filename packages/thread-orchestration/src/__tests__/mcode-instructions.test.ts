@@ -33,6 +33,9 @@ describe("Mcode runtime instruction sections", () => {
   it.each([
     "Create one Mcode thread named leaf_probe",
     "Use thread_create_batch for the requested Mcode thread",
+    "Use the mcode delegate_task tool to hand this to Claude",
+    "Call task_status for the delegated task",
+    "Cancel it with task_cancel",
   ])("recognizes explicit Mcode thread requests: %s", (request) => {
     expect(isExplicitMcodeThreadRequest(request)).toBe(true);
   });

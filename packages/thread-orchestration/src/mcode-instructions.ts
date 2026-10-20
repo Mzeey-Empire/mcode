@@ -3,9 +3,9 @@
 /** Codex silently cuts the middle out of an additionalContext value above ~1,000 tokens (UTF-8 bytes / 4). */
 export const MCODE_INSTRUCTION_SECTION_MAX_BYTES = 4_000;
 
-const EXPLICIT_MCODE_THREAD_TOKEN = /\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait))\b/i;
-const NEGATED_MCODE_THREAD_REQUEST = /\b(?:do\s+not|don['’]?t|dont|never|without|no)\b[\s\S]{0,96}\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait))\b/i;
-const MCODE_THREAD_REQUEST_ACTION = /\b(?:create|start|open|launch|use|manage|list|search|send|stop|wait|get|target|delegate)\b/i;
+const EXPLICIT_MCODE_THREAD_TOKEN = /\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait)|delegate_task|task_(?:status|cancel))\b/i;
+const NEGATED_MCODE_THREAD_REQUEST = /\b(?:do\s+not|don['’]?t|dont|never|without|no)\b[\s\S]{0,96}\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait)|delegate_task|task_(?:status|cancel))\b/i;
+const MCODE_THREAD_REQUEST_ACTION = /\b(?:create|start|open|launch|use|manage|list|search|send|stop|wait|get|target|delegate|call|check|cancel)\b/i;
 
 /** Stable section names used as Codex context tags. */
 export type McodeInstructionSectionKey =
