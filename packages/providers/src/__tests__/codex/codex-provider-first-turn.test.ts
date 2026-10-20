@@ -1115,7 +1115,7 @@ describe("CodexProvider first turn on new session", () => {
     await provider.shutdown();
   });
 
-  it.each([{}, { turnId: "child-turn" }])("holds a linked child's startup notice until its native turn is bound (%j)", async (nativeTurn) => {
+  it.each([{}, { turnId: "child-turn" }])("holds a linked child's warning until its native turn is bound while suppressing unknown notices (%j)", async (nativeTurn) => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
       .mockResolvedValue(acceptedEventReceipt);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
@@ -1130,6 +1130,8 @@ describe("CodexProvider first turn on new session", () => {
       turnId: "turn-test-id", item: { type: "subAgentActivity", id: "spawn-child", kind: "started",
         agentThreadId: "native-child", agentPath: "/root/worker" } } });
     server.emit("notification", { method: "future/childStartupNotice", params: { threadId: "native-child", ...nativeTurn } });
+    server.emit("notification", { method: "warning", params: { threadId: "native-child", ...nativeTurn,
+      message: "Child startup warning" } });
     await provider.waitForCanonicalTurnEvents({ threadId, turnId: "test-turn",
       executionId: schemaValidExecutionId, deliveryAttempt: 2 });
     expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
@@ -1149,8 +1151,14 @@ describe("CodexProvider first turn on new session", () => {
     const startedIndex = childEvents.findIndex((event) => event.event.type === AgentEventType.TurnStarted);
     expect(startedIndex).toBeGreaterThanOrEqual(0);
     expect(noticeIndex).toBeGreaterThan(startedIndex);
-    expect(childEvents[noticeIndex]?.event).toMatchObject({ subtype: "provider.notice.unknown-event",
-      turnExecutionId: schemaValidExecutionId });
+    expect(childEvents[startedIndex]).toMatchObject({
+      extension: { child: { nativeThreadId: "native-child", nativeTurnId: "child-turn" } },
+    });
+    expect(childEvents[noticeIndex]).toMatchObject({ deliveryAttempt: 2,
+      event: { threadId, subtype: "provider.notice.warning", message: "Child startup warning",
+        turnExecutionId: schemaValidExecutionId },
+      extension: { child: { nativeThreadId: "native-child",
+        parentCollaborationItemId: "spawn-child" } } });
     expect(childEvents.filter((event) => event.event.type === AgentEventType.System)).toHaveLength(1);
     expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)).at(-1)?.event)
       .toMatchObject({ type: AgentEventType.Ended, outcome: "completed" });
@@ -1212,7 +1220,7 @@ describe("CodexProvider first turn on new session", () => {
     await provider.shutdown();
   });
 
-  it("owns a later turn's unlinked native thread notice through its active canonical stream", async () => {
+  it("suppresses unlinked startup updates while owning a later turn's main-thread startup through its active canonical stream", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
       .mockResolvedValue(acceptedEventReceipt);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
@@ -1237,6 +1245,7 @@ describe("CodexProvider first turn on new session", () => {
     sendTurnMock.mockResolvedValueOnce("next-native-turn");
     await provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: nextExecutionId });
     await new Promise<void>((resolve) => setImmediate(resolve));
+    const legacyBeforeStartup = legacy.length;
     server.emit("notification", {
       method: "mcpServer/startupStatus/updated", params: { threadId: "unlinked-child", name: "native-mcp", status: "ready" },
     });
@@ -1245,19 +1254,28 @@ describe("CodexProvider first turn on new session", () => {
         threadId: "unlinked-child", turnId: "turn-test-id", name: "stale-mcp", status: "ready",
       },
     });
+    server.emit("notification", {
+      method: "mcpServer/startupStatus/updated", params: { threadId: "sdk-thread-1", name: "current-mcp", status: "ready" },
+    });
+    server.emit("notification", {
+      method: "mcpServer/startupStatus/updated", params: {
+        threadId: "sdk-thread-1", turnId: "turn-test-id", name: "stale-main-mcp", status: "ready",
+      },
+    });
     await provider.waitForCanonicalTurnEvents({
       threadId, turnId: "next-turn", executionId: nextExecutionId, deliveryAttempt: 2,
     });
 
     expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))).toContainEqual(expect.objectContaining({
       deliveryAttempt: 2,
-      event: expect.objectContaining({ type: AgentEventType.System, threadId, turnExecutionId: nextExecutionId,
-        subtype: "provider.notice.unknown-event", systemNotice: expect.objectContaining({ origin: "unattributed-thread" }) }),
+      event: expect.objectContaining({ type: AgentEventType.McpServerStartupStatus, threadId, turnExecutionId: nextExecutionId,
+        serverThreadId: "sdk-thread-1", name: "current-mcp", status: "ready" }),
     }));
     expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)).filter((event) =>
-      event.event.type === AgentEventType.System && event.event.subtype === "provider.notice.unknown-event")).toHaveLength(1);
-    expect(legacy.filter((event) => event.event.type === AgentEventType.System
-      && event.event.subtype === "provider.notice.unknown-event")).toEqual([]);
+      event.event.type === AgentEventType.System || event.event.type === AgentEventType.McpServerStartupStatus))
+      .toMatchObject([{ event: { type: AgentEventType.McpServerStartupStatus, name: "current-mcp" } }]);
+    expect(legacy.slice(legacyBeforeStartup)).toEqual([]);
+    await provider.shutdown();
   });
 
   it("fences duplicate parent Ended callbacks for an owned attempt", async () => {

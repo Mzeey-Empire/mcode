@@ -1,12 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderRuntimeEventSchema } from "@mcode/contracts";
+import { logger } from "@mcode/shared";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
 import { parseCodexNotification } from "../../private/codex/codex-notification-validation.js";
+
+vi.mock("@mcode/shared", () => ({
+  getMcodeDir: () => process.env.MCODE_DATA_DIR ?? ".",
+  logger: { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() },
+}));
 
 const createMapper = () => new CodexEventMapper("thread-1", "native-main");
 const reroute = { threadId: "native-main", turnId: "turn-1", fromModel: "requested", toModel: "safe", reason: "highRiskCyberActivity" };
 
 describe("Codex notification boundary", () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it("classifies unknown envelopes explicitly and rejects a conflicting JSON-RPC version", () => {
     expect(parseCodexNotification({ method: "future/notice", params: {} })).toEqual({ jsonrpc: "2.0", method: "future/notice", params: {}, unrecognized: true });
     expect(parseCodexNotification({ jsonrpc: "1.0", method: "warning", params: { message: "not a v2 notification" } })).toBeUndefined();
@@ -18,7 +26,7 @@ describe("Codex notification boundary", () => {
     expect(mapper.mapNotificationWithDisposition({ method: "windows/worldWritableWarning", params }).events).toMatchObject([{ event: { type: "system", systemNotice: { kind: "security" } } }]);
     const oversized = mapper.mapNotificationWithDisposition({ method: "windows/worldWritableWarning", params: { ...params, samplePaths: Array.from({ length: 1_024 }, () => "P".repeat(1_025)) } });
     expect(oversized.disposition).toEqual({ kind: "diagnostic", reason: "malformed-notification" });
-    expect(oversized.events).toMatchObject([{ event: { message: "Codex sent a malformed notification." } }]);
+    expect(oversized.events).toEqual([]);
   });
 
   it("accepts upstream reasoning, command, MCP, goal, and terminal lifecycle payloads", () => {
@@ -68,9 +76,9 @@ describe("Codex notification boundary", () => {
     const mapper = createMapper();
     const result = mapper.mapNotificationWithDisposition(input);
     expect(result.disposition).toEqual({ kind: "diagnostic", reason: "malformed-notification" });
-    expect(result.events).toHaveLength(1);
-    expect(result.events[0].event).toMatchObject({ type: "system", message: "Codex sent a malformed notification.", systemNotice: { kind: "diagnostic" } });
-    expect(JSON.stringify(result.events)).not.toContain("private-payload");
+    expect(result.events).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("private-payload");
+    expect(JSON.stringify(Object.values(logger).map((log) => vi.mocked(log).mock.calls))).not.toContain("private-payload");
     expect(mapper.mapNotification({ method: "turn/completed", params: { turn: { status: "completed" } } }).map(({ event }) => event.type)).toEqual(["turnComplete"]);
   });
 
@@ -103,9 +111,10 @@ describe("Codex notification boundary", () => {
     mapper.mapNotification({ method: "turn/completed", params: { turn: { status: "completed" } } });
     const result = mapper.mapNotificationWithDisposition({ method, params: { rawSecret: "private-payload" } });
     expect(result.disposition).toEqual({ kind: "diagnostic", reason: "unknown-notification" });
-    expect(result.events).toHaveLength(1);
-    expect(result.events[0].event).toMatchObject({ type: "system", systemNotice: { kind: "diagnostic" } });
-    expect(JSON.stringify(result.events)).not.toContain("private-payload");
+    expect(result.events).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("private-payload");
+    expect(logger.warn).toHaveBeenCalledWith("CodexEventMapper: unrecognized notification", { method });
+    expect(JSON.stringify(Object.values(logger).map((log) => vi.mocked(log).mock.calls))).not.toContain("private-payload");
   });
 
   it("reports state-only buffering and emits the buffered command output on completion", () => {
@@ -135,7 +144,8 @@ describe("Codex notification boundary", () => {
   it("keeps an unlinked thread's unknown update out of the parent transcript", () => {
     const result = createMapper().mapNotificationWithDisposition({ method: "future/update", params: { threadId: "unknown-child", privateText: "private-payload" } });
     expect(result.disposition).toEqual({ kind: "diagnostic", reason: "unattributed-thread" });
-    expect(result.events).toMatchObject([{ event: { type: "system", systemNotice: { kind: "diagnostic", scope: "session", origin: "unattributed-thread" } } }]);
-    expect(JSON.stringify(result.events)).not.toContain("private-payload");
+    expect(result.events).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("private-payload");
+    expect(JSON.stringify(Object.values(logger).map((log) => vi.mocked(log).mock.calls))).not.toContain("private-payload");
   });
 });
