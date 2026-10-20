@@ -140,6 +140,10 @@ export class ThreadRepo {
     return changed;
   }
 
+  commitProviderSwitch(...input: Parameters<ThreadStore["commitProviderSwitch"]>): Promise<ReturnType<ThreadStore["commitProviderSwitch"]>> {
+    return this.writer.execute(threadWriteOperations.commitProviderSwitch, input);
+  }
+
   /** Publish planning changes after their transaction has committed. */
   publishPlanPhase(threadId: string): void {
     this.attention?.invalidate(threadId);

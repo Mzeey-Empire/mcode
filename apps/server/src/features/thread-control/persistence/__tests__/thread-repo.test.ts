@@ -693,6 +693,38 @@ describe("ThreadRepo per-provider sessions", () => {
     expect(sessions.listForThread(threadId)).toEqual([]);
   });
 
+  describe("commitProviderSwitch", () => {
+    it("moves the thread to the target and points the legacy column at the target's own session", () => {
+      threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+      threadRepo.updateSdkSessionId(threadId, "codex", "codex-session");
+
+      threadRepo.commitProviderSwitch(threadId, { provider: "codex", model: "gpt-5", reasoning_level: "high" }, null);
+
+      const thread = threadRepo.findById(threadId);
+      expect(thread).toMatchObject({ provider: "codex", model: "gpt-5", reasoning_level: "high", sdk_session_id: "codex-session" });
+      expect(sessions.find(threadId, "claude")?.sessionId).toBe("claude-session");
+    });
+
+    it("leaves the legacy column empty when the only target row is the stale session a fresh start replaces", () => {
+      threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+      threadRepo.updateSdkSessionId(threadId, "codex", "stale-codex-session");
+
+      threadRepo.commitProviderSwitch(threadId, { provider: "codex", model: "gpt-5" }, "stale-codex-session");
+
+      expect(legacySessionId()).toBeNull();
+    });
+
+    it("adopts a fresh session the target reported before the commit", () => {
+      threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");
+      threadRepo.updateSdkSessionId(threadId, "codex", "stale-codex-session");
+      threadRepo.updateSdkSessionId(threadId, "codex", "new-codex-session");
+
+      threadRepo.commitProviderSwitch(threadId, { provider: "codex", model: "gpt-5" }, "stale-codex-session");
+
+      expect(legacySessionId()).toBe("new-codex-session");
+    });
+  });
+
   describe("resolve", () => {
     it("returns the legacy column for the active provider, with the row's watermark when it names the same session", () => {
       threadRepo.updateSdkSessionId(threadId, "claude", "claude-session");

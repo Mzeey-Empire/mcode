@@ -53,6 +53,9 @@ export const threadWriteOperations = {
   updatePr: databaseWriteOperation("thread.updatePr", z.tuple([z.string(), z.number(), z.string()]), z.boolean()),
   updateContextUsage: databaseWriteOperation("thread.updateContextUsage", z.tuple([z.string(), z.number(), z.number().optional()]), z.boolean()),
   updateSettings: databaseWriteOperation("thread.updateSettings", z.tuple([z.string(), settings]), z.boolean()),
+  commitProviderSwitch: databaseWriteOperation("thread.commitProviderSwitch", z.tuple([
+    z.string(), settings.extend({ provider: z.string() }), z.string().nullable(),
+  ]), z.boolean()),
   updateTitle: booleanByPair("thread.updateTitle"),
   updateCompactSummary: databaseWriteOperation("thread.updateCompactSummary", z.tuple([z.string(), z.string()]), z.void()),
   updateLineage: databaseWriteOperation("thread.updateLineage", z.tuple([z.string(), z.string(), z.string()]), z.boolean()),
