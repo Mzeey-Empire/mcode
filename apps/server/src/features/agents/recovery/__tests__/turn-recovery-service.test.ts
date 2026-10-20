@@ -509,18 +509,44 @@ describe("TurnRecoveryService", () => {
         expect(commands[0]?.forceFreshSession).toBe(true);
       });
 
-      it("fits a seeded Codex input inside the inline limit", async () => {
+      it("fails instead of sending a fence that omits the interrupted turn's own request", async () => {
         db.prepare("UPDATE messages SET content = ? WHERE thread_id = ?").run("x".repeat(60_000), THREAD_ID);
         interruptTurn();
-        const commands: SendMessageCommand[] = [];
-        await resume(async (command) => {
-          commands.push(command);
-          await admit(command);
-        });
-        const wire = commands[0]?.providerWireOverride ?? "";
+        const dispatch = vi.fn(rejectDispatch);
+        await expect(resume(dispatch)).rejects.toMatchObject({ code: "handoff_budget_exhausted" });
+        expect(dispatch).not.toHaveBeenCalled();
+        expect(sink.loadTurn(TURN_ID)?.status).toBe("Interrupted");
+        expect(await handoffs.readLatestHandoffAudit(THREAD_ID)).toBeNull();
+      });
+
+      it("fails a reseeded retry whose original request no longer fits", async () => {
+        interruptTurn();
+        const first = await resume(admit);
+        errorAttempt(first.turnId, { kind: "fatal", provider: "codex", message: "Rate limited" });
+        db.prepare("UPDATE messages SET content = ? WHERE thread_id = ? AND is_internal = 0").run("x".repeat(60_000), THREAD_ID);
+        const dispatch = vi.fn(rejectDispatch);
+        await expect(service.retryErroredTurn({ threadId: THREAD_ID, turnId: first.turnId }, dispatch))
+          .rejects.toMatchObject({ code: "handoff_budget_exhausted" });
+        expect(dispatch).not.toHaveBeenCalled();
+      });
+
+      it("trims history to Codex's inline ceiling even when the provider declares a larger cap", async () => {
+        // Small enough for the declared 100000-character cap and the 16000-byte history budget, so only the
+        // 14000-character ceiling forces it out.
+        const turnId = interruptedSecondTurn("x".repeat(14_000));
+        const wire = await resumeSeeded(turnId);
         expect(wire.length).toBeLessThanOrEqual(14_000);
-        expect(wire.endsWith(RESUME_CONTINUATION_PROMPT)).toBe(true);
-        expect(wire).toContain("Omitted message sequences: [1]");
+        expect(wire).toContain("now rename the helper");
+        expect(wire).toContain("Omitted message sequences: [2]");
+      });
+
+      it.each([
+        { name: "rejects the command", dispatch: async () => { throw new Error("provider unavailable"); } },
+        { name: "returns without admitting a turn", dispatch: async () => {} },
+      ])("writes no recovery record when dispatch $name", async ({ dispatch }) => {
+        const turnId = interruptedSecondTurn("first answer");
+        await expect(service.resumeTurn({ threadId: THREAD_ID, turnId }, dispatch)).rejects.toThrow();
+        expect(await handoffs.readLatestHandoffAudit(THREAD_ID)).toBeNull();
       });
 
       /** A completed first turn, then an interrupted second turn, so the thread has history to replay. */

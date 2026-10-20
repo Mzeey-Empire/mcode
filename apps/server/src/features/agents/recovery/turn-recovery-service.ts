@@ -12,6 +12,7 @@ import { HandoffStorage } from "../../handoff/persistence/handoff-storage.js";
 import {
   buildFencedHandoff,
   HandoffBudgetExhaustedError,
+  type HandoffMessageInput,
   loadHandoffMessages,
   targetInputCharacterCap,
   type FencedHandoff,
@@ -58,6 +59,20 @@ function reusedUserMessage(
     attachments: [],
     persistedUserMessage: { id: message.id, sequence: message.sequence, attachments: stored, persistedAttachments: persisted },
   };
+}
+
+/**
+ * The continuation prompt only says "continue", so the user's request that the interrupted turn was working on
+ * has to reach the fresh session. Whole-item selection can drop it when it is too large; a fence that lists the
+ * task as omitted would send the model off with nothing to continue, so that case fails like an exhausted budget.
+ */
+function requireTaskInHandoff(handoff: FencedHandoff, rows: readonly HandoffMessageInput[], message: Message): void {
+  // A failed resume attempt is itself a hidden message; its task is the latest visible user message before it.
+  const task = message.is_internal
+    ? rows.filter((row) => row.role === "user" && !row.isInternal && row.sequence < message.sequence).at(-1)
+    : message;
+  if (!task || handoff.selection.selectedSequences.includes(task.sequence)) return;
+  throw new HandoffBudgetExhaustedError("The interrupted turn's request does not fit the available byte budget.");
 }
 
 /** Reconciles interrupted executions and admits explicit retries and resumes of ended attempts. */
@@ -285,13 +300,14 @@ export class TurnRecoveryService {
   private seededResumeHandoff(target: RecoverableTurn): FencedHandoff {
     const { thread } = target;
     const providerId = ProviderIdSchema.parse(thread.provider);
+    const rows = loadHandoffMessages({ messageRepo: this.messages, toolCallRecordRepo: this.toolCalls, threadId: thread.id });
     try {
-      return buildFencedHandoff({
+      const handoff = buildFencedHandoff({
         kind: "recovery",
         threadId: thread.id,
         fromProvider: providerId,
         toProvider: providerId,
-        rows: loadHandoffMessages({ messageRepo: this.messages, toolCallRecordRepo: this.toolCalls, threadId: thread.id }),
+        rows,
         afterSequence: 0,
         throughSequence: target.message.sequence,
         contextWindow: thread.context_window ?? null,
@@ -299,6 +315,8 @@ export class TurnRecoveryService {
         userText: RESUME_CONTINUATION_PROMPT,
         attachments: [],
       });
+      requireTaskInHandoff(handoff, rows, target.message);
+      return handoff;
     } catch (error) {
       if (!(error instanceof HandoffBudgetExhaustedError)) throw error;
       throw new TurnRecoveryError(

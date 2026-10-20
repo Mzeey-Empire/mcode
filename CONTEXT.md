@@ -50,7 +50,7 @@ same-turn recovery is unavailable. **Retry** replays an errored turn's user
 message. **Resume** continues an interrupted turn with a hidden continuation
 prompt: in the provider's saved session when it can, otherwise in a fresh
 session seeded with a budgeted selection of the thread's conversation (handoff v2). If
-even the handoff preamble cannot fit, the resume fails instead of sending a truncated
+the handoff preamble or the interrupted turn's own request cannot fit, the resume fails instead of sending a truncated
 message. Either may repeat effects from the earlier attempt. The transcript shows the turn's user message once, then
 only the latest attempt; earlier attempts' records stay persisted.
 
