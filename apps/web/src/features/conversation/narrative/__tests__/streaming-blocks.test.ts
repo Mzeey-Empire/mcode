@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitStreamingBlocks } from "../streaming-blocks";
+import { committedStreamingText, splitStreamingBlocks } from "../streaming-blocks";
 
 describe("splitStreamingBlocks", () => {
   it("returns one text part for text without constructs", () => {
@@ -160,5 +160,44 @@ describe("splitStreamingBlocks", () => {
   it("does not treat two pipe rows without dashes as a table", () => {
     const text = "| a |\n| b |";
     expect(splitStreamingBlocks(text)).toEqual([{ kind: "text", text }]);
+  });
+});
+
+describe("committedStreamingText", () => {
+  it("commits through the last blank line and holds the unfinished paragraph", () => {
+    expect(committedStreamingText("One.\n\nTwo.\n\nThr")).toEqual({ committed: "One.\n\nTwo.\n\n", tail: "Thr" });
+  });
+
+  it("commits nothing before the first block boundary", () => {
+    expect(committedStreamingText("Still typing\nthe first paragraph")).toEqual({
+      committed: "",
+      tail: "Still typing\nthe first paragraph",
+    });
+  });
+
+  it("does not commit at a whitespace-only line that has no newline yet", () => {
+    expect(committedStreamingText("One.\n  ")).toEqual({ committed: "", tail: "One.\n  " });
+  });
+
+  it("does not treat a blank line inside an open fence as a boundary", () => {
+    const text = "Intro.\n\n```ts\nconst a = 1;\n\nconst b";
+    expect(committedStreamingText(text)).toEqual({ committed: "Intro.\n\n", tail: "```ts\nconst a = 1;\n\nconst b" });
+  });
+
+  it("commits through a fence's closing line", () => {
+    const text = "```ts\nconst a = 1;\n```\nAfter";
+    expect(committedStreamingText(text)).toEqual({ committed: "```ts\nconst a = 1;\n```\n", tail: "After" });
+  });
+
+  it("finds blank-line boundaries in CRLF text", () => {
+    expect(committedStreamingText("One.\r\n\r\nTwo")).toEqual({ committed: "One.\r\n\r\n", tail: "Two" });
+  });
+
+  it("splits every prefix of a stream without losing or adding characters", () => {
+    const text = "Lead.\r\n\r\n```js\nx();\n\n```\n| A |\n| - |\n\n  \nEnd";
+    for (let end = 0; end <= text.length; end++) {
+      const { committed, tail } = committedStreamingText(text.slice(0, end));
+      expect(committed + tail).toBe(text.slice(0, end));
+    }
   });
 });

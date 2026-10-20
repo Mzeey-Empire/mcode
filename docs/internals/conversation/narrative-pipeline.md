@@ -524,8 +524,9 @@ before reporting the change done:
   chronological order.
 - **Reasoning:** each reasoning block shows as a collapsed `Thought` row
   between the tools around it, and opens to show its text.
-- **Streaming response:** typing cursor sits inline at the end of the last
-  word — not on its own line below the last paragraph.
+- **Streaming response:** text appears a paragraph at a time, and the typing
+  cursor sits inline after the last word of the last finished paragraph, not
+  on its own line below it.
 - **Turn completion:** the activity folds under "Worked for <duration>" above
   the answer, fork and copy show at rest, and the meta line shows the
   step and sub-agent counts.

@@ -1,11 +1,9 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { splitStreamingBlocks, type StreamingBlockPart } from "./streaming-blocks";
-import { CodeBlock } from "@/components/chat/CodeBlock";
+import { lazy, Suspense, useLayoutEffect, useMemo, useRef } from "react";
+import { committedStreamingText, splitStreamingBlocks } from "./streaming-blocks";
 import { TURN_PROSE_CLASS } from "./narrative-layout";
 import { stripPlanFences } from "@/lib/plan-fences";
 
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
-const LazyMermaidBlock = lazy(() => import("@/components/chat/MermaidBlock"));
 
 /** Typing caret size from the Paper boards: a 2×18 bar centred on the prose line. */
 const CARET_WIDTH_PX = 2;
@@ -17,19 +15,14 @@ interface DeltaBlockProps {
   /** The streamed response text to display. */
   text: string;
   /**
-   * When true, the typewriter reveals characters one-at-a-time. When false,
-   * the text renders immediately at its full length and no animation runs.
-   * Drives only the *reveal animation*, not the cursor caret — see
-   * `showCursor` for that. Defaults to true (legacy delta-row usage).
+   * When true, the unfinished paragraph stays hidden until a blank line or
+   * closing fence commits it; open fences and tables show a skeleton instead.
+   * When false, the full text renders. Defaults to true.
    */
   isStreaming?: boolean;
   /**
-   * When true, the typing caret blinks at the end of the rendered text while
-   * `isStreaming` is also true. Set false for segments that are *animating
-   * into view* but are not actively receiving more deltas — e.g. a just-closed
-   * preamble thought re-typewriting into a `ThoughtBlock` after `tool_use`
-   * fires. Without this gate, every closed thought would park a blinking
-   * cursor at its end. Defaults to true.
+   * Shows the typing caret while `isStreaming` is also true. Defaults to true.
+   * `ThoughtBlock` turns it off so earlier narration segments don't each park a caret.
    */
   showCursor?: boolean;
   /**
@@ -68,7 +61,7 @@ function measureCaretPosition(
   root: HTMLElement,
   cursor: HTMLElement,
   lastTextNode: Text,
-): { x: number; y: number; h: number } | null {
+): CaretPosition | null {
   const rootRect = root.getBoundingClientRect();
   if (lastTextNode.parentElement?.closest("p")) {
     const caretRect = getCaretRectAtEnd(lastTextNode);
@@ -108,140 +101,6 @@ function getCaretRectAtEnd(node: Text): DOMRect | null {
   return rects[rects.length - 1];
 }
 
-/**
- * Maximum initial `target` length we still consider a "fresh first delta
- * batch" rather than a remount into an in-flight stream. Typical first
- * flushes are 10-50 chars; thread-switch remounts bring back hundreds or
- * thousands. Above this threshold, the typewriter snaps to a point near the
- * end of `target` on its first effect so the user sees the typing edge
- * instead of a multi-hundred-char catch-up dump.
- */
-const REMOUNT_TARGET_THRESHOLD = 96;
-
-/**
- * On a detected remount, leave this many characters of trailing text
- * un-typed so a short typewriter reveal plays at the leading edge — the user
- * still perceives the response as "live" without watching the whole buffer
- * fast-forward.
- */
-const REMOUNT_TAIL_CHARS = 24;
-
-const TYPEWRITER_FRAME_MS = 32;
-const DEFAULT_STEP_CEILING = 28;
-const LONG_RESPONSE_STEP_CEILING = 160;
-const LONG_RESPONSE_LENGTH = 2_000;
-
-/**
- * Reveals `target` character-by-character at a steady rate, with adaptive
- * catch-up when the target races ahead of the displayed text.
- *
- * - When `isStreaming` is true on first mount with a SHORT initial target,
- *   `displayed` starts empty so the rAF loop animates from "" up to the
- *   current target (e.g. the first batched flush of text deltas) — producing
- *   a visible typewriter reveal instead of the full text popping in.
- * - When `isStreaming` is true on first mount with a LONG initial target,
- *   we assume a remount into an in-flight stream (e.g. thread-switch back
- *   during streaming). `displayed` starts at `target.length - REMOUNT_TAIL_CHARS`
- *   so only the last few chars typewriter in, avoiding the multi-hundred-char
- *   "dump" the user would otherwise see.
- * - When `isStreaming` is false on first mount, `displayed` starts at `target`
- *   so persisted history doesn't re-typewriter when scrolled into view. If a
- *   live node flips from streaming to persisted while the typewriter is still
- *   behind, the rAF loop keeps catching up instead of snapping to full height.
- *
- * Idle rate: ~6 chars every 32ms. Catch-up closes roughly 1/8 of the gap per
- * paint, with a higher cap for long responses so visible text still catches up
- * during large flushes.
- *
- * When `target` shrinks (e.g., the parent reset for a new turn), the
- * displayed value resets immediately and the animation cancels.
- */
-function useTypewriter(target: string, isStreaming: boolean): string {
-  // Lazy useState initializer runs exactly once at mount — the right place
-  // to evaluate the remount heuristic, since later renders see `target`
-  // grow but should not retro-actively change the starting point.
-  const [displayed, setDisplayed] = useState<string>(() => {
-    if (!isStreaming) return target;
-    if (target.length <= REMOUNT_TARGET_THRESHOLD) return "";
-    return target.slice(0, Math.max(0, target.length - REMOUNT_TAIL_CHARS));
-  });
-  const targetRef = useRef(target);
-  const displayedRef = useRef(displayed);
-  const rafRef = useRef<number | null>(null);
-  const lastPaintAtRef = useRef<number>(0);
-
-  // Mirror current target / displayed into refs so the rAF tick (which
-  // closes over the first render only) always reads fresh values.
-  targetRef.current = target;
-  displayedRef.current = displayed;
-
-  useEffect(() => {
-    // New turn (or any shrink): snap to target, kill the loop.
-    if (target.length < displayedRef.current.length) {
-      if (rafRef.current != null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-      setDisplayed(target);
-      return;
-    }
-    // Already caught up: nothing to animate.
-    if (target === displayedRef.current) return;
-    // Loop already in flight: it'll see the new target via the ref.
-    if (rafRef.current != null) return;
-
-    const tick = (now: number): void => {
-      const t = targetRef.current;
-      const d = displayedRef.current;
-      if (d.length >= t.length) {
-        rafRef.current = null;
-        return;
-      }
-      if (now - lastPaintAtRef.current < TYPEWRITER_FRAME_MS) {
-        rafRef.current = requestAnimationFrame(tick);
-        return;
-      }
-      lastPaintAtRef.current = now;
-      const behind = t.length - d.length;
-      const stepCeiling =
-        t.length >= LONG_RESPONSE_LENGTH ? LONG_RESPONSE_STEP_CEILING : DEFAULT_STEP_CEILING;
-      // A 32ms paint cadence keeps markdown parsing out of the rAF hot path.
-      // Long targets get a larger step cap so large provider flushes catch up
-      // without hundreds of full markdown re-renders.
-      const step = Math.max(6, Math.min(stepCeiling, Math.ceil(behind / 8)));
-      const next = t.slice(0, d.length + step);
-      displayedRef.current = next;
-      setDisplayed(next);
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-  }, [target, isStreaming]);
-
-  // Cancel any in-flight frame on unmount.
-  useEffect(() => () => {
-    if (rafRef.current != null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-  }, []);
-
-  return displayed;
-}
-
-/**
- * Streaming agent response with a typewriter reveal and a typing cursor.
- *
- * Incoming `text` deltas are buffered by `useTypewriter`, which advances the
- * displayed text at a steady rate (≈180 chars/sec when idle, scaling up to
- * close any backlog). Active streams render as plain pre-wrapped text; settled
- * blocks hand the final text to the markdown renderer.
- *
- * The cursor is anchored at the end of whatever is currently rendered via
- * a layout effect that measures `Range.getClientRects()` and positions the
- * cursor with `transform: translate3d()` plus a CSS transition. The cursor
- * stays a permanent child of the root <div> (React-owned, never re-parented)
- * to avoid corrupting React's fiber tree.
- */
 /** Skeleton for a construct whose closing marker has not streamed in yet. */
 function StreamingSkeleton({ label, rows, columns }: { label: string; rows: number; columns?: number }) {
   return (
@@ -281,186 +140,114 @@ function StreamingSkeleton({ label, rows, columns }: { label: string; rows: numb
   );
 }
 
-/** A completed streamed table, matching MarkdownContent's table chrome. */
-function StreamingTable({ header, rows }: { header: string[]; rows: string[][] }) {
-  return (
-    <div className="overflow-x-auto my-2">
-      <table className="min-w-full border border-border rounded">
-        <thead>
-          <tr>
-            {header.map((cell, i) => (
-              <th key={i} className="border border-border bg-hover/50 px-3 py-1.5 text-left text-sm font-semibold">
-                {cell}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, r) => (
-            <tr key={r}>
-              {row.map((cell, c) => (
-                <td key={c} className="border border-border px-3 py-1.5 text-sm">{cell}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+interface PendingSkeleton {
+  label: string;
+  rows: number;
+  columns?: number;
 }
 
-/**
- * Streaming prose split on blank lines into the same `mb-2` paragraphs the
- * settled markdown renders, so the row keeps its height at the swap instead of
- * collapsing each blank line from a full prose line to an 8px margin.
- */
-function StreamingParagraphs({ text }: { text: string }) {
-  const paragraphs = text.split(/\n\s*\n/).filter((paragraph) => paragraph.trim().length > 0);
-  return (
-    <>
-      {paragraphs.map((paragraph, index) => (
-        <p key={index} className="mb-2 whitespace-pre-wrap">{paragraph}</p>
-      ))}
-    </>
-  );
+function pendingSkeletons(tail: string): PendingSkeleton[] {
+  const skeletons: PendingSkeleton[] = [];
+  for (const part of splitStreamingBlocks(tail)) {
+    if (part.kind === "text" || part.closed) continue;
+    if (part.kind === "table") {
+      skeletons.push({ label: "table assembling", rows: part.rows.length, columns: part.header.length });
+    } else {
+      const label = part.lang === "mermaid" ? "diagram" : part.lang || "code";
+      skeletons.push({ label: `${label} assembling`, rows: part.code.split("\n").length });
+    }
+  }
+  return skeletons;
 }
 
-function StreamingPart({ part }: { part: StreamingBlockPart }) {
-  if (part.kind === "text") {
-    return <StreamingParagraphs text={part.text} />;
-  }
-  if (part.kind === "table") {
-    return part.closed
-      ? <StreamingTable header={part.header} rows={part.rows} />
-      : <StreamingSkeleton label="table assembling" rows={part.rows.length} columns={part.header.length} />;
-  }
-  if (!part.closed) {
-    const label = part.lang === "mermaid" ? "diagram" : part.lang || "code";
-    return <StreamingSkeleton label={`${label} assembling`} rows={part.code.split("\n").length} />;
-  }
-  if (part.lang === "mermaid") {
-    return (
-      <Suspense
-        fallback={
-          <pre className="bg-hover/30 rounded-lg p-4 overflow-x-auto text-sm font-mono">
-            <code>{part.code}</code>
-          </pre>
-        }
-      >
-        <LazyMermaidBlock code={part.code} isStreaming={false} />
-      </Suspense>
-    );
-  }
-  // Closed fence content is stable, so `isStreaming` is false; highlighting is
-  // deferred to the settled MarkdownContent pass instead of running mid-stream.
-  return (
-    <CodeBlock
-      code={part.code}
-      language={part.lang}
-      languageLabel={part.lang || "text"}
-      isStreaming={false}
-      disableHighlighting
-    />
-  );
-}
-
-/**
- * Streaming body: plain pre-wrapped text plus constructs whose closing marker
- * has arrived. Full markdown stays out of the per-keystroke path; fenced blocks
- * and tables are the exception because their source stops changing once closed,
- * so each one renders exactly once. A construct still being typed renders as a
- * skeleton rather than raw syntax or a failed partial render.
- */
-function StreamingBody({ text }: { text: string }) {
-  const parts = useMemo(() => splitStreamingBlocks(text), [text]);
-  if (!parts.some((part) => part.kind !== "text")) {
-    return <StreamingParagraphs text={text} />;
-  }
-  return (
-    <>
-      {parts.map((part, index) => <StreamingPart key={index} part={part} />)}
-    </>
-  );
-}
-
-export function DeltaBlock({ text, isStreaming = true, showCursor = true, textMayContinue = isStreaming }: DeltaBlockProps) {
+function useRevealedBlocks(text: string, isStreaming: boolean, textMayContinue: boolean) {
   const visibleText = useMemo(() => stripPlanFences(text, textMayContinue), [text, textMayContinue]);
-  const displayed = useTypewriter(visibleText, isStreaming);
+  const { committed, tail } = useMemo(() => committedStreamingText(visibleText), [visibleText]);
+  const skeletons = useMemo(() => (isStreaming ? pendingSkeletons(tail) : []), [isStreaming, tail]);
+  return {
+    content: isStreaming ? committed : visibleText,
+    skeletons,
+    // Open skeletons grow a row at a time, which moves a caret parked below them.
+    skeletonLayoutKey: skeletons.map((skeleton) => `${skeleton.label}:${skeleton.rows}`).join("|"),
+  };
+}
+
+interface CaretPosition {
+  x: number;
+  y: number;
+  h: number;
+}
+
+/** Null when nothing measurable has rendered; the caret then keeps its last position instead of flickering. */
+function measureCommittedCaret(root: HTMLElement, cursor: HTMLElement): CaretPosition | null {
+  const lastTextNode = findLastTextNode(root);
+  return lastTextNode ? measureCaretPosition(root, cursor, lastTextNode) : null;
+}
+
+/** Moves the caret, playing an entry flight from above-right the first time it appears. */
+function moveCaret(cursor: HTMLElement, { x, y, h }: CaretPosition, hasFlownInRef: { current: boolean }): void {
+  if (!hasFlownInRef.current && (cursor.style.opacity === "0" || cursor.style.opacity === "")) {
+    cursor.style.transition = "none";
+    cursor.style.transform = `translate3d(${x + 24}px, ${y - 28}px, 0)`;
+    cursor.style.opacity = "0";
+    // Forces a style flush so the browser registers the start position before the transition.
+    void cursor.offsetHeight;
+    cursor.style.transition =
+      "transform 280ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease-out 60ms";
+    hasFlownInRef.current = true;
+    const restoreFastTransition = (): void => {
+      cursor.style.transition =
+        "transform 90ms cubic-bezier(0.33, 1, 0.68, 1), opacity 140ms ease-out";
+      cursor.removeEventListener("transitionend", restoreFastTransition);
+    };
+    cursor.addEventListener("transitionend", restoreFastTransition);
+  }
+  cursor.style.opacity = "1";
+  cursor.style.height = `${h}px`;
+  cursor.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+}
+
+/**
+ * Agent response text that reveals finished paragraphs while `isStreaming`, with
+ * a typing caret after the last one, and the full text once it settles.
+ *
+ * Streaming and settled text share one `MarkdownContent` element, so settling
+ * reconciles the paragraphs already shown instead of remounting them, and
+ * markdown re-parses once per finished paragraph rather than per delta.
+ * The caret is React-owned: never move it with DOM calls (narrative-pipeline.md).
+ */
+export function DeltaBlock({ text, isStreaming = true, showCursor = true, textMayContinue = isStreaming }: DeltaBlockProps) {
+  const { content, skeletons, skeletonLayoutKey } = useRevealedBlocks(text, isStreaming, textMayContinue);
   const rootRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
   /** Tracks whether the first-paint entry flight animation has already played. */
   const hasFlownInRef = useRef<boolean>(false);
-  // The cursor is rendered only when BOTH actively receiving deltas (the
-  // typewriter reveal) AND `showCursor` is true. A just-closed thought that
-  // animates into view still uses `isStreaming` for the typewriter, but turns
-  // `showCursor` off so the caret doesn't park at the end of a finished block.
   const renderCursor = isStreaming && showCursor;
+  const parkAtStart = renderCursor && content === "" && skeletons.length === 0;
 
   useLayoutEffect(() => {
     const root = rootRef.current;
     const cursor = cursorRef.current;
     if (!root || !cursor || !renderCursor) return;
-
-    // If the markdown DOM is momentarily empty (Suspense in flight, or a
-    // re-render between fallback and resolved children), keep the cursor at
-    // its last position rather than hiding it. Hiding on every empty frame
-    // produced visible flicker during fast streaming — the cursor would
-    // disappear for one paint then fade back in.
-    const lastTextNode = findLastTextNode(root);
-    if (!lastTextNode) return;
-    const caret = measureCaretPosition(root, cursor, lastTextNode);
-    if (!caret) return;
-    const { x, y, h } = caret;
-
-    // First time visible text appears: play the entry flight animation.
-    // We place the cursor at an offset (above-right of the caret) with no
-    // transition, then force a reflow and enable the slow entry transition.
-    // Subsequent per-character moves use the fast 90ms default transition.
-    if (!hasFlownInRef.current && (cursor.style.opacity === "0" || cursor.style.opacity === "")) {
-      cursor.style.transition = "none";
-      cursor.style.transform = `translate3d(${x + 24}px, ${y - 28}px, 0)`;
-      cursor.style.opacity = "0";
-      // Force reflow so the browser registers the starting position before
-      // we switch on the entry transition.
-      void cursor.offsetHeight;
-      cursor.style.transition =
-        "transform 280ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease-out 60ms";
-      hasFlownInRef.current = true;
-      // After the entry flight completes, restore the fast per-character transition.
-      const restoreFastTransition = (): void => {
-        cursor.style.transition =
-          "transform 90ms cubic-bezier(0.33, 1, 0.68, 1), opacity 140ms ease-out";
-        cursor.removeEventListener("transitionend", restoreFastTransition);
-      };
-      cursor.addEventListener("transitionend", restoreFastTransition);
-    }
-
-    cursor.style.opacity = "1";
-    cursor.style.height = `${h}px`;
-    cursor.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-  }, [displayed, renderCursor]);
+    const caret = parkAtStart ? { x: 0, y: 0, h: CARET_HEIGHT_PX } : measureCommittedCaret(root, cursor);
+    if (caret) moveCaret(cursor, caret, hasFlownInRef);
+  }, [content, skeletonLayoutKey, parkAtStart, renderCursor]);
 
   return (
-    <div ref={rootRef} className={`relative ${TURN_PROSE_CLASS}`}>
-      {isStreaming ? (
-        <StreamingBody text={displayed} />
-      ) : (
-        <Suspense
-          fallback={
-            <p className="whitespace-pre-wrap">
-              {displayed}
-            </p>
-          }
-        >
-          <LazyMarkdownContent content={displayed} isStreaming={false} />
+    <div
+      ref={rootRef}
+      className={`relative ${TURN_PROSE_CLASS}`}
+      style={parkAtStart ? { minHeight: `${CARET_HEIGHT_PX}px` } : undefined}
+    >
+      {content !== "" && (
+        <Suspense fallback={<p className="whitespace-pre-wrap">{content}</p>}>
+          <LazyMarkdownContent content={content} isStreaming={false} />
         </Suspense>
       )}
-      {/* Cursor is mounted ONLY when actively streaming AND `showCursor` is
-          true. The `.typing-cursor` class runs a CSS blink animation that
-          overrides any inline opacity, so an unmounted-but-not-rendered cursor
-          was previously blinking in the top-left corner of completed text
-          blocks. `showCursor=false` is used by ThoughtBlock so just-closed
-          preamble segments don't leave a blinking caret in the timeline. */}
+      {skeletons.map((skeleton, index) => <StreamingSkeleton key={index} {...skeleton} />)}
+      {/* Mounted only while the caret should show: `.typing-cursor` runs a CSS
+          blink that overrides inline opacity, so a hidden-but-mounted caret
+          would blink in the corner of finished blocks. */}
       {renderCursor && (
       <span
         ref={cursorRef}

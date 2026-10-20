@@ -493,10 +493,11 @@ the same interface. (Epic #649, slices #650/#651.)
 
 ### Streaming vs settled rendering
 Two adapters at one rendering seam for agent text. While text deltas are
-arriving, a block renders through the **streaming adapter** (plain
-pre-wrapped text with the typing cursor — cheap per frame). Once the block
+arriving, a block renders through the **streaming adapter**: only the
+paragraphs a blank line or closing fence has finished, as markdown re-parsed
+once per finished paragraph, with the typing cursor after them. Once the block
 settles (its deltas stop, classification resolved), it renders through the
-**settled adapter** — full markdown with code highlighting, parsed once. The
+**settled adapter**: the full text as markdown with code highlighting. The
 user sees the same final result; only the cost during streaming differs.
 (Epic #649, slice #658.)
 

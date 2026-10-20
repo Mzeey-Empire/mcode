@@ -133,3 +133,27 @@ export function splitStreamingBlocks(text: string): StreamingBlockPart[] {
   }
   return parts;
 }
+
+/**
+ * The prefix of streamed markdown that can no longer change shape: everything
+ * up to the last block boundary outside an open fence. A boundary is the end
+ * of a newline-terminated whitespace-only line outside a fence, or the end of
+ * a newline-terminated fence closing line. `committed + tail === text` always.
+ */
+export function committedStreamingText(text: string): { committed: string; tail: string } {
+  let boundary = 0;
+  let fence: OpenFence | null = null;
+  for (const line of toLines(text)) {
+    const terminated = line.end < text.length;
+    if (fence) {
+      if (isFenceClose(line.text, fence)) {
+        fence = null;
+        if (terminated) boundary = line.end + 1;
+      }
+      continue;
+    }
+    fence = matchFenceOpen(line.text);
+    if (!fence && terminated && line.text.trim() === "") boundary = line.end + 1;
+  }
+  return { committed: text.slice(0, boundary), tail: text.slice(boundary) };
+}
