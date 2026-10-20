@@ -258,7 +258,6 @@ export async function setupContainer(mcodeDir: string): Promise<typeof container
       idleSessionTtlMs: 10 * 60 * 1_000,
     },
     host: container.resolve("ProviderHostPorts"),
-
   });
 
   const codexProvider = registerCodexProvider(container, {

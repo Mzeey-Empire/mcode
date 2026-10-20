@@ -230,6 +230,14 @@ function makeMixedFeedbackBundle(): V1Bundle {
 }
 
 describe("MessageBubble user messages", () => {
+  it("hides a legacy ladder handoff anchor instead of printing its raw document", () => {
+    const anchor = '<!-- mcode-handoff {"parentThreadId":"p1"} -->\n# Handoff\nPrior context';
+    const { container } = render(<MessageBubble message={{ ...makeMessage(anchor), role: "system" }} />);
+
+    expect(container).not.toHaveTextContent("Prior context");
+    expect(container.querySelector("[role='note']")).toBeNull();
+  });
+
   it("renders a provider-started turn's opening line as a timeline note, not a user bubble", () => {
     const { container, getByRole } = render(
       <MessageBubble message={{ ...makeMessage("Background command \"sleep 20\" completed"), systemNotice: { kind: "provider-turn", presentation: "timeline" } }} />,

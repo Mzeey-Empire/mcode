@@ -246,11 +246,6 @@ export const WS_CHANNELS = {
     workspacePath: z.string(),
     reason: z.string(),
   }),
-  /** Reports the outcome of preparing inline handoff context. */
-  "thread.handoff": z.object({
-    threadId: z.string(),
-    status: z.enum(["ready", "error"]),
-  }),
 } as const;
 
 /** Union of all push channel names. */

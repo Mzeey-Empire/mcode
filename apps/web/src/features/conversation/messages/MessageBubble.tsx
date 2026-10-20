@@ -797,10 +797,18 @@ function UserMessageContent({
   );
 }
 
+/**
+ * Forks created before #499 stored their ladder handoff document as a visible
+ * system message. The card that rendered it is gone with the ladder, so hide
+ * those rows instead of dumping the raw document into a timeline note.
+ */
+const LEGACY_HANDOFF_ANCHOR_MARKER = "<!-- mcode-handoff";
+
 /** Renders a system message, including security notices. */
 function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) {
   const currentSessionNotices = useThreadRecord(message.thread_id, (record) => record.sessionNotices);
   if (message.systemNotice?.scope === "session") return null;
+  if (message.content.startsWith(LEGACY_HANDOFF_ANCHOR_MARKER)) return null;
   if (isCurrentComposerProviderNotice(message, currentSessionNotices)) return null;
   if (message.systemNotice && TURN_REVERT_NOTICE_KINDS.has(message.systemNotice.kind)) return <TurnRevertReceipt message={message} />;
   if (message.systemNotice?.kind === "security") {
