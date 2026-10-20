@@ -57,7 +57,7 @@ export function OverviewCard({ subject, entries, headerActions, presentation, cl
     >
       <div ref={scrollerRef} onScroll={measure} className="min-h-0 overflow-y-auto">
         <div ref={contentRef} className="flex flex-col gap-1 p-4">
-          <div data-testid="thread-overview-card-header" className="flex h-8 shrink-0 items-center gap-1">
+          <div data-testid="thread-overview-card-header" className="-mr-2 flex h-8 shrink-0 items-center gap-1">
             <span className="min-w-0 flex-1 text-fade text-sm font-medium text-muted">Overview</span>
             {headerActions.map(({ id, Action }) => <Action key={id} subject={subject} />)}
           </div>
