@@ -1897,23 +1897,19 @@ function ThreadRowBranchLine({ thread, presentation }: Pick<ThreadRowVisualProps
   const stale = presentation.isStaleWorktree;
   return (
     <div className="flex h-4 min-w-0 items-center gap-2 text-caption text-muted">
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-        <GitBranch size={12} aria-hidden />
-      </span>
+      <ThreadModeIcon thread={thread} stale={stale} />
       <div
         aria-label={`Branch, ${checkoutLabel}`}
         className={cn("text-fade min-w-0 flex-1 font-mono", stale && "text-error line-through")}
       >
         {checkoutLabel}
       </div>
-      <div className="flex w-[52px] shrink-0 items-center justify-end">
-        <div className="w-6 text-center tabular-nums">{relativeTime(thread.updated_at)}</div>
-        <ThreadModeIcon thread={thread} stale={stale} />
-      </div>
+      <div className="w-6 shrink-0 text-right tabular-nums">{relativeTime(thread.updated_at)}</div>
     </div>
   );
 }
 
+/** Leads the branch line, so the checkout mode (worktree or local) takes the place of a branch glyph. */
 function ThreadModeIcon({ thread, stale }: { thread: WorkspaceThread; stale: boolean }) {
   const isWorktree = thread.mode === "worktree";
   const label = isWorktree ? "Worktree" : "Local";
@@ -1923,7 +1919,7 @@ function ThreadModeIcon({ thread, stale }: { thread: WorkspaceThread; stale: boo
         <div
           aria-label={`${label} mode`}
           data-testid={isWorktree ? `thread-worktree-indicator-${thread.id}` : undefined}
-          className={cn("flex h-4 w-6 items-center justify-center", stale && "text-error")}
+          className={cn("flex h-4 w-4 shrink-0 items-center justify-center", stale && "text-error")}
         >
           {isWorktree ? <WorktreeModeIcon size={12} aria-hidden /> : <Laptop size={12} aria-hidden />}
         </div>

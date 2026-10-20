@@ -1639,7 +1639,7 @@ describe("ProjectTree action-required indicator", () => {
     setupStoreMocks({ thread: makeThread({ id: "thread-updated", title: "Updated Thread", updated_at: updatedAt }) });
     render(<ProjectTree />);
 
-    const row = screen.getByRole("button", { name: /^Provider, Claude Updated Thread Branch, main 5m /i });
+    const row = screen.getByRole("button", { name: /^Provider, Claude Updated Thread Local mode Branch, main 5m$/i });
     const exactTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(updatedAt));
     row.focus();
     expect(await screen.findByTestId("thread-preview-thread-updated")).toHaveTextContent(`Updated ${exactTime}`);
