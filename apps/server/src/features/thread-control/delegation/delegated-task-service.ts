@@ -80,6 +80,12 @@ export class DelegatedTaskService {
     return coordinators;
   }
 
+  /** Refresh the owning Coordinator's roster after a child's approval is published or resolved. */
+  childChanged(childThreadId: string): void {
+    const coordinatorThreadId = this.deps.threads.findById(childThreadId)?.delegation_coordinator_thread_id;
+    if (coordinatorThreadId) this.notifyRoster(coordinatorThreadId);
+  }
+
   /** Enumerate durable receipts for boot recovery without acknowledging results. */
   noticeTasks() { return this.deps.tasks.listAll(); }
 

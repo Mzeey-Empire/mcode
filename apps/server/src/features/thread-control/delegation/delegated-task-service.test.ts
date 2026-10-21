@@ -658,6 +658,28 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     expect((await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID()))?.content).toContain("Which region?");
   });
 
+  it("refreshes the Coordinator roster when its child publishes an approval", async () => {
+    const f = await harness();
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    const loadEntry = () => {
+      const roster = f.roster.loadRoster({ owningParentThreadId: f.coordinator.id });
+      return { revision: roster.revision, status: roster.entries.find((entry) => entry.childThreadId === task.threadId)?.status };
+    };
+    const before = loadEntry();
+    expect(before.status).toBe("running");
+    f.pendingApprovals.push({ requestId: "ask", threadId: task.threadId, body: {
+      requestedAt: new Date().toISOString(), origin: { kind: "agent" },
+      subject: { kind: "question", questions: [{ header: "Choose", question: "Which?", options: [], multiple: false, custom: true }] },
+      choices: [{ id: "answer", intent: "provider", label: "Answer" }],
+    } });
+    f.service.childChanged(task.threadId);
+    expect(loadEntry()).toEqual({ revision: before.revision + 1, status: "waiting" });
+    f.pendingApprovals.pop();
+    f.service.childChanged(task.threadId);
+    expect(loadEntry()).toEqual({ revision: before.revision + 2, status: "running" });
+  });
+
   it("backfills finished tasks while leaving in-flight tasks eligible after migration", async () => {
     const f = await harness();
     const finished = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));

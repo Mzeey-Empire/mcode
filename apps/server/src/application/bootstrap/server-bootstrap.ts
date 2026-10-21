@@ -1078,12 +1078,14 @@ async function bootstrapServer(): Promise<void> {
         broadcast("approval.requested", request);
         threadAttentionService.invalidate(request.threadId);
         nudgeCoordinatorForThread(request.threadId);
+        delegatedTaskService.childChanged(request.threadId);
         portPush.send("approval.requested", request);
       },
       publishApprovalResolved: (payload) => {
         broadcast("approval.resolved", payload);
         threadAttentionService.invalidate(payload.threadId);
         nudgeCoordinatorForThread(payload.threadId);
+        delegatedTaskService.childChanged(payload.threadId);
         portPush.send("approval.resolved", payload);
       },
     }, threadControlService);
