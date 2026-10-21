@@ -21,6 +21,24 @@ export function extractToolInputDetail(tc: ToolCall): string {
   return detail ?? tc.toolName;
 }
 
+/**
+ * The delegated task a task_status or task_cancel call names. A live call has
+ * parsed input, while a reloaded one carries only the server's JSON summary.
+ */
+export function delegatedTaskId(tc: ToolCall): string | undefined {
+  if (typeof tc.toolInput.taskId === "string") return tc.toolInput.taskId;
+  const summary = tc.toolInput._summary ?? tc.toolInput.summary;
+  if (typeof summary !== "string") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(summary);
+    const taskId = typeof parsed === "object" && parsed !== null && "taskId" in parsed ? parsed.taskId : undefined;
+    return typeof taskId === "string" ? taskId : undefined;
+  } catch {
+    // The server truncates long summaries, so stored JSON can be cut off.
+    return undefined;
+  }
+}
+
 function pathTail(value: unknown): string | undefined {
   return typeof value === "string" ? value.split(/[/\\]/).pop() ?? value : undefined;
 }

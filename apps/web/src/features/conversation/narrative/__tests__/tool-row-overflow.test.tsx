@@ -470,11 +470,26 @@ describe.each(MCODE_MCP_SPELLINGS)("Mcode MCP task tools named %s*", (prefix) =>
     expect(screen.queryByText(/task-123/)).not.toBeInTheDocument();
   });
 
+  it("labels a reloaded task_status row, whose input is the persisted JSON summary, with the task title", () => {
+    seedTaskRoster("Fix login redirect");
+    const persisted = { ...taskCall(`${prefix}task_status`), toolInput: { _summary: '{"taskId":"task-123"}' } };
+    render(<SubagentProviderScope threadId="parent">
+      <ToolSummaryLine group={{ calls: [persisted] }} />
+    </SubagentProviderScope>);
+    expect(screen.getByText("Fix login redirect")).toBeInTheDocument();
+  });
+
   it("shows no raw task id when the roster has no title for it", () => {
     useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
     render(<ToolSummaryLine group={{ calls: [taskCall(`${prefix}task_cancel`)] }} />);
     expect(screen.getByText("Cancel task")).toBeInTheDocument();
     expect(screen.queryByText(/task-123|taskId/)).not.toBeInTheDocument();
+  });
+
+  it("leaves the label unclipped when the roster has no title for it", () => {
+    useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
+    render(<ToolSummaryLine group={{ calls: [taskCall(`${prefix}task_cancel`)] }} />);
+    expect(screen.getByText("Cancel task")).not.toHaveClass("max-w-[60%]");
   });
 });
 
