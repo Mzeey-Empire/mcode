@@ -303,20 +303,31 @@ describe("Coordinator task notices", { timeout: 30_000 }, () => {
     expect(f.threads.findById(f.coordinator.id)).toMatchObject({ model: "gpt-test", reasoning_level: "high", permission_mode: "full" });
   });
 
-  it("bounds summary detail and the whole message while keeping the task_status footer", async () => {
+  it("bounds each summary and the whole message, deferring whole tasks that do not fit to a later wake", async () => {
     const f = await harness();
     const w = await wakeHarness(f);
-    for (let index = 0; index < 4; index += 1) {
-      const task = requireTask(await f.service.delegate(f.source, { ...f.input, clientRequestId: `verbose-${index}`, isolation: "shared" }));
+    const titles: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const title = `Verbose task ${index}`;
+      titles.push(title);
+      const task = requireTask(await f.service.delegate(f.source, { ...f.input, title, clientRequestId: `verbose-${index}`, isolation: "shared" }));
       if (!task.threadId) throw new Error("Expected child");
       await finish(f, task.threadId, task.taskId, "completed", { by: "user" }, "A".repeat(4_000) + "B".repeat(4_000));
     }
     w.wake.nudge(f.coordinator.id);
     await w.tick();
-    expect(w.messages()).toHaveLength(1);
-    expect(w.messages()[0]?.content.length).toBe(16_000);
-    expect(w.messages()[0]?.content).not.toContain("B".repeat(20));
-    expect(w.messages()[0]?.content.endsWith("Use task_status for detail.")).toBe(true);
+    await w.tick();
+    const delivered = w.messages();
+    expect(delivered).toHaveLength(2);
+    for (const message of delivered) {
+      expect(message.content.length).toBeLessThanOrEqual(16_000);
+      expect(message.content).not.toContain("B".repeat(20));
+      expect(message.content.endsWith("Use task_status for detail.")).toBe(true);
+    }
+    for (const title of titles) {
+      expect(delivered.filter((message) => message.content.includes(title))).toHaveLength(1);
+    }
+    expect(w.timers.size).toBe(0);
   });
 
   it("reruns once for task changes during an in-flight admission", async () => {

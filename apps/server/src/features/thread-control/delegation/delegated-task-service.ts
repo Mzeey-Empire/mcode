@@ -19,7 +19,9 @@ import type { CreateAndSendCommand, CreateAndSendOptions } from "../../agents/tu
 import type { DelegatedTaskRepo } from "./delegated-task-repo.js";
 import type { DelegatedTask, DelegatedTaskPlan } from "./delegated-task-store.js";
 import { deriveTaskState } from "./task-state.js";
-import { taskNoticeKey, taskNoticeStatus, noticeCovered, renderTaskNotices, type TaskNoticeEntry } from "./task-notice.js";
+import {
+  taskNoticeKey, taskNoticeStatus, noticeCovered, renderTaskNotices, selectEntriesWithinBudget, type TaskNoticeEntry,
+} from "./task-notice.js";
 import type { TurnResumeScheduleStore } from "../../agents/recovery/turn-resume-schedule-store.js";
 
 /** Existing owners used by delegation; the control reference is delayed at composition. */
@@ -94,9 +96,11 @@ export class DelegatedTaskService {
     });
     if (!candidates.length) return null;
     // The committed notice contract allows at most 32 task attributions per message.
-    const claimed = new Set(await this.deps.tasks.claimNotices(wakeId, candidates.slice(0, 32)));
-    const entries = candidates.filter((candidate) => claimed.has(candidate.taskId)).map((candidate) => candidate.entry);
-    return entries.length ? { ...renderTaskNotices(wakeId, entries), hasMore: candidates.length > 32 } : null;
+    const fitting = selectEntriesWithinBudget(candidates.slice(0, 32).map((candidate) => candidate.entry));
+    const selected = candidates.slice(0, fitting.length);
+    const claimed = new Set(await this.deps.tasks.claimNotices(wakeId, selected));
+    const entries = selected.filter((candidate) => claimed.has(candidate.taskId)).map((candidate) => candidate.entry);
+    return entries.length ? { ...renderTaskNotices(wakeId, entries), hasMore: candidates.length > selected.length } : null;
   }
 
   /** Mark an accepted wake delivered without overwriting concurrent acknowledgements. */

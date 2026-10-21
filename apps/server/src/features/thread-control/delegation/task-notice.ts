@@ -43,17 +43,38 @@ export function noticeCovered(delivered: string | null, current: string): boolea
   return Array.isArray(seen) && Array.isArray(pending) && pending.every((id: unknown) => seen.includes(id));
 }
 
+const MAX_SECTION_DETAIL_CHARS = 4_000;
+const MAX_CONTENT_CHARS = 16_000;
+
+function renderSection({ task, detail }: TaskNoticeEntry): string {
+  const header = `${task.title} | child ${task.threadId ?? "not started"} | ${task.status}`;
+  const instruction = task.status === "needs_input"
+    ? "\nThe user answers this in the composer. Do not answer it yourself." : "";
+  return `${header}\n${detail.slice(0, MAX_SECTION_DETAIL_CHARS)}${instruction}`;
+}
+
+function renderContent(entries: readonly TaskNoticeEntry[]): string {
+  return `${entries.map(renderSection).join("\n\n")}\n\nUse task_status for detail.`;
+}
+
+/**
+ * Take whole task sections, in order, while the message stays within its size limit.
+ * Cutting a section off would settle a task the Coordinator never saw, so the rest are left for another wake.
+ * The first entry always fits because its detail is capped.
+ */
+export function selectEntriesWithinBudget<Entry extends TaskNoticeEntry>(entries: readonly Entry[]): Entry[] {
+  const selected: Entry[] = [];
+  for (const entry of entries) {
+    if (selected.length > 0 && renderContent([...selected, entry]).length > MAX_CONTENT_CHARS) break;
+    selected.push(entry);
+  }
+  return selected;
+}
+
 /** Render bounded provider text and matching timeline attribution for a claimed batch. */
 export function renderTaskNotices(wakeId: string, entries: readonly TaskNoticeEntry[]): TaskNoticeBatch {
-  const sections = entries.map(({ task, detail }) => {
-    const header = `${task.title} | child ${task.threadId ?? "not started"} | ${task.status}`;
-    const instruction = task.status === "needs_input"
-      ? "\nThe user answers this in the composer. Do not answer it yourself." : "";
-    return `${header}\n${detail.slice(0, 4_000)}${instruction}`;
-  });
-  const footer = "\n\nUse task_status for detail.";
   return {
-    wakeId, content: sections.join("\n\n").slice(0, 16_000 - footer.length) + footer,
+    wakeId, content: renderContent(entries),
     systemNotice: { kind: "delegated-task", presentation: "timeline", delegatedTasks: entries.map((entry) => entry.task) },
   };
 }
