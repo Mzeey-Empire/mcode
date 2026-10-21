@@ -28,6 +28,9 @@ import { basename } from "@/lib/path";
 import { SelectedTextCommentsComposerAttachment } from "../composer/SelectedTextCommentsComposerAttachment";
 import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
 import { TURN_REVERT_NOTICE_KINDS, TurnRevertReceipt } from "../turn-revert/TurnRevertReceipt";
+import { ProviderSwitchMarker } from "../provider-switch/ProviderSwitchMarker";
+import { ProviderIcon, providerLabel } from "@/components/ui/provider-icon";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 
 /** Text may still arrive while the turn runs, even after its own text stream ended at a boundary. */
 function isTextStillArriving(textIsStreaming: boolean | undefined, agentDisplayState: AgentDisplayState | undefined): boolean {
@@ -807,6 +810,7 @@ const LEGACY_HANDOFF_ANCHOR_MARKER = "<!-- mcode-handoff";
 /** Renders a system message, including security notices. */
 function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) {
   const currentSessionNotices = useThreadRecord(message.thread_id, (record) => record.sessionNotices);
+  if (message.providerSwitch) return <ProviderSwitchMarker message={message} providerSwitch={message.providerSwitch} />;
   if (message.systemNotice?.scope === "session") return null;
   if (message.content.startsWith(LEGACY_HANDOFF_ANCHOR_MARKER)) return null;
   if (isCurrentComposerProviderNotice(message, currentSessionNotices)) return null;
@@ -880,6 +884,25 @@ function AssistantResponseText({
   );
 }
 
+/**
+ * The provider that wrote a reply, shown only once the thread has run on more
+ * than one provider. `providers_used` comes from the thread row, not loaded
+ * messages, because pagination may hide the earlier provider's replies.
+ */
+function AssistantProviderAttribution({ message }: { message: Message }) {
+  const isMultiProvider = useWorkspaceStore((state) => (state.threads.find((thread) => thread.id === message.thread_id)?.providers_used?.length ?? 0) > 1);
+  if (!isMultiProvider || !message.provider) return null;
+  const label = `Written by ${providerLabel(message.provider)}`;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span role="img" aria-label={label} className="inline-flex size-6 items-center justify-center" />}>
+        <ProviderIcon provider={message.provider} size={16} />
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** Renders completed assistant fork and copy controls, visible at rest. */
 function AssistantMessageActions({
   message,
@@ -895,6 +918,7 @@ function AssistantMessageActions({
   if (!isAgentResponseComplete) return null;
   return (
     <div className="flex h-6 items-center gap-1" data-testid="agent-message-actions">
+      <AssistantProviderAttribution message={message} />
       {onBranch && <BranchButton resting onClick={() => onBranch(message.id)} />}
       {textContent.trim() && <CopyButton content={textContent} className={RESTING_ACTION_CLASS} />}
       <PersistedTurnHooks threadId={message.thread_id} messageId={message.id} />
