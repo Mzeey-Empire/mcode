@@ -340,6 +340,7 @@ export {
   HandoffIdSchema,
   ProviderSwitchMarkerSchema,
   ThreadProviderSwitchedEventSchema,
+  DelegatedTaskNoticeStatusSchema,
 } from "./models/message.js";
 export type {
   Message,
@@ -349,6 +350,8 @@ export type {
   SystemNoticeMetadata,
   ProviderSwitchMarker,
   ThreadProviderSwitchedEvent,
+  DelegatedTaskNotice,
+  DelegatedTaskNoticeStatus,
 } from "./models/message.js";
 
 export {
