@@ -58,7 +58,6 @@ describe("overview registry", () => {
     expect(getOverviewEntries(subject).map(({ id, section, order }) => [id, section, order])).toEqual([
       ["save-recovery", "activity", 10],
       ["changes", "activity", 20],
-      ["repository", "activity", 30],
       ["tasks", "activity", 40],
       ["plan", "activity", 45],
       ["local", "lane", 50],
@@ -67,6 +66,7 @@ describe("overview registry", () => {
       ["commit", "lane", 80],
       ["terminals", "terminals", 85],
       ["usage", "summary", 90],
+      ["repository", "lane", 95],
       ["subagents", "activity", 100],
       ["pull-request", "lane", 110],
       ["browser", "activity", 120],

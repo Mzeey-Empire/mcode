@@ -867,11 +867,18 @@ function startupErrorDetail(error: unknown): string | undefined {
   return message.split(/\r?\n/).find((line) => line.trim())?.trim().slice(0, 2_000);
 }
 
-function titleFrom(content: string): string {
+const MAX_THREAD_TITLE_LENGTH = 200;
+
+/**
+ * Derives a fallback thread title from the first line of a user message,
+ * cutting at a word boundary when it exceeds {@link MAX_THREAD_TITLE_LENGTH}.
+ * Never appends an ellipsis: clients fade titles that overflow their space.
+ */
+export function titleFrom(content: string): string {
   const firstLine = content.split("\n")[0].trim();
-  if (firstLine.length <= 50) return firstLine || "New Thread";
-  const truncated = firstLine.slice(0, 50);
+  if (!firstLine) return "New Thread";
+  if (firstLine.length <= MAX_THREAD_TITLE_LENGTH) return firstLine;
+  const truncated = firstLine.slice(0, MAX_THREAD_TITLE_LENGTH);
   const lastSpace = truncated.lastIndexOf(" ");
-  const cutPoint = lastSpace > 0 ? lastSpace : 50;
-  return truncated.slice(0, cutPoint) + "...";
+  return truncated.slice(0, lastSpace > 0 ? lastSpace : MAX_THREAD_TITLE_LENGTH).trimEnd();
 }
