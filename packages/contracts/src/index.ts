@@ -300,7 +300,7 @@ export {
   looksLikeWorkspaceRelativeFileRef,
 } from "./models/workspace-preview-uri.js";
 
-export { ThreadSchema, RecentThreadSchema, ThreadCheckoutStateSchema, PlanPhaseSchema } from "./models/thread.js";
+export { ThreadSchema, RecentThreadSchema, ThreadCheckoutStateSchema, PlanPhaseSchema, isDelegatedSubagent } from "./models/thread.js";
 export type { Thread, RecentThread, ThreadCheckoutState, PlanPhase } from "./models/thread.js";
 
 export {

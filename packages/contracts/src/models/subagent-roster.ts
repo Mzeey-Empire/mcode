@@ -60,6 +60,20 @@ export const SubagentDetailSchema = lazySchema(() => z.object({
 /** Last 32 persisted steps and the Agent's result summary. */
 export type SubagentDetail = z.infer<ReturnType<typeof SubagentDetailSchema>>;
 
+const NATIVE_SUBAGENT_TOOL_NAME = "Agent";
+// Codex names MCP calls `mcp:<server>/<tool>` and Claude `mcp__<server>__<tool>`.
+const DELEGATE_TASK_TOOL_NAME = /^(?:mcp__mcode__|mcp:mcode\/)?delegate_task$/;
+
+/** True when a tool call is the Mcode `delegate_task` tool, under any provider's MCP naming. */
+export function isDelegateTaskToolName(toolName: string): boolean {
+  return DELEGATE_TASK_TOOL_NAME.test(toolName);
+}
+
+/** True when a tool call starts a sub-agent: a provider-native `Agent` call or an Mcode delegation. */
+export function isSubagentLaunchToolName(toolName: string): boolean {
+  return toolName === NATIVE_SUBAGENT_TOOL_NAME || isDelegateTaskToolName(toolName);
+}
+
 /** Read the roster of one owning parent. */
 export const SubagentRosterRequestSchema = lazySchema(() => z.object({
   owningParentThreadId: z.string().min(1),
