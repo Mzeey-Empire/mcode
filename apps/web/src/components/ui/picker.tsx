@@ -13,7 +13,10 @@ import {
 } from "react";
 import { CheckIcon, SearchIcon } from "lucide-react";
 
+import { formatKeybinding } from "@/lib/keybinding-manager";
+import { isMac } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { Kbd } from "./kbd";
 import { Button } from "./button";
 import { SegmentedControl } from "./segmented-control";
 import { Spinner } from "./spinner";
@@ -109,6 +112,8 @@ export interface PickerProps<T> {
   readonly hairlines?: boolean;
   /** Set false to mark the selected row by its fill alone, without the trailing check. Defaults to true. */
   readonly selectedCheck?: boolean;
+  /** Ctrl/Cmd+1..9 pick the Nth selectable row, and each such row shows its keycap. Defaults to false. */
+  readonly numberedShortcuts?: boolean;
   readonly onSelect: (item: T) => void;
 }
 
@@ -128,12 +133,14 @@ interface ListRow<T> {
  * scroll fades, and a count footer. It renders the panel body only, so callers choose the surface
  * (popover, dialog or inline); put the search field first so the host's initial focus lands on it.
  * Focus stays in the search field; the arrow keys move a highlight through the listbox via
- * `aria-activedescendant`, Home and End reach its ends, and Enter picks the highlighted row.
+ * `aria-activedescendant`, Home and End reach its ends, and Enter picks the highlighted row. With
+ * `numberedShortcuts`, Ctrl/Cmd+1..9 pick the first nine selectable rows directly.
  */
 export function Picker<T>(props: PickerProps<T>) {
   const { query, onQueryChange, searchPlaceholder = "Search", items, renderItem, selectedKey, status, hairlines = true, selectedCheck = true } = props;
   const listId = useId();
   const rows = useMemo<ListRow<T>[]>(() => items.map((item) => ({ item, row: renderItem(item) })), [items, renderItem]);
+  const shortcutRows = useShortcutRows(rows, props.numberedShortcuts === true);
   const listKey = `${props.activeTab ?? ""}\u0000${query}`;
   const { activeIndex, setHighlight } = useActiveRow(rows, listKey, selectedKey);
   const loadMore = useLoadMoreOnce(props, listKey);
@@ -145,6 +152,13 @@ export function Picker<T>(props: PickerProps<T>) {
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     // Enter that ends an IME composition commits text, not a row.
     if (event.nativeEvent.isComposing) return;
+    const digit = props.numberedShortcuts ? numberShortcutDigit(event) : null;
+    if (digit !== null) {
+      event.preventDefault();
+      const index = shortcutRows[digit - 1];
+      if (index !== undefined) select(rows[index]);
+      return;
+    }
     if (event.key === "Enter") {
       event.preventDefault();
       select(rows[activeIndex]);
@@ -208,6 +222,7 @@ export function Picker<T>(props: PickerProps<T>) {
           listId={listId}
           listKey={listKey}
           rows={rows}
+          shortcutRows={shortcutRows}
           activeIndex={activeIndex}
           selectedKey={selectedKey}
           onHighlight={highlightRow}
@@ -379,11 +394,23 @@ function useLoadMoreOnce<T>({ onLoadMore, items, total, status }: PickerProps<T>
   }, [onLoadMore, status, total, items.length, visit.count]);
 }
 
+function useShortcutRows<T>(rows: readonly ListRow<T>[], enabled: boolean): readonly number[] {
+  return useMemo(() => {
+    if (!enabled) return [];
+    const indexes: number[] = [];
+    for (let index = 0; index < rows.length && indexes.length < 9; index += 1) {
+      if (!rows[index]?.row.disabled) indexes.push(index);
+    }
+    return indexes;
+  }, [rows, enabled]);
+}
+
 interface PickerListProps<T> {
   readonly listId: string;
   /** Changes when the tab or query starts a new list, which scrolls back to the top. */
   readonly listKey: string;
   readonly rows: readonly ListRow<T>[];
+  readonly shortcutRows: readonly number[];
   readonly activeIndex: number;
   readonly selectedKey?: string;
   readonly onHighlight: (index: number) => void;
@@ -395,7 +422,7 @@ interface PickerListProps<T> {
 }
 
 function PickerList<T>(props: PickerListProps<T>) {
-  const { listId, listKey, rows, activeIndex, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck } = props;
+  const { listId, listKey, rows, shortcutRows, activeIndex, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck } = props;
   const listRef = useRef<HTMLUListElement>(null);
 
   const measure = useCallback(() => {
@@ -434,6 +461,7 @@ function PickerList<T>(props: PickerListProps<T>) {
           <PickerOption
             id={optionId(listId, index)}
             row={entry.row}
+            digit={shortcutDigit(shortcutRows, index)}
             active={index === activeIndex}
             selected={entry.row.key === selectedKey}
             selectedCheck={selectedCheck}
@@ -466,9 +494,15 @@ function PickerGroupStart({ row, previous, hairlines }: { readonly row: PickerRo
   );
 }
 
+function shortcutDigit(shortcutRows: readonly number[], index: number): number | undefined {
+  const position = shortcutRows.indexOf(index);
+  return position === -1 ? undefined : position + 1;
+}
+
 interface PickerOptionProps {
   readonly id: string;
   readonly row: PickerRow;
+  readonly digit?: number;
   readonly active: boolean;
   readonly selected: boolean;
   readonly selectedCheck: boolean;
@@ -490,12 +524,12 @@ function PickerOption(props: PickerOptionProps) {
 }
 
 /** What an option reads after its name: why it is disabled, and how to run its action from the keyboard. */
-function optionDescriptions(id: string, row: PickerRow, reason: string | undefined) {
+function optionDescriptions(id: string, row: PickerRow, reason: string | undefined, digit: number | undefined) {
   const actionHint = row.action ? `${row.action.label} (${ROW_ACTION_SHORTCUT.label})` : undefined;
   const describedBy = [reason && `${id}-reason`, actionHint && `${id}-action`].filter(Boolean).join(" ");
   return {
     describedBy: describedBy || undefined,
-    keyShortcuts: actionHint ? ROW_ACTION_SHORTCUT.aria : undefined,
+    keyShortcuts: optionKeyShortcuts(digit, actionHint !== undefined),
     spans: (
       <>
         {reason ? <span id={`${id}-reason`} hidden>{reason}</span> : null}
@@ -505,8 +539,13 @@ function optionDescriptions(id: string, row: PickerRow, reason: string | undefin
   };
 }
 
-function PickerOptionItem({ id, row, active, selected, selectedCheck, onHighlight, onPick, onRunAction, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
-  const descriptions = optionDescriptions(id, row, reason);
+function optionKeyShortcuts(digit: number | undefined, hasAction: boolean): string | undefined {
+  const pick = digit === undefined ? undefined : `${isMac ? "Meta" : "Control"}+${digit}`;
+  return [pick, hasAction ? ROW_ACTION_SHORTCUT.aria : undefined].filter(Boolean).join(" ") || undefined;
+}
+
+function PickerOptionItem({ id, row, digit, active, selected, selectedCheck, onHighlight, onPick, onRunAction, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
+  const descriptions = optionDescriptions(id, row, reason, digit);
   return (
     <li
       {...(row.disabled ? undefined : { onMouseMove: active ? undefined : onHighlight, onClick: onPick })}
@@ -529,13 +568,13 @@ function PickerOptionItem({ id, row, active, selected, selectedCheck, onHighligh
       )}
     >
       {/* A disabled row keeps its action for the pointer, so a starred row whose model went away can be unstarred. */}
-      <PickerOptionContent row={row} selected={selected} selectedCheck={selectedCheck} onRunAction={onRunAction} />
+      <PickerOptionContent row={row} digit={digit} selected={selected} selectedCheck={selectedCheck} onRunAction={onRunAction} />
       {descriptions.spans}
     </li>
   );
 }
 
-function PickerOptionContent({ row, selected, selectedCheck, onRunAction }: { readonly row: PickerRow; readonly selected: boolean; readonly selectedCheck: boolean; readonly onRunAction: () => void }) {
+function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction }: { readonly row: PickerRow; readonly digit: number | undefined; readonly selected: boolean; readonly selectedCheck: boolean; readonly onRunAction: () => void }) {
   return (
     <>
       {row.icon != null ? (
@@ -553,6 +592,11 @@ function PickerOptionContent({ row, selected, selectedCheck, onRunAction }: { re
         ) : null}
       </span>
       {row.tag ? <span className="max-w-[60%] min-w-0 text-caption text-fade text-muted">{row.tag}</span> : null}
+      {digit !== undefined ? (
+        <span aria-hidden className="shrink-0 text-muted">
+          <Kbd variant="keycap">{formatKeybinding(`mod+${digit}`, isMac)}</Kbd>
+        </span>
+      ) : null}
       {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
       {selectedCheck ? (
         <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
@@ -589,6 +633,11 @@ function PickerRowActionButton({ action, onRun }: { readonly action: PickerRowAc
 
 function isRowActionShortcut(event: KeyboardEvent<HTMLInputElement>): boolean {
   return (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "d";
+}
+
+function numberShortcutDigit(event: KeyboardEvent<HTMLInputElement>): number | null {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return null;
+  return /^[1-9]$/.test(event.key) ? Number(event.key) : null;
 }
 
 function PickerFailure({ status, onRetry }: { readonly status: { readonly failed: string; readonly detail?: string }; readonly onRetry?: () => void }) {
