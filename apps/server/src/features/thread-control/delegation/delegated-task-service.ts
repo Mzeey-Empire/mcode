@@ -56,6 +56,19 @@ export class DelegatedTaskService {
     if (task) this.notifyRoster(task.coordinatorThreadId);
   }
 
+  /** Derive Coordinators with working or waiting delegated tasks from current lifecycle facts. */
+  coordinatorsWithUnfinishedTasks(coordinatorThreadId?: string): ReadonlySet<string> {
+    const coordinators = new Set<string>();
+    for (const task of this.deps.tasks.listUnfinishedCandidates(coordinatorThreadId)) {
+      const state = deriveTaskState({
+        turn: this.deps.canonical.loadTurn(task.taskId), startup: this.deps.startups.get(task.taskId),
+        approval: this.deps.approvals.status(task.taskId), launching: this.launching.has(task.taskId),
+      });
+      if (state.status !== "finished") coordinators.add(task.coordinatorThreadId);
+    }
+    return coordinators;
+  }
+
   private notifyRoster(coordinatorThreadId: string): void {
     for (const listener of this.rosterListeners) listener(coordinatorThreadId);
   }
@@ -218,6 +231,7 @@ export class DelegatedTaskService {
     }
     const launch = this.advanceUnstarted(task, accepted);
     this.launching.set(task.taskId, launch);
+    this.notifyRoster(task.coordinatorThreadId);
     try {
       await launch;
     } finally {

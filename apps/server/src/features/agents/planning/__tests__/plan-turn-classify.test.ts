@@ -49,7 +49,8 @@ async function fixture() {
   const service = new PlanService(writer, undefined, files);
   const pushes: ThreadAttention[] = [];
   const attention = new ThreadAttentionService(db, writer,
-    [planWaitingSource(db, "questions"), planWaitingSource(db, "plan")], value => pushes.push(value));
+    [planWaitingSource(db, "questions"), planWaitingSource(db, "plan")],
+    { coordinatorsWithUnfinishedTasks: () => new Set<string>() }, value => pushes.push(value));
   threads.attention = attention;
   const classify = (command: Partial<SendMessageCommand> = {}) => turns.classify({ threadId: thread.id, ...command });
   const capture = async () => {
