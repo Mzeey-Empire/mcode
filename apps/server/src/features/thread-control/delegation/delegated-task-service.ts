@@ -42,6 +42,9 @@ export interface DelegatedTaskDeps {
 
 type TaskRejection = { status: "rejected"; error: ThreadControlError };
 
+/** Only the Coordinator's own cancel counts as reading the outcome; a user Stop is still reported to it. */
+type CancelOrigin = "coordinator" | "user";
+
 /** A task's notice key as it stood when a Coordinator read it. */
 export interface ObservedNotice {
   taskId: string;
@@ -107,7 +110,6 @@ export class DelegatedTaskService {
       return [{ entry, taskId: task.taskId, key: entry.key, basis: task.noticeDelivered }];
     });
     if (!candidates.length) return null;
-    // The committed notice contract allows at most 32 task attributions per message.
     const fitting = selectEntriesWithinBudget(candidates.slice(0, 32).map((candidate) => candidate.entry));
     const selected = candidates.slice(0, fitting.length);
     const claimed = new Set(await this.deps.tasks.claimNotices(wakeId, selected));
@@ -200,7 +202,7 @@ export class DelegatedTaskService {
     const { taskId } = TaskCancelInputSchema().parse(input);
     const task = this.deps.tasks.find(taskId, authority.sourceThreadId);
     if (!task) return notFound();
-    return this.cancelTask(task, (threadId) => this.deps.control.threadStop(authority, { threadId }), true);
+    return this.cancelTask(task, (threadId) => this.deps.control.threadStop(authority, { threadId }), "coordinator");
   }
 
   /** Stop an owned delegated child with authenticated user authority. */
@@ -217,30 +219,29 @@ export class DelegatedTaskService {
         await this.deps.cancellation.agentService.stopSession(threadId, { by: "user" });
       }
       return { status: "stopped" };
-    }, false);
+    }, "user");
     return true;
   }
 
-  /** Only the Coordinator's own cancel counts as seeing the outcome; a user Stop must still be reported to it. */
   private async cancelTask(task: DelegatedTask, stop: (threadId: string) => Promise<
     { status: "stopped" } | Awaited<ReturnType<ThreadControlService["threadStop"]>>
-  >, acknowledge: boolean): Promise<TaskCancelResult> {
+  >, origin: CancelOrigin): Promise<TaskCancelResult> {
     try {
       const taskId = task.taskId;
       const current = this.snapshot(task);
-      if (current.state.status === "finished") return this.cancelReport(task, acknowledge);
+      if (current.state.status === "finished") return this.cancelReport(task, origin);
       if (this.deps.approvals.status(taskId) === "pending") {
         await this.deps.control.cancelDelegationApproval(taskId);
-        return this.cancelReport(task, acknowledge);
+        return this.cancelReport(task, origin);
       }
       const startup = this.deps.startups.get(taskId);
       if (!startup?.threadId) {
         if (startup) await cancelThreadStartup(this.deps.cancellation, taskId);
-        return this.cancelReport(task, acknowledge);
+        return this.cancelReport(task, origin);
       }
       const stopped = await stop(startup.threadId);
       if (stopped.status === "rejected") return { status: "rejected", error: stopped.error };
-      return { ...await this.cancelReport(task, acknowledge),
+      return { ...await this.cancelReport(task, origin),
         ...(stopped.status === "pending_approval" ? { stopApprovalId: stopped.approvalId } : {}) };
     } finally {
       this.notifyRoster(task.coordinatorThreadId);
@@ -374,8 +375,8 @@ export class DelegatedTaskService {
     return snapshot;
   }
 
-  private async cancelReport(task: DelegatedTask, acknowledge: boolean) {
-    const { taskId, state } = acknowledge ? await this.report(task) : this.snapshot(task);
+  private async cancelReport(task: DelegatedTask, origin: CancelOrigin) {
+    const { taskId, state } = origin === "coordinator" ? await this.report(task) : this.snapshot(task);
     return { taskId, state };
   }
 
