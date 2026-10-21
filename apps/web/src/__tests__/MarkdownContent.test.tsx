@@ -86,38 +86,21 @@ describe("MarkdownContent link handling", () => {
     expect(screen.queryByTestId("markdown-link-favicon-frame")).not.toBeInTheDocument();
   });
 
-  it("shows a bare GitHub repo URL as owner/repo but opens the full URL", async () => {
-    render(<MarkdownContent content="https://github.com/milex-consulting/CaravanFE" />);
-    const url = "https://github.com/milex-consulting/CaravanFE";
-    const link = screen.getByRole("link", { name: "milex-consulting/CaravanFE" });
-    const user = userEvent.setup();
+  it("renders a bare URL exactly as written with the site favicon", async () => {
+    const url = "https://github.com/Mzeey-Empire/mcode/pull/2";
+    render(<MarkdownContent content={url} />);
+    const link = screen.getByRole("link", { name: url });
 
     expect(link).toHaveAttribute("href", url);
-    await user.hover(link);
-    await waitFor(() => {
-      const tooltip = document.querySelector<HTMLElement>("[data-slot='tooltip-content']");
-      expect(tooltip).toBeVisible();
-      expect(tooltip).toHaveTextContent(url);
-    });
+    expect(screen.getByTestId("markdown-link-favicon")).toHaveAttribute("src", "https://github.com/favicon.ico");
 
-    await user.click(link);
+    await userEvent.setup().click(link);
     expect(mockOpenExternalUrl).toHaveBeenCalledWith(url);
-  });
-
-  it("shows a bare GitHub issue URL as owner/repo#number", () => {
-    render(<MarkdownContent content="https://github.com/milex-consulting/CaravanFE/issues/42" />);
-    expect(screen.getByText("milex-consulting/CaravanFE#42")).toBeInTheDocument();
-  });
-
-  it("compacts a bare non-GitHub URL to host/path, dropping the protocol", () => {
-    render(<MarkdownContent content="https://www.example.com/docs/start/" />);
-    expect(screen.getByText("example.com/docs/start")).toBeInTheDocument();
   });
 
   it("never rewrites authored link text", () => {
     render(<MarkdownContent content="[the repo](https://github.com/milex-consulting/CaravanFE)" />);
     expect(screen.getByText("the repo")).toBeInTheDocument();
-    expect(screen.queryByText("milex-consulting/CaravanFE")).not.toBeInTheDocument();
   });
 
   it("calls desktopBridge.openExternalUrl for http links", () => {

@@ -3,7 +3,7 @@ import { memo, useMemo, lazy, Suspense } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { ExternalLink, Globe } from "lucide-react";
+import { Globe } from "lucide-react";
 import {
   isMcodeWorkspacePreviewUrl,
   mcodeWorkspacePreviewHref,
@@ -149,38 +149,6 @@ function resolveMarkdownHref(href: string | undefined, workspacePath: string | n
   return undefined;
 }
 
-/**
- * Produces a compact, human-readable label for a bare URL so inline links read
- * like the Overview repository row (`owner/repo`) instead of a raw `https://`
- * string. GitHub repos collapse to `owner/repo`, issues and pull requests to
- * `owner/repo#123`, commits to `owner/repo@shortsha`; every other URL drops the
- * protocol and a leading `www.`, keeping `host/path`. Only used when the link's
- * visible text is the URL itself; authored link text is never rewritten.
- */
-function formatBareUrlLabel(rawHref: string): string {
-  try {
-    const url = new URL(rawHref);
-    const host = url.hostname.replace(/^www\./, "");
-    const path = url.pathname.replace(/\/+$/, "");
-    const segments = path.split("/").filter(Boolean);
-
-    if (host === "github.com" && segments.length >= 2) {
-      const ownerRepo = `${segments[0]}/${segments[1]}`;
-      if (segments.length >= 4 && (segments[2] === "issues" || segments[2] === "pull")) {
-        return `${ownerRepo}#${segments[3]}`;
-      }
-      if (segments.length >= 4 && segments[2] === "commit") {
-        return `${ownerRepo}@${segments[3].slice(0, 7)}`;
-      }
-      return ownerRepo;
-    }
-
-    return path ? `${host}${path}` : host;
-  } catch {
-    return rawHref;
-  }
-}
-
 /** Extracts plain text from link children when it is a single string node. */
 function getPlainTextChild(children: React.ReactNode): string | null {
   if (typeof children === "string") return children;
@@ -283,7 +251,7 @@ function MarkdownLinkAnchor({
         render={
           <a
             href={safeHref}
-            className="inline-flex max-w-full items-center gap-1 align-baseline text-primary no-underline transition-colors hover:underline"
+            className="inline-flex max-w-full items-center gap-1 align-baseline text-link no-underline transition-colors hover:underline"
             target="_blank"
             rel="noopener noreferrer"
             data-testid="markdown-link"
@@ -302,7 +270,6 @@ function MarkdownLinkAnchor({
               />
             )}
             <span className="min-w-0 text-fade">{label}</span>
-            {safeHref ? <ExternalLink size={12} aria-hidden className="shrink-0 text-muted" /> : null}
           </a>
         }
       />
@@ -322,16 +289,13 @@ function MarkdownLink({
   const faviconUrl = getLinkFaviconUrl(safeHref);
   const childText = getPlainTextChild(children);
   const fileIconPath = getMarkdownFileIconPath({ href, safeHref, childText });
-  const isBareUrlText =
-    !!childText && !!safeHref && (childText === href || childText === safeHref || HTTP_URL_RE.test(childText.trim()));
-  const label = isBareUrlText && safeHref ? formatBareUrlLabel(safeHref) : children;
   const anchor = (
     <MarkdownLinkAnchor
       safeHref={safeHref}
       isPreviewable={isPreviewable}
       faviconUrl={faviconUrl}
       fileIconPath={fileIconPath}
-      label={label}
+      label={children}
     />
   );
 
