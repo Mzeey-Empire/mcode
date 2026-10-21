@@ -2193,6 +2193,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Record an adopted turn's dispatch state without sending a prompt the provider never received. */
   private adoptPreparedProviderDispatch(prepared: PreparedTurnDispatch): void {
+    this.applyThreadControlLease(prepared.threadControl);
     const dispatch = this.createRetryDispatch(prepared);
     dispatch.dispatchStarted = true;
     this.turnRetryDispatchByThread.set(prepared.lease.threadId, dispatch);

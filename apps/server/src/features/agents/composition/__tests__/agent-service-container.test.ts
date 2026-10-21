@@ -34,6 +34,7 @@ import { PlanTurnService } from "../../planning/plan-turn-service.js";
 import { PlanRepo } from "../../planning/persistence/plan-repo.js";
 import { ProviderTurnEventApplication } from "../../turns/provider-turn-event-application.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
+import { McodeSessionAuthority } from "../../../mcode-mcp/mcode-session-authority.js";
 import type { WorkerOwnedProviderEventResult } from "../../../providers/composition/provider-host-ports.js";
 import { addClient, removeClient, subscribeClientToThread } from "../../../../application/transport/push.js";
 
@@ -206,7 +207,7 @@ describe("AgentService container composition", () => {
     });
   });
 
-  it("admits a provider-started turn with its opening notice and releases it after Ended", async () => {
+  it("admits a provider-started turn with its opening notice and active lease, then releases it after Ended", async () => {
     const sendTurn = vi.fn(async (request: TurnRequest) => {
       await submitCodexEvent(workerRuntime!, request, 1, { type: "turnComplete", threadId: request.threadId,
         turnExecutionId: request.turnExecutionId, providerId: "codex", reason: "end_turn", costUsd: null,
@@ -222,8 +223,19 @@ describe("AgentService container composition", () => {
     await container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "start a background task", provider: "codex", model: "gpt-5.5", permissionMode: "full" });
     await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
 
+    const authority = container.resolve(McodeSessionAuthority);
+    const { token } = authority.attach({ providerId: "codex", sessionId: `mcode-${thread.id}`, threadId: thread.id, threadControl: true });
+    const session = authority.resolve(token);
+    if (!session) throw new Error("Provider session was not attached");
+    expect(() => authority.authorizeThreadControl(session, "before-opening"))
+      .toThrow(expect.objectContaining({ reason: "no_active_turn" }));
+
     const opening = await container.resolve(TurnRuntimeController).openProviderTurn({ threadId: thread.id, notice: "Background command finished" });
     if (opening.kind !== "opened") throw new Error(`Provider turn was declined: ${opening.reason}`);
+    expect(authority.authorizeThreadControl(session, "provider-continuation")).toMatchObject({
+      sourceThreadId: thread.id,
+      sourceTurnId: opening.routing.turnId,
+    });
     const adopted = { threadId: opening.routing.threadId, turnId: opening.routing.turnId, turnExecutionId: opening.routing.executionId } as TurnRequest;
     await submitCodexEvent(workerRuntime!, adopted, 1, { type: "textDelta", threadId: thread.id,
       turnExecutionId: adopted.turnExecutionId, delta: "the task finished", isFinalResponse: true });
@@ -239,6 +251,8 @@ describe("AgentService container composition", () => {
     expect(notice).toMatchObject({ role: "user", systemNotice: { kind: "provider-turn" } });
     expect(container.resolve(TurnRuntimeController).snapshot(thread.id)).toMatchObject({ phase: "completed", turnExecutionId: adopted.turnExecutionId });
     expect(container.resolve(ThreadRepo).findById(thread.id)?.model).toBe("gpt-5.5");
+    expect(() => authority.authorizeThreadControl(session, "after-ended"))
+      .toThrow(expect.objectContaining({ reason: "no_active_turn" }));
   });
 
   it("admits a provider-started turn that opens while the ended turn is still releasing", async () => {
