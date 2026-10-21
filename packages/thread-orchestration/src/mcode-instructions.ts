@@ -39,7 +39,8 @@ const IDENTITY_BLOCK = [
 // The thread-control and Browser tool descriptions repeat these rules on purpose. With deferred tool loading, a description arrives only after the model has chosen a tool.
 const THREAD_CONTROL_BLOCK = [
   "Mcode thread control",
-  "- Use the mcode MCP thread_* tools only when the user explicitly asks for Mcode threads. An Mcode thread is a persistent user-visible conversation, different from provider-native child agents.",
+  "- The mcode MCP tools manage Mcode threads: persistent, user-visible conversations. Use delegate_task when the user asks to hand work to another provider or model, even if they never say \"Mcode thread\".",
+  "- A sub-agent request uses your provider-native collaboration tool when it can run the requested model. Never launch an Mcode thread just because the user said \"sub-agent\".",
   "- If no Project is named, use the active source thread's Project without discovery. Resolve an explicitly named Project with workspace_search. Use worktree_list only to resolve an explicit worktree or reference.",
   "- Delegate child work with delegate_task. Preserve the user's title and task in the prompt. Choose isolation shared for the Coordinator's checkout or worktree for a new checkout at its local commit. Retry the same input with the same clientRequestId to return the existing task.",
   "- Call thread_target_list before choosing a provider or model, and pass the exact returned providerId and modelId. Pass any named provider or execution setting. Never assume or enumerate providers or models.",
@@ -51,7 +52,7 @@ const THREAD_CONTROL_BLOCK = [
 const PROVIDER_SUBAGENT_BLOCK = [
   "A child-agent or sub-agent request uses provider-native collaboration in the current turn.",
   "Use collaboration tools, preserve the exact requested brief, and keep direct and nested parent relationships intact.",
-  "A child-agent request does not authorize Mcode thread control; use thread tools only for an explicit Mcode thread request.",
+  "Use Mcode delegation for a child-agent request only when native collaboration cannot run the requested provider or model.",
 ].join(" ");
 
 const REPOSITORY_SEARCH_BLOCK = [
