@@ -95,6 +95,7 @@ import { AgentRuntimeCommandPort } from "../../features/agents/orchestration/age
 import { DelegatedTaskService } from "../../features/thread-control/delegation/delegated-task-service.js";
 import { ThreadLaunchService } from "../../features/thread-control/launch/thread-launch-service.js";
 import { CoordinatorWakeService } from "../../features/thread-control/delegation/coordinator-wake-service.js";
+import { wakeTargets } from "../../features/thread-control/delegation/wake-targets.js";
 import { TurnSteerRepo } from "../../features/agents/steering/persistence/turn-steer-repo.js";
 import { TurnSteerRuntimePort } from "../../features/agents/steering/turn-steer-runtime-port.js";
 import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
@@ -766,7 +767,7 @@ let coordinatorWakeReady = false;
 function nudgeCoordinatorForThread(threadId: string): void {
   if (!coordinatorWakeReady) return;
   const thread = threadRepo.findById(threadId);
-  if (thread) coordinatorWake.nudge(thread.delegation_coordinator_thread_id ?? thread.id);
+  if (thread) for (const target of wakeTargets(thread)) coordinatorWake.nudge(target);
 }
 
 const stopObservingWakeTasks = delegatedTaskService.onRosterChanged((coordinatorId) => {
