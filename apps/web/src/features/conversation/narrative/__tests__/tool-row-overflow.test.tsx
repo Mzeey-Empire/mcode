@@ -495,7 +495,7 @@ describe.each(MCODE_MCP_SPELLINGS)("Mcode MCP task tools named %s*", (prefix) =>
 
 const MCODE_THREAD_TOOLS = [
   "workspace_search", "worktree_list", "thread_target_list", "thread_search",
-  "thread_get", "thread_send", "thread_stop", "thread_wait",
+  "thread_get", "thread_send", "thread_stop", "thread_wait", "thread_launch",
 ] as const;
 
 function mcodeCall(toolName: string, overrides: Partial<ToolCall> = {}): ToolCall {
