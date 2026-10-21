@@ -377,7 +377,11 @@ describe("provider switch on send", () => {
     const request = lastRequest(claude);
     expect(request.codexFastMode).toBeUndefined();
     expect(request.reasoningLevel).toBeUndefined();
-    const audit = await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId);
+    const audit = await vi.waitFor(async () => {
+      const written = await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId);
+      if (written === null) throw new Error("The switch audit is not written yet");
+      return written;
+    });
     expect(audit).toContain("schemaVersion: 2");
     expect(audit).toContain("kind: switch");
     expect(audit).toContain('fromProvider: "codex"');
@@ -446,7 +450,10 @@ describe("provider switch on send", () => {
     expect(retry.message.match(/\[mcode-handoff:begin /g)).toHaveLength(1);
     expect(retry.message.match(/ancient question/g)).toHaveLength(1);
     expect(retry.message.endsWith("back on claude")).toBe(true);
-    expect(await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId)).toContain("kind: switch");
+    // The switch writes its audit after it saves the provider, so the audit can trail the turn's settlement.
+    await vi.waitFor(async () => {
+      expect(await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId)).toContain("kind: switch");
+    });
   });
 
   function notices(): string[] {
