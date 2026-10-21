@@ -3,9 +3,9 @@
 /** Codex silently cuts the middle out of an additionalContext value above ~1,000 tokens (UTF-8 bytes / 4). */
 export const MCODE_INSTRUCTION_SECTION_MAX_BYTES = 4_000;
 
-const EXPLICIT_MCODE_THREAD_TOKEN = /\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait))\b/i;
-const NEGATED_MCODE_THREAD_REQUEST = /\b(?:do\s+not|don['’]?t|dont|never|without|no)\b[\s\S]{0,96}\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait))\b/i;
-const MCODE_THREAD_REQUEST_ACTION = /\b(?:create|start|open|launch|use|manage|list|search|send|stop|wait|get|target|delegate)\b/i;
+const EXPLICIT_MCODE_THREAD_TOKEN = /\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait)|delegate_task|task_(?:status|cancel))\b/i;
+const NEGATED_MCODE_THREAD_REQUEST = /\b(?:do\s+not|don['’]?t|dont|never|without|no)\b[\s\S]{0,96}\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait)|delegate_task|task_(?:status|cancel))\b/i;
+const MCODE_THREAD_REQUEST_ACTION = /\b(?:create|start|open|launch|use|manage|list|search|send|stop|wait|get|target|delegate|call|check|cancel)\b/i;
 
 /** Stable section names used as Codex context tags. */
 export type McodeInstructionSectionKey =
@@ -60,9 +60,9 @@ const THREAD_CONTROL_BLOCK = [
   "Mcode thread control",
   "- Use the mcode MCP thread_* tools only when the user explicitly asks for Mcode threads. An Mcode thread is a persistent user-visible conversation, different from provider-native child agents.",
   "- If no Project is named, use the active source thread's Project without discovery. Resolve an explicitly named Project with workspace_search. Use worktree_list only to resolve an explicit worktree or reference.",
-  "- Create threads with thread_create_batch. Preserve the user's title and task in the prompt. For a new worktree, use placement type new_worktree with the appropriate baseRef, and set branchName only when the user names a branch.",
+  "- Delegate child work with delegate_task. Preserve the user's title and task in the prompt. Choose isolation shared for the Coordinator's checkout or worktree for a new checkout at its local commit. Retry the same input with the same clientRequestId to return the existing task.",
   "- Call thread_target_list before choosing a provider or model, and pass the exact returned providerId and modelId. Pass any named provider or execution setting. Never assume or enumerate providers or models.",
-  "- Use returned workspaceId, threadId, turnId and worktree references for follow-up work. Use thread_search to discover, thread_get to read one bounded transcript, thread_send to assign or continue work, thread_stop to stop work, and thread_wait to wait for attention or a terminal state.",
+  "- Use returned taskId and threadId references for follow-up work. delegate_task returns immediately: end the turn or continue other work and check later with task_status rather than polling in a loop. Use task_cancel to stop delegated work and thread_get to inspect its thread. Run each review round as a fresh task carrying the brief, prior findings and open objections.",
   "- Never target the active source thread. Keep prompts faithful to the user's request and inspect results before sending follow-up work.",
   "- If these tools are missing from an initial tool listing, they may load lazily. Make one direct attempt before reporting them unavailable.",
 ].join("\n");

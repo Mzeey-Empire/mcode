@@ -20,6 +20,7 @@ describe("approvalReceipt", () => {
     [{ kind: "file_edit", files: [{ path: "C:\\fixture\\main.ts", change: "edited", additions: 1, deletions: 0 }] }, "main.ts"],
     [{ kind: "fetch", url: "https://example.com/private?token=secret" }, "example.com"],
     [{ kind: "tool", toolName: "search" }, "search"],
+    [{ kind: "delegate_task", taskId: "task-1", title: "Review startup cancellation", providerId: "codex", modelId: "gpt-test", isolation: "worktree" }, "Review startup cancellation"],
   ])("builds a bounded subject label for %j", (subject, subjectLabel) => {
     const receipt = approvalReceipt(request(subject), { status: "denied", choiceLabel: "Reject always" });
     expect(receipt).toEqual({

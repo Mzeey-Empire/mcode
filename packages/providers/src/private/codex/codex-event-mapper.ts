@@ -134,6 +134,12 @@ const EARLY_CHILD_FILE_TOOL_NAMES = new Set([
   "searchreplace", "strreplace", "write",
 ]);
 
+function mcpTextBlock(block: unknown): string[] {
+  if (typeof block !== "object" || block === null) return [];
+  if (!("type" in block) || block.type !== "text") return [];
+  return "text" in block && typeof block.text === "string" ? [block.text] : [];
+}
+
 /** Maps Codex app-server notifications into Mcode agent events. */
 export class CodexEventMapper {
   private readonly assistantItems = new Map<string, CodexAssistantTextItem>();
@@ -2409,7 +2415,22 @@ export class CodexEventMapper {
 
   private mapCompletedMcpTool(item: CompletedItem, notification: CodexNotification): CodexMappedEvent[] {
     const toolCallId = item.id ?? `mcp-${NodeCrypto.randomUUID()}`;
-    return this.completedToolEvents(item, toolCallId, notification, { isError: Boolean(item.error), output: String(item.error ?? item.result ?? "") });
+    return this.completedToolEvents(item, toolCallId, notification, {
+      isError: item.status === "failed" || item.error != null,
+      output: this.completedMcpToolOutput(item),
+    });
+  }
+
+  private completedMcpToolOutput(item: CompletedItem): string {
+    if (typeof item.error === "string") return item.error;
+    if (item.error != null) return item.error.message;
+    if (typeof item.result === "string") return item.result;
+    if (item.result == null) return "";
+
+    const textBlocks = item.result.content.flatMap(mcpTextBlock);
+    if (textBlocks.length > 0) return textBlocks.join("\n");
+    if (item.result.structuredContent !== undefined) return JSON.stringify(item.result.structuredContent);
+    return "";
   }
 
   private completedToolEvents(

@@ -7,6 +7,7 @@ import { threadControlApprovalWriteOperations } from "./thread-control-approval-
 export function buildThreadControlApprovalStoreWriteHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {
   const store = new ThreadControlApprovalStore(db);
   return new Map<string, (input: unknown) => unknown>([
+    [threadControlApprovalWriteOperations.createDelegate.name, databaseWriteHandler(threadControlApprovalWriteOperations.createDelegate, ([input]) => store.createDelegate(input))],
     [threadControlApprovalWriteOperations.create.name, databaseWriteHandler(threadControlApprovalWriteOperations.create, (input) => store.create(...input))],
     [threadControlApprovalWriteOperations.createSend.name, databaseWriteHandler(threadControlApprovalWriteOperations.createSend, (input) => store.createSend(...input))],
     [threadControlApprovalWriteOperations.createStop.name, databaseWriteHandler(threadControlApprovalWriteOperations.createStop, (input) => store.createStop(...input))],

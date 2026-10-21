@@ -23,6 +23,7 @@ interface ApprovalState {
   add(request: ApprovalRequest): void;
   resolve(requestId: string): void;
   remove(requestId: string): void;
+  /** Drop the thread's turn-scoped requests when its turn ends; server-owned thread-control requests stay. */
   clearThread(threadId: string): void;
   hydrate(requests: ApprovalRequest[]): void;
   setSubmission(requestId: string, submission: ApprovalSubmission): void;
@@ -56,7 +57,8 @@ export const useApprovalStore = create<ApprovalState>((set) => ({
   resolve: (requestId) => set((state) => withApprovals(state,
     state.approvals.map((item) => item.requestId === requestId ? { ...item, settled: true } : item))),
   remove: (requestId) => set((state) => withApprovals(state, state.approvals.filter((item) => item.requestId !== requestId))),
-  clearThread: (threadId) => set((state) => withApprovals(state, state.approvals.filter((item) => item.threadId !== threadId))),
+  clearThread: (threadId) => set((state) => withApprovals(state,
+    state.approvals.filter((item) => item.threadId !== threadId || outlivesTurn(item)))),
   // The server builds this app-wide snapshot synchronously and answers on the
   // same ordered socket as approval pushes, so it already reflects every push
   // applied before it and needs no revision guard against them.
@@ -74,6 +76,11 @@ export const useApprovalStore = create<ApprovalState>((set) => ({
       : state
   )),
 }));
+
+// A thread-control request waits on the user, not on the turn that raised it, and the server resolves it itself.
+function outlivesTurn(request: StoredApproval): boolean {
+  return request.subject.kind === "thread_operation" || request.subject.kind === "delegate_task";
+}
 
 /** Whether the request is pending and belongs in the approval dock. */
 export function isDockApproval(request: StoredApproval): boolean {

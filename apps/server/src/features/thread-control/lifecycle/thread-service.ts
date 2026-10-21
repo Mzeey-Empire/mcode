@@ -51,7 +51,7 @@ export class ThreadService {
     title: string,
     mode: string,
     branch: string,
-    options: { branchless?: boolean; startPoint?: string; provider?: ProviderId; lifecycle?: ThreadCreateLifecycle } = {},
+    options: { branchless?: boolean; startPoint?: string; provider?: ProviderId; lifecycle?: ThreadCreateLifecycle; lineage?: Parameters<ThreadRepo["create"]>[6] } = {},
   ): Promise<Thread & { warnings?: string[] }> {
     validateBranchName(branch);
 
@@ -69,7 +69,7 @@ export class ThreadService {
       branch,
       true,
       options.provider,
-      undefined,
+      options.lineage,
       options.branchless ? "branchless" : "named",
       options.branchless ? branch : null,
     );
@@ -122,6 +122,7 @@ export class ThreadService {
     const thread = this.threadRepo.findById(threadId);
     if (!thread || thread.deleted_at !== null) return false;
     this.acceptedProgress?.assertThreadDeletionSupported(threadId);
+    await this.deleteDelegatedChildren(thread, cleanupWorktree);
 
     if (cleanupWorktree && thread.worktree_path) {
       // Stop the scheduled resume before asynchronous cleanup safety checks can admit it.
@@ -146,6 +147,17 @@ export class ThreadService {
     // Disarm any resume scheduled during teardown or persistent deletion.
     await this.resumeScheduler?.unschedule(threadId);
     return deleted;
+  }
+
+  private async deleteDelegatedChildren(coordinator: Thread, cleanupWorktree: boolean): Promise<void> {
+    const children = this.threadRepo.listDelegatedChildren(coordinator.id);
+    const detached = new Set(await this.threadRepo.detachActiveDelegatedChildren(coordinator.id));
+    for (const child of children) {
+      if (child.deleted_at !== null || detached.has(child.id)) continue;
+      const ownsWorktree = child.mode === "worktree" && child.worktree_managed
+        && child.worktree_path !== coordinator.worktree_path;
+      await this.delete(child.id, cleanupWorktree && ownsWorktree);
+    }
   }
 
   /** Update a thread's display title. */

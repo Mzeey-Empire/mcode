@@ -1,6 +1,10 @@
 import {
-  ThreadCreateBatchInputSchema,
-  ThreadCreateBatchResultSchema,
+  DelegateTaskInputSchema,
+  DelegateTaskResultSchema,
+  TaskStatusInputSchema,
+  TaskStatusResultSchema,
+  TaskCancelInputSchema,
+  TaskCancelResultSchema,
   ThreadGetInputSchema,
   ThreadGetResultSchema,
   ThreadSearchInputSchema,
@@ -29,6 +33,7 @@ import {
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import { ErrorCode, McpError, ToolSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ThreadControlService } from "../../thread-control/index.js";
+import type { DelegatedTaskService } from "../../thread-control/delegation/delegated-task-service.js";
 import type { McodeSession, McodeSessionAuthority } from "../mcode-session-authority.js";
 import {
   defineToolkit,
@@ -42,14 +47,13 @@ export type ThreadControlToolService = Pick<
   ThreadControlService,
   | "workspaceSearch"
   | "worktreeList"
-  | "threadCreateBatch"
   | "threadTargetList"
   | "threadSearch"
   | "threadGet"
   | "threadSend"
   | "threadStop"
   | "threadWait"
->;
+> & Pick<DelegatedTaskService, "delegate" | "status" | "cancel">;
 
 /** Dependencies for the thread-control toolkit. */
 export interface ThreadControlToolkitOptions {
@@ -88,7 +92,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function structuredResult(value: unknown): CallToolResult {
   if (!isRecord(value)) throw new Error("Thread-control tool result must be an object");
-  return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
+  const result: CallToolResult = { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
+  if (value.status === "rejected") result.isError = true;
+  return result;
 }
 
 function combineAbortSignals(signals: ReadonlyArray<AbortSignal | undefined>): AbortSignal | undefined {
@@ -165,21 +171,38 @@ function createTools(context: ToolContext): McodeTool<McodeSession>[] {
       omitListedOutput: true,
       run: (service, authority, input) => service.worktreeList(authority, input),
     }),
-    serviceTool(context, {
-      name: "thread_create_batch",
-      description: "Create and start one to twenty normal, persistent Mcode threads only when explicitly requested, distinct from provider-native child agents. Default to the active source thread's Project without discovery; resolve an explicitly named Project with workspace_search and respect a requested worktree. Preserve the user's title and task in the prompt. For a new worktree use placement type new_worktree with the appropriate baseRef; omit branchName unless the user names a branch. Call thread_target_list before choosing a provider or model and pass exact returned providerId/modelId, including providerId when named; preserve named execution settings. Never target the active source thread. Track returned threadId with thread_get or thread_wait, inspect results before follow-up work, and use returned workspaceId, turnId, and worktree references.",
-      input: ThreadCreateBatchInputSchema(),
-      result: ThreadCreateBatchResultSchema(),
-      run: (service, authority, input) => service.threadCreateBatch(authority, input),
-    }),
+    ...createTaskTools(context),
     serviceTool(context, {
       name: "thread_target_list",
-      description: "List provider and model targets currently usable for new Mcode threads. Call before choosing a provider or model; pass exact returned providerId/modelId to thread_create_batch. Never assume a static provider list or target the active source thread.",
+      description: "List provider and model targets currently usable for delegated tasks. Call before choosing a provider or model; pass exact returned providerId/modelId to delegate_task. Never assume a static provider list or target the active source thread.",
       input: ThreadTargetListInputSchema(),
       result: ThreadTargetListResultSchema(),
       run: (service, authority) => service.threadTargetList(authority),
     }),
     ...createThreadTools(context),
+  ];
+}
+
+function createTaskTools(context: ToolContext): McodeTool<McodeSession>[] {
+  return [
+    serviceTool(context, {
+      name: "delegate_task",
+      description: "Delegate child work to a new visible thread in the Coordinator's Project. Prefer Provider-native sub-agents when they support the chosen model. Call thread_target_list and use its exact providerId/modelId. Choose shared for the Coordinator's checkout or worktree for a new checkout at its local commit with project setup. Omitted permissionMode inherits the Coordinator's mode; a broader mode is forbidden. Run each review round as a fresh task carrying the brief, prior findings and open objections. The call returns immediately: end the turn or continue other work, then check later with task_status rather than polling in a loop. A retry with the same clientRequestId returns the existing task. Keep the same input on retries. Interrupted outcomes may later resume.",
+      input: DelegateTaskInputSchema(), result: DelegateTaskResultSchema(),
+      run: (service, authority, input) => service.delegate(authority, input),
+    }),
+    serviceTool(context, {
+      name: "task_status",
+      description: "Read the current state and bounded result of a task delegated by this Coordinator. Status follows the original task turn and includes its threadId when available; later user turns do not replace its result. Finished/interrupted can become working after recovery. Check later after ending the turn or doing other work; do not poll in a loop.",
+      input: TaskStatusInputSchema(), result: TaskStatusResultSchema(),
+      run: (service, authority, input) => service.status(authority, input),
+    }),
+    serviceTool(context, {
+      name: "task_cancel",
+      description: "Cancel a task owned by this Coordinator. Pending launch approvals are cancelled without creating a thread; setup and running work use the existing stop flow. Supervised stops may return stopApprovalId for a human decision. Cancelling a finished task is a no-op. Finished/interrupted remains resumable; check task_status later after other work rather than polling in a loop.",
+      input: TaskCancelInputSchema(), result: TaskCancelResultSchema(),
+      run: (service, authority, input) => service.cancel(authority, input),
+    }),
   ];
 }
 

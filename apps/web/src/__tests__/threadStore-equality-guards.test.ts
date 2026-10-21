@@ -88,6 +88,7 @@ function resetState() {
         codex_fast_mode: null,
     devin_mode: null,
         parent_thread_id: null,
+        delegation_coordinator_thread_id: null,
         forked_from_message_id: null,
         last_compact_summary: null,
         plan_phase: null,

@@ -295,6 +295,7 @@ function makeThread(
     codex_fast_mode: null,
     devin_mode: null,
     parent_thread_id: null,
+    delegation_coordinator_thread_id: null,
     forked_from_message_id: null,
     last_compact_summary: null,
     plan_phase: null,
@@ -302,6 +303,10 @@ function makeThread(
     has_file_changes: false,
     ...overrides,
   };
+}
+
+function rowIndent(row: HTMLElement | undefined): string | undefined {
+  return row?.querySelector<HTMLElement>("[style*='padding-left']")?.style.paddingLeft;
 }
 
 const WORKSPACE = {
@@ -994,6 +999,21 @@ describe("ProjectTree thread interactions", () => {
     render(<ProjectTree />);
 
     expect(screen.getByText("No active threads", { exact: true })).toBeVisible();
+  });
+
+  it("keeps a Delegated thread at the root even when its Coordinator is listed", () => {
+    const coordinator = makeThread({ id: "coordinator", title: "Coordinator" });
+    const delegated = makeThread({
+      id: "delegated",
+      title: "Delegated",
+      delegation_coordinator_thread_id: "coordinator",
+    });
+    setupStoreMocks({ threads: [coordinator, delegated] });
+
+    render(<ProjectTree />);
+
+    const rows = screen.getAllByTestId("thread-item");
+    expect(rows.map(rowIndent)).toEqual(["4px", "4px"]);
   });
 
   it("caps the thread list at six rows and toggles the overflow", () => {

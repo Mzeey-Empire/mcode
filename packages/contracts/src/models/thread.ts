@@ -94,6 +94,11 @@ export const ThreadSchema = lazySchema(() =>
   default_open_in_app: z.string().nullable(),
   /** ID of the parent thread this was branched from. Null for root threads. */
   parent_thread_id: z.string().nullable(),
+  /**
+   * ID of the Coordinator that delegated this thread. Non-null marks a Delegated
+   * sub-agent, which appears in its Coordinator's sub-agent roster, never in thread lists.
+   */
+  delegation_coordinator_thread_id: z.string().nullable(),
   /** ID of the message in the parent thread that marks the fork point. */
   forked_from_message_id: z.string().nullable(),
   /** Most recent compaction summary from the AI provider. Used to seed branched thread replays. */
@@ -102,6 +107,11 @@ export const ThreadSchema = lazySchema(() =>
 );
 /** Thread record from the database. */
 export type Thread = z.infer<ReturnType<typeof ThreadSchema>>;
+
+/** True when the thread is a Delegated sub-agent, reached through its Coordinator rather than thread lists. */
+export function isDelegatedSubagent(thread: Pick<Thread, "delegation_coordinator_thread_id">): boolean {
+  return thread.delegation_coordinator_thread_id !== null;
+}
 
 /**
  * Thread plus a small slice of its parent workspace, used by the cross-workspace

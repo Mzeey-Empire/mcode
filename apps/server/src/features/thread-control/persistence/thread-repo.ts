@@ -176,8 +176,19 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.updateLineage, [id, parentThreadId, forkedFromMessageId]);
   }
 
-  updateDelegationLineage(id: Parameters<ThreadStore["updateDelegationLineage"]>[0], lineage: Parameters<ThreadStore["updateDelegationLineage"]>[1]): Promise<ReturnType<ThreadStore["updateDelegationLineage"]>> {
-    return this.writer.execute(threadWriteOperations.updateDelegationLineage, [id, lineage]);
+  /** Read delegated children hidden from ordinary lists. */
+  listDelegatedChildren(coordinatorThreadId: string): ReturnType<ThreadStore["listDelegatedChildren"]> {
+    return this.reader.listDelegatedChildren(coordinatorThreadId);
+  }
+
+  /** Commit promotion before publishing children as independent threads. */
+  async detachActiveDelegatedChildren(coordinatorThreadId: string): Promise<string[]> {
+    const ids = await this.writer.execute(threadWriteOperations.detachActiveDelegatedChildren, [coordinatorThreadId]);
+    for (const id of ids) {
+      const thread = this.findById(id);
+      if (thread) broadcast("thread.lifecycleChanged", { thread });
+    }
+    return ids;
   }
 
   updateExternalCreator(id: Parameters<ThreadStore["updateExternalCreator"]>[0], integrationId: Parameters<ThreadStore["updateExternalCreator"]>[1]): Promise<ReturnType<ThreadStore["updateExternalCreator"]>> {

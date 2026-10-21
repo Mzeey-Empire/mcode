@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildNarrativeItems } from "../build-narrative";
+import { createSubagentLaunchPresentation } from "../narrative-builder-helpers";
 import type { ToolCall } from "@/transport/types";
 
 /**
@@ -47,6 +48,29 @@ function subagentChildIds(item: SubagentNarrativeItem, agentId: string): string[
 }
 
 describe("parallel sub-agent nesting", () => {
+  it.each(["mcp__mcode__delegate_task", "mcp:mcode/delegate_task"])(
+    "renders a live %s call as a subagent titled by its delegate title",
+    (toolName) => {
+      const delegate = {
+        ...mkTool({ id: "delegate-1", toolName, isComplete: false }),
+        toolInput: { title: "Audit parser", prompt: "Read the parser", clientRequestId: "r-1", target: { provider: "codex" }, isolation: "worktree" },
+      };
+      const presentation = createSubagentLaunchPresentation(toolName, delegate.toolInput, delegate.id);
+
+      const { items } = buildNarrativeItems({
+        toolCalls: [{ ...delegate, subagentPresentation: presentation }],
+        hooks: [],
+        thoughtSegments: [],
+        streamingText: "",
+        isAgentRunning: true,
+      });
+
+      const subagent = requiredSubagentItem(items.find((item) => item.type === "subagent"));
+      expect(subagent.toolCall.subagentPresentation?.task).toBe("Audit parser");
+      expect(items.some((item) => item.type === "tool-group")).toBe(false);
+    },
+  );
+
   it("nests each parallel sub-agent's children under the right Agent row", () => {
     const tools: ToolCall[] = [
       // 4 parallel agents dispatched at the top level.

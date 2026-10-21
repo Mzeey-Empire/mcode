@@ -57,6 +57,8 @@ const {
     chatViewResidencyMock: {
       invalidateConversation: vi.fn(),
       refresh: vi.fn().mockResolvedValue(undefined),
+      refreshVisibleConversation: vi.fn().mockResolvedValue(undefined),
+      isDisplayConversationLeased: vi.fn((threadId: string) => chatViewDisplayLeaseIdsRef.current.includes(threadId)),
       subscribeDisplayConversations: vi.fn((listener: () => void) => {
         chatViewDisplayLeaseListeners.add(listener);
         return () => chatViewDisplayLeaseListeners.delete(listener);
@@ -254,6 +256,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     codex_fast_mode: null,
     devin_mode: null,
     parent_thread_id: null,
+    delegation_coordinator_thread_id: null,
     forked_from_message_id: null,
     last_compact_summary: null,
     plan_phase: null,

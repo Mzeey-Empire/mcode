@@ -154,6 +154,60 @@ describe("ThreadService.delete", () => {
     });
     expect(teardownThread).toHaveBeenCalledExactlyOnceWith(parent.id);
   });
+
+  it("cleans an inactive delegated child's owned worktree when deleting its coordinator", async () => {
+    const workspace = await workspaces.create("Project", "/repo");
+    const parent = await threads.create(workspace.id, "Coordinator", "direct", "main");
+    const child = await threads.create(workspace.id, "Delegated", "worktree", "feature/delete", true, "codex", {
+      delegation: { coordinatorThreadId: parent.id, creatorTurnId: "turn", creatorToolCallId: "call" },
+    });
+    await threads.updateWorktreePath(child.id, "C:\\Users\\user\\.mcode\\worktrees\\repo\\delegated");
+
+    expect(await threadService.delete(parent.id, true)).toBe(true);
+
+    expect(threads.findById(parent.id)).toBeNull();
+    expect(threads.findById(child.id)?.status).toBe("deleted");
+    expect(cleanupJobs.findByThreadId(child.id)?.worktree_path).toBe("C:\\Users\\user\\.mcode\\worktrees\\repo\\delegated");
+  });
+
+  it("detaches a running delegated child instead of deleting it with its coordinator", async () => {
+    const workspace = await workspaces.create("Project", "/repo");
+    const parent = await threads.create(workspace.id, "Coordinator", "direct", "main");
+    const child = await threads.create(workspace.id, "Running", "direct", "main", true, "codex", {
+      delegation: { coordinatorThreadId: parent.id, creatorTurnId: "turn", creatorToolCallId: "call" },
+    });
+    const now = new Date().toISOString();
+    database.prepare(`INSERT INTO canonical_agent_threads
+      (id, workspace_id, root_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES (?, ?, ?, 'codex', 'Active', ?, ?)`).run(child.id, workspace.id, child.id, now, now);
+    database.prepare(`INSERT INTO canonical_agent_turns
+      (id, thread_id, execution_id, status, trigger_json, permission_mode, created_at, updated_at)
+      VALUES ('running-turn', ?, 'running-execution', 'Running', '{"kind":"user"}', 'supervised', ?, ?)`)
+      .run(child.id, now, now);
+
+    expect(await threadService.delete(parent.id, true)).toBe(true);
+
+    expect(threads.findById(parent.id)).toBeNull();
+    expect(threads.findById(child.id)).toMatchObject({ status: "active", delegation_coordinator_thread_id: null });
+    expect(teardownThread).toHaveBeenCalledExactlyOnceWith(parent.id);
+  });
+
+  it("keeps an attached delegated child's shared checkout out of child cleanup", async () => {
+    const workspace = await workspaces.create("Project", "/repo");
+    const parent = await threads.create(workspace.id, "Coordinator", "worktree", "feature/delete");
+    const child = await threads.create(workspace.id, "Attached", "worktree", "feature/delete", false, "codex", {
+      delegation: { coordinatorThreadId: parent.id, creatorTurnId: "turn", creatorToolCallId: "call" },
+    });
+    const path = "C:\\Users\\user\\.mcode\\worktrees\\repo\\shared";
+    await threads.updateWorktreePath(parent.id, path);
+    await threads.updateWorktreePath(child.id, path);
+
+    expect(await threadService.delete(parent.id, true)).toBe(true);
+
+    expect(threads.findById(child.id)).toBeNull();
+    expect(cleanupJobs.findByThreadId(child.id)).toBeNull();
+    expect(cleanupJobs.findByThreadId(parent.id)?.worktree_path).toBe(path);
+  });
 });
 
 describe("ThreadService.create", () => {

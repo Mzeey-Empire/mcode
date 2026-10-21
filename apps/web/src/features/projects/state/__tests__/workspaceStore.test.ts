@@ -314,6 +314,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: null,
+    delegation_coordinator_thread_id: null,
     forked_from_message_id: null,
     last_compact_summary: null,
     plan_phase: null,
@@ -374,6 +375,25 @@ describe("workspaceStore completion lifecycle", () => {
       visible: true,
       openTabs: ["changes"],
     });
+  });
+
+  it("lists a thread first when a lifecycle push introduces it", () => {
+    useWorkspaceStore.setState({ threads: [makeThread({ id: "older" })] });
+
+    useWorkspaceStore.getState().applyThreadLifecycle(makeThread({ id: "detached" }));
+
+    expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual(["detached", "older"]);
+  });
+
+  it("never lists a delegated thread from a lifecycle push and drops one already listed", () => {
+    const delegated = makeThread({ id: "delegated", delegation_coordinator_thread_id: "coordinator" });
+
+    useWorkspaceStore.getState().applyThreadLifecycle(delegated);
+    expect(useWorkspaceStore.getState().threads.some((thread) => thread.id === "delegated")).toBe(false);
+
+    useWorkspaceStore.setState({ threads: [{ ...delegated, delegation_coordinator_thread_id: null }] });
+    useWorkspaceStore.getState().applyThreadLifecycle(delegated);
+    expect(useWorkspaceStore.getState().threads.some((thread) => thread.id === "delegated")).toBe(false);
   });
 
   it("clears tabs from a hidden panel and tolerates a repeated completion event", () => {

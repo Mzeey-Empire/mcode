@@ -341,6 +341,20 @@ describe("ApprovalDock subjects", () => {
     expect(screen.queryByTestId("approval-dock")).not.toBeInTheDocument();
   });
 
+  it("shows a delegated task launch with its target and pinned commit", () => {
+    addApproval({
+      subject: {
+        kind: "delegate_task", taskId: "task-1", title: "Fix flaky login test",
+        providerId: "claude", modelId: "opus", isolation: "worktree", commit: "0123456789abcdef",
+      },
+    });
+    render(<DockHarness />);
+
+    expect(screen.getByRole("heading", { name: "Codex wants to delegate a task" })).toBeInTheDocument();
+    expect(screen.getByText("Fix flaky login test")).toBeInTheDocument();
+    expect(screen.getByText("claude · opus · new worktree · at 0123456")).toBeInTheDocument();
+  });
+
   it("offers no note row when the provider cannot take a note", () => {
     addApproval();
     render(<DockHarness />);

@@ -163,7 +163,11 @@ function canonicalRecoveryChanged(
 }
 
 function refreshConversation(threadId: string): void {
-  void getConversationResidency().refresh(threadId, useWorkspaceStore.getState().threads).catch(() => {});
+  const residency = getConversationResidency();
+  const refresh = residency.isDisplayConversationLeased(threadId)
+    ? residency.refreshVisibleConversation(threadId)
+    : residency.refresh(threadId, useWorkspaceStore.getState().threads);
+  void refresh.catch(() => {});
 }
 
 function applyCanonicalRecovery(
@@ -174,7 +178,9 @@ function applyCanonicalRecovery(
   if (!canonicalRecoveryChanged(recovery, revisions)) return;
   const residency = getConversationResidency();
   residency.invalidateConversation(recovery.threadId);
-  if (recovery.threadId === activeThreadId) refreshConversation(activeThreadId);
+  if (recovery.threadId === activeThreadId || residency.isDisplayConversationLeased(recovery.threadId)) {
+    refreshConversation(recovery.threadId);
+  }
 }
 
 function applyAtomicResponse(

@@ -10,6 +10,8 @@ import { buildPersistedNarrativeItems } from "../build-persisted-narrative";
 import { buildToolSummaryText, isShellTool, resolveToolName } from "@/components/chat/tool-renderers/constants";
 import type { ToolCall, ToolCallRecord } from "@/transport/types";
 import type { ToolGroup } from "../types";
+import { SubagentProviderScope } from "../subagent-provider";
+import { useSubagentRosterStore } from "@/features/subagents/state/subagentRosterStore";
 
 /** Long unbroken path + git add, matching real overflow reports. */
 export const LONG_SHELL_COMMAND =
@@ -425,5 +427,75 @@ describe("narrative tool row layout classes", () => {
     fireEvent.click(summary);
     expect(screen.getByText("Read file")).toBeVisible();
     expect(screen.getByText("Read failed")).toBeVisible();
+  });
+});
+
+const MCODE_MCP_SPELLINGS = ["mcp:mcode/", "mcp__mcode__"] as const;
+
+function taskCall(toolName: string, id = "tc-task-1"): ToolCall {
+  return { id, toolName, toolInput: { taskId: "task-123" }, output: null, isError: false, isComplete: true };
+}
+
+function seedTaskRoster(title: string): void {
+  useSubagentRosterStore.setState({ rosters: new Map([["parent", {
+    owningParentThreadId: "parent", epoch: "boot", revision: 1, truncated: false,
+    entries: [{ id: "task:task-123", provider: "codex", title, prompt: null, subagentType: null, model: null,
+      reasoningEffort: null, stepCount: 0, status: "running", startedAt: "2026-10-10T10:00:00.000Z",
+      endedAt: null, tier: "transcript", canStop: true, sourceToolCallId: null, childThreadId: "child",
+      sourceMessageId: null, parentEntryId: null }],
+  }]]), errors: new Set() });
+}
+
+describe.each(MCODE_MCP_SPELLINGS)("Mcode MCP task tools named %s*", (prefix) => {
+  it("resolves to the bare tool name", () => {
+    expect(resolveToolName(`${prefix}task_status`)).toBe("task_status");
+    expect(resolveToolName(`${prefix}delegate_task`)).toBe("delegate_task");
+  });
+
+  it("summarizes polls and cancels with task verbs", () => {
+    expect(buildToolSummaryText([
+      { toolName: `${prefix}task_status` },
+      { toolName: `${prefix}task_status` },
+      { toolName: `${prefix}task_cancel` },
+    ])).toBe("Checked 2 tasks, Cancelled 1 task");
+  });
+
+  it("labels a task_status row with the task title instead of the raw id", () => {
+    seedTaskRoster("Fix login redirect");
+    render(<SubagentProviderScope threadId="parent">
+      <ToolSummaryLine group={{ calls: [taskCall(`${prefix}task_status`)] }} />
+    </SubagentProviderScope>);
+    expect(screen.getByText("Check task")).toBeInTheDocument();
+    expect(screen.getByText("Fix login redirect")).toBeInTheDocument();
+    expect(screen.queryByText(/task-123/)).not.toBeInTheDocument();
+  });
+
+  it("labels a reloaded task_status row, whose input is the persisted JSON summary, with the task title", () => {
+    seedTaskRoster("Fix login redirect");
+    const persisted = { ...taskCall(`${prefix}task_status`), toolInput: { _summary: '{"taskId":"task-123"}' } };
+    render(<SubagentProviderScope threadId="parent">
+      <ToolSummaryLine group={{ calls: [persisted] }} />
+    </SubagentProviderScope>);
+    expect(screen.getByText("Fix login redirect")).toBeInTheDocument();
+  });
+
+  it("shows no raw task id when the roster has no title for it", () => {
+    useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
+    render(<ToolSummaryLine group={{ calls: [taskCall(`${prefix}task_cancel`)] }} />);
+    expect(screen.getByText("Cancel task")).toBeInTheDocument();
+    expect(screen.queryByText(/task-123|taskId/)).not.toBeInTheDocument();
+  });
+
+  it("leaves the label unclipped when the roster has no title for it", () => {
+    useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
+    render(<ToolSummaryLine group={{ calls: [taskCall(`${prefix}task_cancel`)] }} />);
+    expect(screen.getByText("Cancel task")).not.toHaveClass("max-w-[60%]");
+  });
+});
+
+describe("unknown tool summary", () => {
+  it("counts calls instead of pluralizing the tool name", () => {
+    expect(buildToolSummaryText([{ toolName: "mcp:other/lookup" }])).toBe("1 mcp:other/lookup call");
+    expect(buildToolSummaryText([{ toolName: "lookup" }, { toolName: "lookup" }])).toBe("2 lookup calls");
   });
 });

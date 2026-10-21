@@ -3,6 +3,7 @@ import {
   createSubagentPresentation,
   decodeCanonicalSubagentDetailTarget,
   decodeSubagentAliasDetailTarget,
+  isDelegateTaskToolName,
   isTaskListToolName,
   resolveBrowserNarrativeTool,
 } from "@mcode/contracts";
@@ -22,13 +23,16 @@ import {
   type SubagentLifecycle,
 } from "./subagent-lifecycle";
 import {
-  AGENT_TOOL_NAME,
   buildToolCallHierarchy,
   createSubagentItem,
+  createSubagentLaunchPresentation,
   createToolGroupItem,
+  isSubagentLaunchRecord,
 } from "./narrative-builder-helpers";
 import { filterPersistedFinalResponseThoughts, isReasoningSegment } from "./narrative-thought-classification";
 import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
+
+const NATIVE_AGENT_TOOL_NAME = "Agent";
 
 /** Inputs that reconstruct a persisted turn narrative from durable records. */
 export interface PersistedNarrativeInputs {
@@ -242,7 +246,7 @@ function persistedToolInput(record: ToolCallRecord): Record<string, unknown> {
 
 function persistedToolInputWithAgentMetadata(record: ToolCallRecord): Record<string, unknown> {
   const input = persistedToolInput(record);
-  if (record.tool_name !== AGENT_TOOL_NAME) return input;
+  if (record.tool_name !== NATIVE_AGENT_TOOL_NAME) return input;
   addPersistedTextField(input, "agentName", record.display_name);
   addPersistedTextField(input, "prompt", record.subagent_prompt);
   addPersistedTextField(input, "subagentType", record.subagent_type);
@@ -252,7 +256,10 @@ function persistedToolInputWithAgentMetadata(record: ToolCallRecord): Record<str
 }
 
 function persistedSubagentPresentation(record: ToolCallRecord): ToolCall["subagentPresentation"] {
-  if (record.tool_name !== AGENT_TOOL_NAME) return undefined;
+  if (isDelegateTaskToolName(record.tool_name)) {
+    return createSubagentLaunchPresentation(record.tool_name, { prompt: record.input_summary }, record.id);
+  }
+  if (record.tool_name !== NATIVE_AGENT_TOOL_NAME) return undefined;
   const input: Record<string, unknown> = {};
   addPersistedTextField(input, "agentName", record.display_name);
   addPersistedProviderAgentInput(input, record.provider_agent_key);
@@ -362,7 +369,7 @@ function createPersistedThoughtEvents(
 function createPersistedTopLevelToolEvents(
   topLevelRecords: readonly ToolCallRecord[],
 ): PersistedTimelineEvent[] {
-  return topLevelRecords.flatMap((toolRecord) => toolRecord.tool_name === AGENT_TOOL_NAME
+  return topLevelRecords.flatMap((toolRecord) => isSubagentLaunchRecord(toolRecord)
     ? []
     : [{ kind: "tool" as const, call: recordToToolCall(toolRecord), sortOrder: toolRecord.sort_order }]);
 }
@@ -372,7 +379,7 @@ function createPersistedSubagentEvents(
   childrenByParent: ReadonlyMap<string, readonly ToolCallRecord[]>,
 ): PersistedTimelineEvent[] {
   return toolRecords.flatMap((toolRecord) => {
-    if (toolRecord.tool_name !== AGENT_TOOL_NAME) return [];
+    if (!isSubagentLaunchRecord(toolRecord)) return [];
     const marker = latestPersistedLifecycleMarker(childrenByParent.get(toolRecord.id) ?? []);
     return [{
       kind: "subagent" as const,
@@ -434,7 +441,7 @@ function createPersistedSubagentActivities(
       .slice()
       .sort((left, right) => left.sort_order - right.sort_order)
       .map(recordToToolCall),
-    hooks: hooks.filter((hook) => hook.toolName === AGENT_TOOL_NAME),
+    hooks: hooks.filter((hook) => hook.toolName === NATIVE_AGENT_TOOL_NAME),
   }));
 }
 

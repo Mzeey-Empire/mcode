@@ -93,6 +93,7 @@ function resolveProviderOptionFields(params: PlaceholderWorkspaceThreadParams) {
     codex_fast_mode: params.codexFastMode ?? null,
     devin_mode: params.devinMode ?? null,
     parent_thread_id: params.parentThreadId ?? null,
+    delegation_coordinator_thread_id: null,
     forked_from_message_id: params.forkedFromMessageId ?? null,
   };
 }

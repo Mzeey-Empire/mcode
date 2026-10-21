@@ -1,5 +1,6 @@
 import { createAgentModelState, type AgentItem, type CanonicalAgentEventEnvelope, type Message } from "@mcode/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockMessage } from "@/__tests__/mocks/transport";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import { projectCanonicalMessageList } from "@/features/conversation/messages/canonical-message-projection";
 import { resetThreadStoreForTests } from "./thread-store-test-utils";
@@ -67,7 +68,7 @@ function envelope(
   };
 }
 
-function childAnswerItem(threadId: string, id: string, content: string): AgentItem {
+function childAnswerItem(threadId: string, id: string, content: string, sequence = 1): AgentItem {
   const answer: Message = {
     id: "child-answer",
     thread_id: threadId,
@@ -78,7 +79,7 @@ function childAnswerItem(threadId: string, id: string, content: string): AgentIt
     cost_usd: null,
     tokens_used: null,
     timestamp: NOW,
-    sequence: 1,
+    sequence,
     attachments: null,
   };
   return {
@@ -161,6 +162,45 @@ describe("canonical agent event residency guards", () => {
     expect(record?.runtimePhase).toBe("completed");
     expect(record?.messages.filter((message) => message.content === "Recovered before saving")).toHaveLength(1);
     expect(loadConversationPage).not.toHaveBeenCalled();
+  });
+
+  it("does not append a recovered prompt after its answer while a leased transcript is unloaded", async () => {
+    const threadId = "unloaded-child";
+    resetThreadStoreForTests({ currentThreadId: "selected-parent" });
+    const residency = getConversationResidency();
+    residency.mountDisplayConversation(threadId);
+    await Promise.resolve();
+    const publishedSequences: number[][] = [];
+    const unsubscribe = useThreadStore.subscribe((store) => {
+      publishedSequences.push(store.records.get(threadId)?.messages.map((message) => message.sequence) ?? []);
+    });
+    try {
+      expect(useThreadStore.getState().records.get(threadId)).toMatchObject({ messages: [], loading: true });
+      const state = createAgentModelState();
+      state.turns["child-turn"] = {
+        id: "child-turn", threadId, status: "Completed", trigger: { kind: "user" },
+        permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null,
+        providerIdentities: [], startedAt: NOW, providerStartedAt: null, ending: null, endedAt: NOW, createdAt: NOW, updatedAt: NOW,
+      };
+      state.items.prompt = {
+        id: "prompt", threadId, turnId: "child-turn", kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+        payload: { projection: "message", message: createMockMessage({
+          id: "child-prompt", thread_id: threadId, role: "user", content: "Child task", sequence: 1,
+        }) },
+      };
+      state.items.answer = childAnswerItem(threadId, "answer", "Child answer", 2);
+
+      useThreadStore.getState().applyCanonicalReconnectRecoveries([{
+        phase: "recovery", threadId, epoch: "child-epoch", acceptedThrough: 0, savedThrough: 0, retained: [], loss: "none",
+        durable: { mode: "snapshot", threadId, snapshot: { revision: { conversationRevision: 1, rosterRevision: 0 }, state } },
+      }]);
+
+      expect(publishedSequences).not.toContainEqual([2, 1]);
+      expect(useThreadStore.getState().records.get(threadId)?.messages.map((message) => message.sequence)).toEqual([2]);
+    } finally {
+      unsubscribe();
+      residency.unmountDisplayConversation(threadId);
+    }
   });
 
   it("rejects a late child push after its display lease is released", () => {

@@ -27,7 +27,10 @@ export const threadWriteOperations = {
   updatePlanPhase: databaseWriteOperation("thread.updatePlanPhase", z.tuple([z.string(), PlanPhaseSchema.nullable()]), z.boolean()),
   create: databaseWriteOperation("thread.create", z.tuple([
     z.string(), z.string(), ThreadModeSchema, z.string(), z.boolean().optional(), z.string().optional(),
-    z.object({ parentThreadId: z.string(), forkedFromMessageId: z.string() }).optional(),
+    z.object({
+      parentThreadId: z.string().optional(), forkedFromMessageId: z.string().optional(),
+      delegation: z.object({ coordinatorThreadId: z.string(), creatorTurnId: z.string(), creatorToolCallId: z.string() }).optional(),
+    }).optional(),
     z.enum(["named", "branchless"]).optional(), z.string().nullable().optional(),
   ]), thread),
   updateStatus: databaseWriteOperation("thread.updateStatus", z.tuple([z.string(), ThreadStatusSchema]), z.boolean()),
@@ -59,7 +62,7 @@ export const threadWriteOperations = {
   updateTitle: booleanByPair("thread.updateTitle"),
   updateCompactSummary: databaseWriteOperation("thread.updateCompactSummary", z.tuple([z.string(), z.string()]), z.void()),
   updateLineage: databaseWriteOperation("thread.updateLineage", z.tuple([z.string(), z.string(), z.string()]), z.boolean()),
-  updateDelegationLineage: databaseWriteOperation("thread.updateDelegationLineage", z.tuple([z.string(), z.object({ coordinatorThreadId: z.string(), creatorTurnId: z.string(), creatorToolCallId: z.string(), creationKind: z.literal("thread_delegation"), integrationId: z.string().optional() })]), z.boolean()),
+  detachActiveDelegatedChildren: databaseWriteOperation("thread.detachActiveDelegatedChildren", idInput, z.array(z.string())),
   updateExternalCreator: booleanByPair("thread.updateExternalCreator"),
   nullifyExternalLineage: databaseWriteOperation("thread.nullifyExternalLineage", z.tuple([z.string()]), z.number().int()),
 };

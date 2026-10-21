@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ResolvedExecutionSchema, ThreadPlacementSchema } from "@mcode/contracts";
+import { DelegateTaskApprovalSubjectSchema, ResolvedExecutionSchema, ThreadPlacementSchema } from "@mcode/contracts";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 
 const identity = z.object({ threadId: z.string(), workspaceId: z.string(), execution: ResolvedExecutionSchema(), turnId: z.string(), callerId: z.string(), sourceThreadId: z.string().optional() });
@@ -11,10 +11,15 @@ const sendApproval = send.extend({ createdAt: z.string(), operation: z.literal("
 const stopApproval = identity.extend({ createdAt: z.string(), operation: z.literal("thread_stop"), approvalId: z.string(), operationPhase: z.enum(["pre_dispatch", "dispatching", "dispatched"]) });
 
 /** Validate the claimed approval before any external side effect is permitted. */
-export const pendingThreadControlApprovalSchema = z.discriminatedUnion("operation", [createApproval, sendApproval, stopApproval]);
+const delegate = identity.extend({ approvalId: z.string(), sourceThreadId: z.string(), subject: DelegateTaskApprovalSubjectSchema() });
+const delegateApproval = delegate.extend({ createdAt: z.string(), operation: z.literal("delegate_task"), operationPhase: z.enum(["pre_dispatch", "dispatching", "dispatched"]) });
+
+/** Validate a durable approval claim before its side effects. */
+export const pendingThreadControlApprovalSchema = z.discriminatedUnion("operation", [createApproval, sendApproval, stopApproval, delegateApproval]);
 
 /** Durable approval claims and phase changes execute entirely on the writer connection. */
 export const threadControlApprovalWriteOperations = {
+  createDelegate: databaseWriteOperation("threadControlApproval.createDelegate", z.tuple([delegate]), z.string()),
   create: databaseWriteOperation("threadControlApproval.create", z.tuple([create]), z.string()),
   createSend: databaseWriteOperation("threadControlApproval.createSend", z.tuple([send.extend({ approvalId: z.string().optional() })]), z.string()),
   createStop: databaseWriteOperation("threadControlApproval.createStop", z.tuple([identity.extend({ approvalId: z.string().optional() })]), z.string()),
@@ -22,6 +27,6 @@ export const threadControlApprovalWriteOperations = {
   setOperationPhase: databaseWriteOperation("threadControlApproval.setOperationPhase", z.tuple([z.string(), z.enum(["pre_provision", "provisioning", "provisioned", "dispatching", "dispatched", "pre_dispatch"])]), z.boolean()),
   requeue: databaseWriteOperation("threadControlApproval.requeue", z.tuple([z.string()]), z.boolean()),
   requeueRecoveredProvisioning: databaseWriteOperation("threadControlApproval.requeueRecoveredProvisioning", z.tuple([z.string()]), z.boolean()),
-  settle: databaseWriteOperation("threadControlApproval.settle", z.tuple([z.string(), z.enum(["approved", "rejected", "failed"])]), z.boolean()),
+  settle: databaseWriteOperation("threadControlApproval.settle", z.tuple([z.string(), z.enum(["approved", "rejected", "failed", "cancelled"])]), z.boolean()),
   requeueDispatch: databaseWriteOperation("threadControlApproval.requeueDispatch", z.tuple([z.string()]), z.boolean()),
 };

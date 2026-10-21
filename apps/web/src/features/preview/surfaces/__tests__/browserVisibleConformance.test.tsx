@@ -263,6 +263,7 @@ function visibleThread(): Thread {
     devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: null,
+    delegation_coordinator_thread_id: null,
     forked_from_message_id: null,
     last_compact_summary: null,
     plan_phase: null,

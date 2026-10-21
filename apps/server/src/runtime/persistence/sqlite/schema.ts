@@ -209,6 +209,16 @@ export const threadStartups = sqliteTable(
   ],
 );
 
+/** Retry receipts pin delegated launches before their startup or approval exists. */
+export const delegatedTasks = sqliteTable("delegated_tasks", {
+  taskId: text("task_id").primaryKey().notNull(),
+  coordinatorThreadId: text("coordinator_thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  clientRequestId: text("client_request_id").notNull(),
+  inputFingerprint: text("input_fingerprint").notNull(),
+  planJson: text("plan_json").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [uniqueIndex("idx_delegated_tasks_coordinator_request").on(table.coordinatorThreadId, table.clientRequestId)]);
+
 /** Durable human approvals for protected delegated-thread creation mutations. */
 export const threadControlApprovals = sqliteTable(
   "thread_control_approvals",

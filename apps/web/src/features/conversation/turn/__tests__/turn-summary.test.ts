@@ -25,6 +25,18 @@ describe("persistedTurnCounts", () => {
     });
     expect(counts).toEqual({ steps: 1, thoughts: 0, subagents: 0 });
   });
+
+  it("counts a failed delegate_task as a step but not a sub-agent, unlike a failed Agent", () => {
+    const counts = persistedTurnCounts({
+      tools: [
+        { ...record("delegate", "mcp__mcode__delegate_task"), status: "failed" },
+        { ...record("agent", "Agent"), status: "failed" },
+        { ...record("running", "mcp__mcode__delegate_task"), status: "running" },
+      ],
+      thoughts: [],
+    });
+    expect(counts).toEqual({ steps: 3, thoughts: 0, subagents: 2 });
+  });
 });
 
 describe("persistedTurnDurationMs", () => {

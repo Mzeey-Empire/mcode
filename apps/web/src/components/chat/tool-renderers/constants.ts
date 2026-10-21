@@ -1,9 +1,10 @@
 import type { LucideIcon } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 import {
-  FileText, FilePen, FolderSearch, Globe,
-  Pencil, Search, Terminal, Wrench,
+  CircleSlash, FileText, FilePen, FolderSearch, Globe,
+  ListChecks, Pencil, Search, Terminal, Wrench,
 } from "lucide-react";
+import { stripMcodeMcpPrefix } from "@mcode/contracts";
 import { StackedLayersIcon } from "@/components/ui/StackedLayersIcon";
 
 /** Accepts both Lucide icons and plain SVG function components. */
@@ -24,6 +25,9 @@ export const TOOL_LABELS: Record<string, string> = {
   browser_act: "Acted on page",
   browser_tabs: "Updated Browser tabs",
   browser_evaluate: "Evaluated page",
+  delegate_task: "Delegate task",
+  task_status: "Check task",
+  task_cancel: "Cancel task",
 };
 
 export const TOOL_ICONS: Record<string, IconComponent> = {
@@ -41,6 +45,9 @@ export const TOOL_ICONS: Record<string, IconComponent> = {
   browser_act: Globe,
   browser_tabs: Globe,
   browser_evaluate: Globe,
+  delegate_task: StackedLayersIcon,
+  task_status: ListChecks,
+  task_cancel: CircleSlash,
 };
 
 export const DEFAULT_ICON: IconComponent = Wrench;
@@ -65,11 +72,11 @@ const EDIT_TOOL_ALIASES: Record<string, "Edit"> = {
 };
 
 /**
- * Maps provider-specific shell and edit tool names to the canonical label/icon set.
+ * Maps provider-specific shell, edit, browser, and Mcode MCP tool names to the canonical label/icon set.
  */
 export function resolveToolName(toolName: string): string {
   const browserTool = toolName.match(/(?:^|__)(browser_[a-z_]+)$/)?.[1];
-  return SHELL_TOOL_ALIASES[toolName] ?? EDIT_TOOL_ALIASES[toolName] ?? browserTool ?? toolName;
+  return SHELL_TOOL_ALIASES[toolName] ?? EDIT_TOOL_ALIASES[toolName] ?? browserTool ?? stripMcodeMcpPrefix(toolName);
 }
 
 /** Returns true when the tool is a shell/command execution (any provider alias). */
@@ -104,6 +111,9 @@ export const TOOL_OUTCOME_VERBS: Record<string, string> = {
   Bash: "Command",
   WebSearch: "Web search",
   WebFetch: "Fetch",
+  delegate_task: "Delegation",
+  task_status: "Task check",
+  task_cancel: "Cancel",
 };
 
 /** Singular/plural labels for tool summary text generation. */
@@ -116,6 +126,9 @@ export const TOOL_SUMMARY_VERBS: Record<string, [string, string]> = {
   Bash: ["Ran %d command", "Ran %d commands"],
   WebSearch: ["%d web search", "%d web searches"],
   WebFetch: ["Fetched %d page", "Fetched %d pages"],
+  delegate_task: ["Delegated %d task", "Delegated %d tasks"],
+  task_status: ["Checked %d task", "Checked %d tasks"],
+  task_cancel: ["Cancelled %d task", "Cancelled %d tasks"],
 };
 
 /**
@@ -135,7 +148,7 @@ export function buildToolSummaryText(calls: readonly { toolName: string }[]): st
       const template = count === 1 ? verbs[0] : verbs[1];
       parts.push(template.replace("%d", String(count)));
     } else {
-      parts.push(`${count} ${name.toLowerCase()}${count > 1 ? "s" : ""}`);
+      parts.push(`${count} ${name} ${count === 1 ? "call" : "calls"}`);
     }
   }
   return parts.join(", ");

@@ -51,6 +51,27 @@ describe("buildNarrativeItems counts", () => {
     expect(completed[0]).toMatchObject({ type: "tool-group", group: { calls } });
   });
 
+  it("shows a rejected delegate_task as a failed tool row, not a sub-agent", () => {
+    const { items, counts } = buildNarrativeItems({
+      toolCalls: [mkTool({ id: "delegate", toolName: "mcp__mcode__delegate_task", isError: true, output: "forbidden" })],
+      hooks: [], thoughtSegments: [], streamingText: "", isAgentRunning: false,
+    });
+    expect(items).toMatchObject([{ type: "tool-group", group: { calls: [{ id: "delegate", isError: true }] } }]);
+    expect(counts.subagents).toBe(0);
+  });
+
+  it("keeps a running delegate_task and a failed native Agent as sub-agents", () => {
+    const { items, counts } = buildNarrativeItems({
+      toolCalls: [
+        mkTool({ id: "delegate", toolName: "mcp__mcode__delegate_task", isComplete: false, startedAt: 1000 }),
+        mkTool({ id: "agent", toolName: "Agent", isError: true, startedAt: 2000 }),
+      ],
+      hooks: [], thoughtSegments: [], streamingText: "", isAgentRunning: true,
+    });
+    expect(items.some((item) => item.type === "tool-group" || item.type === "active-tool")).toBe(false);
+    expect(counts.subagents).toBe(2);
+  });
+
   it("returns zero counts when nothing happened", () => {
     const { items, counts } = buildNarrativeItems({
       toolCalls: [],

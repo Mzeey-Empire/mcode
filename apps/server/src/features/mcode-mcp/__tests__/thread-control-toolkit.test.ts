@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  ThreadCreateBatchResultSchema,
+  DelegateTaskResultSchema,
   ThreadGetResultSchema,
   ThreadSearchResultSchema,
   ThreadSendResultSchema,
@@ -45,7 +45,9 @@ function createService() {
   return {
     workspaceSearch: vi.fn<ThreadControlToolService["workspaceSearch"]>(),
     worktreeList: vi.fn<ThreadControlToolService["worktreeList"]>(),
-    threadCreateBatch: vi.fn<ThreadControlToolService["threadCreateBatch"]>(),
+    delegate: vi.fn<ThreadControlToolService["delegate"]>(),
+    status: vi.fn<ThreadControlToolService["status"]>(),
+    cancel: vi.fn<ThreadControlToolService["cancel"]>(),
     threadTargetList: vi.fn<ThreadControlToolService["threadTargetList"]>(),
     threadSearch: vi.fn<ThreadControlToolService["threadSearch"]>(),
     threadGet: vi.fn<ThreadControlToolService["threadGet"]>(),
@@ -116,14 +118,16 @@ describe("thread-control toolkit", () => {
     );
   });
 
-  it("lists nine operational tools in order with no listed output for worktree_list", () => {
+  it("lists task delegation instead of internal batch creation", () => {
     const { bound } = setup({ lease: "none" });
 
     const tools = bound?.tools.filter((tool) => tool.listed) ?? [];
     expect(tools.map((tool) => tool.name)).toEqual([
       "workspace_search",
       "worktree_list",
-      "thread_create_batch",
+      "delegate_task",
+      "task_status",
+      "task_cancel",
       "thread_target_list",
       "thread_search",
       "thread_get",
@@ -190,35 +194,31 @@ describe("thread-control toolkit", () => {
     for (const method of Object.values(service)) expect(method).not.toHaveBeenCalled();
   });
 
-  it("dispatches thread_create_batch with the call id", async () => {
+  it("dispatches delegate_task with authenticated lineage and validates its result", async () => {
     const { call, service } = setup();
-    service.threadCreateBatch.mockResolvedValue(ThreadCreateBatchResultSchema().parse({
-      results: [{
-        index: 0,
-        status: "created",
-        workspaceId: "workspace-1",
-        threadId: "thread-1",
-        turnId: "turn-1",
-        execution,
-        placement: { type: "direct" },
-        state: { status: "starting" },
-      }],
-    }));
-
-    const result = await call("thread_create_batch", {
-      items: [{
-        workspaceId: "workspace-1",
-        title: "Delegated thread",
-        prompt: "Implement the task.",
-        placement: { type: "direct" },
-      }],
-    }, { toolCallId: "create-call" });
-
-    expect(result.structuredContent).toMatchObject({ results: [{ status: "created", threadId: "thread-1" }] });
-    expect(service.threadCreateBatch).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceToolCallId: "create-call" }),
-      expect.objectContaining({ items: [expect.objectContaining({ title: "Delegated thread" })] }),
+    const receipt = {
+      taskId: "00000000-0000-4000-8000-000000000001",
+      threadId: "thread-1", effectivePermissionMode: "full",
+      state: { status: "working", phase: "preparing" },
+    };
+    service.delegate.mockResolvedValue(DelegateTaskResultSchema().parse(receipt));
+    const input = {
+      clientRequestId: "review-1", title: "Review", prompt: "Find bugs",
+      providerId: "codex", modelId: "gpt-test", isolation: "worktree",
+    };
+    const accepted = await call("delegate_task", input, { toolCallId: "create-call" });
+    expect(accepted.structuredContent).toEqual(receipt);
+    expect(accepted.isError).not.toBe(true);
+    expect(service.delegate).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceThreadId: "source-thread", sourceToolCallId: "create-call" }), input,
     );
+    service.delegate.mockResolvedValueOnce({ status: "rejected", error: { code: "invalid_model", message: "Unavailable", retryable: false } });
+    expect(await call("delegate_task", input)).toMatchObject({
+      isError: true,
+      structuredContent: {
+        status: "rejected", error: { code: "invalid_model", message: "Unavailable", retryable: false },
+      },
+    });
   });
 
   it("returns each thread_send and thread_stop result variant", async () => {
@@ -235,15 +235,17 @@ describe("thread-control toolkit", () => {
       .mockResolvedValueOnce(stopped({ ...base, status: "pending_approval", approvalId: "approval-2", state: { status: "waiting_for_approval", approvalId: "approval-2" } }))
       .mockResolvedValueOnce(stopped({ ...base, status: "rejected", error: { code: "internal_error", message: "Stop failed", retryable: true } }));
 
-    const sends = [] as unknown[];
-    const stops = [] as unknown[];
+    const sends: CallToolResult[] = [];
+    const stops: CallToolResult[] = [];
     for (const id of ["send-1", "send-2", "send-3"]) {
-      sends.push((await call("thread_send", { threadId: "destination-thread", message: "Continue" }, { toolCallId: id })).structuredContent);
-      stops.push((await call("thread_stop", { threadId: "destination-thread" }, { toolCallId: id })).structuredContent);
+      sends.push(await call("thread_send", { threadId: "destination-thread", message: "Continue" }, { toolCallId: id }));
+      stops.push(await call("thread_stop", { threadId: "destination-thread" }, { toolCallId: id }));
     }
 
-    expect(sends).toMatchObject([{ status: "accepted" }, { status: "pending_approval" }, { status: "rejected" }]);
-    expect(stops).toMatchObject([{ status: "accepted" }, { status: "pending_approval" }, { status: "rejected" }]);
+    expect(sends.map((result) => result.structuredContent)).toMatchObject([{ status: "accepted" }, { status: "pending_approval" }, { status: "rejected" }]);
+    expect(stops.map((result) => result.structuredContent)).toMatchObject([{ status: "accepted" }, { status: "pending_approval" }, { status: "rejected" }]);
+    expect(sends.map((result) => result.isError === true)).toEqual([false, false, true]);
+    expect(stops.map((result) => result.isError === true)).toEqual([false, false, true]);
   });
 
   it("dispatches search, get, and wait with defaults and without mutating the destination", async () => {
@@ -274,7 +276,8 @@ describe("thread-control toolkit", () => {
     );
     expect(service.threadSend).not.toHaveBeenCalled();
     expect(service.threadStop).not.toHaveBeenCalled();
-    expect(service.threadCreateBatch).not.toHaveBeenCalled();
+    expect(service.delegate).not.toHaveBeenCalled();
+    expect(service.cancel).not.toHaveBeenCalled();
   });
 
   it("aborts a pending thread_wait when the turn lease is revoked", async () => {

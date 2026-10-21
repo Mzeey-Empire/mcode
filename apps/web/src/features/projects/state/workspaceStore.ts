@@ -8,6 +8,7 @@ import {
 } from "@/lib/workspace-thread";
 import {
   ProviderIdSchema,
+  isDelegatedSubagent,
   type ChecksStatus,
   type CreateAndSendResult,
   type WorkspaceCreateResult,
@@ -1720,12 +1721,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
   applyThreadLifecycle: (thread) => {
     set((state) => {
+      if (isDelegatedSubagent(thread)) {
+        return { threads: state.threads.filter((candidate) => candidate.id !== thread.id) };
+      }
       const existing = state.threads.find((candidate) => candidate.id === thread.id);
       const nextThread = existing ? { ...existing, ...thread } : thread;
       return {
         threads: existing
           ? state.threads.map((candidate) => candidate.id === thread.id ? nextThread : candidate)
-          : [...state.threads, nextThread],
+          : [nextThread, ...state.threads],
       };
     });
     if (thread.user_completed_at !== null) {

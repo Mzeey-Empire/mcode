@@ -455,13 +455,14 @@ function buildThreadTree(threads: WorkspaceThread[]): ThreadTreeItem[] {
   const threadIds = new Set(threads.map((t) => t.id));
 
   for (const thread of threads) {
-    if (!thread.parent_thread_id || !threadIds.has(thread.parent_thread_id)) {
+    const parentId = thread.parent_thread_id;
+    if (!parentId || !threadIds.has(parentId)) {
       // Root thread, or orphan whose parent isn't in this list
       roots.push(thread);
     } else {
-      const siblings = childrenByParent.get(thread.parent_thread_id) ?? [];
+      const siblings = childrenByParent.get(parentId) ?? [];
       siblings.push(thread);
-      childrenByParent.set(thread.parent_thread_id, siblings);
+      childrenByParent.set(parentId, siblings);
     }
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SubagentRosterSchema, SubagentDetailSchema, type SubagentRoster } from "../subagent-roster.js";
+import { SubagentRosterSchema, SubagentDetailSchema, isSubagentLaunchToolName, type SubagentRoster } from "../subagent-roster.js";
 
 const roster: SubagentRoster = {
   owningParentThreadId: "parent", epoch: "boot-one", revision: 7, truncated: false,
@@ -36,4 +36,17 @@ describe("subagent wire contracts", () => {
       steps: Array.from({ length: 33 }, () => ({ toolCallId: "step", toolName: "Read", label: "Read", status: "done" })),
     }).success).toBe(false);
   });
+});
+
+describe("isSubagentLaunchToolName", () => {
+  it.each(["Agent", "delegate_task", "mcp__mcode__delegate_task", "mcp:mcode/delegate_task"])("starts a sub-agent: %s", (name) => {
+    expect(isSubagentLaunchToolName(name)).toBe(true);
+  });
+
+  it.each(["agent", "mcp__other__delegate_task", "mcp:other/delegate_task", "mcp__mcode__task_status", "delegate_task_v2"])(
+    "does not start a sub-agent: %s",
+    (name) => {
+      expect(isSubagentLaunchToolName(name)).toBe(false);
+    },
+  );
 });

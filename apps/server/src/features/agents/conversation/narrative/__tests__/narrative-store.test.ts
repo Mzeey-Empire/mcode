@@ -88,6 +88,43 @@ function traceStatements(db: Database, captured: CapturedStatement[]): Database 
 
 afterEach(closeAgentStorageTestDatabases);
 
+describe("NarrativeStore delegate_task persistence", () => {
+  it.each(["mcp__mcode__delegate_task", "mcp:mcode/delegate_task"])(
+    "labels a persisted %s row with the task title",
+    async (toolName) => {
+      let persistedInputSummary: string | undefined;
+      const store = new NarrativeStore(
+        {} as MessageRepo,
+        {
+          bulkCreate: (records: Array<{ inputSummary?: string }>) => {
+            persistedInputSummary = records[0]?.inputSummary;
+          },
+        } as unknown as ToolCallRecordRepo,
+        { bulkCreate: () => undefined } as unknown as ThoughtSegmentRepo,
+        { bulkCreate: () => undefined } as unknown as HookExecutionRepo,
+      );
+      store.beginTurn("thread-1");
+      store.resetTurnCounters("thread-1");
+      store.bufferToolCall("thread-1", {
+        toolCallId: "delegate",
+        toolName,
+        toolInput: {
+          clientRequestId: "request-1",
+          title: "Audit the parser",
+          prompt: "Read every parser file and report each unchecked branch.",
+          providerId: "codex",
+          modelId: "gpt-6.1-sol",
+          isolation: "shared",
+        },
+      });
+
+      await store.persistNarrative("thread-1", "m1", "done", "completed");
+
+      expect(persistedInputSummary).toBe("Audit the parser");
+    },
+  );
+});
+
 describe("NarrativeStore Move/Rename persistence sanitization", () => {
   it.each(["Move", "rEnAmE"])(
     "passes only bounded source and destination paths to persistence for %s",

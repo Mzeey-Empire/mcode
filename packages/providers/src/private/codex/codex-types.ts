@@ -432,6 +432,7 @@ export interface TurnPlanUpdatedPayload {
 export interface CompletedItem {
   type: string;
   id?: string;
+  status?: string;
 
   // agentMessage
   phase?: unknown;
@@ -452,8 +453,8 @@ export interface CompletedItem {
   tool?: string;
   name?: string;
   arguments?: string | Record<string, unknown>;
-  result?: string | null;
-  error?: string | null;
+  result?: { content: unknown[]; structuredContent?: unknown; _meta?: unknown } | string | null;
+  error?: { message: string } | string | null;
 
   // subAgentActivity
   agentThreadId?: string;

@@ -4,7 +4,7 @@ import { logger } from "@mcode/shared";
 import {
   createSubagentPresentation, mergeSubagentPresentation, resolveBrowserNarrativeTool,
   resolveSubagentDuration, resolveSubagentMetadata, resolveSubagentPrompt,
-  encodeCanonicalSubagentDetailTarget, encodeSubagentAliasDetailTarget,
+  encodeCanonicalSubagentDetailTarget, encodeSubagentAliasDetailTarget, isDelegateTaskToolName,
   type ParentNarrativeRecoveryItem, type SubagentPresentation, type AgentEvent, type ThoughtSegmentKind, type ProviderId,
 } from "@mcode/contracts";
 import type { CreateToolCallRecordInput } from "../../tools/persistence/tool-call-record-repo.js";
@@ -152,6 +152,10 @@ function patternInputSummary(input: Record<string, unknown>): string {
 
 function agentInputSummary(input: Record<string, unknown>): string {
   return String(firstProvidedInputValue(input, ["description"]) ?? "").slice(0, 100);
+}
+
+function delegateTaskTitle(input: Record<string, unknown>): string {
+  return String(firstProvidedInputValue(input, ["title"]) ?? "").slice(0, 100);
 }
 
 function genericInputSummary(input: Record<string, unknown>): string {
@@ -1415,6 +1419,7 @@ export class NarrativeTurnState {
   /** Generate a human-readable summary of tool input. */
   private summarizeInput(toolName: string, input: Record<string, unknown>): string {
     if (resolveBrowserNarrativeTool(toolName)) return JSON.stringify(input).slice(0, 4_000);
+    if (isDelegateTaskToolName(toolName)) return delegateTaskTitle(input);
     return (NARRATIVE_INPUT_SUMMARIZERS[toolName.toLowerCase()] ?? genericInputSummary)(input);
   }
 }
