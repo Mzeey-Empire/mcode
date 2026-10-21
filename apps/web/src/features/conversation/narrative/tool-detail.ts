@@ -1,4 +1,5 @@
-import { resolveToolName } from "@/components/chat/tool-renderers/constants";
+import type { ApprovalSubject } from "@mcode/contracts";
+import { resolveToolName, toolDisplayLabel } from "@/components/chat/tool-renderers/constants";
 import type { ToolCall } from "@/transport/types";
 
 /** Tools whose stored summary is the path they touched. */
@@ -6,10 +7,11 @@ const FILE_SUMMARY_TOOLS = new Set(["Read", "Edit", "Write"]);
 
 /**
  * Short label derived from tool input for narrative rows (path tail, pattern, command, etc.).
+ * Undefined when the input names nothing worth showing, such as an empty object.
  */
-export function extractToolInputDetail(tc: ToolCall): string {
+export function extractToolInputDetail(tc: ToolCall): string | undefined {
   const input = tc.toolInput;
-  const detail = pathTail(input.file_path)
+  return pathTail(input.file_path)
     ?? pathTail(input.path)
     ?? pathTail(singleFile(input.files))
     ?? fileSummaryTail(tc)
@@ -17,8 +19,15 @@ export function extractToolInputDetail(tc: ToolCall): string {
     ?? quotedDetail(input.query)
     ?? stringDetail(input.command)
     ?? stringDetail(input.description)
-    ?? Object.values(input).find(isShortString);
-  return detail ?? tc.toolName;
+    ?? Object.values(input).find(isDisplayableDetail);
+}
+
+/**
+ * Receipt subject for a decided approval. A tool approval names the tool the
+ * way its tool row does; other subjects are already plain, such as a command.
+ */
+export function approvalSubjectLabel(kind: ApprovalSubject["kind"], subjectLabel: string): string {
+  return kind === "tool" ? toolDisplayLabel(subjectLabel) : subjectLabel;
 }
 
 /**
@@ -67,6 +76,6 @@ function stringDetail(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function isShortString(value: unknown): value is string {
-  return typeof value === "string" && value.length < 100;
+function isDisplayableDetail(value: unknown): value is string {
+  return typeof value === "string" && value.length < 100 && value !== "{}";
 }

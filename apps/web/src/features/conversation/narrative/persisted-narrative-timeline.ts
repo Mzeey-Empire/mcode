@@ -30,6 +30,7 @@ import {
   isSubagentLaunchRecord,
 } from "./narrative-builder-helpers";
 import { filterPersistedFinalResponseThoughts, isReasoningSegment } from "./narrative-thought-classification";
+import { approvalSubjectLabel } from "./tool-detail";
 import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
 
 const NATIVE_AGENT_TOOL_NAME = "Agent";
@@ -120,7 +121,7 @@ export function recordToApprovalReceipt(record: ApprovalReceiptRecord): Approval
   if (cached) return cached;
   const receipt: ApprovalReceipt = {
     requestId: record.id,
-    subjectLabel: record.subject_label,
+    subjectLabel: approvalSubjectLabel(record.kind, record.subject_label),
     outcome: record.outcome,
     decidedAt: isoToMs(record.decided_at),
   };

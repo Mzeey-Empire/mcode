@@ -406,7 +406,7 @@ describe("narrative tool row layout classes", () => {
     const _summary = JSON.stringify({ files: path, changes: [{ path, kind: { type: "update" } }] }).slice(0, 200);
     render(<ToolSummaryLine group={{ calls: [makeBashCall({ toolName: "file_change", toolInput: { _summary }, isComplete: true })] }} />);
 
-    expect(screen.getByText("Edited file").parentElement).toHaveTextContent(/^Edited filefile_change$/);
+    expect(screen.getByText("Edited file").parentElement).toHaveTextContent(/^Edited file$/);
   });
 
   it("summarizes several calls with their failures and lists each on open", () => {
