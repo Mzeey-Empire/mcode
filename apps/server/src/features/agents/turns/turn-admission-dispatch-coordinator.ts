@@ -1292,7 +1292,7 @@ export class TurnAdmissionDispatchCoordinator {
       sourceThreadId: prepared.command.threadId,
       sourceTurnId,
       sourceProviderId: prepared.providerId,
-      permissionMode: prepared.command.permissionMode === "full" ? "full" : "supervised",
+      permissionMode: this.effectivePermissionMode(prepared.command.permissionMode, prepared.thread.permission_mode ?? "supervised"),
     };
   }
 
