@@ -13,13 +13,15 @@ import { cn } from "@/lib/utils";
 
 /**
  * Provider icon sizes. 16 and 20 are the product roles; 12 is the mark inside
- * a disc and in dense rows that their section tickets have not restyled yet.
+ * a disc and in dense rows that their section tickets have not restyled yet;
+ * 10 is only the rear mark of {@link ProviderIconStack}.
  */
-export type ProviderIconSize = 12 | 16 | 20;
+export type ProviderIconSize = 10 | 12 | 16 | 20;
 
 // A size class, not only width and height attributes: parents such as Button
 // size every descendant SVG that lacks a `size-*` class.
 const SIZE_CLASS: Record<ProviderIconSize, string> = {
+  10: "size-2.5",
   12: "size-3",
   16: "size-4",
   20: "size-5",
@@ -115,6 +117,50 @@ export function ProviderDiscStack({ providers, max = 3, className }: ProviderDis
           <ProviderIcon provider={provider} size={12} />
         </span>
       ))}
+    </span>
+  );
+}
+
+const PROVIDER_LABELS: Record<SettingsProviderId, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  copilot: "GitHub Copilot",
+  cursor: "Cursor",
+  devin: "Devin",
+  gemini: "Gemini",
+  opencode: "OpenCode",
+};
+
+/** The display name for a provider id; an unknown id shows as itself. */
+export function providerLabel(provider: string): string {
+  return isKnownProvider(provider) ? PROVIDER_LABELS[provider] : (provider || "Provider");
+}
+
+/** Props for {@link ProviderIconStack}. */
+export interface ProviderIconStackProps {
+  /** The thread's current provider, drawn in front at the bottom right. */
+  current: string;
+  /** The provider used before it, drawn behind at the top left. */
+  previous: string;
+  className?: string;
+}
+
+/**
+ * Two provider marks stacked inside one 16px slot, so a thread that switched
+ * provider keeps its title aligned with single-provider rows. The rear mark is
+ * masked by a circle 1px wider than the front mark, which reads as a ring in
+ * the row's background whatever that background is (rest, hover, selected).
+ * Decorative: the caller labels the slot.
+ */
+export function ProviderIconStack({ current, previous, className }: ProviderIconStackProps) {
+  return (
+    <span aria-hidden data-testid="provider-icon-stack" className={cn("relative block size-4 shrink-0", className)}>
+      <ProviderIcon
+        provider={previous}
+        size={10}
+        className="absolute left-0 top-0 [mask-image:radial-gradient(circle_at_100%_100%,transparent_7px,black_7.5px)]"
+      />
+      <ProviderIcon provider={current} size={12} className="absolute bottom-0 right-0" />
     </span>
   );
 }
