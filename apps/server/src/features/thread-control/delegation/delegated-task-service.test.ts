@@ -806,6 +806,7 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     });
     expect(requireTask(await f.service.status(f.source, { taskId: task.taskId })).state)
       .toEqual({ status: "working", phase: "running" });
+    expect([...f.service.coordinatorsWithUnfinishedTasks()]).toEqual([f.coordinator.id]);
     expect(await f.service.stopForUser(f.coordinator.id, task.threadId)).toBe(true);
     expect(f.canonical.loadTurn(attemptId)?.status).toBe("Interrupted");
   });

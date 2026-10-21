@@ -95,14 +95,15 @@ export class DelegatedTaskStore {
       .leftJoin(threadControlApprovals, eq(threadControlApprovals.id, delegatedTasks.taskId))
       .where(and(
         coordinatorThreadId === undefined ? undefined : eq(delegatedTasks.coordinatorThreadId, coordinatorThreadId),
-        sql`CASE
+        sql`(EXISTS (SELECT 1 FROM ${canonicalAgentTurns} attempt WHERE attempt.attempt_of = ${delegatedTasks.taskId}
+          AND attempt.status NOT IN ('Completed', 'Errored', 'Cancelled', 'Interrupted')) OR CASE
           WHEN ${canonicalAgentTurns.id} IS NOT NULL
             THEN ${canonicalAgentTurns.status} NOT IN ('Completed', 'Errored', 'Cancelled', 'Interrupted')
           WHEN ${threadStartups.startupId} IS NOT NULL
             THEN ${threadStartups.state} NOT IN ('failed', 'interrupted', 'cancelled')
           ELSE ${threadControlApprovals.status} IS NULL
             OR ${threadControlApprovals.status} NOT IN ('rejected', 'expired', 'cancelled')
-        END`,
+        END)`,
       )).all().map((row) => this.parse(row));
   }
 

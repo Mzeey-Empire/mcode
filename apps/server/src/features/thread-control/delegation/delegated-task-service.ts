@@ -75,7 +75,7 @@ export class DelegatedTaskService {
     const coordinators = new Set<string>();
     for (const task of this.deps.tasks.listUnfinishedCandidates(coordinatorThreadId)) {
       const state = deriveTaskState({
-        turn: this.deps.canonical.loadTurn(task.taskId), startup: this.deps.startups.get(task.taskId),
+        turn: this.latestAttempt(task), startup: this.deps.startups.get(task.taskId),
         approval: this.deps.approvals.status(task.taskId), launching: this.launching.has(task.taskId),
       });
       if (state.status !== "finished") coordinators.add(task.coordinatorThreadId);
