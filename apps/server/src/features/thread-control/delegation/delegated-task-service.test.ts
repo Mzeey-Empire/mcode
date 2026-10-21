@@ -165,7 +165,8 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
   approvalService.start({ publishApprovalRequest: () => {}, publishApprovalResolved: () => {}, stopSession });
   child.registerInstance(ApprovalService, approvalService);
   child.registerInstance(ThreadControlApprovalRepo, approvals);
-  child.registerInstance(ThreadControlAuditRepo, new ThreadControlAuditRepo(runtime.writer));
+  const audit = new ThreadControlAuditRepo(runtime.writer);
+  child.registerInstance(ThreadControlAuditRepo, audit);
   child.registerInstance<Pick<AgentService, "stopSession" | "runtimeAccess">>(AgentService, { stopSession,
     runtimeAccess: () => ({ activeThreadIds: () => [...active], activeCount: () => active.size, runtimeSnapshots: () => [] }) });
   child.registerInstance(ThreadStartupService, startups);
@@ -201,7 +202,7 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
   disposables.push(roster.bindDelegatedTasks(service));
   disposables.push(startups.subscribe((startup) => service.taskChanged(startup.startupId)));
   disposables.push(roster.observeCommittedEvents());
-  return { ...fixture, service, tasks, threads, threadService, roster, startups, approvals, control, canonical, messages, environment,
+  return { ...fixture, service, tasks, threads, threadService, roster, startups, approvals, control, canonical, messages, environment, audit,
     coordinator, source, input, dispatch, active, admission, authority, resumes, pendingApprovals };
 }
 
@@ -678,6 +679,22 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     f.active.delete(task.threadId);
     await f.control.threadWait(f.source, { threadIds: [task.threadId], until: "terminal", timeoutSeconds: 1 });
     expect(await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID())).toBeNull();
+  });
+
+  it("does not acknowledge a result that arrived after thread_wait captured its observation", async () => {
+    const f = await harness();
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    const childThreadId = task.threadId;
+    const write = f.audit.write.bind(f.audit);
+    vi.spyOn(f.audit, "write").mockImplementationOnce(async (input) => {
+      await finish(f, childThreadId, task.taskId);
+      return write(input);
+    });
+    const waited = await f.control.threadWait(f.source, { threadIds: [childThreadId], until: "terminal", timeoutSeconds: 1 });
+    expect(waited).toMatchObject({ status: "success", timedOut: true, results: [{ state: { status: "running" } }] });
+    const batch = await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID());
+    expect(batch?.systemNotice.delegatedTasks?.map((notice) => [notice.taskId, notice.status])).toEqual([[task.taskId, "completed"]]);
   });
 
   it.each(["ack-first", "settle-first"])("preserves an acknowledgement racing a claim in %s order", async (order) => {

@@ -42,6 +42,12 @@ export interface DelegatedTaskDeps {
 
 type TaskRejection = { status: "rejected"; error: ThreadControlError };
 
+/** A task's notice key as it stood when a Coordinator read it. */
+export interface ObservedNotice {
+  taskId: string;
+  key: string;
+}
+
 /** Owns durable delegation admission while startup, turn and approval owners retain lifecycle state. */
 export class DelegatedTaskService {
   private readonly launching = new Map<string, Promise<void>>();
@@ -109,11 +115,21 @@ export class DelegatedTaskService {
   /** Release a wake that was not accepted. */
   returnNotices(wakeId: string) { return this.deps.tasks.returnNotices(wakeId); }
 
-  /** Acknowledge only a delegated child belonging to the observing Coordinator. */
-  async acknowledgeObservedChild(coordinatorThreadId: string, childThreadId: string): Promise<void> {
-    const task = this.deps.tasks.listByCoordinator(coordinatorThreadId)
-      .find((candidate) => this.deps.startups.get(candidate.taskId)?.threadId === childThreadId);
-    if (task) await this.report(task);
+  /**
+   * Capture the notice key of each delegated child the Coordinator is observing.
+   * Synchronous so a result that lands after the observation is not mistaken for one the Coordinator saw.
+   */
+  observeChildren(coordinatorThreadId: string, childThreadIds: readonly string[]): ObservedNotice[] {
+    return this.deps.tasks.listByCoordinator(coordinatorThreadId).flatMap((task) => {
+      const threadId = this.deps.startups.get(task.taskId)?.threadId;
+      const entry = threadId && childThreadIds.includes(threadId) ? this.noticeEntry(task) : null;
+      return entry ? [{ taskId: task.taskId, key: entry.key }] : [];
+    });
+  }
+
+  /** Acknowledge exactly what an observation returned to the Coordinator. */
+  async acknowledgeObserved(observed: readonly ObservedNotice[]): Promise<void> {
+    for (const { taskId, key } of observed) await this.deps.tasks.acknowledge(taskId, key);
   }
 
   private notifyRoster(coordinatorThreadId: string): void {
