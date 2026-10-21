@@ -493,6 +493,44 @@ describe.each(MCODE_MCP_SPELLINGS)("Mcode MCP task tools named %s*", (prefix) =>
   });
 });
 
+const MCODE_THREAD_TOOLS = [
+  "workspace_search", "worktree_list", "thread_target_list", "thread_search",
+  "thread_get", "thread_send", "thread_stop", "thread_wait",
+] as const;
+
+function mcodeCall(toolName: string, overrides: Partial<ToolCall> = {}): ToolCall {
+  return { id: "tc-mcode-1", toolName, toolInput: {}, output: null, isError: false, isComplete: true, ...overrides };
+}
+
+describe.each(MCODE_MCP_SPELLINGS)("Mcode MCP thread tools named %s*", (prefix) => {
+  it.each(MCODE_THREAD_TOOLS)("labels a finished %s row in plain words", (tool) => {
+    render(<ToolSummaryLine group={{ calls: [mcodeCall(`${prefix}${tool}`)] }} />);
+    expect(screen.queryByText(new RegExp(tool))).not.toBeInTheDocument();
+  });
+
+  it.each(MCODE_THREAD_TOOLS)("labels a failed %s row in plain words", (tool) => {
+    render(<ToolSummaryLine group={{ calls: [mcodeCall(`${prefix}${tool}`, { isError: true, output: "boom" })] }} />);
+    expect(screen.queryByText(new RegExp(tool))).not.toBeInTheDocument();
+  });
+
+  it.each(MCODE_THREAD_TOOLS)("summarizes a group of %s calls in plain words", (tool) => {
+    const call = mcodeCall(`${prefix}${tool}`);
+    expect(buildToolSummaryText([call, call])).not.toContain(tool);
+  });
+
+  it("shows a running thread_target_list row without its raw name", () => {
+    render(<ActiveToolRow toolCall={mcodeCall(`${prefix}thread_target_list`, { isComplete: false })} />);
+    expect(screen.getByText("Listed targets")).toBeInTheDocument();
+    expect(screen.queryByText(/thread_target_list/)).not.toBeInTheDocument();
+  });
+
+  it("shows no detail and an unclipped label for a reloaded row whose input was empty", () => {
+    render(<ToolSummaryLine group={{ calls: [mcodeCall(`${prefix}thread_target_list`, { toolInput: { _summary: "{}" } })] }} />);
+    expect(screen.queryByText("{}")).not.toBeInTheDocument();
+    expect(screen.getByText("Listed targets")).not.toHaveClass("max-w-[60%]");
+  });
+});
+
 describe("unknown tool summary", () => {
   it("counts calls instead of pluralizing the tool name", () => {
     expect(buildToolSummaryText([{ toolName: "mcp:other/lookup" }])).toBe("1 mcp:other/lookup call");
