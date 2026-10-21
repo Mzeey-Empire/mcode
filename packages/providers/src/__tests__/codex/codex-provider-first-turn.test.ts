@@ -599,7 +599,7 @@ describe("CodexProvider first turn on new session", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(server.options.instructionSections?.find((section) => section.key === "mcode_provider_subagents")?.text).toContain("provider-native collaboration");
     expect(server.options.instructionSections?.find((section) => section.key === "mcode_provider_subagents")?.text).toContain("preserve the exact requested brief");
-    expect(server.options.instructionSections?.find((section) => section.key === "mcode_provider_subagents")?.text).toContain("does not authorize Mcode thread control");
+    expect(server.options.instructionSections?.find((section) => section.key === "mcode_provider_subagents")?.text).toContain("only when native collaboration cannot run the requested provider or model");
     expect(sendTurnMock).toHaveBeenCalledWith(
       [{ type: "text", text: childBrief }],
       { model, approvalsReviewer: "user" },
