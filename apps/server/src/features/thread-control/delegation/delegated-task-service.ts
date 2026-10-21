@@ -178,7 +178,7 @@ export class DelegatedTaskService {
     const { taskId } = TaskCancelInputSchema().parse(input);
     const task = this.deps.tasks.find(taskId, authority.sourceThreadId);
     if (!task) return notFound();
-    return this.cancelTask(task, (threadId) => this.deps.control.threadStop(authority, { threadId }));
+    return this.cancelTask(task, (threadId) => this.deps.control.threadStop(authority, { threadId }), true);
   }
 
   /** Stop an owned delegated child with authenticated user authority. */
@@ -195,29 +195,30 @@ export class DelegatedTaskService {
         await this.deps.cancellation.agentService.stopSession(threadId, { by: "user" });
       }
       return { status: "stopped" };
-    });
+    }, false);
     return true;
   }
 
+  /** Only the Coordinator's own cancel counts as seeing the outcome; a user Stop must still be reported to it. */
   private async cancelTask(task: DelegatedTask, stop: (threadId: string) => Promise<
     { status: "stopped" } | Awaited<ReturnType<ThreadControlService["threadStop"]>>
-  >): Promise<TaskCancelResult> {
+  >, acknowledge: boolean): Promise<TaskCancelResult> {
     try {
       const taskId = task.taskId;
       const current = this.snapshot(task);
-      if (current.state.status === "finished") return this.cancelReport(task);
+      if (current.state.status === "finished") return this.cancelReport(task, acknowledge);
       if (this.deps.approvals.status(taskId) === "pending") {
         await this.deps.control.cancelDelegationApproval(taskId);
-        return this.cancelReport(task);
+        return this.cancelReport(task, acknowledge);
       }
       const startup = this.deps.startups.get(taskId);
       if (!startup?.threadId) {
         if (startup) await cancelThreadStartup(this.deps.cancellation, taskId);
-        return this.cancelReport(task);
+        return this.cancelReport(task, acknowledge);
       }
       const stopped = await stop(startup.threadId);
       if (stopped.status === "rejected") return { status: "rejected", error: stopped.error };
-      return { ...await this.cancelReport(task),
+      return { ...await this.cancelReport(task, acknowledge),
         ...(stopped.status === "pending_approval" ? { stopApprovalId: stopped.approvalId } : {}) };
     } finally {
       this.notifyRoster(task.coordinatorThreadId);
@@ -351,8 +352,8 @@ export class DelegatedTaskService {
     return snapshot;
   }
 
-  private async cancelReport(task: DelegatedTask) {
-    const { taskId, state } = await this.report(task);
+  private async cancelReport(task: DelegatedTask, acknowledge: boolean) {
+    const { taskId, state } = acknowledge ? await this.report(task) : this.snapshot(task);
     return { taskId, state };
   }
 

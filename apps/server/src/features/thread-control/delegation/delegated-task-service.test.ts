@@ -817,6 +817,21 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     expect(waiting).toMatchObject({ status: "waiting", canStop: true });
   });
 
+  it("still wakes the Coordinator for a child the user stopped, but not for one it cancelled itself", async () => {
+    const f = await harness("full", true);
+    const w = await wakeHarness(f);
+    const stoppedByUser = requireTask(await f.service.delegate(f.source, f.input));
+    const cancelledByCoordinator = requireTask(await f.service.delegate(f.source, { ...f.input, clientRequestId: "own-cancel" }));
+    if (!stoppedByUser.threadId) throw new Error("Expected child");
+    await vi.waitFor(() => expect(f.environment.getAutomaticSetup({ threadId: stoppedByUser.threadId ?? "" }).attempt?.state).toBe("running"));
+    await f.service.cancel(f.source, { taskId: cancelledByCoordinator.taskId });
+    expect(await f.service.stopForUser(f.coordinator.id, stoppedByUser.threadId)).toBe(true);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    const notices = w.messages().flatMap((row) => SystemNoticeMetadataSchema().parse(JSON.parse(row.system_notice)).delegatedTasks ?? []);
+    expect(notices.map((notice) => [notice.taskId, notice.status])).toEqual([[stoppedByUser.taskId, "cancelled"]]);
+  });
+
   it("keeps the original result during a later user turn and makes completed cancellation a no-op", async () => {
     const f = await harness();
     const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
