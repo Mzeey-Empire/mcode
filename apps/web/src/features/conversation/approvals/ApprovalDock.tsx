@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { CircleAlert, CircleHelp, GitBranch, Pencil, Send, Shield, Terminal, type LucideIcon } from "lucide-react";
 import { useShallow } from "zustand/shallow";
 import type { ApprovalChoice, ApprovalSubject as ApprovalSubjectModel } from "@mcode/contracts";
 import { ProviderIcon } from "@/components/ui/provider-icon";
+import { useSubagentRoster } from "@/features/subagents/state/subagentRosterStore";
 import { selectDockApprovals, useApprovalStore, type StoredApproval } from "@/stores/approvalStore";
 import { approvalActorName, approvalTitle, noteRowLabel, submittingLabel } from "./approval-copy";
 import { ApprovalChoiceRow, ApprovalNoteRow } from "./ApprovalChoiceRow";
@@ -26,9 +27,17 @@ const SUBJECT_ICONS: Record<ApprovalSubjectModel["kind"], LucideIcon> = {
   question: CircleHelp,
 };
 
-/** Pending dock approvals for a thread, oldest first; empty means the composer shows. */
-export function useDockApprovals(threadId: string | undefined): StoredApproval[] {
-  return useApprovalStore(useShallow((state) => selectDockApprovals(state.approvals, threadId)));
+/** Titles of a Coordinator's Delegated threads, keyed by child thread id. */
+export function useDelegatedThreadTitles(threadId: string | undefined): ReadonlyMap<string, string> {
+  const roster = useSubagentRoster(threadId);
+  return useMemo(() => new Map((roster?.entries ?? []).flatMap((entry) =>
+    entry.childThreadId ? [[entry.childThreadId, entry.title] as const] : [])), [roster]);
+}
+
+/** Pending dock approvals for a thread and its Delegated threads, oldest first; empty means the composer shows. */
+export function useDockApprovals(threadId: string | undefined, delegatedThreads: ReadonlyMap<string, string>): StoredApproval[] {
+  const delegatedThreadIds = useMemo(() => new Set(delegatedThreads.keys()), [delegatedThreads]);
+  return useApprovalStore(useShallow((state) => selectDockApprovals(state.approvals, threadId, delegatedThreadIds)));
 }
 
 /**
@@ -110,10 +119,17 @@ function SubagentOrigin({ request }: { readonly request: StoredApproval }) {
   );
 }
 
+function RequestOrigin({ request, delegatedTitle }: { readonly request: StoredApproval; readonly delegatedTitle: string | undefined }) {
+  if (delegatedTitle === undefined) return <SubagentOrigin request={request} />;
+  return <span className="min-w-0 pl-1 text-xs text-muted text-fade">From {delegatedTitle}</span>;
+}
+
 /** Props for {@link ApprovalDock}. */
 export interface ApprovalDockProps {
   /** Pending requests for the thread, oldest first, never empty. */
   readonly requests: readonly StoredApproval[];
+  /** Delegated thread titles by thread id; a request from one of them reads as from that thread. */
+  readonly delegatedThreads: ReadonlyMap<string, string>;
   /** The hidden composer; focus inside it counts as the user's attention being here. */
   readonly composerContainerRef: RefObject<HTMLElement | null>;
   readonly isAgentRunning: boolean;
@@ -127,7 +143,7 @@ export interface ApprovalDockProps {
  * dock, and the dock takes focus only from the composer or nowhere, so a user typing
  * in the terminal or browser panel cannot answer by accident.
  */
-export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, isStopPending, onStop, onFocusComposer }: ApprovalDockProps) {
+export function ApprovalDock({ requests, delegatedThreads, composerContainerRef, isAgentRunning, isStopPending, onStop, onFocusComposer }: ApprovalDockProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef<(HTMLElement | null)[]>([]);
   const guardUntilRef = useRef(0);
@@ -198,6 +214,9 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
   };
 
   const Icon = SUBJECT_ICONS[active.subject.kind];
+  const delegatedTitle = delegatedThreads.get(active.threadId);
+  // This Stop ends the Coordinator's turn, not the Delegated thread that asked.
+  const showStop = isAgentRunning && delegatedTitle === undefined;
   return (
     <div
       ref={rootRef}
@@ -208,7 +227,7 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
       <div className="flex min-w-0 items-center gap-2">
         <Icon size={14} className="shrink-0 text-primary" aria-hidden />
         <h2 className="min-w-0 text-sm font-medium text-ink">{title}</h2>
-        <SubagentOrigin request={active} />
+        <RequestOrigin request={active} delegatedTitle={delegatedTitle} />
         <span className="flex-1" />
         {requests.length > 1 && <ApprovalPager index={index} count={requests.length} onPrevious={() => goTo(-1)} onNext={() => goTo(1)} />}
       </div>
@@ -261,7 +280,7 @@ export function ApprovalDock({ requests, composerContainerRef, isAgentRunning, i
           )}
         </>
       )}
-      {isAgentRunning && (
+      {showStop && (
         <div className="-mt-1 -mb-1.5 flex justify-end">
           <DockStopButton isStopPending={isStopPending} onStop={onStop} />
         </div>

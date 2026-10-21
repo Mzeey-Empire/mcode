@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createMockApproval } from "@/__tests__/mocks/transport";
-import { useApprovalStore } from "../approvalStore";
+import { selectDockApprovals, useApprovalStore } from "../approvalStore";
 
 const requestA = createMockApproval({ requestId: "req-a", threadId: "thread-a" });
 const requestB = createMockApproval({ requestId: "req-b", threadId: "thread-b" });
@@ -68,5 +68,17 @@ describe("approvalStore.clearThread", () => {
     useApprovalStore.getState().clearThread("thread-a");
 
     expect(approvalStates()).toEqual([["req-task", "thread-a", false]]);
+  });
+});
+
+describe("selectDockApprovals", () => {
+  it("shows a Delegated thread's request in its Coordinator's dock and leaves unrelated threads out", () => {
+    const own = { ...createMockApproval({ requestId: "own", threadId: "coordinator" }), requestedAt: "2026-10-21T10:00:00.000Z", settled: false };
+    const child = { ...createMockApproval({ requestId: "child", threadId: "delegated" }), requestedAt: "2026-10-21T10:00:01.000Z", settled: false };
+    const other = { ...createMockApproval({ requestId: "other", threadId: "unrelated" }), requestedAt: "2026-10-21T10:00:02.000Z", settled: false };
+
+    const dock = selectDockApprovals([other, child, own], "coordinator", new Set(["delegated"]));
+
+    expect(dock.map((request) => request.requestId)).toEqual(["own", "child"]);
   });
 });
