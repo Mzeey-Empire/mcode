@@ -137,11 +137,14 @@ describe("McodeSessionAuthority", () => {
     const { token } = authority.attach(attachRequest());
     const session = authority.resolve(token)!;
 
-    expect(() => authority.authorizeThreadControl(session, "call")).toThrow(McodeThreadControlDeniedError);
+    expect(() => authority.authorizeThreadControl(session, "call"))
+      .toThrow(expect.objectContaining({ reason: "no_active_turn" }));
     authority.activate(turn());
     expect(authority.authorizeThreadControl(session, "call")).toMatchObject({ sourceThreadId: "source" });
-    expect(() => authority.authorizeThreadControl(session, "")).toThrow(McodeThreadControlDeniedError);
-    expect(() => authority.authorizeThreadControl(session, "x".repeat(129))).toThrow(McodeThreadControlDeniedError);
+    expect(() => authority.authorizeThreadControl(session, ""))
+      .toThrow(expect.objectContaining({ reason: "invalid_tool_call" }));
+    expect(() => authority.authorizeThreadControl(session, "x".repeat(129)))
+      .toThrow(expect.objectContaining({ reason: "invalid_tool_call" }));
   });
 
   it("scopes thread-control authority to the resolving session", () => {
