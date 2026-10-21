@@ -1553,8 +1553,8 @@ export type { TerminalDataFrame } from "./ws/terminal-legacy-binary.js";
 export { lazySchema } from "./utils/lazySchema.js";
 
 // Handoff contract
-export { HandoffAuditMetadataSchema } from "./handoff.js";
-export type { HandoffAuditMetadata } from "./handoff.js";
+export { HandoffAuditMetadataSchema, HandoffTranscriptMessageSchema } from "./handoff.js";
+export type { HandoffAuditMetadata, HandoffTranscriptMessage } from "./handoff.js";
 
 // Provider interfaces
 export type {

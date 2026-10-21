@@ -19,3 +19,14 @@ export const HandoffAuditMetadataSchema = lazySchema(() => z.object({
 
 /** Validated provenance for a stored v2 handoff. */
 export type HandoffAuditMetadata = z.infer<ReturnType<typeof HandoffAuditMetadataSchema>>;
+
+/** One user or assistant message as it appears in a stored handoff history. */
+export const HandoffTranscriptMessageSchema = lazySchema(() => z.object({
+  role: z.enum(["user", "assistant"]),
+  /** Provider that wrote the message; null for user messages. */
+  provider: z.string().nullable(),
+  text: z.string(),
+}));
+
+/** A message the target provider received in its handoff history. */
+export type HandoffTranscriptMessage = z.infer<ReturnType<typeof HandoffTranscriptMessageSchema>>;

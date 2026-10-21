@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { HandoffAuditMetadataSchema } from "../handoff.js";
+import { HandoffAuditMetadataSchema, HandoffTranscriptMessageSchema } from "../handoff.js";
 import { BuildStageSchema } from "../build-stage.js";
 import { GitSearchCommitsParamsSchema, GitSearchCommitsResultSchema } from "../git.js";
 import {
@@ -1623,6 +1623,8 @@ export const WS_METHODS = lazySchema(() => ({
       meta: HandoffAuditMetadataSchema(),
       /** The rendered history exactly as the target received it. */
       history: z.string(),
+      /** The messages inside `history`, in order; empty when the history has no item boundary. */
+      messages: z.array(HandoffTranscriptMessageSchema()),
     }).nullable(),
   },
   /** Generate a stateless one-line conversational recap from caller-supplied messages. */

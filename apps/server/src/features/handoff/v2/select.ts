@@ -1,3 +1,4 @@
+import type { HandoffTranscriptMessage } from "@mcode/contracts";
 import type { HandoffCoverage, HandoffSelection, HandoffSourceItem } from "./types.js";
 
 /** The mandatory history preamble cannot fit in the available context. */
@@ -172,4 +173,29 @@ export function selectHandoffHistory(input: {
   ordered.push(...selected.filter((item) => item.kind === "plan"));
   const text = renderPreamble(coverage, omissions.render(), boundary) + ordered.map((item) => renderItem(item, boundary)).join("");
   return { text, selectedSequences, omittedSequences, budgetBytes };
+}
+
+/**
+ * Recover the messages from history rendered with a boundary, the inverse of `renderItem`.
+ *
+ * Only the boundary separates real headers from header-shaped message text, so history rendered
+ * without one yields no messages rather than a guess.
+ */
+export function parseHandoffMessages(history: string): HandoffTranscriptMessage[] {
+  const boundary = /^Boundary: (\S+)$/m.exec(history)?.[1];
+  if (boundary === undefined) return [];
+  const escaped = boundary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const header = new RegExp(`\\n\\n\\[role=(user|assistant) kind=(\\w+) ([^\\n]*) boundary=${escaped}\\]\\n`, "g");
+  const headers = [...history.matchAll(header)];
+  return headers.flatMap((match, index) => {
+    if (match[2] !== "message") return [];
+    const providerJson = /(?:^| )provider=(null|"(?:[^"\\]|\\.)*")/.exec(match[3])?.[1];
+    const provider: string | null = providerJson === undefined ? null : JSON.parse(providerJson);
+    const end = headers[index + 1]?.index ?? history.length;
+    return [{
+      role: match[1] === "user" ? "user" : "assistant",
+      provider,
+      text: history.slice(match.index + match[0].length, end),
+    }];
+  });
 }
