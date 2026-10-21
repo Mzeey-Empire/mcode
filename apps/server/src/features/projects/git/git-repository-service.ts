@@ -281,6 +281,21 @@ export class GitRepositoryService {
     }
   }
 
+  /** Resolve only a local branch, returning null when its ref does not exist. */
+  async resolveLocalBranchCommit(repoPath: string, branch: string): Promise<string | null> {
+    validateBranchName(branch);
+    try {
+      const { stdout } = await this.gitExecutor.exec([
+        "-C", repoPath, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`,
+      ]);
+      return stdout.trim();
+    } catch (error) {
+      const failure = gitCommandFailureSchema.safeParse(error);
+      if (failure.success && failure.data.code === 1) return null;
+      throw error;
+    }
+  }
+
   /** Fetch an origin branch at an arbitrary repository path. */
   async fetchBranchAt(repoPath: string, branch: string, prNumber?: number): Promise<void> {
     validateBranchName(branch);

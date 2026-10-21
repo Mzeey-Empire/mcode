@@ -71,6 +71,14 @@ export type { WorkspaceEnvironmentQueuedTurnSubmission };
 /** Injection token for the complete first-turn admission coordinator. */
 export const TURN_ADMISSION_DISPATCH_COORDINATOR = "TurnAdmissionDispatchCoordinator";
 
+/** An existing-worktree choice rejected before a thread is persisted. */
+export class ExistingWorktreePlacementError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExistingWorktreePlacementError";
+  }
+}
+
 /** Why a turn's runtime slot was released; absent for a turn that ran to its terminal state. */
 export type RuntimeReleaseCause = "admission-failed";
 
@@ -406,7 +414,7 @@ export class TurnAdmissionDispatchCoordinator {
     if (!workspace) throw new Error(`Workspace not found: ${params.workspaceId}`);
     const known = await this.worktrees.listWorktrees(params.workspaceId);
     const matched = known.find((worktree) => this.sameWorktreePath(worktree.path, params.existingWorktreePath));
-    if (!matched) throw new Error("Path is not a recognized worktree");
+    if (!matched) throw new ExistingWorktreePlacementError("Path is not a recognized worktree");
     const detached = matched.branch === "(detached)";
     const branch = detached ? params.baseBranch : matched.branch;
     const baseBranch = this.requireAttachedBranch(branch, detached);
@@ -423,8 +431,8 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private requireAttachedBranch(branch: string | undefined, detached: boolean): string {
-    if (!branch) throw new Error("Base branch is required when attaching a detached worktree");
-    if (detached && branch === "HEAD") throw new Error("Base branch cannot be HEAD when attaching a detached worktree");
+    if (!branch) throw new ExistingWorktreePlacementError("Base branch is required when attaching a detached worktree");
+    if (detached && branch === "HEAD") throw new ExistingWorktreePlacementError("Base branch cannot be HEAD when attaching a detached worktree");
     validateBranchName(branch);
     return branch;
   }

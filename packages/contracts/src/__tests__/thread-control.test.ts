@@ -17,7 +17,21 @@ import {
   WorktreeListResultSchema,
   ThreadTargetListInputSchema,
   ThreadTargetListResultSchema,
+  ThreadLaunchInputSchema,
 } from "../thread-control.js";
+
+describe("thread launch input", () => {
+  it("defaults an omitted workspace to the project root", () => {
+    expect(ThreadLaunchInputSchema().parse({ title: "Independent work", prompt: "Implement it" }).workspace)
+      .toEqual({ type: "root" });
+  });
+
+  it("rejects baseRef on an existing worktree placement", () => {
+    expect(ThreadLaunchInputSchema().safeParse({ title: "Independent work", prompt: "Implement it",
+      workspace: { type: "existing_worktree", worktreePath: "/repo/worktree", baseRef: "main" },
+    }).success).toBe(false);
+  });
+});
 
 describe("thread control discovery schemas", () => {
   it("accepts secret-free provider target discovery and validates defaults", () => {

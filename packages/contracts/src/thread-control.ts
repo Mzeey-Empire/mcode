@@ -154,6 +154,44 @@ export type DelegateTaskInput = z.infer<ReturnType<typeof DelegateTaskInputSchem
 
 const taskRejection = lazySchema(() => z.object({ status: z.literal("rejected"), error: ThreadControlErrorSchema() }).strict());
 
+/** Workspace prepared before an ordinary thread's first turn. */
+export const ThreadLaunchWorkspaceSchema = lazySchema(() => z.discriminatedUnion("type", [
+  z.object({ type: z.literal("root") }).strict(),
+  z.object({
+    type: z.literal("new_worktree"),
+    baseRef: gitRef,
+    startFromOrigin: z.boolean().default(false),
+  }).strict(),
+  z.object({
+    type: z.literal("existing_worktree"),
+    worktreePath: z.string().trim().min(1).max(4096),
+    baseBranch: gitRef.optional(),
+  }).strict(),
+]));
+/** Parsed workspace choice for an ordinary thread launch. */
+export type ThreadLaunchWorkspace = z.infer<ReturnType<typeof ThreadLaunchWorkspaceSchema>>;
+
+/** Launch an ordinary thread in the source thread's Project. */
+export const ThreadLaunchInputSchema = lazySchema(() => z.object({
+  title: z.string().trim().min(1).max(THREAD_CREATE_TITLE_MAX_LENGTH),
+  prompt: z.string().min(1).max(THREAD_CREATE_PROMPT_MAX_LENGTH),
+  workspace: ThreadLaunchWorkspaceSchema().default({ type: "root" }),
+  providerId: executionId.optional(),
+  modelId: executionId.optional(),
+  permissionMode: PermissionModeSchema.optional(),
+  interactionMode: InteractionModeSchema.optional(),
+}).strict());
+/** Thread launch request before workspace defaults are applied. */
+export type ThreadLaunchInput = z.input<ReturnType<typeof ThreadLaunchInputSchema>>;
+
+/** Ordinary thread identity or an authority-safe launch rejection. */
+export const ThreadLaunchResultSchema = lazySchema(() => z.union([
+  z.object({ status: z.literal("launched"), threadId: opaqueId }).strict(),
+  taskRejection(),
+]));
+/** Result of launching an ordinary thread. */
+export type ThreadLaunchResult = z.infer<ReturnType<typeof ThreadLaunchResultSchema>>;
+
 /** Durable receipt returned immediately after delegation admission. */
 export const DelegateTaskResultSchema = lazySchema(() => z.union([
   z.object({ taskId: opaqueId, threadId: opaqueId.optional(), state: TaskStateSchema(), effectivePermissionMode: PermissionModeSchema }).strict(),

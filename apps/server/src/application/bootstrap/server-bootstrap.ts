@@ -93,6 +93,7 @@ import { RepositoryGitMutationLock } from "../../features/projects/git/repositor
 import { SNAPSHOT_STORE_ID, type StoreId } from "../../features/projects/diffs/snapshots/snapshot-store-identity.js";
 import { AgentRuntimeCommandPort } from "../../features/agents/orchestration/agent-turn-command-port.js";
 import { DelegatedTaskService } from "../../features/thread-control/delegation/delegated-task-service.js";
+import { ThreadLaunchService } from "../../features/thread-control/launch/thread-launch-service.js";
 import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
 import { TURN_FINALIZER, TurnFinalizer } from "../../features/agents/turns/turn-finalizer.js";
 import {
@@ -337,6 +338,7 @@ const turnRecoveryService = container.resolve(TurnRecoveryService);
 const turnResumeScheduler = container.resolve(TurnResumeScheduler);
 const threadControlService = container.resolve(ThreadControlService);
 const delegatedTaskService = container.resolve(DelegatedTaskService);
+const threadLaunchService = container.resolve(ThreadLaunchService);
 const threadStartupService = container.resolve(ThreadStartupService);
 const stopObservingDelegatedRosters = subagentRosterService.bindDelegatedTasks(delegatedTaskService);
 const stopObservingDelegatedStartups = threadStartupService.subscribe((startup) => delegatedTaskService.taskChanged(startup.startupId));
@@ -361,6 +363,7 @@ const mcodeMcpServer = new McodeMcpServer({
         threadStop: threadControlService.threadStop.bind(threadControlService),
         threadWait: threadControlService.threadWait.bind(threadControlService),
         delegate: delegatedTaskService.delegate.bind(delegatedTaskService),
+        launch: threadLaunchService.launch.bind(threadLaunchService),
         status: delegatedTaskService.status.bind(delegatedTaskService),
         cancel: delegatedTaskService.cancel.bind(delegatedTaskService),
       },

@@ -46,6 +46,7 @@ function createService() {
     workspaceSearch: vi.fn<ThreadControlToolService["workspaceSearch"]>(),
     worktreeList: vi.fn<ThreadControlToolService["worktreeList"]>(),
     delegate: vi.fn<ThreadControlToolService["delegate"]>(),
+    launch: vi.fn<ThreadControlToolService["launch"]>(),
     status: vi.fn<ThreadControlToolService["status"]>(),
     cancel: vi.fn<ThreadControlToolService["cancel"]>(),
     threadTargetList: vi.fn<ThreadControlToolService["threadTargetList"]>(),
@@ -126,6 +127,7 @@ describe("thread-control toolkit", () => {
       "workspace_search",
       "worktree_list",
       "delegate_task",
+      "thread_launch",
       "task_status",
       "task_cancel",
       "thread_target_list",
@@ -141,6 +143,18 @@ describe("thread-control toolkit", () => {
 
   it("lists nothing when the session was attached without thread control", () => {
     expect(setup({ threadControl: false }).bound).toBeNull();
+  });
+
+  it("lists thread_launch for an internal lease and marks a rejected launch as an error", async () => {
+    const { bound, call, service } = setup();
+    expect(bound?.tools.filter((tool) => tool.listed).map((tool) => tool.name)).toContain("thread_launch");
+    service.launch.mockResolvedValueOnce({ status: "rejected", error: {
+      code: "invalid_placement", message: "Unknown worktree", retryable: false,
+    } });
+    expect(await call("thread_launch", { title: "Independent work", prompt: "Implement it" })).toMatchObject({
+      isError: true,
+      structuredContent: { status: "rejected", error: { code: "invalid_placement", retryable: false } },
+    });
   });
 
   it.each(["none", "ineligible"] as const)("refuses every call when the turn lease is %s", async (lease) => {
