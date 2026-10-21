@@ -329,6 +329,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       turnExecutionId: turn.turnExecutionId,
       workspaceId: owned.prepared.request.workspaceId,
       providerId: provider.id,
+      threadControlEligible: owned.prepared.request.threadControlEligible === true,
       steer: isTurnSteerCapable(provider) ? (input) => provider.steerTurn({ ...turn, ...input }) : null,
     };
   }

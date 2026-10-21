@@ -248,16 +248,16 @@ async function wakeHarness(f: Fixture) {
     clearTimeout: (id) => { if (typeof id === "number") timers.delete(id); },
   };
   const steers = new TurnSteerRepo(f.runtime.reader, f.runtime.writer);
-  const state: { steerable: boolean; response: TurnSteerOutcome; busyNext: boolean; sends: number;
+  const state: { steerable: boolean; leased: boolean; response: TurnSteerOutcome; busyNext: boolean; sends: number;
     directives: PreparedTurnDispatch["threadControl"][]; sendGate: Promise<void> | null } = {
-    steerable: true, response: { outcome: "accepted" }, busyNext: false, sends: 0, directives: [], sendGate: null,
+    steerable: true, leased: true, response: { outcome: "accepted" }, busyNext: false, sends: 0, directives: [], sendGate: null,
   };
   const runningTurn = (threadId: string): SteerableTurn | null => {
     if (!f.active.has(threadId)) return null;
     const turn = f.canonical.loadLatestTurn(threadId);
     if (!turn?.executionId) return null;
     return { turnExecutionId: turn.executionId, workspaceId: f.workspace.id, providerId: "codex",
-      steer: state.steerable ? async () => state.response : null };
+      threadControlEligible: state.leased, steer: state.steerable ? async () => state.response : null };
   };
   const runtime: TurnSteerRuntime = { runningTurn, recordDelivered: async (message) => {
     await f.messages.create(message.threadId, "user", message.content, 3, undefined, undefined, undefined,
@@ -449,6 +449,25 @@ describe("Coordinator task notices", { timeout: 30_000 }, () => {
     await w.tick();
     expect(w.messages()).toHaveLength(1);
     expect(w.state.sends).toBe(steerable ? 0 : 1);
+  });
+
+  it("holds a result while the running turn has no task-tool lease, then delivers it as a new turn", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    w.state.leased = false;
+    const coordinatorTurn = await startCoordinator(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toEqual([]);
+    expect(f.tasks.get(task.taskId)?.noticeClaim).toBeNull();
+    await finish(f, f.coordinator.id, coordinatorTurn);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+    expect(w.state.sends).toBe(1);
   });
 
   it("does not wake for a result already read with task_status", async () => {
