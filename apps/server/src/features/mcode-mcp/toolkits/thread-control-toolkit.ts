@@ -190,7 +190,7 @@ function createTaskTools(context: ToolContext): McodeTool<McodeSession>[] {
   return [
     serviceTool(context, {
       name: "delegate_task",
-      description: "Delegate child work to a new visible thread in the Coordinator's Project. Prefer Provider-native sub-agents when they support the chosen model. Call thread_target_list and use its exact providerId/modelId. Choose shared for the Coordinator's checkout or worktree for a new checkout at its local commit with project setup. Omitted permissionMode inherits the Coordinator's mode; a broader mode is forbidden. Run each review round as a fresh task carrying the brief, prior findings and open objections. The call returns immediately: end the turn or continue other work, then check later with task_status rather than polling in a loop. A retry with the same clientRequestId returns the existing task. Keep the same input on retries. Interrupted outcomes may later resume.",
+      description: "Delegate child work in the Coordinator's Project. Prefer Provider-native sub-agents when they support the chosen model. Call thread_target_list and use its exact providerId/modelId. Choose shared for the Coordinator's checkout or worktree for a new checkout at its local commit with project setup. Omitted permissionMode inherits the Coordinator's mode; a broader mode is forbidden. Run each review round as a fresh task carrying the brief, prior findings and open objections. The call returns immediately. The Coordinator is woken on finish, failure or a question; task_status reads acknowledge results. Retry the same input with the same clientRequestId to return the existing task. Interrupted tasks may resume.",
       input: DelegateTaskInputSchema(), result: DelegateTaskResultSchema(),
       run: (service, authority, input) => service.delegate(authority, input),
     }),
@@ -202,7 +202,7 @@ function createTaskTools(context: ToolContext): McodeTool<McodeSession>[] {
     }),
     serviceTool(context, {
       name: "task_status",
-      description: "Read the current state and bounded result of a task delegated by this Coordinator. Status follows the original task turn and includes its threadId when available; later user turns do not replace its result. Finished/interrupted can become working after recovery. Check later after ending the turn or doing other work; do not poll in a loop.",
+      description: "Read and acknowledge a delegated task's current state and bounded result. Status follows its latest attempt and includes its threadId when available. The Coordinator is woken on finish, failure or a question, so polling is unnecessary. Interrupted tasks may resume.",
       input: TaskStatusInputSchema(), result: TaskStatusResultSchema(),
       run: (service, authority, input) => service.status(authority, input),
     }),
