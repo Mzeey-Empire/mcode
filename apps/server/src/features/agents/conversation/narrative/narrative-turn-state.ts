@@ -154,8 +154,7 @@ function agentInputSummary(input: Record<string, unknown>): string {
   return String(firstProvidedInputValue(input, ["description"]) ?? "").slice(0, 100);
 }
 
-/** A delegation row is labelled by its task title, not the prompt and routing fields the generic JSON would truncate. */
-function delegateTaskInputSummary(input: Record<string, unknown>): string {
+function delegateTaskTitle(input: Record<string, unknown>): string {
   return String(firstProvidedInputValue(input, ["title"]) ?? "").slice(0, 100);
 }
 
@@ -1420,7 +1419,7 @@ export class NarrativeTurnState {
   /** Generate a human-readable summary of tool input. */
   private summarizeInput(toolName: string, input: Record<string, unknown>): string {
     if (resolveBrowserNarrativeTool(toolName)) return JSON.stringify(input).slice(0, 4_000);
-    if (isDelegateTaskToolName(toolName)) return delegateTaskInputSummary(input);
+    if (isDelegateTaskToolName(toolName)) return delegateTaskTitle(input);
     return (NARRATIVE_INPUT_SUMMARIZERS[toolName.toLowerCase()] ?? genericInputSummary)(input);
   }
 }

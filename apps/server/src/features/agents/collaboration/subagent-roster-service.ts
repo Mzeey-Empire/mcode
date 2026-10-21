@@ -32,6 +32,7 @@ import type { DelegatedTaskService } from "../../thread-control/delegation/deleg
 
 type AcceptedSubagentProgress = Pick<import("../canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
   "loadSubagentRoster" | "loadSubagentStopTarget" | "loadActiveSubagentStopTargets" | "finishSubagentTurn" | "interruptSubagentTurns" | "onSubagentRosterChange">;
+type DelegatedStopTarget = { tasks: Pick<DelegatedTaskService, "stopForUser">; entry: SubagentRosterEntry };
 
 /** Owns server-authoritative sub-agent rosters and independent cancellation. */
 @injectable()
@@ -258,18 +259,16 @@ export class SubagentRosterService {
     }
   }
 
-  /** Resolves synchronously so a native stop still reaches its provider interrupt in the caller's tick. */
-  private delegatedStop(request: CanonicalSubagentStopRequest): Promise<CanonicalSubagentStopResult> | null {
+  private findDelegatedStopTarget(request: CanonicalSubagentStopRequest): DelegatedStopTarget | null {
     const tasks = this.delegatedTasks;
     const entry = tasks?.rosterEntries(request.owningParentThreadId)
       .find((candidate) => candidate.childThreadId === request.childThreadId);
-    return tasks && entry ? this.stopDelegated(request, tasks, entry) : null;
+    return tasks && entry ? { tasks, entry } : null;
   }
 
   private async stopDelegated(
     request: CanonicalSubagentStopRequest,
-    tasks: Pick<DelegatedTaskService, "stopForUser">,
-    entry: SubagentRosterEntry,
+    { tasks, entry }: DelegatedStopTarget,
   ): Promise<CanonicalSubagentStopResult> {
     try {
       if (!await tasks.stopForUser(request.owningParentThreadId, request.childThreadId)) {
@@ -282,8 +281,8 @@ export class SubagentRosterService {
   }
 
   private async stopOne(request: CanonicalSubagentStopRequest): Promise<CanonicalSubagentStopResult> {
-    const delegated = this.delegatedStop(request);
-    if (delegated) return delegated;
+    const delegated = this.findDelegatedStopTarget(request);
+    if (delegated) return this.stopDelegated(request, delegated);
     const target = this.loadStopTarget(request);
     if (!target) return this.failed(request.childThreadId, "The selected sub-agent does not belong to this thread.");
     if (target.latestTurn?.status !== "Running") {

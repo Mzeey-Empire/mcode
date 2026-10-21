@@ -44,7 +44,7 @@ export class DelegatedTaskService {
 
   constructor(private readonly deps: DelegatedTaskDeps) {}
 
-  /** Observe task changes using the roster's existing debounced publisher. */
+  /** Observe task changes for one Coordinator's roster. */
   onRosterChanged(listener: (coordinatorThreadId: string) => void): () => void {
     this.rosterListeners.add(listener);
     return () => { this.rosterListeners.delete(listener); };
