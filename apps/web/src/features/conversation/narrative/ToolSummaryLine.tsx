@@ -12,6 +12,8 @@ import {
 import type { ToolCall } from "@/transport/types";
 import type { ToolGroup } from "./types";
 import { extractToolInputDetail } from "./tool-detail";
+import { useSubagentRoster } from "@/features/subagents/state/subagentRosterStore";
+import { useSubagentThreadId } from "./subagent-provider";
 import { GroupSummaryLabel, type ToolCallOutcome, toolCallOutcome } from "./GroupSummaryLabel";
 import { ToolOutputTruncationNotice } from "./ToolOutputTruncationNotice";
 import { ShellToolCallRow } from "./ShellToolCallRow";
@@ -30,8 +32,8 @@ interface ToolSummaryLineProps {
 
 function toolCallLabel(toolCall: ToolCall, outcome: ToolCallOutcome): string {
   const canonicalName = resolveToolName(toolCall.toolName);
-  if (outcome === "completed") return TOOL_LABELS[canonicalName] ?? toolCall.toolName;
-  return `${TOOL_OUTCOME_VERBS[canonicalName] ?? toolCall.toolName} ${outcome}`;
+  if (outcome === "completed") return TOOL_LABELS[canonicalName] ?? canonicalName;
+  return `${TOOL_OUTCOME_VERBS[canonicalName] ?? canonicalName} ${outcome}`;
 }
 
 function ApprovalReviewRow({ toolCall }: { toolCall: ToolCall }) {
@@ -60,12 +62,21 @@ function FailedToolCallOutput({ toolCall, panelId }: { toolCall: ToolCall; panel
   );
 }
 
+const TASK_ID_TOOLS = new Set(["task_status", "task_cancel"]);
+
+/** Names a polled or cancelled delegated task by its roster title; the raw task id means nothing to the user. */
+function TaskTitleDetail({ taskId }: { taskId: unknown }) {
+  const entries = useSubagentRoster(useSubagentThreadId())?.entries;
+  const title = typeof taskId === "string" ? entries?.find((entry) => entry.id === `task:${taskId}`)?.title : undefined;
+  return title ? <NarrativeToolRowDetail kind="file">{title}</NarrativeToolRowDetail> : null;
+}
+
 function GenericToolCallRow({ toolCall, expansion }: { toolCall: ToolCall; expansion?: RowExpansion }) {
   const { open, onToggle } = useRowExpansion(expansion);
   const panelId = useId();
   const outcome = toolCallOutcome(toolCall);
-  const Icon = TOOL_ICONS[resolveToolName(toolCall.toolName)] ?? DEFAULT_ICON;
-  const detail = extractToolInputDetail(toolCall);
+  const canonicalName = resolveToolName(toolCall.toolName);
+  const Icon = TOOL_ICONS[canonicalName] ?? DEFAULT_ICON;
   const hasFailureOutput = outcome === "failed" && Boolean(toolCall.output);
 
   return (
@@ -77,7 +88,9 @@ function GenericToolCallRow({ toolCall, expansion }: { toolCall: ToolCall; expan
           ? { open, onToggle, controlsId: open ? panelId : undefined }
           : undefined}
       >
-        <NarrativeToolRowDetail kind="file">{detail}</NarrativeToolRowDetail>
+        {TASK_ID_TOOLS.has(canonicalName)
+          ? <TaskTitleDetail taskId={toolCall.toolInput.taskId} />
+          : <NarrativeToolRowDetail kind="file">{extractToolInputDetail(toolCall)}</NarrativeToolRowDetail>}
       </NarrativeToolRow>
       {hasFailureOutput && open ? <FailedToolCallOutput toolCall={toolCall} panelId={panelId} /> : null}
     </div>
