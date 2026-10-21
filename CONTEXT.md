@@ -353,18 +353,21 @@ user-visible tool calls are domain tool calls; internal SDK plumbing is
 not.
 
 ### Sub-agent thread
-A provider-native child conversation created from the current turn and
-persisted as a normal Mcode thread. Sub-agent threads may run in parallel and
-may themselves dispatch further sub-agents (nested). A sub-agent thread is
-distinct from a [[Delegated thread]] created through [[Delegation]].
+A child conversation that does work for the current Thread and is reached
+through its parent's sub-agent view, never through thread lists. A
+provider-native sub-agent thread is created by the Provider from the current
+turn. A [[Delegated thread]] is the cross-provider kind, created through
+[[Delegation]]. Sub-agent threads may run in parallel and may themselves
+dispatch further sub-agents (nested).
 
 ### Sub-agent call
 The parent-turn tool or action that creates or contacts a [[Sub-agent thread]].
 It remains part of the parent Turn. Each sub-agent call's events are attributed
 to its parent via `parentToolCallId` so the narrative timeline can nest them
-correctly. The phrase “use a sub-agent” means this provider-native behavior
+correctly. The phrase “use a sub-agent” means the provider-native tool
 when the Provider supports the chosen model. For another Provider, or a model
-the native tool lacks, the agent uses [[Delegation]] instead.
+the native tool lacks, the agent uses [[Delegation]], whose `delegate_task`
+call is a sub-agent call too.
 
 Provider-native identity evidence links a sub-agent thread to its sub-agent
 call. A name or a heuristic alone does not establish that relationship.
@@ -387,17 +390,20 @@ when a delegated task finishes, fails, or needs an answer, so it does not poll.
 _Avoid_: Parent agent, orchestrator session
 
 ### Delegated thread
-A normal Mcode thread created by a coordinator thread to perform an explicit
-assignment. It remains visible and controllable as its own thread.
-_Avoid_: Sub-agent thread, hidden child session
+The cross-provider [[Sub-agent thread]] a Coordinator thread starts through
+[[Delegation]]. It runs on any Provider and model, is persisted as a normal
+Mcode Thread, and appears in its Coordinator's sub-agent view with its own
+status, transcript, and Stop. It never appears in thread lists or search.
+_Avoid_: Delegate thread, child session
 
 ### Thread delegation
-The durable assignment and relationship between a coordinator thread and a
-delegated thread. It records which Thread and Turn created the assignment but
-does not make the delegated thread part of the coordinator's Turn. The
-delegated thread has its own lifecycle and survives the coordinator stopping or
-disconnecting.
-_Avoid_: Sub-agent call, conversation fork
+The durable assignment and relationship between a Coordinator thread and a
+Delegated thread. It records which Thread, Turn, and `delegate_task` call
+created the assignment. The Delegated thread keeps its own lifecycle and keeps
+running if the Coordinator stops or disconnects. Deleting the Coordinator
+deletes its finished Delegated threads and turns running ones into ordinary
+visible Threads, as it does for provider-native children.
+_Avoid_: Conversation fork
 
 ### Delegation
 The capability of handing one task to a [[Delegated thread]], reading the
