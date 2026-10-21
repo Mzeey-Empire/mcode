@@ -57,6 +57,8 @@ const {
     chatViewResidencyMock: {
       invalidateConversation: vi.fn(),
       refresh: vi.fn().mockResolvedValue(undefined),
+      refreshVisibleConversation: vi.fn().mockResolvedValue(undefined),
+      isDisplayConversationLeased: vi.fn((threadId: string) => chatViewDisplayLeaseIdsRef.current.includes(threadId)),
       subscribeDisplayConversations: vi.fn((listener: () => void) => {
         chatViewDisplayLeaseListeners.add(listener);
         return () => chatViewDisplayLeaseListeners.delete(listener);
