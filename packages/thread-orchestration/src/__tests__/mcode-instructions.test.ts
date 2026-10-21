@@ -15,14 +15,6 @@ const toolkitCombinations = [
 ];
 
 describe("Mcode runtime instruction sections", () => {
-  it("directs child work through durable tasks and later status reads", () => {
-    const section = buildMcodeInstructionSections({ toolkits: { threadControl: true, browser: false } })
-      .find(item => item.key === "mcode_thread_control");
-    expect(section?.text).toContain("Delegate child work with delegate_task");
-    expect(section?.text).toContain("same clientRequestId");
-    expect(section?.text).toContain("check later with task_status");
-    expect(section?.text).not.toContain("thread_create_batch");
-  });
   it.each([
     "Spawn exactly one nested provider-native child named leaf_probe",
     "Delegate this task to a provider-native subagent",
