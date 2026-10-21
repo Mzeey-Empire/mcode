@@ -400,7 +400,7 @@ export class TurnAdmissionDispatchCoordinator {
     existingWorktreePath: string;
     provider: ProviderId;
     baseBranch?: string;
-    lineage?: { parentThreadId: string; forkedFromMessageId: string };
+    lineage?: Parameters<ThreadRepo["create"]>[6];
   }, createAndBind?: (input: ThreadStartupThreadCreation) => Promise<Thread>): Promise<Thread> {
     const workspace = this.workspaces.findById(params.workspaceId);
     if (!workspace) throw new Error(`Workspace not found: ${params.workspaceId}`);

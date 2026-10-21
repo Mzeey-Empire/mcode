@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import * as NodeFS from "node:fs";
 import { describe, it, expect, beforeEach } from "vitest";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ThreadStore as ThreadRepo } from "../thread-store.js";
@@ -79,14 +80,11 @@ describe("ThreadRepo lineage", () => {
   it("clears cross-workspace delegation lineage when the coordinator is deleted", () => {
     db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run("ws-2", "other", "/tmp/other");
     const coordinator = repo.create("ws-1", "coordinator", "direct", "main");
-    const child = repo.create("ws-2", "child", "direct", "main");
-
-    expect(repo.updateDelegationLineage(child.id, {
+    const child = repo.create("ws-2", "child", "direct", "main", true, "claude", { delegation: {
       coordinatorThreadId: coordinator.id,
       creatorTurnId: "turn-1",
       creatorToolCallId: "call-1",
-      creationKind: "thread_delegation",
-    })).toBe(true);
+    } });
 
     repo.softDelete(coordinator.id);
 
@@ -107,18 +105,44 @@ describe("ThreadRepo lineage", () => {
   it("keeps a cross-workspace child when its coordinator is hard-deleted", () => {
     db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run("ws-2", "other", "/tmp/other");
     const coordinator = repo.create("ws-1", "coordinator", "direct", "main");
-    const child = repo.create("ws-2", "child", "direct", "main");
-    repo.updateDelegationLineage(child.id, {
+    const child = repo.create("ws-2", "child", "direct", "main", true, "claude", { delegation: {
       coordinatorThreadId: coordinator.id,
       creatorTurnId: "turn-1",
       creatorToolCallId: "call-1",
-      creationKind: "thread_delegation",
-    });
+    } });
 
     expect(repo.hardDelete(coordinator.id)).toBe(true);
 
     expect(db.prepare("SELECT delegation_coordinator_thread_id FROM threads WHERE id = ?").get(child.id)).toEqual({
       delegation_coordinator_thread_id: null,
     });
+  });
+  it("hides delegated children from lists, search and counts while keeping identity reads", () => {
+    const coordinator = repo.create("ws-1", "coordinator", "direct", "main");
+    const child = repo.create("ws-1", "delegated", "direct", "main", true, "codex", { delegation: {
+      coordinatorThreadId: coordinator.id, creatorTurnId: "turn", creatorToolCallId: "request",
+    } });
+    expect(repo.findById(child.id)?.delegation_coordinator_thread_id).toBe(coordinator.id);
+    expect(repo.listByWorkspace("ws-1").map((thread) => thread.id)).toEqual([coordinator.id]);
+    expect(repo.listRecent().map((thread) => thread.id)).toEqual([coordinator.id]);
+    expect(repo.search({ query: "delegated" })).toEqual({ threads: [], workspaces: [] });
+    expect(repo.countActiveByWorkspaceIds(["ws-1"]).get("ws-1")).toBe(1);
+    expect(repo.countActiveByBranch(coordinator.id, "main")).toBe(0);
+    repo.updateExternalCreator(coordinator.id, "integration");
+    repo.updateExternalCreator(child.id, "integration");
+    expect(repo.countActiveByIntegration("integration")).toBe(1);
+  });
+
+  it("keeps legacy batch threads visible after migration without losing audit provenance", () => {
+    const coordinator = repo.create("ws-1", "coordinator", "direct", "main");
+    const child = repo.create("ws-1", "legacy", "direct", "main", true, "claude", { delegation: {
+      coordinatorThreadId: coordinator.id, creatorTurnId: "legacy-turn", creatorToolCallId: "legacy-call",
+    } });
+    db.exec(NodeFS.readFileSync(new URL("../../../../../drizzle/0095_worried_anthem.sql", import.meta.url), "utf8"));
+    expect(repo.listByWorkspace("ws-1").map((thread) => thread.title).sort()).toEqual(["coordinator", "legacy"]);
+    expect(repo.search({ query: "legacy" }).threads.map((thread) => thread.id)).toEqual([child.id]);
+    expect(repo.countActiveByWorkspaceIds(["ws-1"]).get("ws-1")).toBe(2);
+    expect(db.prepare("SELECT delegation_creator_turn_id, delegation_creator_tool_call_id, delegation_creation_kind FROM threads WHERE id = ?").get(child.id))
+      .toEqual({ delegation_creator_turn_id: "legacy-turn", delegation_creator_tool_call_id: "legacy-call", delegation_creation_kind: "thread_delegation" });
   });
 });

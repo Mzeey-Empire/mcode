@@ -19,6 +19,7 @@ import type {
 
 import { ThreadService } from "../../thread-control/index.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import type { ThreadCreateLineage } from "../../thread-control/persistence/thread-store.js";
 import { normalizeWorktreePath } from "../../projects/git/worktree-path.js";
 import { GitRepositoryService, OriginFetchError } from "../../projects/git/git-repository-service.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
@@ -49,6 +50,7 @@ export type CreateAndSendCommand = Omit<
 
 /** Trusted feature metadata, never populated from create-and-send wire params. */
 export interface CreateAndSendOptions {
+  lineage?: ThreadCreateLineage;
   setupSkip?: SendMessageCommand["setupSkip"];
   turn?: Required<Pick<SendMessageCommand, "sourceTurnId" | "sourceThreadId" | "sourceProviderId" | "originSourceTurnId">>;
   worktreeStart?: { commit: string };
@@ -64,6 +66,7 @@ export type CreatedInitialTurn =
 
 /** Input for a direct or managed-worktree thread provisioned before its first turn. */
 export interface CreateThreadForTurnInput {
+  lineage?: ThreadCreateLineage;
   workspaceId: string;
   title: string;
   mode: "direct" | "worktree";
@@ -317,6 +320,7 @@ export class ThreadCreationCoordinator {
   ): Promise<CreatedInitialTurn> {
     const startupId = startup?.startupId;
     const creation: CreateThreadForTurnInput = {
+      lineage: params.options?.lineage,
       workspaceId: params.workspaceId,
       title: params.title,
       mode: params.mode,
@@ -372,9 +376,9 @@ export class ThreadCreationCoordinator {
       ? await this.createManagedThread(input, startupId)
       : startupId && startupService
         ? await startupService.createAndBindThread(startupId, { args: [
-          input.workspaceId, input.title, "direct", input.branch, true, input.provider, undefined, undefined, undefined,
+          input.workspaceId, input.title, "direct", input.branch, true, input.provider, input.lineage, undefined, undefined,
         ] })
-        : await this.threads.create(input.workspaceId, input.title, "direct", input.branch, true, input.provider);
+        : await this.threads.create(input.workspaceId, input.title, "direct", input.branch, true, input.provider, input.lineage);
     return this.configure(created, input);
   }
 
@@ -391,6 +395,7 @@ export class ThreadCreationCoordinator {
       existingWorktreePath: params.existingWorktreePath,
       provider: params.provider,
       baseBranch: params.existingWorktreeBaseBranch,
+      lineage: creation.lineage,
     }, startupId && startupService ? (input) => startupService.createAndBindThread(startupId, input) : undefined);
     const thread = await this.configure(attached, creation);
     if (startupId) {
@@ -548,6 +553,7 @@ export class ThreadCreationCoordinator {
     const created = await this.threadService().create(input.workspaceId, input.title, "worktree", input.branch, {
       branchless: input.startPoint !== undefined || input.worktreeBranchMode !== "named",
       startPoint: input.startPoint,
+      lineage: input.lineage,
       provider: input.provider,
       ...this.managedLifecycle(startupId),
     });

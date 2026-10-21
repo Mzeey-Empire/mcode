@@ -1,10 +1,10 @@
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
-import { PermissionModeSchema, ProviderIdSchema } from "@mcode/contracts";
-import { delegatedTasks } from "../../../runtime/persistence/sqlite/schema.js";
+import { PermissionModeSchema, ProviderIdSchema, CanonicalAgentEventEnvelopeSchema, AgentEventSchema, isDelegateTaskToolName } from "@mcode/contracts";
+import { canonicalAgentEvents, canonicalAgentItems, delegatedTasks } from "../../../runtime/persistence/sqlite/schema.js";
 
 /** Immutable launch snapshot, captured before any approval or startup side effect. */
 export const DelegatedTaskPlanSchema = z.object({
@@ -72,6 +72,32 @@ export class DelegatedTaskStore {
   get(taskId: string): DelegatedTask | null {
     const row = this.orm.select().from(delegatedTasks).where(eq(delegatedTasks.taskId, taskId)).get();
     return row ? this.parse(row) : null;
+  }
+
+  /** Enumerate receipts owned by one coordinator, regardless of child visibility. */
+  listByCoordinator(coordinatorThreadId: string): DelegatedTask[] {
+    return this.orm.select().from(delegatedTasks)
+      .where(eq(delegatedTasks.coordinatorThreadId, coordinatorThreadId)).all().map((row) => this.parse(row));
+  }
+
+  /** Resolve the original narrative identity from the creator turn's full tool input. */
+  sourceCalls(coordinatorThreadId: string, creatorTurnId: string) {
+    const rows = this.orm.select({ envelopeJson: canonicalAgentEvents.envelopeJson }).from(canonicalAgentEvents)
+      .where(and(eq(canonicalAgentEvents.threadId, coordinatorThreadId), eq(canonicalAgentEvents.turnId, creatorTurnId),
+        sql`json_extract(${canonicalAgentEvents.envelopeJson}, '$.payload.type') = 'publication.recorded'`))
+      .orderBy(asc(canonicalAgentEvents.durableRevision), asc(canonicalAgentEvents.acceptedSequence)).all();
+    return rows.flatMap((row) => {
+      const payload = CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelopeJson)).payload;
+      if (payload.type !== "publication.recorded" || payload.event.type !== "toolUse") return [];
+      const event = AgentEventSchema().parse(payload.event);
+      if (event.type !== "toolUse" || !isDelegateTaskToolName(event.toolName) || typeof event.toolInput.clientRequestId !== "string") return [];
+      const item = this.orm.select({ messageId: sql<string | null>`COALESCE(
+        json_extract(${canonicalAgentItems.payloadJson}, '$.record.message_id'),
+        json_extract(${canonicalAgentItems.payloadJson}, '$.narrative.record.message_id'))` })
+        .from(canonicalAgentItems).where(and(eq(canonicalAgentItems.id, `toolCall:${event.toolCallId}`),
+          eq(canonicalAgentItems.threadId, coordinatorThreadId), eq(canonicalAgentItems.turnId, creatorTurnId))).get();
+      return [{ id: event.toolCallId, clientRequestId: event.toolInput.clientRequestId, messageId: item?.messageId ?? null }];
+    });
   }
 
   private parse(row: typeof delegatedTasks.$inferSelect): DelegatedTask {

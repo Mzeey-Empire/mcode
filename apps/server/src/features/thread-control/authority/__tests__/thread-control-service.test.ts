@@ -68,7 +68,6 @@ describe("ThreadControlService", () => {
     search: ReturnType<typeof vi.fn>;
     updateModel: ReturnType<typeof vi.fn>;
     updateSettings: ReturnType<typeof vi.fn>;
-    updateDelegationLineage: ReturnType<typeof vi.fn>;
     updateStatus: ReturnType<typeof vi.fn>;
     updateWorktreePath: ReturnType<typeof vi.fn>;
     clearWorktreePath: ReturnType<typeof vi.fn>;
@@ -121,7 +120,6 @@ describe("ThreadControlService", () => {
       search: vi.fn().mockReturnValue({ threads: [], workspaces: [] }),
       updateModel: vi.fn().mockReturnValue(true),
       updateSettings: vi.fn().mockReturnValue(true),
-      updateDelegationLineage: vi.fn().mockReturnValue(true),
       updateStatus: vi.fn().mockReturnValue(true),
       updateWorktreePath: vi.fn().mockReturnValue(true),
       clearWorktreePath: vi.fn().mockReturnValue(true),

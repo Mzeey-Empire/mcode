@@ -1,7 +1,7 @@
 import { inject, injectable } from "tsyringe";
 import {
   SubagentRosterSchema, ProviderIdSchema, SUBAGENT_REPORTING,
-  isChildTurnCancellable,
+  isChildTurnCancellable, isDelegateTaskToolName,
   type SubagentRoster, type SubagentRosterEntry, type SubagentDetail, type SubagentDetailRequest,
   type SubagentRosterRequest,
   type CanonicalSubagentStopRequest,
@@ -28,6 +28,7 @@ import { broadcast } from "../../../application/transport/push.js";
 import { narrativeRosterEntry, narrativeSubagentDetail, rootAgent, subagentStatusFrom, subagentTitle, type RosterToolCall } from "./subagent-roster-projection.js";
 import type { CanonicalChildRow } from "../canonical/canonical-child-roster.js";
 import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
+import type { DelegatedTaskService } from "../../thread-control/delegation/delegated-task-service.js";
 
 type AcceptedSubagentProgress = Pick<import("../canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
   "loadSubagentRoster" | "loadSubagentStopTarget" | "loadActiveSubagentStopTargets" | "finishSubagentTurn" | "interruptSubagentTurns" | "onSubagentRosterChange">;
@@ -42,6 +43,7 @@ export class SubagentRosterService {
   private readonly stoppedCalls = new Map<string, Set<string>>();
   private readonly activeStops = new Map<string, Promise<CanonicalSubagentStopResult>>();
   private acceptedProgress: AcceptedSubagentProgress | undefined;
+  private delegatedTasks: Pick<DelegatedTaskService, "rosterEntries" | "stopForUser"> | undefined;
 
   constructor(
     @inject(SUBAGENT_LIFECYCLE_DURABILITY)
@@ -51,6 +53,12 @@ export class SubagentRosterService {
     @inject("Database") private readonly db: Database,
     @inject("SubagentReporting", { isOptional: true }) private readonly reporting = SUBAGENT_REPORTING,
   ) {}
+
+  /** Compose cross-provider tasks without a dependency cycle through AgentService. */
+  bindDelegatedTasks(tasks: Pick<DelegatedTaskService, "rosterEntries" | "stopForUser" | "onRosterChanged">): () => void {
+    this.delegatedTasks = tasks;
+    return tasks.onRosterChanged((threadId) => this.changed(threadId));
+  }
 
   /** Resolve controls through retained family identities before their saved rows exist. */
   bindAcceptedProgress(progress: AcceptedSubagentProgress): void {
@@ -65,6 +73,7 @@ export class SubagentRosterService {
     const canonical = this.acceptedProgress?.loadSubagentRoster(canonicalRequest)
       ?? this.durability.loadSubagentRoster(canonicalRequest);
     const entries = this.projectEntries(parentId, [...canonical.active, ...canonical.done]);
+    for (const entry of this.delegatedTasks?.rosterEntries(parentId) ?? []) entries.set(entry.id, entry);
     const ordered = [...entries.values()].sort((left, right) =>
       Number(right.status === "running") - Number(left.status === "running")
       || right.startedAt.localeCompare(left.startedAt) || left.id.localeCompare(right.id));
@@ -111,7 +120,7 @@ export class SubagentRosterService {
     const calls = buffered.length > 0 ? buffered : this.callsFor(threadId);
     const byId = new Map(calls.map((call) => [call.toolCallId, call]));
     const call = byId.get(toolCallId);
-    if (call && rootAgent(call, byId)) this.changed(threadId);
+    if (call && (rootAgent(call, byId) || isDelegateTaskToolName(call.toolName))) this.changed(threadId);
   }
 
   /**
@@ -124,6 +133,11 @@ export class SubagentRosterService {
     return subscribe((events) => {
       for (const threadId of threadsWhere(events, touchesNarrativeRoster)) this.changed(threadId);
       for (const threadId of threadsWhere(events, endsTurn)) this.turnFinished(threadId);
+      for (const threadId of threadsWhere(events, (event) => endsTurn(event) || event.payload.type === "turn.started")) {
+        const owner = drizzle(this.db).select({ id: threads.delegationCoordinatorThreadId }).from(threads)
+          .where(eq(threads.id, threadId)).get()?.id;
+        if (owner) this.changed(owner);
+      }
     });
   }
 
@@ -244,7 +258,32 @@ export class SubagentRosterService {
     }
   }
 
+  /** Resolves synchronously so a native stop still reaches its provider interrupt in the caller's tick. */
+  private delegatedStop(request: CanonicalSubagentStopRequest): Promise<CanonicalSubagentStopResult> | null {
+    const tasks = this.delegatedTasks;
+    const entry = tasks?.rosterEntries(request.owningParentThreadId)
+      .find((candidate) => candidate.childThreadId === request.childThreadId);
+    return tasks && entry ? this.stopDelegated(request, tasks, entry) : null;
+  }
+
+  private async stopDelegated(
+    request: CanonicalSubagentStopRequest,
+    tasks: Pick<DelegatedTaskService, "stopForUser">,
+    entry: SubagentRosterEntry,
+  ): Promise<CanonicalSubagentStopResult> {
+    try {
+      if (!await tasks.stopForUser(request.owningParentThreadId, request.childThreadId)) {
+        return this.failed(request.childThreadId, "The selected sub-agent does not belong to this thread.");
+      }
+    } catch (error) {
+      return this.failed(request.childThreadId, error instanceof Error ? error.message : "Sub-agent interruption failed.");
+    }
+    return { childThreadId: request.childThreadId, status: entry.status === "running" ? "interrupted" : "already-terminal" };
+  }
+
   private async stopOne(request: CanonicalSubagentStopRequest): Promise<CanonicalSubagentStopResult> {
+    const delegated = this.delegatedStop(request);
+    if (delegated) return delegated;
     const target = this.loadStopTarget(request);
     if (!target) return this.failed(request.childThreadId, "The selected sub-agent does not belong to this thread.");
     if (target.latestTurn?.status !== "Running") {
@@ -382,12 +421,20 @@ function endsTurn(event: CanonicalAgentEventEnvelope): boolean {
 }
 
 function touchesNarrativeRoster(event: CanonicalAgentEventEnvelope): boolean {
+  if (event.payload.type === "publication.recorded") {
+    const publication = event.payload.event;
+    return publication.type === "toolUse" && typeof publication.toolName === "string" && isDelegateTaskToolName(publication.toolName);
+  }
   if (event.payload.type !== "item.recorded" || event.payload.item.kind !== "tool-call") return false;
   const { parentItemId, payload } = event.payload.item;
   // A late background result settles a call from an earlier turn as a saved toolCall item, outside any terminal.
-  if (payload.projection === "toolCall") return toolName(payload.record) === "Agent";
+  if (payload.projection === "toolCall") return isRosterToolName(toolName(payload.record));
   if (payload.projection !== "narrativeRecovery" && payload.projection !== "narrativeRecoveryDiscarded") return false;
-  return parentItemId !== undefined || narrativeToolName(payload.narrative) === "Agent";
+  return parentItemId !== undefined || isRosterToolName(narrativeToolName(payload.narrative));
+}
+
+function isRosterToolName(name: unknown): boolean {
+  return typeof name === "string" && (name === "Agent" || isDelegateTaskToolName(name));
 }
 
 function narrativeToolName(narrative: unknown): unknown {

@@ -11,6 +11,7 @@ import { DevinModeSchema, PlanPhaseSchema, ReasoningLevelSchema, ScheduledTurnRe
 import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, OrchestrationMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
 import {
   canonicalAgentThreads,
+  canonicalAgentTurns,
   cleanupJobs,
   pullRequestReviewLinks,
   threads,
@@ -28,7 +29,7 @@ type ThreadRow = typeof threads.$inferSelect & {
 
 const threadSelection = { ...getTableColumns(threads), scheduledResume: turnResumeSchedules };
 
-const canonicalChildVisibility = sql`NOT EXISTS (
+const subagentVisibility = sql`${threads.delegationCoordinatorThreadId} IS NULL AND NOT EXISTS (
   SELECT 1
   FROM ${canonicalAgentThreads} canonical_child
   WHERE canonical_child.id = ${threads.id}
@@ -154,10 +155,26 @@ function parseStoredDevinMode(value: string | null): DevinMode | null {
   return parsed.success ? parsed.data : null;
 }
 
-type ThreadCreateLineage = {
-  parentThreadId: string;
-  forkedFromMessageId: string;
+/** Trusted creation provenance, persisted atomically with the thread. */
+export type ThreadCreateLineage = {
+  parentThreadId?: string;
+  forkedFromMessageId?: string;
+  delegation?: {
+    coordinatorThreadId: string;
+    creatorTurnId: string;
+    creatorToolCallId: string;
+  };
 };
+
+function delegationColumns(delegation: ThreadCreateLineage["delegation"]) {
+  if (!delegation) return {};
+  return {
+    delegationCoordinatorThreadId: delegation.coordinatorThreadId,
+    delegationCreatorTurnId: delegation.creatorTurnId,
+    delegationCreatorToolCallId: delegation.creatorToolCallId,
+    delegationCreationKind: "thread_delegation",
+  };
+}
 
 type ThreadCreateRecordInput = {
   id: string;
@@ -213,7 +230,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: input.lineage?.parentThreadId ?? null,
-    delegation_coordinator_thread_id: null,
+    delegation_coordinator_thread_id: input.lineage?.delegation?.coordinatorThreadId ?? null,
     forked_from_message_id: input.lineage?.forkedFromMessageId ?? null,
     last_compact_summary: null,
     has_file_changes: false,
@@ -278,7 +295,7 @@ function searchConditions(opts: ThreadSearchOptions): (SQL | undefined)[] {
   return [
     isNull(threads.deletedAt),
     isNull(workspaces.deletedAt),
-    canonicalChildVisibility,
+    subagentVisibility,
     searchQueryCondition(opts.query),
     filters.status?.length ? inArray(threads.status, filters.status) : undefined,
     filters.provider?.length ? inArray(threads.provider, filters.provider) : undefined,
@@ -405,10 +422,7 @@ export class ThreadStore {
     branch: string,
     worktreeManaged = true,
     provider = "claude",
-    lineage?: {
-      parentThreadId: string;
-      forkedFromMessageId: string;
-    },
+    lineage: ThreadCreateLineage = {},
     checkoutState: "named" | "branchless" = "named",
     baseBranch: string | null = null,
   ): Thread {
@@ -427,8 +441,9 @@ export class ThreadStore {
       baseBranch,
       worktreeManaged: managedInt,
       provider,
-      parentThreadId: lineage?.parentThreadId ?? null,
-      forkedFromMessageId: lineage?.forkedFromMessageId ?? null,
+      parentThreadId: lineage.parentThreadId ?? null,
+      forkedFromMessageId: lineage.forkedFromMessageId ?? null,
+      ...delegationColumns(lineage.delegation),
       createdAt: now,
       updatedAt: now,
     }).run();
@@ -476,7 +491,7 @@ export class ThreadStore {
       .where(and(
         eq(threads.workspaceId, workspaceId),
         isNull(threads.deletedAt),
-        canonicalChildVisibility,
+        subagentVisibility,
       ))
       .orderBy(desc(threads.createdAt))
       .limit(clampedLimit)
@@ -509,7 +524,7 @@ export class ThreadStore {
       .where(and(
         isNull(threads.deletedAt),
         isNull(threads.userCompletedAt),
-        canonicalChildVisibility,
+        subagentVisibility,
       ))
       .orderBy(desc(threads.updatedAt))
       .limit(clampedLimit)
@@ -1181,7 +1196,7 @@ export class ThreadStore {
         inArray(threads.workspaceId, ids),
         isNull(threads.deletedAt),
         isNull(threads.userCompletedAt),
-        canonicalChildVisibility,
+        subagentVisibility,
       ))
       .groupBy(threads.workspaceId)
       .all();
@@ -1199,30 +1214,26 @@ export class ThreadStore {
     return result.changes > 0;
   }
 
-  /** Persist delegation provenance after a delegated thread is created. */
-  updateDelegationLineage(
-    id: string,
-    lineage: {
-      coordinatorThreadId: string;
-      creatorTurnId: string;
-      creatorToolCallId: string;
-      creationKind: "thread_delegation";
-      integrationId?: string;
-    },
-  ): boolean {
-    const result = runChanges(this.orm
-      .update(threads)
-      .set({
-        delegationCoordinatorThreadId: lineage.coordinatorThreadId,
-        delegationCreatorTurnId: lineage.creatorTurnId,
-        delegationCreatorToolCallId: lineage.creatorToolCallId,
-        delegationCreationKind: lineage.creationKind,
-        createdByIntegrationId: lineage.integrationId ?? null,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(threads.id, id))
-      );
-    return result.changes > 0;
+  /** Read delegated children before deleting their coordinator and task receipts. */
+  listDelegatedChildren(coordinatorThreadId: string): Thread[] {
+    return this.orm.select(threadSelection).from(threads)
+      .leftJoin(turnResumeSchedules, eq(turnResumeSchedules.threadId, threads.id))
+      .where(eq(threads.delegationCoordinatorThreadId, coordinatorThreadId)).all().map(rowToThread);
+  }
+
+  /**
+   * Promote delegated children that are still working so deleting their coordinator never loses
+   * running work. Activity is the child's turn state, not user completion, because a hidden
+   * delegated child is never completed by the user.
+   */
+  detachActiveDelegatedChildren(coordinatorThreadId: string): string[] {
+    const runningTurn = this.orm.select({ id: canonicalAgentTurns.id }).from(canonicalAgentTurns)
+      .where(and(eq(canonicalAgentTurns.threadId, threads.id), inArray(canonicalAgentTurns.status, ["Pending", "Running"])));
+    return this.orm.update(threads)
+      .set({ delegationCoordinatorThreadId: null, updatedAt: new Date().toISOString() })
+      .where(and(eq(threads.delegationCoordinatorThreadId, coordinatorThreadId),
+        isNull(threads.deletedAt), sql`EXISTS ${runningTurn}`))
+      .returning({ id: threads.id }).all().map((row) => row.id);
   }
 
   /** Persist ownership for a thread created by a paired external integration. */
@@ -1242,7 +1253,7 @@ export class ThreadStore {
         eq(threads.createdByIntegrationId, integrationId),
         isNull(threads.deletedAt),
         inArray(threads.status, ["active", "paused"]),
-        canonicalChildVisibility,
+        subagentVisibility,
       ))
       .get();
     return row!.count;
@@ -1311,7 +1322,7 @@ export class ThreadStore {
         eq(threads.branch, branch),
         ne(threads.id, threadId),
         isNull(threads.deletedAt),
-        canonicalChildVisibility,
+        subagentVisibility,
       ))
       .get();
     return row!.count;

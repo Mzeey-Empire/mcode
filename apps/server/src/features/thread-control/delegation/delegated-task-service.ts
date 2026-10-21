@@ -3,6 +3,7 @@ import {
   DelegateTaskInputSchema, TaskStatusInputSchema, TaskCancelInputSchema, ProviderIdSchema,
   type DelegateTaskInput, type DelegateTaskResult, type TaskStatusInput, type TaskStatusResult,
   type TaskCancelInput, type TaskCancelResult, type ThreadControlError, type TaskState, type Thread,
+  type SubagentRosterEntry, type SubagentStatus,
 } from "@mcode/contracts";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import type { ThreadRepo } from "../persistence/thread-repo.js";
@@ -22,7 +23,7 @@ import { deriveTaskState } from "./task-state.js";
 /** Existing owners used by delegation; the control reference is delayed at composition. */
 export interface DelegatedTaskDeps {
   tasks: DelegatedTaskRepo;
-  threads: Pick<ThreadRepo, "findById" | "updateDelegationLineage">;
+  threads: Pick<ThreadRepo, "findById">;
   startups: Pick<ThreadStartupService, "get">;
   approvals: ThreadControlApprovalRepo;
   canonical: Pick<CanonicalAgentBoundary, "loadTurn" | "loadTerminalProjection">;
@@ -39,8 +40,49 @@ type TaskRejection = { status: "rejected"; error: ThreadControlError };
 /** Owns durable delegation admission while startup, turn and approval owners retain lifecycle state. */
 export class DelegatedTaskService {
   private readonly launching = new Map<string, Promise<void>>();
+  private readonly rosterListeners = new Set<(coordinatorThreadId: string) => void>();
 
   constructor(private readonly deps: DelegatedTaskDeps) {}
+
+  /** Observe task changes using the roster's existing debounced publisher. */
+  onRosterChanged(listener: (coordinatorThreadId: string) => void): () => void {
+    this.rosterListeners.add(listener);
+    return () => { this.rosterListeners.delete(listener); };
+  }
+
+  /** Refresh task projections after a committed startup or approval transition. */
+  taskChanged(taskId: string): void {
+    const task = this.deps.tasks.get(taskId);
+    if (task) this.notifyRoster(task.coordinatorThreadId);
+  }
+
+  private notifyRoster(coordinatorThreadId: string): void {
+    for (const listener of this.rosterListeners) listener(coordinatorThreadId);
+  }
+
+  /** Project the same original task state used by task_status. */
+  rosterEntries(coordinatorThreadId: string): SubagentRosterEntry[] {
+    const callsByTurn = new Map<string, ReturnType<DelegatedTaskRepo["sourceCalls"]>>();
+    return this.deps.tasks.listByCoordinator(coordinatorThreadId).map((task) => {
+      let calls = callsByTurn.get(task.plan.creatorTurnId);
+      if (!calls) {
+        calls = this.deps.tasks.sourceCalls(coordinatorThreadId, task.plan.creatorTurnId);
+        callsByTurn.set(task.plan.creatorTurnId, calls);
+      }
+      const call = calls.find((source) => source.clientRequestId === task.clientRequestId);
+      const snapshot = this.snapshot(task);
+      const status = rosterStatus(snapshot.state);
+      return {
+        id: `task:${task.taskId}`, provider: task.plan.providerId, model: task.plan.modelId,
+        title: task.plan.title, prompt: task.plan.prompt, subagentType: null, reasoningEffort: null, stepCount: 0,
+        status, startedAt: new Date(task.createdAt).toISOString(),
+        endedAt: this.deps.canonical.loadTurn(task.taskId)?.endedAt ?? null,
+        tier: snapshot.threadId ? "transcript" : "meta", canStop: status === "running",
+        childThreadId: snapshot.threadId ?? null, sourceToolCallId: call?.id ?? null,
+        sourceMessageId: call?.messageId ?? null, parentEntryId: null,
+      };
+    });
+  }
 
   /** Claim or replay a pinned task without repeating launch side effects. */
   async delegate(authority: InternalThreadControlAuthority, input: DelegateTaskInput): Promise<DelegateTaskResult> {
@@ -58,6 +100,7 @@ export class DelegatedTaskService {
       inputFingerprint: fingerprint, plan,
     });
     if (claimed.kind === "conflict") return rejection("conflict", "clientRequestId already names a different task");
+    this.notifyRoster(claimed.task.coordinatorThreadId);
     await this.advance(claimed.task);
     return this.receipt(claimed.task);
   }
@@ -67,7 +110,6 @@ export class DelegatedTaskService {
     const { taskId } = TaskStatusInputSchema().parse(input);
     const task = this.deps.tasks.find(taskId, authority.sourceThreadId);
     if (!task) return notFound();
-    await this.repairLineage(task);
     return this.snapshot(task);
   }
 
@@ -76,21 +118,50 @@ export class DelegatedTaskService {
     const { taskId } = TaskCancelInputSchema().parse(input);
     const task = this.deps.tasks.find(taskId, authority.sourceThreadId);
     if (!task) return notFound();
-    const current = this.snapshot(task);
-    if (current.state.status === "finished") return { taskId, state: current.state };
-    if (this.deps.approvals.status(taskId) === "pending") {
-      await this.deps.control.cancelDelegationApproval(taskId);
-      return { taskId, state: this.snapshot(task).state };
+    return this.cancelTask(task, (threadId) => this.deps.control.threadStop(authority, { threadId }));
+  }
+
+  /** Stop an owned delegated child with authenticated user authority. */
+  async stopForUser(coordinatorThreadId: string, childThreadId: string): Promise<boolean> {
+    const task = this.deps.tasks.listByCoordinator(coordinatorThreadId)
+      .find((candidate) => this.deps.startups.get(candidate.taskId)?.threadId === childThreadId);
+    if (!task) return false;
+    await this.cancelTask(task, async (threadId) => {
+      const startup = this.deps.startups.get(task.taskId);
+      const turn = this.deps.canonical.loadTurn(task.taskId);
+      if (!turn && startup && ["pending", "running", "blocked"].includes(startup.state)) {
+        await cancelThreadStartup(this.deps.cancellation, task.taskId);
+      } else {
+        await this.deps.cancellation.agentService.stopSession(threadId, { by: "user" });
+      }
+      return { status: "stopped" };
+    });
+    return true;
+  }
+
+  private async cancelTask(task: DelegatedTask, stop: (threadId: string) => Promise<
+    { status: "stopped" } | Awaited<ReturnType<ThreadControlService["threadStop"]>>
+  >): Promise<TaskCancelResult> {
+    try {
+      const taskId = task.taskId;
+      const current = this.snapshot(task);
+      if (current.state.status === "finished") return { taskId, state: current.state };
+      if (this.deps.approvals.status(taskId) === "pending") {
+        await this.deps.control.cancelDelegationApproval(taskId);
+        return { taskId, state: this.snapshot(task).state };
+      }
+      const startup = this.deps.startups.get(taskId);
+      if (!startup?.threadId) {
+        if (startup) await cancelThreadStartup(this.deps.cancellation, taskId);
+        return { taskId, state: this.snapshot(task).state };
+      }
+      const stopped = await stop(startup.threadId);
+      if (stopped.status === "rejected") return { status: "rejected", error: stopped.error };
+      return { taskId, state: this.snapshot(task).state,
+        ...(stopped.status === "pending_approval" ? { stopApprovalId: stopped.approvalId } : {}) };
+    } finally {
+      this.notifyRoster(task.coordinatorThreadId);
     }
-    const startup = this.deps.startups.get(taskId);
-    if (!startup?.threadId) {
-      if (startup) await cancelThreadStartup(this.deps.cancellation, taskId);
-      return { taskId, state: this.snapshot(task).state };
-    }
-    const stopped = await this.deps.control.threadStop(authority, { threadId: startup.threadId });
-    if (stopped.status === "rejected") return { status: "rejected", error: stopped.error };
-    return { taskId, state: this.snapshot(task).state,
-      ...(stopped.status === "pending_approval" ? { stopApprovalId: stopped.approvalId } : {}) };
   }
 
   /** Resume a human-approved task from its persisted plan, including crash recovery. */
@@ -140,11 +211,9 @@ export class DelegatedTaskService {
     const inFlight = this.launching.get(task.taskId);
     if (inFlight) {
       await inFlight;
-      await this.repairLineage(task);
       return;
     }
     if (this.deps.startups.get(task.taskId)) {
-      await this.repairLineage(task);
       return;
     }
     const launch = this.advanceUnstarted(task, accepted);
@@ -153,6 +222,7 @@ export class DelegatedTaskService {
       await launch;
     } finally {
       this.launching.delete(task.taskId);
+      this.notifyRoster(task.coordinatorThreadId);
     }
   }
 
@@ -174,7 +244,6 @@ export class DelegatedTaskService {
       if (approval !== "approved" && !(accepted && approval === "processing")) return;
     }
     await this.deps.commands.createAndSend(this.command(task), this.options(task));
-    await this.repairLineage(task);
   }
 
   private command(task: DelegatedTask): CreateAndSendCommand {
@@ -199,21 +268,15 @@ export class DelegatedTaskService {
   private options(task: DelegatedTask): CreateAndSendOptions {
     return {
       messageId: task.plan.messageId,
+      lineage: { delegation: {
+        coordinatorThreadId: task.coordinatorThreadId, creatorTurnId: task.plan.creatorTurnId,
+        creatorToolCallId: task.plan.creatorToolCallId,
+      } },
       turn: { sourceTurnId: task.taskId, sourceThreadId: task.coordinatorThreadId,
         sourceProviderId: task.plan.creatorProviderId, originSourceTurnId: task.plan.creatorTurnId },
       ...(task.plan.checkout.kind === "new_worktree" ? { worktreeStart: { commit: task.plan.checkout.commit } } : {}),
       ...(task.plan.checkout.kind === "attached" ? { setupSkip: { reason: "delegation", sourceThreadId: task.coordinatorThreadId } } : {}),
     };
-  }
-
-  private async repairLineage(task: DelegatedTask): Promise<void> {
-    const threadId = this.deps.startups.get(task.taskId)?.threadId;
-    if (!threadId) return;
-    if (this.deps.threads.findById(threadId)?.delegation_coordinator_thread_id === task.coordinatorThreadId) return;
-    await this.deps.threads.updateDelegationLineage(threadId, {
-      coordinatorThreadId: task.coordinatorThreadId, creatorTurnId: task.plan.creatorTurnId,
-      creatorToolCallId: task.plan.creatorToolCallId, creationKind: "thread_delegation",
-    });
   }
 
   private receipt(task: DelegatedTask): Exclude<DelegateTaskResult, TaskRejection> {
@@ -246,3 +309,14 @@ function rejection(code: ThreadControlError["code"], message: string, retryable 
 }
 
 function notFound(): TaskRejection { return rejection("not_found", "Task not found"); }
+
+function rosterStatus(state: TaskState): SubagentStatus {
+  if (state.status !== "finished") return "running";
+  switch (state.outcome) {
+    case "completed": return "done";
+    case "failed": return "failed";
+    case "cancelled":
+    case "interrupted":
+    case "denied": return "stopped";
+  }
+}

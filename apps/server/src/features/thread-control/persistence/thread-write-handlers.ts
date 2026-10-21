@@ -36,7 +36,7 @@ export function buildThreadStoreWriteHandlers(db: Database): ReadonlyMap<string,
     [threadWriteOperations.updateTitle.name, databaseWriteHandler(threadWriteOperations.updateTitle, (input) => store.updateTitle(...input))],
     [threadWriteOperations.updateCompactSummary.name, databaseWriteHandler(threadWriteOperations.updateCompactSummary, (input) => store.updateCompactSummary(...input))],
     [threadWriteOperations.updateLineage.name, databaseWriteHandler(threadWriteOperations.updateLineage, (input) => store.updateLineage(...input))],
-    [threadWriteOperations.updateDelegationLineage.name, databaseWriteHandler(threadWriteOperations.updateDelegationLineage, (input) => store.updateDelegationLineage(...input))],
+    [threadWriteOperations.detachActiveDelegatedChildren.name, databaseWriteHandler(threadWriteOperations.detachActiveDelegatedChildren, (input) => store.detachActiveDelegatedChildren(...input))],
     [threadWriteOperations.updateExternalCreator.name, databaseWriteHandler(threadWriteOperations.updateExternalCreator, (input) => store.updateExternalCreator(...input))],
     [threadWriteOperations.nullifyExternalLineage.name, databaseWriteHandler(threadWriteOperations.nullifyExternalLineage, (input) => store.nullifyExternalLineage(...input))],
   ]);

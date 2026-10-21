@@ -9,3 +9,6 @@ CREATE TABLE IF NOT EXISTS `delegated_tasks` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS `idx_delegated_tasks_coordinator_request` ON `delegated_tasks` (`coordinator_thread_id`,`client_request_id`);
+--> statement-breakpoint
+UPDATE threads SET delegation_coordinator_thread_id = NULL
+WHERE delegation_creation_kind = 'thread_delegation';

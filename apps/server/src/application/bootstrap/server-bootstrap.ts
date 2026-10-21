@@ -338,6 +338,8 @@ const turnResumeScheduler = container.resolve(TurnResumeScheduler);
 const threadControlService = container.resolve(ThreadControlService);
 const delegatedTaskService = container.resolve(DelegatedTaskService);
 const threadStartupService = container.resolve(ThreadStartupService);
+const stopObservingDelegatedRosters = subagentRosterService.bindDelegatedTasks(delegatedTaskService);
+const stopObservingDelegatedStartups = threadStartupService.subscribe((startup) => delegatedTaskService.taskChanged(startup.startupId));
 const threadStartupFetchDecisions = container.resolve(ThreadStartupFetchDecisions);
 const startupAgentPhaseObserver = container.resolve(StartupAgentPhaseObserver);
 startupAgentPhaseObserver.start();
@@ -1189,6 +1191,8 @@ async function shutdown(): Promise<void> {
   await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
   await captureCleanupFailure(() => planImplementStartupObserver.stop());
   stopObservingSubagentRosters();
+  stopObservingDelegatedRosters();
+  stopObservingDelegatedStartups();
   shutdownCoordinator.setPhase("close application database writer");
   await captureCleanupFailure(() => databaseWriter.close());
 

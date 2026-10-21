@@ -709,6 +709,7 @@ export class ThreadControlService {
     }
     const status = decision === "allow" ? "approved" : "rejected";
     await this.approvals.settle(pending.approvalId, decision === "cancelled" ? "cancelled" : status);
+    this.delegatedTasks?.taskChanged(pending.approvalId);
     this.publishApprovalResolution(pending, decision);
     return true;
   }

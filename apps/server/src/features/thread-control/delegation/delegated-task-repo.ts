@@ -21,4 +21,8 @@ export class DelegatedTaskRepo {
   findByRequest(coordinatorThreadId: string, clientRequestId: string) { return this.reader.findByRequest(coordinatorThreadId, clientRequestId); }
   /** Read by identity for trusted human approval recovery. */
   get(taskId: string) { return this.reader.get(taskId); }
+  /** Read the coordinator's roster receipts. */
+  listByCoordinator(coordinatorThreadId: string) { return this.reader.listByCoordinator(coordinatorThreadId); }
+  /** Read exact source identities in creator-turn order. */
+  sourceCalls(coordinatorThreadId: string, creatorTurnId: string) { return this.reader.sourceCalls(coordinatorThreadId, creatorTurnId); }
 }
