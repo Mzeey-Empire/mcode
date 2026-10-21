@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import type { HandoffAuditMetadata, Message, ProviderSwitchMarker as ProviderSwitch } from "@mcode/contracts";
 import { ExpandIcon } from "@/components/ui/icon-map";
 import { ProviderIcon, providerLabel } from "@/components/ui/provider-icon";
@@ -11,11 +11,10 @@ type HandoffState =
   | { readonly phase: "unavailable" };
 
 // Read on first expand only: most markers are never opened, and the history can be large.
-function useHandoffRecord(threadId: string, handoffId: string, expanded: boolean): HandoffState | null {
+function useHandoffRecord(threadId: string, handoffId: string): { state: HandoffState | null; request: () => void } {
   const [state, setState] = useState<HandoffState | null>(null);
-  const requested = state !== null;
-  useEffect(() => {
-    if (!expanded || requested) return;
+  const request = useCallback(() => {
+    if (state !== null) return;
     setState({ phase: "loading" });
     getTransport().readHandoff(threadId, handoffId).then(
       (record) => setState(record ? { phase: "ready", meta: record.meta, history: record.history } : { phase: "unavailable" }),
@@ -24,8 +23,8 @@ function useHandoffRecord(threadId: string, handoffId: string, expanded: boolean
         setState({ phase: "unavailable" });
       },
     );
-  }, [expanded, requested, threadId, handoffId]);
-  return state;
+  }, [state, threadId, handoffId]);
+  return { state, request };
 }
 
 function HandoffDetails({ state }: { readonly state: HandoffState }) {
@@ -51,7 +50,7 @@ function HandoffDetails({ state }: { readonly state: HandoffState }) {
 export function ProviderSwitchMarker({ message, providerSwitch }: { readonly message: Message; readonly providerSwitch: ProviderSwitch }) {
   const [expanded, setExpanded] = useState(false);
   const detailsId = useId();
-  const handoff = useHandoffRecord(message.thread_id, providerSwitch.handoffId, expanded);
+  const { state: handoff, request: requestHandoff } = useHandoffRecord(message.thread_id, providerSwitch.handoffId);
   const label = `Switched from ${providerLabel(providerSwitch.fromProvider)} to ${providerLabel(providerSwitch.toProvider)}`;
   return (
     <div className="py-2" role="note" data-provider-switch={providerSwitch.handoffId}>
@@ -65,7 +64,10 @@ export function ProviderSwitchMarker({ message, providerSwitch }: { readonly mes
             type="button"
             aria-expanded={expanded}
             aria-controls={detailsId}
-            onClick={() => setExpanded((open) => !open)}
+            onClick={() => {
+              if (!expanded) requestHandoff();
+              setExpanded(!expanded);
+            }}
             className="ml-1 inline-flex shrink-0 items-center gap-0.5 rounded-sm text-xs text-muted outline-none transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus"
           >
             Handoff
