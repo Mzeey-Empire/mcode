@@ -201,6 +201,8 @@ describe("thread launch", { timeout: 30_000 }, () => {
       .toMatchObject({ status: "rejected", error: { code: "forbidden", retryable: false } });
     expect(await f.service.launch(source, { ...input, interactionMode: "build" }))
       .toMatchObject({ status: "rejected", error: { code: "forbidden", retryable: false } });
+    expect(await f.service.launch(source, { ...input, workspace: { type: "new_worktree", baseRef: "main" } }))
+      .toMatchObject({ status: "rejected", error: { code: "forbidden", retryable: false } });
     expect(f.threads.listByWorkspace(f.workspace.id).map((thread) => thread.id)).toEqual([f.coordinator.id]);
     const launched = requireLaunch(await f.service.launch(source, input));
     expect(f.threads.findById(launched.threadId)).toMatchObject({ permission_mode: "supervised", interaction_mode: "plan" });

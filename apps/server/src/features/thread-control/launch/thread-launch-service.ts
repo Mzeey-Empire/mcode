@@ -40,6 +40,9 @@ export class ThreadLaunchService {
     if (!source || source.deleted_at) return rejection("not_found", "Source thread not found");
     const modes = resolveModes(authority, source, parsed);
     if ("status" in modes) return modes;
+    if (authority.permissionMode === "supervised" && parsed.workspace.type === "new_worktree") {
+      return rejection("forbidden", "A supervised caller cannot create a worktree without the user's approval");
+    }
     const target = await this.resolveTarget(source, parsed);
     if (target.status === "rejected") return target;
     const placement = await this.placement(source.workspace_id, parsed.workspace);
