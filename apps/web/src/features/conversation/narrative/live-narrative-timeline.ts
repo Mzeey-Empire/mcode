@@ -10,6 +10,7 @@ import {
   buildToolCallHierarchy,
   createSubagentItem,
   createToolGroupItem,
+  isSubagentLaunchCall,
   isTurnWorkRunning,
 } from "./narrative-builder-helpers";
 import {
@@ -161,7 +162,7 @@ function createTopLevelToolEvents(
   topLevelCalls: readonly ToolCall[],
 ): LiveTimelineEvent[] {
   return topLevelCalls.flatMap((toolCall) => {
-    if (isSubagentLaunchToolName(toolCall.toolName)) return [];
+    if (isSubagentLaunchCall(toolCall)) return [];
     return [{ kind: "tool" as const, call: toolCall, startedAt: liveEventStartedAt(toolCall) }];
   });
 }
@@ -171,7 +172,7 @@ function createSubagentEvents(
   childrenByParent: ReadonlyMap<string, readonly ToolCall[]>,
 ): LiveTimelineEvent[] {
   return toolCalls.flatMap((toolCall) => {
-    if (!isSubagentLaunchToolName(toolCall.toolName)) return [];
+    if (!isSubagentLaunchCall(toolCall)) return [];
     const startedAt = liveEventStartedAt(toolCall);
     const marker = latestLifecycleMarker(childrenByParent.get(toolCall.id) ?? [], startedAt);
     return [{

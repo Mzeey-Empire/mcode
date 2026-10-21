@@ -4,7 +4,6 @@ import {
   decodeCanonicalSubagentDetailTarget,
   decodeSubagentAliasDetailTarget,
   isDelegateTaskToolName,
-  isSubagentLaunchToolName,
   isTaskListToolName,
   resolveBrowserNarrativeTool,
 } from "@mcode/contracts";
@@ -28,6 +27,7 @@ import {
   createSubagentItem,
   createSubagentLaunchPresentation,
   createToolGroupItem,
+  isSubagentLaunchRecord,
 } from "./narrative-builder-helpers";
 import { filterPersistedFinalResponseThoughts, isReasoningSegment } from "./narrative-thought-classification";
 import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
@@ -372,7 +372,7 @@ function createPersistedThoughtEvents(
 function createPersistedTopLevelToolEvents(
   topLevelRecords: readonly ToolCallRecord[],
 ): PersistedTimelineEvent[] {
-  return topLevelRecords.flatMap((toolRecord) => isSubagentLaunchToolName(toolRecord.tool_name)
+  return topLevelRecords.flatMap((toolRecord) => isSubagentLaunchRecord(toolRecord)
     ? []
     : [{ kind: "tool" as const, call: recordToToolCall(toolRecord), sortOrder: toolRecord.sort_order }]);
 }
@@ -382,7 +382,7 @@ function createPersistedSubagentEvents(
   childrenByParent: ReadonlyMap<string, readonly ToolCallRecord[]>,
 ): PersistedTimelineEvent[] {
   return toolRecords.flatMap((toolRecord) => {
-    if (!isSubagentLaunchToolName(toolRecord.tool_name)) return [];
+    if (!isSubagentLaunchRecord(toolRecord)) return [];
     const marker = latestPersistedLifecycleMarker(childrenByParent.get(toolRecord.id) ?? []);
     return [{
       kind: "subagent" as const,

@@ -94,6 +94,17 @@ describe("buildPersistedNarrativeItems", () => {
     },
   );
 
+  it("renders a failed persisted delegate_task as a failed tool row", () => {
+    const items = buildPersistedNarrativeItems({
+      tools: [makeTool({ id: "delegate-1", tool_name: "mcp__mcode__delegate_task", status: "failed", output_summary: "forbidden" })],
+      thoughts: [],
+      hooks: [],
+    });
+
+    expect(persistedItem(items, "subagent")).toBeUndefined();
+    expect(toolGroupCall(persistedItem(items, "tool-group"))).toMatchObject({ id: "delegate-1", isError: true });
+  });
+
   it("hydrates persisted Agent identity separately from its task summary", () => {
     const call = recordToToolCall(makeTool({
       tool_name: "Agent",

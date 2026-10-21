@@ -4,7 +4,7 @@ import {
   isSubagentLaunchToolName,
   type SubagentPresentation,
 } from "@mcode/contracts";
-import type { ToolCall } from "@/transport/types";
+import type { ToolCall, ToolCallRecord } from "@/transport/types";
 import type { NarrativeItem, NarrativeCounts, SubagentActivity } from "./types";
 
 /**
@@ -23,6 +23,21 @@ export function createSubagentLaunchPresentation(
     { description: toolInput.title, prompt: toolInput.prompt ?? toolInput.task },
     fallbackIdentityKey,
   );
+}
+
+/**
+ * True when a call launched a sub-agent. A delegate_task the server rejected created no child
+ * thread, so once it fails it is an ordinary failed tool call. A native Agent that errored still ran.
+ */
+export function isSubagentLaunchCall(call: Pick<ToolCall, "toolName" | "isComplete" | "isError">): boolean {
+  if (!isSubagentLaunchToolName(call.toolName)) return false;
+  return !(isDelegateTaskToolName(call.toolName) && call.isComplete && call.isError);
+}
+
+/** Persisted-record form of {@link isSubagentLaunchCall}. */
+export function isSubagentLaunchRecord(record: Pick<ToolCallRecord, "tool_name" | "status">): boolean {
+  if (!isSubagentLaunchToolName(record.tool_name)) return false;
+  return !(isDelegateTaskToolName(record.tool_name) && record.status === "failed");
 }
 
 /**
@@ -95,7 +110,7 @@ export function createNarrativeCounts(
   return {
     steps: topLevelCalls.length,
     thoughts: items.filter((item) => item.type === "thought").length,
-    subagents: topLevelCalls.filter((call) => isSubagentLaunchToolName(call.toolName)).length,
+    subagents: topLevelCalls.filter(isSubagentLaunchCall).length,
   };
 }
 

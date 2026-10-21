@@ -1,6 +1,7 @@
-import { isSubagentLaunchToolName, isTaskListToolName } from "@mcode/contracts";
+import { isTaskListToolName } from "@mcode/contracts";
 import type { ThoughtSegmentRecord, ToolCallRecord } from "@/transport/types";
 import { backgroundHeldToolIds } from "../narrative/background-held-tools";
+import { isSubagentLaunchRecord } from "../narrative/narrative-builder-helpers";
 import { collapseSubagentRecords } from "../narrative/subagent-lifecycle";
 import type { NarrativeCounts, TurnSummary } from "../narrative/types";
 
@@ -16,7 +17,7 @@ export function persistedTurnCounts(records: PersistedTurnRecords): NarrativeCou
   return {
     steps: topLevel.length,
     thoughts: records.thoughts.filter((thought) => thought.kind !== "reasoning").length,
-    subagents: topLevel.filter((tool) => isSubagentLaunchToolName(tool.tool_name)).length,
+    subagents: topLevel.filter(isSubagentLaunchRecord).length,
   };
 }
 
