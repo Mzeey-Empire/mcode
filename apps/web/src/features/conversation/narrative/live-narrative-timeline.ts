@@ -20,7 +20,6 @@ import {
 } from "./narrative-thought-classification";
 import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
 
-// Subagent hooks fire only for the provider-native Agent tool, never for delegate_task.
 const NATIVE_AGENT_TOOL_NAME = "Agent";
 
 /** Inputs that describe the volatile narrative state for one live turn. */

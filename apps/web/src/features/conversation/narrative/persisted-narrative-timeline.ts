@@ -32,7 +32,6 @@ import {
 import { filterPersistedFinalResponseThoughts, isReasoningSegment } from "./narrative-thought-classification";
 import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
 
-// The subagent_* columns and subagent hooks belong to the provider-native Agent tool only.
 const NATIVE_AGENT_TOOL_NAME = "Agent";
 
 /** Inputs that reconstruct a persisted turn narrative from durable records. */
@@ -257,8 +256,6 @@ function persistedToolInputWithAgentMetadata(record: ToolCallRecord): Record<str
 }
 
 function persistedSubagentPresentation(record: ToolCallRecord): ToolCall["subagentPresentation"] {
-  // Delegated tasks have no Agent columns and persist only an input summary; their roster
-  // entry supplies the title and child thread once it arrives.
   if (isDelegateTaskToolName(record.tool_name)) {
     return createSubagentLaunchPresentation(record.tool_name, { prompt: record.input_summary }, record.id);
   }

@@ -64,10 +64,6 @@ function FailedToolCallOutput({ toolCall, panelId }: { toolCall: ToolCall; panel
 
 const TASK_ID_TOOLS = new Set(["task_status", "task_cancel"]);
 
-/**
- * A polled or cancelled delegated task's roster title. The raw task id means
- * nothing to the user, so a task call with no title shows no detail at all.
- */
 function useDelegatedTaskTitle(toolCall: ToolCall, isTaskCall: boolean): string | undefined {
   const entries = useSubagentRoster(useSubagentThreadId())?.entries;
   const taskId = isTaskCall ? delegatedTaskId(toolCall) : undefined;

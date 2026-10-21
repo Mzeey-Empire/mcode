@@ -134,7 +134,6 @@ const EARLY_CHILD_FILE_TOOL_NAMES = new Set([
   "searchreplace", "strreplace", "write",
 ]);
 
-/** The text of an MCP content block, or nothing for images, resources, and malformed entries. */
 function mcpTextBlock(block: unknown): string[] {
   if (typeof block !== "object" || block === null) return [];
   if (!("type" in block) || block.type !== "text") return [];
