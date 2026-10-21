@@ -71,7 +71,7 @@ describe("HandoffStorage", () => {
   });
 
   it("skips an audit whose write is still in progress", async () => {
-    await storage.writeHandoffAudit("child", audit);
+    await storage.writeHandoffAudit("child", newHandoffUlid(), audit);
     const inProgress = NodePath.join(dir, "threads", "child", "handoffs", "ZZZ-in-progress");
     await NodeFSPromises.mkdir(inProgress, { recursive: true });
     await NodeFSPromises.writeFile(NodePath.join(inProgress, "handoff.md.partial"), "---\nschemaVersion: 2\n");

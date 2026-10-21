@@ -128,7 +128,8 @@ describe("provider switch on send", () => {
     expect(rows.map((row) => row.role)).toEqual(["user", "assistant", "user", "system", "assistant"]);
     expect(rows.map((row) => row.sequence)).toEqual([1, 2, 3, 4, 5]);
     expect(thread().providers_used).toEqual(["claude", "codex"]);
-    const audit = NodeFS.readFileSync(NodePath.join(resolveHandoffDir(temporaryDirectory!, threadId, handoffId), "handoff.md"), "utf8");
+    const auditPath = NodePath.join(resolveHandoffDir(temporaryDirectory!, threadId, handoffId), "handoff.md");
+    const audit = await vi.waitFor(() => NodeFS.readFileSync(auditPath, "utf8"));
     expect(audit).toContain("kind: switch");
     expect(audit).toContain("my project is called Heliotrope");
   });
