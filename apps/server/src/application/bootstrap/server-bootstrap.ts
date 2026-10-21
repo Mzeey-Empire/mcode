@@ -763,7 +763,6 @@ const coordinatorWake = new CoordinatorWakeService({
 });
 let coordinatorWakeReady = false;
 
-/** A child changes its Coordinator's notices; a Coordinator changes its own routing. */
 function nudgeCoordinatorForThread(threadId: string): void {
   if (!coordinatorWakeReady) return;
   const thread = threadRepo.findById(threadId);

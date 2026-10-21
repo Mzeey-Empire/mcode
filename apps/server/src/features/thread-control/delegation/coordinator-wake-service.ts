@@ -13,13 +13,13 @@ import { threadContinuationSettings } from "../../agents/recovery/turn-recovery-
 
 type WakeTimer = ReturnType<typeof setTimeout> | number;
 
-/** Clock seam keeps the settle delay deterministic in service tests. */
+/** Timer operations used to schedule and cancel Coordinator wakes. */
 export interface CoordinatorWakeClock {
   setTimeout(callback: () => Promise<void>, delay: number): WakeTimer;
   clearTimeout(timer: WakeTimer): void;
 }
 
-/** Existing owners provide facts and delivery; task service alone owns the ledger. */
+/** Task state and delivery ports required by Coordinator wakes. */
 export interface CoordinatorWakeDeps {
   tasks: DelegatedTaskService;
   threads: Pick<ThreadRepo, "findById">;
@@ -41,7 +41,7 @@ const systemClock: CoordinatorWakeClock = {
 const SETTLE_DELAY_MS = 1_000;
 const MAX_BACKOFF_MS = 300_000;
 
-/** Debounces task changes and delivers one batch when its Coordinator can accept it. */
+/** Coalesces task changes and delivers one batch when its Coordinator can accept it. */
 export class CoordinatorWakeService {
   private readonly timers = new Map<string, WakeTimer>();
   private readonly running = new Map<string, Promise<void>>();
@@ -73,10 +73,7 @@ export class CoordinatorWakeService {
     }, this.delayFor(coordinatorId)));
   }
 
-  /**
-   * A wake whose admission keeps failing (bad model, provider down) would otherwise retry at every settle delay.
-   * Doubling the delay per consecutive failure defers later nudges instead of dropping them.
-   */
+  /** Settle delay, doubled per consecutive failed delivery after the first, so a broken provider is not retried every second. */
   private delayFor(coordinatorId: string): number {
     const failures = this.failures.get(coordinatorId) ?? 0;
     return Math.min(SETTLE_DELAY_MS * 2 ** Math.max(0, Math.min(failures - 1, 20)), MAX_BACKOFF_MS);
@@ -112,7 +109,7 @@ export class CoordinatorWakeService {
     if (this.disposed || !thread || thread.deleted_at) return;
     const turn = this.deps.runtime.runningTurn(coordinatorId);
     if (turn) {
-      // A turn without the lease cannot call task_status, so a result steered into it would be settled unseen.
+      // A turn without the lease cannot call task_status for detail, so the result waits for a turn that can.
       if (!turn.steer || !turn.threadControlEligible || this.noSteer.get(coordinatorId) === turn.turnExecutionId) return;
       await this.deliverSteer(coordinatorId, turn.turnExecutionId);
       return;
@@ -156,7 +153,6 @@ export class CoordinatorWakeService {
     await this.finishFromEvidence(coordinatorId, batch.wakeId);
   }
 
-  /** Resolves true when the wake message reached the Coordinator, false when its claim was returned. */
   private async send(command: SendMessageCommand): Promise<boolean> {
     const wakeId = command.messageId;
     if (!wakeId) throw new Error("Coordinator wake requires a message identity");
@@ -180,7 +176,6 @@ export class CoordinatorWakeService {
     });
   }
 
-  /** Settle the claim when its message reached the Coordinator, otherwise return it. Resolves whether it settled. */
   private async finishFromEvidence(coordinatorId: string, wakeId: string): Promise<boolean> {
     const message = this.deps.messages.findById(wakeId);
     const steer = this.deps.steers.find(wakeId);

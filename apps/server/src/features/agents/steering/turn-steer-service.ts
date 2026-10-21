@@ -54,7 +54,7 @@ export class TurnSteerFaultStop extends Error {
   }
 }
 
-/** Test-only controls for one steer. */
+/** Steer options for fault injection and server-authored message attribution. */
 export interface TurnSteerOptions {
   readonly stopAt?: TurnSteerFaultPoint;
   /** Server-authored attribution retained with the durable steer payload. */

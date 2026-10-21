@@ -126,7 +126,7 @@ function RequestOrigin({ request, delegatedTitle }: { readonly request: StoredAp
 
 /** Props for {@link ApprovalDock}. */
 export interface ApprovalDockProps {
-  /** Pending requests for the thread, oldest first, never empty. */
+  /** Pending requests for the Coordinator and its Delegated threads, oldest first, never empty. */
   readonly requests: readonly StoredApproval[];
   /** Delegated thread titles by thread id; a request from one of them reads as from that thread. */
   readonly delegatedThreads: ReadonlyMap<string, string>;
@@ -215,8 +215,7 @@ export function ApprovalDock({ requests, delegatedThreads, composerContainerRef,
 
   const Icon = SUBJECT_ICONS[active.subject.kind];
   const delegatedTitle = delegatedThreads.get(active.threadId);
-  // This Stop ends the Coordinator's turn, not the Delegated thread that asked.
-  const showStop = isAgentRunning && delegatedTitle === undefined;
+  const showCoordinatorStop = isAgentRunning && delegatedTitle === undefined;
   return (
     <div
       ref={rootRef}
@@ -280,7 +279,7 @@ export function ApprovalDock({ requests, delegatedThreads, composerContainerRef,
           )}
         </>
       )}
-      {showStop && (
+      {showCoordinatorStop && (
         <div className="-mt-1 -mb-1.5 flex justify-end">
           <DockStopButton isStopPending={isStopPending} onStop={onStop} />
         </div>

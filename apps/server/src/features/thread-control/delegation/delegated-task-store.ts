@@ -9,7 +9,7 @@ import { noticeCovered } from "./task-notice.js";
 
 /** A claim records the delivered key observed before one wake reserved it. */
 export const NoticeClaimSchema = z.object({ wakeId: z.string().uuid(), key: z.string(), basis: z.string().nullable() });
-/** Conditional ledger write input. */
+/** A task notice key and the delivered key it must still match before reservation. */
 export const NoticeCandidateSchema = z.object({ taskId: z.string(), key: z.string(), basis: z.string().nullable() });
 
 /** Immutable launch snapshot, captured before any approval or startup side effect. */

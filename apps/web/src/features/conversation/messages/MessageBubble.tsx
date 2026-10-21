@@ -956,9 +956,7 @@ function AssistantMessageContent({
 /** A user-role message Mcode sent itself, which must not read as the user's own words. */
 function serverUserNotice(message: Message): ReactNode {
   if (message.role !== "user") return null;
-  // A turn the provider started on its own opens with the server notice, not text the user typed.
   if (message.systemNotice?.kind === "provider-turn") return <TimelineNote text={message.content} />;
-  // Mcode sent this to wake the Coordinator for its Delegated threads.
   if (message.systemNotice?.kind === "delegated-task") {
     return <DelegatedTaskWakeUp tasks={message.systemNotice.delegatedTasks ?? []} prompt={message.content} />;
   }

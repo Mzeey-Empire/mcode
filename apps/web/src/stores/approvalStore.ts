@@ -90,9 +90,8 @@ export function isDockApproval(request: StoredApproval): boolean {
 const NO_THREADS: ReadonlySet<string> = new Set();
 
 /**
- * Dock requests for one thread and its Delegated threads, oldest first, so the pager
- * reads in the order the agents asked. A Delegated thread's question waits on the user
- * who is watching the Coordinator, so it is answered from there.
+ * Pending dock requests for the thread and its Delegated threads, oldest first.
+ * A Delegated thread's question is answered from the Coordinator the user is watching.
  */
 export function selectDockApprovals(
   approvals: readonly StoredApproval[],
