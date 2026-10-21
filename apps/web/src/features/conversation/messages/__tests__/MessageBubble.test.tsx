@@ -247,6 +247,22 @@ describe("MessageBubble user messages", () => {
     expect(container.querySelector("[data-testid='markdown-content']")).toBeNull();
   });
 
+  it("renders a delegated-task wake-up as from the Delegated thread, not a user bubble", () => {
+    const { container, getByRole } = render(
+      <MessageBubble message={{
+        ...makeMessage("[Delegated task Fix login] completed\nSummary: done"),
+        systemNotice: {
+          kind: "delegated-task", presentation: "timeline",
+          delegatedTasks: [{ taskId: "t1", threadId: "child-1", title: "Fix login", providerId: "codex", status: "completed" }],
+        },
+      }} />,
+    );
+
+    expect(getByRole("button", { name: "Open Fix login subagent details" })).toHaveTextContent("From Fix login");
+    expect(getByRole("note")).toHaveTextContent("finished");
+    expect(container.querySelector("[data-testid='markdown-content']")).toBeNull();
+  });
+
   it("renders user message through MarkdownContent with variant='user'", async () => {
     const { container } = render(
       <MessageBubble message={makeMessage("Hello **world**")} />,

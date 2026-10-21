@@ -29,6 +29,7 @@ import { SelectedTextCommentsComposerAttachment } from "../composer/SelectedText
 import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
 import { TURN_REVERT_NOTICE_KINDS, TurnRevertReceipt } from "../turn-revert/TurnRevertReceipt";
 import { ProviderSwitchMarker } from "../provider-switch/ProviderSwitchMarker";
+import { DelegatedTaskWakeUp } from "./DelegatedTaskWakeUp";
 
 /** Text may still arrive while the turn runs, even after its own text stream ended at a boundary. */
 function isTextStillArriving(textIsStreaming: boolean | undefined, agentDisplayState: AgentDisplayState | undefined): boolean {
@@ -952,6 +953,18 @@ function AssistantMessageContent({
   );
 }
 
+/** A user-role message Mcode sent itself, which must not read as the user's own words. */
+function serverUserNotice(message: Message): ReactNode {
+  if (message.role !== "user") return null;
+  // A turn the provider started on its own opens with the server notice, not text the user typed.
+  if (message.systemNotice?.kind === "provider-turn") return <TimelineNote text={message.content} />;
+  // Mcode sent this to wake the Coordinator for its Delegated threads.
+  if (message.systemNotice?.kind === "delegated-task") {
+    return <DelegatedTaskWakeUp tasks={message.systemNotice.delegatedTasks ?? []} prompt={message.content} />;
+  }
+  return null;
+}
+
 /** Routes a message to its role-specific presentation without changing its outer memo boundary. */
 function MessageRoleContent({
   message,
@@ -963,8 +976,8 @@ function MessageRoleContent({
   showParentAgentProvenance = true,
 }: MessageBubbleProps) {
   if (message.role === "system") return <SystemMessageContent message={message} />;
-  // A turn the provider started on its own opens with the server notice, not text the user typed.
-  if (message.role === "user" && message.systemNotice?.kind === "provider-turn") return <TimelineNote text={message.content} />;
+  const notice = serverUserNotice(message);
+  if (notice) return notice;
   if (message.role === "user") {
     return <UserMessageContent message={message} interactive={interactive} onBranch={onBranch} onScrollToMessage={onScrollToMessage} agentDisplayState={agentDisplayState} showParentAgentProvenance={showParentAgentProvenance} />;
   }
