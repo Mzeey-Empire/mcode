@@ -14,11 +14,14 @@ import { ThreadControlApprovalRepo } from "../authority/persistence/thread-contr
 import { ThreadControlAuditRepo } from "../authority/persistence/thread-control-audit-repo.js";
 import { DelegatedTaskRepo } from "../delegation/delegated-task-repo.js";
 import { DelegatedTaskService } from "../delegation/delegated-task-service.js";
+import { ThreadLaunchService } from "../launch/thread-launch-service.js";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup-fetch-decisions.js";
 import { WorkspaceEnvironmentService } from "../../projects/environment/workspace-environment-service.js";
 import { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
+import { GitRepositoryService } from "../../projects/git/git-repository-service.js";
+import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { AgentService } from "../../agents/orchestration/agent-service.js";
 import { AgentTurnCommandPort } from "../../agents/orchestration/agent-turn-command-port.js";
 import { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-boundary.js";
@@ -28,6 +31,12 @@ import type { CancelThreadStartupDeps } from "../../thread-startup/cancel-thread
 
 /** Register thread-control mutation, approval, authority, and lifecycle services. */
 export function registerThreadControlServices(container: DependencyContainer): void {
+  container.register(ThreadLaunchService, { useFactory: instanceCachingFactory((c) => new ThreadLaunchService({
+    threads: c.resolve(ThreadRepo), workspaces: c.resolve(WorkspaceRepo),
+    targets: c.resolve(delay(() => DelegationTargetResolver)),
+    repository: c.resolve(delay(() => GitRepositoryService)),
+    commands: c.resolve(delay(() => AgentTurnCommandPort)),
+  })) });
   container.register(DelegatedTaskRepo, { useClass: DelegatedTaskRepo }, { lifecycle: Lifecycle.Singleton });
   container.register<CancelThreadStartupDeps>("CancelThreadStartupDeps", { useFactory: instanceCachingFactory((c) => ({
     threadStartupService: c.resolve(ThreadStartupService),

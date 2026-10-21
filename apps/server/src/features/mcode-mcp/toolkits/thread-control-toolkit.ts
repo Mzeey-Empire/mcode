@@ -1,6 +1,8 @@
 import {
   DelegateTaskInputSchema,
   DelegateTaskResultSchema,
+  ThreadLaunchInputSchema,
+  ThreadLaunchResultSchema,
   TaskStatusInputSchema,
   TaskStatusResultSchema,
   TaskCancelInputSchema,
@@ -34,6 +36,7 @@ import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-sc
 import { ErrorCode, McpError, ToolSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ThreadControlService } from "../../thread-control/index.js";
 import type { DelegatedTaskService } from "../../thread-control/delegation/delegated-task-service.js";
+import type { ThreadLaunchService } from "../../thread-control/launch/thread-launch-service.js";
 import type { McodeSession, McodeSessionAuthority } from "../mcode-session-authority.js";
 import {
   defineToolkit,
@@ -53,7 +56,7 @@ export type ThreadControlToolService = Pick<
   | "threadSend"
   | "threadStop"
   | "threadWait"
-> & Pick<DelegatedTaskService, "delegate" | "status" | "cancel">;
+> & Pick<DelegatedTaskService, "delegate" | "status" | "cancel"> & Pick<ThreadLaunchService, "launch">;
 
 /** Dependencies for the thread-control toolkit. */
 export interface ThreadControlToolkitOptions {
@@ -190,6 +193,12 @@ function createTaskTools(context: ToolContext): McodeTool<McodeSession>[] {
       description: "Delegate child work to a new visible thread in the Coordinator's Project. Prefer Provider-native sub-agents when they support the chosen model. Call thread_target_list and use its exact providerId/modelId. Choose shared for the Coordinator's checkout or worktree for a new checkout at its local commit with project setup. Omitted permissionMode inherits the Coordinator's mode; a broader mode is forbidden. Run each review round as a fresh task carrying the brief, prior findings and open objections. The call returns immediately: end the turn or continue other work, then check later with task_status rather than polling in a loop. A retry with the same clientRequestId returns the existing task. Keep the same input on retries. Interrupted outcomes may later resume.",
       input: DelegateTaskInputSchema(), result: DelegateTaskResultSchema(),
       run: (service, authority, input) => service.delegate(authority, input),
+    }),
+    serviceTool(context, {
+      name: "thread_launch",
+      description: 'Launch an ordinary top-level Mcode thread for the user, in its own workspace. Use it only when the user asks for a separate thread or conversation; never just because they said sub-agent. The new thread runs on its own and you are not notified when it finishes; use delegate_task when you need the result back. workspace: {type:"new_worktree", baseRef, startFromOrigin?} creates a worktree from a local branch, or from the fetched origin branch; {type:"existing_worktree", worktreePath, baseBranch?} uses one of this project\'s worktrees (baseBranch is required when it is detached); omitted or {type:"root"} uses the project root, NOT your current worktree. Project setup finishes before the first message runs. Provider and model default to yours. Permission and interaction modes default to yours and cannot be broader. A supervised caller cannot use new_worktree. Returns the new threadId; link it for the user.',
+      input: ThreadLaunchInputSchema(), result: ThreadLaunchResultSchema(),
+      run: (service, authority, input) => service.launch(authority, input),
     }),
     serviceTool(context, {
       name: "task_status",

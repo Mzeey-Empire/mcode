@@ -31,6 +31,7 @@ export const TOOL_LABELS: Record<string, string> = {
   workspace_search: "Searched projects",
   worktree_list: "Listed worktrees",
   thread_target_list: "Listed targets",
+  thread_launch: "Launched thread",
   thread_search: "Searched threads",
   thread_get: "Read thread",
   thread_send: "Sent to thread",
@@ -56,6 +57,7 @@ export const TOOL_ICONS: Record<string, IconComponent> = {
   delegate_task: StackedLayersIcon,
   task_status: ListChecks,
   task_cancel: CircleSlash,
+  thread_launch: StackedLayersIcon,
 };
 
 export const DEFAULT_ICON: IconComponent = Wrench;
@@ -131,6 +133,7 @@ export const TOOL_OUTCOME_VERBS: Record<string, string> = {
   workspace_search: "Project search",
   worktree_list: "Worktree list",
   thread_target_list: "Target list",
+  thread_launch: "Thread launch",
   thread_search: "Thread search",
   thread_get: "Thread read",
   thread_send: "Thread send",
@@ -154,6 +157,7 @@ export const TOOL_SUMMARY_VERBS: Record<string, [string, string]> = {
   workspace_search: ["%d project search", "%d project searches"],
   worktree_list: ["Listed worktrees %d time", "Listed worktrees %d times"],
   thread_target_list: ["Listed targets %d time", "Listed targets %d times"],
+  thread_launch: ["Launched %d thread", "Launched %d threads"],
   thread_search: ["%d thread search", "%d thread searches"],
   thread_get: ["Read %d thread", "Read %d threads"],
   thread_send: ["Sent %d message", "Sent %d messages"],
