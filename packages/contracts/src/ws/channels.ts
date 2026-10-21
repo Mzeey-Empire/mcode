@@ -12,6 +12,7 @@ import { ApprovalRequestSchema, ApprovalOutcomeSchema } from "../models/approval
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
 import { ProviderStatusSchema } from "../providers/provider-status.js";
 import { lazySchema } from "../utils/lazySchema.js";
+import { ThreadProviderSwitchedEventSchema } from "../models/message.js";
 import { ThreadResumeScheduledSchema } from "../models/turn-recovery.js";
 import { ProjectIconSchema } from "../models/project-icon.js";
 import {
@@ -123,6 +124,8 @@ export const WS_CHANNELS = {
     model: z.string(),
     provider: z.string(),
   }),
+  /** Emitted once a provider switch commits, with the timeline marker it wrote. */
+  "thread.providerSwitched": ThreadProviderSwitchedEventSchema(),
   "thread.checkoutChanged": lazySchema(() =>
     z.object({
       threadId: z.string(),

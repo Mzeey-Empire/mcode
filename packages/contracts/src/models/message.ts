@@ -74,6 +74,23 @@ export const SystemNoticeMetadataSchema = lazySchema<z.ZodType<SystemNoticeMetad
   }).optional(),
 }).strict());
 
+/** A handoff audit's directory name: a 26-character Crockford Base32 ULID. */
+export const HandoffIdSchema = lazySchema(() => z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/));
+
+/**
+ * The provider switch a system message records. It lives beside `systemNotice` rather than as a notice kind
+ * because builds that share the database parse `systemNotice` strictly and would reject a new kind.
+ */
+export const ProviderSwitchMarkerSchema = lazySchema(() => z.object({
+  fromProvider: z.string().min(1).max(64),
+  toProvider: z.string().min(1).max(64),
+  /** The audit of the history the new provider received, readable through `handoff.read`. */
+  handoffId: HandoffIdSchema(),
+}).strict());
+
+/** The provider switch a system message records. */
+export type ProviderSwitchMarker = z.infer<ReturnType<typeof ProviderSwitchMarkerSchema>>;
+
 /** Message schema matching the SQLite row shape. */
 export const MessageSchema = lazySchema(() =>
   z.object({
@@ -109,6 +126,8 @@ export const MessageSchema = lazySchema(() =>
     outcomeExecutionId: z.string().nullable().optional(),
     /** Bounded provider notice metadata retained across transcript reloads. */
     systemNotice: SystemNoticeMetadataSchema().nullable().optional(),
+    /** Set on the system message that marks a provider switch in the timeline. */
+    providerSwitch: ProviderSwitchMarkerSchema().nullable().optional(),
     /**
      * When true, mcode hides this message from the chat timeline.
      * Used for hidden handoff turns on Cursor parent threads.
@@ -121,6 +140,25 @@ export const MessageSchema = lazySchema(() =>
 );
 /** Message record from the database. */
 export type Message = z.infer<ReturnType<typeof MessageSchema>>;
+
+/** Push payload for a committed provider switch, with the timeline marker it wrote. */
+export type ThreadProviderSwitchedEvent = {
+  threadId: string;
+  provider: string;
+  model: string;
+  /** Every provider the thread has run on, in first-used order. */
+  providersUsed: string[];
+  marker: Message;
+};
+const threadProviderSwitched = lazySchema(() => z.object({
+  threadId: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  providersUsed: z.array(z.string()).max(16),
+  marker: MessageSchema(),
+}));
+/** Push payload for a committed provider switch. The explicit type keeps the WebSocket channel declaration small. */
+export const ThreadProviderSwitchedEventSchema: () => z.ZodType<ThreadProviderSwitchedEvent> = threadProviderSwitched;
 
 /** Bounded current-provider-session notices, separate from transcript pagination. */
 export const SessionNoticesSchema = lazySchema<z.ZodType<Message[]>>(() => z.array(MessageSchema()).max(20));
