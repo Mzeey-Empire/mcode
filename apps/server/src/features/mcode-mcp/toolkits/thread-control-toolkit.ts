@@ -92,7 +92,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function structuredResult(value: unknown): CallToolResult {
   if (!isRecord(value)) throw new Error("Thread-control tool result must be an object");
-  return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
+  const result: CallToolResult = { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
+  if (value.status === "rejected") result.isError = true;
+  return result;
 }
 
 function combineAbortSignals(signals: ReadonlyArray<AbortSignal | undefined>): AbortSignal | undefined {

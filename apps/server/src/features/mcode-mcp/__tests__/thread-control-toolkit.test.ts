@@ -206,13 +206,18 @@ describe("thread-control toolkit", () => {
       clientRequestId: "review-1", title: "Review", prompt: "Find bugs",
       providerId: "codex", modelId: "gpt-test", isolation: "worktree",
     };
-    expect((await call("delegate_task", input, { toolCallId: "create-call" })).structuredContent).toEqual(receipt);
+    const accepted = await call("delegate_task", input, { toolCallId: "create-call" });
+    expect(accepted.structuredContent).toEqual(receipt);
+    expect(accepted.isError).not.toBe(true);
     expect(service.delegate).toHaveBeenCalledWith(
       expect.objectContaining({ sourceThreadId: "source-thread", sourceToolCallId: "create-call" }), input,
     );
     service.delegate.mockResolvedValueOnce({ status: "rejected", error: { code: "invalid_model", message: "Unavailable", retryable: false } });
-    expect((await call("delegate_task", input)).structuredContent).toEqual({
-      status: "rejected", error: { code: "invalid_model", message: "Unavailable", retryable: false },
+    expect(await call("delegate_task", input)).toMatchObject({
+      isError: true,
+      structuredContent: {
+        status: "rejected", error: { code: "invalid_model", message: "Unavailable", retryable: false },
+      },
     });
   });
 
@@ -230,15 +235,17 @@ describe("thread-control toolkit", () => {
       .mockResolvedValueOnce(stopped({ ...base, status: "pending_approval", approvalId: "approval-2", state: { status: "waiting_for_approval", approvalId: "approval-2" } }))
       .mockResolvedValueOnce(stopped({ ...base, status: "rejected", error: { code: "internal_error", message: "Stop failed", retryable: true } }));
 
-    const sends = [] as unknown[];
-    const stops = [] as unknown[];
+    const sends: CallToolResult[] = [];
+    const stops: CallToolResult[] = [];
     for (const id of ["send-1", "send-2", "send-3"]) {
-      sends.push((await call("thread_send", { threadId: "destination-thread", message: "Continue" }, { toolCallId: id })).structuredContent);
-      stops.push((await call("thread_stop", { threadId: "destination-thread" }, { toolCallId: id })).structuredContent);
+      sends.push(await call("thread_send", { threadId: "destination-thread", message: "Continue" }, { toolCallId: id }));
+      stops.push(await call("thread_stop", { threadId: "destination-thread" }, { toolCallId: id }));
     }
 
-    expect(sends).toMatchObject([{ status: "accepted" }, { status: "pending_approval" }, { status: "rejected" }]);
-    expect(stops).toMatchObject([{ status: "accepted" }, { status: "pending_approval" }, { status: "rejected" }]);
+    expect(sends.map((result) => result.structuredContent)).toMatchObject([{ status: "accepted" }, { status: "pending_approval" }, { status: "rejected" }]);
+    expect(stops.map((result) => result.structuredContent)).toMatchObject([{ status: "accepted" }, { status: "pending_approval" }, { status: "rejected" }]);
+    expect(sends.map((result) => result.isError === true)).toEqual([false, false, true]);
+    expect(stops.map((result) => result.isError === true)).toEqual([false, false, true]);
   });
 
   it("dispatches search, get, and wait with defaults and without mutating the destination", async () => {
