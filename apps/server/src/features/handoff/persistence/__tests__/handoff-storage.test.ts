@@ -69,6 +69,14 @@ describe("HandoffStorage", () => {
     expect((await storage.readLatest("child"))?.meta).toMatchObject({ fromProvider: null, toProvider: "custom: provider\nname" });
   });
 
+  it("skips an audit whose write is still in progress", async () => {
+    await storage.writeHandoffAudit("child", audit);
+    const inProgress = NodePath.join(dir, "threads", "child", "handoffs", "ZZZ-in-progress");
+    await NodeFSPromises.mkdir(inProgress, { recursive: true });
+    await NodeFSPromises.writeFile(NodePath.join(inProgress, "handoff.md.partial"), "---\nschemaVersion: 2\n");
+    expect((await storage.readLatest("child"))?.meta.kind).toBe("switch");
+  });
+
   it("returns null for an absent thread and removes audits on thread deletion", async () => {
     expect(await storage.readLatest("absent")).toBeNull();
     await storage.writeHandoffAudit("child", audit);

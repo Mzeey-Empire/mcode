@@ -1,3 +1,5 @@
+import { stripInlineMarkdown } from "@/lib/inline-markdown";
+
 /** Release notes reduced to plain text the update card can render safely. */
 export interface ParsedReleaseNotes {
   /** Up to {@link MAX_RELEASE_NOTE_ITEMS} list items, as plain text. */
@@ -16,8 +18,6 @@ const MARKDOWN_HEADING = /^\s{0,3}#{1,6}\s/;
 const EXECUTABLE_BLOCK = /<(script|style)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi;
 const HTML_HEADING_BLOCK = /<h[1-6]\b[^>]*>[\s\S]*?<\/h[1-6]\s*>/gi;
 const BLOCK_BOUNDARY = /<\/?(?:p|div|ul|ol|li|br|hr|h[1-6]|blockquote|pre|table|tr)\b[^>]*>/gi;
-// Link targets may hold one level of parentheses, as in javascript:alert(1).
-const MARKDOWN_LINK = /!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g;
 const ANY_TAG = /<\/?[a-z!][^>]*>/gi;
 
 const NAMED_ENTITIES: Readonly<Record<string, string>> = {
@@ -39,20 +39,10 @@ function decodeEntities(text: string): string {
   });
 }
 
-function stripMarkdown(text: string): string {
-  return text
-    .replace(MARKDOWN_LINK, "$1")
-    .replace(/\[([^\]]*)\]\[[^\]]*\]/g, "$1")
-    .replace(/`+([^`]*)`+/g, "$1")
-    .replace(/(\*\*|__)(.+?)\1/g, "$2")
-    .replace(/(^|[^\w*])[*_]([^*_]+)[*_](?=[^\w*]|$)/g, "$1$2")
-    .replace(/~~(.+?)~~/g, "$1");
-}
-
 /** Reduces one fragment of HTML or markdown to a single line of plain text. */
 function toPlainText(fragment: string): string {
   const withoutTags = fragment.replace(EXECUTABLE_BLOCK, " ").replace(BLOCK_BOUNDARY, " ").replace(ANY_TAG, "");
-  return decodeEntities(stripMarkdown(withoutTags)).replace(/\s+/g, " ").trim();
+  return decodeEntities(stripInlineMarkdown(withoutTags)).replace(/\s+/g, " ").trim();
 }
 
 function htmlListItems(notes: string): string[] {

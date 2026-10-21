@@ -1,5 +1,6 @@
 import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
 import { stripInjectedFiles } from "@/lib/file-tags";
+import { stripInlineMarkdown } from "@/lib/inline-markdown";
 import type { Message } from "@/transport";
 
 /**
@@ -16,16 +17,16 @@ function parseUserGoalCommand(content: string): { condition: string } | null {
   return { condition: arg };
 }
 
+const BLOCK_MARKER = /^[ \t]{0,3}(?:#{1,6}[ \t]+|(?:>[ \t]?)+)/gm;
+
 /** Collapses markdown noise so sticky previews stay readable in one or two lines. */
 function toPlainPreview(text: string): string {
   const codeBlocks = [...text.matchAll(/```[\w-]*\n?([\s\S]*?)```/g)]
     .map((match) => match[1]?.trim() ?? "")
     .filter(Boolean);
 
-  const plain = text
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/[#*_>~[\]()]/g, "")
+  const plain = stripInlineMarkdown(text.replace(/```[\s\S]*?```/g, " "))
+    .replace(BLOCK_MARKER, "")
     .replace(/\s+/g, " ")
     .trim();
 
