@@ -14,7 +14,7 @@ export interface ModelFavoriteEntry {
 /** Persisted favorite models for {@link ModelSelector}. */
 interface ModelFavoritesState {
   entries: ModelFavoriteEntry[];
-  /** Adds or removes a favorite keyed by provider and model id. */
+  /** Adds or removes a favorite keyed by provider and model id. New favorites append; the oldest drops at the cap. */
   toggleFavorite: (entry: ModelFavoriteEntry) => void;
   isFavorite: (providerId: string, modelId: string) => boolean;
 }
@@ -40,7 +40,7 @@ export const useModelFavoritesStore = create<ModelFavoritesState>()(
             modelId: entry.modelId,
             label,
           };
-          return { entries: [row, ...s.entries].slice(0, MAX_FAVORITES) };
+          return { entries: [...s.entries, row].slice(-MAX_FAVORITES) };
         });
       },
       isFavorite: (providerId, modelId) =>
