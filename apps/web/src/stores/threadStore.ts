@@ -15,13 +15,14 @@ import {
   isGoalOpen,
   isTaskListToolName,
   CONVERSATION_HISTORY_PAGE_MAX_BYTES,
-  createSubagentPresentation,
+  isSubagentLaunchToolName,
   mergeSubagentPresentation,
   providerFailureOutcome,
   previewAnnotationPageSnapshotName,
   readPreviewAnnotationBundle,
 } from "@mcode/contracts";
 import { getTransport, RpcError } from "@/transport";
+import { createSubagentLaunchPresentation } from "@/features/conversation/narrative/narrative-builder-helpers";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { admitQueuedDraftHold } from "@/features/conversation/composer/queue/queued-draft-holds";
 import { useQueueStore, type QueuedMessage } from "./queueStore";
@@ -982,7 +983,7 @@ export function countActiveSubagentCalls(calls: ToolCall[] | undefined): number 
   if (!calls?.length) return 0;
   let n = 0;
   for (const tc of calls) {
-    if (tc.toolName === "Agent" && !tc.isComplete) n++;
+    if (isSubagentLaunchToolName(tc.toolName) && !tc.isComplete) n++;
   }
   return n;
 }
@@ -2025,7 +2026,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const shouldMergeToolUse = (existing: ToolCall, toolName: string): boolean => {
-    if (existing.toolName === "Agent" && toolName === "Agent") return true;
+    if (isSubagentLaunchToolName(toolName) && existing.toolName === toolName) return true;
     return !existing.isComplete
       && (Object.keys(existing.toolInput ?? {}).length === 0 || existing.toolName !== toolName);
   };
@@ -2038,7 +2039,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   ): void => {
     const mergedInput = { ...existing.toolInput, ...toolInput };
     const presentation = event.subagentPresentation
-      ?? (toolName === "Agent" ? createSubagentPresentation(toolInput, event.toolCallId) : undefined);
+      ?? createSubagentLaunchPresentation(toolName, toolInput, event.toolCallId);
     const subagentPresentation = presentation
       ? mergeSubagentPresentation(existing.subagentPresentation, presentation, event.toolCallId)
       : existing.subagentPresentation;
@@ -2061,7 +2062,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       id,
       toolName,
       toolInput,
-      ...(toolName === "Agent" ? { subagentPresentation: event.subagentPresentation ?? createSubagentPresentation(toolInput, id) } : {}),
+      ...(isSubagentLaunchToolName(toolName) ? { subagentPresentation: event.subagentPresentation ?? createSubagentLaunchPresentation(toolName, toolInput, id) } : {}),
       output: null,
       isError: false,
       isComplete: false,
@@ -2196,7 +2197,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       const canMatch = !matched
         && !toolCall.isComplete
         && !toolCall.background
-        && !(toolCall.toolName === "Agent" && hasActiveToolChildren(toolCalls, toolCall.id));
+        && !(isSubagentLaunchToolName(toolCall.toolName) && hasActiveToolChildren(toolCalls, toolCall.id));
       if (!canMatch) return toolCall;
       matched = true;
       return completedToolCall(toolCall, event, toolInput);

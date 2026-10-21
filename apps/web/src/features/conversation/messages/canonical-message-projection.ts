@@ -1,4 +1,4 @@
-import { ToolCallRecordSchema, isTaskListToolName, type AgentItem, type AgentModelState, type AgentTurn, type Message, type TurnOutcome } from "@mcode/contracts";
+import { ToolCallRecordSchema, isSubagentLaunchToolName, isTaskListToolName, type AgentItem, type AgentModelState, type AgentTurn, type Message, type TurnOutcome } from "@mcode/contracts";
 import type { ToolCall } from "@/transport/types";
 import { recordToToolCall } from "../narrative/build-persisted-narrative";
 import { collapseSubagentCalls } from "../narrative/subagent-lifecycle";
@@ -135,7 +135,7 @@ function canonicalTurnSummary(turn: AgentTurn, items: readonly AgentItem[]): Tur
     counts: {
       steps: topLevelTools.length,
       thoughts: reasoningItems.length,
-      subagents: topLevelTools.filter((call) => call.toolName === "Agent").length,
+      subagents: topLevelTools.filter((call) => isSubagentLaunchToolName(call.toolName)).length,
     },
     durationMs: canonicalTurnDuration(turn, activityItems),
     ...(outcome !== undefined && outcome !== "completed" ? { outcome } : {}),

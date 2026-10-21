@@ -377,6 +377,17 @@ describe("workspaceStore completion lifecycle", () => {
     });
   });
 
+  it("never lists a delegated thread from a lifecycle push and drops one already listed", () => {
+    const delegated = makeThread({ id: "delegated", delegation_coordinator_thread_id: "coordinator" });
+
+    useWorkspaceStore.getState().applyThreadLifecycle(delegated);
+    expect(useWorkspaceStore.getState().threads.some((thread) => thread.id === "delegated")).toBe(false);
+
+    useWorkspaceStore.setState({ threads: [{ ...delegated, delegation_coordinator_thread_id: null }] });
+    useWorkspaceStore.getState().applyThreadLifecycle(delegated);
+    expect(useWorkspaceStore.getState().threads.some((thread) => thread.id === "delegated")).toBe(false);
+  });
+
   it("clears tabs from a hidden panel and tolerates a repeated completion event", () => {
     const completed = makeThread({
       user_completed_at: "2026-08-12T08:00:00.000Z",

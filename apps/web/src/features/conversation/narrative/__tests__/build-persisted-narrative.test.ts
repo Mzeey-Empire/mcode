@@ -79,6 +79,21 @@ function hookExecution(item: PersistedNarrativeItem | undefined) {
 }
 
 describe("buildPersistedNarrativeItems", () => {
+  it.each(["mcp__mcode__delegate_task", "mcp:mcode/delegate_task"])(
+    "renders a persisted %s call as a subagent item",
+    (toolName) => {
+      const items = buildPersistedNarrativeItems({
+        tools: [makeTool({ id: "delegate-1", tool_name: toolName, input_summary: "Audit the parser" })],
+        thoughts: [],
+        hooks: [],
+      });
+
+      const subagent = persistedItem(items, "subagent");
+      expect(subagent?.type === "subagent" ? subagent.toolCall.id : null).toBe("delegate-1");
+      expect(persistedItem(items, "tool-group")).toBeUndefined();
+    },
+  );
+
   it("hydrates persisted Agent identity separately from its task summary", () => {
     const call = recordToToolCall(makeTool({
       tool_name: "Agent",

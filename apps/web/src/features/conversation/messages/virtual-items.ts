@@ -1,3 +1,4 @@
+import { isSubagentLaunchToolName } from "@mcode/contracts";
 import type { AgentTurnStatus, ApprovalReceiptRecord, ProviderId, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport/types";
 import type { ApprovalReceipt, NarrativeCounts, ThoughtSegment, TurnSummary } from "../narrative/types";
@@ -599,8 +600,8 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
   const running = topLevelTools.filter(isTurnWorkRunning);
   const status = deriveRunStatus({
     ...(holdingSignals ?? NO_HOLDING_SIGNALS),
-    activeTool: running.filter((toolCall) => toolCall.toolName !== "Agent").at(-1),
-    subagentsRunning: running.some((toolCall) => toolCall.toolName === "Agent"),
+    activeTool: running.filter((toolCall) => !isSubagentLaunchToolName(toolCall.toolName)).at(-1),
+    subagentsRunning: running.some((toolCall) => isSubagentLaunchToolName(toolCall.toolName)),
     answering,
     summaryHeading: currentActivityHeading(thoughts),
   });

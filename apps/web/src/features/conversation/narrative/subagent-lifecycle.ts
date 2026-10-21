@@ -1,4 +1,5 @@
 import {
+  isSubagentLaunchToolName,
   mergeSubagentPresentation,
   resolveProviderAgentKey,
   resolveSubagentExactIdentity,
@@ -388,7 +389,7 @@ export function subagentLifecycleParticipants(
     ? explicitSourceId
     : target.parentToolCallId;
   const source = sourceId
-    ? allToolCalls.find((call) => call.id === sourceId && call.toolName === "Agent")
+    ? allToolCalls.find((call) => call.id === sourceId && isSubagentLaunchToolName(call.toolName))
     : undefined;
   return source && source.id !== target.id ? [source, target] : [target];
 }

@@ -1001,26 +1001,19 @@ describe("ProjectTree thread interactions", () => {
     expect(screen.getByText("No active threads", { exact: true })).toBeVisible();
   });
 
-  it("nests a Delegated thread under its Coordinator and roots it when the Coordinator is absent", () => {
+  it("keeps a Delegated thread at the root even when its Coordinator is listed", () => {
     const coordinator = makeThread({ id: "coordinator", title: "Coordinator" });
     const delegated = makeThread({
       id: "delegated",
       title: "Delegated",
       delegation_coordinator_thread_id: "coordinator",
     });
-    setupStoreMocks({ threads: [delegated, coordinator] });
+    setupStoreMocks({ threads: [coordinator, delegated] });
 
-    const { unmount } = render(<ProjectTree />);
-
-    const nested = screen.getAllByTestId("thread-item");
-    expect(nested.map((row) => row.dataset.threadId)).toEqual(["coordinator", "delegated"]);
-    expect(rowIndent(nested[1])).toBe("16px");
-    unmount();
-
-    setupStoreMocks({ threads: [delegated] });
     render(<ProjectTree />);
 
-    expect(rowIndent(screen.getByTestId("thread-item"))).toBe("4px");
+    const rows = screen.getAllByTestId("thread-item");
+    expect(rows.map(rowIndent)).toEqual(["4px", "4px"]);
   });
 
   it("caps the thread list at six rows and toggles the overflow", () => {

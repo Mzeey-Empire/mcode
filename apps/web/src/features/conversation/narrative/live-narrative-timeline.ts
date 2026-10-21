@@ -1,4 +1,4 @@
-import { isTaskListToolName } from "@mcode/contracts";
+import { isSubagentLaunchToolName, isTaskListToolName } from "@mcode/contracts";
 import type { HookExecution, ToolCall } from "@/transport/types";
 import {
   collapseSubagentCalls,
@@ -7,7 +7,6 @@ import {
   type SubagentLifecycle,
 } from "./subagent-lifecycle";
 import {
-  AGENT_TOOL_NAME,
   buildToolCallHierarchy,
   createSubagentItem,
   createToolGroupItem,
@@ -19,6 +18,9 @@ import {
   narrationSegments,
 } from "./narrative-thought-classification";
 import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
+
+// Subagent hooks fire only for the provider-native Agent tool, never for delegate_task.
+const NATIVE_AGENT_TOOL_NAME = "Agent";
 
 /** Inputs that describe the volatile narrative state for one live turn. */
 export interface LiveNarrativeInputs {
@@ -67,7 +69,7 @@ export function prepareLiveNarrative(
     true,
   );
   const activeToolCalls = hierarchy.topLevel.filter(
-    (toolCall) => !toolCall.isComplete && toolCall.toolName !== AGENT_TOOL_NAME,
+    (toolCall) => !toolCall.isComplete && !isSubagentLaunchToolName(toolCall.toolName),
   );
   const hasRunningTopLevelTool = hierarchy.topLevel.some(isTurnWorkRunning);
   return {
@@ -159,7 +161,7 @@ function createTopLevelToolEvents(
   topLevelCalls: readonly ToolCall[],
 ): LiveTimelineEvent[] {
   return topLevelCalls.flatMap((toolCall) => {
-    if (toolCall.toolName === AGENT_TOOL_NAME) return [];
+    if (isSubagentLaunchToolName(toolCall.toolName)) return [];
     return [{ kind: "tool" as const, call: toolCall, startedAt: liveEventStartedAt(toolCall) }];
   });
 }
@@ -169,7 +171,7 @@ function createSubagentEvents(
   childrenByParent: ReadonlyMap<string, readonly ToolCall[]>,
 ): LiveTimelineEvent[] {
   return toolCalls.flatMap((toolCall) => {
-    if (toolCall.toolName !== AGENT_TOOL_NAME) return [];
+    if (!isSubagentLaunchToolName(toolCall.toolName)) return [];
     const startedAt = liveEventStartedAt(toolCall);
     const marker = latestLifecycleMarker(childrenByParent.get(toolCall.id) ?? [], startedAt);
     return [{
@@ -360,7 +362,7 @@ function createLiveSubagentActivities(
     children: (childrenByParent.get(event.call.id) ?? []).filter(
       (child) => !isSubagentLifecycleCall(child),
     ),
-    hooks: hooks.filter((hook) => hook.toolName === AGENT_TOOL_NAME),
+    hooks: hooks.filter((hook) => hook.toolName === NATIVE_AGENT_TOOL_NAME),
   }));
 }
 

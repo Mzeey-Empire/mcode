@@ -455,7 +455,7 @@ function buildThreadTree(threads: WorkspaceThread[]): ThreadTreeItem[] {
   const threadIds = new Set(threads.map((t) => t.id));
 
   for (const thread of threads) {
-    const parentId = thread.parent_thread_id ?? thread.delegation_coordinator_thread_id;
+    const parentId = thread.parent_thread_id;
     if (!parentId || !threadIds.has(parentId)) {
       // Root thread, or orphan whose parent isn't in this list
       roots.push(thread);

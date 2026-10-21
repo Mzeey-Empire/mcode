@@ -1,8 +1,29 @@
+import {
+  createSubagentPresentation,
+  isDelegateTaskToolName,
+  isSubagentLaunchToolName,
+  type SubagentPresentation,
+} from "@mcode/contracts";
 import type { ToolCall } from "@/transport/types";
 import type { NarrativeItem, NarrativeCounts, SubagentActivity } from "./types";
 
-/** Provider tool name for delegated sub-agent work. */
-export const AGENT_TOOL_NAME = "Agent";
+/**
+ * Provisional sub-agent presentation for a launch call, or undefined for any other tool.
+ * A delegate_task input carries routing fields (target, isolation) that are not Agent
+ * metadata, so only its title and prompt reach the shared Agent parser.
+ */
+export function createSubagentLaunchPresentation(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  fallbackIdentityKey: string,
+): SubagentPresentation | undefined {
+  if (!isSubagentLaunchToolName(toolName)) return undefined;
+  if (!isDelegateTaskToolName(toolName)) return createSubagentPresentation(toolInput, fallbackIdentityKey);
+  return createSubagentPresentation(
+    { description: toolInput.title, prompt: toolInput.prompt ?? toolInput.task },
+    fallbackIdentityKey,
+  );
+}
 
 /**
  * True while a call still holds its turn's work open. A backgrounded call keeps running on its own,
@@ -74,7 +95,7 @@ export function createNarrativeCounts(
   return {
     steps: topLevelCalls.length,
     thoughts: items.filter((item) => item.type === "thought").length,
-    subagents: topLevelCalls.filter((call) => call.toolName === AGENT_TOOL_NAME).length,
+    subagents: topLevelCalls.filter((call) => isSubagentLaunchToolName(call.toolName)).length,
   };
 }
 
