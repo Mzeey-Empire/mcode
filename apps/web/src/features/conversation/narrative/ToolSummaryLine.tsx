@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { delegatedTaskRosterEntryId } from "@mcode/contracts";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import {
   TOOL_ICONS,
@@ -67,7 +68,7 @@ const TASK_ID_TOOLS = new Set(["task_status", "task_cancel"]);
 function useDelegatedTaskTitle(toolCall: ToolCall, isTaskCall: boolean): string | undefined {
   const entries = useSubagentRoster(useSubagentThreadId())?.entries;
   const taskId = isTaskCall ? delegatedTaskId(toolCall) : undefined;
-  return taskId ? entries?.find((entry) => entry.id === `task:${taskId}`)?.title : undefined;
+  return taskId ? entries?.find((entry) => entry.id === delegatedTaskRosterEntryId(taskId))?.title : undefined;
 }
 
 function genericToolDetail(toolCall: ToolCall, isTaskCall: boolean, taskTitle: string | undefined): string | undefined {

@@ -77,6 +77,11 @@ export function isDelegateTaskToolName(toolName: string): boolean {
   return stripMcodeMcpPrefix(toolName) === "delegate_task";
 }
 
+/** Roster entry id of an Mcode delegated task, shared by the server roster and client links. */
+export function delegatedTaskRosterEntryId(taskId: string): string {
+  return `task:${taskId}`;
+}
+
 /** True when a tool call starts a sub-agent: a provider-native `Agent` call or an Mcode delegation. */
 export function isSubagentLaunchToolName(toolName: string): boolean {
   return toolName === NATIVE_SUBAGENT_TOOL_NAME || isDelegateTaskToolName(toolName);

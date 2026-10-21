@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import type { DelegatedTaskNotice, DelegatedTaskNoticeStatus } from "@mcode/contracts";
+import { delegatedTaskRosterEntryId, type DelegatedTaskNotice, type DelegatedTaskNoticeStatus } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { openSubagentDetail } from "@/features/subagents/detail/open-subagent-detail";
@@ -34,8 +34,7 @@ export function DelegatedTaskWakeUp({ tasks, prompt }: DelegatedTaskWakeUpProps)
             type="button"
             variant="ghost"
             size="compact"
-            // The roster names a delegated task's entry `task:<taskId>`.
-            onClick={() => openSubagentDetail(`task:${task.taskId}`)}
+            onClick={() => openSubagentDetail(delegatedTaskRosterEntryId(task.taskId))}
             aria-label={`Open ${task.title} subagent details`}
             className="h-7 min-w-0 shrink justify-start rounded-full border-border px-2.5 text-xs"
           >

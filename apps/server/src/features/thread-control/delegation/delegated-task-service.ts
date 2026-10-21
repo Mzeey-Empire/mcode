@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import {
-  DelegateTaskInputSchema, TaskStatusInputSchema, TaskCancelInputSchema, ProviderIdSchema,
+  DelegateTaskInputSchema, TaskStatusInputSchema, delegatedTaskRosterEntryId, TaskCancelInputSchema, ProviderIdSchema,
   type DelegateTaskInput, type DelegateTaskResult, type TaskStatusInput, type TaskStatusResult,
   type TaskCancelInput, type TaskCancelResult, type ThreadControlError, type TaskState, type Thread,
   type SubagentRosterEntry, type SubagentStatus,
@@ -129,7 +129,7 @@ export class DelegatedTaskService {
       const snapshot = this.snapshot(task);
       const status = rosterStatus(snapshot.state);
       return {
-        id: `task:${task.taskId}`, provider: task.plan.providerId, model: task.plan.modelId,
+        id: delegatedTaskRosterEntryId(task.taskId), provider: task.plan.providerId, model: task.plan.modelId,
         title: task.plan.title, prompt: task.plan.prompt, subagentType: null, reasoningEffort: null, stepCount: 0,
         status, startedAt: new Date(task.createdAt).toISOString(),
         endedAt: this.latestAttempt(task)?.endedAt ?? null,
