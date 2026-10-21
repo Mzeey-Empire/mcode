@@ -19,7 +19,7 @@ let stop: (() => void) | undefined;
 function turn(threadId: string, sequence: number, outcome: TurnOutcome = "completed", seen: number | null = null): ThreadAttention {
   return {
     threadId, waiting: null, lastTurn: { outcome, endedAt: ENDED, sequence, changedFileCount: null },
-    seen: { sequence: seen, at: null },
+    seen: { sequence: seen, at: null }, hasUnfinishedDelegatedTasks: false,
   };
 }
 
@@ -61,6 +61,16 @@ describe("thread event toasts", () => {
     stop = startThreadEventDetector();
     push(turn("b", 5));
     expect(toasts()).toEqual([]);
+    push(turn("a", 4));
+    expect(toasts()).toEqual([finishedA]);
+  });
+
+  it("holds a Coordinator's Finished toast until its delegated tasks end, then toasts once", () => {
+    stop = startThreadEventDetector();
+    push({ ...turn("a", 4), hasUnfinishedDelegatedTasks: true });
+    expect(toasts()).toEqual([]);
+    push(turn("a", 4));
+    expect(toasts()).toEqual([finishedA]);
     push(turn("a", 4));
     expect(toasts()).toEqual([finishedA]);
   });
