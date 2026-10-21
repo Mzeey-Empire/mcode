@@ -87,6 +87,7 @@ function buildService({
   assertUsable = vi.fn(),
   resolveProvider = vi.fn(),
   threadStatus = "idle",
+  threadPermissionMode = null,
   approvalReviewSupport,
   threadControlMcp = {
     activate: vi.fn(),
@@ -96,10 +97,11 @@ function buildService({
   assertUsable?: ReturnType<typeof vi.fn>;
   resolveProvider?: ReturnType<typeof vi.fn>;
   threadStatus?: PersistedThreadStatus;
+  threadPermissionMode?: Thread["permission_mode"];
   approvalReviewSupport?: ApprovalReviewSupport;
   threadControlMcp?: { activate: ReturnType<typeof vi.fn>; revoke: ReturnType<typeof vi.fn> };
 } = {}) {
-  const thread = makeThread({ status: threadStatus });
+  const thread = makeThread({ status: threadStatus, permission_mode: threadPermissionMode });
   const database = createOwnedTestDatabase();
   const { db, writer } = database;
   db.run("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)", ["ws-1", "Fixture", process.cwd()]);
@@ -395,10 +397,11 @@ describe("AgentService internal MCP provider allowlist", () => {
   });
 
   it.each([
-    "Spawn exactly one nested provider-native child named leaf_probe",
-    "Delegate this task to a provider-native subagent",
-  ])("revokes thread control at turn start for child-agent wording: %s", async (content) => {
-    const { svc, threadControlMcp } = buildService();
+    "Farm this out to Codex",
+    "Call delegate_task exactly once to hand this review to Codex. Do not call any other tool.",
+    "Do not create an Mcode thread",
+  ])("activates thread control whatever the message says: %s", async (content) => {
+    const { svc, threadControlMcp, providerStub } = buildService();
 
     await svc.sendMessage({
       threadId: THREAD_ID,
@@ -409,26 +412,33 @@ describe("AgentService internal MCP provider allowlist", () => {
       provider: "codex",
     });
 
-    expect(threadControlMcp.activate).not.toHaveBeenCalled();
-    expect(threadControlMcp.revoke).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
+    expect(threadControlMcp.revoke).not.toHaveBeenCalled();
+    expect(threadControlMcp.activate).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: `mcode-${THREAD_ID}`,
+      sourceThreadId: THREAD_ID,
+      permissionMode: "supervised",
+    }));
+    expect(providerStub.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
+      threadControlEligible: true,
+    }));
   });
 
-  it("activates thread control only for an explicit Mcode thread request", async () => {
-    const { svc, threadControlMcp } = buildService();
+  it("activates full thread control for a default command on a persisted full thread", async () => {
+    const { svc, threadControlMcp } = buildService({ threadPermissionMode: "full" });
 
     await svc.sendMessage({
       threadId: THREAD_ID,
-      content: "Create one Mcode thread named leaf_probe",
+      content: "Farm this out to Codex",
       permissionMode: "default",
       model: "claude-sonnet-4-6",
       attachments: [],
       provider: "codex",
     });
 
-    expect(threadControlMcp.revoke).not.toHaveBeenCalled();
     expect(threadControlMcp.activate).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: `mcode-${THREAD_ID}`,
-      eligible: true,
+      sourceThreadId: THREAD_ID,
+      permissionMode: "full",
     }));
   });
 });

@@ -2,7 +2,6 @@ import * as NodeBuffer from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
   buildMcodeInstructionSections,
-  isExplicitMcodeThreadRequest,
   MCODE_INSTRUCTION_SECTION_MAX_BYTES,
   renderMcodeInstructionSections,
 } from "../index.js";
@@ -15,27 +14,6 @@ const toolkitCombinations = [
 ];
 
 describe("Mcode runtime instruction sections", () => {
-  it.each([
-    "Spawn exactly one nested provider-native child named leaf_probe",
-    "Delegate this task to a provider-native subagent",
-  ])("does not grant Mcode thread control to provider-native child wording: %s", (request) => {
-    expect(isExplicitMcodeThreadRequest(request)).toBe(false);
-  });
-
-  it.each([
-    "Create one Mcode thread named leaf_probe",
-    "Use thread_create_batch for the requested Mcode thread",
-    "Use the mcode delegate_task tool to hand this to Claude",
-    "Call task_status for the delegated task",
-    "Cancel it with task_cancel",
-  ])("recognizes explicit Mcode thread requests: %s", (request) => {
-    expect(isExplicitMcodeThreadRequest(request)).toBe(true);
-  });
-
-  it("fails closed for negated Mcode thread requests", () => {
-    expect(isExplicitMcodeThreadRequest("Do not create an Mcode thread")).toBe(false);
-  });
-
   it.each(toolkitCombinations)("selects guidance for attached toolkits: %j", (toolkits) => {
     const sections = buildMcodeInstructionSections({ toolkits });
     const keys = sections.map((section) => section.key);
@@ -90,7 +68,7 @@ describe("Mcode runtime instruction sections", () => {
     const sections = buildMcodeInstructionSections({ toolkits: { threadControl: false, browser: false } });
     expect(renderMcodeInstructionSections(sections)).toBe(
       "You are operating inside an Mcode-managed session. Mcode runtime guidance is advisory; MCP authorization and lease state remain authoritative.\n\n"
-      + "A child-agent or sub-agent request uses provider-native collaboration in the current turn. Use collaboration tools, preserve the exact requested brief, and keep direct and nested parent relationships intact. A child-agent request does not authorize Mcode thread control; use thread tools only for an explicit Mcode thread request.\n\n"
+      + "A child-agent or sub-agent request uses provider-native collaboration in the current turn. Use collaboration tools, preserve the exact requested brief, and keep direct and nested parent relationships intact. Use Mcode delegation for a child-agent request only when native collaboration cannot run the requested provider or model.\n\n"
       + "For broad repository searches, first list files with rg -l. Exclude fixtures and captured traces (*.ndjson) unless the task targets them, and bound line output with rg --max-columns 240 before reading matches.",
     );
   });

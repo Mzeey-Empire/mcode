@@ -1067,12 +1067,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Apply the provider-neutral thread-control directive selected during admission. */
   private applyThreadControlLease(directive: ThreadControlLeaseDirective | null): void {
-    if (!directive) return;
-    if (directive.kind === "revoke") {
-      this.threadControlMcp?.revoke(directive.sessionId);
-      return;
-    }
-    this.threadControlMcp?.activate({ ...directive, eligible: true });
+    if (directive) this.threadControlMcp?.activate(directive);
   }
 
   /** Send one attempt and hand only retryable failures to the existing retry owner. */
@@ -2198,6 +2193,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Record an adopted turn's dispatch state without sending a prompt the provider never received. */
   private adoptPreparedProviderDispatch(prepared: PreparedTurnDispatch): void {
+    this.applyThreadControlLease(prepared.threadControl);
     const dispatch = this.createRetryDispatch(prepared);
     dispatch.dispatchStarted = true;
     this.turnRetryDispatchByThread.set(prepared.lease.threadId, dispatch);

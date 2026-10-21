@@ -55,20 +55,6 @@ describe("McodeSessionAuthority", () => {
     expect(authority.signal("mcode-source")).toBeUndefined();
   });
 
-  it("denies an ineligible turn from the start without inheriting a prior grant", () => {
-    const authority = new McodeSessionAuthority();
-    authority.activate(turn({ sourceTurnId: "child-turn", eligible: false }));
-    expect(() => authority.authorizeThreadControl(session, "child-mcp-call")).toThrow(McodeThreadControlDeniedError);
-
-    authority.activate(turn({ sourceTurnId: "explicit-turn", eligible: true }));
-    expect(authority.authorizeThreadControl(session, "parent-mcp-call")).toMatchObject({
-      sourceTurnId: "explicit-turn",
-    });
-
-    authority.activate(turn({ sourceTurnId: "next-child-turn", eligible: false }));
-    expect(() => authority.authorizeThreadControl(session, "next-child-mcp-call")).toThrow(McodeThreadControlDeniedError);
-  });
-
   it("rejects unequal credential lengths before constant-time comparison", () => {
     expect(constantTimeCredentialEqual("credential", "credential")).toBe(true);
     expect(constantTimeCredentialEqual("credential", "credential-extra")).toBe(false);
@@ -146,18 +132,19 @@ describe("McodeSessionAuthority", () => {
     expect(authority.signal("mcode-source")?.aborted).toBe(false);
   });
 
-  it("refuses thread control without an active eligible lease and bounds the tool call id", () => {
+  it("refuses thread control without an active lease and bounds the tool call id", () => {
     const authority = new McodeSessionAuthority();
     const { token } = authority.attach(attachRequest());
     const session = authority.resolve(token)!;
 
-    expect(() => authority.authorizeThreadControl(session, "call")).toThrow(McodeThreadControlDeniedError);
+    expect(() => authority.authorizeThreadControl(session, "call"))
+      .toThrow(expect.objectContaining({ reason: "no_active_turn" }));
     authority.activate(turn());
     expect(authority.authorizeThreadControl(session, "call")).toMatchObject({ sourceThreadId: "source" });
-    expect(() => authority.authorizeThreadControl(session, "")).toThrow(McodeThreadControlDeniedError);
-    expect(() => authority.authorizeThreadControl(session, "x".repeat(129))).toThrow(McodeThreadControlDeniedError);
-    authority.activate(turn({ eligible: false }));
-    expect(() => authority.authorizeThreadControl(session, "call")).toThrow(McodeThreadControlDeniedError);
+    expect(() => authority.authorizeThreadControl(session, ""))
+      .toThrow(expect.objectContaining({ reason: "invalid_tool_call" }));
+    expect(() => authority.authorizeThreadControl(session, "x".repeat(129)))
+      .toThrow(expect.objectContaining({ reason: "invalid_tool_call" }));
   });
 
   it("scopes thread-control authority to the resolving session", () => {

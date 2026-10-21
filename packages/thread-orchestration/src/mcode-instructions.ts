@@ -3,10 +3,6 @@
 /** Codex silently cuts the middle out of an additionalContext value above ~1,000 tokens (UTF-8 bytes / 4). */
 export const MCODE_INSTRUCTION_SECTION_MAX_BYTES = 4_000;
 
-const EXPLICIT_MCODE_THREAD_TOKEN = /\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|launch|search|get|send|stop|wait)|delegate_task|task_(?:status|cancel))\b/i;
-const NEGATED_MCODE_THREAD_REQUEST = /\b(?:do\s+not|don['’]?t|dont|never|without|no)\b[\s\S]{0,96}\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|launch|search|get|send|stop|wait)|delegate_task|task_(?:status|cancel))\b/i;
-const MCODE_THREAD_REQUEST_ACTION = /\b(?:create|start|open|launch|use|manage|list|search|send|stop|wait|get|target|delegate|call|check|cancel)\b/i;
-
 /** Stable section names used as Codex context tags. */
 export type McodeInstructionSectionKey =
   | "mcode_identity"
@@ -35,21 +31,6 @@ export interface BuildMcodeInstructionSectionsInput {
   readonly nestedDelegationModel?: string;
 }
 
-/**
- * Returns true only when the user's current request explicitly names Mcode
- * thread control or one of its thread operations.
- *
- * Provider-native child-agent language intentionally does not satisfy this
- * boundary. Negated requests fail closed so a model cannot inherit a lease
- * from wording such as "do not create an Mcode thread".
- */
-export function isExplicitMcodeThreadRequest(content: string): boolean {
-  const request = content.trim();
-  if (!request || NEGATED_MCODE_THREAD_REQUEST.test(request)) return false;
-  if (!EXPLICIT_MCODE_THREAD_TOKEN.test(request)) return false;
-  return MCODE_THREAD_REQUEST_ACTION.test(request);
-}
-
 const IDENTITY_BLOCK = [
   "You are operating inside an Mcode-managed session.",
   "Mcode runtime guidance is advisory; MCP authorization and lease state remain authoritative.",
@@ -58,7 +39,8 @@ const IDENTITY_BLOCK = [
 // The thread-control and Browser tool descriptions repeat these rules on purpose. With deferred tool loading, a description arrives only after the model has chosen a tool.
 const THREAD_CONTROL_BLOCK = [
   "Mcode thread control",
-  "- Use the mcode MCP thread_* tools only when the user explicitly asks for Mcode threads. An Mcode thread is a persistent user-visible conversation, different from provider-native child agents.",
+  "- The mcode MCP tools manage Mcode threads: persistent, user-visible conversations. Use delegate_task when the user asks to hand work to another provider or model, even if they never say \"Mcode thread\".",
+  "- A sub-agent request uses your provider-native collaboration tool when it can run the requested model. Never launch an Mcode thread just because the user said \"sub-agent\".",
   "- If no Project is named, use the active source thread's Project without discovery. Resolve an explicitly named Project with workspace_search. Use worktree_list only to resolve an explicit worktree or reference.",
   "- Delegate child work with delegate_task. Preserve the user's title and task in the prompt. Choose isolation shared for the Coordinator's checkout or worktree for a new checkout at its local commit. Retry the same input with the same clientRequestId to return the existing task.",
   "- thread_launch starts a separate user-owned thread only when the user asks for one; use delegate_task for child work whose result you need.",
@@ -71,7 +53,7 @@ const THREAD_CONTROL_BLOCK = [
 const PROVIDER_SUBAGENT_BLOCK = [
   "A child-agent or sub-agent request uses provider-native collaboration in the current turn.",
   "Use collaboration tools, preserve the exact requested brief, and keep direct and nested parent relationships intact.",
-  "A child-agent request does not authorize Mcode thread control; use thread tools only for an explicit Mcode thread request.",
+  "Use Mcode delegation for a child-agent request only when native collaboration cannot run the requested provider or model.",
 ].join(" ");
 
 const REPOSITORY_SEARCH_BLOCK = [
