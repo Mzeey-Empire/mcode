@@ -1,10 +1,11 @@
 import "reflect-metadata";
 import * as NodeCrypto from "node:crypto";
 import * as NodeEvents from "node:events";
+import * as NodeFS from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { container } from "tsyringe";
 import { WS_CHANNELS } from "@mcode/contracts";
-import type { AgentStopResult, DelegateTaskResult, TaskStatusResult, IAgentProvider, IProviderRegistry } from "@mcode/contracts";
+import type { AgentStopResult, ApprovalRequestEnvelope, DelegateTaskResult, TaskStatusResult, IAgentProvider, IProviderRegistry } from "@mcode/contracts";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import { createOriginFixture, git } from "../../projects/git/__tests__/start-from-origin-fixture.js";
 import { ThreadRepo } from "../persistence/thread-repo.js";
@@ -52,6 +53,7 @@ import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup
 import { DelegationTargetResolver } from "../../agents/collaboration/delegation-target-resolver.js";
 import { DelegatedTaskRepo } from "./delegated-task-repo.js";
 import { DelegatedTaskService } from "./delegated-task-service.js";
+import { TurnResumeScheduleStore } from "../../agents/recovery/turn-resume-schedule-store.js";
 import { SubagentRosterService } from "../../agents/collaboration/subagent-roster-service.js";
 import { NarrativeStore } from "../../agents/conversation/narrative/narrative-store.js";
 import { ToolCallRecordRepo } from "../../agents/tools/persistence/tool-call-record-repo.js";
@@ -75,6 +77,7 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
   const startups = new ThreadStartupService(new ThreadStartupRepo(runtime.reader, runtime.writer), runtime.writer);
   const fetchDecisions = new ThreadStartupFetchDecisions();
   const settings = new SettingsService();
+  const pendingApprovals: ApprovalRequestEnvelope[] = [];
   disposables.push(() => settings.dispose());
   const provider: IAgentProvider = Object.assign(new NodeEvents.EventEmitter(), {
     id: "codex" as const, descriptor: { id: "codex" as const, capabilities: [{ name: "child-cancellation" as const, support: "supported" as const }] }, subagentReporting: null,
@@ -83,6 +86,7 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
     sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {},
     interruptChildTurn: async () => {},
     listModels: async () => [{ id: "gpt-test", name: "Test" }],
+    listPendingApprovals: (threadId?: string) => pendingApprovals.filter((request) => !threadId || request.threadId === threadId),
   });
   const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
   const models = new ModelCacheService(new ModelCacheRepo(runtime.reader, runtime.writer), providers,
@@ -166,7 +170,8 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
   child.registerInstance("CancelThreadStartupDeps", cancellation);
   const control = child.resolve(ThreadControlService);
   const tasks = new DelegatedTaskRepo(runtime.reader, runtime.writer);
-  const service = new DelegatedTaskService({ tasks, threads, startups, approvals, canonical, targets, git: worktrees, control,
+  const resumes = new TurnResumeScheduleStore(runtime.reader, runtime.writer);
+  const service = new DelegatedTaskService({ tasks, threads, startups, approvals, canonical, targets, git: worktrees, control, resumes,
     approvalService, cancellation,
     commands: { createAndSend: async (command, options) => {
       const created = await creation.createInitialTurn(command, options);
@@ -190,7 +195,8 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
   disposables.push(roster.bindDelegatedTasks(service));
   disposables.push(startups.subscribe((startup) => service.taskChanged(startup.startupId)));
   disposables.push(roster.observeCommittedEvents());
-  return { ...fixture, service, tasks, threads, threadService, roster, startups, approvals, control, canonical, messages, environment, coordinator, source, input, dispatch };
+  return { ...fixture, service, tasks, threads, threadService, roster, startups, approvals, control, canonical, messages, environment,
+    coordinator, source, input, dispatch, active, admission, authority, resumes, pendingApprovals };
 }
 
 function requireTask(result: DelegateTaskResult): Exclude<DelegateTaskResult, { status: "rejected" }>;
@@ -258,6 +264,89 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     });
     expect(changed).toEqual([task.taskId]);
     expect(statuses).toEqual([["done"]]);
+  });
+
+  it("covers answered questions but delivers a newly pending question", async () => {
+    const f = await harness();
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    const question = (requestId: string, prompt: string): ApprovalRequestEnvelope => ({
+      requestId, threadId: task.threadId ?? "", body: {
+        requestedAt: new Date().toISOString(), origin: { kind: "agent" },
+        subject: { kind: "question", questions: [{ header: "Choose", question: prompt, options: [], multiple: false, custom: true }] },
+        choices: [{ id: "answer", intent: "provider", label: "Answer" }],
+      },
+    });
+    f.pendingApprovals.push(question("first", "Which environment?"), question("second", "Which branch?"));
+    const first = await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID());
+    expect(first?.content).toContain("Which environment?\nWhich branch?");
+    expect(first?.content).toContain("The user answers this in the composer. Do not answer it yourself.");
+    if (!first) throw new Error("Expected question notice");
+    await f.service.settleNotices(first.wakeId);
+    f.pendingApprovals.shift();
+    expect(await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID())).toBeNull();
+    f.pendingApprovals.push(question("third", "Which region?"));
+    expect((await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID()))?.content).toContain("Which region?");
+  });
+
+  it("backfills finished tasks while leaving in-flight tasks eligible after migration", async () => {
+    const f = await harness();
+    const finished = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    const running = requireTask(await f.service.delegate(f.source, { ...f.input, clientRequestId: "running", isolation: "shared" }));
+    const turn = f.canonical.loadTurn(finished.taskId);
+    if (!finished.threadId || !turn?.executionId) throw new Error("Expected admitted child");
+    await f.canonical.finishParentTurnBatched({
+      threadId: finished.threadId, turnId: finished.taskId, executionId: turn.executionId,
+      providerId: "codex", providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+    });
+    f.runtime.database.exec("ALTER TABLE delegated_tasks DROP COLUMN notice_delivered; ALTER TABLE delegated_tasks DROP COLUMN notice_claim;");
+    f.runtime.database.exec(NodeFS.readFileSync(new URL("../../../../drizzle/0097_parallel_madelyne_pryor.sql", import.meta.url), "utf8"));
+    expect(await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID())).toBeNull();
+    const active = f.canonical.loadTurn(running.taskId);
+    if (!running.threadId || !active?.executionId) throw new Error("Expected running child");
+    await f.canonical.finishParentTurnBatched({
+      threadId: running.threadId, turnId: running.taskId, executionId: active.executionId,
+      providerId: "codex", providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+    });
+    const batch = await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID());
+    expect(batch?.systemNotice.delegatedTasks?.map((notice) => notice.taskId)).toEqual([running.taskId]);
+  });
+
+  it("acknowledges task_status and thread_wait without letting roster reads consume results", async () => {
+    const f = await harness();
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    const turn = f.canonical.loadTurn(task.taskId);
+    if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted child");
+    await f.canonical.finishParentTurnBatched({
+      threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
+      providerId: "codex", providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+    });
+    f.service.rosterEntries(f.coordinator.id);
+    const batch = await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID());
+    expect(batch?.systemNotice.delegatedTasks?.map((notice) => notice.status)).toEqual(["completed"]);
+    if (!batch) throw new Error("Expected notice");
+    await f.service.returnNotices(batch.wakeId);
+    f.active.delete(task.threadId);
+    await f.control.threadWait(f.source, { threadIds: [task.threadId], until: "terminal", timeoutSeconds: 1 });
+    expect(await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID())).toBeNull();
+  });
+
+  it.each(["ack-first", "settle-first"])("preserves an acknowledgement racing a claim in %s order", async (order) => {
+    const f = await harness();
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    const turn = f.canonical.loadTurn(task.taskId);
+    if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted child");
+    await f.canonical.finishParentTurnBatched({
+      threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
+      providerId: "codex", providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+    });
+    const batch = await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID());
+    expect(batch?.systemNotice.delegatedTasks?.map((notice) => notice.status)).toEqual(["completed"]);
+    if (!batch) throw new Error("Expected notice");
+    if (order === "ack-first") await f.service.status(f.source, { taskId: task.taskId });
+    await f.service.settleNotices(batch.wakeId);
+    if (order === "settle-first") await f.service.status(f.source, { taskId: task.taskId });
+    expect(await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID())).toBeNull();
   });
 
   it("reports and stops the latest resumed attempt on the bound child", async () => {

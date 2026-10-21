@@ -302,7 +302,12 @@ export class ThreadControlService {
       signal?.addEventListener("abort", onAbort, { once: true });
       check();
     });
-    if (result.status === "success") (await this.auditRead(authority, "thread_wait", "success"));
+    if (result.status === "success") {
+      await this.auditRead(authority, "thread_wait", "success");
+      if (authority.type === "internal") {
+        for (const item of result.results) await this.delegatedTasks?.acknowledgeObservedChild(authority.sourceThreadId, item.threadId);
+      }
+    }
     return result;
   }
 

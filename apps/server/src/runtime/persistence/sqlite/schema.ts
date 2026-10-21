@@ -218,6 +218,8 @@ export const delegatedTasks = sqliteTable("delegated_tasks", {
   inputFingerprint: text("input_fingerprint").notNull(),
   planJson: text("plan_json").notNull(),
   createdAt: integer("created_at").notNull(),
+  noticeDelivered: text("notice_delivered"),
+  noticeClaim: text("notice_claim"),
 }, (table) => [uniqueIndex("idx_delegated_tasks_coordinator_request").on(table.coordinatorThreadId, table.clientRequestId)]);
 
 /** Durable human approvals for protected delegated-thread creation mutations. */
