@@ -2,12 +2,12 @@ import { useId, useState } from "react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import {
   TOOL_ICONS,
-  TOOL_LABELS,
   TOOL_OUTCOME_VERBS,
   DEFAULT_ICON,
   buildToolSummaryText,
   resolveToolName,
   isShellTool,
+  toolDisplayLabel,
 } from "@/components/chat/tool-renderers/constants";
 import type { ToolCall } from "@/transport/types";
 import type { ToolGroup } from "./types";
@@ -31,8 +31,8 @@ interface ToolSummaryLineProps {
 }
 
 function toolCallLabel(toolCall: ToolCall, outcome: ToolCallOutcome): string {
+  if (outcome === "completed") return toolDisplayLabel(toolCall.toolName);
   const canonicalName = resolveToolName(toolCall.toolName);
-  if (outcome === "completed") return TOOL_LABELS[canonicalName] ?? canonicalName;
   return `${TOOL_OUTCOME_VERBS[canonicalName] ?? canonicalName} ${outcome}`;
 }
 

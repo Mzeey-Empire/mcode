@@ -28,6 +28,14 @@ export const TOOL_LABELS: Record<string, string> = {
   delegate_task: "Delegate task",
   task_status: "Check task",
   task_cancel: "Cancel task",
+  workspace_search: "Searched projects",
+  worktree_list: "Listed worktrees",
+  thread_target_list: "Listed targets",
+  thread_search: "Searched threads",
+  thread_get: "Read thread",
+  thread_send: "Sent to thread",
+  thread_stop: "Stopped thread",
+  thread_wait: "Waited on threads",
 };
 
 export const TOOL_ICONS: Record<string, IconComponent> = {
@@ -79,6 +87,12 @@ export function resolveToolName(toolName: string): string {
   return SHELL_TOOL_ALIASES[toolName] ?? EDIT_TOOL_ALIASES[toolName] ?? browserTool ?? stripMcodeMcpPrefix(toolName);
 }
 
+/** Plain label for a tool name, falling back to the name without its Mcode MCP prefix. */
+export function toolDisplayLabel(toolName: string): string {
+  const canonicalName = resolveToolName(toolName);
+  return TOOL_LABELS[canonicalName] ?? canonicalName;
+}
+
 /** Returns true when the tool is a shell/command execution (any provider alias). */
 export function isShellTool(toolName: string): boolean {
   return resolveToolName(toolName) === "Bash";
@@ -114,6 +128,14 @@ export const TOOL_OUTCOME_VERBS: Record<string, string> = {
   delegate_task: "Delegation",
   task_status: "Task check",
   task_cancel: "Cancel",
+  workspace_search: "Project search",
+  worktree_list: "Worktree list",
+  thread_target_list: "Target list",
+  thread_search: "Thread search",
+  thread_get: "Thread read",
+  thread_send: "Thread send",
+  thread_stop: "Thread stop",
+  thread_wait: "Thread wait",
 };
 
 /** Singular/plural labels for tool summary text generation. */
@@ -129,6 +151,14 @@ export const TOOL_SUMMARY_VERBS: Record<string, [string, string]> = {
   delegate_task: ["Delegated %d task", "Delegated %d tasks"],
   task_status: ["Checked %d task", "Checked %d tasks"],
   task_cancel: ["Cancelled %d task", "Cancelled %d tasks"],
+  workspace_search: ["%d project search", "%d project searches"],
+  worktree_list: ["Listed worktrees %d time", "Listed worktrees %d times"],
+  thread_target_list: ["Listed targets %d time", "Listed targets %d times"],
+  thread_search: ["%d thread search", "%d thread searches"],
+  thread_get: ["Read %d thread", "Read %d threads"],
+  thread_send: ["Sent %d message", "Sent %d messages"],
+  thread_stop: ["Stopped %d thread", "Stopped %d threads"],
+  thread_wait: ["Waited %d time", "Waited %d times"],
 };
 
 /**
