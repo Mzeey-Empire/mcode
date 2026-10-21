@@ -32,8 +32,26 @@ describe("Mcode runtime instruction sections", () => {
     expect(isExplicitMcodeThreadRequest(request)).toBe(true);
   });
 
-  it("fails closed for negated Mcode thread requests", () => {
-    expect(isExplicitMcodeThreadRequest("Do not create an Mcode thread")).toBe(false);
+  it.each([
+    "Call delegate_task exactly once to hand this review to Codex. Do not call any other tool, and report what delegate_task returned.",
+    "Delegate this with delegate_task. Don't wait on it, check task_status later.",
+    "Use delegate_task for the review and never poll it in a loop.",
+  ])("grants an explicit request that also contains an unrelated negation: %s", (request) => {
+    expect(isExplicitMcodeThreadRequest(request)).toBe(true);
+  });
+
+  it.each([
+    "Do not create an Mcode thread",
+    "Don't use delegate_task, just fix the bug.",
+    "Do not, under any circumstances, call delegate_task.",
+    "Without creating an Mcode thread, fix the bug and check the status.",
+    "Fix the bug.\nNever use delegate_task or task_status here.",
+    "Don't edit src/a.ts or call delegate_task.",
+    "Do not bump Node to 20.1 or use delegate_task.",
+    "Never do any of these:\n- call delegate_task\n- check task_status",
+    "Don't wait; call delegate_task.",
+  ])("fails closed when every thread-control mention is negated: %s", (request) => {
+    expect(isExplicitMcodeThreadRequest(request)).toBe(false);
   });
 
   it.each(toolkitCombinations)("selects guidance for attached toolkits: %j", (toolkits) => {

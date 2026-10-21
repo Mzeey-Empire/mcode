@@ -21,7 +21,8 @@ const session: McodeSession = {
   threadControl: true,
 };
 
-const DENIED = "Internal thread-control MCP request denied";
+const NOT_REQUESTED = /^Mcode thread control is off for this turn because the user's message did not explicitly ask for it\./;
+const NO_ACTIVE_TURN = /^Mcode thread control is unavailable because no user turn is active for this session\./;
 
 const thread = {
   workspaceId: "workspace-1",
@@ -143,12 +144,15 @@ describe("thread-control toolkit", () => {
     expect(setup({ threadControl: false }).bound).toBeNull();
   });
 
-  it.each(["none", "ineligible"] as const)("refuses every call when the turn lease is %s", async (lease) => {
+  it.each([
+    ["none", NO_ACTIVE_TURN],
+    ["ineligible", NOT_REQUESTED],
+  ] as const)("refuses every call when the turn lease is %s and says why", async (lease, reason) => {
     const { call, service } = setup({ lease });
 
     await expect(call("workspace_search", { query: "mcode" })).resolves.toMatchObject({
       isError: true,
-      content: [{ type: "text", text: DENIED }],
+      content: [{ type: "text", text: expect.stringMatching(reason) }],
     });
     expect(service.workspaceSearch).not.toHaveBeenCalled();
   });
@@ -174,7 +178,7 @@ describe("thread-control toolkit", () => {
 
     await expect(call("thread_search", { statuses: [] })).resolves.toMatchObject({
       isError: true,
-      content: [{ type: "text", text: DENIED }],
+      content: [{ type: "text", text: expect.stringMatching(NO_ACTIVE_TURN) }],
     });
   });
 
