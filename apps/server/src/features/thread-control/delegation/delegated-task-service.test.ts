@@ -33,7 +33,8 @@ import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../../agents/orch
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
 import { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../../agents/canonical/canonical-agent-writer-client.js";
-import { notifyCommittedCanonicalEvents } from "../../agents/canonical/committed-canonical-events.js";
+import { notifyCommittedCanonicalEvents, subscribeCommittedCanonicalEvents } from "../../agents/canonical/committed-canonical-events.js";
+import { notifyTasksOnSettledTurns } from "../attention/thread-attention-service.js";
 import { MessageRepo } from "../../agents/conversation/persistence/message-repo.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { HandoffStorage } from "../../handoff/index.js";
@@ -200,6 +201,65 @@ function requireTask(result: DelegateTaskResult | TaskStatusResult) {
 }
 
 describe("delegated task lifecycle", { timeout: 30_000 }, () => {
+  it("includes Coordinators while launching and running, and excludes completed tasks", async () => {
+    const f = await harness();
+    const launching: string[][] = [];
+    disposables.push(f.service.onRosterChanged(() => {
+      const task = f.tasks.listByCoordinator(f.coordinator.id)[0];
+      if (task && !f.startups.get(task.taskId) && !f.canonical.loadTurn(task.taskId)) {
+        launching.push([...f.service.coordinatorsWithUnfinishedTasks(f.coordinator.id)]);
+      }
+    }));
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    expect(launching).toEqual([[], [f.coordinator.id]]);
+    expect([...f.service.coordinatorsWithUnfinishedTasks()]).toEqual([f.coordinator.id]);
+    expect([...f.service.coordinatorsWithUnfinishedTasks("another-coordinator")]).toEqual([]);
+    const turn = f.canonical.loadTurn(task.taskId);
+    if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted task turn");
+    await f.canonical.finishParentTurnBatched({
+      threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId, providerId: "codex",
+      providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+    });
+    expect([...f.service.coordinatorsWithUnfinishedTasks()]).toEqual([]);
+  });
+
+  it("notifies the roster when launching starts before a supervised approval is committed", async () => {
+    const f = await harness("supervised");
+    const preparing: string[] = [];
+    disposables.push(f.service.onRosterChanged(() => {
+      const task = f.tasks.listByCoordinator(f.coordinator.id)[0];
+      if (task && !f.approvals.status(task.taskId)) {
+        preparing.push(...f.service.rosterEntries(f.coordinator.id).map((entry) => entry.status));
+      }
+    }));
+    await f.service.delegate(f.source, f.input);
+    expect(preparing).toEqual(["failed", "running"]);
+    expect([...f.service.coordinatorsWithUnfinishedTasks()]).toEqual([f.coordinator.id]);
+  });
+
+  it("notifies the delegated roster once for a committed settled turn and ignores non-settled events", async () => {
+    const f = await harness();
+    const changed: string[] = [];
+    disposables.push(notifyTasksOnSettledTurns({ taskChanged: (taskId) => {
+      changed.push(taskId);
+      f.service.taskChanged(taskId);
+    } }, subscribeCommittedCanonicalEvents));
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    expect(changed).toEqual([]);
+    const statuses: string[][] = [];
+    disposables.push(f.service.onRosterChanged(() => {
+      statuses.push(f.service.rosterEntries(f.coordinator.id).map((entry) => entry.status));
+    }));
+    const turn = f.canonical.loadTurn(task.taskId);
+    if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted task turn");
+    await f.canonical.finishParentTurnBatched({
+      threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId, providerId: "codex",
+      providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+    });
+    expect(changed).toEqual([task.taskId]);
+    expect(statuses).toEqual([["done"]]);
+  });
+
   it("pins HEAD and replays the same hidden child on a retried request", async () => {
     const f = await harness();
     const first = requireTask(await f.service.delegate(f.source, f.input));

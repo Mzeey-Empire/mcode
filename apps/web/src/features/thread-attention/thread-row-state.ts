@@ -39,9 +39,15 @@ export function isTurnSeen(turnSequence: number, seenSequence: number | null | u
  * Picks the row state. A blocking question outranks a running turn because
  * the turn cannot progress without the user; a plan only matters once the turn
  * that wrote it stops. Settled outcomes show only until the user sees them.
+ * Delegated tasks still running after the thread's own turn keep it running,
+ * below anything that needs the user and above an unseen settled outcome.
  */
 export function deriveThreadRowState(facts: ThreadRowFacts): ThreadRowState {
-  return liveRowState(facts) ?? settledRowState(facts);
+  const live = liveRowState(facts);
+  if (live) return live;
+  const settled = settledRowState(facts);
+  if (facts.attention?.hasUnfinishedDelegatedTasks && settled.kind !== "needs-you") return { kind: "running" };
+  return settled;
 }
 
 /** A pending startup still counts as running, but a failed setup holds it until the user decides. */

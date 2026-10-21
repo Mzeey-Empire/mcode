@@ -26,6 +26,8 @@ export const ThreadAttentionSchema = lazySchema(() => z.object({
     changedFileCount: z.number().int().nonnegative().nullable(),
   }).nullable(),
   seen: SeenMarkSchema(),
+  /** True while any task this thread delegated is unfinished, so the thread reads as running after its own turn ends. */
+  hasUnfinishedDelegatedTasks: z.boolean(),
 }).strict());
 /** Durable attention facts plus the current live wait, if any. */
 export type ThreadAttention = z.infer<ReturnType<typeof ThreadAttentionSchema>>;

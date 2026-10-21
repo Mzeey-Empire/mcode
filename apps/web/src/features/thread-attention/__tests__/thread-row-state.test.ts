@@ -14,17 +14,20 @@ function attention({
   outcome = null,
   turnSequence = 8,
   seen = null,
+  delegating = false,
 }: {
   waiting?: ThreadWaitingKind | null;
   outcome?: TurnOutcome | null;
   turnSequence?: number;
   seen?: number | null;
+  delegating?: boolean;
 }): ThreadAttention {
   return {
     threadId: "a",
     waiting: waiting ? { kind: waiting, since: AT } : null,
     lastTurn: outcome ? { outcome, endedAt: AT, sequence: turnSequence, changedFileCount: null } : null,
     seen: { sequence: seen, at: seen === null ? null : AT },
+    hasUnfinishedDelegatedTasks: delegating,
   };
 }
 
@@ -69,6 +72,12 @@ describe("deriveThreadRowState", () => {
     ["seen before the turn is unseen", facts({ attention: attention({ outcome: "completed", seen: 7 }) }), FINISHED],
     ["seen zero before turn zero is seen", facts({ attention: attention({ outcome: "completed", turnSequence: 0, seen: 0 }) }), QUIET],
     ["never seen turn zero is unseen", facts({ attention: attention({ outcome: "completed", turnSequence: 0 }) }), FINISHED],
+    ["delegating with no last turn is running", facts({ attention: attention({ delegating: true }) }), RUNNING],
+    ["delegating over unseen finished", facts({ attention: attention({ outcome: "completed", delegating: true }) }), RUNNING],
+    ["delegating over unseen failed", facts({ attention: attention({ outcome: "errored", delegating: true }) }), RUNNING],
+    ["unseen interrupted over delegating", facts({ attention: attention({ outcome: "interrupted", delegating: true }) }), interrupted],
+    ["plan ready over delegating", facts({ attention: attention({ waiting: "plan", outcome: "completed", delegating: true }) }), plan],
+    ["delegating stays running while on screen", facts({ onScreen: true, attention: attention({ outcome: "completed", delegating: true }) }), RUNNING],
   ])("%s", (_name, input, expected) => {
     expect(deriveThreadRowState(input)).toEqual(expected);
   });
@@ -84,5 +93,14 @@ describe("rollUpThreadRowStates", () => {
     ["first needs-you wins a tie", [approval, plan], approval],
   ])("%s", (_name, states, expected) => {
     expect(rollUpThreadRowStates(states)).toEqual(expected);
+  });
+
+  it("rolls a collapsed project up to running when one thread is delegating", () => {
+    const states = [
+      deriveThreadRowState(facts({ attention: attention({ outcome: "completed", seen: 8 }) })),
+      deriveThreadRowState(facts({ attention: attention({ outcome: "completed", delegating: true }) })),
+      deriveThreadRowState(facts({ attention: attention({ outcome: "errored", seen: 8 }) })),
+    ];
+    expect(rollUpThreadRowStates(states)).toEqual(RUNNING);
   });
 });

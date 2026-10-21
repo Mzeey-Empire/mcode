@@ -1123,12 +1123,42 @@ describe("provider retry status", () => {
   });
 
   it("keeps the status line row, no longer live, while it fades after the last approval is answered", () => {
-    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: true });
+    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: "turn" });
     expect(findIndicator(items)?.isAgentRunning).toBe(false);
   });
 
   it("shows no status line on an idle thread with nothing waiting", () => {
     const items = buildVolatileItems([], undefined, undefined, undefined, [], [], undefined, undefined, undefined, { stopPending: false, compacting: false });
     expect(findIndicator(items)).toBeUndefined();
+  });
+});
+
+describe("delegated task status", () => {
+  const leftoverTools = [makeToolCall({ id: "edit", toolName: "Edit" })];
+
+  it("keeps a live 'Waiting on subagents' line without steps or clock after the own turn ends", () => {
+    const items = buildVolatileItems(
+      leftoverTools, undefined, 1, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: true, compacting: false, planning: true, delegating: true },
+    );
+    expect(findIndicator(items)).toMatchObject({
+      isAgentRunning: true, stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
+    });
+  });
+
+  it("keeps the delegated shape, no longer live, while the line fades after the last task ends", () => {
+    const items = buildVolatileItems(
+      leftoverTools, undefined, 1, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false, exiting: "delegated" },
+    );
+    expect(findIndicator(items)).toMatchObject({ isAgentRunning: false, stepCount: 0, startTime: undefined });
+  });
+
+  it("lets an approval wait outrank delegation", () => {
+    const items = buildVolatileItems(
+      [], undefined, undefined, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false, waitingFor: "approval", delegating: true },
+    );
+    expect(findIndicator(items)?.status.label).toBe("Waiting for approval");
   });
 });

@@ -1519,7 +1519,7 @@ describe("ProjectTree action-required indicator", () => {
   });
 
   function attention(threadId: string, overrides: Partial<ThreadAttention> = {}): ThreadAttention {
-    return { threadId, waiting: null, lastTurn: null, seen: { sequence: null, at: null }, ...overrides };
+    return { threadId, waiting: null, lastTurn: null, seen: { sequence: null, at: null }, hasUnfinishedDelegatedTasks: false, ...overrides };
   }
 
   function waitingOn(kind: ThreadWaitingKind): Pick<ThreadAttention, "waiting"> {

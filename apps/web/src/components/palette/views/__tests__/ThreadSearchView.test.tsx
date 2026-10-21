@@ -145,6 +145,7 @@ describe("ThreadSearchView", () => {
         waiting: { kind: "approval", since: "2026-10-10T10:00:00.000Z" },
         lastTurn: { outcome: "errored", endedAt: "2026-10-10T10:00:00.000Z", sequence: 4, changedFileCount: null },
         seen: { sequence: null, at: null },
+        hasUnfinishedDelegatedTasks: false,
       } } });
     });
     const { rerender } = render(<Command shouldFilter={false}><ThreadSearchView /></Command>);

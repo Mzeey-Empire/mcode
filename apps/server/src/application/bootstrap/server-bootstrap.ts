@@ -115,7 +115,7 @@ import { WorkspaceTerminalPreferencesService } from "../../features/terminal/pre
 import { TerminalDiagnosticsService } from "../../features/terminal/diagnostics/terminal-diagnostics-service.js";
 import { MessageRepo } from "../../features/agents/conversation/persistence/message-repo.js";
 import { ThreadRepo } from "../../features/thread-control/persistence/thread-repo.js";
-import { invalidateAttentionOnSettledTurns, ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
+import { invalidateAttentionOnSettledTurns, notifyTasksOnSettledTurns, ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
 import { subscribeCommittedCanonicalEvents } from "../../features/agents/canonical/committed-canonical-events.js";
 import { approvalWaitingSource } from "../../features/thread-control/attention/approval-waiting-source.js";
 import { planWaitingSource } from "../../features/thread-control/attention/plan-waiting-source.js";
@@ -340,6 +340,7 @@ const delegatedTaskService = container.resolve(DelegatedTaskService);
 const threadStartupService = container.resolve(ThreadStartupService);
 const stopObservingDelegatedRosters = subagentRosterService.bindDelegatedTasks(delegatedTaskService);
 const stopObservingDelegatedStartups = threadStartupService.subscribe((startup) => delegatedTaskService.taskChanged(startup.startupId));
+const stopObservingDelegatedTurns = notifyTasksOnSettledTurns(delegatedTaskService, subscribeCommittedCanonicalEvents);
 const threadStartupFetchDecisions = container.resolve(ThreadStartupFetchDecisions);
 const startupAgentPhaseObserver = container.resolve(StartupAgentPhaseObserver);
 startupAgentPhaseObserver.start();
@@ -503,12 +504,14 @@ const db = container.resolve<Database>("Database");
 const databaseWriter = container.resolve(ApplicationDatabaseWriter);
 const threadAttentionService = new ThreadAttentionService(db, databaseWriter,
   [approvalWaitingSource(approvalService), planWaitingSource(db, "questions"), planWaitingSource(db, "plan")],
+  delegatedTaskService,
   (attention) => broadcast("thread.attention", attention));
 threadRepo.attention = threadAttentionService;
 workerOwnedTurnRuntime.bindPlanPhaseChanged((threadId) => threadRepo.publishPlanPhase(threadId));
 turnSnapshotRepo.attention = threadAttentionService;
 snapshotRefPins.attention = threadAttentionService;
 invalidateAttentionOnSettledTurns(threadAttentionService, subscribeCommittedCanonicalEvents);
+const stopObservingDelegatedAttention = delegatedTaskService.onRosterChanged((coordinatorThreadId) => threadAttentionService.invalidate(coordinatorThreadId));
 const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, planRepo, planTurnService, {
   threads: threadRepo, providers: providerRegistry, commands: container.resolve(AGENT_TURN_COMMAND_PORT),
   startups: threadStartupService, messages: messageRepo, threadService,
@@ -1193,6 +1196,8 @@ async function shutdown(): Promise<void> {
   stopObservingSubagentRosters();
   stopObservingDelegatedRosters();
   stopObservingDelegatedStartups();
+  stopObservingDelegatedTurns();
+  stopObservingDelegatedAttention();
   shutdownCoordinator.setPhase("close application database writer");
   await captureCleanupFailure(() => databaseWriter.close());
 

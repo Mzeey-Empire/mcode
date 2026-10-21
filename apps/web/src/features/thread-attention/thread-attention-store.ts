@@ -65,7 +65,7 @@ export const threadAttentionStore = create<ThreadAttentionState>((set, get) => {
   let visit = 0;
 
   const applySeen = (threadId: string, mark: SeenMark): void => set((state) => {
-    const attention = state.byThreadId[threadId] ?? { threadId, waiting: null, lastTurn: null, seen: { sequence: null, at: null } };
+    const attention = state.byThreadId[threadId] ?? { threadId, waiting: null, lastTurn: null, seen: { sequence: null, at: null }, hasUnfinishedDelegatedTasks: false };
     return { byThreadId: { ...state.byThreadId, [threadId]: { ...attention, seen: laterMark(attention.seen, mark) } } };
   });
 
@@ -101,7 +101,7 @@ export const threadAttentionStore = create<ThreadAttentionState>((set, get) => {
       const current = get().byThreadId;
       const received = new Set(attention.map((item) => item.threadId));
       const cleared = Object.entries(observed).flatMap(([threadId, old]) =>
-        current[threadId] === old && !received.has(threadId) ? [{ ...old, waiting: null, lastTurn: null }] : []);
+        current[threadId] === old && !received.has(threadId) ? [{ ...old, waiting: null, lastTurn: null, hasUnfinishedDelegatedTasks: false }] : []);
       const updates = [...cleared, ...attention.filter((item) => current[item.threadId] === observed[item.threadId])];
       // One set per snapshot, so the counter and the facts it replays land together.
       set((state) => ({ hydrations: state.hydrations + 1, byThreadId: updates.reduce(withAttention, state.byThreadId) }));

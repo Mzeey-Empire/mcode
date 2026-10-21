@@ -29,7 +29,9 @@ async function fixture() {
   const requests: ApprovalRequest[] = [];
   const approvals = new ApprovalService({ resolveAll: () => [] });
   const pushes: ThreadAttention[] = [];
-  const service = new ThreadAttentionService(runtime.reader, runtime.writer, [approvalWaitingSource(approvals)], (attention) => pushes.push(attention));
+  const coordinators = new Set<string>();
+  const delegations = { coordinatorsWithUnfinishedTasks: () => coordinators };
+  const service = new ThreadAttentionService(runtime.reader, runtime.writer, [approvalWaitingSource(approvals)], delegations, (attention) => pushes.push(attention));
   approvals.start({
     publishApprovalRequest: (request) => service.invalidate(request.threadId),
     publishApprovalResolved: (resolved) => service.invalidate(resolved.threadId),
@@ -43,10 +45,34 @@ async function fixture() {
       .run(`message-${sequence}`, a.id, sequence, outcome);
   };
   const markBefore = () => runtime.database.query("UPDATE threads SET seen_through_sequence = 2, seen_at = ? WHERE id = ?").run(BEFORE, a.id);
-  return { ...runtime, a, b, workspace, threads, service, approvals, snapshots, requests, pushes, settle, markBefore };
+  return { ...runtime, a, b, workspace, threads, service, approvals, snapshots, requests, pushes, settle, markBefore, coordinators, delegations };
 }
 
 describe("thread attention through real SQLite and the serialized writer", () => {
+  it("hydrates a seen Coordinator without a wait only while delegated tasks are unfinished", async () => {
+    const t = await fixture();
+    t.settle(2);
+    t.markBefore();
+    await t.threads.recordTurnOutcome(t.a.id, "completed", ENDED);
+    t.coordinators.add(t.a.id);
+    expect(t.service.listInteresting().map(({ threadId, waiting, hasUnfinishedDelegatedTasks }) => ({ threadId, waiting, hasUnfinishedDelegatedTasks })))
+      .toEqual([{ threadId: t.a.id, waiting: null, hasUnfinishedDelegatedTasks: true }]);
+    t.coordinators.clear();
+    expect(t.service.listInteresting()).toEqual([]);
+  });
+
+  it("publishes delegation changes once and emits one clearing frame", async () => {
+    const t = await fixture();
+    t.coordinators.add(t.a.id);
+    t.service.invalidate(t.a.id);
+    t.service.invalidate(t.a.id);
+    expect(t.pushes.map(({ hasUnfinishedDelegatedTasks }) => hasUnfinishedDelegatedTasks)).toEqual([true]);
+    t.coordinators.clear();
+    t.service.invalidate(t.a.id);
+    t.service.invalidate(t.a.id);
+    expect(t.pushes.map(({ hasUnfinishedDelegatedTasks }) => hasUnfinishedDelegatedTasks)).toEqual([true, false]);
+  });
+
   it.each([true, false])("uses only transcript-visible sequence anchors, with answer: %s", async (withAnswer) => {
     const t = await fixture();
     t.database.query("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES ('prompt', ?, 'user', 'Question', 1)").run(t.a.id);
@@ -159,7 +185,7 @@ describe("thread attention through real SQLite and the serialized writer", () =>
       expect(t.pushes).toEqual([]);
       notifyCommittedCanonicalEvents([event("message.recorded"), event("turn.completed")]);
       notifyCommittedCanonicalEvents([event("turn.completed")]);
-      expect(t.pushes).toEqual([{ threadId: t.a.id, waiting: null,
+      expect(t.pushes).toEqual([{ threadId: t.a.id, waiting: null, hasUnfinishedDelegatedTasks: false,
         lastTurn: { outcome: "completed", endedAt: ENDED, sequence: 3, changedFileCount: null }, seen: { sequence: null, at: null } }]);
     } finally {
       unsubscribe();
@@ -177,7 +203,7 @@ describe("thread attention through real SQLite and the serialized writer", () =>
     expect(result.current.at).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     expect(t.service.get(t.a.id)?.seen).toEqual(result.current);
     expect(t.threads.findById(t.a.id)?.status).toBe("paused");
-    expect(t.pushes).toEqual([{ threadId: t.a.id, waiting: null,
+    expect(t.pushes).toEqual([{ threadId: t.a.id, waiting: null, hasUnfinishedDelegatedTasks: false,
       lastTurn: { outcome: "completed", endedAt: ENDED, sequence: 4, changedFileCount: null }, seen: result.current }]);
     expect(t.service.listInteresting()).toEqual([]);
   });
@@ -232,7 +258,7 @@ describe("thread attention through real SQLite and the serialized writer", () =>
     t.approvals.publish({ requestId: request.requestId, threadId: request.threadId, body: {
       requestedAt: request.requestedAt, subject: request.subject, choices: request.choices, origin: request.origin,
     } }, { id: "codex" });
-    const reloaded = new ThreadAttentionService(t.reader, t.writer, [approvalWaitingSource(t.approvals)], () => {});
+    const reloaded = new ThreadAttentionService(t.reader, t.writer, [approvalWaitingSource(t.approvals)], t.delegations, () => {});
     expect(reloaded.listInteresting().map(({ threadId, waiting }) => ({ threadId, waiting }))).toEqual([
       { threadId: t.a.id, waiting: { kind: "approval", since: BEFORE } },
     ]);

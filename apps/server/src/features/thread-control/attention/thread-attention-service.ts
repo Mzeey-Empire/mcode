@@ -4,11 +4,17 @@ import {
 } from "@mcode/contracts";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { threadWriteOperations } from "../persistence/thread-write-operations.js";
+import type { DelegatedTaskService } from "../delegation/delegated-task-service.js";
 
 /** Supplies live waits on their owning threads, with the earliest request time. */
 export interface ThreadWaitingSource {
   readonly kind: ThreadWaitingKind;
   listWaiting(): ReadonlyMap<string, string>;
+}
+
+/** Supplies Coordinators whose delegated tasks are currently working or waiting. */
+export interface ThreadDelegationSource {
+  coordinatorsWithUnfinishedTasks(coordinatorThreadId?: string): ReadonlySet<string>;
 }
 
 const waitingPrecedence: readonly ThreadWaitingKind[] = ["approval", "questions", "plan"];
@@ -34,6 +40,7 @@ export class ThreadAttentionService {
     private readonly db: Database,
     private readonly writer: ApplicationDatabaseWriter,
     sources: readonly ThreadWaitingSource[],
+    private readonly delegations: ThreadDelegationSource,
     private readonly publish: (attention: ThreadAttention) => void,
   ) {
     this.sources = waitingPrecedence.flatMap((kind) => sources.filter((source) => source.kind === kind));
@@ -42,15 +49,16 @@ export class ThreadAttentionService {
   /** Read attention for a live thread, including one whose outcome is already seen. */
   get(threadId: string): ThreadAttention | null {
     const row = this.db.query<AttentionRow, [string]>(`${attentionSelect} AND t.id = ?`).get(threadId);
-    return row ? this.fromRow(row, this.waiting()) : null;
+    return row ? this.fromRow(row, this.waiting(), this.delegations.coordinatorsWithUnfinishedTasks(threadId).has(threadId)) : null;
   }
 
-  /** Hydrate only live threads with a wait or an unseen settled turn. */
+  /** Hydrate live threads with a wait, delegated work, or an unseen settled turn. */
   listInteresting(): ThreadAttention[] {
     const waiting = this.waiting();
+    const coordinators = this.delegations.coordinatorsWithUnfinishedTasks();
     return this.db.query<AttentionRow, []>(attentionSelect).all()
-      .map((row) => this.fromRow(row, waiting))
-      .filter(({ waiting, lastTurn, seen }) => waiting !== null
+      .map((row) => this.fromRow(row, waiting, coordinators.has(row.threadId)))
+      .filter(({ waiting, lastTurn, seen, hasUnfinishedDelegatedTasks }) => waiting !== null || hasUnfinishedDelegatedTasks
         || lastTurn !== null && (seen.sequence === null || seen.sequence < lastTurn.sequence));
   }
 
@@ -81,9 +89,10 @@ export class ThreadAttentionService {
     return waiting;
   }
 
-  private fromRow(row: AttentionRow, waiting: ReturnType<ThreadAttentionService["waiting"]>): ThreadAttention {
+  private fromRow(row: AttentionRow, waiting: ReturnType<ThreadAttentionService["waiting"]>, hasUnfinishedDelegatedTasks: boolean): ThreadAttention {
     return ThreadAttentionSchema().parse({
       threadId: row.threadId, waiting: waiting.get(row.threadId) ?? null,
+      hasUnfinishedDelegatedTasks,
       lastTurn: row.outcome === null || row.sequence === null ? null : {
         outcome: row.outcome, endedAt: row.endedAt, sequence: row.sequence, changedFileCount: row.changedFileCount,
       },
@@ -92,7 +101,20 @@ export class ThreadAttentionService {
   }
 }
 
-const settledTurnEvents = new Set(["turn.completed", "turn.errored", "turn.cancelled", "turn.interrupted"]);
+/** Committed lifecycle events whose turns no longer have active work. */
+export const settledTurnEvents: ReadonlySet<string> = new Set(["turn.completed", "turn.errored", "turn.cancelled", "turn.interrupted"]);
+
+/** Refresh delegated task projections when their original child turn settles durably. */
+export function notifyTasksOnSettledTurns(
+  tasks: Pick<DelegatedTaskService, "taskChanged">,
+  subscribe: (listener: (events: readonly CanonicalAgentEventEnvelope[]) => void) => () => void,
+): () => void {
+  return subscribe((events) => {
+    for (const event of events) {
+      if (settledTurnEvents.has(event.payload.type) && event.routing.turnId) tasks.taskChanged(event.routing.turnId);
+    }
+  });
+}
 
 /**
  * Accepted executions settle through saved canonical batches and never release a committed AgentEvent,
