@@ -20,7 +20,8 @@ import type { Message } from "@/transport/types";
 import { useTurnEndings } from "../turn-ending/useTurnEndings";
 import type { ThoughtSegment } from "../narrative/types";
 import type { RunHoldingSignals, RunRetry } from "../narrative/run-status";
-import { useStatusLineExit } from "../narrative/status-line-exit";
+import { useDelegatedOnlyPhase, useStatusLineExit } from "../narrative/status-line-exit";
+import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
@@ -99,15 +100,18 @@ function useRunHoldingSignals(threadId: string | null | undefined, isAgentRunnin
   const retryKind = useThreadRecord(threadId, (record): RunRetry["kind"] | undefined =>
     record.rateLimit ? "rate-limited" : record.apiRetry ? "retrying" : undefined);
   const retryErrorStatus = useThreadRecord(threadId, (record) => record.apiRetry?.errorStatus);
-  const exiting = useStatusLineExit(threadId, isAgentRunning || awaitingApproval || awaitingAnswers);
+  const delegatingNow = threadAttentionStore((state) => threadId ? state.byThreadId[threadId]?.hasUnfinishedDelegatedTasks === true : false);
+  const ownLive = isAgentRunning || awaitingApproval || awaitingAnswers;
+  const exiting = useStatusLineExit(threadId, ownLive || delegatingNow);
+  const delegatedOnlyPhase = useDelegatedOnlyPhase(threadId, ownLive, delegatingNow);
   const waitingFor = awaitingApproval ? "approval" : awaitingAnswers ? "answers" : undefined;
   return useMemo<RunHoldingSignals>(() => {
     const retry: RunRetry | undefined =
       retryKind === "retrying" ? { kind: "retrying", errorStatus: retryErrorStatus }
         : retryKind === "rate-limited" ? { kind: "rate-limited" }
           : undefined;
-    return { stopPending, compacting, retry, ...(waitingFor ? { waitingFor } : {}), ...(planning ? { planning } : {}), ...(exiting ? { exiting: true } : {}) };
-  }, [stopPending, compacting, retryKind, retryErrorStatus, waitingFor, planning, exiting]);
+    return { stopPending, compacting, retry, ...(waitingFor ? { waitingFor } : {}), ...(planning ? { planning } : {}), ...(delegatingNow ? { delegating: true } : {}), ...(exiting ? { exiting: delegatedOnlyPhase ? "delegated" : "turn" } : {}) };
+  }, [stopPending, compacting, retryKind, retryErrorStatus, waitingFor, planning, delegatingNow, exiting, delegatedOnlyPhase]);
 }
 
 /** Reads and normalizes the transcript data needed by the conversation viewport. */

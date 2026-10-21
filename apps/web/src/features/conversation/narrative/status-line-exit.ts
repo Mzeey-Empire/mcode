@@ -27,3 +27,16 @@ export function useStatusLineExit(threadId: string | null | undefined, live: boo
 
   return exiting;
 }
+
+/**
+ * Whether the latest live phase on this thread had delegated work but no own-turn activity.
+ * Retains the result while idle on the same thread.
+ */
+export function useDelegatedOnlyPhase(threadId: string | null | undefined, ownLive: boolean, delegating: boolean): boolean {
+  const live = ownLive || delegating;
+  const delegatedOnly = delegating && !ownLive;
+  const [last, setLast] = useState({ threadId, delegatedOnly });
+  if (live && (last.threadId !== threadId || last.delegatedOnly !== delegatedOnly)) setLast({ threadId, delegatedOnly });
+  if (live) return delegatedOnly;
+  return last.threadId === threadId && last.delegatedOnly;
+}

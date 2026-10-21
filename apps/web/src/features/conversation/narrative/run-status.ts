@@ -16,8 +16,10 @@ export interface RunHoldingSignals {
   waitingFor?: "approval" | "answers";
   /** The server is writing the plan after the questions were answered. */
   planning?: boolean;
-  /** The status line just went off and keeps its row while the exit fade plays. */
-  exiting?: boolean;
+  /** Tasks this thread delegated are unfinished now. */
+  delegating?: boolean;
+  /** The status line just went off and keeps its row while the exit fade plays; `"delegated"` means the last live phase was held only by delegated tasks, so that shape fades. */
+  exiting?: "turn" | "delegated";
 }
 
 /** Everything the status line needs to pick one label for a running turn. */
