@@ -1701,6 +1701,13 @@ describe("subagent count during overlapping tool calls", () => {
     );
   });
 
+  it("keeps the provider that wrote a streamed reply", () => {
+    useThreadStore.getState().handleAgentEvent({ type: "message", threadId: "thread-1", messageId: "answer-1", content: "Done.", provider: "codex" } as AgentEvent);
+
+    const rec = readThreadField("thread-1", (record) => record);
+    expect(rec.messages.find((message) => message.id === "answer-1")?.provider).toBe("codex");
+  });
+
   it("does not let goal receipts claim current turn response identity", () => {
     useThreadStore.getState().handleAgentEvent({ type: "message", threadId: "thread-1", messageId: "answer-1", content: "The rendering bug is fixed." } as AgentEvent);
 

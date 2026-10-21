@@ -929,4 +929,9 @@ export interface McodeTransport {
     markdown: string;
     meta: HandoffAuditMetadata;
   } | null>;
+  /** Reads one handoff audit by id, such as the one a provider-switch marker names. Null when it is missing. */
+  readHandoff(threadId: string, handoffId: string): Promise<{
+    meta: HandoffAuditMetadata;
+    history: string;
+  } | null>;
 }
