@@ -26,7 +26,7 @@ export { handoffItemsFromMessages } from "./items.js";
 export { loadHandoffMessages } from "./message-adapter.js";
 
 /** Select and render history, or report an exhausted preamble budget. */
-export { HandoffBudgetExhaustedError, parseHandoffMessages, selectHandoffHistory } from "./select.js";
+export { HandoffBudgetExhaustedError, selectHandoffHistory } from "./select.js";
 
 /** Budgeted, fenced history shared by every handoff kind. */
 export { buildFencedHandoff } from "./fenced-handoff.js";

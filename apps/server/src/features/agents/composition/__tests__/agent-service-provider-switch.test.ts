@@ -15,6 +15,7 @@ import type {
   TurnRequest,
 } from "@mcode/contracts";
 import { ProviderTurnError, SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
+import { resolveHandoffDir } from "@mcode/shared";
 
 import { setupContainer } from "../../../../application/composition/container.js";
 import { mapRouteError } from "../../../../application/transport/ws-router.js";
@@ -127,9 +128,9 @@ describe("provider switch on send", () => {
     expect(rows.map((row) => row.role)).toEqual(["user", "assistant", "user", "system", "assistant"]);
     expect(rows.map((row) => row.sequence)).toEqual([1, 2, 3, 4, 5]);
     expect(thread().providers_used).toEqual(["claude", "codex"]);
-    const audit = await container.resolve(HandoffStorage).read(threadId, handoffId);
-    expect(audit?.meta).toMatchObject({ kind: "switch", fromProvider: "claude", toProvider: "codex" });
-    expect(audit?.history).toContain("my project is called Heliotrope");
+    const audit = NodeFS.readFileSync(NodePath.join(resolveHandoffDir(temporaryDirectory!, threadId, handoffId), "handoff.md"), "utf8");
+    expect(audit).toContain("kind: switch");
+    expect(audit).toContain("my project is called Heliotrope");
   });
 
   it("forks onto Codex with inline parent context without calling the parent's provider", async () => {

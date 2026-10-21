@@ -77,16 +77,6 @@ describe("HandoffStorage", () => {
     expect(await storage.readLatest("child")).toBeNull();
   });
 
-  it("reads the requested audit through RPC rather than the latest and preserves history whitespace", async () => {
-    const first = await storage.writeHandoffAudit("child", "01ARZ3NDEKTSV4RRFFQ69G5FAV", { ...audit, history: "  Earlier history\n" });
-    await storage.writeHandoffAudit("child", "01ARZ3NDEKTSV4RRFFQ69G5FAW", { ...audit, history: "Latest history" });
-    const result = await routeHandoffRpc("handoff.read", { threadId: "child", handoffId: first }, { handoffStorage: storage });
-    expect(WS_METHODS()["handoff.read"].result.parse(result)).toMatchObject({
-      meta: { kind: "switch", fromProvider: "claude", toProvider: "codex" }, history: "  Earlier history\n",
-    });
-    expect(await storage.read("absent", first)).toBeNull();
-  });
-
   it.each(["..", "../escape", "child/../../escape", "child\\..\\..\\escape", "has..dots"])(
     "refuses unsafe thread identity %s even when an audit exists at its resolved target", async (threadId) => {
       const id = await storage.writeHandoffAudit("child", newHandoffUlid(), audit);
@@ -94,20 +84,7 @@ describe("HandoffStorage", () => {
       const target = NodePath.join(dir, "threads", threadId, "handoffs", id);
       await NodeFSPromises.mkdir(target, { recursive: true });
       await NodeFSPromises.writeFile(NodePath.join(target, "handoff.md"), markdown);
-      expect(await storage.read(threadId, id)).toBeNull();
       await expect(storage.readLatest(threadId)).rejects.toThrow();
     },
   );
-
-  it("refuses malformed handoff IDs with a real audit at the traversal target", async () => {
-    const id = await storage.writeHandoffAudit("child", newHandoffUlid(), audit);
-    const traversalTarget = NodePath.join(dir, "threads", "child", id);
-    await NodeFSPromises.mkdir(traversalTarget, { recursive: true });
-    await NodeFSPromises.copyFile(NodePath.join(dir, "threads", "child", "handoffs", id, "handoff.md"), NodePath.join(traversalTarget, "handoff.md"));
-    expect(await storage.read("child", `../${id}`)).toBeNull();
-    const target = NodePath.join(dir, "threads", "child", "handoffs", "invalid-id");
-    await NodeFSPromises.mkdir(target, { recursive: true });
-    await NodeFSPromises.copyFile(NodePath.join(dir, "threads", "child", "handoffs", id, "handoff.md"), NodePath.join(target, "handoff.md"));
-    expect(await storage.read("child", "invalid-id")).toBeNull();
-  });
 });

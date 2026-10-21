@@ -3,13 +3,12 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { injectable } from "tsyringe";
 import { parseDocument } from "yaml";
-import { HandoffAuditMetadataSchema, type HandoffAuditMetadata, type HandoffTranscriptMessage } from "@mcode/contracts";
+import { HandoffAuditMetadataSchema, type HandoffAuditMetadata } from "@mcode/contracts";
 import {
   getMcodeDir,
   resolveHandoffDir,
   resolveThreadHandoffsDir,
 } from "@mcode/shared";
-import { parseHandoffMessages } from "../v2/index.js";
 
 /** The selected history and provenance saved after a switch, fork, or recovery. */
 export type HandoffAudit = Omit<HandoffAuditMetadata, "schemaVersion" | "coveredSequences" | "omittedSequences" | "droppedOptions"> & {
@@ -30,30 +29,6 @@ export class HandoffStorage {
     const storage = new HandoffStorage();
     storage.mcodeDirFn = overrides.mcodeDirFn;
     return storage;
-  }
-
-  /** Returns the requested v2 audit and its exact replay history, or null for invalid or missing artifacts. */
-  async read(
-    threadId: string,
-    handoffId: string,
-  ): Promise<{ meta: HandoffAuditMetadata; history: string; messages: HandoffTranscriptMessage[] } | null> {
-    let dir: string;
-    try {
-      dir = resolveHandoffDir(this.mcodeDirFn(), threadId, handoffId);
-    } catch {
-      return null;
-    }
-    let markdown: string;
-    try {
-      markdown = await NodeFSPromises.readFile(NodePath.join(dir, "handoff.md"), "utf8");
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
-      throw error;
-    }
-    const meta = readAuditMetadata(markdown);
-    if (!meta) return null;
-    const history = markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n(?:\r?\n)?/, "").replace(/\n$/, "");
-    return { meta, history, messages: parseHandoffMessages(history) };
   }
 
   /** Returns the newest v2 audit, ignoring older artifact formats on disk. */

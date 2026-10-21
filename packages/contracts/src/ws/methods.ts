@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { HandoffAuditMetadataSchema, HandoffTranscriptMessageSchema } from "../handoff.js";
+import { HandoffAuditMetadataSchema } from "../handoff.js";
 import { BuildStageSchema } from "../build-stage.js";
 import { GitSearchCommitsParamsSchema, GitSearchCommitsResultSchema } from "../git.js";
 import {
@@ -49,7 +49,7 @@ import type {
 } from "../models/workspace-environment.js";
 import { ThreadSchema, RecentThreadSchema } from "../models/thread.js";
 import { ApprovalReviewModeSchema, DevinModeSchema, ThreadModeSchema, PermissionModeSchema, InteractionModeSchema, OrchestrationModeSchema } from "../models/enums.js";
-import { HandoffIdSchema, PaginatedMessagesSchema } from "../models/message.js";
+import { PaginatedMessagesSchema } from "../models/message.js";
 import { MessageMentionsSchema } from "../models/mention.js";
 import { SelectedTextCommentsSchema } from "../models/selected-text-comment.js";
 import { ConversationNarrativeBatchSchema, ConversationPageSchema } from "../models/conversation-page.js";
@@ -1614,17 +1614,6 @@ export const WS_METHODS = lazySchema(() => ({
     result: z.object({
       markdown: z.string(),
       meta: HandoffAuditMetadataSchema(),
-    }).nullable(),
-  },
-  /** Read one handoff audit by id, such as the one a provider-switch marker names. Null when it is missing. */
-  "handoff.read": {
-    params: z.object({ threadId: z.string().min(1).max(256), handoffId: HandoffIdSchema() }).strict(),
-    result: z.object({
-      meta: HandoffAuditMetadataSchema(),
-      /** The rendered history exactly as the target received it. */
-      history: z.string(),
-      /** The messages inside `history`, in order; empty when the history has no item boundary. */
-      messages: z.array(HandoffTranscriptMessageSchema()),
     }).nullable(),
   },
   /** Generate a stateless one-line conversational recap from caller-supplied messages. */

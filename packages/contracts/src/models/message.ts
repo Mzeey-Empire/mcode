@@ -84,7 +84,7 @@ export const HandoffIdSchema = lazySchema(() => z.string().regex(/^[0-9A-HJKMNP-
 export const ProviderSwitchMarkerSchema = lazySchema(() => z.object({
   fromProvider: z.string().min(1).max(64),
   toProvider: z.string().min(1).max(64),
-  /** The audit of the history the new provider received, readable through `handoff.read`. */
+  /** Directory id of the stored audit of the history the new provider received. */
   handoffId: HandoffIdSchema(),
 }).strict());
 
