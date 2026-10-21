@@ -814,6 +814,65 @@ describe("CodexEventMapper", () => {
     });
   });
 
+  it.each([
+    {
+      name: "marks an MCP rejection with text content as failed",
+      status: "failed", result: { content: [{ type: "text", text: "Rejected" }] }, error: null,
+      expectedOutput: "Rejected", expectedError: true,
+    },
+    {
+      name: "extracts text from a successful MCP object result",
+      status: "completed", result: { content: [{ type: "text", text: "hello" }] }, error: null,
+      expectedOutput: "hello", expectedError: false,
+    },
+    {
+      name: "extracts the message from an MCP transport error",
+      status: "failed", result: null, error: { message: "boom" },
+      expectedOutput: "boom", expectedError: true,
+    },
+    {
+      name: "joins MCP text blocks while ignoring other content",
+      status: "completed", result: { content: [{ type: "text", text: "first" }, { type: "image", data: "image" }, { type: "text", text: "second" }] }, error: null,
+      expectedOutput: "first\nsecond", expectedError: false,
+    },
+    {
+      name: "serializes structured MCP content when no text blocks exist",
+      status: "completed", result: { content: [], structuredContent: { count: 2 } }, error: null,
+      expectedOutput: '{"count":2}', expectedError: false,
+    },
+    {
+      name: "returns empty output when the MCP result is absent",
+      status: "completed", result: null, error: null,
+      expectedOutput: "", expectedError: false,
+    },
+    {
+      name: "preserves legacy MCP result strings",
+      status: "completed", result: "legacy output", error: null,
+      expectedOutput: "legacy output", expectedError: false,
+    },
+    {
+      name: "preserves legacy MCP error strings",
+      status: "completed", result: null, error: "legacy error",
+      expectedOutput: "legacy error", expectedError: true,
+    },
+  ])("$name", ({ status, result, error, expectedOutput, expectedError }) => {
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: { type: "mcpToolCall", id: "mcp-result", server: "mcode", tool: "delegate_task", status, result, error },
+      },
+    });
+
+    expect(requireToolResult(events).event).toEqual({
+      type: "toolResult",
+      threadId: "test-thread",
+      toolCallId: "mcp-result",
+      output: expectedOutput,
+      isError: expectedError,
+    });
+  });
+
   it("keeps completed-only commandExecution fallback when no item/started arrived", () => {
     const events = mapper.mapNotification({
       jsonrpc: "2.0",
