@@ -51,7 +51,7 @@ export interface OverviewHeaderAction {
 export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "save-recovery", section: "activity", order: 10, subjects: ["thread"], Entry: SaveRecoveryEntryBlock },
   { id: "changes", section: "activity", order: 20, subjects: ["thread"], Entry: ChangesEntryBlock, State: ChangesEntryState },
-  { id: "repository", section: "activity", order: 30, subjects: ["thread"], Entry: RepositoryEntryBlock, State: RepositoryEntryState },
+  { id: "repository", section: "lane", order: 95, subjects: ["thread"], Entry: RepositoryEntryBlock, State: RepositoryEntryState },
   { id: "tasks", section: "activity", order: 40, subjects: ["thread"], Entry: TasksEntryBlock },
   { id: "plan", section: "activity", order: 45, subjects: ["thread"], Entry: PlanEntryBlock },
   { id: "local", section: "lane", order: 50, subjects: ["thread"], Entry: LocalEntryBlock, State: LocalEntryState },

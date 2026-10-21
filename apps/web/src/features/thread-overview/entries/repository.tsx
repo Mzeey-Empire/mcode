@@ -4,9 +4,10 @@ import type { OverviewSubject } from "@/features/thread-overview/overview-subjec
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { getTransport, type McodeTransport, type Thread } from "@/transport";
-import { ExternalLink, GitBranch } from "lucide-react";
+import { GitBranch } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useState } from "react";
-import { LoadStatus, ThreadOverviewTooltipButton } from "@/features/thread-overview/overview-row";
+import { LoadStatus, OVERVIEW_ROW_CLASS, OverviewRowIcon, ThreadOverviewTooltipButton } from "@/features/thread-overview/overview-row";
 
 type ThreadOverviewRepositoryTransport = Pick<McodeTransport, "getRemoteUrl">;
 
@@ -100,37 +101,28 @@ function ThreadOverviewRepositoryRow({
   if (!canOpen) return null;
 
   return (
-    <div className="grid animate-thread-overview-row-reveal">
-      <div className="min-h-0 overflow-hidden">
-        <div
-          data-testid="thread-overview-repository"
-          className="flex w-full flex-col gap-1.5 px-3 py-1.5"
+    <div data-testid="thread-overview-repository">
+      <ThreadOverviewTooltipButton content={repository.webUrl ?? label}>
+        <Button
+          variant="ghost"
+          size="compact"
+          type="button"
+          onClick={onOpen}
+          data-testid="thread-overview-repository-link"
+          aria-label={`Open ${label} on remote`}
+          className={cn(OVERVIEW_ROW_CLASS, "justify-start text-ink/75")}
         >
-          <span className="font-mono text-xs font-medium uppercase leading-tight tracking-[0.18em] text-muted">
-            REPOSITORY
-          </span>
-          <ThreadOverviewTooltipButton content={repository.webUrl ?? label}>
-            <Button
-              variant="ghost"
-              size="compact"
-              type="button"
-              onClick={onOpen}
-              data-testid="thread-overview-repository-link"
-              aria-label={`Open ${label} on remote`}
-              className="-mx-1.5 h-7 min-w-0 justify-start gap-1.5 rounded-md px-1.5 text-left text-primary hover:bg-hover/50 hover:text-primary focus-visible:ring-inset"
-            >
-              <SiteFavicon
-                src={repository.faviconUrl}
-                frameTestId="thread-overview-repository-favicon-frame"
-                imageTestId="thread-overview-repository-favicon"
-                fallback={<GitBranch size={14} className="shrink-0 text-muted" />}
-              />
-              <span className="text-fade text-xs font-medium">{label}</span>
-              <ExternalLink size={12} aria-hidden className="shrink-0 text-muted" />
-            </Button>
-          </ThreadOverviewTooltipButton>
-        </div>
-      </div>
+          <OverviewRowIcon>
+            <SiteFavicon
+              src={repository.faviconUrl}
+              frameTestId="thread-overview-repository-favicon-frame"
+              imageTestId="thread-overview-repository-favicon"
+              fallback={<GitBranch size={14} className="shrink-0 text-muted" />}
+            />
+          </OverviewRowIcon>
+          <span className="text-fade font-medium">{label}</span>
+        </Button>
+      </ThreadOverviewTooltipButton>
     </div>
   );
 }
@@ -207,7 +199,7 @@ function RepositoryEntry() {
   />);
 }
 
-/** Repository block in the thread overview, preserving its existing row position. */
+/** Lane row in the thread overview that links the thread's remote repository. */
 export function RepositoryEntryBlock({ subject }: { subject: OverviewSubject }) {
   return subject.kind === "thread" ? <RepositoryEntry /> : null;
 }
