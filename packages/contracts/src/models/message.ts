@@ -146,7 +146,7 @@ export type ThreadProviderSwitchedEvent = {
   threadId: string;
   provider: string;
   model: string;
-  /** Every provider the thread has run on, in first-used order. */
+  /** Every provider the thread has run on, least recently used first, so the current provider is last. */
   providersUsed: string[];
   marker: Message;
 };

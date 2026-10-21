@@ -1831,10 +1831,7 @@ function scheduleThreadRowPrefetch(thread: WorkspaceThread) {
   schedulePrefetch(thread.id);
 }
 
-/**
- * The provider that ran the thread before `current`: the latest other entry in
- * `providersUsed`, or null when the thread never switched.
- */
+/** The provider that ran the thread before `current`, or null when the thread never switched. */
 function previousProvider(current: string, providersUsed: readonly string[] | null | undefined): string | null {
   if (!providersUsed || providersUsed.length < 2) return null;
   return [...providersUsed].reverse().find((provider) => provider !== current) ?? null;

@@ -47,7 +47,7 @@ export const ThreadSchema = lazySchema(() =>
   model: z.string().nullable(),
   /** The AI provider used by this thread (e.g. "claude", "codex"). */
   provider: z.string().default("claude"),
-  /** Every provider the thread has run on, in first-used order. Null until the thread first switches provider. */
+  /** Every provider the thread has run on, least recently used first, so the current provider is last. Null until the thread first switches provider. */
   providers_used: z.array(z.string().max(64)).max(16).nullable().optional(),
   deleted_at: z.string().nullable(),
   /** Server timestamp for explicit user completion. Independent from runtime status. */

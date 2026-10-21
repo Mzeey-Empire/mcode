@@ -1157,8 +1157,8 @@ export class ThreadStore {
     return this.db.transaction(() => {
       const thread = this.findById(id);
       if (!thread) throw new Error(`Thread not found: ${id}`);
-      const providersUsed = thread.providers_used ?? [fromProvider];
-      if (!providersUsed.includes(settings.provider)) providersUsed.push(settings.provider);
+      const priorProviders = (thread.providers_used ?? [fromProvider]).filter((provider) => provider !== settings.provider);
+      const providersUsed = [...priorProviders, settings.provider];
       const row = this.providerSessions.find(id, settings.provider);
       const sdkSessionId = row && row.sessionId !== staleSessionId ? row.sessionId : null;
       runChanges(this.orm

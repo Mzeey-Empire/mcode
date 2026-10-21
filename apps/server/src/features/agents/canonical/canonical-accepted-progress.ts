@@ -140,7 +140,6 @@ export class CanonicalAcceptedProgress {
 
   /** Reserve the switch marker's position before the target's assistant can be accepted. */
   reserveProviderSwitchMarker(threadId: string, sequence: number): number {
-    // The marker is saved only after the target responds, but its assistant may already be accepted by then.
     const thread = this.thread(threadId);
     thread.messageSequence = Math.max(thread.messageSequence, sequence + 1);
     return sequence;
