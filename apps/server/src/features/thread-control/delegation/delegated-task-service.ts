@@ -325,6 +325,7 @@ function rejection(code: ThreadControlError["code"], message: string, retryable 
 function notFound(): TaskRejection { return rejection("not_found", "Task not found"); }
 
 function rosterStatus(state: TaskState): SubagentStatus {
+  if (state.status === "waiting" && (state.reason === "needs_input" || state.reason === "setup_blocked")) return "waiting";
   if (state.status !== "finished") return "running";
   switch (state.outcome) {
     case "completed": return "done";

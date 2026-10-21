@@ -17,7 +17,7 @@ import { useThreadRecord } from "@/stores/thread-selectors";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
 import { useSubagentRoster, useSubagentRosterStore } from "../state/subagentRosterStore";
-import { subagentStatusLabel } from "../subagent-status";
+import { isLiveSubagentStatus, subagentStatusLabel } from "../subagent-status";
 import { elapsed, useNow } from "../live-duration";
 import { subagentKind } from "../subagent-kind";
 import { openSubagentDetail, openSubagentsPanel } from "./open-subagent-detail";
@@ -60,7 +60,7 @@ function DetailBody({ children }: { readonly children: ReactNode }) {
 }
 
 function DetailHeader({ threadId, entry }: { readonly threadId: string; readonly entry: SubagentRosterEntry }) {
-  const running = entry.status === "running";
+  const running = isLiveSubagentStatus(entry.status);
   const now = useNow(running);
   const kind = subagentKind(entry);
   const duration = elapsed(entry, now);
@@ -169,7 +169,7 @@ function StepsTier({ threadId, entry, roster }: {
     {error && <p role="alert" className="flex items-center gap-2 text-sm text-ink">
       Couldn't load subagent activity <Button variant="ghost" size="compact" onClick={() => setRetry((value) => value + 1)}>Retry</Button>
     </p>}
-    {detail && <StepsDetail detail={detail} running={entry.status === "running"} />}
+    {detail && <StepsDetail detail={detail} running={isLiveSubagentStatus(entry.status)} />}
   </>;
 }
 

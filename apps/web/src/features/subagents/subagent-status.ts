@@ -1,11 +1,16 @@
 import type { SubagentRosterEntry, SubagentStatus } from "@mcode/contracts";
 
 const LIST_WORDS: Record<SubagentStatus, string> = {
-  running: "Running", done: "Done", failed: "Failed", stopped: "Stopped",
+  running: "Running", waiting: "Waiting", done: "Done", failed: "Failed", stopped: "Stopped",
 };
 const CHIP_WORDS: Record<SubagentStatus, string> = {
-  running: "working", done: "finished", failed: "failed", stopped: "stopped",
+  running: "working", waiting: "waiting for you", done: "finished", failed: "failed", stopped: "stopped",
 };
+
+/** Whether a child is still live: working, or blocked on the user's answer. */
+export function isLiveSubagentStatus(status: SubagentStatus): boolean {
+  return status === "running" || status === "waiting";
+}
 
 /** Shared list and rail status copy. */
 export function subagentStatusLabel(status: SubagentStatus): string {
@@ -19,7 +24,7 @@ export function subagentChipStatus(status: SubagentStatus): string {
 
 /** Overview counts treat every terminal outcome as finished work. */
 export function subagentOverviewCounts(entries: readonly SubagentRosterEntry[]): { active: number; done: number } {
-  const active = entries.filter((entry) => entry.status === "running").length;
+  const active = entries.filter((entry) => isLiveSubagentStatus(entry.status)).length;
   return { active, done: entries.length - active };
 }
 

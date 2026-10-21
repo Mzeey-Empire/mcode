@@ -2,8 +2,11 @@ import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderIdSchema } from "./settings.js";
 
-/** One normalized subagent outcome shared by every surface. */
-export const SubagentStatusSchema = z.enum(["running", "done", "failed", "stopped"]);
+/**
+ * One normalized subagent outcome shared by every surface.
+ * `waiting` is a live child blocked on the user's answer.
+ */
+export const SubagentStatusSchema = z.enum(["running", "waiting", "done", "failed", "stopped"]);
 /** One normalized subagent outcome shared by every surface. */
 export type SubagentStatus = z.infer<typeof SubagentStatusSchema>;
 /** Detail supported by this entry's persisted evidence. */
