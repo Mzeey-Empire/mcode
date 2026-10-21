@@ -377,6 +377,14 @@ describe("workspaceStore completion lifecycle", () => {
     });
   });
 
+  it("lists a thread first when a lifecycle push introduces it", () => {
+    useWorkspaceStore.setState({ threads: [makeThread({ id: "older" })] });
+
+    useWorkspaceStore.getState().applyThreadLifecycle(makeThread({ id: "detached" }));
+
+    expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual(["detached", "older"]);
+  });
+
   it("never lists a delegated thread from a lifecycle push and drops one already listed", () => {
     const delegated = makeThread({ id: "delegated", delegation_coordinator_thread_id: "coordinator" });
 

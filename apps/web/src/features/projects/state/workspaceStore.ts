@@ -1729,7 +1729,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       return {
         threads: existing
           ? state.threads.map((candidate) => candidate.id === thread.id ? nextThread : candidate)
-          : [...state.threads, nextThread],
+          : [nextThread, ...state.threads],
       };
     });
     if (thread.user_completed_at !== null) {
