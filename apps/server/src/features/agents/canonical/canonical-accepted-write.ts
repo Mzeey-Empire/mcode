@@ -116,7 +116,7 @@ export class CanonicalAcceptedEventWrite {
     if (existing && existing.role !== "user") throw new Error("Accepted steer message conflicts with an existing message");
     if (!existing) {
       this.messages.create(threadId, "user", message.content, message.sequence, undefined, undefined, undefined,
-        undefined, false, message.mentions ?? undefined, undefined, undefined, message.id);
+        undefined, false, message.mentions ?? undefined, undefined, undefined, message.id, undefined, message.systemNotice ?? undefined);
     }
     this.steers.markDelivered(message.id);
   }

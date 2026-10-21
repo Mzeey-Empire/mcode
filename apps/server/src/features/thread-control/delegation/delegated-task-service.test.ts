@@ -4,8 +4,8 @@ import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { container } from "tsyringe";
-import { WS_CHANNELS } from "@mcode/contracts";
-import type { AgentStopResult, ApprovalRequestEnvelope, DelegateTaskResult, TaskStatusResult, IAgentProvider, IProviderRegistry } from "@mcode/contracts";
+import { WS_CHANNELS, SystemNoticeMetadataSchema } from "@mcode/contracts";
+import type { AgentStopResult, ApprovalRequestEnvelope, DelegateTaskResult, TaskStatusResult, IAgentProvider, IProviderRegistry, TurnSteerOutcome, TurnStopCause } from "@mcode/contracts";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import { createOriginFixture, git } from "../../projects/git/__tests__/start-from-origin-fixture.js";
 import { ThreadRepo } from "../persistence/thread-repo.js";
@@ -54,6 +54,11 @@ import { DelegationTargetResolver } from "../../agents/collaboration/delegation-
 import { DelegatedTaskRepo } from "./delegated-task-repo.js";
 import { DelegatedTaskService } from "./delegated-task-service.js";
 import { TurnResumeScheduleStore } from "../../agents/recovery/turn-resume-schedule-store.js";
+import { CoordinatorWakeService, type CoordinatorWakeClock } from "./coordinator-wake-service.js";
+import { TurnSteerService } from "../../agents/steering/turn-steer-service.js";
+import { TurnSteerRepo } from "../../agents/steering/persistence/turn-steer-repo.js";
+import type { SteerableTurn, TurnSteerRuntime } from "../../agents/steering/turn-steer-runtime-port.js";
+import type { PreparedTurnDispatch, SendMessageCommand } from "../../agents/turns/turn-admission-dispatch-coordinator.js";
 import { SubagentRosterService } from "../../agents/collaboration/subagent-roster-service.js";
 import { NarrativeStore } from "../../agents/conversation/narrative/narrative-store.js";
 import { ToolCallRecordRepo } from "../../agents/tools/persistence/tool-call-record-repo.js";
@@ -205,6 +210,337 @@ function requireTask(result: DelegateTaskResult | TaskStatusResult) {
   if ("status" in result) throw new Error(`Task was rejected: ${result.error.code}: ${result.error.message}`);
   return result;
 }
+
+type Fixture = Awaited<ReturnType<typeof harness>>;
+
+async function startCoordinator(f: Fixture) {
+  const turnId = NodeCrypto.randomUUID();
+  await f.canonical.startParentTurn({
+    thread: { id: f.coordinator.id, workspaceId: f.workspace.id, providerId: "codex", createdAt: new Date().toISOString() },
+    turnId, executionId: NodeCrypto.randomUUID(), permissionMode: "full", providerIdentities: [],
+    userMessage: { kind: "create", messageId: NodeCrypto.randomUUID(), content: "Human turn", sequence: 1 },
+  });
+  f.active.add(f.coordinator.id);
+  return turnId;
+}
+
+async function finish(f: Fixture, threadId: string, turnId: string, outcome: "completed" | "interrupted" | "cancelled" = "completed",
+  stop: TurnStopCause = { by: "user" }, summary = "Review complete") {
+  const turn = f.canonical.loadTurn(turnId);
+  if (!turn?.executionId) throw new Error("Expected turn");
+  const message = outcome === "completed" ? await f.messages.create(threadId, "assistant", summary, 2) : null;
+  await f.canonical.finishParentTurnBatched({ threadId, turnId, executionId: turn.executionId, providerId: "codex",
+    providerIdentities: [], outcome, projection: { message, narrative: [] },
+    ...(outcome === "cancelled" ? { ending: { stop } } : {}),
+    ...(outcome === "interrupted" ? { ending: { cause: "app_closed" } } : {}),
+  });
+  f.active.delete(threadId);
+}
+
+async function wakeHarness(f: Fixture) {
+  await f.threads.updateSettings(f.coordinator.id, { permission_mode: "full", model: "gpt-test" });
+  const timers = new Map<number, { callback: () => Promise<void>; delay: number }>();
+  let timerId = 0;
+  const clock: CoordinatorWakeClock = {
+    setTimeout: (callback, delay) => { const id = ++timerId; timers.set(id, { callback, delay }); return id; },
+    clearTimeout: (id) => { if (typeof id === "number") timers.delete(id); },
+  };
+  const steers = new TurnSteerRepo(f.runtime.reader, f.runtime.writer);
+  const state: { steerable: boolean; response: TurnSteerOutcome; busyNext: boolean; sends: number;
+    directives: PreparedTurnDispatch["threadControl"][]; sendGate: Promise<void> | null } = {
+    steerable: true, response: { outcome: "accepted" }, busyNext: false, sends: 0, directives: [], sendGate: null,
+  };
+  const runningTurn = (threadId: string): SteerableTurn | null => {
+    if (!f.active.has(threadId)) return null;
+    const turn = f.canonical.loadLatestTurn(threadId);
+    if (!turn?.executionId) return null;
+    return { turnExecutionId: turn.executionId, workspaceId: f.workspace.id, providerId: "codex",
+      steer: state.steerable ? async () => state.response : null };
+  };
+  const runtime: TurnSteerRuntime = { runningTurn, recordDelivered: async (message) => {
+    await f.messages.create(message.threadId, "user", message.content, 3, undefined, undefined, undefined,
+      undefined, false, undefined, undefined, undefined, message.messageId, undefined, message.systemNotice ?? undefined);
+    await steers.markDelivered(message.messageId);
+  } };
+  const steer = new TurnSteerService(steers, runtime, new FileService(f.workspaces, f.threads, f.worktrees, f.executor, f.host));
+  const sendMessage = async (command: SendMessageCommand) => {
+    state.sends += 1;
+    if (state.sendGate) await state.sendGate;
+    if (state.busyNext) {
+      state.busyNext = false;
+      await startCoordinator(f);
+      throw new Error("busy");
+    }
+    const result = await f.admission.admit(command, f.authority);
+    if (result.kind === "dispatch") {
+      f.active.add(command.threadId);
+      state.directives.push(result.threadControl);
+    }
+  };
+  const deps = { tasks: f.service, threads: f.threads, canonical: f.canonical, messages: f.messages,
+    steers, steer, runtime: { runningTurn, isActive: (id: string) => f.active.has(id), sendMessage } };
+  const wake = new CoordinatorWakeService(deps, clock);
+  disposables.push(() => wake.dispose());
+  const tick = async () => {
+    const current = [...timers.entries()];
+    for (const [id, timer] of current) { timers.delete(id); await timer.callback(); }
+  };
+  const messages = () => f.runtime.database.query<{ content: string; system_notice: string }, [string]>(
+    "SELECT content, system_notice FROM messages WHERE thread_id = ? AND json_extract(system_notice, '$.kind') = 'delegated-task' ORDER BY rowid",
+  ).all(f.coordinator.id);
+  return { wake, state, timers, tick, messages, deps, clock, steers, sendMessage };
+}
+
+describe("Coordinator task notices", { timeout: 30_000 }, () => {
+  it("grants full thread-control on a wake with default permission and preserves saved selections", async () => {
+    const f = await harness();
+    await f.threads.updateSettings(f.coordinator.id, { permission_mode: "full", model: "gpt-test", reasoning_level: "high" });
+    const admitted = await f.admission.admit({ threadId: f.coordinator.id, content: "Review complete.",
+      permissionMode: "default", delegationWake: true }, f.authority);
+    if (admitted.kind !== "dispatch") throw new Error("Expected wake admission");
+    expect(admitted.threadControl).toMatchObject({ permissionMode: "full" });
+    expect(f.canonical.loadLatestTurn(f.coordinator.id)?.permissionMode).toBe("full");
+    expect(f.threads.findById(f.coordinator.id)).toMatchObject({ model: "gpt-test", reasoning_level: "high", permission_mode: "full" });
+  });
+
+  it("bounds summary detail and the whole message while keeping the task_status footer", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    for (let index = 0; index < 4; index += 1) {
+      const task = requireTask(await f.service.delegate(f.source, { ...f.input, clientRequestId: `verbose-${index}`, isolation: "shared" }));
+      if (!task.threadId) throw new Error("Expected child");
+      await finish(f, task.threadId, task.taskId, "completed", { by: "user" }, "A".repeat(4_000) + "B".repeat(4_000));
+    }
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+    expect(w.messages()[0]?.content.length).toBe(16_000);
+    expect(w.messages()[0]?.content).not.toContain("B".repeat(20));
+    expect(w.messages()[0]?.content.endsWith("Use task_status for detail.")).toBe(true);
+  });
+
+  it("reruns once for task changes during an in-flight admission", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const first = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    const second = requireTask(await f.service.delegate(f.source, { ...f.input, clientRequestId: "second", isolation: "shared" }));
+    if (!first.threadId || !second.threadId) throw new Error("Expected children");
+    await finish(f, first.threadId, first.taskId);
+    let release = () => {};
+    w.state.sendGate = new Promise<void>((resolve) => { release = resolve; });
+    w.wake.nudge(f.coordinator.id);
+    const inFlight = w.tick();
+    await vi.waitFor(() => expect(w.state.sends).toBe(1));
+    await finish(f, second.threadId, second.taskId);
+    w.wake.nudge(f.coordinator.id);
+    w.wake.nudge(f.coordinator.id);
+    expect(w.timers.size).toBe(0);
+    release();
+    await inFlight;
+    expect(w.timers.size).toBe(1);
+    await w.tick();
+    expect(w.messages()).toHaveLength(2);
+    expect(w.state.sends).toBe(1);
+    expect(w.timers.size).toBe(0);
+  });
+
+  it("reports an interrupted attempt at boot, then reports its completed replacement", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId, "interrupted");
+    await w.wake.recoverAtStartup();
+    await w.tick();
+    expect(w.messages().map((row) => SystemNoticeMetadataSchema().parse(JSON.parse(row.system_notice)).delegatedTasks?.[0]?.status)).toEqual(["interrupted"]);
+    const original = f.canonical.loadTurn(task.taskId);
+    if (!original?.executionId) throw new Error("Expected original execution");
+    const attemptId = NodeCrypto.randomUUID();
+    await f.canonical.startParentTurn({
+      thread: { id: task.threadId, workspaceId: f.workspace.id, providerId: "codex", createdAt: new Date().toISOString() },
+      turnId: attemptId, executionId: NodeCrypto.randomUUID(), retryOfExecutionId: original.executionId,
+      permissionMode: "full", providerIdentities: [],
+      userMessage: { kind: "create", messageId: NodeCrypto.randomUUID(), content: "Resume", sequence: 3 },
+    });
+    await finish(f, task.threadId, attemptId, "completed", { by: "user" }, "Replacement complete");
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages().map((row) => SystemNoticeMetadataSchema().parse(JSON.parse(row.system_notice)).delegatedTasks?.[0]?.status)).toEqual(["interrupted", "completed"]);
+    expect(w.messages()[1]?.content).toContain("Replacement complete");
+    expect(f.tasks.get(task.taskId)?.noticeDelivered).toBe(`finished:completed:${attemptId}`);
+  });
+
+  it("holds a usage-limit interruption while its auto-resume is scheduled", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    const turn = f.canonical.loadTurn(task.taskId);
+    if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted child");
+    await f.canonical.finishParentTurnBatched({ threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
+      providerId: "codex", providerIdentities: [], outcome: "interrupted",
+      ending: { cause: "usage_limit", usageLimit: { resetsAt: "2030-01-01T00:00:00.000Z" } },
+      projection: { message: null, narrative: [] } });
+    await f.resumes.upsert({ threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
+      runAt: "2030-01-01T00:00:00.000Z", createdAt: new Date().toISOString() });
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toEqual([]);
+    await f.resumes.delete(task.threadId);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+    expect(w.messages()[0]?.content).toContain("interrupted");
+  });
+
+  it("wakes an idle Coordinator once with summary, attribution, full mode and task tool eligibility", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId);
+    const before = f.threads.findById(f.coordinator.id);
+    w.wake.nudge(f.coordinator.id);
+    w.wake.nudge(f.coordinator.id);
+    expect([...w.timers.keys()]).toEqual([1]);
+    expect([...w.timers.values()].map((timer) => timer.delay)).toEqual([1_000]);
+    await w.tick();
+    expect(w.messages()).toEqual([{ content: `Review | child ${task.threadId} | completed\nReview complete\n\nUse task_status for detail.`,
+      system_notice: JSON.stringify({ kind: "delegated-task", presentation: "timeline", delegatedTasks: [
+        { taskId: task.taskId, threadId: task.threadId, title: "Review", providerId: "codex", status: "completed" },
+      ] }) }]);
+    expect(f.canonical.loadLatestTurn(f.coordinator.id)?.permissionMode).toBe("full");
+    expect(w.state.directives).toEqual([expect.objectContaining({ permissionMode: "full" })]);
+    expect(f.threads.findById(f.coordinator.id)?.model).toBe(before?.model);
+    expect(f.threads.findById(f.coordinator.id)?.permission_mode).toBe("full");
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+  });
+
+  it.each([true, false])("routes a running Coordinator with steering %s and retries after its turn ends", async (steerable) => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    w.state.steerable = steerable;
+    const coordinatorTurn = await startCoordinator(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(steerable ? 1 : 0);
+    expect(f.canonical.loadLatestTurn(f.coordinator.id)?.id).toBe(coordinatorTurn);
+    expect(w.state.sends).toBe(0);
+    await finish(f, f.coordinator.id, coordinatorTurn);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+    expect(w.state.sends).toBe(steerable ? 0 : 1);
+  });
+
+  it("does not wake for a result already read with task_status", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId);
+    expect(requireTask(await f.service.status(f.source, { taskId: task.taskId })).state)
+      .toEqual({ status: "finished", outcome: "completed", summary: "Review complete" });
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toEqual([]);
+    expect(w.state.sends).toBe(0);
+  });
+
+  it.each(["user", "thread_control"])("parks only after %s cancellation, then delivers on the next human turn", async (by) => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const coordinatorTurn = await startCoordinator(f);
+    await finish(f, f.coordinator.id, coordinatorTurn, "cancelled", by === "user" ? { by: "user" } : { by: "mcode", reason: "thread_control" });
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(f.canonical.loadTurn(task.taskId)?.status).toBe("Running");
+    await finish(f, task.threadId, task.taskId);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(by === "user" ? 0 : 1);
+    if (by === "user") {
+      await startCoordinator(f);
+      w.wake.nudge(f.coordinator.id);
+      await w.tick();
+      expect(w.messages()).toHaveLength(1);
+    }
+  });
+
+  it.each([true, false])("recovers a crash with committed message %s without losing or duplicating the result", async (committed) => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId, "interrupted");
+    const batch = await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID());
+    if (!batch) throw new Error("Expected claim");
+    if (committed) await w.sendMessage({ threadId: f.coordinator.id, content: batch.content,
+      messageId: batch.wakeId, permissionMode: "full", model: "gpt-test", provider: "codex",
+      delegationWake: true, systemNotice: batch.systemNotice });
+    await w.wake.recoverAtStartup();
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+    expect(f.tasks.get(task.taskId)?.noticeClaim).toBeNull();
+    await w.wake.recoverAtStartup();
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+  });
+
+  it.each(["rejected", "unknown"])("handles a %s steer without replaying its message identity", async (outcome) => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const coordinatorTurn = await startCoordinator(f);
+    w.state.response = outcome === "rejected" ? { outcome: "rejected", reason: "provider", detail: "No" }
+      : { outcome: "unknown", detail: "Lost response" };
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    const attempts = () => f.runtime.database.query<{ message_id: string; state: string }, []>("SELECT message_id, state FROM turn_steers").all();
+    const first = attempts();
+    expect(first.map((row) => row.state)).toEqual([outcome === "rejected" ? "rejected" : "delivery_unknown"]);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(attempts()).toEqual(first);
+    await finish(f, f.coordinator.id, coordinatorTurn);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(outcome === "rejected" ? 1 : 0);
+    if (outcome === "rejected") {
+      const row = f.tasks.get(task.taskId);
+      expect(row?.noticeDelivered).toBe(`finished:completed:${task.taskId}`);
+      expect(w.messages()[0]?.content).toContain("Review complete");
+    }
+  });
+
+  it("returns a lost admission claim and delivers after the winning turn ends", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId);
+    w.state.busyNext = true;
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toEqual([]);
+    expect(f.tasks.get(task.taskId)?.noticeClaim).toBeNull();
+    const winning = f.canonical.loadLatestTurn(f.coordinator.id);
+    if (!winning) throw new Error("Expected winning turn");
+    await finish(f, f.coordinator.id, winning.id);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+    expect(w.state.sends).toBe(2);
+  });
+});
 
 describe("delegated task lifecycle", { timeout: 30_000 }, () => {
   it("includes Coordinators while launching and running, and excludes completed tasks", async () => {

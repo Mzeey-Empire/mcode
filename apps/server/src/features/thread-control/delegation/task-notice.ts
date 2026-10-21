@@ -1,4 +1,4 @@
-import type { DelegatedTaskNotice, SystemNoticeMetadata, TaskState } from "@mcode/contracts";
+import type { DelegatedTaskNotice, DelegatedTaskNoticeStatus, SystemNoticeMetadata, TaskState } from "@mcode/contracts";
 
 /** One notifiable task snapshot and its durable coverage key. */
 export interface TaskNoticeEntry {
@@ -12,6 +12,13 @@ export interface TaskNoticeBatch {
   wakeId: string;
   content: string;
   systemNotice: SystemNoticeMetadata;
+}
+
+/** Only task results and child-side waits produce Coordinator notices. */
+export function taskNoticeStatus(state: TaskState): DelegatedTaskNoticeStatus | null {
+  if (state.status === "finished") return state.outcome;
+  if (state.status === "waiting" && state.reason !== "approval") return state.reason;
+  return null;
 }
 
 /** Derive a stable notice identity, suppressing interrupted attempts scheduled to resume. */

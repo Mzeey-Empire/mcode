@@ -46,6 +46,11 @@ export class AgentService {
     return this.runtime.runtimeAccess();
   }
 
+  /** Observe slot release, including failed admissions with no turn-ending event. */
+  onRuntimeReleased(listener: (threadId: string) => void): () => void {
+    return this.runtime.onRuntimeReleased(listener);
+  }
+
   /** Stop all active provider sessions during shutdown. */
   stopAll(): Promise<void> {
     return this.runtime.stopAll();

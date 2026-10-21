@@ -195,6 +195,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private readonly endedSuppressionThreads = new Set<string>();
   /** Callbacks keyed by turn execution that run once that runtime releases its active slot, so follow-up turns can admit. */
   private readonly runtimeReleaseCallbacks = new Map<string, (cause?: RuntimeReleaseCause) => void>();
+  private readonly runtimeReleaseListeners = new Set<(threadId: string) => void>();
   /**
    * Per-thread dispatch state for transient retries. Fire-and-forget providers
    * A provider can return from `sendTurn` before the stream ends, so the retry
@@ -394,6 +395,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Return the authoritative runtime state for one thread. */
   snapshot(threadId: string): TurnRuntimeSnapshot | undefined {
     return this.turnRuntime.snapshot(threadId);
+  }
+
+  /** Observe release even when admission failed before any terminal event existed. */
+  onRuntimeReleased(listener: (threadId: string) => void): () => void {
+    this.runtimeReleaseListeners.add(listener);
+    return () => { this.runtimeReleaseListeners.delete(listener); };
   }
 
   /** Start runtime identity for a provider-originated turn before its events enter ingress. */
@@ -611,6 +618,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const released = this.runtimeReleaseCallbacks.get(lease.turnExecutionId);
     this.runtimeReleaseCallbacks.delete(lease.turnExecutionId);
     released?.("admission-failed");
+    for (const listener of this.runtimeReleaseListeners) listener(lease.threadId);
   }
 
   /** Terminalize an admitted turn when durable admission cannot complete. */
@@ -1704,6 +1712,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
     const reservationToken = this.turnRetryDispatchByThread.get(threadId)?.mutationReservationToken;
     this.releaseMutationReservation(threadId, reservationToken);
+    for (const listener of this.runtimeReleaseListeners) listener(threadId);
   }
 
   /** Clear resources that belong to a turn after terminal handling owns the outcome. */

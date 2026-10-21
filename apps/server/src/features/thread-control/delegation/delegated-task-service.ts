@@ -19,7 +19,7 @@ import type { CreateAndSendCommand, CreateAndSendOptions } from "../../agents/tu
 import type { DelegatedTaskRepo } from "./delegated-task-repo.js";
 import type { DelegatedTask, DelegatedTaskPlan } from "./delegated-task-store.js";
 import { deriveTaskState } from "./task-state.js";
-import { taskNoticeKey, noticeCovered, renderTaskNotices, type TaskNoticeEntry } from "./task-notice.js";
+import { taskNoticeKey, taskNoticeStatus, noticeCovered, renderTaskNotices, type TaskNoticeEntry } from "./task-notice.js";
 import type { TurnResumeScheduleStore } from "../../agents/recovery/turn-resume-schedule-store.js";
 
 /** Existing owners used by delegation; the control reference is delayed at composition. */
@@ -75,6 +75,16 @@ export class DelegatedTaskService {
   /** Enumerate durable receipts for boot recovery without acknowledging results. */
   noticeTasks() { return this.deps.tasks.listAll(); }
 
+  /** Find Coordinators with unread task state after recovery has reconciled claims. */
+  coordinatorsWithUncoveredNotices(): string[] {
+    const coordinators = new Set<string>();
+    for (const task of this.deps.tasks.listAll()) {
+      const entry = this.noticeEntry(task);
+      if (entry && !task.noticeClaim && !noticeCovered(task.noticeDelivered, entry.key)) coordinators.add(task.coordinatorThreadId);
+    }
+    return [...coordinators];
+  }
+
   /** Reserve uncovered snapshots against their delivered basis. */
   async claimNotices(coordinatorThreadId: string, wakeId: string) {
     const candidates = this.deps.tasks.listByCoordinator(coordinatorThreadId).flatMap((task) => {
@@ -83,9 +93,10 @@ export class DelegatedTaskService {
       return [{ entry, taskId: task.taskId, key: entry.key, basis: task.noticeDelivered }];
     });
     if (!candidates.length) return null;
-    const claimed = new Set(await this.deps.tasks.claimNotices(wakeId, candidates));
+    // The committed notice contract allows at most 32 task attributions per message.
+    const claimed = new Set(await this.deps.tasks.claimNotices(wakeId, candidates.slice(0, 32)));
     const entries = candidates.filter((candidate) => claimed.has(candidate.taskId)).map((candidate) => candidate.entry);
-    return entries.length ? renderTaskNotices(wakeId, entries) : null;
+    return entries.length ? { ...renderTaskNotices(wakeId, entries), hasMore: candidates.length > 32 } : null;
   }
 
   /** Mark an accepted wake delivered without overwriting concurrent acknowledgements. */
@@ -343,23 +354,35 @@ export class DelegatedTaskService {
 
   private noticeEntry(task: DelegatedTask, snapshot = this.snapshot(task)): TaskNoticeEntry | null {
     const turn = this.latestAttempt(task);
-    const requests = snapshot.threadId ? this.deps.approvalService.listPendingApprovals(snapshot.threadId) : [];
-    const pending = snapshot.threadId ? this.deps.approvals.listPendingByThread(snapshot.threadId) : [];
-    const requestIds = [...requests.map((request) => request.requestId), ...pending.map((request) => request.approvalId)];
-    const ending = turn?.ending;
-    const resumeScheduled = ending?.outcome === "interrupted" && ending.cause === "usage_limit"
-      && this.deps.resumes.get(turn.threadId)?.turnId === turn.id;
-    const key = taskNoticeKey(task.taskId, snapshot.state, turn?.id ?? null, requestIds, resumeScheduled);
-    if (!key || snapshot.state.status === "working") return null;
     const state = snapshot.state;
-    if (state.status === "waiting" && state.reason === "approval") return null;
-    const detail = state.status === "finished" ? state.summary ?? state.error ?? "" : requests.map((request) => {
-      if (request.subject.kind === "question") return request.subject.questions.map((question) => question.question).join("\n");
-      return request.reason ?? JSON.stringify(request.subject);
-    }).join("\n");
+    const status = taskNoticeStatus(state);
+    if (!status) return null;
+    const requests = this.pendingRequests(snapshot.threadId);
+    const key = taskNoticeKey(task.taskId, state, turn?.id ?? null, requests.map((request) => request.id), this.hasScheduledResume(turn));
+    if (!key) return null;
+    const detail = state.status === "finished" ? state.summary ?? state.error ?? "" : requests.map((request) => request.prompt).join("\n");
     return { key, detail, task: { taskId: task.taskId, threadId: snapshot.threadId ?? null,
-      title: task.plan.title, providerId: task.plan.providerId,
-      status: state.status === "finished" ? state.outcome : state.reason } };
+      title: task.plan.title, providerId: task.plan.providerId, status } };
+  }
+
+  private hasScheduledResume(turn: ReturnType<DelegatedTaskService["latestAttempt"]>): boolean {
+    if (!turn) return false;
+    const ending = turn.ending;
+    if (ending?.outcome !== "interrupted" || ending.cause !== "usage_limit") return false;
+    return this.deps.resumes.get(turn.threadId)?.turnId === turn.id;
+  }
+
+  private pendingRequests(threadId: string | undefined) {
+    if (!threadId) return [];
+    const requests = this.deps.approvalService.listPendingApprovals(threadId).map((request) => ({
+      id: request.requestId, prompt: request.subject.kind === "question"
+        ? request.subject.questions.map((question) => question.question).join("\n")
+        : request.reason ?? JSON.stringify(request.subject),
+    }));
+    const pending = this.deps.approvals.listPendingByThread(threadId).map((request) => ({
+      id: request.approvalId, prompt: request.operation,
+    }));
+    return [...new Map([...requests, ...pending].map((request) => [request.id, request])).values()];
   }
 
   private snapshot(task: DelegatedTask): { taskId: string; threadId?: string; state: TaskState } {
