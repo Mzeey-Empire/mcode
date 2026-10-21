@@ -737,17 +737,17 @@ describe("MessageBubble agent response state", () => {
     expect(queryByText(/128 tok/)).not.toBeInTheDocument();
   });
 
-  it("credits each completed reply to its own provider once the thread has used two", () => {
+  it("credits each reply to its own provider once the thread has used two, while streaming too", () => {
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1", provider: "codex", providers_used: ["claude", "codex"] })] });
     const view = render(
       <>
         <MessageBubble message={{ ...makeAgentMessage(), id: "a-claude", provider: "claude" }} agentDisplayState={{ phase: "completed" }} />
-        <MessageBubble message={{ ...makeAgentMessage(), id: "a-codex", provider: "codex" }} agentDisplayState={{ phase: "completed" }} />
+        <MessageBubble message={{ ...makeAgentMessage(), id: "a-codex", provider: "codex" }} agentDisplayState={{ phase: "streaming" }} />
       </>,
     );
-    const [claudeActions, codexActions] = view.getAllByTestId("agent-message-actions");
-    expect(within(claudeActions!).getByRole("img", { name: "Written by Claude" })).toBeInTheDocument();
-    expect(within(codexActions!).getByRole("img", { name: "Written by Codex" })).toBeInTheDocument();
+    const reply = (id: string) => within(view.container.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!);
+    expect(reply("a-claude").getByRole("img", { name: "Written by Claude" })).toBeInTheDocument();
+    expect(reply("a-codex").getByRole("img", { name: "Written by Codex" })).toBeInTheDocument();
   });
 
   it("shows no provider on replies in a thread that never switched", () => {

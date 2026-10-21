@@ -43,30 +43,49 @@ beforeEach(() => {
 afterEach(() => resetThreadStoreForTests());
 
 describe("ProviderSwitchMarker", () => {
+  const messages = [
+    { role: "user" as const, provider: null, text: "fix the => arrow" },
+    { role: "assistant" as const, provider: "claude", text: "Fixed in parser.ts" },
+  ];
+  const toggle = () => screen.getByRole("button", { name: "What Codex saw" });
+
   it("names both providers and reads the handoff once when expanded", async () => {
-    transport.readHandoff.mockResolvedValue({ meta, history: "user: fix the => arrow" });
+    transport.readHandoff.mockResolvedValue({ meta, history: "RAW HISTORY", messages });
     const user = userEvent.setup();
     render(<MessageBubble message={marker} />);
-    expect(screen.getByText("Switched from Claude to Codex")).toBeInTheDocument();
+    expect(screen.getByRole("note", { name: "Switched from Claude to Codex" })).toBeInTheDocument();
 
-    const toggle = screen.getByRole("button", { name: /handoff/i });
-    await user.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(await screen.findByText("user: fix the => arrow")).toBeInTheDocument();
+    await user.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByText("fix the => arrow")).toBeInTheDocument();
+    expect(screen.getByText("Fixed in parser.ts")).toBeInTheDocument();
+    expect(screen.getByText("You")).toBeInTheDocument();
     expect(screen.getByText("Dropped effort: Codex has no max effort")).toBeInTheDocument();
-    expect(screen.getByText("Sent 3 of 4 messages")).toBeInTheDocument();
+    expect(screen.getByText("1 message left out to fit")).toBeInTheDocument();
+    expect(screen.queryByText("RAW HISTORY")).not.toBeInTheDocument();
 
-    await user.click(toggle);
-    await user.click(toggle);
+    await user.click(screen.getByRole("button", { name: "Raw prompt" }));
+    expect(screen.getByText("RAW HISTORY")).toBeInTheDocument();
+
+    await user.click(toggle());
+    await user.click(toggle());
     expect(transport.readHandoff).toHaveBeenCalledTimes(1);
     expect(transport.readHandoff).toHaveBeenCalledWith("thread-1", HANDOFF_ID);
+  });
+
+  it("shows the raw history when it could not be split into messages", async () => {
+    transport.readHandoff.mockResolvedValue({ meta, history: "RAW HISTORY", messages: [] });
+    const user = userEvent.setup();
+    render(<MessageBubble message={marker} />);
+    await user.click(toggle());
+    expect(await screen.findByText("RAW HISTORY")).toBeInTheDocument();
   });
 
   it("says the record is unavailable when the read returns null", async () => {
     transport.readHandoff.mockResolvedValue(null);
     const user = userEvent.setup();
     render(<MessageBubble message={marker} />);
-    await user.click(screen.getByRole("button", { name: /handoff/i }));
+    await user.click(toggle());
     expect(await screen.findByText("Handoff record unavailable")).toBeInTheDocument();
   });
 });

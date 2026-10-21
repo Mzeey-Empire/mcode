@@ -885,9 +885,15 @@ function AssistantResponseText({
 }
 
 /**
- * The provider that wrote a reply, shown only once the thread has run on more
- * than one provider. `providers_used` comes from the thread row, not loaded
- * messages, because pagination may hide the earlier provider's replies.
+ * The provider that wrote a reply, in the chat gutter beside its first line,
+ * shown only once the thread has run on more than one provider. `providers_used`
+ * comes from the thread row, not loaded messages, because pagination may hide
+ * the earlier provider's replies.
+ *
+ * The transcript rail clips horizontal overflow, so the icon reaches the gutter
+ * by being absolutely positioned with no offsets: it keeps its in-flow spot, and
+ * its containing block is the transcript row outside the clip. A positioned
+ * ancestor between the icon and the rail would clip it again.
  */
 function AssistantProviderAttribution({ message }: { message: Message }) {
   const isMultiProvider = useWorkspaceStore((state) => (state.threads.find((thread) => thread.id === message.thread_id)?.providers_used?.length ?? 0) > 1);
@@ -895,7 +901,7 @@ function AssistantProviderAttribution({ message }: { message: Message }) {
   const label = `Written by ${providerLabel(message.provider)}`;
   return (
     <Tooltip>
-      <TooltipTrigger render={<span role="img" aria-label={label} className="inline-flex size-6 items-center justify-center" />}>
+      <TooltipTrigger render={<span role="img" aria-label={label} className="absolute mt-1 inline-flex size-4 -translate-x-[calc(100%+6px)] items-center justify-center max-sm:size-3 max-sm:-translate-x-[calc(100%+3px)] max-sm:[&_svg]:size-3" />}>
         <ProviderIcon provider={message.provider} size={16} />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
@@ -918,7 +924,6 @@ function AssistantMessageActions({
   if (!isAgentResponseComplete) return null;
   return (
     <div className="flex h-6 items-center gap-1" data-testid="agent-message-actions">
-      <AssistantProviderAttribution message={message} />
       {onBranch && <BranchButton resting onClick={() => onBranch(message.id)} />}
       {textContent.trim() && <CopyButton content={textContent} className={RESTING_ACTION_CLASS} />}
       <PersistedTurnHooks threadId={message.thread_id} messageId={message.id} />
@@ -947,6 +952,7 @@ function AssistantMessageContent({
   const isAgentResponseComplete = resolvedAgentDisplayState.phase === "completed";
   return (
     <div className="group/msg space-y-2" data-message-id={message.id} data-message-role={message.role} data-thread-id={message.thread_id}>
+      <AssistantProviderAttribution message={message} />
       {message.reply_to_message_id && (
         <QuoteBlock
           quotedText={message.quoted_text ?? ""}
