@@ -48,10 +48,19 @@ export interface McodeSessionCredential {
   sessionId: string;
 }
 
+/** Why a thread-control call was refused. */
+export type McodeThreadControlDenial = "invalid_tool_call" | "no_active_turn" | "not_requested";
+
+const DENIAL_MESSAGES: Record<McodeThreadControlDenial, string> = {
+  invalid_tool_call: "Mcode thread control denied this call because its tool call id is empty or longer than 128 characters.",
+  no_active_turn: "Mcode thread control is unavailable because no user turn is active for this session. Thread-control tools work only while a user turn runs.",
+  not_requested: "Mcode thread control is off for this turn because the user's message did not explicitly ask for it. It turns on when the message asks for an Mcode thread or names a thread-control tool such as delegate_task, with an action such as \"use\" or \"call\" and no negation such as \"don't\" before it in the same sentence. Ask the user to request it directly.",
+};
+
 /** Refuses a thread-control call that has no active, eligible turn lease. */
 export class McodeThreadControlDeniedError extends Error {
-  constructor() {
-    super("Internal thread-control MCP request denied");
+  constructor(readonly reason: McodeThreadControlDenial) {
+    super(DENIAL_MESSAGES[reason]);
   }
 }
 
@@ -149,9 +158,7 @@ export class McodeSessionAuthority {
    * @throws McodeThreadControlDeniedError when the lease is missing, revoked, or ineligible.
    */
   authorizeThreadControl(session: McodeSession, sourceToolCallId: string): InternalThreadControlAuthority {
-    const authority = authorizeEntry(this.entries.get(session.sessionId), sourceToolCallId);
-    if (!authority) throw new McodeThreadControlDeniedError();
-    return authority;
+    return authorizeEntry(this.entries.get(session.sessionId), sourceToolCallId);
   }
 
   /** Returns the revocation signal for a session while its turn lease is active. */
@@ -182,10 +189,13 @@ function activeSignal(entry: SessionEntry | undefined): AbortSignal | undefined 
 function authorizeEntry(
   entry: SessionEntry | undefined,
   sourceToolCallId: string,
-): InternalThreadControlAuthority | undefined {
-  if (sourceToolCallId.length < 1 || sourceToolCallId.length > 128) return undefined;
+): InternalThreadControlAuthority {
+  if (sourceToolCallId.length < 1 || sourceToolCallId.length > 128) {
+    throw new McodeThreadControlDeniedError("invalid_tool_call");
+  }
   const lease = entry?.active;
-  if (!lease?.active || !lease.eligible) return undefined;
+  if (!lease?.active) throw new McodeThreadControlDeniedError("no_active_turn");
+  if (!lease.eligible) throw new McodeThreadControlDeniedError("not_requested");
   return {
     type: "internal",
     userId: "local-user",

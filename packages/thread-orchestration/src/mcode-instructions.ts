@@ -4,7 +4,8 @@
 export const MCODE_INSTRUCTION_SECTION_MAX_BYTES = 4_000;
 
 const EXPLICIT_MCODE_THREAD_TOKEN = /\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait)|delegate_task|task_(?:status|cancel))\b/i;
-const NEGATED_MCODE_THREAD_REQUEST = /\b(?:do\s+not|don['’]?t|dont|never|without|no)\b[\s\S]{0,96}\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait)|delegate_task|task_(?:status|cancel))\b/i;
+const NEGATION = /\b(?:do\s+not|don['’]?t|dont|never|without|no)\b/i;
+const SENTENCE_BOUNDARY = /[.!?]+\s+(?=[A-Z])/;
 const MCODE_THREAD_REQUEST_ACTION = /\b(?:create|start|open|launch|use|manage|list|search|send|stop|wait|get|target|delegate|call|check|cancel)\b/i;
 
 /** Stable section names used as Codex context tags. */
@@ -40,14 +41,18 @@ export interface BuildMcodeInstructionSectionsInput {
  * thread control or one of its thread operations.
  *
  * Provider-native child-agent language intentionally does not satisfy this
- * boundary. Negated requests fail closed so a model cannot inherit a lease
- * from wording such as "do not create an Mcode thread".
+ * boundary. A sentence asks for thread control only through the text before
+ * its first negation, so "do not create an Mcode thread" grants nothing while
+ * an unrelated "don't wait on it" in another sentence does not revoke an
+ * explicit request. A sentence ends only at terminal punctuation followed by
+ * whitespace and a capital letter, so paths, versions and line breaks cannot
+ * split a negated request into an affirmative one.
  */
 export function isExplicitMcodeThreadRequest(content: string): boolean {
-  const request = content.trim();
-  if (!request || NEGATED_MCODE_THREAD_REQUEST.test(request)) return false;
-  if (!EXPLICIT_MCODE_THREAD_TOKEN.test(request)) return false;
-  return MCODE_THREAD_REQUEST_ACTION.test(request);
+  return content.split(SENTENCE_BOUNDARY).some((sentence) => {
+    const affirmative = sentence.split(NEGATION, 1)[0] ?? "";
+    return EXPLICIT_MCODE_THREAD_TOKEN.test(affirmative) && MCODE_THREAD_REQUEST_ACTION.test(affirmative);
+  });
 }
 
 const IDENTITY_BLOCK = [
