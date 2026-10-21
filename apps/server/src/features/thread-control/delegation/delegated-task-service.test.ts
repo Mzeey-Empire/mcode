@@ -248,9 +248,9 @@ async function wakeHarness(f: Fixture) {
     clearTimeout: (id) => { if (typeof id === "number") timers.delete(id); },
   };
   const steers = new TurnSteerRepo(f.runtime.reader, f.runtime.writer);
-  const state: { steerable: boolean; leased: boolean; response: TurnSteerOutcome; busyNext: boolean; sends: number;
+  const state: { steerable: boolean; leased: boolean; failSends: boolean; response: TurnSteerOutcome; busyNext: boolean; sends: number;
     directives: PreparedTurnDispatch["threadControl"][]; sendGate: Promise<void> | null } = {
-    steerable: true, leased: true, response: { outcome: "accepted" }, busyNext: false, sends: 0, directives: [], sendGate: null,
+    steerable: true, leased: true, failSends: false, response: { outcome: "accepted" }, busyNext: false, sends: 0, directives: [], sendGate: null,
   };
   const runningTurn = (threadId: string): SteerableTurn | null => {
     if (!f.active.has(threadId)) return null;
@@ -268,6 +268,10 @@ async function wakeHarness(f: Fixture) {
   const sendMessage = async (command: SendMessageCommand) => {
     state.sends += 1;
     if (state.sendGate) await state.sendGate;
+    if (state.failSends) {
+      command.onRuntimeReleased?.();
+      throw new Error("provider down");
+    }
     if (state.busyNext) {
       state.busyNext = false;
       await startCoordinator(f);
@@ -468,6 +472,34 @@ describe("Coordinator task notices", { timeout: 30_000 }, () => {
     await w.tick();
     expect(w.messages()).toHaveLength(1);
     expect(w.state.sends).toBe(1);
+  });
+
+  it("backs off a persistently failing wake with growing gaps, and resets after a delivery", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const delays = () => [...w.timers.values()].map((timer) => timer.delay);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId);
+    w.state.failSends = true;
+    w.wake.nudge(f.coordinator.id);
+    const gaps: number[][] = [delays()];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await w.tick();
+      gaps.push(delays());
+    }
+    expect(gaps).toEqual([[1_000], [1_000], [2_000], [4_000]]);
+    expect(w.state.sends).toBe(3);
+    expect(w.messages()).toEqual([]);
+    w.state.failSends = false;
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+    expect(w.timers.size).toBe(0);
+    const next = requireTask(await f.service.delegate(f.source, { ...f.input, clientRequestId: "after", isolation: "shared" }));
+    if (!next.threadId) throw new Error("Expected child");
+    await finish(f, next.threadId, next.taskId);
+    w.wake.nudge(f.coordinator.id);
+    expect(delays()).toEqual([1_000]);
   });
 
   it("does not wake for a result already read with task_status", async () => {
