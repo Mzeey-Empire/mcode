@@ -3413,7 +3413,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       const projected = { ...record, ...projection };
       const records = patchThreadRecord(state.records, frame.threadId, {
         ...projection,
-        ...(visibleChanged ? steeredMessagesPatch(frame.threadId, projected) : {}),
+        ...(visibleChanged && record.messages.length > 0 ? steeredMessagesPatch(frame.threadId, projected) : {}),
         ...reconcileSavedTurnStatuses(projected, drainedSavingEpoch(frame, previous)),
         serverMessageIds: { ...projected.serverMessageIds, ...canonicalSavedMessageIds(projected) },
       });

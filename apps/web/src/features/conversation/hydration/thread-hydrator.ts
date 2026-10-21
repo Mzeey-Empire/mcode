@@ -379,7 +379,7 @@ export class ThreadHydrator {
 
   private async awaitResidentHydration(threadId: string, opts: DisplayHydrationOptions): Promise<boolean> {
     const existing = this.residentHydrates.get(threadId);
-    if (!existing) return false;
+    if (!existing || opts.force) return false;
     await existing;
     if (this.residentHydrateGenerations.get(threadId) !== opts.generation && opts.isCurrent()) {
       await this.hydrateResident(threadId, opts);

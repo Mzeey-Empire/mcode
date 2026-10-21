@@ -1,7 +1,9 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope,
-  type CanonicalAgentEventEnvelope, type SetThreadSubscriptionsResult } from "@mcode/contracts";
+  type CanonicalAgentEventEnvelope, type ConversationPage, type SetThreadSubscriptionsResult } from "@mcode/contracts";
+import { createMockMessage } from "@/__tests__/mocks/transport";
+import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
@@ -10,8 +12,9 @@ import { useThreadSubscriptionReconciler } from "../useThreadSubscriptionReconci
 const setThreadSubscriptions = vi.hoisted(() => vi.fn(async (): Promise<SetThreadSubscriptionsResult> => ({
   canonicalRecoveries: [],
 })));
+const loadConversationPage = vi.hoisted(() => vi.fn());
 vi.mock("@/transport", async () => ({
-  ...(await vi.importActual("@/transport")), getTransport: () => ({ setThreadSubscriptions }),
+  ...(await vi.importActual("@/transport")), getTransport: () => ({ setThreadSubscriptions, loadConversationPage, loadTurn: async () => [] }),
 }));
 
 const THREAD = "parent-recovery";
@@ -56,6 +59,51 @@ afterEach(() => {
   cleanup();
   resetThreadStoreForTests();
   setThreadSubscriptions.mockClear();
+  loadConversationPage.mockReset();
+});
+
+it("reloads a leased non-active transcript after recovery invalidates its pending fetch", async () => {
+  resetThreadStoreForTests({ currentThreadId: "selected-parent" });
+  let resolveInitialPage: ((page: ConversationPage) => void) | undefined;
+  const initialPage = new Promise<ConversationPage>((resolve) => { resolveInitialPage = resolve; });
+  const messages = [
+    createMockMessage({ id: "earlier-prompt", thread_id: THREAD, role: "user", content: "Earlier task", sequence: 1 }),
+    createMockMessage({ id: "earlier-answer", thread_id: THREAD, role: "assistant", content: "Earlier answer", sequence: 2 }),
+    createMockMessage({ id: "latest-prompt", thread_id: THREAD, role: "user", content: "Latest task", sequence: 3 }),
+    createMockMessage({ id: "latest-answer", thread_id: THREAD, role: "assistant", content: "Latest answer", sequence: 4 }),
+  ];
+  loadConversationPage.mockImplementationOnce(() => initialPage)
+    .mockResolvedValue({ messages, hasMore: false, narrativeByMessage: {} });
+  const residency = getConversationResidency();
+  const initialLoad = residency.mountDisplayConversation(THREAD);
+  await act(async () => {});
+  expect(loadConversationPage).toHaveBeenCalledTimes(1);
+  setThreadSubscriptions.mockResolvedValueOnce({ canonicalRecoveries: [{
+    phase: "recovery", threadId: THREAD, epoch: EPOCH, acceptedThrough: 0, savedThrough: 0, retained: [], loss: "none",
+    durable: { mode: "snapshot", threadId: THREAD, snapshot: {
+      revision: { conversationRevision: 1, rosterRevision: 0 }, state: fixture().seeded,
+    } },
+  }] });
+  try {
+    renderHook(() => useThreadSubscriptionReconciler({
+      activeThreadId: "selected-parent", desiredThreadIds: DESIRED, connectionStatus: "connected",
+      runningThreadIds: new Set(), canonicalRecoverySignature: "",
+    }));
+    await act(async () => {});
+    const completeInitialPage = resolveInitialPage;
+    if (!completeInitialPage) throw new Error("Missing initial page resolver");
+    await act(async () => {
+      completeInitialPage({ messages: [], hasMore: false, narrativeByMessage: {} });
+      await initialLoad;
+    });
+
+    expect(useThreadStore.getState().records.get(THREAD)?.messages.map((message) => message.id))
+      .toEqual(["earlier-prompt", "earlier-answer", "latest-prompt", "latest-answer"]);
+    expect(useThreadStore.getState().currentThreadId).toBe("selected-parent");
+    expect(loadConversationPage).toHaveBeenCalledTimes(2);
+  } finally {
+    residency.unmountDisplayConversation(THREAD);
+  }
 });
 
 it("requests durable repair after a batched saved gap and live prefix, then restores the admitted turn and text", async () => {
