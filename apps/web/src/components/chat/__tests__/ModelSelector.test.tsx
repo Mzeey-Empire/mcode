@@ -5,6 +5,8 @@ import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore
 import { useModelFavoritesStore } from "@/stores/modelFavoritesStore";
 import { MODEL_PROVIDERS } from "@/lib/model-registry";
 import React from "react";
+import { initShortcuts } from "@/lib/shortcuts";
+import { registerCommand } from "@/lib/command-registry";
 
 // @base-ui/react (used by Button) does not work in jsdom; stub with a native button.
 vi.mock("@/components/ui/button", () => ({
@@ -63,10 +65,10 @@ async function openPicker() {
 }
 
 function optionNames(): string[] {
-  // Hidden description spans are part of textContent, so drop them to read only what the row shows.
+  // Hidden description spans and shortcut keycaps are part of textContent, so drop them to read only the row name.
   return screen.getAllByRole("option").map((option) => {
     const visible = option.cloneNode(true) as HTMLElement;
-    visible.querySelectorAll("[hidden]").forEach((node) => node.remove());
+    visible.querySelectorAll("[hidden], [data-slot=kbd]").forEach((node) => node.remove());
     return visible.textContent ?? "";
   });
 }
@@ -309,5 +311,44 @@ describe("ModelSelector", () => {
     expect(within(dialog).getByRole("button", { name: "Reasoning high" })).toBeInTheDocument();
     expect(within(dialog).queryByRole("option")).toBeNull();
     expect(screen.getByLabelText("Model locked while the agent runs")).toBeInTheDocument();
+  });
+
+  async function openCodexTab(onSelect: () => void) {
+    setProviders({ claude: true, codex: true });
+    listProviderModels.mockResolvedValue([
+      { id: "gpt-9-zeta", name: "GPT-9 Zeta", group: "OpenAI" },
+      { id: "gpt-9-alpha", name: "GPT-9 Alpha", group: "OpenAI" },
+    ]);
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={onSelect} locked={false} />);
+    await openPicker();
+    await userEvent.click(screen.getByRole("radio", { name: "Codex" }));
+    await waitFor(() => expect(optionNames()).toEqual(["GPT-9 Zeta", "GPT-9 Alpha"]));
+  }
+
+  it("picks the second model with Ctrl+2 and closes", async () => {
+    const onSelect = vi.fn();
+    await openCodexTab(onSelect);
+
+    await userEvent.keyboard("{Control>}2{/Control}");
+
+    expect(onSelect).toHaveBeenCalledWith("gpt-9-alpha", "codex");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("picks a model with Ctrl+1 instead of switching threads", async () => {
+    onTestFinished(initShortcuts());
+    const goTo1 = vi.fn();
+    onTestFinished(registerCommand({ id: "thread.goTo1", title: "Go to thread 1", category: "Navigation", handler: goTo1 }));
+    await userEvent.keyboard("{Control>}1{/Control}");
+    expect(goTo1).toHaveBeenCalledTimes(1);
+    goTo1.mockClear();
+
+    const onSelect = vi.fn();
+    await openCodexTab(onSelect);
+    await userEvent.keyboard("{Control>}1{/Control}");
+
+    expect(goTo1).not.toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledWith("gpt-9-zeta", "codex");
   });
 });

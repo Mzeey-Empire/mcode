@@ -613,6 +613,7 @@ export function ModelSelector({
         className={cn(PICKER_PANEL_CLASS, "max-h-(--available-height) overflow-y-auto")}
       >
         <Picker
+          numberedShortcuts
           tabs={tabs}
           activeTab={activeTab}
           onTabChange={setActiveTab}
