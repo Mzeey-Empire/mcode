@@ -1528,8 +1528,6 @@ export function createWsTransport(
 
     readLatestHandoff: (threadId: string) =>
       rpc<Awaited<ReturnType<McodeTransport["readLatestHandoff"]>>>("handoff.readLatest", { threadId }),
-    readHandoff: (threadId: string, handoffId: string) =>
-      rpc<Awaited<ReturnType<McodeTransport["readHandoff"]>>>("handoff.read", { threadId, handoffId }),
 
     // Memory pressure
     setBackground: (background) => rpc<void>("memory.setBackground", { background }),

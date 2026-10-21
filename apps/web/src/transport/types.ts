@@ -11,7 +11,6 @@ export interface PlanSnapshot {
 import type {
   DiffStats,
   HandoffAuditMetadata,
-  HandoffTranscriptMessage,
   ProjectIcon,
   TurnSteerParams,
   TurnSteerResult,
@@ -929,11 +928,5 @@ export interface McodeTransport {
   readLatestHandoff(threadId: string): Promise<{
     markdown: string;
     meta: HandoffAuditMetadata;
-  } | null>;
-  /** Reads one handoff audit by id, such as the one a provider-switch marker names. Null when it is missing. */
-  readHandoff(threadId: string, handoffId: string): Promise<{
-    meta: HandoffAuditMetadata;
-    history: string;
-    messages: HandoffTranscriptMessage[];
   } | null>;
 }

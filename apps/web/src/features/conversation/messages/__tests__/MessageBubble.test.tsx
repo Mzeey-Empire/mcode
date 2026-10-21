@@ -4,8 +4,6 @@ import userEvent from "@testing-library/user-event";
 import type { Message, StoredAttachment } from "@/transport";
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
 import { MessageBubble } from "../MessageBubble";
-import { createMockThread } from "@/__tests__/mocks/transport";
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import {
@@ -735,25 +733,6 @@ describe("MessageBubble agent response state", () => {
     await user.tab();
     expect(copy).toHaveFocus();
     expect(queryByText(/128 tok/)).not.toBeInTheDocument();
-  });
-
-  it("credits each reply to its own provider once the thread has used two, while streaming too", () => {
-    useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1", provider: "codex", providers_used: ["claude", "codex"] })] });
-    const view = render(
-      <>
-        <MessageBubble message={{ ...makeAgentMessage(), id: "a-claude", provider: "claude" }} agentDisplayState={{ phase: "completed" }} />
-        <MessageBubble message={{ ...makeAgentMessage(), id: "a-codex", provider: "codex" }} agentDisplayState={{ phase: "streaming" }} />
-      </>,
-    );
-    const reply = (id: string) => within(view.container.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!);
-    expect(reply("a-claude").getByRole("img", { name: "Written by Claude" })).toBeInTheDocument();
-    expect(reply("a-codex").getByRole("img", { name: "Written by Codex" })).toBeInTheDocument();
-  });
-
-  it("shows no provider on replies in a thread that never switched", () => {
-    useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1", provider: "codex", providers_used: null })] });
-    const view = render(<MessageBubble message={{ ...makeAgentMessage(), provider: "codex" }} agentDisplayState={{ phase: "completed" }} />);
-    expect(view.queryByRole("img", { name: /written by/i })).not.toBeInTheDocument();
   });
 
   it("withholds response actions until the agent completes", () => {

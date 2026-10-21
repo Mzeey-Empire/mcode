@@ -419,7 +419,6 @@ export const mockTransport: McodeTransport = {
   }),
   generateRecap: vi.fn().mockResolvedValue({ text: "Mock recap" }),
   readLatestHandoff: vi.fn().mockResolvedValue(null),
-  readHandoff: vi.fn().mockResolvedValue(null),
 };
 
 vi.mocked(mockTransport.loadConversationPage).mockImplementation(
