@@ -152,13 +152,6 @@ export function Picker<T>(props: PickerProps<T>) {
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     // Enter that ends an IME composition commits text, not a row.
     if (event.nativeEvent.isComposing) return;
-    const digit = props.numberedShortcuts ? numberShortcutDigit(event) : null;
-    if (digit !== null) {
-      event.preventDefault();
-      const index = shortcutRows[digit - 1];
-      if (index !== undefined) select(rows[index]);
-      return;
-    }
     if (event.key === "Enter") {
       event.preventDefault();
       select(rows[activeIndex]);
@@ -174,6 +167,17 @@ export function Picker<T>(props: PickerProps<T>) {
     if (target === null) return;
     event.preventDefault();
     moveHighlight(target);
+  };
+
+  // Bound on the panel, not the search field: clicking a tab moves focus onto it, and the chord must still pick a row.
+  const handleNumberShortcut = (event: KeyboardEvent<HTMLElement>) => {
+    const digit = props.numberedShortcuts && !event.nativeEvent.isComposing ? numberShortcutDigit(event) : null;
+    if (digit === null) return;
+    // Stopping here keeps the chord from the browser's tab switch and the global Ctrl+N thread switch.
+    event.preventDefault();
+    event.stopPropagation();
+    const index = shortcutRows[digit - 1];
+    if (index !== undefined) select(rows[index]);
   };
 
   const runRowAction = (index: number) => {
@@ -199,7 +203,7 @@ export function Picker<T>(props: PickerProps<T>) {
 
   const hasRows = rows.length > 0;
   return (
-    <div data-slot="picker" className="flex min-w-0 flex-col">
+    <div data-slot="picker" className="flex min-w-0 flex-col" onKeyDown={handleNumberShortcut}>
       <div className="flex h-control-compact items-center gap-2 px-2">
         <SearchIcon aria-hidden className="size-[1.4rem] shrink-0 text-muted" />
         <input
@@ -635,7 +639,7 @@ function isRowActionShortcut(event: KeyboardEvent<HTMLInputElement>): boolean {
   return (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "d";
 }
 
-function numberShortcutDigit(event: KeyboardEvent<HTMLInputElement>): number | null {
+function numberShortcutDigit(event: KeyboardEvent<HTMLElement>): number | null {
   if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return null;
   return /^[1-9]$/.test(event.key) ? Number(event.key) : null;
 }

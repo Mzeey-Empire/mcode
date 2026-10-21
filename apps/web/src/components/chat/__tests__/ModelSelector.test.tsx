@@ -324,7 +324,6 @@ describe("ModelSelector", () => {
     await openPicker();
     await userEvent.click(screen.getByRole("radio", { name: "Codex" }));
     await waitFor(() => expect(optionNames()).toEqual(["GPT-9 Zeta", "GPT-9 Alpha"]));
-    screen.getByRole("combobox").focus();
   }
 
   it("picks the second model with Ctrl+2 and closes", async () => {
