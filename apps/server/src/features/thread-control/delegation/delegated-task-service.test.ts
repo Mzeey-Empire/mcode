@@ -260,6 +260,28 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     expect(statuses).toEqual([["done"]]);
   });
 
+  it("reports and stops the latest resumed attempt on the bound child", async () => {
+    const f = await harness();
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    const original = f.canonical.loadTurn(task.taskId);
+    if (!task.threadId || !original?.executionId) throw new Error("Expected admitted child");
+    await f.canonical.finishParentTurnBatched({
+      threadId: task.threadId, turnId: task.taskId, executionId: original.executionId,
+      providerId: "codex", providerIdentities: [], outcome: "interrupted", projection: { message: null, narrative: [] },
+    });
+    const attemptId = NodeCrypto.randomUUID();
+    await f.canonical.startParentTurn({
+      thread: { id: task.threadId, workspaceId: f.workspace.id, providerId: "codex", createdAt: new Date().toISOString() },
+      turnId: attemptId, executionId: NodeCrypto.randomUUID(), retryOfExecutionId: original.executionId,
+      permissionMode: "full", providerIdentities: [],
+      userMessage: { kind: "create", messageId: NodeCrypto.randomUUID(), content: "Continue", sequence: 2 },
+    });
+    expect(requireTask(await f.service.status(f.source, { taskId: task.taskId })).state)
+      .toEqual({ status: "working", phase: "running" });
+    expect(await f.service.stopForUser(f.coordinator.id, task.threadId)).toBe(true);
+    expect(f.canonical.loadTurn(attemptId)?.status).toBe("Interrupted");
+  });
+
   it("pins HEAD and replays the same hidden child on a retried request", async () => {
     const f = await harness();
     const first = requireTask(await f.service.delegate(f.source, f.input));

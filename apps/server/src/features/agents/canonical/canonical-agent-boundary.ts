@@ -193,6 +193,11 @@ export class CanonicalAgentBoundary {
     return this.reader.loadLatestTurn(...args);
   }
 
+  /** Load the newest delegated attempt on the bound child thread. */
+  loadLatestAttempt(...args: Parameters<CanonicalAgentStore["loadLatestAttempt"]>): ReturnType<CanonicalAgentStore["loadLatestAttempt"]> {
+    return this.reader.loadLatestAttempt(...args);
+  }
+
   /** Read the canonical preconditions for retrying an attempt. */
   loadTurnRetryState(...args: Parameters<CanonicalAgentStore["loadTurnRetryState"]>): ReturnType<CanonicalAgentStore["loadTurnRetryState"]> {
     return this.reader.loadTurnRetryState(...args);

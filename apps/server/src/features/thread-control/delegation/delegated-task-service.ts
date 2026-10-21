@@ -26,7 +26,7 @@ export interface DelegatedTaskDeps {
   threads: Pick<ThreadRepo, "findById">;
   startups: Pick<ThreadStartupService, "get">;
   approvals: ThreadControlApprovalRepo;
-  canonical: Pick<CanonicalAgentBoundary, "loadTurn" | "loadTerminalProjection">;
+  canonical: Pick<CanonicalAgentBoundary, "loadLatestAttempt" | "loadTerminalProjection">;
   targets: Pick<DelegationTargetResolver, "resolve">;
   git: Pick<GitWorktreeService, "resolveHeadCommit">;
   control: Pick<ThreadControlService, "threadStop" | "publishThreadApproval" | "cancelDelegationApproval">;
@@ -89,7 +89,7 @@ export class DelegatedTaskService {
         id: `task:${task.taskId}`, provider: task.plan.providerId, model: task.plan.modelId,
         title: task.plan.title, prompt: task.plan.prompt, subagentType: null, reasoningEffort: null, stepCount: 0,
         status, startedAt: new Date(task.createdAt).toISOString(),
-        endedAt: this.deps.canonical.loadTurn(task.taskId)?.endedAt ?? null,
+        endedAt: this.latestAttempt(task)?.endedAt ?? null,
         tier: snapshot.threadId ? "transcript" : "meta", canStop: status === "running",
         childThreadId: snapshot.threadId ?? null, sourceToolCallId: call?.id ?? null,
         sourceMessageId: call?.messageId ?? null, parentEntryId: null,
@@ -118,7 +118,7 @@ export class DelegatedTaskService {
     return this.receipt(claimed.task);
   }
 
-  /** Read the task's original canonical turn, including resumable Interrupted outcomes. */
+  /** Read the task's latest canonical attempt, including resumable Interrupted outcomes. */
   async status(authority: InternalThreadControlAuthority, input: TaskStatusInput): Promise<TaskStatusResult> {
     const { taskId } = TaskStatusInputSchema().parse(input);
     const task = this.deps.tasks.find(taskId, authority.sourceThreadId);
@@ -141,7 +141,7 @@ export class DelegatedTaskService {
     if (!task) return false;
     await this.cancelTask(task, async (threadId) => {
       const startup = this.deps.startups.get(task.taskId);
-      const turn = this.deps.canonical.loadTurn(task.taskId);
+      const turn = this.latestAttempt(task);
       if (!turn && startup && ["pending", "running", "blocked"].includes(startup.state)) {
         await cancelThreadStartup(this.deps.cancellation, task.taskId);
       } else {
@@ -299,12 +299,12 @@ export class DelegatedTaskService {
 
   private snapshot(task: DelegatedTask): { taskId: string; threadId?: string; state: TaskState } {
     const startup = this.deps.startups.get(task.taskId);
-    const turn = this.deps.canonical.loadTurn(task.taskId);
+    const turn = this.latestAttempt(task);
     const threadId = startup?.threadId;
     const ending = turn?.ending;
     const state = deriveTaskState({
       turn, startup, approval: this.deps.approvals.status(task.taskId), launching: this.launching.has(task.taskId),
-      summary: turn?.status === "Completed" ? this.deps.canonical.loadTerminalProjection(task.taskId).message?.content : undefined,
+      summary: turn?.status === "Completed" ? this.deps.canonical.loadTerminalProjection(turn.id).message?.content : undefined,
       error: ending?.outcome === "errored" ? ending.failure.message : undefined,
       needsInput: this.needsInput(threadId),
     });
@@ -315,6 +315,11 @@ export class DelegatedTaskService {
     if (!threadId) return false;
     return this.deps.approvals.listPendingByThread(threadId).length > 0
       || this.deps.approvalService.listPendingApprovals(threadId).length > 0;
+  }
+
+  private latestAttempt(task: DelegatedTask) {
+    const threadId = this.deps.startups.get(task.taskId)?.threadId;
+    return threadId ? this.deps.canonical.loadLatestAttempt(task.taskId, threadId) : null;
   }
 }
 

@@ -835,6 +835,15 @@ export class CanonicalAgentStore {
     return row ? this.turnFromRow(row) : null;
   }
 
+  /** Load the newest attempt of a delegated turn within its bound child thread. */
+  loadLatestAttempt(taskId: string, childThreadId: string): AgentTurn | null {
+    const row = this.orm.select().from(canonicalAgentTurns)
+      .where(and(eq(canonicalAgentTurns.threadId, childThreadId),
+        or(eq(canonicalAgentTurns.id, taskId), eq(canonicalAgentTurns.attemptOf, taskId))))
+      .orderBy(desc(sql`rowid`)).limit(1).get();
+    return row ? this.turnFromRow(row) : null;
+  }
+
   /** Check admission order and running turns without ordering by mutable update timestamps. */
   loadTurnRetryState(threadId: string, turnId: string): { hasLaterTurn: boolean; hasRunningTurn: boolean } {
     // Row insertion order distinguishes starts even when their timestamps are identical.
