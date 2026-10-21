@@ -94,6 +94,19 @@ describe("ThreadRepo.updateSettings", () => {
     expect(ok).toBe(false);
   });
 
+  it("keeps each provider once, most recently used last, across switches and thread reads", () => {
+    const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    expect(repo.findById(threadId)?.providers_used).toBeNull();
+    expect(repo.commitProviderSwitch(threadId, { provider: "codex" }, null, "claude", id).providersUsed)
+      .toEqual(["claude", "codex"]);
+    expect(repo.commitProviderSwitch(threadId, { provider: "cursor" }, null, "codex", id).providersUsed)
+      .toEqual(["claude", "codex", "cursor"]);
+    expect(repo.commitProviderSwitch(threadId, { provider: "codex" }, null, "cursor", id).providersUsed)
+      .toEqual(["claude", "cursor", "codex"]);
+    expect(repo.findById(threadId)?.providers_used).toEqual(["claude", "cursor", "codex"]);
+    expect(repo.listByWorkspace("ws-1")[0]?.providers_used).toEqual(["claude", "cursor", "codex"]);
+  });
+
   it("new threads have null settings columns by default", () => {
     const thread = repo.findById(threadId);
     expect(thread?.reasoning_level).toBeNull();

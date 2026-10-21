@@ -6,7 +6,6 @@ import { parseDocument } from "yaml";
 import { HandoffAuditMetadataSchema, type HandoffAuditMetadata } from "@mcode/contracts";
 import {
   getMcodeDir,
-  newHandoffUlid,
   resolveHandoffDir,
   resolveThreadHandoffsDir,
 } from "@mcode/shared";
@@ -52,8 +51,7 @@ export class HandoffStorage {
   }
 
   /** Persists the audit copy of an inline handoff as schemaVersion 2 handoff.md. */
-  async writeHandoffAudit(threadId: string, audit: HandoffAudit): Promise<string> {
-    const ulid = newHandoffUlid();
+  async writeHandoffAudit(threadId: string, ulid: string, audit: HandoffAudit): Promise<string> {
     const handoffDir = resolveHandoffDir(this.mcodeDirFn(), threadId, ulid);
     await NodeFSPromises.mkdir(handoffDir, { recursive: true });
     const frontmatter = [

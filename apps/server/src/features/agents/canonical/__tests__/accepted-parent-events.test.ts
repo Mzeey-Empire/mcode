@@ -226,7 +226,7 @@ describe("prepareAcceptedParentEvents", () => {
     expect(item?.payload).toEqual({ projection: "message", message: {
       id: "live-assistant", thread_id: thread.id, role: "assistant", content: "Plan body",
       is_internal: true,
-      timestamp: ACCEPTED_AT, sequence: 3, model: "fixture-model", attachments: [],
+      timestamp: ACCEPTED_AT, sequence: 3, model: "fixture-model", provider: "codex", attachments: [],
       tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null,
     } });
     expect(result.terminalMessage).toBeUndefined();

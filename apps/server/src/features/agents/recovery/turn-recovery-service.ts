@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
-import { logger } from "@mcode/shared";
+import { logger, newHandoffUlid } from "@mcode/shared";
 import { ProviderIdSchema, toPreviewAnnotationBundleV2 } from "@mcode/contracts";
 import { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
@@ -331,7 +331,7 @@ export class TurnRecoveryService {
     if (handoff.preamble === "") return;
     const providerId = ProviderIdSchema.parse(thread.provider);
     try {
-      await this.handoffStorage.writeHandoffAudit(thread.id, {
+      await this.handoffStorage.writeHandoffAudit(thread.id, newHandoffUlid(), {
         kind: "recovery",
         fromProvider: providerId,
         toProvider: providerId,

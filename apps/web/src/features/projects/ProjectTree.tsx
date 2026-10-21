@@ -42,7 +42,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { WorktreeModeIcon } from "@/components/icons/WorktreeModeIcon";
-import { ProviderIcon } from "@/components/ui/provider-icon";
+import { ProviderIcon, ProviderIconStack, providerLabel } from "@/components/ui/provider-icon";
 import { getPrVisual } from "@/lib/pr-status";
 import { formatRelative } from "@/lib/format-relative";
 import { cn } from "@/lib/utils";
@@ -1831,6 +1831,27 @@ function scheduleThreadRowPrefetch(thread: WorkspaceThread) {
   schedulePrefetch(thread.id);
 }
 
+/** The provider that ran the thread before `current`, or null when the thread never switched. */
+function previousProvider(current: string, providersUsed: readonly string[] | null | undefined): string | null {
+  if (!providersUsed || providersUsed.length < 2) return null;
+  return [...providersUsed].reverse().find((provider) => provider !== current) ?? null;
+}
+
+function ThreadRowProviderSlot({ provider, providersUsed, isUserCompleted }: { provider: string; providersUsed: readonly string[] | null | undefined; isUserCompleted: boolean }) {
+  const previous = previousProvider(provider, providersUsed);
+  const label = previous && providersUsed
+    ? `Providers, ${[provider, ...providersUsed.filter((used) => used !== provider).reverse()].map(providerLabel).join(", ")}`
+    : `Provider, ${providerLabel(provider)}`;
+  return (
+    <div
+      aria-label={label}
+      className={cn("flex h-5 w-4 shrink-0 items-center justify-center text-muted", isUserCompleted && "grayscale opacity-45")}
+    >
+      {previous ? <ProviderIconStack current={provider} previous={previous} /> : <ProviderIcon provider={provider} size={12} />}
+    </div>
+  );
+}
+
 function ThreadRowTitleLine({
   thread,
   isEditing,
@@ -1843,12 +1864,7 @@ function ThreadRowTitleLine({
   // The right padding keeps the title clear of the hover actions so it never reflows on hover.
   return (
     <div className={cn("flex h-5 min-w-0 items-center gap-2", !isEditing && "pr-[60px]")}>
-      <div
-        aria-label={`Provider, ${providerLabel(presentation.provider)}`}
-        className={cn("flex h-5 w-4 shrink-0 items-center justify-center text-muted", presentation.isUserCompleted && "grayscale opacity-45")}
-      >
-        <ProviderIcon provider={presentation.provider} size={12} />
-      </div>
+      <ThreadRowProviderSlot provider={presentation.provider} providersUsed={thread.providers_used} isUserCompleted={presentation.isUserCompleted} />
       {isEditing ? (
         <Input
           type="text"
@@ -2144,20 +2160,6 @@ function ciRollupStatus(
     ? `${count} ${noun} failing`
     : `${count} ${noun} with checks running`;
   return { aggregate, count, label };
-}
-
-const PROVIDER_LABELS: Record<string, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  copilot: "GitHub Copilot",
-  cursor: "Cursor",
-  devin: "Devin",
-  gemini: "Gemini",
-  opencode: "OpenCode",
-};
-
-function providerLabel(provider: string): string {
-  return PROVIDER_LABELS[provider] ?? (provider || "Provider");
 }
 
 function SidebarThreadPreview({

@@ -28,6 +28,7 @@ import { basename } from "@/lib/path";
 import { SelectedTextCommentsComposerAttachment } from "../composer/SelectedTextCommentsComposerAttachment";
 import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
 import { TURN_REVERT_NOTICE_KINDS, TurnRevertReceipt } from "../turn-revert/TurnRevertReceipt";
+import { ProviderSwitchMarker } from "../provider-switch/ProviderSwitchMarker";
 
 /** Text may still arrive while the turn runs, even after its own text stream ended at a boundary. */
 function isTextStillArriving(textIsStreaming: boolean | undefined, agentDisplayState: AgentDisplayState | undefined): boolean {
@@ -807,6 +808,7 @@ const LEGACY_HANDOFF_ANCHOR_MARKER = "<!-- mcode-handoff";
 /** Renders a system message, including security notices. */
 function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) {
   const currentSessionNotices = useThreadRecord(message.thread_id, (record) => record.sessionNotices);
+  if (message.providerSwitch) return <ProviderSwitchMarker providerSwitch={message.providerSwitch} />;
   if (message.systemNotice?.scope === "session") return null;
   if (message.content.startsWith(LEGACY_HANDOFF_ANCHOR_MARKER)) return null;
   if (isCurrentComposerProviderNotice(message, currentSessionNotices)) return null;

@@ -3,6 +3,7 @@ import {
   WS_CHANNELS,
   type ProviderAvailability,
   type Settings,
+  type ThreadProviderSwitchedEvent,
   type TurnFileEffectSummary,
 } from "@mcode/contracts";
 import { useApprovalStore } from "@/stores/approvalStore";
@@ -14,7 +15,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { refreshTurnSnapshotsAfterPersist } from "@/lib/turn-snapshot-refresh";
-import { useThreadStore } from "@/stores/threadStore";
+import { appendServerNoticeOnceLoaded, useThreadStore } from "@/stores/threadStore";
 import { getThreadRecord, patchThreadRecord } from "@/stores/thread-record";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -155,6 +156,7 @@ function handleTerminalData(data: unknown): void {
  * - `thread.prLinked` -- PR detected for a thread, updates pr_number/pr_status
  * - `thread.checksUpdated` -- CI check status polled for a thread's PR, updates checksById
  * - `thread.modelUpdated` -- thread model and provider synced after a message send (multi-client)
+ * - `thread.providerSwitched` -- a send switched provider; patches the thread row and appends the switch marker once
  * - `files.changed` -- invalidates the file autocomplete cache
  * - `skills.changed` -- invalidates provider catalogs; popup re-fetches on next open
  * - `provider.catalogChanged` -- reconciles a refreshed catalog by stable identity
@@ -345,6 +347,19 @@ export function startPushListeners(): void {
           t.id === threadId ? { ...t, model, provider } : t,
         ),
       }));
+    }),
+  );
+
+  unsubs.push(
+    pushEmitter.on("thread.providerSwitched", (data) => {
+      const { threadId, provider, model, providersUsed, marker } = data as ThreadProviderSwitchedEvent;
+      if (!threadId) return;
+      useWorkspaceStore.setState((ws) => ({
+        threads: ws.threads.map((t) =>
+          t.id === threadId ? { ...t, provider, model, providers_used: providersUsed } : t,
+        ),
+      }));
+      appendServerNoticeOnceLoaded(threadId, marker);
     }),
   );
 

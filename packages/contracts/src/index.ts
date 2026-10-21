@@ -337,6 +337,9 @@ export {
   LegacyMessageProvenanceSchema,
   ParentAgentMessageProvenanceSchema,
   SystemNoticeMetadataSchema,
+  HandoffIdSchema,
+  ProviderSwitchMarkerSchema,
+  ThreadProviderSwitchedEventSchema,
 } from "./models/message.js";
 export type {
   Message,
@@ -344,6 +347,8 @@ export type {
   LegacyMessageProvenance,
   ParentAgentMessageProvenance,
   SystemNoticeMetadata,
+  ProviderSwitchMarker,
+  ThreadProviderSwitchedEvent,
 } from "./models/message.js";
 
 export {

@@ -218,9 +218,11 @@ export function loadConversationTail(
     reply_to_message_id: message.reply_to_message_id,
     quoted_text: message.quoted_text,
     model: message.model,
+    provider: message.provider,
     outcome: message.outcome,
     outcomeExecutionId: message.outcomeExecutionId,
     systemNotice: message.systemNotice,
+    providerSwitch: message.providerSwitch,
     is_internal: message.is_internal,
     parentAgentProvenance: message.parentAgentProvenance,
   }));

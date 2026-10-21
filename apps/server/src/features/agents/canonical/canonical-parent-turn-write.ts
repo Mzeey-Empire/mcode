@@ -132,7 +132,7 @@ export interface DataOnlyParentTerminalProjectionInput {
   executionId: string;
   outcome: TurnOutcome;
   endedAt: string;
-  assistant: { content: string; model: string | null; attachments: readonly StoredAttachment[]; messageId?: string };
+  assistant: { content: string; model: string | null; provider?: string | null; attachments: readonly StoredAttachment[]; messageId?: string };
   narrative: readonly ParentNarrativeRecoveryItem[];
 }
 
@@ -142,6 +142,7 @@ export interface DataOnlyParentLiveMessageInput {
   readonly messageId: string;
   readonly content: string;
   readonly model: string | null;
+  readonly provider?: string | null;
   readonly attachments: readonly StoredAttachment[];
 }
 

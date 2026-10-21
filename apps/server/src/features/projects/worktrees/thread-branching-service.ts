@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import { validateBranchName } from "@mcode/shared";
+import { newHandoffUlid, validateBranchName } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type {
   ContextWindowMode,
@@ -101,7 +101,7 @@ export class ThreadBranchingService {
     const handoff = this.planHandoff(input, fork);
     const created = await this.createChild(input, fork.messageId, lifecycle);
     const thread = await this.configureChild(created.thread, input, inherited, fork.messageId);
-    await this.handoffs.writeHandoffAudit(thread.id, {
+    await this.handoffs.writeHandoffAudit(thread.id, newHandoffUlid(), {
       kind: "fork",
       fromProvider: fork.parent.provider,
       toProvider: input.provider,

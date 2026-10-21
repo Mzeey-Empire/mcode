@@ -138,6 +138,13 @@ export class CanonicalAcceptedProgress {
     await new Promise<void>((resolve, reject) => thread.waiters.add({ resolve, reject }));
   }
 
+  /** Reserve the switch marker's position before the target's assistant can be accepted. */
+  reserveProviderSwitchMarker(threadId: string, sequence: number): number {
+    const thread = this.thread(threadId);
+    thread.messageSequence = Math.max(thread.messageSequence, sequence + 1);
+    return sequence;
+  }
+
   /** Release the admission fence if the durable command fails or conflicts. */
   cancelDurableCommand(threadId: string): void {
     const thread = this.threads.get(threadId);
