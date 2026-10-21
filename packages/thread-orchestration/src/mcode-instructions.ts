@@ -3,11 +3,6 @@
 /** Codex silently cuts the middle out of an additionalContext value above ~1,000 tokens (UTF-8 bytes / 4). */
 export const MCODE_INSTRUCTION_SECTION_MAX_BYTES = 4_000;
 
-const EXPLICIT_MCODE_THREAD_TOKEN = /\b(?:mcode(?:[-_\s]+managed)?[-_\s]+threads?|mcode[-_\s]+thread[-_\s]?control|thread_(?:target_list|create_batch|search|get|send|stop|wait)|delegate_task|task_(?:status|cancel))\b/i;
-const NEGATION = /\b(?:do\s+not|don['’]?t|dont|never|without|no)\b/i;
-const SENTENCE_BOUNDARY = /[.!?]+\s+(?=[A-Z])/;
-const MCODE_THREAD_REQUEST_ACTION = /\b(?:create|start|open|launch|use|manage|list|search|send|stop|wait|get|target|delegate|call|check|cancel)\b/i;
-
 /** Stable section names used as Codex context tags. */
 export type McodeInstructionSectionKey =
   | "mcode_identity"
@@ -34,25 +29,6 @@ export interface BuildMcodeInstructionSectionsInput {
   readonly toolkits: McodeAttachedToolkits;
   /** Optional provider-native model to use when a child must spawn another child. */
   readonly nestedDelegationModel?: string;
-}
-
-/**
- * Returns true only when the user's current request explicitly names Mcode
- * thread control or one of its thread operations.
- *
- * Provider-native child-agent language intentionally does not satisfy this
- * boundary. A sentence asks for thread control only through the text before
- * its first negation, so "do not create an Mcode thread" grants nothing while
- * an unrelated "don't wait on it" in another sentence does not revoke an
- * explicit request. A sentence ends only at terminal punctuation followed by
- * whitespace and a capital letter, so paths, versions and line breaks cannot
- * split a negated request into an affirmative one.
- */
-export function isExplicitMcodeThreadRequest(content: string): boolean {
-  return content.split(SENTENCE_BOUNDARY).some((sentence) => {
-    const affirmative = sentence.split(NEGATION, 1)[0] ?? "";
-    return EXPLICIT_MCODE_THREAD_TOKEN.test(affirmative) && MCODE_THREAD_REQUEST_ACTION.test(affirmative);
-  });
 }
 
 const IDENTITY_BLOCK = [

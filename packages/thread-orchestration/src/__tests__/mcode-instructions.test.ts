@@ -2,7 +2,6 @@ import * as NodeBuffer from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
   buildMcodeInstructionSections,
-  isExplicitMcodeThreadRequest,
   MCODE_INSTRUCTION_SECTION_MAX_BYTES,
   renderMcodeInstructionSections,
 } from "../index.js";
@@ -15,45 +14,6 @@ const toolkitCombinations = [
 ];
 
 describe("Mcode runtime instruction sections", () => {
-  it.each([
-    "Spawn exactly one nested provider-native child named leaf_probe",
-    "Delegate this task to a provider-native subagent",
-  ])("does not grant Mcode thread control to provider-native child wording: %s", (request) => {
-    expect(isExplicitMcodeThreadRequest(request)).toBe(false);
-  });
-
-  it.each([
-    "Create one Mcode thread named leaf_probe",
-    "Use thread_create_batch for the requested Mcode thread",
-    "Use the mcode delegate_task tool to hand this to Claude",
-    "Call task_status for the delegated task",
-    "Cancel it with task_cancel",
-  ])("recognizes explicit Mcode thread requests: %s", (request) => {
-    expect(isExplicitMcodeThreadRequest(request)).toBe(true);
-  });
-
-  it.each([
-    "Call delegate_task exactly once to hand this review to Codex. Do not call any other tool, and report what delegate_task returned.",
-    "Delegate this with delegate_task. Don't wait on it, check task_status later.",
-    "Use delegate_task for the review and never poll it in a loop.",
-  ])("grants an explicit request that also contains an unrelated negation: %s", (request) => {
-    expect(isExplicitMcodeThreadRequest(request)).toBe(true);
-  });
-
-  it.each([
-    "Do not create an Mcode thread",
-    "Don't use delegate_task, just fix the bug.",
-    "Do not, under any circumstances, call delegate_task.",
-    "Without creating an Mcode thread, fix the bug and check the status.",
-    "Fix the bug.\nNever use delegate_task or task_status here.",
-    "Don't edit src/a.ts or call delegate_task.",
-    "Do not bump Node to 20.1 or use delegate_task.",
-    "Never do any of these:\n- call delegate_task\n- check task_status",
-    "Don't wait; call delegate_task.",
-  ])("fails closed when every thread-control mention is negated: %s", (request) => {
-    expect(isExplicitMcodeThreadRequest(request)).toBe(false);
-  });
-
   it.each(toolkitCombinations)("selects guidance for attached toolkits: %j", (toolkits) => {
     const sections = buildMcodeInstructionSections({ toolkits });
     const keys = sections.map((section) => section.key);

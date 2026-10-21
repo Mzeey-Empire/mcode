@@ -9,8 +9,6 @@ interface ActiveLease {
   sourceProviderId: string;
   permissionMode: "supervised" | "full";
   active: boolean;
-  /** Whether the current user request explicitly authorized Mcode thread control. */
-  eligible: boolean;
   controller: AbortController;
 }
 
@@ -38,8 +36,6 @@ export interface ActivateMcodeSessionLease {
   sourceTurnId: string;
   sourceProviderId: string;
   permissionMode: "supervised" | "full";
-  /** Explicit per-turn eligibility derived from the original user request. */
-  eligible?: boolean;
 }
 
 /** Opaque credential and stable session binding supplied to a provider transport. */
@@ -49,15 +45,14 @@ export interface McodeSessionCredential {
 }
 
 /** Why a thread-control call was refused. */
-export type McodeThreadControlDenial = "invalid_tool_call" | "no_active_turn" | "not_requested";
+export type McodeThreadControlDenial = "invalid_tool_call" | "no_active_turn";
 
 const DENIAL_MESSAGES: Record<McodeThreadControlDenial, string> = {
   invalid_tool_call: "Mcode thread control denied this call because its tool call id is empty or longer than 128 characters.",
   no_active_turn: "Mcode thread control is unavailable because no user turn is active for this session. Thread-control tools work only while a user turn runs.",
-  not_requested: "Mcode thread control is off for this turn because the user's message did not explicitly ask for it. It turns on when the message asks for an Mcode thread or names a thread-control tool such as delegate_task, with an action such as \"use\" or \"call\" and no negation such as \"don't\" before it in the same sentence. Ask the user to request it directly.",
 };
 
-/** Refuses a thread-control call that has no active, eligible turn lease. */
+/** Refuses a thread-control call that has no active turn lease. */
 export class McodeThreadControlDeniedError extends Error {
   constructor(readonly reason: McodeThreadControlDenial) {
     super(DENIAL_MESSAGES[reason]);
@@ -119,7 +114,6 @@ export class McodeSessionAuthority {
       sourceTurnId: input.sourceTurnId,
       sourceProviderId: input.sourceProviderId,
       permissionMode: input.permissionMode,
-      eligible: input.eligible ?? true,
       active: true,
       controller: new AbortController(),
     };
@@ -155,7 +149,7 @@ export class McodeSessionAuthority {
 
   /**
    * Builds the thread-control authority from the session's turn lease.
-   * @throws McodeThreadControlDeniedError when the lease is missing, revoked, or ineligible.
+   * @throws McodeThreadControlDeniedError when the lease is missing or revoked.
    */
   authorizeThreadControl(session: McodeSession, sourceToolCallId: string): InternalThreadControlAuthority {
     return authorizeEntry(this.entries.get(session.sessionId), sourceToolCallId);
@@ -195,7 +189,6 @@ function authorizeEntry(
   }
   const lease = entry?.active;
   if (!lease?.active) throw new McodeThreadControlDeniedError("no_active_turn");
-  if (!lease.eligible) throw new McodeThreadControlDeniedError("not_requested");
   return {
     type: "internal",
     userId: "local-user",

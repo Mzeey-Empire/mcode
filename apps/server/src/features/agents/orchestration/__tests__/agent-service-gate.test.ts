@@ -395,9 +395,10 @@ describe("AgentService internal MCP provider allowlist", () => {
   });
 
   it.each([
-    "Spawn exactly one nested provider-native child named leaf_probe",
-    "Delegate this task to a provider-native subagent",
-  ])("revokes thread control at turn start for child-agent wording: %s", async (content) => {
+    "Farm this out to Codex",
+    "Call delegate_task exactly once to hand this review to Codex. Do not call any other tool.",
+    "Do not create an Mcode thread",
+  ])("activates thread control whatever the message says: %s", async (content) => {
     const { svc, threadControlMcp } = buildService();
 
     await svc.sendMessage({
@@ -409,26 +410,11 @@ describe("AgentService internal MCP provider allowlist", () => {
       provider: "codex",
     });
 
-    expect(threadControlMcp.activate).not.toHaveBeenCalled();
-    expect(threadControlMcp.revoke).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
-  });
-
-  it("activates thread control only for an explicit Mcode thread request", async () => {
-    const { svc, threadControlMcp } = buildService();
-
-    await svc.sendMessage({
-      threadId: THREAD_ID,
-      content: "Create one Mcode thread named leaf_probe",
-      permissionMode: "default",
-      model: "claude-sonnet-4-6",
-      attachments: [],
-      provider: "codex",
-    });
-
     expect(threadControlMcp.revoke).not.toHaveBeenCalled();
     expect(threadControlMcp.activate).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: `mcode-${THREAD_ID}`,
-      eligible: true,
+      sourceThreadId: THREAD_ID,
+      permissionMode: "supervised",
     }));
   });
 });

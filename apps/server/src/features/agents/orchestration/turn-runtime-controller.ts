@@ -1067,12 +1067,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Apply the provider-neutral thread-control directive selected during admission. */
   private applyThreadControlLease(directive: ThreadControlLeaseDirective | null): void {
-    if (!directive) return;
-    if (directive.kind === "revoke") {
-      this.threadControlMcp?.revoke(directive.sessionId);
-      return;
-    }
-    this.threadControlMcp?.activate({ ...directive, eligible: true });
+    if (directive) this.threadControlMcp?.activate(directive);
   }
 
   /** Send one attempt and hand only retryable failures to the existing retry owner. */

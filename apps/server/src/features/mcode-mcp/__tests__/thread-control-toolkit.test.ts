@@ -21,7 +21,6 @@ const session: McodeSession = {
   threadControl: true,
 };
 
-const NOT_REQUESTED = /^Mcode thread control is off for this turn because the user's message did not explicitly ask for it\./;
 const NO_ACTIVE_TURN = /^Mcode thread control is unavailable because no user turn is active for this session\./;
 
 const thread = {
@@ -58,17 +57,15 @@ function createService() {
   } satisfies ThreadControlToolService;
 }
 
-function setup(options: { lease?: "active" | "ineligible" | "none"; threadControl?: boolean } = {}) {
+function setup(options: { lease?: "active" | "none"; threadControl?: boolean } = {}) {
   const authority = new McodeSessionAuthority();
-  const lease = options.lease ?? "active";
-  if (lease !== "none") {
+  if (options.lease !== "none") {
     authority.activate({
       sessionId: session.sessionId,
       sourceThreadId: session.threadId,
       sourceTurnId: "source-turn",
       sourceProviderId: "claude",
       permissionMode: "full",
-      eligible: lease === "active",
     });
   }
   const service = createService();
@@ -144,15 +141,12 @@ describe("thread-control toolkit", () => {
     expect(setup({ threadControl: false }).bound).toBeNull();
   });
 
-  it.each([
-    ["none", NO_ACTIVE_TURN],
-    ["ineligible", NOT_REQUESTED],
-  ] as const)("refuses every call when the turn lease is %s and says why", async (lease, reason) => {
-    const { call, service } = setup({ lease });
+  it("refuses every call without a turn lease and says why", async () => {
+    const { call, service } = setup({ lease: "none" });
 
     await expect(call("workspace_search", { query: "mcode" })).resolves.toMatchObject({
       isError: true,
-      content: [{ type: "text", text: expect.stringMatching(reason) }],
+      content: [{ type: "text", text: expect.stringMatching(NO_ACTIVE_TURN) }],
     });
     expect(service.workspaceSearch).not.toHaveBeenCalled();
   });

@@ -23,7 +23,6 @@ import {
   type TurnRuntimeSnapshot,
 } from "@mcode/contracts";
 import { logger, validateBranchName } from "@mcode/shared";
-import { isExplicitMcodeThreadRequest } from "@mcode/thread-orchestration";
 import { broadcast } from "../../../application/transport/push.js";
 import { publishSynthesizedAgentEvents } from "../canonical/synthesized-agent-event-publication.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
@@ -168,16 +167,13 @@ export interface TurnParentStartOwner {
 }
 
 /** The thread-control action selected during generic dispatch preparation. */
-export type ThreadControlLeaseDirective =
-  | {
-      readonly kind: "activate";
-      readonly sessionId: string;
-      readonly sourceThreadId: string;
-      readonly sourceTurnId: string;
-      readonly sourceProviderId: ProviderId;
-      readonly permissionMode: "supervised" | "full";
-    }
-  | { readonly kind: "revoke"; readonly sessionId: string };
+export interface ThreadControlLeaseDirective {
+  readonly sessionId: string;
+  readonly sourceThreadId: string;
+  readonly sourceTurnId: string;
+  readonly sourceProviderId: ProviderId;
+  readonly permissionMode: "supervised" | "full";
+}
 
 /** A provider-ready turn package with no persistence or provider-selection work left. */
 export interface PreparedTurnDispatch {
@@ -1191,7 +1187,7 @@ export class TurnAdmissionDispatchCoordinator {
       attachments: attachments.persisted.length > 0 ? attachments.persisted : undefined,
       reasoningLevel: prepared.command.reasoningLevel,
       ...guardrails,
-      threadControlEligible: this.isThreadControlEligible(prepared),
+      threadControlEligible: supportsInternalThreadControl(prepared.providerId),
       resumeFrom: this.resumeFrom(prepared, attachments),
       ...(prepared.command.resumeRequired ? { resumeRequired: true } : {}),
       providerOptions: this.providerOptions(prepared, settings),
@@ -1289,17 +1285,10 @@ export class TurnAdmissionDispatchCoordinator {
     return thread.sdk_session_id ?? undefined;
   }
 
-  private isThreadControlEligible(prepared: PreparedCommand): boolean {
-    return supportsInternalThreadControl(prepared.providerId) && isExplicitMcodeThreadRequest(prepared.command.content);
-  }
-
   private threadControlDirective(prepared: PreparedCommand, sourceTurnId: string): ThreadControlLeaseDirective | null {
     if (!supportsInternalThreadControl(prepared.providerId)) return null;
-    const sessionId = `mcode-${prepared.command.threadId}`;
-    if (!this.isThreadControlEligible(prepared)) return { kind: "revoke", sessionId };
     return {
-      kind: "activate",
-      sessionId,
+      sessionId: `mcode-${prepared.command.threadId}`,
       sourceThreadId: prepared.command.threadId,
       sourceTurnId,
       sourceProviderId: prepared.providerId,

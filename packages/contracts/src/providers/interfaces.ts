@@ -129,7 +129,7 @@ export interface TurnRequest<P extends ProviderId = ProviderId> {
   maxBudgetUsd?: number;
   /** Max agent turns for this Turn. Undefined or 0 disables. */
   maxTurns?: number;
-  /** Whether this turn's user request explicitly authorizes Mcode thread control. */
+  /** Whether the server grants this turn Mcode thread control. */
   threadControlEligible?: boolean;
   /**
    * SDK session id to resume from. When defined the Provider resumes that
