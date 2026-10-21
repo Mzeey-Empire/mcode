@@ -86,6 +86,27 @@ describe("approvalReceiptCopy", () => {
   });
 });
 
+describe("tool approval subject", () => {
+  it.each(["mcp__mcode__delegate_task", "mcp:mcode/delegate_task"])("names %s the way its tool row does after reload", (toolName) => {
+    const [item] = buildPersistedNarrativeItems({
+      tools: [],
+      thoughts: [],
+      hooks: [],
+      approvals: [{ ...receiptRecord(0, BASE), kind: "tool", subject_label: toolName }],
+    });
+    if (item?.type !== "approval") throw new Error("expected an approval item");
+    render(<ApprovalReceiptRow receipt={item.receipt} />);
+    expect(screen.getByText("Delegate task")).toBeTruthy();
+    expect(screen.queryByText(toolName)).toBeNull();
+  });
+
+  it("keeps a command subject verbatim", () => {
+    const [item] = buildPersistedNarrativeItems({ tools: [], thoughts: [], hooks: [], approvals: [receiptRecord(0, BASE)] });
+    if (item?.type !== "approval") throw new Error("expected an approval item");
+    expect(item.receipt.subjectLabel).toBe("bun run test");
+  });
+});
+
 describe("approval receipt position", () => {
   it("places the receipt between the same tool rows live and after reload", () => {
     const live = buildNarrativeItems({

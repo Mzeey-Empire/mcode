@@ -455,3 +455,59 @@ describe("Picker", () => {
     expect(screen.getByRole("option", { name: "branch-008" })).not.toHaveAttribute("data-selected");
   });
 });
+
+function NumberedPicker({ onSelect, numbered = true }: { readonly onSelect: (name: string) => void; readonly numbered?: boolean }) {
+  const [query, setQuery] = useState("");
+  const names = ["alpha", "bravo", "charlie", "delta"].filter((name) => name.includes(query));
+  return (
+    <Picker<string>
+      numberedShortcuts={numbered}
+      query={query}
+      onQueryChange={setQuery}
+      items={names}
+      total={names.length}
+      status="ready"
+      renderItem={(name) => ({ key: name, name, disabled: name === "bravo" })}
+      onSelect={onSelect}
+    />
+  );
+}
+
+function chipOf(name: string): string | null {
+  return screen.getByRole("option", { name: new RegExp(name) }).querySelector("[data-slot=kbd]")?.textContent ?? null;
+}
+
+describe("Picker numbered shortcuts", () => {
+  it("numbers only the selectable rows", () => {
+    render(<NumberedPicker onSelect={() => {}} />);
+    expect(["alpha", "bravo", "charlie", "delta"].map(chipOf)).toEqual(["Ctrl+1", null, "Ctrl+2", "Ctrl+3"]);
+    expect(screen.getByRole("option", { name: /charlie/ })).toHaveAttribute("aria-keyshortcuts", "Control+2");
+  });
+
+  it("picks the Nth selectable row with Ctrl or Meta, skipping disabled rows", () => {
+    const onSelect = vi.fn();
+    render(<NumberedPicker onSelect={onSelect} />);
+    const search = screen.getByRole("combobox");
+    fireEvent.keyDown(search, { key: "2", ctrlKey: true });
+    fireEvent.keyDown(search, { key: "2", metaKey: true });
+    expect(onSelect.mock.calls).toEqual([["charlie"], ["charlie"]]);
+  });
+
+  it("renumbers the rows a search leaves", async () => {
+    const onSelect = vi.fn();
+    render(<NumberedPicker onSelect={onSelect} />);
+    const search = screen.getByRole("combobox");
+    await userEvent.type(search, "del");
+    expect(chipOf("delta")).toBe("Ctrl+1");
+    fireEvent.keyDown(search, { key: "1", ctrlKey: true });
+    expect(onSelect).toHaveBeenCalledWith("delta");
+  });
+
+  it("does nothing without the prop", () => {
+    const onSelect = vi.fn();
+    render(<NumberedPicker onSelect={onSelect} numbered={false} />);
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "1", ctrlKey: true });
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(chipOf("alpha")).toBeNull();
+  });
+});

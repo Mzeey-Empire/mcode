@@ -27,7 +27,9 @@ export class TurnConversationProjectionService {
     event: Extract<AgentEvent, { type: "message" }>,
     postTurnGoalReceipt: boolean,
   ): Promise<void> {
-    const model = this.threads.findById(event.threadId)?.model ?? null;
+    const thread = this.threads.findById(event.threadId);
+    const model = thread?.model ?? null;
+    event.provider ??= thread?.provider ?? null;
     if (postTurnGoalReceipt) {
       await this.materializeGoalReceipt(event, model);
       return;
@@ -109,6 +111,7 @@ export class TurnConversationProjectionService {
     const receipt = await this.writer.execute(turnConversationWriteOperations.goalReceipt, {
       threadId: event.threadId, messageId, content: event.content, model,
     });
+    event.provider = receipt.provider ?? event.provider ?? null;
     if (receipt.id !== messageId) throw new Error("Goal receipt changed its assigned renderer identity");
   }
 }

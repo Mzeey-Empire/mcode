@@ -1,10 +1,10 @@
 import {
   TOOL_ICONS,
-  TOOL_LABELS,
   TOOL_PHASE_LABELS,
   DEFAULT_ICON,
   resolveToolName,
   isShellTool,
+  toolDisplayLabel,
 } from "@/components/chat/tool-renderers/constants";
 import type { ToolCall } from "@/transport/types";
 import { extractToolInputDetail } from "./tool-detail";
@@ -34,10 +34,11 @@ export function ActiveToolRow({ toolCall, expansion }: ActiveToolRowProps) {
   }
 
   const canonicalName = resolveToolName(toolCall.toolName);
-  const label = TOOL_PHASE_LABELS[canonicalName] ?? TOOL_LABELS[canonicalName] ?? toolCall.toolName;
+  const label = TOOL_PHASE_LABELS[canonicalName] ?? toolDisplayLabel(toolCall.toolName);
+  const detail = extractToolInputDetail(toolCall);
   return (
     <NarrativeToolRow icon={TOOL_ICONS[canonicalName] ?? DEFAULT_ICON} label={label}>
-      <NarrativeToolRowDetail kind="file">{extractToolInputDetail(toolCall)}</NarrativeToolRowDetail>
+      {detail ? <NarrativeToolRowDetail kind="file">{detail}</NarrativeToolRowDetail> : null}
     </NarrativeToolRow>
   );
 }

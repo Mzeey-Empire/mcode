@@ -199,7 +199,7 @@ function assistantMessage(
     is_internal: true,
     tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null,
     timestamp: original?.timestamp ?? input.acceptedAt, sequence: original?.sequence ?? input.messageSequence,
-    model: assistant.model, attachments: assistantAttachments(assistant) };
+    model: assistant.model, provider: input.thread.providerId, attachments: assistantAttachments(assistant) };
 }
 
 function existingAssistantMessage(item: AgentItem | undefined): Message | undefined {
@@ -285,9 +285,10 @@ function publicationEvents(input: PreparationInput): CanonicalAgentEventDraft[] 
       throw new Error("Accepted publication requires a valid reserved publication ID");
     }
     const event = terminalHookPublication(input, sanitizePublicationEvent(publication.event));
+    const projected = event.type === "message" ? { ...event, provider: input.thread.providerId } : event;
     return { eventId: `${input.operation.operationId}:publication:${index}`,
       routing: input.operation.execution, sourceProviderId: input.thread.providerId, sourceIdentities: [],
-      payload: { type: "publication.recorded", publicationId, event } };
+      payload: { type: "publication.recorded", publicationId, event: projected } };
   });
 }
 

@@ -31,6 +31,24 @@ describe("resolveUserMessagePreview", () => {
     );
   });
 
+  it.each([
+    ["call thread_target_list then delegate_task", "call thread_target_list then delegate_task"],
+    ["see `src/__tests__/a_b.ts`", "see src/__tests__/a_b.ts"],
+    ["open https://example.com/wiki/Foo_(bar)", "open https://example.com/wiki/Foo_(bar)"],
+    ["fix issue #2269 when a > b and [x] is set", "fix issue #2269 when a > b and [x] is set"],
+    ["2 * 3 * 4 = 24", "2 * 3 * 4 = 24"],
+  ])("keeps literal characters in %j", (content, expected) => {
+    expect(resolveUserMessagePreview(userMessage({ content }))).toBe(expected);
+  });
+
+  it.each([
+    ["## Plan\n> quoted _note_", "Plan quoted note"],
+    ["read [the docs](https://example.com/a_(b)) first", "read the docs first"],
+    ["__bold__ and ~~gone~~", "bold and gone"],
+  ])("drops markdown syntax in %j", (content, expected) => {
+    expect(resolveUserMessagePreview(userMessage({ content }))).toBe(expected);
+  });
+
   it("returns goal conditions for /goal set commands", () => {
     expect(resolveUserMessagePreview(userMessage({ content: "/goal ship sticky messages" }))).toBe(
       "ship sticky messages",

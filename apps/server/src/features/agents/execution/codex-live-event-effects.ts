@@ -34,6 +34,7 @@ export class CodexLiveEventEffects {
   private calls = new Map<string, TaskToolCall>();
   private sharedCalls = false;
   private assignedMessageId: string | undefined;
+  private provider: string | null = null;
 
   constructor(private readonly execution: ExecutionIdentity, private readonly precedingMessageId: string) {}
 
@@ -45,6 +46,7 @@ export class CodexLiveEventEffects {
     copy.sharedCalls = true;
     this.sharedCalls = true;
     copy.assignedMessageId = this.assignedMessageId;
+    copy.provider = this.provider;
     return copy;
   }
 
@@ -117,9 +119,10 @@ export class CodexLiveEventEffects {
   }
 
   private messageEffects(intent: Extract<CodexLiveWriterIntent, { kind: "assistant-body" }>, effects: ParentLiveEffects): ParentLiveEffects {
+    this.provider = intent.provider;
     this.assignedMessageId ??= deriveTurnAssistantMessageId(this.execution.threadId, this.precedingMessageId);
     return { ...effects, message: { precedingMessageId: this.precedingMessageId, messageId: this.assignedMessageId,
-      content: intent.content, model: intent.model, attachments: intent.attachments } };
+      content: intent.content, model: intent.model, provider: intent.provider, attachments: intent.attachments } };
   }
 
   private narrativeEffects(intent: Extract<CodexLiveWriterIntent, { kind: "narrative-recovery" }>, effects: ParentLiveEffects): ParentLiveEffects {
@@ -164,6 +167,7 @@ export class CodexLiveEventEffects {
     return { threadId: this.execution.threadId, executionId: this.execution.executionId,
       outcome: intent.outcome, endedAt,
       assistant: { content: intent.assistant.content, model: intent.assistant.model,
+        provider: this.provider,
         attachments: intent.assistant.attachments, ...(this.assignedMessageId ? { messageId: this.assignedMessageId } : {}) },
       narrative: intent.narrative };
   }

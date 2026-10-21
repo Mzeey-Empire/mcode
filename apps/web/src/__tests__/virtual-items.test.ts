@@ -369,6 +369,36 @@ describe("buildStableItems", () => {
     }));
   });
 });
+describe("provider switch marker placement", () => {
+  const user = makeMessage({ id: "u1", sequence: 1, role: "user", content: "continue on codex" });
+  const marker = makeMessage({
+    id: "switch-1", sequence: 2, role: "system", content: "Switched from Claude to Codex",
+    providerSwitch: { fromProvider: "claude", toProvider: "codex", handoffId: "01J0000000000000000000000A" },
+  });
+
+  it("keeps the marker between the user message and the new provider's reply", () => {
+    const reply = makeMessage({ id: "a1", sequence: 3, provider: "codex" });
+    const keys = buildVirtualItems(buildStableItems([user, marker, reply]), [], false).map((item) => item.key);
+    expect(keys.indexOf("switch-1")).toBeGreaterThan(keys.indexOf("u1"));
+    expect(keys.indexOf("switch-1")).toBeLessThan(keys.indexOf("a1"));
+  });
+
+  it("puts the live turn after the marker and shows the marker once when the turn settles", () => {
+    const responseKey = "turn-response:thread-1:switch";
+    const currentTurn = { threadId: "thread-1", messageId: "a1", responseKey, responseKeysByMessageId: { a1: responseKey } };
+    const volatile = buildVolatileItems([makeToolCall()], STREAMING_AGENT, 1, "working", undefined, undefined, currentTurn);
+    const live = buildVirtualItems(buildStableItems([user, marker]), volatile, true).map((item) => item.key);
+    expect(live.slice(0, 2)).toEqual(["u1", "switch-1"]);
+    expect(live).toContain("narrative-flow");
+    expect(live.at(-1)).toBe("narrative-indicator");
+
+    const reply = makeMessage({ id: "a1", sequence: 3, provider: "codex" });
+    const settled = buildVirtualItems(buildStableItems([user, marker, reply], undefined, null, currentTurn), [], false);
+    expect(settled.filter((item) => item.key === "switch-1")).toHaveLength(1);
+    expect(settled.filter((item) => item.type === "message" && item.message.id === "a1")).toHaveLength(1);
+  });
+});
+
 describe("final response item keys", () => {
   it("derives the same key before and after the assistant message persists", () => {
     const liveKey = liveFinalResponseItemKey("thread-1", "turn-response:thread-1:abc");
@@ -1123,12 +1153,42 @@ describe("provider retry status", () => {
   });
 
   it("keeps the status line row, no longer live, while it fades after the last approval is answered", () => {
-    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: true });
+    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: "turn" });
     expect(findIndicator(items)?.isAgentRunning).toBe(false);
   });
 
   it("shows no status line on an idle thread with nothing waiting", () => {
     const items = buildVolatileItems([], undefined, undefined, undefined, [], [], undefined, undefined, undefined, { stopPending: false, compacting: false });
     expect(findIndicator(items)).toBeUndefined();
+  });
+});
+
+describe("delegated task status", () => {
+  const leftoverTools = [makeToolCall({ id: "edit", toolName: "Edit" })];
+
+  it("keeps a live 'Waiting on subagents' line without steps or clock after the own turn ends", () => {
+    const items = buildVolatileItems(
+      leftoverTools, undefined, 1, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: true, compacting: false, planning: true, delegating: true },
+    );
+    expect(findIndicator(items)).toMatchObject({
+      isAgentRunning: true, stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
+    });
+  });
+
+  it("keeps the delegated shape, no longer live, while the line fades after the last task ends", () => {
+    const items = buildVolatileItems(
+      leftoverTools, undefined, 1, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false, exiting: "delegated" },
+    );
+    expect(findIndicator(items)).toMatchObject({ isAgentRunning: false, stepCount: 0, startTime: undefined });
+  });
+
+  it("lets an approval wait outrank delegation", () => {
+    const items = buildVolatileItems(
+      [], undefined, undefined, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false, waitingFor: "approval", delegating: true },
+    );
+    expect(findIndicator(items)?.status.label).toBe("Waiting for approval");
   });
 });

@@ -6,6 +6,9 @@ export * from "./models/task-list-tools.js";
 export {
   DelegateTaskInputSchema,
   DelegateTaskResultSchema,
+  ThreadLaunchWorkspaceSchema,
+  ThreadLaunchInputSchema,
+  ThreadLaunchResultSchema,
   TaskStateSchema,
   TaskStatusInputSchema,
   TaskStatusResultSchema,
@@ -13,6 +16,9 @@ export {
   TaskCancelResultSchema,
   type DelegateTaskInput,
   type DelegateTaskResult,
+  type ThreadLaunchWorkspace,
+  type ThreadLaunchInput,
+  type ThreadLaunchResult,
   type TaskState,
   type TaskStatusInput,
   type TaskStatusResult,
@@ -331,6 +337,9 @@ export {
   LegacyMessageProvenanceSchema,
   ParentAgentMessageProvenanceSchema,
   SystemNoticeMetadataSchema,
+  HandoffIdSchema,
+  ProviderSwitchMarkerSchema,
+  ThreadProviderSwitchedEventSchema,
 } from "./models/message.js";
 export type {
   Message,
@@ -338,6 +347,8 @@ export type {
   LegacyMessageProvenance,
   ParentAgentMessageProvenance,
   SystemNoticeMetadata,
+  ProviderSwitchMarker,
+  ThreadProviderSwitchedEvent,
 } from "./models/message.js";
 
 export {

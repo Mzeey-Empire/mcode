@@ -406,7 +406,7 @@ describe("narrative tool row layout classes", () => {
     const _summary = JSON.stringify({ files: path, changes: [{ path, kind: { type: "update" } }] }).slice(0, 200);
     render(<ToolSummaryLine group={{ calls: [makeBashCall({ toolName: "file_change", toolInput: { _summary }, isComplete: true })] }} />);
 
-    expect(screen.getByText("Edited file").parentElement).toHaveTextContent(/^Edited filefile_change$/);
+    expect(screen.getByText("Edited file").parentElement).toHaveTextContent(/^Edited file$/);
   });
 
   it("summarizes several calls with their failures and lists each on open", () => {
@@ -490,6 +490,44 @@ describe.each(MCODE_MCP_SPELLINGS)("Mcode MCP task tools named %s*", (prefix) =>
     useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
     render(<ToolSummaryLine group={{ calls: [taskCall(`${prefix}task_cancel`)] }} />);
     expect(screen.getByText("Cancel task")).not.toHaveClass("max-w-[60%]");
+  });
+});
+
+const MCODE_THREAD_TOOLS = [
+  "workspace_search", "worktree_list", "thread_target_list", "thread_search",
+  "thread_get", "thread_send", "thread_stop", "thread_wait", "thread_launch",
+] as const;
+
+function mcodeCall(toolName: string, overrides: Partial<ToolCall> = {}): ToolCall {
+  return { id: "tc-mcode-1", toolName, toolInput: {}, output: null, isError: false, isComplete: true, ...overrides };
+}
+
+describe.each(MCODE_MCP_SPELLINGS)("Mcode MCP thread tools named %s*", (prefix) => {
+  it.each(MCODE_THREAD_TOOLS)("labels a finished %s row in plain words", (tool) => {
+    render(<ToolSummaryLine group={{ calls: [mcodeCall(`${prefix}${tool}`)] }} />);
+    expect(screen.queryByText(new RegExp(tool))).not.toBeInTheDocument();
+  });
+
+  it.each(MCODE_THREAD_TOOLS)("labels a failed %s row in plain words", (tool) => {
+    render(<ToolSummaryLine group={{ calls: [mcodeCall(`${prefix}${tool}`, { isError: true, output: "boom" })] }} />);
+    expect(screen.queryByText(new RegExp(tool))).not.toBeInTheDocument();
+  });
+
+  it.each(MCODE_THREAD_TOOLS)("summarizes a group of %s calls in plain words", (tool) => {
+    const call = mcodeCall(`${prefix}${tool}`);
+    expect(buildToolSummaryText([call, call])).not.toContain(tool);
+  });
+
+  it("shows a running thread_target_list row without its raw name", () => {
+    render(<ActiveToolRow toolCall={mcodeCall(`${prefix}thread_target_list`, { isComplete: false })} />);
+    expect(screen.getByText("Listed targets")).toBeInTheDocument();
+    expect(screen.queryByText(/thread_target_list/)).not.toBeInTheDocument();
+  });
+
+  it("shows no detail and an unclipped label for a reloaded row whose input was empty", () => {
+    render(<ToolSummaryLine group={{ calls: [mcodeCall(`${prefix}thread_target_list`, { toolInput: { _summary: "{}" } })] }} />);
+    expect(screen.queryByText("{}")).not.toBeInTheDocument();
+    expect(screen.getByText("Listed targets")).not.toHaveClass("max-w-[60%]");
   });
 });
 

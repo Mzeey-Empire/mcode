@@ -670,6 +670,21 @@ describe("ProjectTree thread interactions", () => {
     expect(screen.getByRole("button", { name: /^Provider, Claude Second active/i })).toBeVisible();
   });
 
+  it("labels a thread that switched provider with every provider, current first", () => {
+    setupStoreMocks({
+      threads: [
+        makeThread({ id: "switched", title: "Switched", provider: "codex", providers_used: ["claude", "codex"] }),
+        makeThread({ id: "single", title: "Single", provider: "claude", providers_used: ["claude"] }),
+        makeThread({ id: "never", title: "Never", provider: "claude", providers_used: null }),
+      ],
+    });
+    render(<ProjectTree />);
+    expect(screen.getByRole("button", { name: /^Providers, Codex, Claude Switched/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Provider, Claude Single/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Provider, Claude Never/ })).toBeVisible();
+    expect(screen.getAllByTestId("provider-icon-stack")).toHaveLength(1);
+  });
+
   it("offers Reopen on a completed row and shows its hover details", async () => {
     vi.useRealTimers();
     setupStoreMocks({
@@ -1519,7 +1534,7 @@ describe("ProjectTree action-required indicator", () => {
   });
 
   function attention(threadId: string, overrides: Partial<ThreadAttention> = {}): ThreadAttention {
-    return { threadId, waiting: null, lastTurn: null, seen: { sequence: null, at: null }, ...overrides };
+    return { threadId, waiting: null, lastTurn: null, seen: { sequence: null, at: null }, hasUnfinishedDelegatedTasks: false, ...overrides };
   }
 
   function waitingOn(kind: ThreadWaitingKind): Pick<ThreadAttention, "waiting"> {

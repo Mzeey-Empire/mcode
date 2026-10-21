@@ -79,6 +79,7 @@ export class ProviderExecutionEventState {
 
   private reduceParent(event: AgentEvent, allowTerminal: boolean, capture?: ProviderRuntimeEvent["planCapture"]): PreparedExecutionParentEvent {
     if (!allowTerminal && isTerminalEvent(event)) return { kind: "rejected" };
+    if (event.type === "message") event = { ...event, provider: this.providerId };
     switch (this.parent.kind) {
       case "codex": {
         const reduction = this.parent.reducer.reduce(event, capture);

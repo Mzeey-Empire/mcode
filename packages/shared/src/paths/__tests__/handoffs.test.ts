@@ -34,9 +34,12 @@ describe("handoffs paths", () => {
     expect(result.replace(/\\/g, "/")).toBe("/data/threads/t_1/handoffs");
   });
 
-  it("resolveHandoffDir joins the ULID subdir", () => {
-    const result = resolveHandoffDir("/data", "t_1", "01HX");
-    expect(result.replace(/\\/g, "/")).toBe("/data/threads/t_1/handoffs/01HX");
+  it("resolveHandoffDir joins the ULID subdir and rejects anything else", () => {
+    const ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    expect(resolveHandoffDir("/data", "t_1", ulid).replace(/\\/g, "/")).toBe(`/data/threads/t_1/handoffs/${ulid}`);
+    for (const id of ["01HX", `../${ulid}`, ulid.toLowerCase()]) {
+      expect(() => resolveHandoffDir("/data", "t_1", id)).toThrow();
+    }
   });
 
   it("resolveThreadAttachmentsDir is a sibling of handoffs", () => {

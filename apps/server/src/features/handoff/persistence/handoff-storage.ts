@@ -6,7 +6,6 @@ import { parseDocument } from "yaml";
 import { HandoffAuditMetadataSchema, type HandoffAuditMetadata } from "@mcode/contracts";
 import {
   getMcodeDir,
-  newHandoffUlid,
   resolveHandoffDir,
   resolveThreadHandoffsDir,
 } from "@mcode/shared";
@@ -42,6 +41,8 @@ export class HandoffStorage {
       const dir = NodePath.join(handoffsRoot, entry);
       // Pre-v2 artifacts have separate JSON metadata and must not enter the v2 wire contract.
       if (NodeFS.existsSync(NodePath.join(dir, "handoff.json"))) continue;
+      // An audit still being written has its directory but not yet its renamed handoff.md.
+      if (!NodeFS.existsSync(NodePath.join(dir, "handoff.md"))) continue;
       const markdown = await NodeFSPromises.readFile(NodePath.join(dir, "handoff.md"), "utf8");
       const meta = readAuditMetadata(markdown);
       if (meta) return { markdown, meta };
@@ -50,8 +51,7 @@ export class HandoffStorage {
   }
 
   /** Persists the audit copy of an inline handoff as schemaVersion 2 handoff.md. */
-  async writeHandoffAudit(threadId: string, audit: HandoffAudit): Promise<string> {
-    const ulid = newHandoffUlid();
+  async writeHandoffAudit(threadId: string, ulid: string, audit: HandoffAudit): Promise<string> {
     const handoffDir = resolveHandoffDir(this.mcodeDirFn(), threadId, ulid);
     await NodeFSPromises.mkdir(handoffDir, { recursive: true });
     const frontmatter = [
@@ -64,7 +64,10 @@ export class HandoffStorage {
       `budgetBytes: ${audit.budgetBytes}`,
       `droppedOptions: ${JSON.stringify(audit.droppedOptions)}`,
     ].join("\n");
-    await NodeFSPromises.writeFile(NodePath.join(handoffDir, "handoff.md"), `---\n${frontmatter}\n---\n\n${audit.history}\n`, "utf8");
+    // Readers must never see a half-written audit, so handoff.md appears only once it is complete.
+    const partialPath = NodePath.join(handoffDir, "handoff.md.partial");
+    await NodeFSPromises.writeFile(partialPath, `---\n${frontmatter}\n---\n\n${audit.history}\n`, "utf8");
+    await NodeFSPromises.rename(partialPath, NodePath.join(handoffDir, "handoff.md"));
     return ulid;
   }
 

@@ -81,7 +81,10 @@ function createThreadService() {
   return {
     workspaceSearch: vi.fn<ThreadControlToolService["workspaceSearch"]>(),
     worktreeList: vi.fn<ThreadControlToolService["worktreeList"]>(),
-    threadCreateBatch: vi.fn<ThreadControlToolService["threadCreateBatch"]>(),
+    delegate: vi.fn<ThreadControlToolService["delegate"]>(),
+    launch: vi.fn<ThreadControlToolService["launch"]>(),
+    status: vi.fn<ThreadControlToolService["status"]>(),
+    cancel: vi.fn<ThreadControlToolService["cancel"]>(),
     threadTargetList: vi.fn<ThreadControlToolService["threadTargetList"]>(),
     threadSearch: vi.fn<ThreadControlToolService["threadSearch"]>(),
     threadGet: vi.fn<ThreadControlToolService["threadGet"]>(),

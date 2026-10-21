@@ -1,10 +1,10 @@
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { PermissionModeSchema, ProviderIdSchema, CanonicalAgentEventEnvelopeSchema, AgentEventSchema, isDelegateTaskToolName } from "@mcode/contracts";
-import { canonicalAgentEvents, canonicalAgentItems, delegatedTasks } from "../../../runtime/persistence/sqlite/schema.js";
+import { canonicalAgentEvents, canonicalAgentItems, canonicalAgentTurns, delegatedTasks, threadStartups, threadControlApprovals } from "../../../runtime/persistence/sqlite/schema.js";
 
 /** Immutable launch snapshot, captured before any approval or startup side effect. */
 export const DelegatedTaskPlanSchema = z.object({
@@ -78,6 +78,25 @@ export class DelegatedTaskStore {
   listByCoordinator(coordinatorThreadId: string): DelegatedTask[] {
     return this.orm.select().from(delegatedTasks)
       .where(eq(delegatedTasks.coordinatorThreadId, coordinatorThreadId)).all().map((row) => this.parse(row));
+  }
+
+  /** Read task receipts without durable terminal evidence. */
+  listUnfinishedCandidates(coordinatorThreadId?: string): DelegatedTask[] {
+    return this.orm.select(getTableColumns(delegatedTasks)).from(delegatedTasks)
+      .leftJoin(canonicalAgentTurns, eq(canonicalAgentTurns.id, delegatedTasks.taskId))
+      .leftJoin(threadStartups, eq(threadStartups.startupId, delegatedTasks.taskId))
+      .leftJoin(threadControlApprovals, eq(threadControlApprovals.id, delegatedTasks.taskId))
+      .where(and(
+        coordinatorThreadId === undefined ? undefined : eq(delegatedTasks.coordinatorThreadId, coordinatorThreadId),
+        sql`CASE
+          WHEN ${canonicalAgentTurns.id} IS NOT NULL
+            THEN ${canonicalAgentTurns.status} NOT IN ('Completed', 'Errored', 'Cancelled', 'Interrupted')
+          WHEN ${threadStartups.startupId} IS NOT NULL
+            THEN ${threadStartups.state} NOT IN ('failed', 'interrupted', 'cancelled')
+          ELSE ${threadControlApprovals.status} IS NULL
+            OR ${threadControlApprovals.status} NOT IN ('rejected', 'expired', 'cancelled')
+        END`,
+      )).all().map((row) => this.parse(row));
   }
 
   /** Resolve the original narrative identity from the creator turn's full tool input. */

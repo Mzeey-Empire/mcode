@@ -34,7 +34,8 @@ function createTestDb(): Database {
       parent_agent_provenance TEXT,
       is_internal INTEGER NOT NULL DEFAULT 0,
       outcome TEXT,
-      outcome_execution_id TEXT
+      outcome_execution_id TEXT,
+      provider_switch TEXT
       ,system_notice TEXT
     );
     CREATE TABLE tool_call_records (

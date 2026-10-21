@@ -36,15 +36,20 @@ export function resolveThreadHandoffsDir(
   mcodeDir: string,
   threadId: string,
 ): string {
+  validateThreadId(threadId);
   return NodePath.join(mcodeDir, "threads", threadId, "handoffs");
 }
 
 /** Returns the authoritative Mcode plan projection outside the repository checkout. */
 export function resolveThreadPlanFile(mcodeDir: string, threadId: string): string {
-  if (!threadId || threadId === "." || threadId === ".." || /[\\/:\0]/.test(threadId)) {
+  validateThreadId(threadId);
+  return NodePath.join(mcodeDir, "threads", threadId, "plan.md");
+}
+
+function validateThreadId(threadId: string): void {
+  if (!threadId || threadId === "." || threadId.includes("..") || /[\\/:\0]/.test(threadId)) {
     throw new Error("Invalid thread directory identity");
   }
-  return NodePath.join(mcodeDir, "threads", threadId, "plan.md");
 }
 
 /**
@@ -55,6 +60,7 @@ export function resolveHandoffDir(
   threadId: string,
   ulid: string,
 ): string {
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(ulid)) throw new Error("Invalid handoff directory identity");
   return NodePath.join(resolveThreadHandoffsDir(mcodeDir, threadId), ulid);
 }
 

@@ -23,6 +23,7 @@ import {
 } from "@mcode/contracts";
 import { getTransport, RpcError } from "@/transport";
 import { createSubagentLaunchPresentation } from "@/features/conversation/narrative/narrative-builder-helpers";
+import { approvalSubjectLabel } from "@/features/conversation/narrative/tool-detail";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { admitQueuedDraftHold } from "@/features/conversation/composer/queue/queued-draft-holds";
 import { useQueueStore, type QueuedMessage } from "./queueStore";
@@ -1824,6 +1825,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     sequence: messageSequenceFor(event.threadId),
     attachments: attachments.length > 0 ? attachments : null,
     model: event.model ?? null,
+    provider: event.provider ?? null,
   });
 
   const responseIdentityForMessage = (
@@ -2466,7 +2468,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     patchRec(event.threadId, (record) => {
       // Providers may republish a decision on recovery; one request is one receipt.
       if (record.approvals.some((receipt) => receipt.requestId === event.requestId)) return {};
-      const receipt = { requestId: event.requestId, subjectLabel: event.subjectLabel, outcome: event.outcome, decidedAt: Date.now() };
+      const receipt = { requestId: event.requestId, subjectLabel: approvalSubjectLabel(event.kind, event.subjectLabel), outcome: event.outcome, decidedAt: Date.now() };
       return { approvals: [...record.approvals, receipt] };
     });
   };
@@ -4536,3 +4538,21 @@ useThreadStore.subscribe((state, previous) => {
 });
 
 import { useApprovalStore } from "./approvalStore";
+
+/**
+ * Appends a server-written notice exactly once. A load in flight may have read
+ * the thread before the notice was committed, so the append waits for it to
+ * settle; `appendServerNotice` skips the notice when the load already holds it.
+ */
+export function appendServerNoticeOnceLoaded(threadId: string, notice: Message): void {
+  const isLoading = (state: ThreadState) => state.records.get(threadId)?.loading === true;
+  if (!isLoading(useThreadStore.getState())) {
+    useThreadStore.getState().appendServerNotice(threadId, notice);
+    return;
+  }
+  const unsubscribe = useThreadStore.subscribe((state) => {
+    if (isLoading(state)) return;
+    unsubscribe();
+    state.appendServerNotice(threadId, notice);
+  });
+}

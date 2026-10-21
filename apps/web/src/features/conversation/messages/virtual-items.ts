@@ -594,18 +594,26 @@ const NO_HOLDING_SIGNALS: RunHoldingSignals = { stopPending: false, compacting: 
 
 function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts, answering, holdingSignals }: NarrativeIndicatorInput): ChatVirtualItem | undefined {
   // An integration can ask for approval, and plan questions wait on the user after their turn ends; the status line still has to say the thread waits.
-  const live = isAgentRunning || holdingSignals?.waitingFor !== undefined;
-  if (!live && toolCalls.length === 0 && !holdingSignals?.exiting) return undefined;
+  const signals = holdingSignals ?? NO_HOLDING_SIGNALS;
+  const ownLive = isAgentRunning || signals.waitingFor !== undefined;
+  const live = ownLive || signals.delegating === true;
+  if (!live && toolCalls.length === 0 && !signals.exiting) return undefined;
+  if (!ownLive && (signals.delegating || signals.exiting === "delegated")) return delegatedOnlyIndicatorItem(live);
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
   const running = topLevelTools.filter(isTurnWorkRunning);
   const status = deriveRunStatus({
-    ...(holdingSignals ?? NO_HOLDING_SIGNALS),
+    ...signals,
     activeTool: running.filter((toolCall) => !isSubagentLaunchToolName(toolCall.toolName)).at(-1),
     subagentsRunning: running.some((toolCall) => isSubagentLaunchToolName(toolCall.toolName)),
     answering,
     summaryHeading: currentActivityHeading(thoughts),
   });
   return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning: live };
+}
+
+function delegatedOnlyIndicatorItem(live: boolean): ChatVirtualItem {
+  const status = deriveRunStatus({ ...NO_HOLDING_SIGNALS, subagentsRunning: true, answering: false });
+  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: 0, status, startTime: undefined, isAgentRunning: live };
 }
 
 function sameAgentDisplayState(
