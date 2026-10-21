@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { SubagentDetail, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
+import { isLiveSubagentStatus, type SubagentDetail, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { ProviderIcon } from "@/components/ui/provider-icon";
@@ -17,7 +17,7 @@ import { useThreadRecord } from "@/stores/thread-selectors";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
 import { useSubagentRoster, useSubagentRosterStore } from "../state/subagentRosterStore";
-import { isLiveSubagentStatus, subagentStatusLabel } from "../subagent-status";
+import { subagentStatusLabel } from "../subagent-status";
 import { elapsed, useNow } from "../live-duration";
 import { subagentKind } from "../subagent-kind";
 import { openSubagentDetail, openSubagentsPanel } from "./open-subagent-detail";

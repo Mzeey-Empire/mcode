@@ -1,4 +1,4 @@
-import type { SubagentRosterEntry, SubagentStatus } from "@mcode/contracts";
+import { isLiveSubagentStatus, type SubagentRosterEntry, type SubagentStatus } from "@mcode/contracts";
 
 const LIST_WORDS: Record<SubagentStatus, string> = {
   running: "Running", waiting: "Waiting", done: "Done", failed: "Failed", stopped: "Stopped",
@@ -6,11 +6,6 @@ const LIST_WORDS: Record<SubagentStatus, string> = {
 const CHIP_WORDS: Record<SubagentStatus, string> = {
   running: "working", waiting: "waiting for you", done: "finished", failed: "failed", stopped: "stopped",
 };
-
-/** Whether a child is still live: working, or blocked on the user's answer. */
-export function isLiveSubagentStatus(status: SubagentStatus): boolean {
-  return status === "running" || status === "waiting";
-}
 
 /** Shared list and rail status copy. */
 export function subagentStatusLabel(status: SubagentStatus): string {

@@ -1,6 +1,6 @@
 import { useSubagentRoster } from "@/features/subagents/state/subagentRosterStore";
-import { isLiveSubagentStatus, subagentChipStatus, subagentOverviewCounts } from "@/features/subagents/subagent-status";
-import { formatSubagentDisplayName, type SubagentRosterEntry } from "@mcode/contracts";
+import { subagentChipStatus, subagentOverviewCounts } from "@/features/subagents/subagent-status";
+import { formatSubagentDisplayName, isLiveSubagentStatus, type SubagentRosterEntry } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { cn } from "@/lib/utils";

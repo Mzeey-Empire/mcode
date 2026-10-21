@@ -9,6 +9,11 @@ import { ProviderIdSchema } from "./settings.js";
 export const SubagentStatusSchema = z.enum(["running", "waiting", "done", "failed", "stopped"]);
 /** One normalized subagent outcome shared by every surface. */
 export type SubagentStatus = z.infer<typeof SubagentStatusSchema>;
+
+/** Whether a child is still live: working, or blocked on the user's answer. */
+export function isLiveSubagentStatus(status: SubagentStatus): boolean {
+  return status === "running" || status === "waiting";
+}
 /** Detail supported by this entry's persisted evidence. */
 export const SubagentDetailTierSchema = z.enum(["transcript", "steps", "meta"]);
 /** Detail supported by this entry's persisted evidence. */

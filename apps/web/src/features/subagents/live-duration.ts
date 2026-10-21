@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { SubagentRosterEntry } from "@mcode/contracts";
-import { formatLiveDuration, isLiveSubagentStatus } from "./subagent-status";
+import { isLiveSubagentStatus, type SubagentRosterEntry } from "@mcode/contracts";
+import { formatLiveDuration } from "./subagent-status";
 
 const LIVE_TICK_MS = 1_000;
 

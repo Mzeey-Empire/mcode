@@ -1,13 +1,13 @@
 import { useRef, useState } from "react";
 import { Check, Layers } from "lucide-react";
-import type { CanonicalSubagentStopResult, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
+import { isLiveSubagentStatus, type CanonicalSubagentStopResult, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useToastStore } from "@/stores/toastStore";
-import { isLiveSubagentStatus, subagentStatusLabel } from "../subagent-status";
+import { subagentStatusLabel } from "../subagent-status";
 import { elapsed, useNow } from "../live-duration";
 import { subagentKind } from "../subagent-kind";
 

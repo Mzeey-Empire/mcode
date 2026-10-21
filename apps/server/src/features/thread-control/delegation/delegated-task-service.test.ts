@@ -4,7 +4,7 @@ import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { container } from "tsyringe";
-import { WS_CHANNELS, SystemNoticeMetadataSchema } from "@mcode/contracts";
+import { WS_CHANNELS, SystemNoticeMetadataSchema, delegatedTaskRosterEntryId } from "@mcode/contracts";
 import type { AgentStopResult, ApprovalRequestEnvelope, DelegateTaskResult, TaskStatusResult, IAgentProvider, IProviderRegistry, TurnSteerOutcome, TurnStopCause } from "@mcode/contracts";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import { createOriginFixture, git } from "../../projects/git/__tests__/start-from-origin-fixture.js";
@@ -788,7 +788,7 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     expect(requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" })).effectivePermissionMode).toBe("supervised");
   });
 
-  it("cancels setup through threadStop and requires approval to stop a supervised running task", async () => {
+  it("cancels setup through threadStop and keeps a task waiting on stop approval stoppable", async () => {
     const f = await harness("full", true);
     const task = requireTask(await f.service.delegate(f.source, f.input));
     await vi.waitFor(() => expect(f.environment.getAutomaticSetup({ threadId: task.threadId ?? "" }).attempt?.state).toBe("running"));
@@ -799,6 +799,9 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     const running = requireTask(await f.service.delegate(f.source, { ...f.input, clientRequestId: "running", isolation: "shared" }));
     expect(await f.service.cancel({ ...f.source, permissionMode: "supervised" }, { taskId: running.taskId }))
       .toMatchObject({ stopApprovalId: expect.any(String), state: { status: "waiting", reason: "needs_input" } });
+    const waiting = f.roster.loadRoster({ owningParentThreadId: f.coordinator.id }).entries
+      .find((entry) => entry.id === delegatedTaskRosterEntryId(running.taskId));
+    expect(waiting).toMatchObject({ status: "waiting", canStop: true });
   });
 
   it("keeps the original result during a later user turn and makes completed cancellation a no-op", async () => {
