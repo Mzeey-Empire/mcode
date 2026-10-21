@@ -1,6 +1,5 @@
 const CODE_SPAN = /(`+)([\s\S]*?)\1/g;
-// Link targets may hold one level of parentheses, as in javascript:alert(1).
-const INLINE_LINK = /!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g;
+const INLINE_LINK_ONE_PAREN_LEVEL = /!?\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g;
 const REFERENCE_LINK = /\[([^\]]*)\]\[[^\]]*\]/g;
 // Delimiters only count when they hug non-space text, so `2 * 3 * 4` keeps its stars.
 const STRONG_STARS = /\*\*(?=\S)([\s\S]*?\S)\*\*/g;
@@ -12,7 +11,7 @@ const STRIKETHROUGH = /~~(?=\S)([\s\S]*?\S)~~/g;
 
 function stripDelimiters(prose: string): string {
   return prose
-    .replace(INLINE_LINK, "$1")
+    .replace(INLINE_LINK_ONE_PAREN_LEVEL, "$1")
     .replace(REFERENCE_LINK, "$1")
     .replace(STRONG_STARS, "$1")
     .replace(STRONG_UNDERSCORES, "$1")
