@@ -22,6 +22,7 @@ import type {
 } from "@mcode/contracts";
 import {
   PreviewAnnotationBundleSchema,
+  ProviderSwitchMarkerSchema,
   LegacyMessageProvenanceSchema,
   ParentAgentMessageProvenanceSchema,
   SelectedTextCommentsSchema,
@@ -132,6 +133,7 @@ function rowToMessage(row: MessageRow): Message {
     outcome: (row.outcome ?? null) as TurnOutcome | null,
     outcomeExecutionId: row.outcomeExecutionId ?? null,
     systemNotice: parseSystemNotice(row.systemNotice),
+    providerSwitch: row.providerSwitch === null ? null : ProviderSwitchMarkerSchema().parse(parseJsonField(row.providerSwitch)),
     is_internal: row.isInternal === 1,
     ...(row.parentAgentProvenance
       ? { parentAgentProvenance: parseParentAgentProvenance(row.parentAgentProvenance) }
@@ -334,6 +336,16 @@ export class MessageStore {
       isInternal,
       systemNotice,
     });
+  }
+
+  /** Create a switch marker without notice metadata so older builds can read it as plain text. */
+  createProviderSwitch(threadId: string, content: string, sequence: number, marker: NonNullable<Message["providerSwitch"]>): Message {
+    const providerSwitch = ProviderSwitchMarkerSchema().parse(marker);
+    const row = this.orm.insert(messages).values({
+      id: NodeCrypto.randomUUID(), threadId, role: "system", content, sequence,
+      timestamp: new Date().toISOString(), providerSwitch: JSON.stringify(providerSwitch),
+    }).returning().get();
+    return rowToMessage(row);
   }
 
   /** Create a visible system message carrying bounded provider notice metadata. */

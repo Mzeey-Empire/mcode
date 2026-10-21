@@ -4,6 +4,9 @@
  */
 
 import * as NodeCrypto from "node:crypto";
+import { z } from "zod";
+import { PROVIDER_CATALOG } from "@mcode/contracts";
+import { MessageStore } from "../../agents/conversation/persistence/message-store.js";
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
@@ -28,6 +31,11 @@ type ThreadRow = typeof threads.$inferSelect & {
 };
 
 const threadSelection = { ...getTableColumns(threads), scheduledResume: turnResumeSchedules };
+
+function providerDisplayName(providerId: string): string {
+  const provider = PROVIDER_CATALOG.find((entry) => entry.id === providerId);
+  return provider?.name ?? providerId;
+}
 
 const subagentVisibility = sql`${threads.delegationCoordinatorThreadId} IS NULL AND NOT EXISTS (
   SELECT 1
@@ -76,7 +84,7 @@ function rowToThread(row: ThreadRow): Thread {
 function rowToThreadIdentity(row: ThreadRow): Pick<Thread,
   "id" | "workspace_id" | "title" | "status" | "mode" | "worktree_path" | "branch"
   | "checkout_state" | "base_branch" | "head_sha" | "worktree_managed" | "issue_number" | "pr_number"
-  | "pr_status" | "sdk_session_id" | "model" | "provider" | "created_at" | "updated_at"
+  | "pr_status" | "sdk_session_id" | "model" | "provider" | "providers_used" | "created_at" | "updated_at"
 > {
   return {
     id: row.id,
@@ -96,6 +104,7 @@ function rowToThreadIdentity(row: ThreadRow): Pick<Thread,
     sdk_session_id: row.sdkSessionId,
     model: row.model ?? null,
     provider: row.provider,
+    providers_used: row.providersUsed === null ? null : z.array(z.string()).parse(JSON.parse(row.providersUsed)),
     created_at: row.createdAt,
     updated_at: row.updatedAt,
   };
@@ -1142,16 +1151,26 @@ export class ThreadStore {
    * The legacy `sdk_session_id` column follows the new provider's own row. A fresh target may hold an
    * older row from before the switch (`staleSessionId`); that session is not the one just started, so
    * the column stays empty until the new session reports and overwrites the row.
+   * Admission reserves the marker's sequence before dispatch so a delayed save still precedes the assistant.
    */
-  commitProviderSwitch(id: string, settings: ThreadSettings & { provider: string }, staleSessionId: string | null): boolean {
+  commitProviderSwitch(id: string, settings: ThreadSettings & { provider: string }, staleSessionId: string | null, fromProvider: string, handoffId: string, markerSequence?: number) {
     return this.db.transaction(() => {
+      const thread = this.findById(id);
+      if (!thread) throw new Error(`Thread not found: ${id}`);
+      const providersUsed = thread.providers_used ?? [fromProvider];
+      if (!providersUsed.includes(settings.provider)) providersUsed.push(settings.provider);
       const row = this.providerSessions.find(id, settings.provider);
       const sdkSessionId = row && row.sessionId !== staleSessionId ? row.sessionId : null;
-      const result = runChanges(this.orm
+      runChanges(this.orm
         .update(threads)
-        .set({ ...buildSettingsSet(settings), sdkSessionId, updatedAt: new Date().toISOString() })
+        .set({ ...buildSettingsSet(settings), sdkSessionId, providersUsed: JSON.stringify(providersUsed), updatedAt: new Date().toISOString() })
         .where(eq(threads.id, id)));
-      return result.changes > 0;
+      const messages = new MessageStore(this.db);
+      const fromName = providerDisplayName(fromProvider);
+      const toName = providerDisplayName(settings.provider);
+      const marker = messages.createProviderSwitch(id, `Switched from ${fromName} to ${toName}`,
+        markerSequence ?? messages.getLatestSequenceIncludingInternal(id) + 1, { fromProvider, toProvider: settings.provider, handoffId });
+      return { providersUsed, marker };
     })();
   }
 

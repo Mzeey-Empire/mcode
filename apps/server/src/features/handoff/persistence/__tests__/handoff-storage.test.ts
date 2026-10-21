@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { newHandoffUlid } from "@mcode/shared";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -26,7 +27,7 @@ describe("HandoffStorage", () => {
   });
 
   it.each(["switch", "fork", "recovery"] as const)("reads a %s audit through the RPC contract", async (kind) => {
-    const ulid = await storage.writeHandoffAudit("child", { ...audit, kind });
+    const ulid = await storage.writeHandoffAudit("child", newHandoffUlid(), { ...audit, kind });
     const result = await routeHandoffRpc("handoff.readLatest", { threadId: "child" }, { handoffStorage: storage });
     const parsed = WS_METHODS()["handoff.readLatest"].result.parse(result);
     expect(parsed?.meta).toEqual({
@@ -40,8 +41,8 @@ describe("HandoffStorage", () => {
   });
 
   it("returns the newest audit by ULID, independent of kind", async () => {
-    const first = await storage.writeHandoffAudit("child", audit);
-    const second = await storage.writeHandoffAudit("child", { ...audit, kind: "recovery", history: "Recovered history" });
+    const first = await storage.writeHandoffAudit("child", newHandoffUlid(), audit);
+    const second = await storage.writeHandoffAudit("child", newHandoffUlid(), { ...audit, kind: "recovery", history: "Recovered history" });
     // Use fixed directory names so the assertion is independent of clock resolution and ULID randomness.
     const handoffs = NodePath.join(dir, "threads", "child", "handoffs");
     await NodeFSPromises.rename(NodePath.join(handoffs, first), NodePath.join(handoffs, "01"));
@@ -56,7 +57,7 @@ describe("HandoffStorage", () => {
     await NodeFSPromises.writeFile(NodePath.join(legacy, "handoff.md"), "---\nschemaVersion: 1\nmode: minimal\n---\nOld summary");
     await NodeFSPromises.writeFile(NodePath.join(legacy, "handoff.json"), '{"schemaVersion":1,"mode":"minimal"}');
     expect(await storage.readLatest("child")).toBeNull();
-    await storage.writeHandoffAudit("child", audit);
+    await storage.writeHandoffAudit("child", newHandoffUlid(), audit);
     expect((await storage.readLatest("child"))?.meta.schemaVersion).toBe(2);
     expect(await NodeFSPromises.readFile(NodePath.join(legacy, "handoff.json"), "utf8")).toBe('{"schemaVersion":1,"mode":"minimal"}');
   });
@@ -65,14 +66,48 @@ describe("HandoffStorage", () => {
     const invalid = NodePath.join(dir, "threads", "child", "handoffs", "ZZZ-invalid");
     await NodeFSPromises.mkdir(invalid, { recursive: true });
     await NodeFSPromises.writeFile(NodePath.join(invalid, "handoff.md"), "---\nschemaVersion: 2\nkind: unknown\n---\nInvalid");
-    await storage.writeHandoffAudit("child", { ...audit, fromProvider: null, toProvider: "custom: provider\nname" });
+    await storage.writeHandoffAudit("child", newHandoffUlid(), { ...audit, fromProvider: null, toProvider: "custom: provider\nname" });
     expect((await storage.readLatest("child"))?.meta).toMatchObject({ fromProvider: null, toProvider: "custom: provider\nname" });
   });
 
   it("returns null for an absent thread and removes audits on thread deletion", async () => {
     expect(await storage.readLatest("absent")).toBeNull();
-    await storage.writeHandoffAudit("child", audit);
+    await storage.writeHandoffAudit("child", newHandoffUlid(), audit);
     await storage.deleteThreadFiles("child");
     expect(await storage.readLatest("child")).toBeNull();
+  });
+
+  it("reads the requested audit through RPC rather than the latest and preserves history whitespace", async () => {
+    const first = await storage.writeHandoffAudit("child", "01ARZ3NDEKTSV4RRFFQ69G5FAV", { ...audit, history: "  Earlier history\n" });
+    await storage.writeHandoffAudit("child", "01ARZ3NDEKTSV4RRFFQ69G5FAW", { ...audit, history: "Latest history" });
+    const result = await routeHandoffRpc("handoff.read", { threadId: "child", handoffId: first }, { handoffStorage: storage });
+    expect(WS_METHODS()["handoff.read"].result.parse(result)).toMatchObject({
+      meta: { kind: "switch", fromProvider: "claude", toProvider: "codex" }, history: "  Earlier history\n",
+    });
+    expect(await storage.read("absent", first)).toBeNull();
+  });
+
+  it.each(["..", "../escape", "child/../../escape", "child\\..\\..\\escape", "has..dots"])(
+    "refuses unsafe thread identity %s even when an audit exists at its resolved target", async (threadId) => {
+      const id = await storage.writeHandoffAudit("child", newHandoffUlid(), audit);
+      const markdown = await NodeFSPromises.readFile(NodePath.join(dir, "threads", "child", "handoffs", id, "handoff.md"), "utf8");
+      const target = NodePath.join(dir, "threads", threadId, "handoffs", id);
+      await NodeFSPromises.mkdir(target, { recursive: true });
+      await NodeFSPromises.writeFile(NodePath.join(target, "handoff.md"), markdown);
+      expect(await storage.read(threadId, id)).toBeNull();
+      await expect(storage.readLatest(threadId)).rejects.toThrow();
+    },
+  );
+
+  it("refuses malformed handoff IDs with a real audit at the traversal target", async () => {
+    const id = await storage.writeHandoffAudit("child", newHandoffUlid(), audit);
+    const traversalTarget = NodePath.join(dir, "threads", "child", id);
+    await NodeFSPromises.mkdir(traversalTarget, { recursive: true });
+    await NodeFSPromises.copyFile(NodePath.join(dir, "threads", "child", "handoffs", id, "handoff.md"), NodePath.join(traversalTarget, "handoff.md"));
+    expect(await storage.read("child", `../${id}`)).toBeNull();
+    const target = NodePath.join(dir, "threads", "child", "handoffs", "invalid-id");
+    await NodeFSPromises.mkdir(target, { recursive: true });
+    await NodeFSPromises.copyFile(NodePath.join(dir, "threads", "child", "handoffs", id, "handoff.md"), NodePath.join(target, "handoff.md"));
+    expect(await storage.read("child", "invalid-id")).toBeNull();
   });
 });

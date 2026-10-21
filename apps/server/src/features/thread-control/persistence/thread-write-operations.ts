@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HandoffIdSchema, MessageSchema } from "@mcode/contracts";
 import { AcknowledgeSeenResultSchema, ContextWindowModeSchema, PlanPhaseSchema, ThreadModeSchema, ThreadSchema, ThreadStatusSchema, TurnOutcomeSchema } from "@mcode/contracts";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 
@@ -57,8 +58,8 @@ export const threadWriteOperations = {
   updateContextUsage: databaseWriteOperation("thread.updateContextUsage", z.tuple([z.string(), z.number(), z.number().optional()]), z.boolean()),
   updateSettings: databaseWriteOperation("thread.updateSettings", z.tuple([z.string(), settings]), z.boolean()),
   commitProviderSwitch: databaseWriteOperation("thread.commitProviderSwitch", z.tuple([
-    z.string(), settings.extend({ provider: z.string() }), z.string().nullable(),
-  ]), z.boolean()),
+    z.string(), settings.extend({ provider: z.string() }), z.string().nullable(), z.string(), HandoffIdSchema(), z.number().int().positive().optional(),
+  ]), z.object({ providersUsed: z.array(z.string()), marker: MessageSchema() })),
   updateTitle: booleanByPair("thread.updateTitle"),
   updateCompactSummary: databaseWriteOperation("thread.updateCompactSummary", z.tuple([z.string(), z.string()]), z.void()),
   updateLineage: databaseWriteOperation("thread.updateLineage", z.tuple([z.string(), z.string(), z.string()]), z.boolean()),

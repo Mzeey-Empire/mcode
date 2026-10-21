@@ -115,6 +115,21 @@ describe("provider switch on send", () => {
     await waitFor(() => thread().provider === "codex");
     expect(thread()).toMatchObject({ provider: "codex", model: CODEX_MODEL, sdk_session_id: "codex-s1" });
     expect(sessions().find(threadId, "claude")).toMatchObject({ sessionId: "claude-s1" });
+    const rows = container.resolve(MessageRepo).listIncludingInternal(threadId);
+    const markers = rows.filter((row) => row.providerSwitch != null);
+    expect(markers).toHaveLength(1);
+    const marker = markers[0];
+    expect(marker).toMatchObject({ role: "system", systemNotice: null,
+      providerSwitch: { fromProvider: "claude", toProvider: "codex" } });
+    const handoffId = marker.providerSwitch?.handoffId;
+    expect(handoffId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    if (!handoffId) throw new Error("Switch marker has no handoff ID");
+    expect(rows.map((row) => row.role)).toEqual(["user", "assistant", "user", "system", "assistant"]);
+    expect(rows.map((row) => row.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(thread().providers_used).toEqual(["claude", "codex"]);
+    const audit = await container.resolve(HandoffStorage).read(threadId, handoffId);
+    expect(audit?.meta).toMatchObject({ kind: "switch", fromProvider: "claude", toProvider: "codex" });
+    expect(audit?.history).toContain("my project is called Heliotrope");
   });
 
   it("forks onto Codex with inline parent context without calling the parent's provider", async () => {
@@ -245,12 +260,18 @@ describe("provider switch on send", () => {
 
     codex.sendTurn.mockImplementationOnce(answer(codex, "codex here", "codex-s1"));
     await send(codex, "switch");
-    await waitFor(() => sessions().find(threadId, "codex")?.lastSeenSequence === 4);
+    await waitFor(() => sessions().find(threadId, "codex")?.lastSeenSequence === 5);
 
     expect(thread().provider).toBe("claude");
     expect(sessions().find(threadId, "claude")?.lastSeenSequence).toBe(2);
     commitGate.resolve();
     await waitFor(() => thread().provider === "codex");
+    await settled(2);
+    const rows = container.resolve(MessageRepo).listIncludingInternal(threadId);
+    const marker = rows.find((row) => row.providerSwitch != null);
+    const assistant = rows.find((row) => row.role === "assistant" && row.content === "codex here");
+    expect(marker?.sequence).toBe(4);
+    expect(assistant?.sequence).toBe(5);
   });
 
   it("keeps what the user typed in the timeline and the provider that produced each message", async () => {
@@ -263,6 +284,7 @@ describe("provider switch on send", () => {
       { role: "user", content: "first question", provider: null },
       { role: "assistant", content: "first answer", provider: "claude" },
       { role: "user", content: "second question", provider: null },
+      { role: "system", content: "Switched from Claude to Codex", provider: null },
       { role: "assistant", content: "second answer", provider: "codex" },
     ]);
   });
@@ -365,6 +387,8 @@ describe("provider switch on send", () => {
     expect(thread()).toMatchObject({ provider: "claude", model: before.thread.model, sdk_session_id: "claude-s1" });
     expect(sessions().find(threadId, "codex")).toBeNull();
     expect(assistantRows()).toEqual(before.assistants);
+    expect(thread().providers_used).toBeNull();
+    expect(container.resolve(MessageRepo).listIncludingInternal(threadId).filter((row) => row.providerSwitch != null)).toEqual([]);
     expect(await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId)).toBeNull();
   });
 
@@ -436,11 +460,11 @@ describe("provider switch on send", () => {
     await waitFor(() => thread().provider === "claude");
     await settled(terminalCount());
 
-    // The two exchanges before the switch are rows 1-4; the user's message is row 5 and is not replayed.
-    expect(retry.message).toContain("Sequences: 1-4");
+    // The first switch marker uses sequence 4, so the next prompt is sequence 6 and is not replayed.
+    expect(retry.message).toContain("Sequences: 1-5");
     const userRows = container.resolve(MessageRepo).listIncludingInternal(threadId)
       .filter((message) => message.role === "user" && message.content === "back on claude");
-    expect(userRows.map((message) => message.sequence)).toEqual([5]);
+    expect(userRows.map((message) => message.sequence)).toEqual([6]);
 
     // Recovery reuses the switch's own handoff: one fenced history, no second copy seeded by recovery.
     expect(retry.message.match(/\[mcode-handoff:begin /g)).toHaveLength(1);

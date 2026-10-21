@@ -24,6 +24,12 @@ function setup(plan: CodexPlanFeature = "none") {
 }
 
 describe("CodexLiveEventEffects", () => {
+  it("carries the producing provider into the assistant write and published message", () => {
+    const { prepare } = setup();
+    const result = prepare("message", { content: "Answer", tokens: null, provider: "codex", model: "gpt-5.5" });
+    expect(result.effects.message).toMatchObject({ content: "Answer", provider: "codex", model: "gpt-5.5" });
+    expect(result.publication.event).toMatchObject({ type: "message", provider: "codex" });
+  });
   it("checkpoints only the result tool while keeping full recovery and terminal narrative consistent", () => {
     const { prepare } = setup();
     prepare("textDelta", { delta: "Thought", isFinalResponse: false });

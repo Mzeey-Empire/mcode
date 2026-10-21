@@ -113,6 +113,7 @@ export const threads = sqliteTable(
     lastContextTokens: integer("last_context_tokens"),
     contextWindow: integer("context_window"),
     provider: text("provider").notNull().default("claude"),
+    providersUsed: text("providers_used"),
     reasoningLevel: text("reasoning_level"),
     interactionMode: text("interaction_mode"),
     planPhase: text("plan_phase"),
@@ -403,6 +404,7 @@ export const messages = sqliteTable(
     outcomeExecutionId: text("outcome_execution_id"),
     /** Bounded typed provider notice metadata for durable system messages. */
     systemNotice: text("system_notice"),
+    providerSwitch: text("provider_switch"),
   },
   (table) => [
     index("idx_messages_thread").on(table.threadId),

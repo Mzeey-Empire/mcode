@@ -6,7 +6,6 @@ import { parseDocument } from "yaml";
 import { HandoffAuditMetadataSchema, type HandoffAuditMetadata } from "@mcode/contracts";
 import {
   getMcodeDir,
-  newHandoffUlid,
   resolveHandoffDir,
   resolveThreadHandoffsDir,
 } from "@mcode/shared";
@@ -32,6 +31,27 @@ export class HandoffStorage {
     return storage;
   }
 
+  /** Returns the requested v2 audit and its exact replay history, or null for invalid or missing artifacts. */
+  async read(threadId: string, handoffId: string): Promise<{ meta: HandoffAuditMetadata; history: string } | null> {
+    let dir: string;
+    try {
+      dir = resolveHandoffDir(this.mcodeDirFn(), threadId, handoffId);
+    } catch {
+      return null;
+    }
+    let markdown: string;
+    try {
+      markdown = await NodeFSPromises.readFile(NodePath.join(dir, "handoff.md"), "utf8");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+      throw error;
+    }
+    const meta = readAuditMetadata(markdown);
+    if (!meta) return null;
+    const history = markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n(?:\r?\n)?/, "").replace(/\n$/, "");
+    return { meta, history };
+  }
+
   /** Returns the newest v2 audit, ignoring older artifact formats on disk. */
   async readLatest(threadId: string): Promise<{ markdown: string; meta: HandoffAuditMetadata } | null> {
     const handoffsRoot = resolveThreadHandoffsDir(this.mcodeDirFn(), threadId);
@@ -50,8 +70,7 @@ export class HandoffStorage {
   }
 
   /** Persists the audit copy of an inline handoff as schemaVersion 2 handoff.md. */
-  async writeHandoffAudit(threadId: string, audit: HandoffAudit): Promise<string> {
-    const ulid = newHandoffUlid();
+  async writeHandoffAudit(threadId: string, ulid: string, audit: HandoffAudit): Promise<string> {
     const handoffDir = resolveHandoffDir(this.mcodeDirFn(), threadId, ulid);
     await NodeFSPromises.mkdir(handoffDir, { recursive: true });
     const frontmatter = [

@@ -8,7 +8,7 @@ import {
   type Thread,
 } from "@mcode/contracts";
 import { ProviderTurnError, SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
-import { logger } from "@mcode/shared";
+import { logger, newHandoffUlid } from "@mcode/shared";
 import { broadcast } from "../../../application/transport/push.js";
 import { HandoffStorage } from "../../handoff/persistence/handoff-storage.js";
 import {
@@ -23,6 +23,7 @@ import { ThreadProviderSessionRepo } from "../../thread-control/persistence/thre
 import type { ResolvedProviderSession } from "../../thread-control/persistence/thread-provider-session-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
+import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import { TurnRecoveryService } from "../recovery/turn-recovery-service.js";
 import { sendAdmittedTurn } from "../transport/turn-message-dispatch.js";
@@ -49,6 +50,7 @@ export interface PlannedSwitch {
 interface ArmedSwitch {
   readonly turnId: string;
   readonly settings: ProviderSwitchSettings;
+  readonly markerSequence: number | undefined;
   accepted: boolean;
   resumeUnavailable: boolean;
   committing: Promise<void> | null;
@@ -95,6 +97,7 @@ export class ProviderSwitchService {
     @inject("IProviderRegistry") private readonly providers: IProviderRegistry,
     @inject(TurnRecoveryService) private readonly recovery: Pick<TurnRecoveryService, "retryErroredTurn">,
     @inject(ApplicationDatabaseWriter) private readonly writer: Pick<ApplicationDatabaseWriter, "execute">,
+    @inject(CanonicalAcceptedProgress, { isOptional: true }) private readonly progress?: CanonicalAcceptedProgress,
   ) {}
 
   /** Bind the runtime's send, used to start the fresh attempt after a resume fails. */
@@ -186,11 +189,14 @@ export class ProviderSwitchService {
    */
   arm(ticket: ProviderSwitchTicket, input: { threadId: string; turnId: string; settings: ProviderSwitchSettings }): void {
     this.armedByThread.get(input.threadId)?.armed?.unsubscribe();
+    const markerSequence = this.progress?.reserveProviderSwitchMarker(input.threadId,
+      this.messages.getLatestSequenceIncludingInternal(input.threadId) + 1);
     let settleTerminal: () => void = () => undefined;
     const terminal = new Promise<void>((resolve) => { settleTerminal = resolve; });
     const armed: ArmedSwitch = {
       turnId: input.turnId,
       settings: input.settings,
+      markerSequence,
       accepted: false,
       resumeUnavailable: false,
       committing: null,
@@ -237,22 +243,27 @@ export class ProviderSwitchService {
   private async commit(ticket: ProviderSwitchTicket, threadId: string, armed: ArmedSwitch): Promise<void> {
     const plan = ticket.plan;
     if (!plan) return;
-    if (!(await this.saveSwitch(ticket, threadId, armed, plan))) return;
-    await this.writeAudit(ticket, threadId, plan);
+    const handoffId = newHandoffUlid();
+    if (!(await this.saveSwitch(ticket, threadId, armed, plan, handoffId))) return;
+    await this.writeAudit(ticket, threadId, plan, handoffId);
   }
 
   /** Save the accepted switch, retrying once; a switch that still cannot be saved is reported in the timeline. */
-  private async saveSwitch(ticket: ProviderSwitchTicket, threadId: string, armed: ArmedSwitch, plan: PlannedSwitch): Promise<boolean> {
+  private async saveSwitch(ticket: ProviderSwitchTicket, threadId: string, armed: ArmedSwitch, plan: PlannedSwitch, handoffId: string): Promise<boolean> {
     for (let attempt = 1; attempt <= COMMIT_ATTEMPTS; attempt += 1) {
+      let result: Awaited<ReturnType<ThreadRepo["commitProviderSwitch"]>>;
       try {
-        await this.threads.commitProviderSwitch(threadId, { ...armed.settings, provider: ticket.toProvider }, plan.staleSessionId);
-        broadcast("thread.modelUpdated", { threadId, model: armed.settings.model, provider: ticket.toProvider });
-        return true;
+        result = await this.threads.commitProviderSwitch(threadId, { ...armed.settings, provider: ticket.toProvider },
+          plan.staleSessionId, ticket.fromProvider, handoffId, armed.markerSequence);
       } catch (error) {
         logger.error("Provider switch accepted by the target but not saved", {
           threadId, toProvider: ticket.toProvider, attempt, error: error instanceof Error ? error.message : String(error),
         });
+        continue;
       }
+      broadcast("thread.providerSwitched", { threadId, provider: ticket.toProvider, model: armed.settings.model, ...result });
+      broadcast("thread.modelUpdated", { threadId, model: armed.settings.model, provider: ticket.toProvider });
+      return true;
     }
     await this.reportUnsavedSwitch(threadId, ticket.toProvider);
     return false;
@@ -276,9 +287,9 @@ export class ProviderSwitchService {
     }
   }
 
-  private async writeAudit(ticket: ProviderSwitchTicket, threadId: string, plan: PlannedSwitch): Promise<void> {
+  private async writeAudit(ticket: ProviderSwitchTicket, threadId: string, plan: PlannedSwitch, handoffId: string): Promise<void> {
     try {
-      await this.storage.writeHandoffAudit(threadId, {
+      await this.storage.writeHandoffAudit(threadId, handoffId, {
         kind: "switch",
         fromProvider: ticket.fromProvider,
         toProvider: ticket.toProvider,

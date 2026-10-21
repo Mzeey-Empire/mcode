@@ -73,7 +73,7 @@ export type CodexLiveWriterIntent =
   | { readonly kind: "assistant-text-delta"; readonly delta: string; readonly classification: "final" | "unknown" }
   | { readonly kind: "assistant-text-reclassify"; readonly text: string; readonly retainedText?: string; readonly classification: "narration" }
   | { readonly kind: "assistant-text-promote"; readonly text: string }
-  | { readonly kind: "assistant-body"; readonly content: string; readonly model: string | null; readonly attachments: StoredAttachment[]; readonly tokens: number | null }
+  | { readonly kind: "assistant-body"; readonly content: string; readonly model: string | null; readonly provider: string | null; readonly attachments: StoredAttachment[]; readonly tokens: number | null }
   | { readonly kind: "generated-attachment"; readonly attachment: StoredAttachment }
   | { readonly kind: "tool-use"; readonly event: ToolUseEvent }
   | { readonly kind: "tool-result"; readonly event: ToolResultEvent }
@@ -377,7 +377,7 @@ export class CodexLiveEventReducer {
     this.knownFinalText = false;
     this.unknownText = "";
     const writer: CodexLiveWriterIntent[] = [
-      { kind: "assistant-body", content: body.content, model: body.model, attachments: body.attachments, tokens: event.tokens },
+      { kind: "assistant-body", content: body.content, model: body.model, provider: event.provider ?? null, attachments: body.attachments, tokens: event.tokens },
       { kind: "feature-event", feature: "assistant-message", event },
     ];
     if (this.plan && this.planFeature === "output") {
