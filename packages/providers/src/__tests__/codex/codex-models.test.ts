@@ -1,6 +1,5 @@
 import * as NodeStream from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
-import { CODEX_STATIC_MODELS } from "@mcode/contracts";
 import { CodexRpcClient } from "../../private/codex/codex-rpc-client.js";
 import { listCodexModels } from "../../private/codex/codex-models.js";
 
@@ -94,7 +93,7 @@ describe("Codex model discovery", () => {
     const { client } = catalog([{ data: [model("gpt-6-sol"), model("gpt-9-unknown")], nextCursor: null }]);
     const models = await listCodexModels(client);
     expect(models.map((entry) => [entry.id, entry.supportsFastMode])).toEqual([
-      ["gpt-6-sol", CODEX_STATIC_MODELS.find((entry) => entry.id === "gpt-6-sol")?.supportsFastMode],
+      ["gpt-6-sol", true],
       ["gpt-9-unknown", false],
     ]);
   });
