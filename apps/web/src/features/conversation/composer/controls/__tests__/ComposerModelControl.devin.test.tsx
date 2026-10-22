@@ -5,7 +5,6 @@ import type { ReasoningLevel } from "@mcode/contracts";
 import { ComposerModelControl } from "../ComposerModelControl";
 import type { ComposerAgentSelection } from "../../draft/useComposerFormController";
 
-// The picker UI is covered by ModelSelector tests; this file drives the selection callback directly.
 vi.mock("@/components/chat/ModelSelector", () => ({
   ModelSelector: ({ onSelect }: { onSelect: (modelId: string, providerId: string) => void }) => (
     <>

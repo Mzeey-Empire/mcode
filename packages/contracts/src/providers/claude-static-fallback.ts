@@ -1,13 +1,6 @@
 import type { ProviderModelInfo } from "./models.js";
 
-/**
- * Complete Claude fallback catalog shared by server discovery and web pickers.
- *
- * No row declares `supportsFastMode` yet: the Claude adapter wires Fast in MPE-03 (#2229), and
- * declaring it now would show a toggle the adapter ignores. Measured on Agent SDK 0.3.291
- * `supportedModels()`: Fast is reported for Opus 5.5, Opus 5 and Opus 4.8, effort levels match
- * these rows exactly, and the SDK has no 1M context field.
- */
+/** Complete Claude fallback catalog shared by server discovery and web pickers. */
 export const CLAUDE_STATIC_MODELS: readonly ProviderModelInfo[] = [
   ...[
     ["claude-opus-5-5", "Claude Opus 5.5"],

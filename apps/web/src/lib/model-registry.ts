@@ -101,7 +101,6 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     name: "Claude",
     comingSoon: false,
     supportsCompletion: true,
-    // The static picker shows the default (200k) window; the 1M window is a per-thread choice.
     models: CLAUDE_STATIC_MODELS.map((model) => ({
       ...toModelDefinition("claude", model),
       contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT[model.id],
@@ -226,8 +225,7 @@ export function registerProviderModels(providerId: string, defs: ModelDefinition
  * Matches a dated SDK variant ID (e.g. `claude-haiku-4-5-20251001`) to its base
  * model definition by prefix. Longest-first order ensures a more specific ID is
  * never shadowed by a shorter prefix. Devin effort ids (`swe-2-high`) resolve
- * to their family (`swe-2`) through the same prefix rule. A provider id restricts
- * the match to that provider's defs.
+ * to their family (`swe-2`) through the same prefix rule.
  */
 function matchDatedVariant(id: string, providerId?: string): ModelDefinition | undefined {
   return [...SORTED_ALL_MODELS, ...dynamicModelsSorted].find((m) =>

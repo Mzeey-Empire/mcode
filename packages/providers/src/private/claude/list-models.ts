@@ -42,7 +42,6 @@ let inflight: Promise<ProviderModelInfo[]> | null = null;
 
 type ClaudeReasoningEffort = NonNullable<ProviderModelInfo["supportedReasoningEfforts"]>[number];
 
-/** Effort tiers the Claude SDK accepts for a model id, matching the runtime normalization ladder. */
 function derivedReasoningEfforts(id: string): ClaudeReasoningEffort[] {
   if (!supportsEffortParameter(id)) return [];
   return [
@@ -54,11 +53,7 @@ function derivedReasoningEfforts(id: string): ClaudeReasoningEffort[] {
   ];
 }
 
-/**
- * Maps an Anthropic REST row that is absent from the static catalog. The REST API reports no
- * capabilities, so they are derived from the same id rules the runtime uses to send effort.
- */
-function restOnlyModel(model: AnthropicModelInfo): ProviderModelInfo {
+function fromAnthropicModel(model: AnthropicModelInfo): ProviderModelInfo {
   const supportedReasoningEfforts = derivedReasoningEfforts(model.id);
   return {
     id: model.id,
@@ -134,7 +129,7 @@ async function fetchModels(): Promise<ProviderModelInfo[]> {
 
     const models = mergeStaticCatalog(body.data
       .filter((m) => m.id.startsWith("claude-"))
-      .map(restOnlyModel));
+      .map(fromAnthropicModel));
 
     cachedModels = models;
     cacheTimestamp = Date.now();
