@@ -7,10 +7,7 @@ import {
 } from "./ComposerModelPreferences";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import type { ReasoningLevel } from "@mcode/contracts";
-import {
-  getModelDefaultReasoningLevel,
-  getModelReasoningLevels,
-} from "@/lib/model-registry";
+import { findProviderModel } from "@/lib/model-registry";
 
 /** Props for the Composer's model control. */
 export interface ComposerModelControlProps {
@@ -46,9 +43,10 @@ export function ComposerModelControl({
         // model cannot express the current reasoning level, snap to its
         // declared default so the pill and the wire id stay consistent.
         if (provider === "devin") {
-          const levels = getModelReasoningLevels(modelId);
+          const model = findProviderModel(provider, modelId);
+          const levels = model?.supportedReasoningLevels;
           if (levels?.length && !levels.includes(selection.reasoning)) {
-            patch.reasoning = (getModelDefaultReasoningLevel(modelId) ?? levels[0]) as ReasoningLevel;
+            patch.reasoning = (model?.defaultReasoningLevel ?? levels[0]) as ReasoningLevel;
           }
         }
         onSelectionChange(patch);

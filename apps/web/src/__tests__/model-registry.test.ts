@@ -12,8 +12,6 @@ import {
   getDefaultModelId,
   getDefaultReasoningLevel,
   getModelContextWindow,
-  getCodexDefaultReasoningLevel,
-  getCodexReasoningLevels,
   isMaxEffortModel,
   isModelAvailable,
   isXhighEffortModel,
@@ -312,36 +310,36 @@ describe("Codex model catalog", () => {
       supportedReasoningLevels: ["low", "medium", "high", "xhigh", "max"],
       defaultReasoningLevel: "low",
     });
-    expect(getCodexReasoningLevels("gpt-6.1-sol")).toEqual([
+    expect(getReasoningLevels("codex", "gpt-6.1-sol")).toEqual([
       "low", "medium", "high", "xhigh", "max",
     ]);
-    expect(getCodexDefaultReasoningLevel("gpt-6.1-sol")).toBe("low");
-    expect(getCodexReasoningLevels("gpt-6-astra")).toEqual([
+    expect(findProviderModel("codex", "gpt-6.1-sol")?.defaultReasoningLevel).toBe("low");
+    expect(getReasoningLevels("codex", "gpt-6-astra")).toEqual([
       "low",
       "medium",
       "high",
       "xhigh",
       "max",
     ]);
-    expect(getCodexDefaultReasoningLevel("gpt-6-astra")).toBeNull();
-    expect(getCodexReasoningLevels("gpt-5.6-sol")).toEqual([
+    expect(findProviderModel("codex", "gpt-6-astra")?.defaultReasoningLevel).toBeUndefined();
+    expect(getReasoningLevels("codex", "gpt-5.6-sol")).toEqual([
       "low",
       "medium",
       "high",
       "xhigh",
       "max",
     ]);
-    expect(getCodexDefaultReasoningLevel("gpt-5.6-sol")).toBe("low");
-    expect(getCodexReasoningLevels("gpt-6-sol")).toEqual([
+    expect(findProviderModel("codex", "gpt-5.6-sol")?.defaultReasoningLevel).toBe("low");
+    expect(getReasoningLevels("codex", "gpt-6-sol")).toEqual([
       "low",
       "medium",
       "high",
       "xhigh",
       "max",
     ]);
-    expect(getCodexDefaultReasoningLevel("gpt-6-sol")).toBe("medium");
-    expect(getCodexDefaultReasoningLevel("gpt-6-luna")).toBe("medium");
-    expect(getCodexReasoningLevels("gpt-5.6-luna")).toEqual([
+    expect(findProviderModel("codex", "gpt-6-sol")?.defaultReasoningLevel).toBe("medium");
+    expect(findProviderModel("codex", "gpt-6-luna")?.defaultReasoningLevel).toBe("medium");
+    expect(getReasoningLevels("codex", "gpt-5.6-luna")).toEqual([
       "low",
       "medium",
       "high",

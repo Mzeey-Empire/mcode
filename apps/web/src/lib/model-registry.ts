@@ -400,15 +400,6 @@ export function getReasoningLevels(providerId: string, modelId: string): Reasoni
 }
 
 /**
- * Returns the per-model reasoning levels declared on the registry def, or null
- * if the model uses mcode's standard reasoning levels. Codex and Devin models
- * carry explicit `supportedReasoningLevels`.
- */
-export function getModelReasoningLevels(modelId: string): readonly CodexReasoningLevel[] | null {
-  return findModelById(modelId)?.supportedReasoningLevels ?? null;
-}
-
-/**
  * Normalizes a requested reasoning level for the selected provider's model.
  * Devin encodes effort inside the wire model id, so its levels come from the
  * family def's declared `supportedReasoningLevels` — the Claude-style effort
@@ -430,28 +421,3 @@ export function normalizeReasoningLevel(
     ?? level;
 }
 
-/** Returns the model's default reasoning level, or null when undeclared. */
-export function getModelDefaultReasoningLevel(modelId: string): CodexReasoningLevel | null {
-  return findModelById(modelId)?.defaultReasoningLevel ?? null;
-}
-
-/**
- * Returns the Codex-specific reasoning levels for a model, or null if the model
- * uses mcode's standard reasoning levels (i.e. is not a Codex model).
- */
-export function getCodexReasoningLevels(modelId: string): readonly CodexReasoningLevel[] | null {
-  return getModelReasoningLevels(modelId);
-}
-
-/** Returns the Codex model's default reasoning level, or null for non-Codex models. */
-export function getCodexDefaultReasoningLevel(modelId: string): CodexReasoningLevel | null {
-  return getModelDefaultReasoningLevel(modelId);
-}
-
-/**
- * Returns true when the given Codex model supports the "xhigh" reasoning effort tier.
- */
-export function isXhighModel(modelId: string): boolean {
-  const levels = getCodexReasoningLevels(modelId);
-  return levels?.includes("xhigh") ?? false;
-}

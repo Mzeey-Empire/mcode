@@ -5,8 +5,6 @@ import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import {
   MODEL_PROVIDERS,
-  isMaxEffortModel,
-  isXhighEffortModel,
   getReasoningLevels,
   supports1MContextWindow,
   supportsThinkingToggle,
@@ -24,12 +22,6 @@ import { Sparkles } from "lucide-react";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { useToastStore } from "@/stores/toastStore";
 
-
-const REASONING_OPTIONS_BASE = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-];
 
 /** Display labels for provider-declared reasoning effort levels. */
 const REASONING_LEVEL_LABELS: Record<string, string> = {
@@ -310,44 +302,12 @@ export function ModelSection() {
   );
 
 
-  // Levels are read off the selected model's row in the active provider's
-  // merged catalog, so a model id shared across providers can never pick up
-  // another provider's declared efforts.
-  const declaredLevels = useMemo(
-    () =>
-      mergedCatalogModels.find((m) => m.id === modelId)
-        ?.supportedReasoningLevels ?? null,
-    [mergedCatalogModels, modelId],
+  const reasoningLevels = useMemo(() => getReasoningLevels(provider, modelId), [provider, modelId]);
+  const reasoningOptions = useMemo(
+    () => reasoningLevels.map((level) => ({ value: level, label: REASONING_LEVEL_LABELS[level] ?? level })),
+    [reasoningLevels],
   );
-
-  const reasoningOptions = useMemo(() => {
-    if (declaredLevels) {
-      return declaredLevels.map((level) => ({
-        value: level,
-        label: REASONING_LEVEL_LABELS[level] ?? level,
-      }));
-    }
-    if (provider === "copilot") {
-      return REASONING_OPTIONS_BASE;
-    }
-    // Claude: correct tier order is Low, Medium, High, X-High, Max.
-    // Tiers above the model's ceiling are disabled.
-    return [
-      ...REASONING_OPTIONS_BASE,
-      { value: "xhigh",      label: "X-High",     disabled: !isXhighEffortModel(modelId) },
-      { value: "max",        label: "Max",        disabled: !isMaxEffortModel(modelId) },
-    ];
-  }, [modelId, declaredLevels, provider]);
-
-  const reasoningHint = useMemo(() => {
-    if (declaredLevels) {
-      return `Reasoning effort for ${activeProvider?.name ?? provider} models.`;
-    }
-    if (provider === "copilot") {
-      return "Reasoning effort passed to the Copilot model. Not all models support all levels.";
-    }
-    return "Default reasoning level. Max requires Opus 5.5/5, Sonnet 5.5/5, Fable 5.1/5, Opus 4.8/4.7/4.6, or Sonnet 4.6. X-High requires Opus 5.5/5/4.8/4.7, Sonnet 5.5/5, or Fable 5.1/5.";
-  }, [declaredLevels, provider, activeProvider]);
+  const reasoningHint = `Reasoning effort for ${activeProvider?.name ?? provider} models.`;
 
   const handleProviderChange = (v: string) => {
     void (async () => {
@@ -415,7 +375,7 @@ export function ModelSection() {
       modelsLoading={modelsLoading}
       defaultModelStale={defaultModelStale}
       fallbackModelStale={fallbackModelStale}
-      showReasoning={getReasoningLevels(provider, modelId).length > 0}
+      showReasoning={reasoningLevels.length > 0}
       reasoningOptions={reasoningOptions}
       reasoningHint={reasoningHint}
       showFastMode={provider === "codex"}

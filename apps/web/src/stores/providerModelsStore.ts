@@ -39,7 +39,7 @@ interface ProviderModelsState {
   fetchModels: (providerId: string, opts?: { force?: boolean }) => Promise<void>;
   /**
    * Replace one provider's model list from a server-pushed cache update and
-   * register the defs so `findModelById`/`getModelReasoningLevels` resolve them.
+   * register the defs so `findModelById`/`findProviderModel` resolve them.
    */
   applyModels: (providerId: string, info: readonly ProviderModelInfo[]) => void;
   /**
