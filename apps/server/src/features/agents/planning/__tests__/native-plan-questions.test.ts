@@ -107,7 +107,7 @@ async function fixture(interactionMode: "plan" | "build" = "plan") {
   const request: TurnRequest<"codex"> = { threadId: thread.id, turnId: "turn", turnExecutionId: "execution",
     sessionId: `mcode-${thread.id}`, workspaceId: workspace.id, cwd: process.cwd(), message: "Plan a greeting",
     model: "gpt-6.1-sol", permissionMode: "full", approvalReviewMode: "manual", interactionMode,
-    providerOptions: {}, threadControlEligible: false,
+    providerOptions: {},
     ...(interactionMode === "plan" ? { planTurn: { kind: "planning", planFilePath: null } } : {}) };
   const ask = async () => {
     await provider.sendTurn(request);

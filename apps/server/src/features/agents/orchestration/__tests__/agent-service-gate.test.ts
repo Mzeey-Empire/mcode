@@ -401,7 +401,7 @@ describe("AgentService internal MCP provider allowlist", () => {
     "Call delegate_task exactly once to hand this review to Codex. Do not call any other tool.",
     "Do not create an Mcode thread",
   ])("activates thread control whatever the message says: %s", async (content) => {
-    const { svc, threadControlMcp, providerStub } = buildService();
+    const { svc, threadControlMcp } = buildService();
 
     await svc.sendMessage({
       threadId: THREAD_ID,
@@ -417,9 +417,6 @@ describe("AgentService internal MCP provider allowlist", () => {
       sessionId: `mcode-${THREAD_ID}`,
       sourceThreadId: THREAD_ID,
       permissionMode: "supervised",
-    }));
-    expect(providerStub.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
-      threadControlEligible: true,
     }));
   });
 

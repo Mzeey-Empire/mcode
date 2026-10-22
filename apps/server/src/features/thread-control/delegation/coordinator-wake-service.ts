@@ -110,7 +110,7 @@ export class CoordinatorWakeService {
     const turn = this.deps.runtime.runningTurn(coordinatorId);
     if (turn) {
       // A turn without the lease cannot call task_status for detail, so the result waits for a turn that can.
-      if (!turn.steer || !turn.threadControlEligible || this.noSteer.get(coordinatorId) === turn.turnExecutionId) return;
+      if (!turn.steer || !turn.holdsDelegationLease || this.noSteer.get(coordinatorId) === turn.turnExecutionId) return;
       await this.deliverSteer(coordinatorId, turn.turnExecutionId);
       return;
     }

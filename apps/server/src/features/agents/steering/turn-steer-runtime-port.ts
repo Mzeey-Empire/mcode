@@ -16,8 +16,8 @@ export interface SteerableTurn {
   /** Where the turn's mentions resolve, as for `agent.send`. */
   readonly workspaceId: string;
   readonly providerId: ProviderId;
-  /** Whether the turn holds the thread-control lease, so a message steered into it can be acted on with task tools. */
-  readonly threadControlEligible: boolean;
+  /** Whether the turn holds the Delegation lease, so a message steered into it can be acted on with task tools. */
+  readonly holdsDelegationLease: boolean;
   readonly steer: ((input: TurnSteerMessage) => Promise<TurnSteerOutcome>) | null;
 }
 

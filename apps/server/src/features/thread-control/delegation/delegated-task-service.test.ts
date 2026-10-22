@@ -257,7 +257,7 @@ async function wakeHarness(f: Fixture) {
     const turn = f.canonical.loadLatestTurn(threadId);
     if (!turn?.executionId) return null;
     return { turnExecutionId: turn.executionId, workspaceId: f.workspace.id, providerId: "codex",
-      threadControlEligible: state.leased, steer: state.steerable ? async () => state.response : null };
+      holdsDelegationLease: state.leased, steer: state.steerable ? async () => state.response : null };
   };
   const runtime: TurnSteerRuntime = { runningTurn, recordDelivered: async (message) => {
     await f.messages.create(message.threadId, "user", message.content, 3, undefined, undefined, undefined,

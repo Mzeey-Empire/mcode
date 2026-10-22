@@ -496,9 +496,9 @@ describe("CodexProvider first turn on new session", () => {
     await provider.stopSession(sessionId);
   });
 
-  it("attaches for Browser alone when the turn is not thread-control eligible", async () => {
-    const attach = vi.fn().mockResolvedValue(mcodeAttachment({ browser: true, threadControl: false }));
-    const provider = makeProvider(undefined, configuredLease(), { attach });
+  it("attaches the Delegation toolkit whatever the user's wording, without a Browser grant", async () => {
+    const attach = vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true }));
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), { attach });
 
     const send = provider.sendTurn({
       turnId: "test-turn",
@@ -506,19 +506,18 @@ describe("CodexProvider first turn on new session", () => {
       sessionId,
       workspaceId: "workspace-test",
       threadId,
-      message: "inspect the page",
+      message: "Farm this out to Claude",
       cwd: process.cwd(),
       model: "gpt-5.4",
       interactionMode: "build",
       providerOptions: {},
       permissionMode: "supervised",
-      threadControlEligible: false,
     });
     await vi.waitFor(() => expect(appServers.at(-1)).toBeDefined());
     emitMcpStartup(appServers.at(-1)!, "mcode", "ready");
     await send;
 
-    expect(attach).toHaveBeenCalledExactlyOnceWith({ providerId: "codex", sessionId, threadId, threadControl: false });
+    expect(attach).toHaveBeenCalledExactlyOnceWith({ providerId: "codex", sessionId, threadId, threadControl: true });
     await provider.stopSession(sessionId);
   });
 
@@ -622,7 +621,6 @@ describe("CodexProvider first turn on new session", () => {
       interactionMode: "build",
       providerOptions: {},
       permissionMode: "supervised",
-      threadControlEligible: false,
     });
 
     const server = appServers.at(-1)!;
@@ -2806,71 +2804,6 @@ describe("CodexProvider first turn on new session", () => {
     expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Error)).toBe(false);
     expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended)).toBe(false);
     await provider.stopSession(sessionId);
-  });
-
-  it("omits the mcode server for an ineligible turn without a Browser lease", async () => {
-    const attach = vi.fn().mockResolvedValue(mcodeAttachment());
-    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), { attach });
-
-    await provider.sendTurn({
-      turnId: "test-turn",
-      turnExecutionId: "ineligible-execution",
-      sessionId: "mcode-ineligible",
-      workspaceId: "workspace-test",
-      threadId: "ineligible",
-      message: "Spawn a provider-native child",
-      cwd: process.cwd(),
-      model: "gpt-5.4",
-      interactionMode: "build",
-      providerOptions: {},
-      permissionMode: "supervised",
-      threadControlEligible: false,
-    });
-
-    const server = appServers.at(-1)!;
-    expect(attach).not.toHaveBeenCalled();
-    expect(server.options.configOverrides).toEqual([]);
-    expect(server.spawnedEnv).not.toHaveProperty("MCODE_MCP_TOKEN");
-    expect(server.options.instructionSections?.map((section) => section.key)).not.toContain("mcode_thread_control");
-    await provider.stopSession("mcode-ineligible");
-  });
-
-  it("restarts a pooled session when Mcode thread-control eligibility changes", async () => {
-    const attach = vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true }));
-    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), { attach });
-
-    const request = {
-      turnId: "test-turn",
-      turnExecutionId: "eligible-execution",
-      sessionId: "mcode-eligibility-transition",
-      workspaceId: "workspace-test",
-      threadId: "eligibility-transition",
-      message: "Create an Mcode thread named child",
-      cwd: process.cwd(),
-      model: "gpt-5.4",
-      interactionMode: "build" as const,
-      providerOptions: {},
-      permissionMode: "supervised",
-    };
-    const firstSend = provider.sendTurn({ ...request, threadControlEligible: true });
-    await vi.waitFor(() => expect(appServers.at(-1)).toBeDefined());
-    emitMcpStartup(appServers[0]!, "mcode", "ready");
-    await firstSend;
-    await provider.sendTurn({
-      ...request,
-      turnExecutionId: "ineligible-execution",
-      message: "Spawn a provider-native child named child",
-      threadControlEligible: false,
-    });
-
-    expect(appServers).toHaveLength(2);
-    expect(appServers[0]?.options.configOverrides).toEqual([
-      'mcp_servers.mcode.url="http://127.0.0.1:19400/mcp/mcode"',
-      'mcp_servers.mcode.bearer_token_env_var="MCODE_MCP_TOKEN"',
-    ]);
-    expect(appServers[1]?.options.configOverrides).toEqual([]);
-    expect(attach).toHaveBeenCalledTimes(1);
-    await provider.stopSession("mcode-eligibility-transition");
   });
 
   it("restarts a pooled session and attaches again once its Browser credential expires", async () => {
