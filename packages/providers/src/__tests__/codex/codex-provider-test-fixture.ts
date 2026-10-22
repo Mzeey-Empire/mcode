@@ -214,5 +214,4 @@ export class CodexProvider extends PackageCodexProvider {
     super(host, codexPorts, 10 * 60 * 1_000);
     this.settingsService = delegatedSettingsService;
   }
-
 }

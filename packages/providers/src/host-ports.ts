@@ -92,7 +92,7 @@ export interface ProviderMcodeAttachRequest {
   /** Must equal the Browser lease `mcodeSessionId` for this session. */
   sessionId: string;
   threadId: string;
-  /** Whether the thread-control toolkit is listed; Codex passes its per-turn eligibility. */
+  /** Whether the Delegation toolkit is listed; every adapter that supports it passes true. */
   threadControl: boolean;
 }
 
