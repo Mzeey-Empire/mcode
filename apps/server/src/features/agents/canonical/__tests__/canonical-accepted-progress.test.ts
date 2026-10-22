@@ -297,7 +297,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await progress.acceptSteeredUserMessage({ threadId: execution.threadId, turnExecutionId: execution.executionId,
       messageId: onTime, content: "Use staging." });
     await progress.acceptSteeredUserMessage({ threadId: execution.threadId, turnExecutionId: execution.executionId,
-      messageId: late, content: "Also run lint." });
+      messageId: late, content: "Also run lint.", systemNotice: { kind: "delegated-task", presentation: "timeline",
+        delegatedTasks: [{ taskId: "child-task", threadId: "child", title: "Review", providerId: "codex", status: "completed" }] } });
 
     expect(db.prepare("SELECT id, role, content, is_internal FROM messages WHERE id IN (?, ?) ORDER BY sequence")
       .all(onTime, late)).toEqual([
@@ -305,6 +306,10 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       { id: late, role: "user", content: "Also run lint.", is_internal: 0 },
     ]);
     expect([steers.find(onTime)?.state, steers.find(late)?.state]).toEqual(["delivered", "delivered"]);
+    expect(db.prepare("SELECT system_notice FROM messages WHERE id = ?").get(late)).toEqual({
+      system_notice: JSON.stringify({ kind: "delegated-task", presentation: "timeline",
+        delegatedTasks: [{ taskId: "child-task", threadId: "child", title: "Review", providerId: "codex", status: "completed" }] }),
+    });
     expect(() => progress.acceptSteeredUserMessage({ threadId: execution.threadId, turnExecutionId: "another-execution",
       messageId: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e", content: "Too late." }))
       .toThrow("Steered message has no matching accepted execution");

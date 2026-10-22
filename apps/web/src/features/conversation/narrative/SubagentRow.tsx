@@ -1,6 +1,6 @@
 import { useSubagentRoster } from "@/features/subagents/state/subagentRosterStore";
 import { subagentChipStatus, subagentOverviewCounts } from "@/features/subagents/subagent-status";
-import { formatSubagentDisplayName, type SubagentRosterEntry } from "@mcode/contracts";
+import { formatSubagentDisplayName, isLiveSubagentStatus, type SubagentRosterEntry } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { cn } from "@/lib/utils";
@@ -67,7 +67,7 @@ function SubagentChip({ view, onSubagentSelect }: { view: SubagentChipView; onSu
         variant="ghost"
         size="compact"
         disabled={!entry}
-        onClick={() => entry && onSubagentSelect?.(entry.id, entry.status === "running" ? "active" : "finished")}
+        onClick={() => entry && onSubagentSelect?.(entry.id, isLiveSubagentStatus(entry.status) ? "active" : "finished")}
         aria-label={`${entry ? "Open" : "Show"} ${view.title} subagent details`}
         aria-describedby={statusId}
         className="h-7 min-w-0 shrink justify-start gap-1.5 rounded-full border-border pr-2.5 pl-1.5 text-left text-xs disabled:opacity-100 hover:bg-hover/30 motion-reduce:transition-none"
@@ -92,7 +92,7 @@ function SubagentChip({ view, onSubagentSelect }: { view: SubagentChipView; onSu
 function OverflowChip({ entries, onOpenSubagents }: { entries: readonly SubagentRosterEntry[]; onOpenSubagents: SubagentRowProps["onOpenSubagents"] }) {
   const label = remainingLabel(entries);
   if (!label) return null;
-  const target: SubagentRosterTarget = entries.some((entry) => entry.status === "running") ? "active" : "finished";
+  const target: SubagentRosterTarget = entries.some((entry) => isLiveSubagentStatus(entry.status)) ? "active" : "finished";
   return (
     <Button
       type="button"

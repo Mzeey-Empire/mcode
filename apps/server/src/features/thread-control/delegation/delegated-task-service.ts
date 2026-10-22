@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import {
-  DelegateTaskInputSchema, TaskStatusInputSchema, TaskCancelInputSchema, ProviderIdSchema,
+  DelegateTaskInputSchema, TaskStatusInputSchema, delegatedTaskRosterEntryId, isLiveSubagentStatus, TaskCancelInputSchema, ProviderIdSchema,
   type DelegateTaskInput, type DelegateTaskResult, type TaskStatusInput, type TaskStatusResult,
   type TaskCancelInput, type TaskCancelResult, type ThreadControlError, type TaskState, type Thread,
   type SubagentRosterEntry, type SubagentStatus,
@@ -19,6 +19,10 @@ import type { CreateAndSendCommand, CreateAndSendOptions } from "../../agents/tu
 import type { DelegatedTaskRepo } from "./delegated-task-repo.js";
 import type { DelegatedTask, DelegatedTaskPlan } from "./delegated-task-store.js";
 import { deriveTaskState } from "./task-state.js";
+import {
+  taskNoticeKey, taskNoticeStatus, noticeCovered, renderTaskNotices, selectEntriesWithinBudget, type TaskNoticeEntry,
+} from "./task-notice.js";
+import type { TurnResumeScheduleStore } from "../../agents/recovery/turn-resume-schedule-store.js";
 
 /** Existing owners used by delegation; the control reference is delayed at composition. */
 export interface DelegatedTaskDeps {
@@ -26,7 +30,8 @@ export interface DelegatedTaskDeps {
   threads: Pick<ThreadRepo, "findById">;
   startups: Pick<ThreadStartupService, "get">;
   approvals: ThreadControlApprovalRepo;
-  canonical: Pick<CanonicalAgentBoundary, "loadTurn" | "loadTerminalProjection">;
+  canonical: Pick<CanonicalAgentBoundary, "loadLatestAttempt" | "loadTerminalProjection">;
+  resumes: Pick<TurnResumeScheduleStore, "get">;
   targets: Pick<DelegationTargetResolver, "resolve">;
   git: Pick<GitWorktreeService, "resolveHeadCommit">;
   control: Pick<ThreadControlService, "threadStop" | "publishThreadApproval" | "cancelDelegationApproval">;
@@ -36,6 +41,15 @@ export interface DelegatedTaskDeps {
 }
 
 type TaskRejection = { status: "rejected"; error: ThreadControlError };
+
+/** Only the Coordinator's own cancel counts as reading the outcome; a user Stop is still reported to it. */
+type CancelOrigin = "coordinator" | "user";
+
+/** A task's notice key as it stood when a Coordinator read it. */
+export interface ObservedNotice {
+  taskId: string;
+  key: string;
+}
 
 /** Owns durable delegation admission while startup, turn and approval owners retain lifecycle state. */
 export class DelegatedTaskService {
@@ -61,12 +75,69 @@ export class DelegatedTaskService {
     const coordinators = new Set<string>();
     for (const task of this.deps.tasks.listUnfinishedCandidates(coordinatorThreadId)) {
       const state = deriveTaskState({
-        turn: this.deps.canonical.loadTurn(task.taskId), startup: this.deps.startups.get(task.taskId),
+        turn: this.latestAttempt(task), startup: this.deps.startups.get(task.taskId),
         approval: this.deps.approvals.status(task.taskId), launching: this.launching.has(task.taskId),
       });
       if (state.status !== "finished") coordinators.add(task.coordinatorThreadId);
     }
     return coordinators;
+  }
+
+  /** Refresh the owning Coordinator's roster after a child's approval is published or resolved. */
+  childChanged(childThreadId: string): void {
+    const coordinatorThreadId = this.deps.threads.findById(childThreadId)?.delegation_coordinator_thread_id;
+    if (coordinatorThreadId) this.notifyRoster(coordinatorThreadId);
+  }
+
+  /** Enumerate durable receipts for boot recovery without acknowledging results. */
+  noticeTasks() { return this.deps.tasks.listAll(); }
+
+  /** Find Coordinators with unread task state after recovery has reconciled claims. */
+  coordinatorsWithUncoveredNotices(): string[] {
+    const coordinators = new Set<string>();
+    for (const task of this.deps.tasks.listAll()) {
+      const entry = this.noticeEntry(task);
+      if (entry && !task.noticeClaim && !noticeCovered(task.noticeDelivered, entry.key)) coordinators.add(task.coordinatorThreadId);
+    }
+    return [...coordinators];
+  }
+
+  /** Reserve uncovered snapshots against their delivered basis. */
+  async claimNotices(coordinatorThreadId: string, wakeId: string) {
+    const candidates = this.deps.tasks.listByCoordinator(coordinatorThreadId).flatMap((task) => {
+      const entry = this.noticeEntry(task);
+      if (!entry || task.noticeClaim || noticeCovered(task.noticeDelivered, entry.key)) return [];
+      return [{ entry, taskId: task.taskId, key: entry.key, basis: task.noticeDelivered }];
+    });
+    if (!candidates.length) return null;
+    const fitting = selectEntriesWithinBudget(candidates.slice(0, 32).map((candidate) => candidate.entry));
+    const selected = candidates.slice(0, fitting.length);
+    const claimed = new Set(await this.deps.tasks.claimNotices(wakeId, selected));
+    const entries = selected.filter((candidate) => claimed.has(candidate.taskId)).map((candidate) => candidate.entry);
+    return entries.length ? { ...renderTaskNotices(wakeId, entries), hasMore: candidates.length > selected.length } : null;
+  }
+
+  /** Mark an accepted wake delivered without overwriting concurrent acknowledgements. */
+  settleNotices(wakeId: string) { return this.deps.tasks.settleNotices(wakeId); }
+
+  /** Release a wake that was not accepted. */
+  returnNotices(wakeId: string) { return this.deps.tasks.returnNotices(wakeId); }
+
+  /**
+   * Capture the notice key of each delegated child the Coordinator is observing.
+   * Synchronous so a result that lands after the observation is not mistaken for one the Coordinator saw.
+   */
+  observeChildren(coordinatorThreadId: string, childThreadIds: readonly string[]): ObservedNotice[] {
+    return this.deps.tasks.listByCoordinator(coordinatorThreadId).flatMap((task) => {
+      const threadId = this.deps.startups.get(task.taskId)?.threadId;
+      const entry = threadId && childThreadIds.includes(threadId) ? this.noticeEntry(task) : null;
+      return entry ? [{ taskId: task.taskId, key: entry.key }] : [];
+    });
+  }
+
+  /** Acknowledge exactly what an observation returned to the Coordinator. */
+  async acknowledgeObserved(observed: readonly ObservedNotice[]): Promise<void> {
+    for (const { taskId, key } of observed) await this.deps.tasks.acknowledge(taskId, key);
   }
 
   private notifyRoster(coordinatorThreadId: string): void {
@@ -86,11 +157,11 @@ export class DelegatedTaskService {
       const snapshot = this.snapshot(task);
       const status = rosterStatus(snapshot.state);
       return {
-        id: `task:${task.taskId}`, provider: task.plan.providerId, model: task.plan.modelId,
+        id: delegatedTaskRosterEntryId(task.taskId), provider: task.plan.providerId, model: task.plan.modelId,
         title: task.plan.title, prompt: task.plan.prompt, subagentType: null, reasoningEffort: null, stepCount: 0,
         status, startedAt: new Date(task.createdAt).toISOString(),
-        endedAt: this.deps.canonical.loadTurn(task.taskId)?.endedAt ?? null,
-        tier: snapshot.threadId ? "transcript" : "meta", canStop: status === "running",
+        endedAt: this.latestAttempt(task)?.endedAt ?? null,
+        tier: snapshot.threadId ? "transcript" : "meta", canStop: isLiveSubagentStatus(status),
         childThreadId: snapshot.threadId ?? null, sourceToolCallId: call?.id ?? null,
         sourceMessageId: call?.messageId ?? null, parentEntryId: null,
       };
@@ -118,12 +189,12 @@ export class DelegatedTaskService {
     return this.receipt(claimed.task);
   }
 
-  /** Read the task's original canonical turn, including resumable Interrupted outcomes. */
+  /** Read the task's latest canonical attempt, including resumable Interrupted outcomes. */
   async status(authority: InternalThreadControlAuthority, input: TaskStatusInput): Promise<TaskStatusResult> {
     const { taskId } = TaskStatusInputSchema().parse(input);
     const task = this.deps.tasks.find(taskId, authority.sourceThreadId);
     if (!task) return notFound();
-    return this.snapshot(task);
+    return this.report(task);
   }
 
   /** Cancel pending admission or use the existing stop authority for a bound child. */
@@ -131,7 +202,7 @@ export class DelegatedTaskService {
     const { taskId } = TaskCancelInputSchema().parse(input);
     const task = this.deps.tasks.find(taskId, authority.sourceThreadId);
     if (!task) return notFound();
-    return this.cancelTask(task, (threadId) => this.deps.control.threadStop(authority, { threadId }));
+    return this.cancelTask(task, (threadId) => this.deps.control.threadStop(authority, { threadId }), "coordinator");
   }
 
   /** Stop an owned delegated child with authenticated user authority. */
@@ -141,36 +212,36 @@ export class DelegatedTaskService {
     if (!task) return false;
     await this.cancelTask(task, async (threadId) => {
       const startup = this.deps.startups.get(task.taskId);
-      const turn = this.deps.canonical.loadTurn(task.taskId);
+      const turn = this.latestAttempt(task);
       if (!turn && startup && ["pending", "running", "blocked"].includes(startup.state)) {
         await cancelThreadStartup(this.deps.cancellation, task.taskId);
       } else {
         await this.deps.cancellation.agentService.stopSession(threadId, { by: "user" });
       }
       return { status: "stopped" };
-    });
+    }, "user");
     return true;
   }
 
   private async cancelTask(task: DelegatedTask, stop: (threadId: string) => Promise<
     { status: "stopped" } | Awaited<ReturnType<ThreadControlService["threadStop"]>>
-  >): Promise<TaskCancelResult> {
+  >, origin: CancelOrigin): Promise<TaskCancelResult> {
     try {
       const taskId = task.taskId;
       const current = this.snapshot(task);
-      if (current.state.status === "finished") return { taskId, state: current.state };
+      if (current.state.status === "finished") return this.cancelReport(task, origin);
       if (this.deps.approvals.status(taskId) === "pending") {
         await this.deps.control.cancelDelegationApproval(taskId);
-        return { taskId, state: this.snapshot(task).state };
+        return this.cancelReport(task, origin);
       }
       const startup = this.deps.startups.get(taskId);
       if (!startup?.threadId) {
         if (startup) await cancelThreadStartup(this.deps.cancellation, taskId);
-        return { taskId, state: this.snapshot(task).state };
+        return this.cancelReport(task, origin);
       }
       const stopped = await stop(startup.threadId);
       if (stopped.status === "rejected") return { status: "rejected", error: stopped.error };
-      return { taskId, state: this.snapshot(task).state,
+      return { ...await this.cancelReport(task, origin),
         ...(stopped.status === "pending_approval" ? { stopApprovalId: stopped.approvalId } : {}) };
     } finally {
       this.notifyRoster(task.coordinatorThreadId);
@@ -293,18 +364,63 @@ export class DelegatedTaskService {
     };
   }
 
-  private receipt(task: DelegatedTask): Exclude<DelegateTaskResult, TaskRejection> {
-    return { ...this.snapshot(task), effectivePermissionMode: task.plan.permissionMode };
+  private async receipt(task: DelegatedTask): Promise<Exclude<DelegateTaskResult, TaskRejection>> {
+    return { ...await this.report(task), effectivePermissionMode: task.plan.permissionMode };
+  }
+
+  private async report(task: DelegatedTask) {
+    const snapshot = this.snapshot(task);
+    const entry = this.noticeEntry(task, snapshot);
+    if (entry) await this.deps.tasks.acknowledge(task.taskId, entry.key);
+    return snapshot;
+  }
+
+  private async cancelReport(task: DelegatedTask, origin: CancelOrigin) {
+    const { taskId, state } = origin === "coordinator" ? await this.report(task) : this.snapshot(task);
+    return { taskId, state };
+  }
+
+  private noticeEntry(task: DelegatedTask, snapshot = this.snapshot(task)): TaskNoticeEntry | null {
+    const turn = this.latestAttempt(task);
+    const state = snapshot.state;
+    const status = taskNoticeStatus(state);
+    if (!status) return null;
+    const requests = this.pendingRequests(snapshot.threadId);
+    const key = taskNoticeKey(task.taskId, state, turn?.id ?? null, requests.map((request) => request.id), this.hasScheduledResume(turn));
+    if (!key) return null;
+    const detail = state.status === "finished" ? state.summary ?? state.error ?? "" : requests.map((request) => request.prompt).join("\n");
+    return { key, detail, task: { taskId: task.taskId, threadId: snapshot.threadId ?? null,
+      title: task.plan.title, providerId: task.plan.providerId, status } };
+  }
+
+  private hasScheduledResume(turn: ReturnType<DelegatedTaskService["latestAttempt"]>): boolean {
+    if (!turn) return false;
+    const ending = turn.ending;
+    if (ending?.outcome !== "interrupted" || ending.cause !== "usage_limit") return false;
+    return this.deps.resumes.get(turn.threadId)?.turnId === turn.id;
+  }
+
+  private pendingRequests(threadId: string | undefined) {
+    if (!threadId) return [];
+    const requests = this.deps.approvalService.listPendingApprovals(threadId).map((request) => ({
+      id: request.requestId, prompt: request.subject.kind === "question"
+        ? request.subject.questions.map((question) => question.question).join("\n")
+        : request.reason ?? JSON.stringify(request.subject),
+    }));
+    const pending = this.deps.approvals.listPendingByThread(threadId).map((request) => ({
+      id: request.approvalId, prompt: request.operation,
+    }));
+    return [...new Map([...requests, ...pending].map((request) => [request.id, request])).values()];
   }
 
   private snapshot(task: DelegatedTask): { taskId: string; threadId?: string; state: TaskState } {
     const startup = this.deps.startups.get(task.taskId);
-    const turn = this.deps.canonical.loadTurn(task.taskId);
+    const turn = this.latestAttempt(task);
     const threadId = startup?.threadId;
     const ending = turn?.ending;
     const state = deriveTaskState({
       turn, startup, approval: this.deps.approvals.status(task.taskId), launching: this.launching.has(task.taskId),
-      summary: turn?.status === "Completed" ? this.deps.canonical.loadTerminalProjection(task.taskId).message?.content : undefined,
+      summary: turn?.status === "Completed" ? this.deps.canonical.loadTerminalProjection(turn.id).message?.content : undefined,
       error: ending?.outcome === "errored" ? ending.failure.message : undefined,
       needsInput: this.needsInput(threadId),
     });
@@ -316,6 +432,11 @@ export class DelegatedTaskService {
     return this.deps.approvals.listPendingByThread(threadId).length > 0
       || this.deps.approvalService.listPendingApprovals(threadId).length > 0;
   }
+
+  private latestAttempt(task: DelegatedTask) {
+    const threadId = this.deps.startups.get(task.taskId)?.threadId;
+    return threadId ? this.deps.canonical.loadLatestAttempt(task.taskId, threadId) : null;
+  }
 }
 
 function rejection(code: ThreadControlError["code"], message: string, retryable = false): TaskRejection {
@@ -325,6 +446,7 @@ function rejection(code: ThreadControlError["code"], message: string, retryable 
 function notFound(): TaskRejection { return rejection("not_found", "Task not found"); }
 
 function rosterStatus(state: TaskState): SubagentStatus {
+  if (state.status === "waiting" && (state.reason === "needs_input" || state.reason === "setup_blocked")) return "waiting";
   if (state.status !== "finished") return "running";
   switch (state.outcome) {
     case "completed": return "done";

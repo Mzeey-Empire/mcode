@@ -50,6 +50,7 @@ class FakeTurnRuntime implements TurnSteerRuntime {
       turnExecutionId: this.running.turnExecutionId,
       workspaceId: "workspace",
       providerId: this.providerId,
+      threadControlEligible: false,
       steer: this.running.steerable ? (input) => { this.sent.push(input); return this.respond(input); } : null,
     };
   }
@@ -132,6 +133,25 @@ describe("durable Send now", () => {
       content: "Use the staging database instead." }]);
     expect(repo.find(STEER_ID)?.state).toBe("delivered");
     expect(service.listHeldSteers()).toEqual([]);
+  });
+
+  it("retains server notice attribution on delivered and uncertain steers", async () => {
+    const options = { systemNotice: { kind: "delegated-task", presentation: "timeline", delegatedTasks: [
+      { taskId: "task-review", threadId: "child-review", title: "Review", providerId: "codex", status: "completed" },
+    ] } } satisfies Parameters<TurnSteerService["steer"]>[1];
+    await service.steer(steerParams(), options);
+    expect(runtime.saved[0]?.systemNotice).toEqual({ kind: "delegated-task", presentation: "timeline", delegatedTasks: [
+      { taskId: "task-review", threadId: "child-review", title: "Review", providerId: "codex", status: "completed" },
+    ] });
+    runtime.respond = async () => ({ outcome: "unknown", detail: "Connection lost" });
+    const uncertain = "00000000-0000-4000-8000-000000000099";
+    await expect(service.steer({ ...steerParams(), messageId: uncertain }, options))
+      .resolves.toEqual({ status: "delivery_unknown", messageId: uncertain });
+    expect(repo.find(uncertain)?.payload.systemNotice).toEqual({ kind: "delegated-task", presentation: "timeline", delegatedTasks: [
+      { taskId: "task-review", threadId: "child-review", title: "Review", providerId: "codex", status: "completed" },
+    ] });
+    await expect(service.steer(steerParams(), { systemNotice: { kind: "warning", presentation: "timeline" } }))
+      .rejects.toMatchObject({ code: "INVALID_PARAMS" });
   });
 
   it("answers a steer whose transcript save hangs as delivered, so it is never offered again", async () => {

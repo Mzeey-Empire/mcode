@@ -82,7 +82,7 @@ import { ModelCacheService } from "../../providers/models/model-cache-service.js
 import { SettingsService } from "../../settings/settings-service.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
-import { DelegatedTaskService } from "../delegation/delegated-task-service.js";
+import { DelegatedTaskService, type ObservedNotice } from "../delegation/delegated-task-service.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { cancelThreadStartup, type CancelThreadStartupDeps } from "../../thread-startup/cancel-thread-startup.js";
 
@@ -271,6 +271,7 @@ export class ThreadControlService {
         || state.status === "completed" || state.status === "failed" || state.status === "stopped";
     };
     const timeoutAt = Date.now() + validated.timeoutSeconds * 1000;
+    let observed: ObservedNotice[] = [];
     const result = await new Promise<ThreadWaitResult>((resolve) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       let settled = false;
@@ -279,7 +280,11 @@ export class ThreadControlService {
         settled = true;
         if (timer) clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
-        resolve({ status: "success", timedOut, results: readCurrent() });
+        const results = readCurrent();
+        if (authority.type === "internal") {
+          observed = this.delegatedTasks?.observeChildren(authority.sourceThreadId, results.map((item) => item.threadId)) ?? [];
+        }
+        resolve({ status: "success", timedOut, results });
       };
       const onAbort = (): void => finish(true);
       const check = (): void => {
@@ -302,7 +307,10 @@ export class ThreadControlService {
       signal?.addEventListener("abort", onAbort, { once: true });
       check();
     });
-    if (result.status === "success") (await this.auditRead(authority, "thread_wait", "success"));
+    if (result.status === "success") {
+      await this.auditRead(authority, "thread_wait", "success");
+      await this.delegatedTasks?.acknowledgeObserved(observed);
+    }
     return result;
   }
 

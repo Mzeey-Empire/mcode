@@ -5,6 +5,12 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { PermissionModeSchema, ProviderIdSchema, CanonicalAgentEventEnvelopeSchema, AgentEventSchema, isDelegateTaskToolName } from "@mcode/contracts";
 import { canonicalAgentEvents, canonicalAgentItems, canonicalAgentTurns, delegatedTasks, threadStartups, threadControlApprovals } from "../../../runtime/persistence/sqlite/schema.js";
+import { noticeCovered } from "./task-notice.js";
+
+/** A claim records the delivered key observed before one wake reserved it. */
+export const NoticeClaimSchema = z.object({ wakeId: z.string().uuid(), key: z.string(), basis: z.string().nullable() });
+/** A task notice key and the delivered key it must still match before reservation. */
+export const NoticeCandidateSchema = z.object({ taskId: z.string(), key: z.string(), basis: z.string().nullable() });
 
 /** Immutable launch snapshot, captured before any approval or startup side effect. */
 export const DelegatedTaskPlanSchema = z.object({
@@ -25,11 +31,12 @@ export type DelegatedTaskPlan = z.infer<typeof DelegatedTaskPlanSchema>;
 export const DelegatedTaskSchema = z.object({
   taskId: z.string().uuid(), coordinatorThreadId: z.string(), clientRequestId: z.string(),
   inputFingerprint: z.string(), plan: DelegatedTaskPlanSchema, createdAt: z.number(),
+  noticeDelivered: z.string().nullable(), noticeClaim: NoticeClaimSchema.nullable(),
 });
 /** Delegation receipt, independent of mutable startup and turn state. */
 export type DelegatedTask = z.infer<typeof DelegatedTaskSchema>;
 /** Input claimed atomically before a delegated task may launch. */
-export type ClaimTaskInput = Omit<DelegatedTask, "taskId" | "createdAt">;
+export type ClaimTaskInput = Omit<DelegatedTask, "taskId" | "createdAt" | "noticeDelivered" | "noticeClaim">;
 /** Claim outcome preserves the first plan and rejects conflicting wire input. */
 export type ClaimResult = { kind: "claimed" | "existing"; task: DelegatedTask } | { kind: "conflict" };
 
@@ -88,15 +95,53 @@ export class DelegatedTaskStore {
       .leftJoin(threadControlApprovals, eq(threadControlApprovals.id, delegatedTasks.taskId))
       .where(and(
         coordinatorThreadId === undefined ? undefined : eq(delegatedTasks.coordinatorThreadId, coordinatorThreadId),
-        sql`CASE
+        sql`(EXISTS (SELECT 1 FROM ${canonicalAgentTurns} attempt WHERE attempt.attempt_of = ${delegatedTasks.taskId}
+          AND attempt.status NOT IN ('Completed', 'Errored', 'Cancelled', 'Interrupted')) OR CASE
           WHEN ${canonicalAgentTurns.id} IS NOT NULL
             THEN ${canonicalAgentTurns.status} NOT IN ('Completed', 'Errored', 'Cancelled', 'Interrupted')
           WHEN ${threadStartups.startupId} IS NOT NULL
             THEN ${threadStartups.state} NOT IN ('failed', 'interrupted', 'cancelled')
           ELSE ${threadControlApprovals.status} IS NULL
             OR ${threadControlApprovals.status} NOT IN ('rejected', 'expired', 'cancelled')
-        END`,
+        END)`,
       )).all().map((row) => this.parse(row));
+  }
+
+  /** Enumerate durable tasks for boot recovery, without acknowledging any results. */
+  listAll(): DelegatedTask[] {
+    return this.orm.select().from(delegatedTasks).all().map((row) => this.parse(row));
+  }
+
+  /** Reserve only snapshots whose delivered basis and empty claim still match. */
+  claimNotices(wakeId: string, candidates: z.infer<typeof NoticeCandidateSchema>[]): string[] {
+    return candidates.flatMap(({ taskId, key, basis }) => {
+      const claimed = this.orm.update(delegatedTasks).set({ noticeClaim: JSON.stringify({ wakeId, key, basis }) })
+        .where(and(eq(delegatedTasks.taskId, taskId), sql`${delegatedTasks.noticeClaim} IS NULL`,
+          sql`${delegatedTasks.noticeDelivered} IS ${basis}`)).returning({ taskId: delegatedTasks.taskId }).all();
+      return claimed.map((row) => row.taskId);
+    });
+  }
+
+  /** Settle without overwriting an acknowledgement that advanced the delivered basis. */
+  settleNotices(wakeId: string): void {
+    this.orm.update(delegatedTasks).set({
+      noticeDelivered: sql`CASE WHEN ${delegatedTasks.noticeDelivered} IS json_extract(${delegatedTasks.noticeClaim}, '$.basis')
+        THEN json_extract(${delegatedTasks.noticeClaim}, '$.key') ELSE ${delegatedTasks.noticeDelivered} END`,
+      noticeClaim: null,
+    }).where(sql`json_extract(${delegatedTasks.noticeClaim}, '$.wakeId') = ${wakeId}`).run();
+  }
+
+  /** Release a failed delivery for a future trigger. */
+  returnNotices(wakeId: string): void {
+    this.orm.update(delegatedTasks).set({ noticeClaim: null })
+      .where(sql`json_extract(${delegatedTasks.noticeClaim}, '$.wakeId') = ${wakeId}`).run();
+  }
+
+  /** Record a read without shrinking coverage when some questions were answered. */
+  acknowledge(taskId: string, key: string): void {
+    const task = this.get(taskId);
+    if (!task || noticeCovered(task.noticeDelivered, key)) return;
+    this.orm.update(delegatedTasks).set({ noticeDelivered: key }).where(eq(delegatedTasks.taskId, taskId)).run();
   }
 
   /** Resolve the original narrative identity from the creator turn's full tool input. */
@@ -120,6 +165,7 @@ export class DelegatedTaskStore {
   }
 
   private parse(row: typeof delegatedTasks.$inferSelect): DelegatedTask {
-    return DelegatedTaskSchema.parse({ ...row, plan: JSON.parse(row.planJson) });
+    return DelegatedTaskSchema.parse({ ...row, plan: JSON.parse(row.planJson),
+      noticeClaim: row.noticeClaim ? JSON.parse(row.noticeClaim) : null });
   }
 }

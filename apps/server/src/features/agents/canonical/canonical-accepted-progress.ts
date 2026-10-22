@@ -64,6 +64,7 @@ export interface AcceptedSteerMessage {
   readonly messageId: string;
   readonly content: string;
   readonly mentions?: Message["mentions"];
+  readonly systemNotice?: Message["systemNotice"];
 }
 
 const MAX_OWNERS = 8;
@@ -573,7 +574,8 @@ export class CanonicalAcceptedProgress {
     const message: Message = { id: input.messageId, thread_id: input.threadId, role: "user", content: input.content,
       tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: acceptedAt,
       sequence: Math.max(thread.messageSequence, head.assistant.sequence + 1), attachments: null,
-      ...(input.mentions?.length ? { mentions: input.mentions } : {}), is_internal: false };
+      ...(input.mentions?.length ? { mentions: input.mentions } : {}),
+      ...(input.systemNotice ? { systemNotice: input.systemNotice } : {}), is_internal: false };
     const events: import("./canonical-agent-boundary.js").CanonicalAgentEventDraft[] = [{ eventId: `${operationId}:message`,
       routing: { ...head.execution, itemId }, sourceProviderId: head.providerId, sourceIdentities: [],
       payload: { type: "item.recorded", item: { id: itemId, threadId: input.threadId, turnId: head.execution.turnId,

@@ -30,10 +30,28 @@ export const LegacyMessageProvenanceSchema = lazySchema(() => z.object({
 /** Provenance for a retained message that originated in the legacy conversation store. */
 export type LegacyMessageProvenance = z.infer<ReturnType<typeof LegacyMessageProvenanceSchema>>;
 
+/** What a Coordinator wake-up reports about one delegated task. */
+export const DelegatedTaskNoticeStatusSchema = z.enum(["completed", "failed", "cancelled", "interrupted", "denied", "needs_input", "setup_blocked"]);
+/** What a Coordinator wake-up reports about one delegated task. */
+export type DelegatedTaskNoticeStatus = z.infer<typeof DelegatedTaskNoticeStatusSchema>;
+
+/** One delegated task announced by a Coordinator wake-up message. */
+export interface DelegatedTaskNotice {
+  taskId: string;
+  /** Null when the task never got a Delegated thread, such as a denied delegation. */
+  threadId: string | null;
+  title: string;
+  providerId: string;
+  status: DelegatedTaskNoticeStatus;
+}
+
 /** Typed metadata retained with a provider system notice. */
 export interface SystemNoticeMetadata {
-  /** `provider-turn` marks the opening line of a turn the provider started without a prompt. */
-  kind: "diagnostic" | "warning" | "security" | "configuration" | "deprecation" | "model-rerouted" | "authentication-recovered" | "provider-turn" | "turn-reverted" | "turn-revert-undone" | "turn-revert-interrupted";
+  /**
+   * `provider-turn` marks the opening line of a turn the provider started without a prompt.
+   * `delegated-task` marks a user-role message that the server wrote to wake a Coordinator, so it renders as from the Delegated thread.
+   */
+  kind: "diagnostic" | "warning" | "security" | "configuration" | "deprecation" | "model-rerouted" | "authentication-recovered" | "provider-turn" | "turn-reverted" | "turn-revert-undone" | "turn-revert-interrupted" | "delegated-task";
   revertId?: string;
   /** Set on an undo receipt: the revert it undid, so a reloaded timeline knows that revert can no longer be undone. */
   undoesRevertId?: string;
@@ -49,11 +67,13 @@ export interface SystemNoticeMetadata {
   reason?: "safety" | "availability";
   configPath?: string;
   configRange?: { startLine: number; startColumn: number; endLine: number; endColumn: number };
+  /** Set with kind `delegated-task`: the tasks this wake-up reports, in delivery order. */
+  delegatedTasks?: DelegatedTaskNotice[];
 }
 
 /** Bounded provider-neutral metadata for a persisted system notice. */
 export const SystemNoticeMetadataSchema = lazySchema<z.ZodType<SystemNoticeMetadata>>(() => z.object({
-  kind: z.enum(["diagnostic", "warning", "security", "configuration", "deprecation", "model-rerouted", "authentication-recovered", "provider-turn", "turn-reverted", "turn-revert-undone", "turn-revert-interrupted"]),
+  kind: z.enum(["diagnostic", "warning", "security", "configuration", "deprecation", "model-rerouted", "authentication-recovered", "provider-turn", "turn-reverted", "turn-revert-undone", "turn-revert-interrupted", "delegated-task"]),
   revertId: z.string().max(64).optional(),
   undoesRevertId: z.string().max(64).optional(),
   undoneByRevertId: z.string().max(64).optional(),
@@ -72,6 +92,13 @@ export const SystemNoticeMetadataSchema = lazySchema<z.ZodType<SystemNoticeMetad
     endLine: z.number().int().nonnegative().max(1_000_000),
     endColumn: z.number().int().nonnegative().max(1_000_000),
   }).optional(),
+  delegatedTasks: z.array(z.object({
+    taskId: z.string().min(1).max(256),
+    threadId: z.string().min(1).max(256).nullable(),
+    title: z.string().max(512),
+    providerId: z.string().min(1).max(64),
+    status: DelegatedTaskNoticeStatusSchema,
+  }).strict()).min(1).max(32).optional(),
 }).strict());
 
 /** A handoff audit's directory name: a 26-character Crockford Base32 ULID. */

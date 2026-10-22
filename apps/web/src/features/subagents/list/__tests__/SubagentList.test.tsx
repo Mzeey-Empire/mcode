@@ -64,6 +64,18 @@ describe("SubagentList in the Subagents panel", () => {
     ]);
   });
 
+  it("groups a child waiting on the user with running rows", async () => {
+    transport.loadSubagentRoster.mockResolvedValue(roster([
+      entry("old done", { status: "done", startedAt: at(0), endedAt: at(30) }),
+      codex("asking", { status: "waiting", startedAt: at(40) }),
+      entry("working", { startedAt: at(20) }),
+    ]));
+    render(<SubagentsPanel threadId="parent" />);
+    await screen.findByRole("button", { name: "Open asking details, Waiting" });
+
+    expect(rowOrder()).toEqual(["call:asking", "call:working", "divider", "call:old done"]);
+  });
+
   it("offers Stop only on running rows that can stop", async () => {
     transport.loadSubagentRoster.mockResolvedValue(roster([
       codex("codex child"),

@@ -7,6 +7,7 @@ import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
 import {
   MessageMentionsSchema,
+  SystemNoticeMetadataSchema,
   TurnSteerErrorCodeSchema,
   type HeldSteer,
   type TurnSteerErrorCode,
@@ -19,6 +20,7 @@ export const TURN_STEER_RETENTION_DAYS = 30;
 export const TurnSteerPayloadSchema = z.object({
   content: z.string().min(1),
   mentions: MessageMentionsSchema().optional(),
+  systemNotice: SystemNoticeMetadataSchema().optional(),
 }).strict();
 /** Message fields stored with a steer. */
 export type TurnSteerPayload = z.infer<typeof TurnSteerPayloadSchema>;
@@ -87,6 +89,7 @@ export function hashTurnSteerInputs(inputs: TurnSteerInputs): string {
     inputs.turnExecutionId,
     inputs.payload.content,
     inputs.payload.mentions ?? null,
+    ...(inputs.payload.systemNotice ? [inputs.payload.systemNotice] : []),
   ]);
   return NodeCrypto.createHash("sha256").update(canonical).digest("hex");
 }

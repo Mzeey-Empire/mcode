@@ -406,7 +406,7 @@ export class TurnRecoveryService {
     executionId: string,
   ): SendMessageCommand {
     return {
-      ...this.threadSettings(thread),
+      ...threadContinuationSettings(thread),
       content: message.content,
       attachments,
       replyToMessageId: this.optionalValue(message.reply_to_message_id),
@@ -435,7 +435,7 @@ export class TurnRecoveryService {
 
   private continuationCommand(target: RecoverableTurn, retryOfExecutionId: string): SendMessageCommand {
     return {
-      ...this.threadSettings(target.thread),
+      ...threadContinuationSettings(target.thread),
       content: RESUME_CONTINUATION_PROMPT,
       attachments: [],
       internalUserMessage: true,
@@ -443,23 +443,18 @@ export class TurnRecoveryService {
     };
   }
 
-  private threadSettings(thread: Thread): Omit<SendMessageCommand, "content"> {
-    return {
-      threadId: thread.id,
-      model: this.optionalValue(thread.model),
-      permissionMode: this.optionalValue(thread.permission_mode),
-      reasoningLevel: this.optionalValue(thread.reasoning_level),
-      provider: ProviderIdSchema.parse(thread.provider),
-      interactionMode: this.optionalValue(thread.interaction_mode),
-      orchestrationMode: this.optionalValue(thread.orchestration_mode),
-      contextWindow: this.optionalValue(thread.context_window_mode),
-      thinking: this.optionalValue(thread.thinking),
-      codexFastMode: this.optionalValue(thread.codex_fast_mode),
-      devinMode: this.optionalValue(thread.devin_mode),
-    };
-  }
-
   private optionalValue<T>(value: T | null | undefined): T | undefined {
     return value ?? undefined;
   }
+}
+
+/** Continue a thread with its persisted provider and composer selections. */
+export function threadContinuationSettings(thread: Thread): Omit<SendMessageCommand, "content"> {
+  return {
+    threadId: thread.id, model: thread.model ?? undefined, permissionMode: thread.permission_mode ?? undefined,
+    reasoningLevel: thread.reasoning_level ?? undefined, provider: ProviderIdSchema.parse(thread.provider),
+    interactionMode: thread.interaction_mode ?? undefined, orchestrationMode: thread.orchestration_mode ?? undefined,
+    contextWindow: thread.context_window_mode ?? undefined, thinking: thread.thinking ?? undefined,
+    codexFastMode: thread.codex_fast_mode ?? undefined, devinMode: thread.devin_mode ?? undefined,
+  };
 }

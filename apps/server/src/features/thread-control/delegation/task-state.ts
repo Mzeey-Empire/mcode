@@ -1,6 +1,6 @@
 import type { AgentTurn, TaskState, ThreadStartup } from "@mcode/contracts";
 
-/** Mutable lifecycle facts read for the original delegated turn only. */
+/** Mutable lifecycle facts read for the latest delegated attempt. */
 export interface TaskFacts {
   turn?: Pick<AgentTurn, "status"> | null;
   startup?: (Pick<ThreadStartup, "state" | "phase"> & { error?: { message: string } }) | null;

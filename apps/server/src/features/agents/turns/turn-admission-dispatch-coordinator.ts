@@ -18,6 +18,7 @@ import {
   type ProviderId,
   type SendMessageInput,
   type StoredAttachment,
+  type SystemNoticeMetadata,
   type Thread,
   type TurnRequest,
   type TurnRuntimeSnapshot,
@@ -140,6 +141,10 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   cleanupPersistedAttachmentsOnHandledCommand?: boolean;
   /** Admits a turn the provider already started; `content` is its opening notice, not a prompt. */
   providerOriginated?: boolean;
+  /** Server-authored Coordinator wake; retains tool eligibility and persisted settings. */
+  delegationWake?: boolean;
+  /** Server-only timeline attribution for an admitted user-role message. */
+  systemNotice?: SystemNoticeMetadata;
 };
 
 /** An opaque receipt for a command effect that can be activated or rolled back. */
@@ -981,7 +986,7 @@ export class TurnAdmissionDispatchCoordinator {
           previewAnnotations: command.previewAnnotations,
           origin: this.messageOrigin(command),
           selectedTextComments: command.selectedTextComments,
-          ...(command.providerOriginated ? { systemNotice: { kind: "provider-turn" as const, presentation: "timeline" as const } } : {}),
+          systemNotice: this.systemNotice(command),
         };
     return {
       thread: {
@@ -1008,6 +1013,11 @@ export class TurnAdmissionDispatchCoordinator {
 
   private effectivePermissionMode(requested: PermissionMode | "default" | undefined, persisted: PermissionMode): "full" | "supervised" {
     return requested === "full" || (requested === "default" && persisted === "full") ? "full" : "supervised";
+  }
+
+  private systemNotice(command: SendMessageCommand): SystemNoticeMetadata | undefined {
+    if (command.providerOriginated) return { kind: "provider-turn", presentation: "timeline" };
+    return command.systemNotice;
   }
 
   private resumeIdentities(prepared: PreparedCommand) {
@@ -1057,8 +1067,8 @@ export class TurnAdmissionDispatchCoordinator {
 
   private async persistThreadSettings(prepared: PreparedCommand): Promise<void> {
     const command = prepared.command;
-    // A provider-started turn carries no composer selection, so it must not overwrite the user's.
-    if (command.providerOriginated) return;
+    // A turn the server or provider started carries no composer selection, so it must not overwrite the user's.
+    if (command.providerOriginated || command.delegationWake) return;
     const model = command.model ?? "claude-sonnet-4-6";
     await this.threads.updateSettings(command.threadId, {
       ...this.threadSettings(command, prepared.providerId),

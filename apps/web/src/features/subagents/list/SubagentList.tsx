@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Check, Layers } from "lucide-react";
-import type { CanonicalSubagentStopResult, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
+import { isLiveSubagentStatus, type CanonicalSubagentStopResult, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { ProviderIcon } from "@/components/ui/provider-icon";
@@ -27,8 +27,8 @@ function byNewestStart(a: SubagentRosterEntry, b: SubagentRosterEntry): number {
 
 /** Running rows first, then finished rows, each newest first. */
 function partitionRows(entries: readonly SubagentRosterEntry[]) {
-  const running = entries.filter((row) => row.status === "running").sort(byNewestStart);
-  const finished = entries.filter((row) => row.status !== "running").sort(byNewestStart);
+  const running = entries.filter((row) => isLiveSubagentStatus(row.status)).sort(byNewestStart);
+  const finished = entries.filter((row) => !isLiveSubagentStatus(row.status)).sort(byNewestStart);
   return { running, finished };
 }
 
@@ -42,6 +42,11 @@ function StatusTrail({ row, now }: { readonly row: SubagentRosterEntry; readonly
   switch (row.status) {
     case "running":
       return <span className="flex items-center gap-1.5 text-ink"><span aria-hidden className="size-[7px] rounded-full bg-success" />{time}</span>;
+    case "waiting":
+      return <span className="flex items-center gap-1.5 text-ink">
+        <span aria-hidden className="size-[7px] rounded-full bg-warning" />
+        <span className="text-xs font-medium">{subagentStatusLabel(row.status)}</span>{time}
+      </span>;
     case "done":
       return <span className="flex items-center gap-1.5 text-muted"><Check size={12} aria-hidden />{time}</span>;
     case "failed":
@@ -86,7 +91,7 @@ function SubagentListRow({ row, now, onSelect, onStop }: {
   readonly row: SubagentRosterEntry; readonly now: number;
   readonly onSelect: SubagentListProps["onSelect"]; readonly onStop: SubagentListProps["onStop"];
 }) {
-  const running = row.status === "running";
+  const running = isLiveSubagentStatus(row.status);
   const stoppable = running && row.canStop && row.childThreadId !== null;
   const meta = rowMeta(row);
   const selectRef = useRef<HTMLButtonElement | null>(null);

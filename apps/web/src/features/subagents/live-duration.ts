@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SubagentRosterEntry } from "@mcode/contracts";
+import { isLiveSubagentStatus, type SubagentRosterEntry } from "@mcode/contracts";
 import { formatLiveDuration } from "./subagent-status";
 
 const LIVE_TICK_MS = 1_000;
@@ -17,6 +17,6 @@ export function useNow(live: boolean): number {
 
 /** Only a running entry reads the clock; a finished entry without an end time has no honest duration. */
 export function elapsed(row: SubagentRosterEntry, now: number): string | null {
-  const end = row.status === "running" ? now : row.endedAt && Date.parse(row.endedAt);
+  const end = isLiveSubagentStatus(row.status) ? now : row.endedAt && Date.parse(row.endedAt);
   return end ? formatLiveDuration(end - Date.parse(row.startedAt)) : null;
 }

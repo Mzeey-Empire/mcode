@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { SubagentDetail, SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
+import { isLiveSubagentStatus, type SubagentDetail, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { ProviderIcon } from "@/components/ui/provider-icon";
@@ -60,7 +60,7 @@ function DetailBody({ children }: { readonly children: ReactNode }) {
 }
 
 function DetailHeader({ threadId, entry }: { readonly threadId: string; readonly entry: SubagentRosterEntry }) {
-  const running = entry.status === "running";
+  const running = isLiveSubagentStatus(entry.status);
   const now = useNow(running);
   const kind = subagentKind(entry);
   const duration = elapsed(entry, now);
@@ -169,7 +169,7 @@ function StepsTier({ threadId, entry, roster }: {
     {error && <p role="alert" className="flex items-center gap-2 text-sm text-ink">
       Couldn't load subagent activity <Button variant="ghost" size="compact" onClick={() => setRetry((value) => value + 1)}>Retry</Button>
     </p>}
-    {detail && <StepsDetail detail={detail} running={entry.status === "running"} />}
+    {detail && <StepsDetail detail={detail} running={isLiveSubagentStatus(entry.status)} />}
   </>;
 }
 

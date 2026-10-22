@@ -5,6 +5,7 @@ import { formatLiveDuration, subagentChipStatus, subagentOverviewCounts, subagen
 describe("shared subagent surface words", () => {
   it.each([
     ["running", "Running", "working"],
+    ["waiting", "Waiting", "waiting for you"],
     ["done", "Done", "finished"],
     ["failed", "Failed", "failed"],
     ["stopped", "Stopped", "stopped"],
@@ -14,7 +15,7 @@ describe("shared subagent surface words", () => {
   });
 
   it("counts every terminal outcome as done", () => {
-    const entries = ["running", "running", "done", "failed", "stopped"].map((status, index) =>
+    const entries = ["running", "waiting", "done", "failed", "stopped"].map((status, index) =>
       SubagentRosterEntrySchema().parse({
         id: `call:${index}`, provider: "claude", title: "Inspect", prompt: null,
         subagentType: null, model: null, reasoningEffort: null, stepCount: 0, status,

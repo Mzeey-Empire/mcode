@@ -94,6 +94,10 @@ import { SNAPSHOT_STORE_ID, type StoreId } from "../../features/projects/diffs/s
 import { AgentRuntimeCommandPort } from "../../features/agents/orchestration/agent-turn-command-port.js";
 import { DelegatedTaskService } from "../../features/thread-control/delegation/delegated-task-service.js";
 import { ThreadLaunchService } from "../../features/thread-control/launch/thread-launch-service.js";
+import { CoordinatorWakeService } from "../../features/thread-control/delegation/coordinator-wake-service.js";
+import { wakeTargets } from "../../features/thread-control/delegation/wake-targets.js";
+import { TurnSteerRepo } from "../../features/agents/steering/persistence/turn-steer-repo.js";
+import { TurnSteerRuntimePort } from "../../features/agents/steering/turn-steer-runtime-port.js";
 import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
 import { TURN_FINALIZER, TurnFinalizer } from "../../features/agents/turns/turn-finalizer.js";
 import {
@@ -540,6 +544,7 @@ const portPush = new PortPush();
 turnResumeScheduler.onChange((event) => {
   broadcast("thread.resumeScheduled", event);
   portPush.send("thread.resumeScheduled", event);
+  nudgeCoordinatorForThread(event.threadId);
 });
 
 /** IPC push server for named pipe / Unix domain socket transport. */
@@ -748,6 +753,32 @@ async function settleCommitRequests(): Promise<void> {
 await settleCommitRequests();
 
 const turnSteers = container.resolve(TurnSteerService);
+const steerRuntime = container.resolve(TurnSteerRuntimePort);
+const coordinatorWake = new CoordinatorWakeService({
+  tasks: delegatedTaskService, threads: threadRepo, canonical: canonicalSink, messages: messageRepo,
+  steers: container.resolve(TurnSteerRepo), steer: turnSteers,
+  runtime: { runningTurn: (threadId) => steerRuntime.runningTurn(threadId),
+    isActive: (threadId) => agentService.runtimeAccess().activeThreadIds().includes(threadId),
+    sendMessage: (command) => agentService.sendMessage(command) },
+});
+let coordinatorWakeReady = false;
+
+function nudgeCoordinatorForThread(threadId: string): void {
+  if (!coordinatorWakeReady) return;
+  const thread = threadRepo.findById(threadId);
+  if (thread) for (const target of wakeTargets(thread)) coordinatorWake.nudge(target);
+}
+
+const stopObservingWakeTasks = delegatedTaskService.onRosterChanged((coordinatorId) => {
+  if (coordinatorWakeReady) coordinatorWake.nudge(coordinatorId);
+});
+const wakeTurnBoundaries = new Set(["turn.started", "turn.completed", "turn.errored", "turn.cancelled", "turn.interrupted"]);
+const stopObservingWakeTurns = subscribeCommittedCanonicalEvents((events) => {
+  for (const event of events) {
+    if (wakeTurnBoundaries.has(event.payload.type)) nudgeCoordinatorForThread(event.routing.threadId);
+  }
+});
+const stopObservingWakeReleases = agentService.onRuntimeReleased(nudgeCoordinatorForThread);
 
 /** No steer call survives a restart, so pending steers are held as uncertain before RPCs arrive. */
 async function reconcileSteers(): Promise<void> {
@@ -1045,11 +1076,15 @@ async function bootstrapServer(): Promise<void> {
       publishApprovalRequest: (request) => {
         broadcast("approval.requested", request);
         threadAttentionService.invalidate(request.threadId);
+        nudgeCoordinatorForThread(request.threadId);
+        delegatedTaskService.childChanged(request.threadId);
         portPush.send("approval.requested", request);
       },
       publishApprovalResolved: (payload) => {
         broadcast("approval.resolved", payload);
         threadAttentionService.invalidate(payload.threadId);
+        nudgeCoordinatorForThread(payload.threadId);
+        delegatedTaskService.childChanged(payload.threadId);
         portPush.send("approval.resolved", payload);
       },
     }, threadControlService);
@@ -1069,6 +1104,8 @@ async function bootstrapServer(): Promise<void> {
     planImplementStartupObserver.start();
     settleActionObserver.start();
     await turnResumeScheduler.start();
+    coordinatorWakeReady = true;
+    await coordinatorWake.recoverAtStartup();
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();
     recordStartupCheckpoint("orphaned background tools settled");
@@ -1108,6 +1145,11 @@ await bootstrapServer();
 async function shutdown(): Promise<void> {
   shutdownCoordinator.setPhase("begin shutdown");
   logger.info("Shutdown initiated");
+  coordinatorWakeReady = false;
+  stopObservingWakeTasks();
+  stopObservingWakeTurns();
+  stopObservingWakeReleases();
+  await coordinatorWake.dispose();
 
   // Disarm the grace-period controller so its timer does not fire after
   // an externally-triggered shutdown (e.g. SIGTERM).

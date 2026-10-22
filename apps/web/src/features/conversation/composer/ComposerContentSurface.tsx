@@ -40,7 +40,7 @@ import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
 import { ComposerTray } from "./ComposerTray";
 import { clearVisibleBrowserNotes } from "./draft/draft-browser-notes";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
-import { ApprovalAnnouncer, ApprovalDock, useDockApprovals } from "@/features/conversation/approvals/ApprovalDock";
+import { ApprovalAnnouncer, ApprovalDock, useDelegatedThreadTitles, useDockApprovals } from "@/features/conversation/approvals/ApprovalDock";
 import { QuestionDock } from "@/features/conversation/approvals/QuestionDock";
 import { DiffCommentsComposerAttachment, type ComposerCodeComment } from "./DiffCommentsComposerAttachment";
 import { SelectedTextCommentsComposerAttachment } from "./SelectedTextCommentsComposerAttachment";
@@ -754,7 +754,8 @@ export function getComposerDock(args: {
 
 export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   const { model, actions } = props;
-  const approvals = useDockApprovals(model.threadId);
+  const delegatedThreads = useDelegatedThreadTitles(model.threadId);
+  const approvals = useDockApprovals(model.threadId, delegatedThreads);
   const dock = getComposerDock({ approvalCount: approvals.length, planPending: model.planPending, threadId: model.threadId });
   const docked = dock !== null;
   return (
@@ -766,6 +767,7 @@ export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
         <ApprovalDock
           key={model.threadId}
           requests={approvals}
+          delegatedThreads={delegatedThreads}
           composerContainerRef={model.composerContainerRef}
           isAgentRunning={model.isAgentRunning}
           isStopPending={model.isStopPending}

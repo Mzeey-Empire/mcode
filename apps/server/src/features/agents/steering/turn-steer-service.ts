@@ -13,6 +13,7 @@ import {
   type SettleUnknownSteerResult,
   type TurnSteerParams,
   type TurnSteerResult,
+  type SystemNoticeMetadata,
 } from "@mcode/contracts";
 import { FileService } from "../../projects/files/file-service.js";
 import { injectMentionFileContents, validateMessageMentions, type MentionFiles } from "../turns/message-mentions.js";
@@ -53,9 +54,11 @@ export class TurnSteerFaultStop extends Error {
   }
 }
 
-/** Test-only controls for one steer. */
+/** Steer options for fault injection and server-authored message attribution. */
 export interface TurnSteerOptions {
   readonly stopAt?: TurnSteerFaultPoint;
+  /** Server-authored attribution retained with the durable steer payload. */
+  readonly systemNotice?: SystemNoticeMetadata;
 }
 
 interface InFlightSteer {
@@ -84,7 +87,8 @@ export class TurnSteerService {
 
   /** Add a message to the running turn. Every thrown `TurnSteerError` means the provider never took it. */
   steer(params: TurnSteerParams, options: TurnSteerOptions = {}): Promise<TurnSteerResult> {
-    const payload: TurnSteerPayload = { content: params.content, ...(params.mentions ? { mentions: params.mentions } : {}) };
+    const payload: TurnSteerPayload = { content: params.content, ...(params.mentions ? { mentions: params.mentions } : {}),
+      ...(options.systemNotice ? { systemNotice: options.systemNotice } : {}) };
     const inputsHash = hashTurnSteerInputs({ threadId: params.threadId, turnExecutionId: params.turnExecutionId, payload });
     const running = this.inFlight.get(params.messageId);
     if (running) {
@@ -188,7 +192,8 @@ export class TurnSteerService {
     stopAt(options, "after-provider-accepted");
     try {
       await withinSaveTimeout(this.runtime.recordDelivered({ threadId: params.threadId, turnExecutionId: params.turnExecutionId,
-        messageId, content: payload.content, ...(payload.mentions ? { mentions: payload.mentions } : {}) }));
+        messageId, content: payload.content, ...(payload.mentions ? { mentions: payload.mentions } : {}),
+        ...(payload.systemNotice ? { systemNotice: payload.systemNotice } : {}) }));
     } catch (error) {
       // The provider holds the message, so it is delivered even though the transcript may not have it
       // yet. Held as uncertain, it would offer Send again and the agent could get it twice.

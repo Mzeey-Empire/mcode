@@ -64,6 +64,9 @@ export const CONTRACT_STEPS: Readonly<Record<string, ContractStep>> = {
 
 /** Migrations after the floor migration that are not auto-additive but do not break older builds. */
 export const COMPATIBLE_STEPS: Readonly<Record<string, CompatibleStep>> = {
+  "0097_parallel_madelyne_pryor": {
+    reason: "Adds nullable delegated_tasks.notice_delivered and notice_claim, and backfills notice_delivered so tasks that finished before the upgrade do not wake their Coordinator. Older builds never read or write either column.",
+  },
   "0095_worried_anthem": {
     reason: "The unique retry key belongs only to the new delegated_tasks table. Older builds never insert into that table, so their writes are unchanged.",
   },

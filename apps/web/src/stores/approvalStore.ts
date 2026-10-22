@@ -87,10 +87,19 @@ export function isDockApproval(request: StoredApproval): boolean {
   return !request.settled;
 }
 
-/** Dock requests for one thread, oldest first, so the pager reads in the order the agent asked. */
-export function selectDockApprovals(approvals: readonly StoredApproval[], threadId: string | undefined): StoredApproval[] {
+const NO_THREADS: ReadonlySet<string> = new Set();
+
+/**
+ * Pending dock requests for the thread and its Delegated threads, oldest first.
+ * A Delegated thread's question is answered from the Coordinator the user is watching.
+ */
+export function selectDockApprovals(
+  approvals: readonly StoredApproval[],
+  threadId: string | undefined,
+  delegatedThreadIds: ReadonlySet<string> = NO_THREADS,
+): StoredApproval[] {
   if (!threadId) return [];
   return approvals
-    .filter((request) => request.threadId === threadId && isDockApproval(request))
+    .filter((request) => (request.threadId === threadId || delegatedThreadIds.has(request.threadId)) && isDockApproval(request))
     .sort((left, right) => left.requestedAt.localeCompare(right.requestedAt));
 }

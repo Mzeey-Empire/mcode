@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { inject, injectable } from "tsyringe";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { DelegatedTaskStore, type ClaimTaskInput, type ClaimResult } from "./delegated-task-store.js";
-import { claimDelegatedTask } from "./delegated-task-write-operations.js";
+import { claimDelegatedTask, claimTaskNotices, settleTaskNotices, returnTaskNotices, acknowledgeTaskNotice } from "./delegated-task-write-operations.js";
 
 /** Read-only receipt queries and committed claims through the application writer. */
 @injectable()
@@ -27,4 +27,14 @@ export class DelegatedTaskRepo {
   listUnfinishedCandidates(coordinatorThreadId?: string) { return this.reader.listUnfinishedCandidates(coordinatorThreadId); }
   /** Read exact source identities in creator-turn order. */
   sourceCalls(coordinatorThreadId: string, creatorTurnId: string) { return this.reader.sourceCalls(coordinatorThreadId, creatorTurnId); }
+  /** Enumerate receipts for wake recovery. */
+  listAll() { return this.reader.listAll(); }
+  /** Reserve a notice batch through the sole database writer. */
+  claimNotices(...args: Parameters<DelegatedTaskStore["claimNotices"]>) { return this.writer.execute(claimTaskNotices, args); }
+  /** Settle accepted notices. */
+  settleNotices(wakeId: string) { return this.writer.execute(settleTaskNotices, wakeId); }
+  /** Release unaccepted notices. */
+  returnNotices(wakeId: string) { return this.writer.execute(returnTaskNotices, wakeId); }
+  /** Acknowledge a result the Coordinator read. */
+  acknowledge(taskId: string, key: string) { return this.writer.execute(acknowledgeTaskNotice, [taskId, key]); }
 }

@@ -2,10 +2,18 @@ import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderIdSchema } from "./settings.js";
 
-/** One normalized subagent outcome shared by every surface. */
-export const SubagentStatusSchema = z.enum(["running", "done", "failed", "stopped"]);
+/**
+ * One normalized subagent outcome shared by every surface.
+ * `waiting` is a live child blocked on the user's answer.
+ */
+export const SubagentStatusSchema = z.enum(["running", "waiting", "done", "failed", "stopped"]);
 /** One normalized subagent outcome shared by every surface. */
 export type SubagentStatus = z.infer<typeof SubagentStatusSchema>;
+
+/** Whether a child is still live: working, or blocked on the user's answer. */
+export function isLiveSubagentStatus(status: SubagentStatus): boolean {
+  return status === "running" || status === "waiting";
+}
 /** Detail supported by this entry's persisted evidence. */
 export const SubagentDetailTierSchema = z.enum(["transcript", "steps", "meta"]);
 /** Detail supported by this entry's persisted evidence. */
@@ -72,6 +80,11 @@ export function stripMcodeMcpPrefix(toolName: string): string {
 /** True when a tool call is the Mcode `delegate_task` tool, under any provider's MCP naming. */
 export function isDelegateTaskToolName(toolName: string): boolean {
   return stripMcodeMcpPrefix(toolName) === "delegate_task";
+}
+
+/** Roster entry id of an Mcode delegated task, shared by the server roster and client links. */
+export function delegatedTaskRosterEntryId(taskId: string): string {
+  return `task:${taskId}`;
 }
 
 /** True when a tool call starts a sub-agent: a provider-native `Agent` call or an Mcode delegation. */

@@ -21,11 +21,14 @@ vi.mock("@/transport", () => ({
 interface DockHarnessProps {
   readonly threadId?: string;
   readonly onStop?: () => void;
+  readonly delegatedThreads?: ReadonlyMap<string, string>;
 }
 
-function DockHarness({ threadId = "thread-1", onStop }: DockHarnessProps) {
+const NO_DELEGATED_THREADS: ReadonlyMap<string, string> = new Map();
+
+function DockHarness({ threadId = "thread-1", onStop, delegatedThreads = NO_DELEGATED_THREADS }: DockHarnessProps) {
   const composerRef = useRef<HTMLDivElement>(null);
-  const requests = useDockApprovals(threadId);
+  const requests = useDockApprovals(threadId, delegatedThreads);
   return (
     <>
       <input aria-label="Terminal" />
@@ -33,6 +36,7 @@ function DockHarness({ threadId = "thread-1", onStop }: DockHarnessProps) {
       {requests.length > 0 && (
         <ApprovalDock
           requests={requests}
+          delegatedThreads={delegatedThreads}
           composerContainerRef={composerRef}
           isAgentRunning={onStop !== undefined}
           isStopPending={false}
@@ -144,6 +148,19 @@ describe("ApprovalDock keys", () => {
 
     expect(onStop).toHaveBeenCalledTimes(1);
     expect(respondToApproval).not.toHaveBeenCalled();
+  });
+
+  it("answers a Delegated thread's request from its Coordinator, without the Coordinator's Stop", async () => {
+    const user = setupUser();
+    addApproval({ requestId: "child-req", threadId: "delegated" });
+    render(<DockHarness threadId="coordinator" onStop={vi.fn()} delegatedThreads={new Map([["delegated", "Fix login"]])} />);
+    await elapseGuard();
+
+    expect(screen.getByText("From Fix login")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop agent" })).not.toBeInTheDocument();
+    await user.keyboard("1");
+
+    expect(respondToApproval).toHaveBeenCalledWith("child-req", { choiceId: "allow" });
   });
 
   it("sends each deny row's own choice id", async () => {
