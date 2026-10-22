@@ -3,6 +3,7 @@ import type { ProviderModelInfo } from "@mcode/contracts";
 import {
   MODEL_PROVIDERS,
   registerProviderModels,
+  toModelDefinition,
   type ModelDefinition,
 } from "@/lib/model-registry";
 import { getTransport } from "@/transport";
@@ -18,16 +19,7 @@ function toModelDefinitions(
   providerId: string,
   info: readonly ProviderModelInfo[],
 ): ModelDefinition[] {
-  return info.map((m) => ({
-    id: m.id,
-    label: m.name,
-    providerId,
-    group: m.group,
-    multiplier: m.multiplier,
-    contextWindow: m.contextWindow,
-    supportedReasoningLevels: m.supportedReasoningEfforts,
-    defaultReasoningLevel: m.defaultReasoningEffort,
-  }));
+  return info.map((m) => toModelDefinition(providerId, m));
 }
 
 /** State and actions for the provider models Zustand store. */

@@ -5,7 +5,7 @@ import { SteppedSlider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
-import { supports1MContextWindow, supportsThinkingToggle } from "@/lib/model-registry";
+import { findProviderModel, supportsThinkingToggle } from "@/lib/model-registry";
 import { formatReasoningLabel } from "@/lib/format-model-label";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
@@ -30,7 +30,7 @@ export interface ComposerModelPreferencesProps {
 interface ModelPreferenceState {
   has1M: boolean;
   hasThinking: boolean;
-  hasCodexFast: boolean;
+  hasFast: boolean;
   contextWindow: ContextWindowMode;
   thinking: boolean;
   codexFastMode: boolean;
@@ -82,15 +82,15 @@ function hasAvailablePreference(
   reasoningLevels: ReasoningLevel[],
   has1M: boolean,
   hasThinking: boolean,
-  hasCodexFast: boolean,
+  hasFast: boolean,
 ): boolean {
-  return reasoningLevels.length > 0 || has1M || hasThinking || hasCodexFast;
+  return reasoningLevels.length > 0 || has1M || hasThinking || hasFast;
 }
 
 function getPreferenceLabel(state: Omit<ModelPreferenceState, "preferenceLabel" | "preferenceTooltip" | "canShowPreferences">, selection: ComposerAgentSelection): string {
   if (state.reasoningLevels.length > 0) return formatReasoningLabel(selection.reasoning);
   if (state.hasThinking) return "Thinking";
-  if (state.hasCodexFast) return state.codexFastMode ? "Fast" : "Off";
+  if (state.hasFast) return state.codexFastMode ? "Fast" : "Off";
   return state.contextWindow === "1m" ? "1M" : "200K";
 }
 
@@ -98,14 +98,14 @@ function getPreferenceTooltip(
   reasoningLevels: ReasoningLevel[],
   has1M: boolean,
   hasThinking: boolean,
-  hasCodexFast: boolean,
+  hasFast: boolean,
 ): string {
   if (reasoningLevels.length > 0) {
-    if (has1M || hasThinking || hasCodexFast) return "Reasoning and model options";
+    if (has1M || hasThinking || hasFast) return "Reasoning and model options";
     return "Reasoning level";
   }
   if (hasThinking) return "Thinking";
-  if (hasCodexFast) return "Fast mode";
+  if (hasFast) return "Fast mode";
   return "Context window";
 }
 
@@ -114,18 +114,19 @@ function getModelPreferenceState(
   defaults: ComposerModelPreferenceDefaults,
   reasoningLevels: ReasoningLevel[],
 ): ModelPreferenceState {
-  const has1M = supportsClaudeModelOption(selection.provider, selection.modelId, supports1MContextWindow);
+  const model = findProviderModel(selection.provider, selection.modelId);
+  const has1M = model?.contextWindowOptions?.includes("1m") === true;
   const hasThinking = supportsClaudeModelOption(selection.provider, selection.modelId, supportsThinkingToggle);
-  const hasCodexFast = selection.provider === "codex";
+  const hasFast = model?.supportsFastMode === true;
   const contextWindow = getContextWindow(selection, defaults);
   const thinking = getThinking(selection, defaults);
   const codexFastMode = getCodexFastMode(selection, defaults);
-  const baseState = { has1M, hasThinking, hasCodexFast, contextWindow, thinking, codexFastMode, reasoningLevels };
+  const baseState = { has1M, hasThinking, hasFast, contextWindow, thinking, codexFastMode, reasoningLevels };
   return {
     ...baseState,
     preferenceLabel: getPreferenceLabel(baseState, selection),
-    preferenceTooltip: getPreferenceTooltip(reasoningLevels, has1M, hasThinking, hasCodexFast),
-    canShowPreferences: hasAvailablePreference(reasoningLevels, has1M, hasThinking, hasCodexFast),
+    preferenceTooltip: getPreferenceTooltip(reasoningLevels, has1M, hasThinking, hasFast),
+    canShowPreferences: hasAvailablePreference(reasoningLevels, has1M, hasThinking, hasFast),
   };
 }
 
@@ -141,7 +142,7 @@ export function hasModelPreferences(
 function ComposerModelPreferenceSummaryContent({ state }: { state: ModelPreferenceState }) {
   return (
     <>
-      {state.hasCodexFast && state.codexFastMode && (
+      {state.hasFast && state.codexFastMode && (
         <Zap
           size={12}
           aria-hidden="true"
@@ -244,7 +245,7 @@ function ComposerOptionToggles({
 }) {
   return (
     <div className="flex shrink-0 items-center gap-0.5">
-      {state.hasCodexFast && (
+      {state.hasFast && (
         <ComposerOptionToggle
           label="Fast"
           pressed={state.codexFastMode}

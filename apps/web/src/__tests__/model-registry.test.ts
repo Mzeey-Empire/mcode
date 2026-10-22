@@ -1,9 +1,12 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, beforeEach } from "vitest";
 import { getDefaultSettings, ReasoningLevelSchema } from "@mcode/contracts";
 import { useSettingsStore } from "@/stores/settingsStore";
 import {
   MODEL_PROVIDERS,
   findModelById,
+  findProviderModel,
+  getReasoningLevels,
+  registerProviderModels,
   findProviderForModel,
   getDefaultModel,
   getDefaultModelId,
@@ -17,9 +20,9 @@ import {
   normalizeReasoningLevel,
   normalizeReasoningLevelForModel,
   resolveThreadModelId,
-  supportsEffortParameter,
   pickProviderModelsForSettings,
 } from "@/lib/model-registry";
+import { supportsEffortParameter } from "@mcode/shared/model-effort";
 
 describe("pickProviderModelsForSettings", () => {
   it("keeps Codex provider order and excludes unavailable static entries", () => {
@@ -108,6 +111,9 @@ describe("ModelRegistry", () => {
       label: "Claude Opus 5",
       providerId: "claude",
       contextWindow: 200_000,
+      contextWindowOptions: ["200k", "1m"],
+      supportedReasoningLevels: ["low", "medium", "high", "xhigh", "max"],
+      defaultReasoningLevel: "high",
     });
   });
 
@@ -644,5 +650,41 @@ describe("getModelContextWindow", () => {
   it("resolves dated SDK variants via prefix match", () => {
     expect(getModelContextWindow("claude-haiku-4-5-20251001", "200k")).toBe(200_000);
     expect(getModelContextWindow("claude-sonnet-4-6-20260101", "1m")).toBe(1_000_000);
+  });
+});
+
+describe("provider-scoped capabilities", () => {
+  afterEach(() => {
+    for (const provider of ["copilot", "cursor"]) registerProviderModels(provider, []);
+  });
+
+  it("keeps Claude's effort ladder on declared levels", () => {
+    expect(getReasoningLevels("claude", "claude-opus-5-5")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(getReasoningLevels("claude", "claude-opus-4-6-20250101")).toEqual(["low", "medium", "high", "max"]);
+    expect(getReasoningLevels("claude", "claude-haiku-4-5")).toEqual([]);
+  });
+
+  it("shows exactly the levels a Copilot model declares", () => {
+    registerProviderModels("copilot", [
+      { id: "gpt-9", label: "GPT-9", providerId: "copilot", supportedReasoningLevels: ["low", "medium", "high"] },
+      { id: "gpt-9-mini", label: "GPT-9 Mini", providerId: "copilot" },
+    ]);
+    expect(getReasoningLevels("copilot", "gpt-9")).toEqual(["low", "medium", "high"]);
+    expect(getReasoningLevels("copilot", "gpt-9-mini")).toEqual([]);
+  });
+
+  it("shows no levels for a Cursor model that declares none", () => {
+    registerProviderModels("cursor", [{ id: "composer-9", label: "Composer 9", providerId: "cursor" }]);
+    expect(getReasoningLevels("cursor", "composer-9")).toEqual([]);
+  });
+
+  it("resolves the same model id per provider", () => {
+    registerProviderModels("copilot", [
+      { id: "gpt-6-sol", label: "GPT-6 Sol", providerId: "copilot", supportedReasoningLevels: ["medium"] },
+    ]);
+    expect(findProviderModel("copilot", "gpt-6-sol")?.supportsFastMode).toBeUndefined();
+    expect(findProviderModel("codex", "gpt-6-sol")?.supportsFastMode).toBe(true);
+    expect(getReasoningLevels("copilot", "gpt-6-sol")).toEqual(["medium"]);
+    expect(getReasoningLevels("codex", "gpt-6-sol")).toEqual(["low", "medium", "high", "xhigh", "max"]);
   });
 });

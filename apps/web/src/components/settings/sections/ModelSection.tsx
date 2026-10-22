@@ -7,12 +7,11 @@ import {
   MODEL_PROVIDERS,
   isMaxEffortModel,
   isXhighEffortModel,
-  supportsEffortParameter,
+  getReasoningLevels,
   supports1MContextWindow,
   supportsThinkingToggle,
   normalizeReasoningLevel,
   pickProviderModelsForSettings,
-  providerSupportsReasoningLevels,
   type ModelDefinition,
 } from "@/lib/model-registry";
 import { SettingRow } from "../SettingRow";
@@ -104,19 +103,6 @@ function isModelStale(
     catalogModels.length > 0 &&
     !catalogModels.some((model) => model.id === modelId)
   );
-}
-
-function shouldShowReasoning(
-  provider: string,
-  modelId: string,
-  declaredLevels: readonly string[] | null,
-): boolean {
-  if (!providerSupportsReasoningLevels(provider)) return false;
-  if (provider === "claude") return supportsEffortParameter(modelId);
-  // Devin bakes effort into the model id; a model without declared levels
-  // (bare ids, fusion composites) has no effort to choose.
-  if (provider === "devin") return declaredLevels != null && declaredLevels.length > 0;
-  return true;
 }
 
 function shouldShowThinking(provider: string, modelId: string): boolean {
@@ -429,7 +415,7 @@ export function ModelSection() {
       modelsLoading={modelsLoading}
       defaultModelStale={defaultModelStale}
       fallbackModelStale={fallbackModelStale}
-      showReasoning={shouldShowReasoning(provider, modelId, declaredLevels)}
+      showReasoning={getReasoningLevels(provider, modelId).length > 0}
       reasoningOptions={reasoningOptions}
       reasoningHint={reasoningHint}
       showFastMode={provider === "codex"}

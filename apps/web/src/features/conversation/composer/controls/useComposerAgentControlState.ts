@@ -3,11 +3,7 @@ import { PERMISSION_MODES } from "@/transport";
 import { isWindows } from "@/lib/platform";
 import { isCursorPermissionLockedToFull } from "@/lib/cursor-permission";
 import {
-  getModelReasoningLevels,
-  isMaxEffortModel,
-  isXhighEffortModel,
-  providerSupportsReasoningLevels,
-  supportsEffortParameter,
+  getReasoningLevels,
 } from "@/lib/model-registry";
 import { useThreadStore } from "@/stores/threadStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
@@ -26,16 +22,6 @@ import {
   type ComposerCapabilityId,
 } from "../composer-capabilities";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
-
-const VALID_REASONING_LEVELS = new Set<string>([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
 
 /** Inputs for Composer capability policy and control-state synchronization. */
 export interface UseComposerAgentControlStateOptions {
@@ -104,30 +90,10 @@ export function useComposerAgentControlState({
     if (orchestrationMode === ORCHESTRATION_MODES.PROACTIVE) ids.add("orchestration");
     return ids;
   }, [activeGoal, goalPending, interactionMode, orchestrationMode]);
-  const reasoningLevels = useMemo<ReasoningLevel[]>(() => {
-    if (!providerSupportsReasoningLevels(provider)) return [];
-    // Codex and Devin declare per-model effort levels on the registry def.
-    // For Devin the level is part of the wire model id, so the generic
-    // Claude-style fallback must not apply.
-    const modelLevels = provider === "codex" || provider === "devin"
-      ? getModelReasoningLevels(modelId)
-      : null;
-    if (provider === "devin") {
-      return (modelLevels ?? []).filter((level) =>
-        VALID_REASONING_LEVELS.has(level)) as ReasoningLevel[];
-    }
-    if (modelLevels) {
-      return modelLevels.filter((level) => VALID_REASONING_LEVELS.has(level)) as ReasoningLevel[];
-    }
-    if (!supportsEffortParameter(modelId)) return [];
-    return [
-      "low",
-      "medium",
-      "high",
-      ...(isXhighEffortModel(modelId) ? (["xhigh"] as const) : []),
-      ...(isMaxEffortModel(modelId) ? (["max"] as const) : []),
-    ];
-  }, [modelId, provider]);
+  const reasoningLevels = useMemo<ReasoningLevel[]>(
+    () => getReasoningLevels(provider, modelId),
+    [modelId, provider],
+  );
 
   const detachPlan = useCallback(() => {
     onSelectionChange({ interactionMode: INTERACTION_MODES.BUILD });
