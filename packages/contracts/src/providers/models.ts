@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ContextWindowModeSchema } from "../models/settings.js";
 import { lazySchema } from "../utils/lazySchema.js";
 
 /** Policy state for a provider model (read-only, set by org admins). */
@@ -25,6 +26,10 @@ export const ProviderModelInfoSchema = lazySchema(() =>
     defaultReasoningEffort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
     /** Whether the model exposes Codex's proactive Ultra orchestration mode. */
     supportsUltraOrchestration: z.boolean().optional(),
+    /** Whether mcode can run this model in Fast mode. Absent means no Fast control. */
+    supportsFastMode: z.boolean().optional(),
+    /** Context windows the user can choose between (e.g. ["200k", "1m"]). Absent means no choice. */
+    contextWindowOptions: z.array(ContextWindowModeSchema).optional(),
     /** Org/enterprise policy state. Absent when no policy is configured. */
     policy: z.object({ state: ModelPolicyStateSchema }).optional(),
     /** Billing rate multiplier relative to base plan (e.g. 1, 0.33, 3, 30). */

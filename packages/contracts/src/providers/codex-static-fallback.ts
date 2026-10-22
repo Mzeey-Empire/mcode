@@ -8,6 +8,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-6.1-sol",
     name: "GPT-6.1 Sol",
+    supportsFastMode: true,
     group: "OpenAI",
     supportsVision: true,
     supportsReasoning: true,
@@ -18,6 +19,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-6-astra",
     name: "GPT-6 Astra",
+    supportsFastMode: true,
     group: "OpenAI",
     supportsReasoning: true,
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
@@ -26,6 +28,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-6-sol",
     name: "GPT-6 Sol",
+    supportsFastMode: true,
     group: "OpenAI",
     contextWindow: 372_000,
     supportsVision: true,
@@ -37,6 +40,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-6-luna",
     name: "GPT-6 Luna",
+    supportsFastMode: true,
     group: "OpenAI",
     contextWindow: 372_000,
     supportsVision: true,
@@ -47,6 +51,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-5.6-sol",
     name: "GPT-5.6 Sol",
+    supportsFastMode: true,
     group: "OpenAI",
     contextWindow: 372_000,
     supportsVision: true,
@@ -58,6 +63,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-5.6-terra",
     name: "GPT-5.6 Terra",
+    supportsFastMode: true,
     group: "OpenAI",
     contextWindow: 372_000,
     supportsVision: true,
@@ -69,6 +75,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-5.6-luna",
     name: "GPT-5.6 Luna",
+    supportsFastMode: true,
     group: "OpenAI",
     contextWindow: 372_000,
     supportsVision: true,
@@ -79,6 +86,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-5.5",
     name: "GPT-5.5",
+    supportsFastMode: true,
     group: "OpenAI",
     supportsReasoning: true,
     supportedReasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh"],
@@ -87,6 +95,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-5.4",
     name: "GPT-5.4",
+    supportsFastMode: true,
     group: "OpenAI",
     supportsReasoning: true,
     supportedReasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh"],
@@ -95,6 +104,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-5.4-mini",
     name: "GPT-5.4 Mini",
+    supportsFastMode: true,
     group: "OpenAI",
     supportsReasoning: true,
     supportedReasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh"],
@@ -103,6 +113,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
   {
     id: "gpt-5.3-codex",
     name: "GPT-5.3 Codex",
+    supportsFastMode: true,
     group: "OpenAI",
     supportsReasoning: true,
     supportedReasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh"],
