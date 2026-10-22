@@ -1,5 +1,6 @@
 import * as NodeStream from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
+import { CODEX_STATIC_MODELS } from "@mcode/contracts";
 import { CodexRpcClient } from "../../private/codex/codex-rpc-client.js";
 import { listCodexModels } from "../../private/codex/codex-models.js";
 
@@ -38,9 +39,9 @@ describe("Codex model discovery", () => {
     ]);
     const models = await listCodexModels(client);
     expect(models).toEqual([
-      { id: "gpt-9-zeta", name: "GPT-9 Zeta", group: "OpenAI", supportsVision: true,
+      { id: "gpt-9-zeta", name: "GPT-9 Zeta", group: "OpenAI", supportsVision: true, supportsFastMode: false,
         supportsReasoning: true, supportedReasoningEfforts: ["low", "high"], defaultReasoningEffort: "low" },
-      { id: "gpt-9-alpha", name: "GPT-9 Alpha", group: "OpenAI", supportsVision: true,
+      { id: "gpt-9-alpha", name: "GPT-9 Alpha", group: "OpenAI", supportsVision: true, supportsFastMode: false,
         supportsReasoning: true, supportedReasoningEfforts: ["low", "high"], defaultReasoningEffort: "low" },
     ]);
     expect(requests).toEqual([
@@ -63,14 +64,38 @@ describe("Codex model discovery", () => {
     }]);
     expect(await listCodexModels(client)).toEqual([
       {
-        id: "gpt-6-astra", name: "GPT-6 Astra", group: "OpenAI", supportsVision: true,
+        id: "gpt-6-astra", name: "GPT-6 Astra", group: "OpenAI", supportsVision: true, supportsFastMode: true,
         supportsReasoning: true, supportedReasoningEfforts: ["low", "high"], defaultReasoningEffort: "low",
       },
       {
-        id: "gpt-6.1-sol", name: "GPT-6.1 Sol", group: "OpenAI", supportsVision: true,
+        id: "gpt-6.1-sol", name: "GPT-6.1 Sol", group: "OpenAI", supportsVision: true, supportsFastMode: true,
         supportsReasoning: true, supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
         defaultReasoningEffort: "low",
       },
+    ]);
+  });
+
+  it("reads Fast support from the priority service tier", async () => {
+    const { client } = catalog([{
+      data: [
+        { ...model("gpt-9-fast"), serviceTiers: [{ id: "priority", name: "Fast" }] },
+        { ...model("gpt-9-slow"), serviceTiers: [{ id: "flex", name: "Flex" }] },
+      ],
+      nextCursor: null,
+    }]);
+    const models = await listCodexModels(client);
+    expect(models.map((entry) => [entry.id, entry.supportsFastMode])).toEqual([
+      ["gpt-9-fast", true],
+      ["gpt-9-slow", false],
+    ]);
+  });
+
+  it("falls back to the static row for Fast support when service tiers are absent", async () => {
+    const { client } = catalog([{ data: [model("gpt-6-sol"), model("gpt-9-unknown")], nextCursor: null }]);
+    const models = await listCodexModels(client);
+    expect(models.map((entry) => [entry.id, entry.supportsFastMode])).toEqual([
+      ["gpt-6-sol", CODEX_STATIC_MODELS.find((entry) => entry.id === "gpt-6-sol")?.supportsFastMode],
+      ["gpt-9-unknown", false],
     ]);
   });
 
@@ -95,7 +120,7 @@ describe("Codex model discovery", () => {
       inputModalities: ["text"],
     }], nextCursor: null }]);
     expect(await listCodexModels(unknown.client)).toEqual([{
-      id: "custom", name: "Custom", group: "OpenAI", supportsVision: false,
+      id: "custom", name: "Custom", group: "OpenAI", supportsVision: false, supportsFastMode: false,
       supportsReasoning: false, supportedReasoningEfforts: [],
     }]);
   });

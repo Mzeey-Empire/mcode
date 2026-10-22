@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ProviderModelInfo } from "@mcode/contracts";
+import { CLAUDE_STATIC_MODELS, type ProviderModelInfo } from "@mcode/contracts";
 import { listClaudeModels, resetModelCache } from "../list-models.js";
 
 // Minimal shape matching the Anthropic Models API response.
@@ -60,20 +60,42 @@ describe("listClaudeModels", () => {
       id: "claude-opus-5-5",
       name: "Claude Opus 5.5",
       contextWindow: 1_000_000,
+      contextWindowOptions: ["200k", "1m"],
       supportsReasoning: true,
       supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
       defaultReasoningEffort: "high",
     });
+  });
+
+  it("derives capabilities for dated REST-only ids from the runtime effort rules", async () => {
+    const result = await listClaudeModels();
     expect(result.find((model) => model.id === "claude-sonnet-4-6-20250514")).toEqual<ProviderModelInfo>({
       id: "claude-sonnet-4-6-20250514",
       name: "Claude Sonnet 4.6",
       contextWindow: 1_000_000,
+      contextWindowOptions: ["200k", "1m"],
+      supportsReasoning: true,
+      supportedReasoningEfforts: ["low", "medium", "high", "max"],
     });
     expect(result.find((model) => model.id === "claude-haiku-4-5-20251001")).toEqual<ProviderModelInfo>({
       id: "claude-haiku-4-5-20251001",
       name: "Claude Haiku 4.5",
       contextWindow: 200_000,
+      supportsReasoning: false,
     });
+  });
+
+  it("agrees with the static catalog for every known id returned by the API", async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        data: CLAUDE_STATIC_MODELS.map((model) => ({
+          id: model.id, display_name: model.name, type: "model", max_input_tokens: null, max_tokens: null,
+        })),
+        has_more: false,
+      }),
+    });
+    expect(await listClaudeModels()).toEqual(CLAUDE_STATIC_MODELS);
   });
 
   it("sends the correct headers", async () => {

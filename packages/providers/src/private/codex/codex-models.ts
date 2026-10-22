@@ -11,6 +11,7 @@ const modelPage = z.object({
     supportedReasoningEfforts: z.array(z.object({ reasoningEffort: z.string().max(32) })).max(32),
     defaultReasoningEffort: z.string().max(32),
     inputModalities: z.array(z.string().max(32)).max(16),
+    serviceTiers: z.array(z.object({ id: z.string().max(64) }).passthrough()).max(16).optional(),
   })).max(100),
   nextCursor: z.string().max(4096).nullable(),
 });
@@ -23,7 +24,18 @@ function modelLabel(name: string, id: string): string {
   return words.replace(/^GPT /, "GPT-");
 }
 
-function providerModel(model: z.infer<typeof modelPage>["data"][number]): ProviderModelInfo {
+type CodexModelRow = z.infer<typeof modelPage>["data"][number];
+
+/**
+ * Fast is sent to Codex as `serviceTier: "priority"`, so a model supports Fast when it lists that
+ * tier. Older app-servers omit `serviceTiers`; the static row decides for them.
+ */
+function supportsFastMode(model: CodexModelRow, known: ProviderModelInfo | undefined): boolean {
+  if (model.serviceTiers) return model.serviceTiers.some((tier) => tier.id === "priority");
+  return known?.supportsFastMode === true;
+}
+
+function providerModel(model: CodexModelRow): ProviderModelInfo {
   const supportedReasoningEfforts = model.supportedReasoningEfforts.flatMap((option) => {
     const parsed = effort.safeParse(option.reasoningEffort);
     return parsed.success ? [parsed.data] : [];
@@ -36,6 +48,7 @@ function providerModel(model: z.infer<typeof modelPage>["data"][number]): Provid
     group: "OpenAI",
     ...(known?.contextWindow ? { contextWindow: known.contextWindow } : {}),
     supportsVision: model.inputModalities.includes("image"),
+    supportsFastMode: supportsFastMode(model, known),
     supportsReasoning: supportedReasoningEfforts.length > 0,
     supportedReasoningEfforts,
     ...(defaultEffort.success ? { defaultReasoningEffort: defaultEffort.data } : {}),
