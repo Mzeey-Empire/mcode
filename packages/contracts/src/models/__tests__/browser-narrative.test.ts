@@ -62,6 +62,16 @@ describe("Browser narrative projection", () => {
     expect(JSON.stringify(input)).not.toContain("Password");
   });
 
+  it("projects a single-action browser_act call without its content", () => {
+    expect(projectBrowserNarrativeInput("mcp__mcode__browser_act", {
+      action: "type", ref: "s2e4", text: "SECRET_TYPED_VALUE",
+    })).toEqual({ operation: "browser_act", steps: [{ operation: "type" }] });
+    expect(projectBrowserNarrativeInput("mcp__mcode__browser_act", { action: "resize", width: 390, height: 844 }))
+      .toEqual({ operation: "browser_act", steps: [{ operation: "resize", width: 390, height: 844 }] });
+    expect(projectBrowserNarrativeInput("mcp__mcode__browser_act", { action: "SECRET_UNKNOWN" }))
+      .toEqual({ operation: "browser_act", steps: [] });
+  });
+
   it("keeps typed receipts and drops Browser result content", () => {
     const result = projectBrowserNarrativeResult(
       "mcp__mcode-browser__browser_act",

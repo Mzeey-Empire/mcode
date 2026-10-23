@@ -138,16 +138,7 @@ function createMcpConformanceScenario() {
       {
         id: "act",
         operation: "act",
-        args: {
-          idempotencyKey: "act-conformance-1",
-          observationRef: "observation-conformance-1",
-          deadlineMs: 5_000,
-          steps: [
-            { operation: "click", target: { semanticId: "fixture-action-button" } },
-            { operation: "type", text: "partial fixture text" },
-            { operation: "press", key: "Enter" },
-          ],
-        },
+        args: { action: "click", ref: "s1e1" },
       },
     ],
     cleanup: { baseline: createBrowserConformanceResourceSnapshot({}) },
@@ -251,6 +242,33 @@ function callMcpTool(
   });
 }
 
+function fixtureSnapshot() {
+  const none = { truncated: false } as const;
+  return {
+    url: "https://example.com/",
+    title: "Fixture",
+    loading: false,
+    visibleText: "Fixture action",
+    visibleTextTruncation: none,
+    elements: [{
+      semanticId: "fixture-action-button",
+      role: "button",
+      accessibleName: "Action",
+      disabled: false,
+      bounds: { x: 0, y: 0, width: 10, height: 10 },
+    }],
+    elementsTruncation: none,
+    accessibility: [],
+    accessibilityTruncation: none,
+    console: [],
+    consoleTruncation: none,
+    network: [],
+    networkTruncation: none,
+    actions: [],
+    actionsTruncation: none,
+  };
+}
+
 function createInspectionResponse(dispatch: BrowserAutomationHostDispatch): BrowserAutomationResponse {
   return BrowserAutomationResponseSchema().parse({
     contractVersion: BROWSER_AUTOMATION_CONTRACT_VERSION,
@@ -258,7 +276,12 @@ function createInspectionResponse(dispatch: BrowserAutomationHostDispatch): Brow
     sequence: dispatch.request.sequence,
     ok: true,
     result: {
-      operation: "inspect", controlEpoch: 7, tabs: [], capabilities: ["inspect", "act"], observationRef: "observation-conformance-1",
+      operation: "inspect",
+      controlEpoch: 7,
+      tabs: [],
+      capabilities: ["inspect", "act"],
+      observationRef: "observation-conformance-1",
+      snapshot: fixtureSnapshot(),
     },
   });
 }
@@ -338,7 +361,7 @@ function assertInspectionConformance(
   expect(normalized.outcome.recovery).toBe("none");
   expect(normalized.receipts.some((receipt) => receipt.status === "unknown" || receipt.operation === "unknown")).toBe(false);
   expect(JSON.parse(inspection.payload.result.content[0].text))
-    .toMatchObject({ operation: "inspect", controlEpoch: 7, capabilities: ["inspect", "act"] });
+    .toMatchObject({ operation: "inspect", capabilities: ["inspect", "act"], snapshot: { elements: [{ ref: "s1e1" }] } });
 }
 
 async function runAct(fixture: McpConformanceFixture): Promise<{
@@ -350,11 +373,12 @@ async function runAct(fixture: McpConformanceFixture): Promise<{
   const dispatchReady = fixture.nextDispatch();
   const call = callMcpTool(fixture, 2, command.operation, command.args);
   const dispatch = await dispatchReady;
-  const scenarioArgs = command.args as { steps: readonly { operation: string }[] };
   expect(dispatch.request.operation).toBe("act");
-  expect(dispatch.request.args.steps).toHaveLength(scenarioArgs.steps.length);
-  expect(dispatch.request.args.steps.map((step: { operation: string }) => step.operation))
-    .toEqual(scenarioArgs.steps.map((step) => step.operation));
+  expect(dispatch.request.expectedControlEpoch).toBe(7);
+  expect(dispatch.request.args).toMatchObject({
+    observationRef: "observation-conformance-1",
+    steps: [{ operation: "click", target: { semanticId: "fixture-action-button" } }],
+  });
   const response = createActResponse(dispatch);
   fixture.receiptFaults.hit("receipt-delivery");
   broker!.respond(socket, "host-conformance", fixture.generation, response, dispatch.target);

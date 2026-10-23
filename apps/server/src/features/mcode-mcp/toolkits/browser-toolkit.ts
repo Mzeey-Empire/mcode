@@ -5,6 +5,7 @@ import {
   BROWSER_AUTOMATION_OPERATION_METADATA,
   BROWSER_V2_CORE_OPERATIONS,
   BrowserAutomationRequestSchema,
+  type BrowserAutomationError,
   type BrowserAutomationPublicOperation,
   type BrowserAutomationRequest,
   type BrowserAutomationResponse,
@@ -23,6 +24,13 @@ import {
   type McodeToolkit,
 } from "../mcode-toolkit.js";
 import type { McodeSession } from "../mcode-session-authority.js";
+import {
+  EMPTY_BROWSER_TOOL_LEDGER,
+  advanceBrowserToolLedger,
+  projectBrowserToolResult,
+  translateBrowserToolArgs,
+  type BrowserToolLedger,
+} from "./browser-tool-refs.js";
 import { browserInputSchema, browserToolDescription } from "./browser-tool-schemas.js";
 
 const OPERATIONS = [...BROWSER_V2_CORE_OPERATIONS, "evaluate" as const];
@@ -45,6 +53,26 @@ interface BrowserGrant {
   listed: ReadonlySet<BrowserAutomationPublicOperation>;
 }
 
+/** The internal arguments a mutation was sent with, kept to recognize a redelivery. */
+interface DeliveredMutation {
+  toolCallId: string;
+  fingerprint: string;
+  args: Record<string, unknown>;
+  expectedControlEpoch: number;
+  deliveredAt: number;
+}
+
+interface CredentialState {
+  sequence: number;
+  lastUsedAt: number;
+  ledger: BrowserToolLedger;
+  lastMutation?: DeliveredMutation;
+}
+
+type PreparedCall =
+  | { kind: "request"; request: BrowserAutomationRequest; redelivered: boolean }
+  | { kind: "refused"; result: CallToolResult };
+
 interface ActiveCall {
   claims: BrowserAutomationCredentialClaims;
   requestId: string;
@@ -61,24 +89,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function mcpContent(result: BrowserAutomationResponse): CallToolResult["content"] {
+function mcpContent(result: BrowserAutomationResponse, snapshotId: number | undefined): CallToolResult["content"] {
   if (!result.ok) return [{ type: "text", text: JSON.stringify(result.error) }];
+  const projected = projectBrowserToolResult(result.result, snapshotId);
   const screenshot = screenshotOf(result.result);
-  if (!screenshot) return [{ type: "text", text: JSON.stringify(result.result) }];
+  if (!screenshot) return [{ type: "text", text: JSON.stringify(projected) }];
   const { dataBase64, ...metadata } = screenshot;
   return [
-    { type: "text", text: JSON.stringify({ ...result.result, screenshot: metadata }) },
+    { type: "text", text: JSON.stringify({ ...projected, screenshot: metadata }) },
     { type: "image", data: dataBase64, mimeType: screenshot.mediaType },
   ];
 }
+
+function refusal(error: BrowserAutomationError): CallToolResult {
+  return { content: [{ type: "text", text: JSON.stringify(error) }], isError: true };
+}
+
+const MUTATIONS: ReadonlySet<BrowserAutomationPublicOperation> = new Set(["open", "act", "tabs", "evaluate"]);
 
 function screenshotOf(result: BrowserAutomationResult): BrowserScreenshot | undefined {
   return result.operation === "inspect" ? result.screenshot : undefined;
 }
 
 /**
- * Serves the visible-Browser tools on the `mcode` MCP server and owns the
- * per-credential request sequences and in-flight calls that bound them.
+ * Serves the visible-Browser tools on the `mcode` MCP server. It owns the
+ * per-credential request sequences, the ledger that fills internal fields the
+ * model never sends, and the in-flight calls that bound them.
  */
 export class BrowserToolkit implements McodeToolkit {
   readonly name = "browser";
@@ -87,7 +123,8 @@ export class BrowserToolkit implements McodeToolkit {
   private readonly now: () => number;
   private readonly maxSequenceEntries: number;
   private readonly sequenceTtlMs: number;
-  private readonly sequences = new Map<string, { sequence: number; lastUsedAt: number }>();
+  private readonly credentials = new Map<string, CredentialState>();
+  private snapshotCounter = 0;
   private readonly activeCalls = new Map<string, ActiveCall>();
   private readonly toolkit: McodeToolkit;
 
@@ -114,9 +151,9 @@ export class BrowserToolkit implements McodeToolkit {
     return this.toolkit.bind(session);
   }
 
-  /** Releases per-credential sequence state when a credential is revoked. */
+  /** Releases per-credential sequence and ledger state when a credential is revoked. */
   releaseCredential(credentialId: string): boolean {
-    let removed = this.sequences.delete(credentialId);
+    let removed = this.credentials.delete(credentialId);
     for (const [key, call] of this.activeCalls) {
       if (call.claims.credentialId !== credentialId) continue;
       this.activeCalls.delete(key);
@@ -128,8 +165,8 @@ export class BrowserToolkit implements McodeToolkit {
   /** Prunes expired per-credential sequence state at an explicit lifecycle checkpoint. */
   sweep(): void {
     const now = this.now();
-    for (const [credentialId, state] of this.sequences) {
-      if (now - state.lastUsedAt >= this.sequenceTtlMs) this.sequences.delete(credentialId);
+    for (const [credentialId, state] of this.credentials) {
+      if (now - state.lastUsedAt >= this.sequenceTtlMs) this.credentials.delete(credentialId);
     }
   }
 
@@ -176,53 +213,107 @@ export class BrowserToolkit implements McodeToolkit {
     if (operation === "evaluate" && claims.permissionCapability !== "privileged") {
       throw forbidden("Browser evaluation is forbidden");
     }
-    const parsed = this.createBrowserRequest(claims, operation, isRecord(args) ? args : {});
-    if (!parsed.success) throw new McpError(ErrorCode.InvalidParams, "Invalid browser tool arguments");
-    const result = await this.executeToolCall(claims, call, parsed.data);
-    const toolResult: CallToolResult = { content: mcpContent(result), isError: !result.ok };
+    const state = this.credentialState(claims.credentialId);
+    const prepared = this.prepareCall(claims, state, operation, isRecord(args) ? args : {}, call.toolCallId);
+    if (prepared.kind === "refused") return prepared.result;
+    const result = await this.executeToolCall(claims, call, prepared.request);
+    const snapshotId = this.snapshotIdFor(result);
+    if (!prepared.redelivered) {
+      state.ledger = advanceBrowserToolLedger(state.ledger, prepared.request, result, snapshotId);
+    }
+    const toolResult: CallToolResult = { content: mcpContent(result, snapshotId), isError: !result.ok };
     if (Buffer.byteLength(JSON.stringify(toolResult)) > BROWSER_AUTOMATION_MAX_RESULT_BYTES) {
       throw new McpError(-32002, "Browser result exceeds the response limit");
     }
     return toolResult;
   }
 
-  private createBrowserRequest(
+  /**
+   * A transport retry reuses the JSON-RPC id and arguments of the credential's
+   * latest mutation. Resending its internal arguments lets the broker replay
+   * the first result instead of applying the effect again. JSON-RPC ids
+   * restart with a new client, so the match only holds for one request
+   * deadline; after that, the same id and arguments are a new call.
+   */
+  private prepareCall(
     claims: BrowserAutomationCredentialClaims,
+    state: CredentialState,
     operation: BrowserAutomationPublicOperation,
     args: Record<string, unknown>,
-  ): ReturnType<ReturnType<typeof BrowserAutomationRequestSchema>["safeParse"]> {
-    const { expectedControlEpoch, ...values } = args;
-    return BrowserAutomationRequestSchema().safeParse({
+    toolCallId: string,
+  ): PreparedCall {
+    const fingerprint = JSON.stringify([operation, args]);
+    const previous = state.lastMutation;
+    const withinRetryWindow = previous !== undefined && this.now() - previous.deliveredAt <= REQUEST_DEADLINE_MS;
+    if (withinRetryWindow && previous.toolCallId === toolCallId && previous.fingerprint === fingerprint) {
+      const request = this.parseRequest(claims, state, operation, previous.args, previous.expectedControlEpoch);
+      return { kind: "request", request, redelivered: true };
+    }
+    const translation = translateBrowserToolArgs(operation, args, state.ledger);
+    if (translation.kind === "invalid") throw new McpError(ErrorCode.InvalidParams, "Invalid browser tool arguments");
+    if (translation.kind === "refused") return { kind: "refused", result: refusal(translation.error) };
+    const request = this.parseRequest(claims, state, operation, translation.args, translation.expectedControlEpoch);
+    if (MUTATIONS.has(operation)) {
+      state.lastMutation = {
+        toolCallId,
+        fingerprint,
+        args: translation.args,
+        expectedControlEpoch: translation.expectedControlEpoch,
+        deliveredAt: this.now(),
+      };
+    }
+    return { kind: "request", request, redelivered: false };
+  }
+
+  private parseRequest(
+    claims: BrowserAutomationCredentialClaims,
+    state: CredentialState,
+    operation: BrowserAutomationPublicOperation,
+    args: Record<string, unknown>,
+    expectedControlEpoch: number,
+  ): BrowserAutomationRequest {
+    const parsed = BrowserAutomationRequestSchema().safeParse({
       contractVersion: BROWSER_AUTOMATION_CONTRACT_VERSION,
       workspaceId: claims.workspaceId,
       threadId: claims.threadId,
       providerSessionId: claims.providerSessionId,
       providerInstanceId: claims.mcodeSessionId,
       requestId: NodeCrypto.randomUUID(),
-      sequence: this.nextSequence(claims.credentialId),
+      sequence: (state.sequence += 1),
       deadline: this.now() + REQUEST_DEADLINE_MS,
-      expectedControlEpoch: typeof expectedControlEpoch === "number" ? expectedControlEpoch : 0,
+      expectedControlEpoch,
       operation,
-      args: values,
+      args,
     });
+    if (!parsed.success) throw new McpError(ErrorCode.InvalidParams, "Invalid browser tool arguments");
+    return parsed.data;
   }
 
-  private nextSequence(credentialId: string): number {
+  private snapshotIdFor(response: BrowserAutomationResponse): number | undefined {
+    if (!response.ok || response.result.operation !== "inspect" || !response.result.snapshot) return undefined;
+    this.snapshotCounter += 1;
+    return this.snapshotCounter;
+  }
+
+  private credentialState(credentialId: string): CredentialState {
     this.sweep();
-    const sequence = (this.sequences.get(credentialId)?.sequence ?? 0) + 1;
-    if (!this.sequences.has(credentialId)) {
-      while (this.sequences.size >= this.maxSequenceEntries) this.evictOldestSequence();
+    const existing = this.credentials.get(credentialId);
+    if (existing) {
+      existing.lastUsedAt = this.now();
+      return existing;
     }
-    this.sequences.set(credentialId, { sequence, lastUsedAt: this.now() });
-    return sequence;
+    while (this.credentials.size >= this.maxSequenceEntries) this.evictOldestSequence();
+    const state: CredentialState = { sequence: 0, lastUsedAt: this.now(), ledger: EMPTY_BROWSER_TOOL_LEDGER };
+    this.credentials.set(credentialId, state);
+    return state;
   }
 
   private evictOldestSequence(): void {
     let oldest: [string, { lastUsedAt: number }] | undefined;
-    for (const entry of this.sequences) {
+    for (const entry of this.credentials) {
       if (!oldest || entry[1].lastUsedAt < oldest[1].lastUsedAt) oldest = entry;
     }
-    if (oldest) this.sequences.delete(oldest[0]);
+    if (oldest) this.credentials.delete(oldest[0]);
   }
 
   private async executeToolCall(

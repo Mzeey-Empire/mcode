@@ -145,6 +145,14 @@ function projectStep(value: unknown): BrowserNarrativeStepInput | null {
   };
 }
 
+// The model sends one flat `{ action, ... }` call; persisted history still holds `steps` batches.
+function projectActSteps(args: Record<string, unknown>): BrowserNarrativeStepInput[] {
+  const raw = Array.isArray(args.steps)
+    ? args.steps.slice(0, BROWSER_AUTOMATION_ACT_MAX_STEPS)
+    : [{ ...args, operation: args.action }];
+  return raw.map(projectStep).filter((step): step is BrowserNarrativeStepInput => step !== null);
+}
+
 /** Projects raw Browser input into a content-free narrative input. */
 export function projectBrowserNarrativeInput(
   toolName: string,
@@ -154,15 +162,7 @@ export function projectBrowserNarrativeInput(
   if (!operation) return null;
   const args = browserArguments(input);
 
-  if (operation === "browser_act") {
-    const steps = Array.isArray(args.steps)
-      ? args.steps
-          .slice(0, BROWSER_AUTOMATION_ACT_MAX_STEPS)
-          .map(projectStep)
-          .filter((step): step is BrowserNarrativeStepInput => step !== null)
-      : [];
-    return { operation, steps };
-  }
+  if (operation === "browser_act") return { operation, steps: projectActSteps(args) };
 
   if (operation === "browser_tabs") {
     const action = allowedString(args.action, TAB_ACTIONS) as BrowserNarrativeInput["action"];
