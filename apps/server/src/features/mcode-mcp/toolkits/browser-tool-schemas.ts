@@ -81,7 +81,11 @@ const inputSchemaByOperation: Record<BrowserAutomationPublicOperation, JsonSchem
   },
   inspect: {
     type: "object",
-    properties: { includeScreenshot: { type: "boolean", default: false }, includeDiagnostics: { type: "boolean", default: false } },
+    properties: {
+      includeScreenshot: { type: "boolean", default: false },
+      includeDiagnostics: { type: "boolean", default: false },
+      tabId: { type: "string", minLength: 1, maxLength: 256, description: "Read this thread tab instead of the current one, without selecting it." },
+    },
     required: [],
     additionalProperties: false,
   },
@@ -116,6 +120,8 @@ const descriptionByOperation: Record<BrowserAutomationPublicOperation, string> =
     "Returns a snapshot whose elements each carry a ref such as s3e12. Target browser_act with these refs. Each inspection replaces the previous refs.",
     "Inspect before the first action and again whenever an action says to. Tool discovery does not prove readiness.",
     "Request includeScreenshot only for visual evidence or when the user asks. Verify every success claim against current page evidence.",
+    "tabs lists every Browser tab in this thread, including tabs the user opened, with who holds each. Pass a tabId to read that tab, even while the user holds it; reading never takes control.",
+    "browser_act targets the current tab, not one read by tabId, and refuses refs from another tab. To act on a tab read by tabId, browser_tabs select it while nobody holds the Browser, then inspect again.",
     "Browser-only tasks need no shell commands or local skills/files. Call browser_tabs finalize before replying.",
   ].join(" "),
   act: [
