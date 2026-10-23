@@ -649,7 +649,7 @@ describe("Claude public factory core and capabilities", () => {
     assert(options);
     expect(options.mcpServers).toEqual({ mcode: { type: "http", url: "http://127.0.0.1:19400/mcp/mcode", headers: { Authorization: "Bearer fixture-token" } } });
     expect(options.settings).toMatchObject({ ultracode: true });
-    expect(options.systemPrompt).toMatchObject({ append: expect.stringContaining("browser_tabs") });
+    expect(options.systemPrompt).toMatchObject({ append: expect.stringContaining("browser_inspect") });
     assert(typeof options.systemPrompt === "object" && !Array.isArray(options.systemPrompt));
     const append = options.systemPrompt.append ?? "";
     expect(append).toContain("thread_target_list");
@@ -695,7 +695,7 @@ describe("Claude public factory core and capabilities", () => {
     assert(typeof prompt === "object" && !Array.isArray(prompt));
     const append = prompt.append ?? "";
     expect(append.includes("thread_target_list")).toBe(expected.thread);
-    expect(append.includes("browser_tabs")).toBe(expected.browser);
+    expect(append.includes("browser_inspect")).toBe(expected.browser);
   });
 
   it("emits no Mcode server and grants nothing when the server declines to attach", async () => {
@@ -707,7 +707,7 @@ describe("Claude public factory core and capabilities", () => {
     expect(options?.mcpServers).toEqual({});
     assert(typeof options?.systemPrompt === "object" && !Array.isArray(options.systemPrompt));
     expect(options.systemPrompt.append ?? "").not.toContain("thread_target_list");
-    expect(options.systemPrompt.append ?? "").not.toContain("browser_tabs");
+    expect(options.systemPrompt.append ?? "").not.toContain("browser_inspect");
   });
 
   it("attaches under the session id the Browser lease is staged for, not the resume or thread id", async () => {
