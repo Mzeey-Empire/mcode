@@ -122,7 +122,7 @@ const descriptionByOperation: Record<BrowserAutomationPublicOperation, string> =
     "Perform one Browser action per call. Target elements only with a ref from the latest browser_inspect snapshot; never guess an ambiguous target.",
     'Examples: `{ "action": "click", "ref": "s3e12" }`, `{ "action": "type", "ref": "s3e4", "text": "Ada", "submit": true }`, `{ "action": "navigate", "url": "https://example.com" }`.',
     "drag uses sourceRef and ref; assert needs ref, text, or url; wait needs durationMs.",
-    "A ref from an older snapshot is refused: call browser_inspect and use the new refs. Navigation, back, forward, reload, and failed or interrupted actions end the snapshot.",
+    "A ref from an older snapshot is refused: call browser_inspect and use the new refs. Navigation, back, forward, reload, and failed, interrupted, or refused actions end the snapshot.",
     "User input invalidates the snapshot. Stop or Take control interrupts execution, and Take control holds the Browser until Hand back, even after a new message. Keep completed effects and yield to the user.",
     "An applied receipt proves the action ran, not the intended outcome; verify with assert or a fresh inspection. Effects do not roll back, so check the receipt before retrying and never replay mutations automatically.",
     "Follow exactly one recovery instruction: inspect, reopen, wait, yield_to_user, or do_not_retry.",
@@ -130,12 +130,14 @@ const descriptionByOperation: Record<BrowserAutomationPublicOperation, string> =
   tabs: [
     "Select, claim, release, close, or finalize Browser tabs.",
     "Select and claim require tabId; finalize requires dispositions; release and close may omit tabId.",
+    "Needs a current browser_inspect: after a failed, interrupted, or refused call, inspect first.",
     "Call browser_tabs finalize before replying. Release claimed user tabs instead of closing them. Close agent tabs by default.",
     "For a tab the user wants open or usable, set disposition handoff and verify success.",
   ].join(" "),
   evaluate: [
     "Use browser_evaluate for privileged open-world page evaluation only when the live capability advertises it.",
     "All browser_act and browser_inspect rules apply, including readiness, interruption, receipts, effects, recovery, and current evidence.",
+    "An evaluation ends the snapshot: call browser_inspect before the next browser_act.",
     "Use only mcode MCP browser tools, never another browser or profile. Browser-only tasks need no shell commands or local skills/files.",
   ].join(" "),
 };

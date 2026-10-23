@@ -156,6 +156,23 @@ function fakeBrowser() {
     actResults.push(result);
     return responseFor(request, result);
   };
+  const evaluate = (request: Extract<BrowserAutomationRequest, { operation: "evaluate" }>): BrowserAutomationResponse => {
+    if (!live.delete(request.args.observationRef)) {
+      return refuse(request, { code: "STALE_TARGET_GENERATION", message: "stale", retryable: true, recovery: "inspect" });
+    }
+    const nextObservationRef = observe();
+    return responseFor(request, {
+      operation: "evaluate",
+      outcome: "completed",
+      stoppingPosition: 1,
+      effect: "complete",
+      recovery: "inspect",
+      receipts: [{ index: 0, operation: "evaluate", status: "applied" }],
+      finalObservation: { observationRef: nextObservationRef, hostRevision: 1, documentRevision: 1, controlRevision: epoch(), capabilityRevision: 1, observationRevision: counter },
+      nextObservationRef,
+      valueJson: "null",
+    });
+  };
   const respond = (request: BrowserAutomationRequest): BrowserAutomationResponse => {
     switch (request.operation) {
       case "inspect":
@@ -167,6 +184,8 @@ function fakeBrowser() {
         return responseFor(request, { operation: "tabs", action: request.args.action, tabs: [], observationRef: observe() });
       case "act":
         return act(request);
+      case "evaluate":
+        return evaluate(request);
       default:
         throw new Error(`unexpected ${request.operation}`);
     }
@@ -194,6 +213,7 @@ function setup(options: {
   claims?: BrowserAutomationCredentialClaims | null;
   maxSequenceEntries?: number;
   execute?: Execute;
+  now?: () => number;
 } = {}) {
   const claims = options.claims === undefined ? claimsWith() : options.claims;
   const claimsFor = vi.fn<BrowserToolkitOptions["lease"]["claimsFor"]>(() => claims);
@@ -206,7 +226,7 @@ function setup(options: {
   const toolkit = new BrowserToolkit({
     lease: { claimsFor },
     broker: { execute, availableOperations, cancelFromProvider, recordMcpLifecycle },
-    now: () => 1_000,
+    now: options.now ?? (() => 1_000),
     maxSequenceEntries: options.maxSequenceEntries,
   });
 
@@ -421,6 +441,39 @@ describe("BrowserToolkit", () => {
     expect(page.effects.map((step) => step.operation)).toEqual(["navigate"]);
   });
 
+  it("drops references after an evaluation, which can rewrite the page", async () => {
+    const page = fakeBrowser();
+    const { call } = setup({ execute: page.execute });
+
+    const ref = firstRef(await call("browser_inspect", {}, { toolCallId: "1" }));
+    const evaluated = await call("browser_evaluate", { expression: "document.body.replaceChildren()" }, { toolCallId: "2" });
+    const refused = await call("browser_act", { action: "click", ref }, { toolCallId: "3" });
+
+    expect(evaluated.isError).toBe(false);
+    expect(JSON.parse(textOf(refused))).toMatchObject({ code: "STALE_TARGET_GENERATION", recovery: "inspect" });
+    expect(page.effects).toEqual([]);
+  });
+
+  it("drops references after any refused call, whatever recovery it names", async () => {
+    const page = fakeBrowser();
+    let busy = true;
+    const { call } = setup({
+      execute: async (claims, input) => {
+        if (input.operation !== "act" || !busy) return page.execute(claims, input);
+        busy = false;
+        return { contractVersion: BROWSER_AUTOMATION_CONTRACT_VERSION, requestId: input.requestId, sequence: input.sequence, ok: false, error: { code: "BROWSER_BUSY", message: "busy", retryable: true, recovery: "wait" } };
+      },
+    });
+
+    const ref = firstRef(await call("browser_inspect", {}, { toolCallId: "1" }));
+    const failed = await call("browser_act", { action: "click", ref }, { toolCallId: "2" });
+    const retried = await call("browser_act", { action: "click", ref }, { toolCallId: "3" });
+
+    expect(JSON.parse(textOf(failed))).toMatchObject({ code: "BROWSER_BUSY" });
+    expect(JSON.parse(textOf(retried))).toMatchObject({ code: "STALE_TARGET_GENERATION", recovery: "inspect" });
+    expect(page.effects).toEqual([]);
+  });
+
   it("refuses an action while the user holds the tab and allows the next one after Hand back", async () => {
     const page = fakeBrowser();
     const { call, requestAt } = setup({ execute: page.execute });
@@ -453,6 +506,20 @@ describe("BrowserToolkit", () => {
 
     const again = await call("browser_act", { action: "click", ref }, { toolCallId: "8" });
     expect(again.isError).toBe(false);
+    expect(page.effects).toHaveLength(2);
+  });
+
+  it("treats a reused call id with the same arguments as new once the redelivery window has passed", async () => {
+    const page = fakeBrowser();
+    let now = 1_000;
+    const { call } = setup({ execute: page.execute, now: () => now });
+    const ref = firstRef(await call("browser_inspect", {}, { toolCallId: "1" }));
+
+    await call("browser_act", { action: "click", ref }, { toolCallId: "2" });
+    now += 60_001;
+    const reused = await call("browser_act", { action: "click", ref }, { toolCallId: "2" });
+
+    expect(reused.isError).toBe(false);
     expect(page.effects).toHaveLength(2);
   });
 

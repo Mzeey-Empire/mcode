@@ -41,7 +41,6 @@ export type BrowserToolTranslation =
 
 const REF_PATTERN = /^s(\d+)e(\d+)$/;
 const NAVIGATION_ACTIONS: ReadonlySet<string> = new Set(["navigate", "back", "forward", "reload"]);
-const INVALIDATING_RECOVERIES: ReadonlySet<string> = new Set(["inspect", "reopen", "refresh", "yield_to_user"]);
 const INVALID: BrowserToolTranslation = { kind: "invalid" };
 
 type Result<T extends BrowserAutomationResult["operation"]> = Extract<BrowserAutomationResult, { operation: T }>;
@@ -134,32 +133,29 @@ export function translateBrowserToolArgs(
   }
 }
 
-function invalidated(ledger: BrowserToolLedger): BrowserToolLedger {
-  return { controlEpoch: ledger.controlEpoch };
-}
-
 function isMutationResult(
   result: BrowserAutomationResult,
 ): result is BrowserAutomationActResult | BrowserAutomationEvaluateResult {
   return (result.operation === "act" || result.operation === "evaluate") && "finalObservation" in result;
 }
 
-function afterAct(ledger: BrowserToolLedger, request: BrowserAutomationRequest, result: BrowserAutomationActResult): BrowserToolLedger {
+// Only a completed, non-navigating act keeps the refs: the host keeps its
+// targets then. An evaluation can rewrite the page, so it always ends them.
+function keepsSnapshot(request: BrowserAutomationRequest, result: BrowserAutomationActResult | BrowserAutomationEvaluateResult): boolean {
+  if (result.operation !== "act" || result.outcome !== "completed") return false;
   const steps: readonly BrowserAutomationActStep[] = request.operation === "act" ? request.args.steps : [];
-  const navigated = steps.some((step) => NAVIGATION_ACTIONS.has(step.operation));
-  const keepsSnapshot = result.outcome === "completed" && !navigated;
-  return {
-    controlEpoch: ledger.controlEpoch,
-    ...(result.nextObservationRef ? { observationRef: result.nextObservationRef } : {}),
-    ...(keepsSnapshot && ledger.snapshot ? { snapshot: ledger.snapshot } : {}),
-  };
+  return !steps.some((step) => NAVIGATION_ACTIONS.has(step.operation));
 }
 
-function afterEvaluate(ledger: BrowserToolLedger, result: BrowserAutomationEvaluateResult): BrowserToolLedger {
+function afterMutation(
+  ledger: BrowserToolLedger,
+  request: BrowserAutomationRequest,
+  result: BrowserAutomationActResult | BrowserAutomationEvaluateResult,
+): BrowserToolLedger {
   return {
     controlEpoch: ledger.controlEpoch,
     ...(result.nextObservationRef ? { observationRef: result.nextObservationRef } : {}),
-    ...(result.outcome === "completed" && ledger.snapshot ? { snapshot: ledger.snapshot } : {}),
+    ...(keepsSnapshot(request, result) && ledger.snapshot ? { snapshot: ledger.snapshot } : {}),
   };
 }
 
@@ -178,9 +174,7 @@ function afterSuccess(
   result: BrowserAutomationResult,
   snapshotId: number | undefined,
 ): BrowserToolLedger {
-  if (isMutationResult(result)) {
-    return result.operation === "act" ? afterAct(ledger, request, result) : afterEvaluate(ledger, result);
-  }
+  if (isMutationResult(result)) return afterMutation(ledger, request, result);
   switch (result.operation) {
     case "inspect":
       return afterInspect(result, snapshotId);
@@ -194,8 +188,9 @@ function afterSuccess(
 }
 
 /**
- * Advances the ledger after the broker answers. Refusals whose recovery needs
- * a fresh look drop the snapshot so stale refs are refused before dispatch.
+ * Advances the ledger after the broker answers. Any refusal drops the
+ * observation and refs: a timeout may already have consumed the single-use
+ * observation, so the next action must start from a fresh browser_inspect.
  */
 export function advanceBrowserToolLedger(
   ledger: BrowserToolLedger,
@@ -204,7 +199,7 @@ export function advanceBrowserToolLedger(
   snapshotId: number | undefined,
 ): BrowserToolLedger {
   if (response.ok) return afterSuccess(ledger, request, response.result, snapshotId);
-  return INVALIDATING_RECOVERIES.has(response.error.recovery ?? "") ? invalidated(ledger) : ledger;
+  return { controlEpoch: ledger.controlEpoch };
 }
 
 function projectInspect(result: Result<"inspect">, snapshotId: number | undefined): Record<string, unknown> {

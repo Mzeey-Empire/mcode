@@ -59,6 +59,7 @@ interface DeliveredMutation {
   fingerprint: string;
   args: Record<string, unknown>;
   expectedControlEpoch: number;
+  deliveredAt: number;
 }
 
 interface CredentialState {
@@ -230,7 +231,9 @@ export class BrowserToolkit implements McodeToolkit {
   /**
    * A transport retry reuses the JSON-RPC id and arguments of the credential's
    * latest mutation. Resending its internal arguments lets the broker replay
-   * the first result instead of applying the effect again.
+   * the first result instead of applying the effect again. JSON-RPC ids
+   * restart with a new client, so the match only holds for one request
+   * deadline; after that, the same id and arguments are a new call.
    */
   private prepareCall(
     claims: BrowserAutomationCredentialClaims,
@@ -241,7 +244,8 @@ export class BrowserToolkit implements McodeToolkit {
   ): PreparedCall {
     const fingerprint = JSON.stringify([operation, args]);
     const previous = state.lastMutation;
-    if (previous?.toolCallId === toolCallId && previous.fingerprint === fingerprint) {
+    const withinRetryWindow = previous !== undefined && this.now() - previous.deliveredAt <= REQUEST_DEADLINE_MS;
+    if (withinRetryWindow && previous.toolCallId === toolCallId && previous.fingerprint === fingerprint) {
       const request = this.parseRequest(claims, state, operation, previous.args, previous.expectedControlEpoch);
       return { kind: "request", request, redelivered: true };
     }
@@ -250,7 +254,13 @@ export class BrowserToolkit implements McodeToolkit {
     if (translation.kind === "refused") return { kind: "refused", result: refusal(translation.error) };
     const request = this.parseRequest(claims, state, operation, translation.args, translation.expectedControlEpoch);
     if (MUTATIONS.has(operation)) {
-      state.lastMutation = { toolCallId, fingerprint, args: translation.args, expectedControlEpoch: translation.expectedControlEpoch };
+      state.lastMutation = {
+        toolCallId,
+        fingerprint,
+        args: translation.args,
+        expectedControlEpoch: translation.expectedControlEpoch,
+        deliveredAt: this.now(),
+      };
     }
     return { kind: "request", request, redelivered: false };
   }
