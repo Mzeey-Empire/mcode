@@ -320,8 +320,6 @@ interface CodexSessionState {
   workspaceId: string;
   /** Browser permission class fixed to the provider process at spawn. */
   browserPermissionCapability: "observe" | "interact" | "privileged";
-  /** Whether this session was started with the Mcode thread-control toolkit. */
-  threadControlEligible: boolean;
 }
 
 /** One pending codex approval bridged into the Phase 1 permission flow. */
@@ -349,7 +347,6 @@ interface PreparedCodexTurn {
   browserPermissionCapability: "observe" | "interact" | "privileged";
   input: CodexTurnInput;
   turnOptions: CodexTurnOptions;
-  threadControlEligible: boolean;
 }
 
 interface CodexMcodeSetup {
@@ -366,9 +363,8 @@ interface CodexSpawnContext {
   resumeFrom: string | undefined;
   sandbox: SandboxMode;
   approvalPolicy: "never" | "on-request";
-  pendingSpawn: { input: CodexTurnInput; turnOptions: CodexTurnOptions; turnExecutionId: string; threadControlEligible: boolean; resumeRequired: boolean } | undefined;
+  pendingSpawn: { input: CodexTurnInput; turnOptions: CodexTurnOptions; turnExecutionId: string; resumeRequired: boolean } | undefined;
   stagedExecutionId: string | undefined;
-  threadControlEligible: boolean;
   browserAccess: { stage: BrowserAutomationSessionLeaseStage; workspaceId: string; permissionCapability: "observe" | "interact" | "privileged" } | undefined;
   mcode: ProviderMcodeAttachment | null;
   mcodeSetupError: string | undefined;
@@ -741,7 +737,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       turnExecutionId: string;
       turnId: string;
       deliveryAttempt: number;
-      threadControlEligible: boolean;
       resumeRequired: boolean;
       signal: AbortSignal;
     }
@@ -1182,7 +1177,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       sandbox: request.permissionMode === "full" ? "danger-full-access" : "workspace-write",
       browserPermissionCapability: providerBrowserPermissionCapability(request.permissionMode, request.interactionMode),
       turnOptions: this.codexTurnOptions(request, settings.fastMode, nativePlan),
-      threadControlEligible: request.threadControlEligible === true,
     };
   }
 
@@ -1255,7 +1249,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       return undefined;
     }
     if (existing && existing.server.isAlive && existing.sandboxMode !== turn.sandbox) this.restartCodexSessionForSandbox(existing, turn);
-    if (this.requiresThreadControlSessionRestart(existing, turn)) return this.restartCodexSessionForThreadControl(existing, turn);
     return existing;
   }
 
@@ -1271,18 +1264,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     void this.runtime.stop(sessionId).catch((error: unknown) => {
       logger.warn("Codex session kill on permission change failed", { error: String(error) });
     });
-  }
-
-  private requiresThreadControlSessionRestart(existing: CodexSessionState | undefined, turn: PreparedCodexTurn): existing is CodexSessionState {
-    return Boolean(existing && existing.server.isAlive && existing.threadControlEligible !== turn.threadControlEligible);
-  }
-
-  private async restartCodexSessionForThreadControl(existing: CodexSessionState, turn: PreparedCodexTurn): Promise<undefined> {
-    const sessionId = turn.request.sessionId;
-    logger.info("Codex session restarted due to Mcode thread-control eligibility change", { sessionId, from: existing.threadControlEligible, to: turn.threadControlEligible });
-    this.drainPending((entry) => entry.sessionId === sessionId);
-    await this.runtime.stop(sessionId);
-    return undefined;
   }
 
   private isReusableCodexSession(existing: CodexSessionState | undefined, sandbox: string): existing is CodexSessionState {
@@ -1301,7 +1282,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private stageCodexTurn(turn: PreparedCodexTurn): void {
     const { request } = turn;
     const sessionId = request.sessionId;
-    this.pendingSpawnTurns.set(sessionId, { input: turn.input, turnOptions: turn.turnOptions, turnExecutionId: request.turnExecutionId, turnId: request.turnId, deliveryAttempt: request.deliveryAttempt ?? 1, threadControlEligible: turn.threadControlEligible, resumeRequired: request.resumeRequired === true, signal: turn.signal });
+    this.pendingSpawnTurns.set(sessionId, { input: turn.input, turnOptions: turn.turnOptions, turnExecutionId: request.turnExecutionId, turnId: request.turnId, deliveryAttempt: request.deliveryAttempt ?? 1, resumeRequired: request.resumeRequired === true, signal: turn.signal });
     if (!this.host.browser.isConfigured()) return;
     const stage = this.host.browser.stage({ providerId: this.id, providerSessionId: request.resumeFrom ?? sessionId, mcodeSessionId: sessionId, threadId: request.threadId, workspaceId: request.workspaceId, permissionCapability: turn.browserPermissionCapability });
     const previous = this.pendingBrowserAccess.get(sessionId);
@@ -1472,12 +1453,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async prepareCodexSpawn(args: SpawnArgs): Promise<CodexSpawnContext> {
     const settings = await this.codexPorts.settings.get();
     const pendingSpawn = this.pendingSpawnTurns.get(args.sessionId);
-    const threadControlEligible = pendingSpawn?.threadControlEligible === true;
     const browserAccess = this.pendingBrowserAccess.get(args.sessionId);
     const issuedGrant = browserAccess ? this.host.browser.issue(browserAccess.stage) : null;
     this.pendingBrowserAccess.delete(args.sessionId);
     const closeMcode = this.codexMcodeSessionCloser(args.sessionId);
-    const mcodeSetup = await this.attachCodexMcode(args, threadControlEligible, issuedGrant !== null, closeMcode);
+    const mcodeSetup = await this.attachCodexMcode(args, closeMcode);
     const browserGrant = this.releaseUnlistedBrowserGrant(issuedGrant, mcodeSetup.mcode);
     const spawnEnv = { ...args.env };
     if (mcodeSetup.mcode) spawnEnv[CODEX_MCODE_TOKEN_ENV] = mcodeSetup.mcode.token;
@@ -1492,7 +1472,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       approvalPolicy: args.permissionMode === "full" ? "never" : "on-request",
       pendingSpawn,
       stagedExecutionId: pendingSpawn?.turnExecutionId,
-      threadControlEligible,
       browserAccess,
       mcode: mcodeSetup.mcode,
       mcodeSetupError: mcodeSetup.setupError,
@@ -1509,13 +1488,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    */
   private async attachCodexMcode(
     args: SpawnArgs,
-    threadControlEligible: boolean,
-    hasBrowserGrant: boolean,
     close: () => Promise<void>,
   ): Promise<CodexMcodeSetup> {
-    if (!threadControlEligible && !hasBrowserGrant) return { mcode: null, setupError: undefined };
     try {
-      const mcode = await this.host.mcode.attach({ providerId: this.id, sessionId: args.sessionId, threadId: args.threadId, threadControl: threadControlEligible });
+      const mcode = await this.host.mcode.attach({ providerId: this.id, sessionId: args.sessionId, threadId: args.threadId, threadControl: true });
       if (!mcode) logger.warn("Codex mcode MCP server is unavailable; continuing without Mcode tools", { threadId: args.threadId });
       return { mcode, setupError: undefined };
     } catch (error) {
@@ -1863,7 +1839,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       nextChildGeneration: 0, pendingChildEvents: [], deliveredChildEventKeys: new Set(),
       workspaceId: context.browserAccess?.workspaceId ?? "unknown-workspace",
       browserPermissionCapability: context.browserAccess?.permissionCapability ?? "interact",
-      threadControlEligible: context.threadControlEligible, childMetadataFetches: new Set(),
+      childMetadataFetches: new Set(),
     };
     if (context.browserGrant) {
       state.browserCredential = { credentialId: context.browserGrant.credentialId, expiresAt: context.browserGrant.expiresAt };

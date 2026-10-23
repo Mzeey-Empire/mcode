@@ -63,7 +63,7 @@ const turn: TurnRequest<"codex"> = {
   turnId: "turn", turnExecutionId: "execution", sessionId: "mcode-native-plan", threadId: "native-plan",
   workspaceId: "fixture", cwd: process.cwd(), message: "Plan a greeting", model: "gpt-6.1-sol",
   reasoningLevel: "low", permissionMode: "full", approvalReviewMode: "manual", interactionMode: "plan",
-  providerOptions: {}, threadControlEligible: false, planTurn: { kind: "planning", planFilePath: null },
+  providerOptions: {}, planTurn: { kind: "planning", planFilePath: null },
 };
 
 function fixture(

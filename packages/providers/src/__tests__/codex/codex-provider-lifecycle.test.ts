@@ -77,7 +77,6 @@ const request: TurnRequest<"codex"> = {
   turnId: "turn-1", turnExecutionId: "execution-1", sessionId: "mcode-lifecycle",
   threadId: "lifecycle", workspaceId: "fixture", cwd: process.cwd(), message: "hello",
   model: "gpt-5.4", permissionMode: "supervised", approvalReviewMode: "manual", interactionMode: "build", providerOptions: {},
-  threadControlEligible: false,
 };
 
 function createProvider() {

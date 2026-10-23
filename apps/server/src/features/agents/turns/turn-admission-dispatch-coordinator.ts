@@ -1205,7 +1205,6 @@ export class TurnAdmissionDispatchCoordinator {
       attachments: attachments.persisted.length > 0 ? attachments.persisted : undefined,
       reasoningLevel: prepared.command.reasoningLevel,
       ...guardrails,
-      threadControlEligible: supportsInternalThreadControl(prepared.providerId),
       resumeFrom: this.resumeFrom(prepared, attachments),
       ...(prepared.command.resumeRequired ? { resumeRequired: true } : {}),
       providerOptions: this.providerOptions(prepared, settings),

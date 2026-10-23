@@ -50,7 +50,7 @@ class FakeTurnRuntime implements TurnSteerRuntime {
       turnExecutionId: this.running.turnExecutionId,
       workspaceId: "workspace",
       providerId: this.providerId,
-      threadControlEligible: false,
+      holdsDelegationLease: false,
       steer: this.running.steerable ? (input) => { this.sent.push(input); return this.respond(input); } : null,
     };
   }
