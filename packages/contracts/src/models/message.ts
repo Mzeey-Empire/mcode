@@ -7,6 +7,7 @@ import { SelectedTextCommentsSchema } from "./selected-text-comment.js";
 import { PreviewAnnotationBundleSchema } from "./browser-preview.js";
 import { ProviderIdentitySchema } from "../compat/agent-model.js";
 import { TurnOutcomeSchema } from "./turn-outcome.js";
+import { HtmlVisualSchema } from "./html-visual.js";
 
 /** Canonical provenance for a user-side message sent by a parent agent. */
 export const ParentAgentMessageProvenanceSchema = lazySchema(() => z.object({
@@ -155,6 +156,8 @@ export const MessageSchema = lazySchema(() =>
     systemNotice: SystemNoticeMetadataSchema().nullable().optional(),
     /** Set on the system message that marks a provider switch in the timeline. */
     providerSwitch: ProviderSwitchMarkerSchema().nullable().optional(),
+    /** Set on the system message that shows an HTML visual in the timeline. */
+    visual: HtmlVisualSchema().nullable().optional(),
     /**
      * When true, mcode hides this message from the chat timeline.
      * Used for hidden handoff turns on Cursor parent threads.

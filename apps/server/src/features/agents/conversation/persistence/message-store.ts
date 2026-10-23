@@ -9,6 +9,7 @@ import type { Changes, Database } from "bun:sqlite";
 import { and, asc, count, desc, eq, getTableColumns, gt, inArray, isNotNull, lt, lte, notExists, placeholder, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type {
+  HtmlVisual,
   Message,
   LegacyMessageProvenance,
   MessageMention,
@@ -21,6 +22,7 @@ import type {
   TurnOutcome,
 } from "@mcode/contracts";
 import {
+  HtmlVisualSchema,
   PreviewAnnotationBundleSchema,
   ProviderSwitchMarkerSchema,
   LegacyMessageProvenanceSchema,
@@ -108,6 +110,10 @@ function serializeSelectedTextComments(
   return JSON.stringify(SelectedTextCommentsSchema().parse(selectedTextComments));
 }
 
+function parseVisual(value: string | null): HtmlVisual | null {
+  return value === null ? null : HtmlVisualSchema().parse(parseJsonField(value));
+}
+
 function rowToMessage(row: MessageRow): Message {
   const msg: Message = {
     id: row.id,
@@ -134,6 +140,7 @@ function rowToMessage(row: MessageRow): Message {
     outcomeExecutionId: row.outcomeExecutionId ?? null,
     systemNotice: parseSystemNotice(row.systemNotice),
     providerSwitch: row.providerSwitch === null ? null : ProviderSwitchMarkerSchema().parse(parseJsonField(row.providerSwitch)),
+    visual: parseVisual(row.visual),
     is_internal: row.isInternal === 1,
     ...(row.parentAgentProvenance
       ? { parentAgentProvenance: parseParentAgentProvenance(row.parentAgentProvenance) }
@@ -344,6 +351,16 @@ export class MessageStore {
     const row = this.orm.insert(messages).values({
       id: NodeCrypto.randomUUID(), threadId, role: "system", content, sequence,
       timestamp: new Date().toISOString(), providerSwitch: JSON.stringify(providerSwitch),
+    }).returning().get();
+    return rowToMessage(row);
+  }
+
+  /** Create the system message that shows an HTML visual. Its text names the visual for builds and readers without the frame. */
+  createVisual(threadId: string, sequence: number, input: HtmlVisual): Message {
+    const visual = HtmlVisualSchema().parse(input);
+    const row = this.orm.insert(messages).values({
+      id: NodeCrypto.randomUUID(), threadId, role: "system", content: `Visual: ${visual.title}`, sequence,
+      timestamp: new Date().toISOString(), visual: JSON.stringify(visual),
     }).returning().get();
     return rowToMessage(row);
   }

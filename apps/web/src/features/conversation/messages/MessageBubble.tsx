@@ -28,6 +28,7 @@ import { basename } from "@/lib/path";
 import { SelectedTextCommentsComposerAttachment } from "../composer/SelectedTextCommentsComposerAttachment";
 import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
 import { TURN_REVERT_NOTICE_KINDS, TurnRevertReceipt } from "../turn-revert/TurnRevertReceipt";
+import { HtmlVisualFrame } from "../html-visual/HtmlVisualFrame";
 import { ProviderSwitchMarker } from "../provider-switch/ProviderSwitchMarker";
 import { DelegatedTaskWakeUp } from "./DelegatedTaskWakeUp";
 
@@ -806,10 +807,16 @@ function UserMessageContent({
  */
 const LEGACY_HANDOFF_ANCHOR_MARKER = "<!-- mcode-handoff";
 
-/** Renders a system message, including security notices. */
+/** Renders a system message, including security notices and HTML visuals. */
 function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) {
-  const currentSessionNotices = useThreadRecord(message.thread_id, (record) => record.sessionNotices);
   if (message.providerSwitch) return <ProviderSwitchMarker providerSwitch={message.providerSwitch} />;
+  if (message.visual) return <HtmlVisualFrame visual={message.visual} />;
+  return <SystemNoticeContent message={message} />;
+}
+
+/** Renders a system notice or a plain timeline note. */
+function SystemNoticeContent({ message }: Pick<MessageBubbleProps, "message">) {
+  const currentSessionNotices = useThreadRecord(message.thread_id, (record) => record.sessionNotices);
   if (message.systemNotice?.scope === "session") return null;
   if (message.content.startsWith(LEGACY_HANDOFF_ANCHOR_MARKER)) return null;
   if (isCurrentComposerProviderNotice(message, currentSessionNotices)) return null;
