@@ -114,7 +114,7 @@ export interface PickerProps<T> {
   readonly hairlines?: boolean;
   /** Set false to mark the selected row by its fill alone, without the trailing check. Defaults to true. */
   readonly selectedCheck?: boolean;
-  /** Ctrl/Cmd+1..9 pick the Nth selectable row, and each such row shows its keycap. Defaults to false. */
+  /** Ctrl/Cmd+1..9 pick the Nth selectable row, skipping disclosure rows; each such row shows its keycap. Defaults to false. */
   readonly numberedShortcuts?: boolean;
   readonly onSelect: (item: T) => void;
 }
@@ -405,7 +405,9 @@ function useShortcutRows<T>(rows: readonly ListRow<T>[], enabled: boolean): read
     if (!enabled) return [];
     const indexes: number[] = [];
     for (let index = 0; index < rows.length && indexes.length < 9; index += 1) {
-      if (!rows[index]?.row.disabled) indexes.push(index);
+      // A disclosure row shows or hides rows rather than picking one, so it takes no pick shortcut.
+      const row = rows[index]?.row;
+      if (row && !row.disabled && row.expanded === undefined) indexes.push(index);
     }
     return indexes;
   }, [rows, enabled]);

@@ -397,6 +397,16 @@ describe("ModelSelector", () => {
       expect(screen.getByRole("option", { name: /Claude Opus 5$/ })).toBeInTheDocument();
     });
 
+    it("gives the numbered shortcuts to models, not to the fold row", async () => {
+      const onSelect = vi.fn();
+      await openClaudeTab("claude-opus-5-5", onSelect);
+      await userEvent.click(screen.getByRole("option", { name: /Legacy models/ }));
+
+      await userEvent.keyboard("{Control>}3{/Control}");
+
+      expect(onSelect).toHaveBeenCalledWith("claude-opus-5", "claude");
+    });
+
     it("opens the fold on the selected legacy model so it is never hidden", async () => {
       await openClaudeTab("claude-sonnet-5");
 
