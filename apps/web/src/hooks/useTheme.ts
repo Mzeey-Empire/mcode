@@ -51,6 +51,18 @@ function getServerSnapshot(): ShikiTheme {
   return "github-dark";
 }
 
+/** Light or dark app appearance. */
+export type Appearance = "light" | "dark";
+
+function getAppearanceSnapshot(): Appearance {
+  return document.documentElement.classList.contains("dark") ? "dark" : "light";
+}
+
+/** Returns the current app appearance. Shares the dark-mode MutationObserver with useShikiTheme. */
+export function useAppearance(): Appearance {
+  return useSyncExternalStore(subscribe, getAppearanceSnapshot, () => "dark");
+}
+
 /**
  * Returns the resolved Shiki theme name ("github-dark" | "github-light").
  * Reacts to dark-mode class changes on `<html>`. All consumers share a single MutationObserver.
