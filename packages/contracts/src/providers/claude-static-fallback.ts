@@ -15,15 +15,12 @@ const CLAUDE_LEGACY_MODEL_IDS: ReadonlySet<string> = new Set([
 const DATED_SNAPSHOT_SUFFIX = /-\d{8}$/;
 
 /**
- * True when a Claude model id, or a dated snapshot of one, is a legacy generation. The suffix
- * must be a date: a plain prefix match would fold `claude-opus-5-5` under `claude-opus-5`.
+ * Marks a Claude model legacy when its id, or the alias of a dated snapshot, is in the legacy list.
+ * The suffix must be a date: a plain prefix match would fold `claude-opus-5-5` under `claude-opus-5`.
  */
-export function isLegacyClaudeModelId(id: string): boolean {
-  return CLAUDE_LEGACY_MODEL_IDS.has(id.replace(DATED_SNAPSHOT_SUFFIX, ""));
-}
-
-function withClaudeLifecycle(model: ProviderModelInfo): ProviderModelInfo {
-  return isLegacyClaudeModelId(model.id) ? { ...model, lifecycle: "legacy" } : model;
+export function withClaudeLifecycle(model: ProviderModelInfo): ProviderModelInfo {
+  const legacy = CLAUDE_LEGACY_MODEL_IDS.has(model.id.replace(DATED_SNAPSHOT_SUFFIX, ""));
+  return legacy ? { ...model, lifecycle: "legacy" } : model;
 }
 
 /** Complete Claude fallback catalog shared by server discovery and web pickers. */

@@ -1602,7 +1602,7 @@ export {
 } from "./providers/devin-models.js";
 export { CURSOR_CLI_MODEL_SNAPSHOT } from "./providers/cursor-cli-models-snapshot.js";
 export { CODEX_STATIC_MODELS, supportsCodexUltraOrchestration } from "./providers/codex-static-fallback.js";
-export { CLAUDE_STATIC_MODELS, isLegacyClaudeModelId } from "./providers/claude-static-fallback.js";
+export { CLAUDE_STATIC_MODELS, withClaudeLifecycle } from "./providers/claude-static-fallback.js";
 
 export {
   ProviderModelInfoSchema,

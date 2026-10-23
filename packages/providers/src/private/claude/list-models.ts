@@ -13,7 +13,7 @@ import {
   supports1MContextWindow,
   supportsEffortParameter,
 } from "@mcode/shared/model-effort";
-import { CLAUDE_STATIC_MODELS, isLegacyClaudeModelId } from "@mcode/contracts";
+import { CLAUDE_STATIC_MODELS, withClaudeLifecycle } from "@mcode/contracts";
 import type { ProviderModelInfo } from "@mcode/contracts";
 
 /** Cache TTL: 5 minutes, matching the design spec. */
@@ -55,15 +55,14 @@ function derivedReasoningEfforts(id: string): ClaudeReasoningEffort[] {
 
 function fromAnthropicModel(model: AnthropicModelInfo): ProviderModelInfo {
   const supportedReasoningEfforts = derivedReasoningEfforts(model.id);
-  return {
+  return withClaudeLifecycle({
     id: model.id,
     name: model.display_name,
     contextWindow: model.max_input_tokens ?? undefined,
     supportsReasoning: supportedReasoningEfforts.length > 0,
     ...(supportedReasoningEfforts.length > 0 ? { supportedReasoningEfforts } : {}),
     ...(supports1MContextWindow(model.id) ? { contextWindowOptions: ["200k", "1m"] as const } : {}),
-    ...(isLegacyClaudeModelId(model.id) ? { lifecycle: "legacy" as const } : {}),
-  };
+  });
 }
 
 /** Merges API metadata into the complete fallback catalog without losing defined fallback fields. */
