@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReasoningLevel } from "@mcode/contracts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProviderId, ReasoningLevel } from "@mcode/contracts";
+import { registerProviderModels } from "@/lib/model-registry";
 import { useThreadStore } from "@/stores/threadStore";
 import { ComposerModelControl } from "../ComposerModelControl";
 import type { ComposerAgentSelection } from "../../draft/useComposerFormController";
@@ -104,5 +105,57 @@ describe("ComposerModelControl", () => {
 
     expect(await screen.findByTestId("composer-settings-label")).toHaveTextContent("High");
     expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
+  });
+});
+
+describe("ComposerModelControl model capabilities", () => {
+  afterEach(() => {
+    for (const provider of ["claude", "codex", "copilot"]) registerProviderModels(provider, []);
+  });
+
+  async function openControlsFor(provider: ProviderId, modelId: string) {
+    render(
+      <ComposerModelControl
+        threadId="thread-1"
+        selection={{ ...selection, provider, modelId }}
+        defaults={{ contextWindow: undefined, thinking: undefined, globalCodexFast: false }}
+        reasoningLevels={["low", "medium", "high"]}
+        isModelLocked
+        isProviderLocked
+        onSelectionChange={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByTestId("model-selector-trigger"));
+    await screen.findByLabelText("Reasoning effort");
+  }
+
+  it("hides Fast for a Codex model that does not declare it", async () => {
+    registerProviderModels("codex", [{ id: "gpt-9-plain", label: "GPT-9 Plain", providerId: "codex" }]);
+    await openControlsFor("codex", "gpt-9-plain");
+    expect(screen.queryByRole("button", { name: "Fast" })).toBeNull();
+  });
+
+  it("shows Fast for a non-Codex model that declares it", async () => {
+    registerProviderModels("copilot", [
+      { id: "gpt-9-quick", label: "GPT-9 Quick", providerId: "copilot", supportsFastMode: true },
+    ]);
+    await openControlsFor("copilot", "gpt-9-quick");
+    expect(screen.getByRole("button", { name: "Fast" })).toBeInTheDocument();
+  });
+
+  it("shows the 1M toggle for the Claude 1M cohort", async () => {
+    await openControlsFor("claude", "claude-opus-5-5");
+    expect(screen.getByRole("button", { name: "1M context" })).toBeInTheDocument();
+  });
+
+  it("hides the 1M toggle for Haiku", async () => {
+    await openControlsFor("claude", "claude-haiku-4-5");
+    expect(screen.queryByRole("button", { name: "1M context" })).toBeNull();
+  });
+
+  it("hides the 1M toggle for a Claude model without context window options", async () => {
+    registerProviderModels("claude", [{ id: "claude-opus-5-5", label: "Claude Opus 5.5", providerId: "claude" }]);
+    await openControlsFor("claude", "claude-opus-5-5");
+    expect(screen.queryByRole("button", { name: "1M context" })).toBeNull();
   });
 });

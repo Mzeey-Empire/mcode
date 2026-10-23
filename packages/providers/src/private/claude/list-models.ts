@@ -7,6 +7,12 @@
  */
 
 import { logger } from "@mcode/shared";
+import {
+  isMaxEffortModel,
+  isXhighEffortModel,
+  supports1MContextWindow,
+  supportsEffortParameter,
+} from "@mcode/shared/model-effort";
 import { CLAUDE_STATIC_MODELS } from "@mcode/contracts";
 import type { ProviderModelInfo } from "@mcode/contracts";
 
@@ -33,6 +39,31 @@ interface AnthropicModelsResponse {
 let cachedModels: ProviderModelInfo[] | null = null;
 let cacheTimestamp = 0;
 let inflight: Promise<ProviderModelInfo[]> | null = null;
+
+type ClaudeReasoningEffort = NonNullable<ProviderModelInfo["supportedReasoningEfforts"]>[number];
+
+function derivedReasoningEfforts(id: string): ClaudeReasoningEffort[] {
+  if (!supportsEffortParameter(id)) return [];
+  return [
+    "low",
+    "medium",
+    "high",
+    ...(isXhighEffortModel(id) ? (["xhigh"] as const) : []),
+    ...(isMaxEffortModel(id) ? (["max"] as const) : []),
+  ];
+}
+
+function fromAnthropicModel(model: AnthropicModelInfo): ProviderModelInfo {
+  const supportedReasoningEfforts = derivedReasoningEfforts(model.id);
+  return {
+    id: model.id,
+    name: model.display_name,
+    contextWindow: model.max_input_tokens ?? undefined,
+    supportsReasoning: supportedReasoningEfforts.length > 0,
+    ...(supportedReasoningEfforts.length > 0 ? { supportedReasoningEfforts } : {}),
+    ...(supports1MContextWindow(model.id) ? { contextWindowOptions: ["200k", "1m"] as const } : {}),
+  };
+}
 
 /** Merges API metadata into the complete fallback catalog without losing defined fallback fields. */
 function mergeStaticCatalog(models: ProviderModelInfo[]): ProviderModelInfo[] {
@@ -98,11 +129,7 @@ async function fetchModels(): Promise<ProviderModelInfo[]> {
 
     const models = mergeStaticCatalog(body.data
       .filter((m) => m.id.startsWith("claude-"))
-      .map((m) => ({
-        id: m.id,
-        name: m.display_name,
-        contextWindow: m.max_input_tokens ?? undefined,
-      })));
+      .map(fromAnthropicModel));
 
     cachedModels = models;
     cacheTimestamp = Date.now();

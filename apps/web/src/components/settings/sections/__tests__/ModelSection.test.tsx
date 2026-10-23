@@ -133,13 +133,12 @@ describe("ModelSection reasoning options", () => {
     expect(xhigh).not.toBeDisabled();
   });
 
-  it("X-High is disabled for Claude Sonnet 4.6", () => {
+  it("X-High is not offered for Claude Sonnet 4.6", () => {
     renderWithModel("claude", "claude-sonnet-4-6");
 
     const row = getReasoningRow();
-    const xhigh = within(row).getByRole("radio", { name: "X-High" });
 
-    expect(xhigh).toBeDisabled();
+    expect(within(row).queryByRole("radio", { name: "X-High" })).toBeNull();
   });
 
   it("Max is enabled for Claude Sonnet 4.6", () => {

@@ -1,6 +1,6 @@
 import { useSettingsStore } from "@/stores/settingsStore";
 import { CLAUDE_STATIC_MODELS, CODEX_STATIC_MODELS, CURSOR_STATIC_MODEL_FALLBACK, DEVIN_STATIC_MODEL_FALLBACK, groupDevinModelFamilies } from "@mcode/contracts";
-import type { ContextWindowMode, ProviderId, ReasoningLevel } from "@mcode/contracts";
+import type { ContextWindowMode, ProviderModelInfo, ReasoningLevel } from "@mcode/contracts";
 import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
   getModelContextWindow as sharedGetModelContextWindow,
@@ -14,7 +14,6 @@ import { normalizeReasoningLevelForModel } from "@mcode/shared/model-effort";
 export {
   isXhighEffortModel,
   isMaxEffortModel,
-  supportsEffortParameter,
   supports1MContextWindow,
   supportsThinkingToggle,
   normalizeReasoningLevelForModel,
@@ -53,6 +52,10 @@ export interface ModelDefinition {
   defaultReasoningLevel?: CodexReasoningLevel;
   /** Billing rate multiplier relative to the base rate (e.g. 1, 0.33, 3). */
   multiplier?: number;
+  /** Whether the provider can run this model in Fast mode. Absent means no Fast control. */
+  supportsFastMode?: boolean;
+  /** Context windows the user can choose between. Absent means no choice. */
+  contextWindowOptions?: readonly ContextWindowMode[];
   /**
    * ISO date (YYYY-MM-DD) after which the model can no longer be selected.
    * Mcode authenticates via subscription credentials (never API keys), so a
@@ -76,6 +79,22 @@ export function isModelAvailable(m: ModelDefinition, now: Date = new Date()): bo
   return localYmd <= m.availableUntil;
 }
 
+/** Maps a provider's wire model row to a registry definition, carrying its declared capabilities. */
+export function toModelDefinition(providerId: string, model: ProviderModelInfo): ModelDefinition {
+  return {
+    id: model.id,
+    label: model.name,
+    providerId,
+    group: model.group,
+    multiplier: model.multiplier,
+    contextWindow: model.contextWindow,
+    supportedReasoningLevels: model.supportedReasoningEfforts,
+    defaultReasoningLevel: model.defaultReasoningEffort,
+    supportsFastMode: model.supportsFastMode,
+    contextWindowOptions: model.contextWindowOptions,
+  };
+}
+
 export const MODEL_PROVIDERS: readonly ModelProvider[] = [
   {
     id: "claude",
@@ -83,9 +102,7 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     comingSoon: false,
     supportsCompletion: true,
     models: CLAUDE_STATIC_MODELS.map((model) => ({
-      id: model.id,
-      label: model.name,
-      providerId: "claude",
+      ...toModelDefinition("claude", model),
       contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT[model.id],
     })),
   },
@@ -93,15 +110,7 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     id: "codex",
     name: "Codex",
     comingSoon: false,
-    models: CODEX_STATIC_MODELS.map((model) => ({
-      id: model.id,
-      label: model.name,
-      providerId: "codex",
-      group: model.group,
-      contextWindow: model.contextWindow,
-      supportedReasoningLevels: model.supportedReasoningEfforts,
-      defaultReasoningLevel: model.defaultReasoningEffort,
-    })),
+    models: CODEX_STATIC_MODELS.map((model) => toModelDefinition("codex", model)),
   },
   {
     id: "copilot",
@@ -218,8 +227,20 @@ export function registerProviderModels(providerId: string, defs: ModelDefinition
  * never shadowed by a shorter prefix. Devin effort ids (`swe-2-high`) resolve
  * to their family (`swe-2`) through the same prefix rule.
  */
-function matchDatedVariant(id: string): ModelDefinition | undefined {
-  return [...SORTED_ALL_MODELS, ...dynamicModelsSorted].find((m) => id.startsWith(`${m.id}-`));
+function matchDatedVariant(id: string, providerId?: string): ModelDefinition | undefined {
+  return [...SORTED_ALL_MODELS, ...dynamicModelsSorted].find((m) =>
+    (providerId === undefined || m.providerId === providerId) && id.startsWith(`${m.id}-`));
+}
+
+/**
+ * Finds a model definition within one provider: its live defs, then its static defs,
+ * then a dated-variant prefix match. Capability reads must use this, because model ids
+ * collide across providers (Cursor and Copilot reuse other vendors' ids).
+ */
+export function findProviderModel(providerId: string, modelId: string): ModelDefinition | undefined {
+  return DYNAMIC_MODEL_DEFS.get(providerId)?.find((model) => model.id === modelId)
+    ?? MODEL_PROVIDERS.find((p) => p.id === providerId)?.models.find((model) => model.id === modelId)
+    ?? matchDatedVariant(modelId, providerId);
 }
 
 /**
@@ -368,39 +389,12 @@ export function getModelContextWindow(
 }
 
 /**
- * Providers whose backends do **not** accept a per-call reasoning-effort
- * parameter. The Composer hides the reasoning pill for these providers
- * regardless of the active model id (cursor models, for example, can share
- * an id with a provider that does expose effort tiers, so a model-only
- * check would surface the pill incorrectly).
- *
- * Add a provider id here when integrating a backend that picks reasoning
- * effort internally (cursor's Composer mode, hosted assistants without an
- * exposed effort knob, etc.). Entries are matched by exact `ProviderId`.
+ * Returns the reasoning levels the provider's model declares, or `[]` when it declares none.
+ * The Composer and Settings show the reasoning control only when this is non-empty.
  */
-export const PROVIDERS_WITHOUT_REASONING_LEVELS: ReadonlySet<ProviderId> = new Set<ProviderId>([
-  "cursor",
-  "copilot",
-]);
-
-/**
- * Returns true when the given provider exposes a reasoning-effort knob
- * that the Composer should surface. Falls back to `true` for unknown
- * provider strings so newly added providers default to "show the pill",
- * forcing an opt-out via {@link PROVIDERS_WITHOUT_REASONING_LEVELS}.
- */
-export function providerSupportsReasoningLevels(provider: ProviderId | string | undefined): boolean {
-  if (!provider) return true;
-  return !PROVIDERS_WITHOUT_REASONING_LEVELS.has(provider as ProviderId);
-}
-
-/**
- * Returns the per-model reasoning levels declared on the registry def, or null
- * if the model uses mcode's standard reasoning levels. Codex and Devin models
- * carry explicit `supportedReasoningLevels`.
- */
-export function getModelReasoningLevels(modelId: string): readonly CodexReasoningLevel[] | null {
-  return findModelById(modelId)?.supportedReasoningLevels ?? null;
+export function getReasoningLevels(providerId: string, modelId: string): ReasoningLevel[] {
+  const declared = findProviderModel(providerId, modelId)?.supportedReasoningLevels ?? [];
+  return declared.filter((level): level is ReasoningLevel => VALID_REASONING_LEVELS.includes(level));
 }
 
 /**
@@ -425,28 +419,3 @@ export function normalizeReasoningLevel(
     ?? level;
 }
 
-/** Returns the model's default reasoning level, or null when undeclared. */
-export function getModelDefaultReasoningLevel(modelId: string): CodexReasoningLevel | null {
-  return findModelById(modelId)?.defaultReasoningLevel ?? null;
-}
-
-/**
- * Returns the Codex-specific reasoning levels for a model, or null if the model
- * uses mcode's standard reasoning levels (i.e. is not a Codex model).
- */
-export function getCodexReasoningLevels(modelId: string): readonly CodexReasoningLevel[] | null {
-  return getModelReasoningLevels(modelId);
-}
-
-/** Returns the Codex model's default reasoning level, or null for non-Codex models. */
-export function getCodexDefaultReasoningLevel(modelId: string): CodexReasoningLevel | null {
-  return getModelDefaultReasoningLevel(modelId);
-}
-
-/**
- * Returns true when the given Codex model supports the "xhigh" reasoning effort tier.
- */
-export function isXhighModel(modelId: string): boolean {
-  const levels = getCodexReasoningLevels(modelId);
-  return levels?.includes("xhigh") ?? false;
-}
