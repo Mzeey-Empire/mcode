@@ -227,7 +227,7 @@ export class BrowserAutomationRecorder {
       releaseCursor: () => {
         if (cursorReleased) return;
         cursorReleased = true;
-        void bridge.setRecordingCursor({ threadId, tabId, enabled: false });
+        void bridge.setRecordingCursor({ threadId, tabId, enabled: false }).catch(warnRecordingCursorFailure);
       },
       resolveStopped,
     };
@@ -264,6 +264,15 @@ export class BrowserAutomationRecorder {
       session.resolveStopped();
     };
     return session;
+  }
+
+  private async enableRecordingCursor(dispatch: BrowserAutomationHostDispatch, bridge: PreviewAutomationBridge): Promise<void> {
+    try {
+      const enabled = await bridge.setRecordingCursor({ threadId: dispatch.target.threadId, tabId: dispatch.target.tabId, enabled: true });
+      if (!enabled) warnRecordingCursorFailure(new Error("The recorded tab is no longer the current target"));
+    } catch (error) {
+      warnRecordingCursorFailure(error);
+    }
   }
 
   private startRecorder(
@@ -331,7 +340,6 @@ export class BrowserAutomationRecorder {
     const session = this.configureRecorder(this.createSession(dispatch, bridge, key, recorder.value, stream.value), key, acquisition);
     const startFailure = this.startRecorder(dispatch, session, key, acquisition);
     if (startFailure) return startFailure;
-    void bridge.setRecordingCursor({ threadId: dispatch.target.threadId, tabId: dispatch.target.tabId, enabled: true });
     const requestedDuration = dispatch.request.operation === "recordingStart"
       ? dispatch.request.args.maxDurationMs
       : MAX_RECORDING_DURATION_MS;
@@ -340,6 +348,8 @@ export class BrowserAutomationRecorder {
     }, Math.min(requestedDuration, MAX_RECORDING_DURATION_MS));
     this.sessions.set(key, session);
     this.clearPendingAcquisition(key, acquisition);
+    // Awaited so the agent's first point after recordingStart is already in the video.
+    await this.enableRecordingCursor(dispatch, bridge);
     return this.recordingStartedResponse(dispatch, session);
   }
 
@@ -426,4 +436,9 @@ export class BrowserAutomationRecorder {
     }
     for (const acquisition of this.pendingAcquisitions.values()) acquisition.cancelled = true;
   }
+}
+
+// The mark is presentation only, so a recording without it is still a valid recording.
+function warnRecordingCursorFailure(error: unknown): void {
+  console.warn("Browser recording cursor could not be updated", error);
 }

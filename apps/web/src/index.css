@@ -686,13 +686,15 @@ diffs-container:has([data-jump-highlight="true"]) {
   }
 }
 
-/* One ring per agent click; it ends transparent so nothing keeps animating while the agent is idle. */
+/* One ring per agent click; it ends transparent so nothing keeps animating while the agent is idle.
+   The delay matches the mark's 150ms travel, so the ring appears where the click lands. */
 @keyframes agent-cursor-ping {
   from { opacity: 0.9; transform: scale(0.4); }
   to { opacity: 0; transform: scale(1.8); }
 }
 .animate-agent-cursor-ping {
-  animation: agent-cursor-ping 450ms ease-out forwards;
+  opacity: 0;
+  animation: agent-cursor-ping 450ms ease-out 150ms forwards;
 }
 @media (prefers-reduced-motion: reduce) {
   .animate-agent-cursor-ping {

@@ -1789,7 +1789,11 @@ export class BrowserAutomationKernel {
     const { state, webContents } = resolved;
     const point = request.args.target ? await this.resolvePoint(resolved, request.args.target) : { x: 1, y: 1 };
     // An untargeted scroll has no point the user would recognise, so the cursor stays put.
-    if (request.args.target) this.emitPointer(state, "move", point);
+    if (request.args.target) {
+      // Resolving the point awaits the page, so the user may have taken control meanwhile.
+      this.admitAgentEffect(state, request);
+      this.emitPointer(state, "move", point);
+    }
     await this.withSyntheticInput(state, async () => {
       await this.ensureDebugger(state);
       await this.dispatchGuestInput(

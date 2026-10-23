@@ -219,6 +219,7 @@ describe("BrowserAutomationHost", () => {
   const listTabs = vi.fn();
   let controllerChanged: ((state: BrowserAutomationControllerState) => void) | null;
   let hostHeartbeat: (() => void) | null;
+  let pointerReported: ((pointer: unknown) => void) | null;
   let nextGeneration: number;
 
   beforeEach(() => {
@@ -227,6 +228,7 @@ describe("BrowserAutomationHost", () => {
     sessionStorage.clear();
     controllerChanged = null;
     hostHeartbeat = null;
+    pointerReported = null;
     nextGeneration = 1;
     harness.transport.registerBrowserAutomationHost.mockImplementation(async () => {
       const generation = nextGeneration++;
@@ -273,7 +275,12 @@ describe("BrowserAutomationHost", () => {
               if (controllerChanged === callback) controllerChanged = null;
             };
           },
-          onPointer: () => () => {},
+          onPointer(callback: (pointer: unknown) => void) {
+            pointerReported = callback;
+            return () => {
+              if (pointerReported === callback) pointerReported = null;
+            };
+          },
           onHostHeartbeat(callback: () => void) {
             hostHeartbeat = callback;
             return () => {
@@ -297,6 +304,7 @@ describe("BrowserAutomationHost", () => {
     useThreadStore.setState({ runningThreadIds: new Set() });
     useBrowserAutomationStore.setState({
       liveTargets: new Map(),
+      pointers: new Map(),
       controllers: new Map(),
       activeRequests: new Map(),
       pendingAgentOpens: new Map(),
@@ -488,6 +496,20 @@ describe("BrowserAutomationHost", () => {
       controlEpoch: 0,
       providerSessionId: "provider-session",
     });
+    view.unmount();
+  });
+
+  it("shows only well-formed agent points from the desktop bridge", async () => {
+    const view = render(<BrowserAutomationHost />);
+    await waitFor(() => expect(pointerReported).not.toBeNull());
+    const pointer = () => useBrowserAutomationStore.getState().pointers.get(browserAutomationTargetKey("workspace-1", "thread-1", "tab-1"));
+
+    act(() => pointerReported?.({ tabId: "tab-1", phase: "click", x: -5, y: 10, zoomFactor: 1, sequence: 1 }));
+    act(() => pointerReported?.({ tabId: "tab-1", phase: "drag", x: 5, y: 10, zoomFactor: 1, sequence: 2 }));
+    expect(pointer()).toBeUndefined();
+
+    act(() => pointerReported?.({ tabId: "tab-1", phase: "click", x: 5, y: 10, zoomFactor: 1, sequence: 3 }));
+    expect(pointer()).toEqual({ tabId: "tab-1", phase: "click", x: 5, y: 10, zoomFactor: 1, sequence: 3 });
     view.unmount();
   });
 

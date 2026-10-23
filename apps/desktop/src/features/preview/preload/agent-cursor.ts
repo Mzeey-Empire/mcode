@@ -3,7 +3,7 @@ import type { PreviewGuestAgentPointerMessage } from "../contracts/guest-input.j
 /** Time after the last agent point before the in-page mark fades out and is removed. */
 export const GUEST_AGENT_CURSOR_IDLE_MS = 700;
 
-const FADE_MS = 150;
+const MOTION_MS = 150;
 const MAX_VIEWPORT_COORDINATE = 100_000;
 // Matches --amber-500, the dark-theme --primary, so recordings show the same mark as the host.
 const MARK_COLOR = "oklch(72% 0.170 75)";
@@ -32,7 +32,9 @@ const SHADOW_STYLE = `
     border-radius: 50%;
     border: 2px solid ${MARK_COLOR};
     box-sizing: border-box;
-    animation: ping 450ms ease-out forwards;
+    opacity: 0;
+    /* Waits for the mark's travel so the ring appears where the click lands. */
+    animation: ping 450ms ease-out ${MOTION_MS}ms forwards;
   }
   @keyframes ping {
     from { opacity: 0.9; transform: scale(0.4); }
@@ -81,7 +83,7 @@ export function createGuestAgentCursor(document: Document): GuestAgentCursor {
     idleTimer = setTimeout(() => {
       idleTimer = null;
       mounted?.host.style.setProperty("opacity", "0", "important");
-      removeTimer = setTimeout(unmount, FADE_MS);
+      removeTimer = setTimeout(unmount, MOTION_MS);
     }, GUEST_AGENT_CURSOR_IDLE_MS);
   };
 
@@ -116,7 +118,7 @@ function mountMark(document: Document): MountedMark {
     ["height", "0"],
     ["pointer-events", "none"],
     ["z-index", "2147483647"],
-    ["transition", `transform ${FADE_MS}ms ease-out, opacity ${FADE_MS}ms ease-out`],
+    ["transition", `transform ${MOTION_MS}ms ease-out, opacity ${MOTION_MS}ms ease-out`],
   ] as const) {
     host.style.setProperty(property, value, "important");
   }

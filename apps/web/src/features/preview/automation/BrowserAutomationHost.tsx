@@ -3,6 +3,7 @@ import {
   BROWSER_AUTOMATION_CONTRACT_VERSION,
   BROWSER_AUTOMATION_MAX_PENDING_REQUESTS,
   BrowserAutomationHostDispatchSchema,
+  BrowserAutomationPointerEventSchema,
   type BrowserAutomationHostDispatch,
   type BrowserAutomationHostDispatchTarget,
   type BrowserAutomationErrorCode,
@@ -1514,7 +1515,10 @@ export function BrowserAutomationHost() {
   useEffect(() => {
     const bridge = window.desktopBridge?.preview?.automation;
     if (!bridge) return;
-    return bridge.onPointer((pointer) => useBrowserAutomationStore.getState().setPointer(pointer));
+    return bridge.onPointer((input) => {
+      const pointer = BrowserAutomationPointerEventSchema().safeParse(input);
+      if (pointer.success) useBrowserAutomationStore.getState().setPointer(pointer.data);
+    });
   }, []);
 
   useEffect(() => {
