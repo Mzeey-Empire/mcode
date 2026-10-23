@@ -36,7 +36,7 @@ const IDENTITY_BLOCK = [
   "Mcode runtime guidance is advisory; MCP authorization and lease state remain authoritative.",
 ].join(" ");
 
-// The thread-control and Browser tool descriptions repeat these rules on purpose. With deferred tool loading, a description arrives only after the model has chosen a tool.
+// The thread-control tool descriptions repeat these rules on purpose. With deferred tool loading, a description arrives only after the model has chosen a tool.
 const THREAD_CONTROL_BLOCK = [
   "Mcode thread control",
   "- The mcode MCP tools manage Mcode threads: persistent, user-visible conversations. Use delegate_task when the user asks to hand work to another provider or model, even if they never say \"Mcode thread\".",
@@ -71,20 +71,14 @@ function nestedDelegationBlock(model: string | undefined): string | undefined {
   ].join(" ");
 }
 
+// Routing rules only: they decide which browser the model picks, which happens before any Browser tool description is loaded. Operating rules live in the tool descriptions.
 const BROWSER_BLOCK = [
   "Mcode Browser",
-  "- Boundary: for visible Browser or Mcode Preview requests, use only the mcode MCP browser_* tools. Never use bundled generic Browser, Chrome, Playwright or Node-REPL, and never launch another browser or profile.",
-  "- Browser-only tasks need no shell commands or local skill files. Keep narration minimal.",
-  "- Open: browser_open creates a sticky, agent-owned background tab and returns tab metadata, not a page observation.",
-  "- Inspect: browser_inspect is authoritative for readiness, tabs, capabilities, constraints, diagnostics and element references. Inspect before the first action. Tool discovery does not prove readiness.",
-  "- Target: browser_act performs one action per call on an element reference such as s3e12 from the latest inspection. Each inspection replaces earlier references. Never guess an ambiguous target.",
-  "- Verify: stop on failure, interruption or invalidation. Verify non-navigation effects with an assert action or a fresh inspection. Navigation and reload end the snapshot, so inspect again before another action.",
-  "- Interruptions: user input invalidates the observation. Stop or Take control interrupts execution, and Take control holds the Browser until Hand back. Release held input, keep completed effects and yield to the user.",
-  "- Recover: inspect the receipt and effect before retrying. Effects do not roll back, so never replay mutations automatically. Follow exactly one recovery instruction: inspect, reopen, wait, yield_to_user or do_not_retry.",
-  "- Evidence: request includeScreenshot only for visual evidence or when the user asks. Verify every success claim against current page evidence.",
-  "- Finish: call browser_tabs finalize before replying. Release claimed user tabs and close agent tabs by default. For a tab the user wants open, set disposition handoff and verify success.",
-  "- Evaluate: use browser_evaluate only when the live capability advertises it. All rules above apply.",
-  "- If these tools are missing from an initial tool listing, they may load lazily. Make one direct attempt before reporting them unavailable.",
+  "- Prefer the mcode MCP browser_* tools for any browser work. They drive the Browser the user sees.",
+  "- Before concluding the Browser is unavailable, check its status with browser_inspect and open a tab with browser_open. If the tools are missing from an initial tool listing, they may load lazily; make one direct attempt.",
+  "- When the user means the page they have open, read their tab instead of opening a new one.",
+  "- After a first failure, follow the error's recovery instruction and retry in Mcode's Browser. Do not switch to another browser, Chrome, Playwright or Node-REPL.",
+  "- Switch only after two failures on the same step, or when the user asks. Quote the raw error when you switch.",
 ].join("\n");
 
 const SECTION_REGISTRY: readonly {

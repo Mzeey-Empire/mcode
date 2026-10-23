@@ -53,6 +53,15 @@ describe("Mcode runtime instruction sections", () => {
     );
   }
 
+  it("keeps the Browser section to routing rules without call shapes", () => {
+    const browser = buildMcodeInstructionSections({ toolkits: { threadControl: false, browser: true } })
+      .find((section) => section.key === "mcode_browser")?.text ?? "";
+    expect(browser.split(/\s+/).filter(Boolean).length).toBeLessThan(200);
+    expect(browser).not.toMatch(/[{}`]|\bs\d+e\d+\b/);
+    expect(browser).toContain("Prefer the mcode MCP browser_* tools");
+    expect(browser).toContain("Switch only after two failures on the same step");
+  });
+
   it("trims nested models and omits a blank model", () => {
     const toolkits = { threadControl: false, browser: false };
     const sections = buildMcodeInstructionSections({ toolkits, nestedDelegationModel: "  gpt-5.6-sol  " });

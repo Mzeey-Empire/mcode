@@ -463,7 +463,7 @@ describe("CodexProvider first turn on new session", () => {
       "mcode_identity", "mcode_provider_subagents", "mcode_thread_control", "mcode_browser", "mcode_repository_search",
     ]);
     expect(server.options.instructionSections?.find((section) => section.key === "mcode_browser")?.text)
-      .toContain("use only the mcode MCP browser_* tools");
+      .toContain("Prefer the mcode MCP browser_* tools");
     expect(server.options.instructionSections?.find((section) => section.key === "mcode_thread_control")?.text)
       .toContain("thread_target_list");
     expect(server.spawnedEnv?.MCODE_MCP_TOKEN).toBe("session-token-fixture");

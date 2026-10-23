@@ -106,17 +106,17 @@ export function browserInputSchema(operation: BrowserAutomationPublicOperation):
 
 const descriptionByOperation: Record<BrowserAutomationPublicOperation, string> = {
   open: [
-    "Use only the mcode MCP server for Mcode's shared Preview. Never initialize or use bundled generic Browser/Chrome/Node-REPL, or launch another browser or profile.",
+    "Use only the mcode MCP server for Mcode's shared Preview. After one failure, retry here instead of using bundled generic Browser, Chrome, Playwright, Node-REPL, or another browser or profile. Switch only after two failures on the same step or when the user asks, and quote the raw error.",
     "For Browser-only tasks, do not run shell/terminal commands or read local skills/files; keep narration minimal.",
     "Create a sticky, agent-owned background tab without revealing or focusing the Browser panel.",
-    "Returns tab metadata, not a page snapshot: call browser_inspect before targeting elements. Use browser_tabs to select, claim, release, close, or finalize tabs.",
+    "Returns tab metadata, not a page snapshot: call browser_inspect before targeting elements. Use browser_tabs to select, claim, release, or close tabs, and call browser_tabs finalize before replying.",
   ].join(" "),
   inspect: [
     "Authoritative for Browser readiness, tabs, capabilities, constraints, diagnostics, and recovery guidance.",
     "Returns a snapshot whose elements each carry a ref such as s3e12. Target browser_act with these refs. Each inspection replaces the previous refs.",
     "Inspect before the first action and again whenever an action says to. Tool discovery does not prove readiness.",
     "Request includeScreenshot only for visual evidence or when the user asks. Verify every success claim against current page evidence.",
-    "Use only mcode MCP browser tools; Browser-only tasks need no shell commands or local skills/files.",
+    "Use only mcode MCP browser tools; Browser-only tasks need no shell commands or local skills/files. Call browser_tabs finalize before replying.",
   ].join(" "),
   act: [
     "Perform one Browser action per call. Target elements only with a ref from the latest browser_inspect snapshot; never guess an ambiguous target.",
@@ -138,7 +138,7 @@ const descriptionByOperation: Record<BrowserAutomationPublicOperation, string> =
     "Use browser_evaluate for privileged open-world page evaluation only when the live capability advertises it.",
     "All browser_act and browser_inspect rules apply, including readiness, interruption, receipts, effects, recovery, and current evidence.",
     "An evaluation ends the snapshot: call browser_inspect before the next browser_act.",
-    "Use only mcode MCP browser tools, never another browser or profile. Browser-only tasks need no shell commands or local skills/files.",
+    "Use only mcode MCP browser tools. Browser-only tasks need no shell commands or local skills/files.",
   ].join(" "),
 };
 
