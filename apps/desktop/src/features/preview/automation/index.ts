@@ -22,16 +22,23 @@ export function registerBrowserAutomationHandlers(platform: NodeJS.Platform): vo
   ipcMain.handle("preview:automation.release-agent-control", (event, target: unknown) => automationKernel.releaseAgentControl(event, target));
   ipcMain.handle("preview:automation.describe-target", (event, target: unknown) => automationKernel.describeTarget(event, target));
   ipcMain.handle("preview:automation.media-source", (event, target: unknown) => automationKernel.getMediaSourceId(event, target));
+  ipcMain.handle("preview:automation.recording-cursor", (event, target: unknown) => automationKernel.setRecordingCursor(event, target));
   ipcMain.handle("preview:open-guest-devtools", (event, target: unknown) => automationKernel.openDevTools(event, target));
   ipcMain.on("preview:automation.subscribe", (event: IpcMainEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed()) return;
     if (subscribedRenderers.has(event.sender)) return;
     subscribedRenderers.add(event.sender);
-    const unsubscribe = automationKernel.subscribe(win.id, (state) => {
+    const unsubscribeController = automationKernel.subscribe(win.id, (state) => {
       if (!event.sender.isDestroyed()) event.sender.send("preview:automation.controller", state);
     });
-    event.sender.once("destroyed", unsubscribe);
+    const unsubscribePointer = automationKernel.subscribePointer(win.id, (pointer) => {
+      if (!event.sender.isDestroyed()) event.sender.send("preview:automation.pointer", pointer);
+    });
+    event.sender.once("destroyed", () => {
+      unsubscribeController();
+      unsubscribePointer();
+    });
   });
   ipcMain.on(BROWSER_AUTOMATION_HEARTBEAT_SUBSCRIBE_CHANNEL, (event: IpcMainEvent) => {
     heartbeatPulse.subscribe(event.sender);

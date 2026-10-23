@@ -160,6 +160,10 @@ class FakeWebContents extends NodeEvents.EventEmitter {
     return this.destroyed;
   }
 
+  getZoomFactor(): number {
+    return 1;
+  }
+
   getURL(): string {
     return this.url;
   }

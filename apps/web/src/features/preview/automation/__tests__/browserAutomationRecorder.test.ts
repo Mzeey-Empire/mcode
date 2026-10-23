@@ -69,7 +69,9 @@ describe("BrowserAutomationRecorder", () => {
   const stream = { getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream;
   const getUserMedia = vi.fn();
   const getMediaSourceId = vi.fn();
-  const bridge = { getMediaSourceId } as unknown as PreviewAutomationBridge;
+  const setRecordingCursor = vi.fn(async (_target: { threadId: string; tabId: string; enabled: boolean }) => true);
+  const bridge = { getMediaSourceId, setRecordingCursor } as unknown as PreviewAutomationBridge;
+  const cursorStates = () => setRecordingCursor.mock.calls.map(([target]) => target.enabled);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -204,6 +206,43 @@ describe("BrowserAutomationRecorder", () => {
     if (result.ok && result.result.operation === "recordingStop") {
       expect(atob(result.result.dataBase64).length).toBe(300 * 1_024);
     }
+  });
+
+  it("draws the page cursor only while a recording runs, however the recording ends", async () => {
+    const recorder = new BrowserAutomationRecorder();
+    await recorder.start(dispatch("recordingStart", 1), bridge);
+    expect(setRecordingCursor).toHaveBeenLastCalledWith({ threadId: "thread", tabId: "tab", enabled: true });
+    FakeMediaRecorder.instances[0]!.emit(400 * 1_024);
+    await Promise.resolve();
+    expect(cursorStates()).toEqual([true, false]);
+    await recorder.stop(dispatch("recordingStop", 2));
+    expect(cursorStates()).toEqual([true, false]);
+
+    vi.useFakeTimers();
+    FakeMediaRecorder.stopEmits = false;
+    await recorder.start(dispatch("recordingStart", 3), bridge);
+    const stopping = recorder.stop(dispatch("recordingStop", 4));
+    await vi.advanceTimersByTimeAsync(1_000);
+    await stopping;
+    expect(cursorStates()).toEqual([true, false, true, false]);
+  });
+
+  it("reports the recording started only once the page cursor is on, so the agent's first point is recorded", async () => {
+    let cursorOn!: (enabled: boolean) => void;
+    setRecordingCursor.mockReturnValueOnce(new Promise<boolean>((resolve) => { cursorOn = resolve; }));
+    const recorder = new BrowserAutomationRecorder();
+    let started = false;
+    const starting = recorder.start(dispatch("recordingStart", 1), bridge).then((result) => {
+      started = true;
+      return result;
+    });
+    await vi.waitFor(() => expect(setRecordingCursor).toHaveBeenCalledOnce());
+    expect(started).toBe(false);
+
+    cursorOn(true);
+
+    await expect(starting).resolves.toMatchObject({ ok: true, result: { operation: "recordingStart" } });
+    recorder.dispose();
   });
 
   it("fails a never-resolving stop within the cleanup timeout and stops tracks", async () => {

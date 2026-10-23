@@ -3,6 +3,7 @@ import {
   BROWSER_AUTOMATION_CONTRACT_VERSION,
   BROWSER_AUTOMATION_MAX_PENDING_REQUESTS,
   BrowserAutomationHostDispatchSchema,
+  BrowserAutomationPointerEventSchema,
   type BrowserAutomationHostDispatch,
   type BrowserAutomationHostDispatchTarget,
   type BrowserAutomationErrorCode,
@@ -1510,6 +1511,15 @@ export function BrowserAutomationHost() {
   useEffect(() => onBrowserAutomationObservationInvalidation((workspaceId, threadId, tabId) => {
     sessionDriverRef.current?.invalidateTargetObservations(workspaceId, threadId, tabId);
   }), []);
+
+  useEffect(() => {
+    const bridge = window.desktopBridge?.preview?.automation;
+    if (!bridge) return;
+    return bridge.onPointer((input) => {
+      const pointer = BrowserAutomationPointerEventSchema().safeParse(input);
+      if (pointer.success) useBrowserAutomationStore.getState().setPointer(pointer.data);
+    });
+  }, []);
 
   useEffect(() => {
     const bridge = window.desktopBridge?.preview?.automation;

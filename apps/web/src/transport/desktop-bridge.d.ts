@@ -310,6 +310,10 @@ export interface PreviewAutomationBridge {
       }
     | { ok: false; error: string }
   >;
+  /** Draws the agent cursor inside one tab's page while the renderer records it; false when the tab is unavailable. */
+  setRecordingCursor(target: { threadId: string; tabId: string; enabled: boolean }): Promise<boolean>;
+  /** Subscribe to agent cursor points, reported before each agent pointer action; validate with BrowserAutomationPointerEventSchema. */
+  onPointer(callback: (pointer: unknown) => void): () => void;
   /** Subscribe to controller transitions for adopted tabs in this window. */
   onControllerChanged(callback: (state: BrowserAutomationControllerState) => void): () => void;
   /** Subscribe to Browser host heartbeat pulses owned by Electron main. */

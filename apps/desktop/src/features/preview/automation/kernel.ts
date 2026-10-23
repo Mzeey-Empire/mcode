@@ -24,11 +24,16 @@ import {
   type BrowserAutomationHostDispatchTarget,
   type BrowserAutomationHostDispatch,
   type BrowserAutomationControllerState,
+  type BrowserAutomationPointerEvent,
 } from "@mcode/contracts";
 import { findAdoptedWebContentsForWindow } from "../surfaces/registry.js";
 import { resolveActivePreviewWebContentsForWindow } from "../surfaces/active-web-contents.js";
 import { loadPreviewGuestUrl } from "../navigation/guest-navigation.js";
-import { PREVIEW_GUEST_AGENT_INPUT_CHANNEL } from "../contracts/guest-input.js";
+import {
+  PREVIEW_GUEST_AGENT_INPUT_CHANNEL,
+  PREVIEW_GUEST_AGENT_POINTER_CHANNEL,
+  type PreviewGuestAgentPointerMessage,
+} from "../contracts/guest-input.js";
 import { getSession, getThreadTabSet } from "../state/window-session.js";
 import {
   BrowserAutomationCancelledError,
@@ -616,6 +621,10 @@ export class BrowserAutomationKernel {
   private readonly targetGenerations = new Map<string, number>();
   private readonly cancellations = new Map<string, { cancel: () => void }>();
   private readonly subscribers = new Map<number, Set<(state: unknown) => void>>();
+  private readonly pointerSubscribers = new Map<number, Set<(event: BrowserAutomationPointerEvent) => void>>();
+  /** Target keys whose page is being recorded, so the guest must draw the agent cursor itself. */
+  private readonly recordingCursorTargets = new Set<string>();
+  private pointerSequence = 0;
   private readonly rendererOperationLeases = new Map<string, RendererOperationLease>();
 
   /** Validates and executes one request from a trusted renderer. */
@@ -974,6 +983,46 @@ export class BrowserAutomationKernel {
     };
   }
 
+  /** Subscribes a renderer window to agent cursor points, reported before each pointer action. */
+  subscribePointer(windowId: number, callback: (event: BrowserAutomationPointerEvent) => void): () => void {
+    const listeners = this.pointerSubscribers.get(windowId) ?? new Set();
+    listeners.add(callback);
+    this.pointerSubscribers.set(windowId, listeners);
+    return () => {
+      listeners.delete(callback);
+      if (listeners.size === 0) this.pointerSubscribers.delete(windowId);
+    };
+  }
+
+  /**
+   * Turns the in-page agent cursor on or off for one tab while the renderer records it.
+   * Turning it off never requires a live tab, so a recording that outlives its tab still cleans up.
+   */
+  setRecordingCursor(event: IpcMainInvokeEvent, input: unknown): boolean {
+    const value = asRecord(input);
+    let threadId: string;
+    let tabId: string;
+    try {
+      threadId = assertShortId(value.threadId, "threadId");
+      tabId = assertShortId(value.tabId, "tabId");
+    } catch {
+      return false;
+    }
+    if (typeof value.enabled !== "boolean") return false;
+    if (!value.enabled) {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win) return false;
+      this.recordingCursorTargets.delete(targetKey(win.id, threadId, tabId));
+      return true;
+    }
+    try {
+      this.recordingCursorTargets.add(this.resolveCurrentTarget(event, threadId, tabId).state.key);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Releases target listeners, debugger sessions, queues, and buffers for one window. */
   disposeWindow(windowId: number): void {
     for (const [key, state] of this.targets) {
@@ -989,6 +1038,10 @@ export class BrowserAutomationKernel {
       if (key.startsWith(`[${windowId},`)) this.threadControls.delete(key);
     }
     this.subscribers.delete(windowId);
+    this.pointerSubscribers.delete(windowId);
+    for (const key of this.recordingCursorTargets) {
+      if (key.startsWith(`[${windowId},`)) this.recordingCursorTargets.delete(key);
+    }
   }
 
   /** Returns internal bounded counters for tests and performance diagnostics. */
@@ -1187,7 +1240,6 @@ export class BrowserAutomationKernel {
     state: TargetState,
     event: BrowserControlEvent,
     request?: BrowserAutomationRequest,
-    pointer?: { x: number; y: number },
   ): boolean {
     const key = JSON.stringify([state.windowId, state.threadId]);
     const previous = this.threadControls.get(key) ?? createBrowserThreadControl();
@@ -1196,7 +1248,7 @@ export class BrowserAutomationKernel {
     this.threadControls.set(key, next);
     if (event.type === "agent-effect") {
       state.controlEpoch = next.epochByTab.get(state.tabId) ?? 0;
-      this.emitController(state, "agent", request, pointer);
+      this.emitController(state, "agent", request);
     } else {
       this.publishThreadControl(state, next);
     }
@@ -1236,19 +1288,40 @@ export class BrowserAutomationKernel {
     }
   }
 
-  private admitAgentEffect(state: TargetState, request: BrowserAutomationRequest, pointer?: { x: number; y: number }): void {
+  private admitAgentEffect(state: TargetState, request: BrowserAutomationRequest): void {
     this.applyControlEvent(state, {
       type: "agent-effect",
       tabId: state.tabId,
       expectedEpoch: request.expectedControlEpoch,
-    }, request, pointer);
+    }, request);
+  }
+
+  /** Reports where the agent is about to act; runs after admission so a held tab never shows a cursor. */
+  private emitPointer(state: TargetState, phase: BrowserAutomationPointerEvent["phase"], point: { x: number; y: number }): void {
+    this.pointerSequence += 1;
+    const event: BrowserAutomationPointerEvent = {
+      tabId: state.tabId,
+      phase,
+      x: point.x,
+      y: point.y,
+      zoomFactor: state.webContents.getZoomFactor(),
+      sequence: this.pointerSequence,
+    };
+    for (const listener of this.pointerSubscribers.get(state.windowId) ?? []) listener(event);
+    if (!this.recordingCursorTargets.has(state.key) || state.webContents.isDestroyed()) return;
+    const message: PreviewGuestAgentPointerMessage = { phase, x: point.x, y: point.y };
+    state.webContents.send(PREVIEW_GUEST_AGENT_POINTER_CHANNEL, message);
+  }
+
+  private emitPointerMoveThenClick(state: TargetState, point: { x: number; y: number }): void {
+    this.emitPointer(state, "move", point);
+    this.emitPointer(state, "click", point);
   }
 
   private emitController(
     state: TargetState,
     controller: "none" | "human" | "agent",
     request?: BrowserAutomationRequest,
-    pointer?: { x: number; y: number },
   ): void {
     const payload: BrowserAutomationControllerState = {
       tabId: state.tabId,
@@ -1262,7 +1335,6 @@ export class BrowserAutomationKernel {
               : {}),
           }
         : {}),
-      ...(pointer ? { pointer } : {}),
     };
     state.controller = payload;
     for (const listener of this.subscribers.get(state.windowId) ?? []) listener(payload);
@@ -1601,7 +1673,8 @@ export class BrowserAutomationKernel {
   ): Promise<unknown> {
     const { state, webContents } = resolved;
     const point = await this.resolvePoint(resolved, request.args.target);
-    this.admitAgentEffect(state, request, point);
+    this.admitAgentEffect(state, request);
+    this.emitPointerMoveThenClick(state, point);
     await this.withSyntheticInput(state, async () => {
       await this.dispatchClick(state, webContents, point, request, signal, markEffect);
       this.throwIfAborted(signal);
@@ -1667,7 +1740,8 @@ export class BrowserAutomationKernel {
   ): Promise<void> {
     if (!request.args.target) return;
     const point = await this.resolvePoint(resolved, request.args.target);
-    this.admitAgentEffect(resolved.state, request, point);
+    this.admitAgentEffect(resolved.state, request);
+    this.emitPointerMoveThenClick(resolved.state, point);
     await this.withSyntheticInput(resolved.state, () => this.clickPoint(resolved.state, point, markEffect));
     this.throwIfAborted(signal);
   }
@@ -1714,6 +1788,12 @@ export class BrowserAutomationKernel {
   ): Promise<unknown> {
     const { state, webContents } = resolved;
     const point = request.args.target ? await this.resolvePoint(resolved, request.args.target) : { x: 1, y: 1 };
+    // An untargeted scroll has no point the user would recognise, so the cursor stays put.
+    if (request.args.target) {
+      // Resolving the point awaits the page, so the user may have taken control meanwhile.
+      this.admitAgentEffect(state, request);
+      this.emitPointer(state, "move", point);
+    }
     await this.withSyntheticInput(state, async () => {
       await this.ensureDebugger(state);
       await this.dispatchGuestInput(

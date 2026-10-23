@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BROWSER_AUTOMATION_CONTRACT_VERSION, type BrowserAutomationRequest } from "@mcode/contracts";
 import {
   PREVIEW_GUEST_AGENT_INPUT_CHANNEL,
+  PREVIEW_GUEST_AGENT_POINTER_CHANNEL,
   PreviewGuestInputSuppressor,
 } from "../../contracts/guest-input.js";
 
@@ -159,6 +160,7 @@ class FakeWebContents extends NodeEvents.EventEmitter {
   url = "https://example.test/";
   title = "Example";
   focused = true;
+  zoomFactor = 1;
   focus = vi.fn(() => {
     this.focused = true;
   });
@@ -166,6 +168,7 @@ class FakeWebContents extends NodeEvents.EventEmitter {
   isDestroyed() { return this.destroyed; }
   getURL() { return this.url; }
   getTitle() { return this.title; }
+  getZoomFactor() { return this.zoomFactor; }
   isLoading() { return false; }
   isFocused() { return this.focused; }
   async executeJavaScript(source: string) {
@@ -650,9 +653,12 @@ describe("BrowserAutomationKernel", () => {
     await expect(click("opaque-replacement", "semantic-replacement")).resolves.toMatchObject({ ok: true });
   });
 
-  it("publishes a resolved semantic target pointer before agent input", async () => {
-    const states: unknown[] = [];
-    const unsubscribe = kernel.subscribe(7, (state) => states.push(state));
+  it("reports a move then a click at the target's centre before pressing the mouse", async () => {
+    const pointerEvents: Array<{ event: unknown; commandsBefore: number }> = [];
+    const unsubscribe = kernel.subscribePointer(7, (pointerEvent) => {
+      pointerEvents.push({ event: pointerEvent, commandsBefore: currentWebContents!.debugger.commands.length });
+    });
+    currentWebContents!.zoomFactor = 1.5;
     currentWebContents!.semanticElements.set("semantic-button", { attached: true, visible: true, x: 25, y: 40 });
     await kernel.execute(event(), payload(request("click", {
       target: { semanticId: "semantic-button" },
@@ -660,15 +666,41 @@ describe("BrowserAutomationKernel", () => {
       clickCount: 1,
       timeoutMs: 1_000,
     }, { requestId: "semantic-pointer" })));
-    expect(states).toContainEqual(expect.objectContaining({
-      controller: "agent",
-      pointer: { x: 25, y: 40 },
-    }));
-    expect(currentWebContents!.send).toHaveBeenCalledWith(
-      "mcode:browser-agent-input",
-      expect.objectContaining({ kind: "pointer", count: 1 }),
-    );
     unsubscribe();
+
+    expect(pointerEvents.map(({ event }) => event)).toEqual([
+      { tabId: "tab", phase: "move", x: 25, y: 40, zoomFactor: 1.5, sequence: 1 },
+      { tabId: "tab", phase: "click", x: 25, y: 40, zoomFactor: 1.5, sequence: 2 },
+    ]);
+    const firstPress = currentWebContents!.debugger.commands.findIndex(({ method, params }) =>
+      method === "Input.dispatchMouseEvent" && (params as { type?: string }).type === "mousePressed");
+    expect(firstPress).toBeGreaterThanOrEqual(0);
+    expect(pointerEvents.every(({ commandsBefore }) => commandsBefore <= firstPress)).toBe(true);
+  });
+
+  it("forwards agent pointer events to the page only while its recording cursor is on", async () => {
+    currentWebContents!.semanticElements.set("recorded-button", { attached: true, visible: true, x: 30, y: 60 });
+    const click = (requestId: string) => kernel.execute(event(), payload(request("click", {
+      target: { semanticId: "recorded-button" },
+      button: "left",
+      clickCount: 1,
+      timeoutMs: 1_000,
+    }, { requestId })));
+    const pointerSends = () => currentWebContents!.send.mock.calls.filter(([channel]) => channel === PREVIEW_GUEST_AGENT_POINTER_CHANNEL);
+
+    await click("before-recording");
+    expect(pointerSends()).toEqual([]);
+
+    expect(kernel.setRecordingCursor(event(), { threadId: "thread", tabId: "tab", enabled: true })).toBe(true);
+    await click("while-recording");
+    expect(pointerSends().map(([, pointer]) => pointer)).toEqual([
+      { phase: "move", x: 30, y: 60 },
+      { phase: "click", x: 30, y: 60 },
+    ]);
+
+    expect(kernel.setRecordingCursor(event(), { threadId: "thread", tabId: "tab", enabled: false })).toBe(true);
+    await click("after-recording");
+    expect(pointerSends()).toHaveLength(2);
   });
 
   it("scrolls an off-screen semantic target into view before clicking", async () => {

@@ -125,6 +125,7 @@ describe("Preview feature public interface", () => {
       "preview:automation.release-agent-control",
       "preview:automation.describe-target",
       "preview:automation.media-source",
+      "preview:automation.recording-cursor",
       "preview:open-guest-devtools",
       "preview:get-perf-counters",
     ];

@@ -1,6 +1,7 @@
 import type {
   BrowserAutomationControllerState,
   BrowserAutomationHostDispatch,
+  BrowserAutomationPointerEvent,
 } from "@mcode/contracts";
 import { BROWSER_AUTOMATION_MAX_INSPECT_TABS, BROWSER_AUTOMATION_MAX_PENDING_REQUESTS } from "@mcode/contracts";
 import { create } from "zustand";
@@ -48,6 +49,8 @@ interface BrowserAutomationState {
   readonly liveTargets: ReadonlyMap<string, BrowserAutomationLiveTarget>;
   readonly lifecycleTabs: ReadonlyMap<string, BrowserSessionLifecycleTab>;
   readonly controllers: ReadonlyMap<string, BrowserAutomationControllerState>;
+  /** Latest agent cursor point per target, in the page's viewport CSS pixels. */
+  readonly pointers: ReadonlyMap<string, BrowserAutomationPointerEvent>;
   readonly activeRequests: ReadonlyMap<string, BrowserAutomationActiveRequest>;
   readonly pendingAgentOpens: ReadonlyMap<string, BrowserAutomationPendingAgentOpen>;
   /** Targets whose agent has a Browser effect running or finished within {@link BROWSER_ACTING_LINGER_MS}. */
@@ -66,6 +69,7 @@ interface BrowserAutomationState {
   releaseThreadTargets: (workspaceId: string, threadId: string) => void;
   releaseWorkspaceTargets: (workspaceId: string) => void;
   setController: (state: BrowserAutomationControllerState) => void;
+  setPointer: (pointer: BrowserAutomationPointerEvent) => void;
   setControllerForTarget: (
     workspaceId: string,
     threadId: string,
@@ -202,10 +206,10 @@ export function isBrowserAutomationAgentControlled(
   ) !== null;
 }
 
-/** Resolve a controller event only when its tab id maps to one exact live target. */
-export function resolveBrowserAutomationControllerTarget(
+/** Resolve a controller or pointer event only when its tab id maps to one exact live target. */
+export function resolveBrowserAutomationControllerTarget<TEvent extends { readonly tabId: string }>(
   targets: Iterable<BrowserAutomationLiveTarget>,
-  controller: BrowserAutomationControllerState,
+  controller: TEvent,
 ): BrowserAutomationLiveTarget | null {
   const candidates = [...targets].filter((candidate) => candidate.tabId === controller.tabId);
   return candidates.length === 1 ? candidates[0]! : null;
@@ -255,6 +259,7 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
   liveTargets: new Map(),
   lifecycleTabs: new Map(),
   controllers: new Map(),
+  pointers: new Map(),
   activeRequests: new Map(),
   pendingAgentOpens: new Map(),
   actingTargets: new Set(),
@@ -317,6 +322,8 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
       liveTargets.delete(key);
       const controllers = new Map(state.controllers);
       controllers.delete(key);
+      const pointers = new Map(state.pointers);
+      pointers.delete(key);
       const viewportCoordinators = new Map(state.viewportCoordinators);
       viewportCoordinators.delete(key);
       const viewportState = coordinator?.snapshot();
@@ -328,7 +335,7 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
           viewportByTarget.set(key, viewportState.confirmed);
         }
       }
-      return { liveTargets, controllers, viewportByTarget, viewportStateByTarget, viewportCoordinators };
+      return { liveTargets, controllers, pointers, viewportByTarget, viewportStateByTarget, viewportCoordinators };
     });
   },
   unregisterTarget: (workspaceId, threadId, tabId) => {
@@ -341,6 +348,8 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
       liveTargets.delete(key);
       const controllers = new Map(state.controllers);
       controllers.delete(key);
+      const pointers = new Map(state.pointers);
+      pointers.delete(key);
       const viewportByTarget = new Map(state.viewportByTarget);
       viewportByTarget.delete(key);
       const viewportStateByTarget = new Map(state.viewportStateByTarget);
@@ -358,6 +367,7 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
       return {
         liveTargets,
         controllers,
+        pointers,
         viewportByTarget,
         viewportStateByTarget,
         viewportCoordinators,
@@ -390,6 +400,7 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
     set((state) => {
       const liveTargets = new Map(state.liveTargets);
       const controllers = new Map(state.controllers);
+      const pointers = new Map(state.pointers);
       const viewportByTarget = new Map(state.viewportByTarget);
       const viewportStateByTarget = new Map(state.viewportStateByTarget);
       const viewportCoordinators = new Map(state.viewportCoordinators);
@@ -399,6 +410,7 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
         const key = browserAutomationTargetKey(target.workspaceId, target.threadId, target.tabId);
         liveTargets.delete(key);
         controllers.delete(key);
+        pointers.delete(key);
         viewportByTarget.delete(key);
         viewportStateByTarget.delete(key);
         viewportCoordinators.delete(key);
@@ -409,6 +421,7 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
       return {
         liveTargets,
         controllers,
+        pointers,
         viewportByTarget,
         viewportStateByTarget,
         viewportCoordinators,
@@ -429,6 +442,7 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
     set((state) => {
       const liveTargets = new Map(state.liveTargets);
       const controllers = new Map(state.controllers);
+      const pointers = new Map(state.pointers);
       const viewportByTarget = new Map(state.viewportByTarget);
       const viewportStateByTarget = new Map(state.viewportStateByTarget);
       const viewportCoordinators = new Map(state.viewportCoordinators);
@@ -438,6 +452,7 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
         const key = browserAutomationTargetKey(target.workspaceId, target.threadId, target.tabId);
         liveTargets.delete(key);
         controllers.delete(key);
+        pointers.delete(key);
         viewportByTarget.delete(key);
         viewportStateByTarget.delete(key);
         viewportCoordinators.delete(key);
@@ -448,6 +463,7 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
       return {
         liveTargets,
         controllers,
+        pointers,
         viewportByTarget,
         viewportStateByTarget,
         viewportCoordinators,
@@ -459,6 +475,17 @@ export const useBrowserAutomationStore = create<BrowserAutomationState>((set, ge
     const target = resolveBrowserAutomationControllerTarget(get().liveTargets.values(), controller);
     if (!target) return;
     get().setControllerForTarget(target.workspaceId, target.threadId, target.tabId, controller);
+  },
+  setPointer: (pointer) => {
+    const target = resolveBrowserAutomationControllerTarget(get().liveTargets.values(), pointer);
+    if (!target) return;
+    set((state) => {
+      const key = browserAutomationTargetKey(target.workspaceId, target.threadId, target.tabId);
+      const current = state.pointers.get(key);
+      // IPC delivers in order today; the guard keeps a late duplicate from rewinding the mark.
+      if (current && current.sequence >= pointer.sequence) return state;
+      return { pointers: new Map(state.pointers).set(key, pointer) };
+    });
   },
   setControllerForTarget: (workspaceId, threadId, tabId, controller) =>
     set((state) => {

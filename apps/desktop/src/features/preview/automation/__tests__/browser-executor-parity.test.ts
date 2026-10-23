@@ -103,6 +103,7 @@ class FakeWebContents extends NodeEvents.EventEmitter {
   stop = vi.fn();
   send = vi.fn();
   isDestroyed(): boolean { return this.destroyed; }
+  getZoomFactor(): number { return 1; }
   getURL(): string { return this.url; }
   getTitle(): string { return "Executor fixture"; }
   isLoading(): boolean { return false; }
