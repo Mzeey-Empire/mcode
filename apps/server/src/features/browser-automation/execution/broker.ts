@@ -202,6 +202,12 @@ function failure(
   };
 }
 
+/** A named tab outside the thread is a bad reference, so the agent re-reads the tab list instead of reopening. */
+function unlistedTabFailure(request: BrowserAutomationRequest): BrowserAutomationResponse {
+  const response = failure(request, "TAB_UNAVAILABLE", "That tab is not open in this thread; browser_inspect lists the thread's tabs", false);
+  return response.ok ? response : { ...response, error: { ...response.error, recovery: "inspect" } };
+}
+
 function assignmentKeyParts(
   providerId: string,
   providerSessionId: string,
@@ -429,9 +435,17 @@ function inspectCapabilities(
     : capabilities.filter((operation) => operation !== "act");
 }
 
-function inspectReadiness(target: BrowserAutomationHostDispatchTarget | undefined): { ready: boolean; state: "ready" | "target-unavailable" | "human-control"; reason?: string } {
+/** The thread tab the user holds, if any. ADR-0029 makes the hold thread-wide, so it blocks effects on every tab. */
+function userHeldTarget(host: RegisteredHost, threadId: string): BrowserAutomationHostDispatchTarget | undefined {
+  return [...host.targets.values()].find((target) => target.threadId === threadId && target.controller?.controller === "human");
+}
+
+function inspectReadiness(
+  target: BrowserAutomationHostDispatchTarget | undefined,
+  userHeld: BrowserAutomationHostDispatchTarget | undefined,
+): { ready: boolean; state: "ready" | "target-unavailable" | "human-control"; reason?: string } {
   if (!target) return { ready: false, state: "target-unavailable", reason: "Visible browser target is unavailable" };
-  if (target.controller?.controller === "human") return { ready: false, state: "human-control", reason: "Visible Preview is under human control" };
+  if (userHeld) return { ready: false, state: "human-control", reason: "Visible Preview is under human control" };
   return { ready: true, state: "ready" };
 }
 
@@ -451,19 +465,28 @@ function boundedInspectSnapshot(
   };
 }
 
+/**
+ * Hosts list a thread's tabs without their holder, so each listed tab takes the
+ * controller the broker admits effects against.
+ */
 function inspectTabs(
   responseTabs: BrowserInspectResult["tabs"],
   target: BrowserAutomationHostDispatchTarget | undefined,
+  host: RegisteredHost,
 ): BrowserInspectResult["tabs"] {
-  return (target ? [target, ...responseTabs.filter((tab) => tab.tabId !== target.tabId)] : responseTabs) as BrowserInspectResult["tabs"];
+  const tabs = target ? [target, ...responseTabs.filter((tab) => tab.tabId !== target.tabId)] : responseTabs;
+  return tabs.map(({ controller: _reported, ...tab }) => {
+    const controller = host.targets.get(targetKey(tab))?.controller;
+    return controller ? { ...tab, controller } : tab;
+  });
 }
 
 function inspectGuidance(
   descriptor: RegisteredHost["registration"]["executorDescriptor"],
-  target: BrowserAutomationHostDispatchTarget | undefined,
+  userHeld: BrowserAutomationHostDispatchTarget | undefined,
   capabilities: BrowserAutomationPublicOperation[],
 ): string {
-  if (target?.controller?.controller === "human") return "The user has control of the Browser. Do not act until browser_inspect reports ready; the user hands control back.";
+  if (userHeld) return "The user has control of the Browser. browser_inspect can still read any tab. Do not act until browser_inspect reports ready; the user hands control back.";
   return `Visible browser executor (${descriptor.runtime}) supports: ${capabilities.join(", ") || "none"}.`;
 }
 
@@ -478,19 +501,20 @@ function shapeNegotiatedResponse(
   const observationRef = inspectObservationReference(response.result);
   const capabilities = inspectCapabilities(negotiated, observationRef);
   const diagnostics = response.result.diagnostics?.slice(0, descriptor.constraints.maxDiagnostics);
+  const userHeld = userHeldTarget(pending.host, pending.request.threadId);
   return {
     ...response,
     result: {
       ...response.result,
-      readiness: inspectReadiness(pending.target),
+      readiness: inspectReadiness(pending.target, userHeld),
       target: pending.target && { threadId: pending.target.threadId, tabId: pending.target.tabId, targetGeneration: pending.target.targetGeneration, sticky: true },
-      tabs: inspectTabs(response.result.tabs, pending.target).slice(0, descriptor.constraints.maxTabs),
+      tabs: inspectTabs(response.result.tabs, pending.target, pending.host).slice(0, descriptor.constraints.maxTabs),
       snapshot: boundedInspectSnapshot(response.result.snapshot, descriptor.constraints.maxSnapshotChars),
       ...(diagnostics ? { diagnostics } : {}),
       ...(observationRef ? { observationRef } : !negotiated.includes("act") ? { observationRef: NodeCrypto.randomUUID() } : {}),
       capabilities,
       capabilityRevision: descriptor.capabilityRevision,
-      guidance: inspectGuidance(descriptor, pending.target, capabilities).slice(0, 4_000),
+      guidance: inspectGuidance(descriptor, userHeld, capabilities).slice(0, 4_000),
     },
   };
 }
@@ -1235,6 +1259,8 @@ export class BrowserAutomationBroker {
   ): RoutingCandidate | undefined {
     if (request.operation === "open" && request.args.idempotencyKey !== undefined) return undefined;
     if (request.operation === "tabs") return this.resolveTabsAssignment(claims, request);
+    // A named read leaves the sticky assignment alone: reading a tab never selects it.
+    if (request.operation === "inspect" && request.args.tabId) return this.resolveExplicitTarget(claims, request, request.args.tabId);
     return this.resolveAssignment(claims, request);
   }
 
@@ -1246,6 +1272,9 @@ export class BrowserAutomationBroker {
     if (request.operation === "open") {
       const host = this.resolveBootstrapHost(claims, request);
       if (host) return this.executeBootstrap(host, claims.providerId, request);
+    }
+    if (request.operation === "inspect" && request.args.tabId && this.resolveSelectedHost(claims)) {
+      return finishImmediately(unlistedTabFailure(request));
     }
     const code = this.resolveSelectedHost(claims) ? "TAB_UNAVAILABLE" : "HOST_UNAVAILABLE";
     const message = code === "TAB_UNAVAILABLE"
@@ -1681,9 +1710,7 @@ export class BrowserAutomationBroker {
   }
 
   private targetDeliveryError(pending: PendingRequest): BrowserAutomationResponse | null {
-    if (pending.request.operation !== "inspect" && [...pending.host.targets.values()].some((target) =>
-      target.threadId === pending.request.threadId && target.controller?.controller === "human"
-    )) {
+    if (pending.request.operation !== "inspect" && userHeldTarget(pending.host, pending.request.threadId)) {
       return failure(pending.request, "HUMAN_INTERRUPTED", "The user has control of the Browser until Hand back", true);
     }
     if (!pending.target) return null;

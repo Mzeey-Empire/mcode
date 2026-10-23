@@ -993,6 +993,8 @@ export const BrowserAutomationRequestSchema = lazySchema(() =>
     requestVariant("inspect", z.object({
       includeScreenshot: z.boolean().default(false),
       includeDiagnostics: z.boolean().default(false),
+      /** Reads this thread tab instead of the session's current one, without selecting it. */
+      tabId: idSchema.optional(),
     }).strict()),
     requestVariant("status", emptyArgs),
     requestVariant(

@@ -284,7 +284,7 @@ describe("BrowserAutomationBroker", () => {
       result: {
         controlEpoch: 3,
         readiness: { ready: false, state: "human-control" },
-        guidance: "The user has control of the Browser. Do not act until browser_inspect reports ready; the user hands control back.",
+        guidance: "The user has control of the Browser. browser_inspect can still read any tab. Do not act until browser_inspect reports ready; the user hands control back.",
       },
     });
     broker.disconnect(hostSocket);

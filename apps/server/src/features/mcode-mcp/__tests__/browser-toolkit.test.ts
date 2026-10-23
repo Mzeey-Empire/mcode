@@ -342,6 +342,15 @@ describe("BrowserToolkit", () => {
     });
   });
 
+  it("reads a named tab by passing its tabId to the broker", async () => {
+    const page = fakeBrowser();
+    const { call, requestAt } = setup({ execute: page.execute });
+
+    await call("browser_inspect", { tabId: "user-tab" });
+
+    expect(requestAt(0)).toMatchObject({ operation: "inspect", args: { tabId: "user-tab" } });
+  });
+
   it("rejects caller-supplied scope, internal fields, and invalid argument shapes before the broker", async () => {
     const page = fakeBrowser();
     const { call, execute } = setup({ execute: page.execute });
