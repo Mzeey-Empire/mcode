@@ -1,4 +1,5 @@
 import { HTML_VISUAL_THEME_TOKENS } from "@mcode/contracts";
+import type { Appearance } from "@/hooks/useTheme";
 
 /** Message type a visual's page posts with its content height. */
 export const HTML_VISUAL_HEIGHT_MESSAGE = "mcode:visual-height";
@@ -7,7 +8,7 @@ export const HTML_VISUAL_THEME_MESSAGE = "mcode:visual-theme";
 
 /** Resolved app design tokens handed to a visual's page. */
 export interface HtmlVisualTheme {
-  readonly colorScheme: "light" | "dark";
+  readonly colorScheme: Appearance;
   readonly tokens: Readonly<Record<string, string>>;
 }
 
@@ -18,6 +19,11 @@ export function readHtmlVisualTheme(root: HTMLElement = document.documentElement
   for (const token of HTML_VISUAL_THEME_TOKENS) tokens[token] = style.getPropertyValue(token).trim();
   return { colorScheme: root.classList.contains("dark") ? "dark" : "light", tokens };
 }
+
+// The sandbox already isolates the page from the app; this policy also keeps it self-contained,
+// so a page cannot fetch, beacon, or load remote content with whatever data it was given.
+const CONTENT_SECURITY_POLICY =
+  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:";
 
 // Page styles come later in the document, so pages can override these defaults.
 const BASE_CSS = "html{background:var(--background);color:var(--ink);font-family:var(--font-sans)}body{margin:0}";
@@ -42,9 +48,10 @@ const LEADING_DOCTYPE = /^\s*<!doctype[^>]*>/i;
 /**
  * Builds the frame document for a visual: the page with Mcode's theme bootstrap ahead of it.
  * The bootstrap goes after a leading doctype, because markup before it would put the page in quirks mode.
+ * It also comes before any page markup, so the policy lands in the head, the only place a meta policy applies.
  */
 export function buildHtmlVisualDocument(html: string, theme: HtmlVisualTheme): string {
-  const bootstrap = `<style>${BASE_CSS}</style><script>${bootstrapScript(theme)}</script>`;
+  const bootstrap = `<meta http-equiv="Content-Security-Policy" content="${CONTENT_SECURITY_POLICY}"><style>${BASE_CSS}</style><script>${bootstrapScript(theme)}</script>`;
   const doctype = LEADING_DOCTYPE.exec(html)?.[0] ?? "";
   return `${doctype}${bootstrap}${html.slice(doctype.length)}`;
 }

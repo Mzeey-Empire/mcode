@@ -16,6 +16,7 @@ export function HtmlVisualFrame({ visual }: { readonly visual: HtmlVisual }) {
   const srcDoc = useMemo(() => buildHtmlVisualDocument(visual.html, readHtmlVisualTheme()), [visual.html]);
 
   const postTheme = useCallback(() => {
+    // The sandboxed page has an opaque origin, so "*" is the only target that reaches it.
     frameRef.current?.contentWindow?.postMessage({ type: HTML_VISUAL_THEME_MESSAGE, theme: readHtmlVisualTheme() }, "*");
   }, []);
 

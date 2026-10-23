@@ -96,6 +96,13 @@ describe("buildHtmlVisualDocument", () => {
     expect(document.body.textContent).toBe("chart");
   });
 
+  it("puts the no-network policy in the head, where browsers honour it", () => {
+    const page = "<!doctype html><html><head><title>t</title></head><body><p>chart</p></body></html>";
+    const document = new DOMParser().parseFromString(buildHtmlVisualDocument(page, theme), "text/html");
+    const policy = document.head.querySelector('meta[http-equiv="Content-Security-Policy"]');
+    expect(policy?.getAttribute("content")).toMatch(/^default-src 'none';/);
+  });
+
   it("cannot be broken out of by a token value", () => {
     const document = new DOMParser().parseFromString(buildHtmlVisualDocument("<p>chart</p>", theme), "text/html");
     expect(document.scripts).toHaveLength(1);
