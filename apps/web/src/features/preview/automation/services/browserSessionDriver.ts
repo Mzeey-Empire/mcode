@@ -610,7 +610,8 @@ export class BrowserSessionDriver {
     capabilityRevision: number,
   ): boolean {
     const current = this.currentObservationBinding(dispatch, capabilityRevision);
-    return observation.hostRevision === current.hostRevision &&
+    return this.observedDispatchTarget(dispatch, observation) &&
+      observation.hostRevision === current.hostRevision &&
       observation.documentRevision === current.documentRevision &&
       observation.controlRevision === current.controlRevision &&
       observation.capabilityRevision === current.capabilityRevision &&
@@ -859,10 +860,19 @@ export class BrowserSessionDriver {
     capabilityRevision: number,
   ): boolean {
     const current = this.currentObservationBinding(dispatch, capabilityRevision);
-    return observation.hostRevision === current.hostRevision &&
+    return this.observedDispatchTarget(dispatch, observation) &&
+      observation.hostRevision === current.hostRevision &&
       observation.documentRevision === current.documentRevision &&
       observation.controlRevision === current.controlRevision &&
       observation.capabilityRevision === current.capabilityRevision;
+  }
+
+  /**
+   * Revisions count per tab, so two tabs can share them. An inspect can read a
+   * tab other than the one effects go to, so its refs must not reach another tab.
+   */
+  private observedDispatchTarget(dispatch: BrowserAutomationHostDispatch, observation: ObservationRecord): boolean {
+    return observation.targetKey === observationTargetKey(dispatch.request.workspaceId, dispatch.target.threadId, dispatch.target.tabId);
   }
 
   private evaluatePreEffectInterruption(
