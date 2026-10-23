@@ -202,14 +202,30 @@ export function advanceBrowserToolLedger(
   return { controlEpoch: ledger.controlEpoch };
 }
 
+/**
+ * Lists tabs without routing internals or control epochs. ADR-0029 makes a user
+ * hold thread-wide, and hosts differ on whether they mark every thread tab, so a
+ * user hold on any tab is reported on all of them.
+ */
+function projectTabs(tabs: Result<"inspect">["tabs"]): Array<{ tabId: string; active: boolean; focused: boolean; holder: "user" | "agent" | "none" }> {
+  const userHolds = tabs.some((tab) => tab.controller?.controller === "human");
+  return tabs.map(({ tabId, active, focused, controller }) => ({
+    tabId,
+    active,
+    focused,
+    holder: userHolds ? "user" : controller?.controller === "agent" ? "agent" : "none",
+  }));
+}
+
 function projectInspect(result: Result<"inspect">, snapshotId: number | undefined): Record<string, unknown> {
-  const { observationRef: _observationRef, controlEpoch: _controlEpoch, snapshot, ...rest } = result;
-  if (!snapshot) return rest;
+  const { observationRef: _observationRef, controlEpoch: _controlEpoch, snapshot, tabs, ...rest } = result;
+  const listed = { ...rest, tabs: projectTabs(tabs) };
+  if (!snapshot) return listed;
   const elements = snapshot.elements.map(({ semanticId: _semanticId, ...element }, index) => ({
     ref: elementRef(snapshotId ?? 0, index),
     ...element,
   }));
-  return { ...rest, snapshot: { ...snapshot, elements } };
+  return { ...listed, snapshot: { ...snapshot, elements } };
 }
 
 /** Removes internal bookkeeping from a Browser result and swaps semantic ids for refs. */

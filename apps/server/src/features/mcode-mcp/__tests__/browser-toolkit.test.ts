@@ -342,6 +342,44 @@ describe("BrowserToolkit", () => {
     });
   });
 
+  it("reads a named tab by passing its tabId to the broker", async () => {
+    const page = fakeBrowser();
+    const { call, requestAt } = setup({ execute: page.execute });
+
+    await call("browser_inspect", { tabId: "user-tab" });
+
+    expect(requestAt(0)).toMatchObject({ operation: "inspect", args: { tabId: "user-tab" } });
+  });
+
+  it("lists each tab's holder, counting a user hold on any tab as holding the whole thread", async () => {
+    const { call, execute } = setup();
+    const tab = (tabId: string, controller?: "human" | "agent") => ({
+      desktopInstanceId: "desktop",
+      windowId: 1,
+      connectionGeneration: 1,
+      threadId: "thread-a",
+      tabId,
+      targetGeneration: 1,
+      active: tabId === "user-tab",
+      focused: false,
+      lastUsedAt: 1,
+      ...(controller ? { controller: { tabId, controller, controlEpoch: 3 } } : {}),
+    });
+    const listing = (tabs: ReturnType<typeof tab>[]) => execute.mockImplementationOnce(async (_claims, input) => responseFor(input, { operation: "inspect", controlEpoch: 3, tabs }));
+
+    listing([tab("agent-tab", "agent"), tab("user-tab")]);
+    expect(JSON.parse(textOf(await call("browser_inspect"))).tabs).toEqual([
+      { tabId: "agent-tab", active: false, focused: false, holder: "agent" },
+      { tabId: "user-tab", active: true, focused: false, holder: "none" },
+    ]);
+
+    listing([tab("agent-tab"), tab("user-tab", "human")]);
+    expect(JSON.parse(textOf(await call("browser_inspect"))).tabs).toEqual([
+      { tabId: "agent-tab", active: false, focused: false, holder: "user" },
+      { tabId: "user-tab", active: true, focused: false, holder: "user" },
+    ]);
+  });
+
   it("rejects caller-supplied scope, internal fields, and invalid argument shapes before the broker", async () => {
     const page = fakeBrowser();
     const { call, execute } = setup({ execute: page.execute });
