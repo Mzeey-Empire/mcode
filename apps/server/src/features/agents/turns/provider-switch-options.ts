@@ -3,7 +3,7 @@ import type { ProviderId, ProviderModelInfo, SendMessageInput } from "@mcode/con
 /** Composer options that only some providers (or some of a provider's models) understand. */
 export type SwitchableOptions = Pick<
   SendMessageInput,
-  "reasoningLevel" | "contextWindow" | "thinking" | "codexFastMode" | "devinMode"
+  "reasoningLevel" | "contextWindow" | "thinking" | "fastMode" | "devinMode"
 >;
 
 /** One option the target could not honour, kept so the timeline can say what was dropped. */
@@ -23,23 +23,24 @@ export interface ReconciledOptions {
  * The provider that owns each option outright; every other provider drops it.
  *
  * Hardcoded because the capability descriptors (`ProviderCapabilityName`) name features such as
- * `plan` and `permissions`, not composer options, and per-model catalogs only describe reasoning
- * levels. Nothing declares which provider honours Fast or context-window mode, so a new provider
- * that adds one of these options must be listed here.
+ * `plan` and `permissions`, not composer options. Model catalogs declare Fast (`supportsFastMode`)
+ * and reasoning levels, so those are checked against the target model instead. Nothing declares
+ * context-window or Devin mode, so a new provider that adds one of these options must be listed here.
  */
 const OPTION_OWNER: Partial<Record<keyof SwitchableOptions, ProviderId>> = {
   contextWindow: "claude",
   thinking: "claude",
-  codexFastMode: "codex",
   devinMode: "devin",
 };
 
 /**
  * Reconcile the composer's options against the provider and model the send is switching to.
  *
- * Provider-owned toggles (Fast, context-window mode, thinking, Devin mode) drop when another provider
- * receives the send. A reasoning level drops only when the target model's catalog entry lists levels
- * and omits this one: a model missing from the catalog is not evidence that the level is unsupported.
+ * Provider-owned toggles (context-window mode, thinking, Devin mode) drop when another provider
+ * receives the send. Fast drops unless the target model declares it, matching turn admission, which
+ * sends Fast only to such models. A reasoning level drops only when the target model's catalog entry
+ * lists levels and omits this one: a model missing from the catalog is not evidence that the level is
+ * unsupported.
  * Permission mode needs no mapping here: Mcode has two modes and every registered provider declares the
  * `permissions` capability, so neither mode is ever unsupported.
  */
@@ -55,16 +56,29 @@ export function reconcileSwitchOptions(input: {
     dropped.push({ option, value: value as string | boolean, reason });
   };
 
-  for (const option of Object.keys(OPTION_OWNER) as (keyof SwitchableOptions)[]) {
-    const owner = OPTION_OWNER[option];
-    if (kept[option] !== undefined && owner !== input.toProvider) {
-      drop(option, kept[option], `${input.toProvider} has no ${option} setting`);
-    }
+  for (const option of optionsOwnedElsewhere(kept, input.toProvider)) {
+    drop(option, kept[option], `${input.toProvider} has no ${option} setting`);
+  }
+  if (kept.fastMode !== undefined && !modelSupportsFastMode(input.targetModel)) {
+    drop("fastMode", kept.fastMode, `${input.targetModel?.id ?? input.toProvider} has no Fast mode`);
   }
   const level = kept.reasoningLevel;
-  const levels = input.targetModel?.supportedReasoningEfforts;
-  if (level !== undefined && levels && !(levels as readonly string[]).includes(level)) {
+  if (level !== undefined && !modelSupportsReasoningLevel(input.targetModel, level)) {
     drop("reasoningLevel", level, `${input.targetModel?.id} does not support the ${level} reasoning level`);
   }
   return { options: kept, dropped };
+}
+
+function optionsOwnedElsewhere(options: SwitchableOptions, toProvider: ProviderId): (keyof SwitchableOptions)[] {
+  return (Object.keys(OPTION_OWNER) as (keyof SwitchableOptions)[])
+    .filter((option) => options[option] !== undefined && OPTION_OWNER[option] !== toProvider);
+}
+
+function modelSupportsFastMode(model: ProviderModelInfo | null): boolean {
+  return model?.supportsFastMode === true;
+}
+
+function modelSupportsReasoningLevel(model: ProviderModelInfo | null, level: string): boolean {
+  const levels: readonly string[] | undefined = model?.supportedReasoningEfforts;
+  return levels === undefined || levels.includes(level);
 }

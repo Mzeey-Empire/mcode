@@ -30,6 +30,9 @@ import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../../orchestrati
 import { TurnAdmissionDispatchCoordinator, type TurnParentStartOwner, type TurnRuntimeAdmissionAuthority } from "../../turns/turn-admission-dispatch-coordinator.js";
 import { isAgentRpcMethod, routeAgentRpc, type AgentRouterDeps } from "../agent-rpc.js";
 
+// No catalog model declares Fast, so these turns never carry `fastMode`.
+const noModels = { listModels: async () => [] };
+
 let directory: string;
 let settings: SettingsService;
 
@@ -99,7 +102,7 @@ async function fixture(
     threads, workspaces, messages, new TurnRevertStore(db), worktrees, new AttachmentService(), providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, writer, commands, canonical), undefined,
-    new FileService(workspaces, threads, worktrees, git, hostRuntime), hostRuntime.platform, owner,
+    new FileService(workspaces, threads, worktrees, git, hostRuntime), hostRuntime.platform, noModels, owner,
   );
   let reserved = false;
   const runtime: TurnRuntimeAdmissionAuthority = {

@@ -420,6 +420,28 @@ describe("startup action gate admission and recovery", () => {
     expect(service.getAutomaticSetup({ threadId: "thread-1" }).queuedTurns).toHaveLength(64);
   });
 
+  it("stores Fast under the key older builds parse and reads either key back", async () => {
+    const { db, service, repository } = await automaticHarness();
+    const input = queuedInput();
+    await service.queueAutomaticFirstTurn({ ...input, submission: { ...input.submission, fastMode: true } });
+    await service.queueAutomaticFirstTurn(queuedInput(2));
+    const stored = JSON.parse((db.prepare(
+      "SELECT submission_json FROM workspace_environment_queued_turns WHERE message_id = 'message-1'",
+    ).get() as { submission_json: string }).submission_json) as Record<string, unknown>;
+    expect(stored).toMatchObject({ codexFastMode: true });
+    expect(stored).not.toHaveProperty("fastMode");
+    // A row written by an older build.
+    db.prepare("UPDATE workspace_environment_queued_turns SET submission_json = ? WHERE message_id = 'message-2'")
+      .run(JSON.stringify({ ...queuedInput(2).submission, codexFastMode: false }));
+
+    await repository.releaseWithoutSetup("thread-1");
+    const first = await repository.claimReleasedTurn("thread-1");
+    if (!first) throw new Error("Expected a released Turn");
+    expect(first.submission.fastMode).toBe(true);
+    await repository.markDispatched(first.id);
+    expect((await repository.claimReleasedTurn("thread-1"))?.submission.fastMode).toBe(false);
+  });
+
   it("retains only the latest terminal queued Turns without pruning active rows", async () => {
     const { service, repository } = await automaticHarness();
     for (let index = 1; index <= 34; index += 1) await service.queueAutomaticFirstTurn(queuedInput(index));

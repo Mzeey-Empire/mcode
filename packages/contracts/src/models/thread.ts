@@ -78,10 +78,10 @@ export const ThreadSchema = lazySchema(() =>
   /** Boolean thinking toggle last used in this thread. Honored only by models with a thinking toggle (Haiku 4.5). */
   thinking: z.boolean().nullable(),
   /**
-   * Codex: when true, request OpenAI fast service tier for turns; false = standard;
-   * null = inherit global `settings.provider.codex.fastMode`.
+   * Fast mode for turns on models that declare `supportsFastMode`; false = standard;
+   * null = inherit the global default (`settings.provider.codex.fastMode`).
    */
-  codex_fast_mode: z.boolean().nullable(),
+  fast_mode: z.boolean().nullable(),
   /** Selected Copilot sub-agent name. Null means provider default (interactive). */
   /**
    * Devin native session mode restored when a thread returns to build from

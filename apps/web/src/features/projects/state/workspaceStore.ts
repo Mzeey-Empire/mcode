@@ -161,17 +161,17 @@ function createdThreadProviderSettings(
   pending: PendingThreadCreation | undefined,
 ) {
   return {
-    codex_fast_mode: createdCodexFastMode(thread, pending),
+    fast_mode: createdFastMode(thread, pending),
     devin_mode: createdDevinMode(thread, pending),
   };
 }
 
-function createdCodexFastMode(
+function createdFastMode(
   thread: Omit<CreateAndSendResult, "runtimeSnapshot" | "warnings">,
   pending: PendingThreadCreation | undefined,
 ): boolean | null {
-  return (pending?.provider === "codex" ? pending.codexFastMode ?? null : null)
-    ?? thread.codex_fast_mode
+  return (pending?.provider === "codex" ? pending.fastMode ?? null : null)
+    ?? thread.fast_mode
     ?? null;
 }
 
@@ -271,7 +271,7 @@ interface PendingThreadCreation {
   forkedFromMessageId?: string;
   contextWindow?: ContextWindowMode;
   thinking?: boolean;
-  codexFastMode?: boolean;
+  fastMode?: boolean;
   devinMode?: DevinMode;
   /** Goal objective installed atomically with this thread's first turn. */
   goalObjective?: string;
@@ -309,7 +309,7 @@ interface BranchThreadParams {
   interactionMode?: InteractionMode;
   contextWindow?: ContextWindowMode;
   thinking?: boolean;
-  codexFastMode?: boolean;
+  fastMode?: boolean;
   devinMode?: DevinMode;
   mentions?: MessageMention[];
   previewAnnotations?: PreviewAnnotationBundle;
@@ -460,7 +460,7 @@ function placeholderWorktreeSettings(pending: PendingThreadCreation) {
 
 function placeholderProviderSettings(pending: PendingThreadCreation) {
   return {
-    codexFastMode: pending.provider === "codex" ? (pending.codexFastMode ?? null) : null,
+    fastMode: pending.provider === "codex" ? (pending.fastMode ?? null) : null,
     devinMode: pending.provider === "devin" ? (pending.devinMode ?? null) : null,
   };
 }
@@ -517,7 +517,7 @@ async function runCreateAndSend(pending: PendingThreadCreation): Promise<CreateA
     forkedFromMessageId: pending.forkedFromMessageId,
     contextWindow: pending.contextWindow,
     thinking: pending.thinking,
-    codexFastMode: pending.codexFastMode,
+    fastMode: pending.fastMode,
     devinMode: pending.devinMode,
     displayContent: pending.displayContent,
     mentions: pending.mentions,
@@ -568,7 +568,7 @@ function pendingCreationWithCurrentDraft(
     provider: draft.provider,
     reasoningLevel: draft.reasoning,
     contextWindow: draft.contextWindow,
-    codexFastMode: draft.provider === "codex" ? draft.codexFastMode ?? undefined : undefined,
+    fastMode: draft.provider === "codex" ? draft.fastMode ?? undefined : undefined,
     devinMode: draft.provider === "devin" ? draft.devinMode ?? undefined : undefined,
     composerDraft: draft,
   };
@@ -665,7 +665,7 @@ interface WorkspaceState {
     interactionMode?: InteractionMode,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
-    codexFastMode?: boolean,
+    fastMode?: boolean,
     displayContent?: string,
     mentions?: MessageMention[],
     previewAnnotations?: PreviewAnnotationBundle,
@@ -1480,7 +1480,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     interactionMode,
     contextWindow,
     thinking,
-    codexFastMode,
+    fastMode,
     displayContent,
     mentions,
     previewAnnotations,
@@ -1510,7 +1510,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       orchestrationMode,
       contextWindow,
       thinking,
-      codexFastMode,
+      fastMode,
       devinMode,
       mentions,
       previewAnnotations,
@@ -1543,7 +1543,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       forkedFromMessageId: params.forkedFromMessageId,
       contextWindow: params.contextWindow,
       thinking: params.thinking,
-      codexFastMode: params.codexFastMode,
+      fastMode: params.fastMode,
       devinMode: params.devinMode,
       mentions: params.mentions,
       previewAnnotations: params.previewAnnotations,

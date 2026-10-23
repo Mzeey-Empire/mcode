@@ -43,7 +43,7 @@ function createInput(): ProviderFactoryInput {
     host: createHostPorts(),
 
     codex: {
-      settings: { get: vi.fn(async () => ({ cliPath: "codex", fastMode: false })) },
+      settings: { get: vi.fn(async () => ({ cliPath: "codex" })) },
       attachments: { persistGeneratedImageFromPath: vi.fn() },
       catalog: {
         currentSkills: vi.fn(() => []),

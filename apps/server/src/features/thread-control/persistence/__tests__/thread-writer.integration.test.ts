@@ -30,8 +30,8 @@ describe("thread persistence through the shared SQLite writer", () => {
       parentThreadId: root.id, forkedFromMessageId: "origin-message",
     });
     expect(threads.findById(child.id)?.parent_thread_id).toBe(root.id);
-    await threads.updateSettings(child.id, { reasoning_level: "high", codex_fast_mode: true });
-    expect(threads.findById(child.id)).toMatchObject({ reasoning_level: "high", codex_fast_mode: true });
+    await threads.updateSettings(child.id, { reasoning_level: "high", fast_mode: true });
+    expect(threads.findById(child.id)).toMatchObject({ reasoning_level: "high", fast_mode: true });
     expect(() => reader.run("DELETE FROM threads")).toThrow(/readonly/);
     expect(await threads.hardDelete(root.id)).toBe(true);
     expect(threads.findById(root.id)).toBeNull();

@@ -278,6 +278,17 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     expect(startups.get(managedStartupId)).toMatchObject({ state: "running", phase: "agent" });
   });
 
+  it("gives a fork its parent's Fast choice on the thread and its first turn", async () => {
+    const { workspace, threads, parent, fork, makeCoordinator } = await branchHarness();
+    await threads.updateSettings(parent.id, { fast_mode: true });
+    const created = await makeCoordinator().createInitialTurn({ workspaceId: workspace.id, content: "Branch here",
+      mode: "worktree", branch: "main", existingWorktreePath: "/project/existing", parentThreadId: parent.id,
+      forkedFromMessageId: fork.id, provider: "codex", model: "gpt-5.4", startupId: managedStartupId });
+
+    expect(created).toMatchObject({ kind: "dispatch", command: { fastMode: true } });
+    expect(threads.findById(created.thread.id)?.fast_mode).toBe(true);
+  });
+
   it.each(["direct", "worktree"] as const)("records the real PR fetch phase in %s mode", async (mode) => {
     const { workspace, threads, startups, threadService, gitRepository, coordinator } = await harness();
     vi.mocked(gitRepository.fetchBranch).mockImplementation(async () => {

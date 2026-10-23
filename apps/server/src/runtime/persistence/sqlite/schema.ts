@@ -132,8 +132,14 @@ export const threads = sqliteTable(
     contextWindowMode: text("context_window_mode"),
     thinking: integer("thinking"),
     /**
-     * Codex-only: 1 = request `serviceTier: priority` (the "Fast" tier), 0 = standard, null = inherit global
-     * `settings.provider.codex.fastMode`.
+     * 1 = Fast mode, 0 = standard, null = inherit the global default. Sent only to models that declare
+     * `supportsFastMode`; Codex maps it to `serviceTier: priority`.
+     */
+    fastMode: integer("fast_mode"),
+    /**
+     * Legacy copy of `fast_mode` that builds before migration 0098 read. Stable and nightly share one
+     * database, so every write sets both columns until the compatibility floor passes 0098, and the
+     * 0098 triggers copy writes from older builds into `fast_mode`. Drop the triggers before the column.
      */
     codexFastMode: integer("codex_fast_mode"),
     /** Thread-scoped default open-in app id (ADR-0005 tier 1); null = no override. */

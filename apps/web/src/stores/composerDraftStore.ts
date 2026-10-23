@@ -105,7 +105,7 @@ export interface ComposerDraft {
    * Per-thread Codex fast-tier override. Undefined in drafts means "not captured
    * in this saved draft"; Composer falls back to thread settings.
    */
-  codexFastMode?: boolean | null;
+  fastMode?: boolean | null;
   /** Per-thread Devin native mode (normal|accept-edits|smart|bypass|plan). */
   devinMode?: DevinMode | null;
   /** Browser pages whose saved notes ride the next Send, with their staged captures. */

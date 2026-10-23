@@ -30,7 +30,7 @@ export interface ThreadSettings {
   orchestrationMode?: OrchestrationMode;
   contextWindow?: ContextWindowMode | null;
   thinking?: boolean | null;
-  codexFastMode?: boolean | null;
+  fastMode?: boolean | null;
   /** Devin-only native session mode persisted per thread. */
   devinMode?: DevinMode | null;
   /** Thread-scoped default open-in app id (ADR-0005 tier 1). Null clears the override. */

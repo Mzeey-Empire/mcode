@@ -69,6 +69,7 @@ import { SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pin
 import { FileService } from "../../projects/files/file-service.js";
 import { WorkspaceEnvironmentService } from "../../projects/index.js";
 import { ProviderAvailabilityService } from "../../providers/availability/provider-availability-service.js";
+import { ModelCacheService } from "../../providers/models/model-cache-service.js";
 import { PROVIDER_TURN_PORT } from "../../providers/composition/provider-host-ports.js";
 import type { ProviderTurnPort } from "@mcode/providers";
 import { SettingsService } from "../../settings/settings-service.js";
@@ -295,6 +296,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(WorkspaceEnvironmentService),
       c.resolve(FileService),
       c.resolve<HostRuntime>("HostRuntime").platform,
+      c.resolve(ModelCacheService),
       c.resolve(WorkerOwnedTurnRuntime).owner,
       c.resolve(TurnResumeScheduler),
       c.resolve(ProviderSwitchService),

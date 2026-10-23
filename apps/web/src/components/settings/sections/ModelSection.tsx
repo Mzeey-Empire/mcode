@@ -123,7 +123,7 @@ export function ModelSection() {
     (s) => s.settings.model.defaults.contextWindow,
   );
   const thinking = useSettingsStore((s) => s.settings.model.defaults.thinking);
-  const codexFastMode = useSettingsStore(
+  const fastMode = useSettingsStore(
     (s) => s.settings.provider.codex?.fastMode ?? false,
   );
   const utilityProvider = useSettingsStore((s) => s.settings.model.utility.provider);
@@ -368,7 +368,7 @@ export function ModelSection() {
       reasoning={reasoning}
       contextWindowMode={contextWindowMode}
       thinking={thinking}
-      codexFastMode={codexFastMode}
+      fastMode={fastMode}
       providerOptions={providerOptions}
       modelOptions={modelOptions}
       fallbackOptions={fallbackOptions}
@@ -406,7 +406,7 @@ interface ModelSettingsContentProps {
   reasoning: string;
   contextWindowMode: string;
   thinking: boolean;
-  codexFastMode: boolean;
+  fastMode: boolean;
   providerOptions: ProviderOptions;
   modelOptions: ModelPickerOptions;
   fallbackOptions: ModelPickerOptions;
@@ -442,7 +442,7 @@ function ModelSettingsContent({
   reasoning,
   contextWindowMode,
   thinking,
-  codexFastMode,
+  fastMode,
   providerOptions,
   modelOptions,
   fallbackOptions,
@@ -490,7 +490,7 @@ function ModelSettingsContent({
           reasoning={reasoning}
           contextWindowMode={contextWindowMode}
           thinking={thinking}
-          codexFastMode={codexFastMode}
+          fastMode={fastMode}
           providerOptions={providerOptions}
           modelOptions={modelOptions}
           fallbackOptions={fallbackOptions}
@@ -533,7 +533,7 @@ type DefaultModelSettingsProps = Pick<
   | "reasoning"
   | "contextWindowMode"
   | "thinking"
-  | "codexFastMode"
+  | "fastMode"
   | "providerOptions"
   | "modelOptions"
   | "fallbackOptions"
@@ -562,7 +562,7 @@ function DefaultModelSettings({
   reasoning,
   contextWindowMode,
   thinking,
-  codexFastMode,
+  fastMode,
   providerOptions,
   modelOptions,
   fallbackOptions,
@@ -644,7 +644,7 @@ function DefaultModelSettings({
           configKey="provider.codex.fastMode"
           hint="Sends OpenAI fast service tier on Codex turns when your CLI and account support it (often lower latency; billing follows OpenAI rules)."
         >
-          <Switch checked={codexFastMode} onCheckedChange={onFastModeChange} />
+          <Switch checked={fastMode} onCheckedChange={onFastModeChange} />
         </SettingRow>
       )}
       {showContextWindow && (

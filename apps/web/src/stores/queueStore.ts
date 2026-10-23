@@ -52,7 +52,7 @@ export interface QueuedMessage {
   /** Haiku thinking toggle for this turn; undefined means inherit from thread/settings. */
   thinking?: boolean;
   /** Codex OpenAI fast tier for this queued send; undefined inherits at dequeue. */
-  codexFastMode?: boolean;
+  fastMode?: boolean;
   /** Devin native mode for this queued send; undefined inherits at dequeue. */
   devinMode?: DevinMode;
   /** Goal objective installed atomically when this queued turn dispatches. */

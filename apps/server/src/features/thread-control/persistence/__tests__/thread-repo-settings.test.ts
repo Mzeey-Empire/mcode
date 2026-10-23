@@ -43,14 +43,14 @@ describe("ThreadRepo.updateSettings", () => {
   });
 
   it("persists model, provider, and supplied settings together while retaining omitted values", () => {
-    repo.updateSettings(threadId, { reasoning_level: "high", thinking: true, codex_fast_mode: true });
+    repo.updateSettings(threadId, { reasoning_level: "high", thinking: true, fast_mode: true });
 
     expect(repo.updateSettings(threadId, {
       model: "gpt-5.6-luna",
       provider: "codex",
       permission_mode: "full",
       thinking: false,
-      codex_fast_mode: null,
+      fast_mode: null,
     })).toBe(true);
 
     expect(repo.findById(threadId)).toMatchObject({
@@ -59,7 +59,7 @@ describe("ThreadRepo.updateSettings", () => {
       permission_mode: "full",
       reasoning_level: "high",
       thinking: false,
-      codex_fast_mode: null,
+      fast_mode: null,
     });
     repo.updateSettings(threadId, { model: "gpt-5.6-sol" });
     expect(repo.findById(threadId)).toMatchObject({ model: "gpt-5.6-sol", provider: "codex", permission_mode: "full" });
@@ -87,6 +87,17 @@ describe("ThreadRepo.updateSettings", () => {
     const before = repo.findById(threadId);
     expect(repo.updateSettings(threadId, {})).toBe(false);
     expect(repo.findById(threadId)).toEqual(before);
+  });
+
+  it("writes Fast to codex_fast_mode too, so older builds sharing the database read it", () => {
+    const stored = () => db.prepare("SELECT fast_mode, codex_fast_mode FROM threads WHERE id = ?").get(threadId);
+
+    repo.updateSettings(threadId, { fast_mode: true });
+    expect(stored()).toEqual({ fast_mode: 1, codex_fast_mode: 1 });
+    repo.updateSettings(threadId, { fast_mode: false });
+    expect(stored()).toEqual({ fast_mode: 0, codex_fast_mode: 0 });
+    repo.updateSettings(threadId, { fast_mode: null });
+    expect(stored()).toEqual({ fast_mode: null, codex_fast_mode: null });
   });
 
   it("returns false for nonexistent thread", () => {

@@ -445,7 +445,7 @@ interface ThreadState {
   // Message actions
   loadOlderMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
   loadNewerMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string, planCommentIds?: string[]) => Promise<boolean>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, fastMode?: boolean, replyToMessageId?: string, quotedText?: string, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string, planCommentIds?: string[]) => Promise<boolean>;
   /** Remove one durably cancelled message from the resident thread transcript. */
   removePersistedMessage: (threadId: string, messageId: string) => void;
   stopAgent: (threadId: string) => Promise<void>;
@@ -789,7 +789,7 @@ export async function sendQueuedMessage(threadId: string, message: QueuedMessage
       message.provider,
       message.contextWindow,
       message.thinking,
-      message.codexFastMode,
+      message.fastMode,
       undefined,
       undefined,
       message.mentions,
@@ -1006,11 +1006,11 @@ const DEFAULT_THREAD_SETTINGS: ThreadSettings = {
 /** Maps the composer-scoped nullable fields of a workspace thread row. */
 function nullableThreadFields(
   thread: ReturnType<typeof useWorkspaceStore.getState>["threads"][number],
-): Pick<ThreadSettings, "contextWindow" | "thinking" | "codexFastMode" | "devinMode" | "defaultOpenInApp"> {
+): Pick<ThreadSettings, "contextWindow" | "thinking" | "fastMode" | "devinMode" | "defaultOpenInApp"> {
   return {
     contextWindow: (thread.context_window_mode as ContextWindowMode | null) ?? null,
     thinking: thread.thinking ?? null,
-    codexFastMode: thread.codex_fast_mode ?? null,
+    fastMode: thread.fast_mode ?? null,
     devinMode: thread.devin_mode ?? null,
     defaultOpenInApp: thread.default_open_in_app ?? null,
   };
@@ -2960,7 +2960,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   ): void => {
     if ("contextWindow" in source) target.contextWindow = source.contextWindow;
     if ("thinking" in source) target.thinking = source.thinking;
-    if ("codexFastMode" in source) target.codexFastMode = source.codexFastMode;
+    if ("fastMode" in source) target.fastMode = source.fastMode;
     if ("devinMode" in source) target.devinMode = source.devinMode;
     if ("defaultOpenInApp" in source) target.defaultOpenInApp = source.defaultOpenInApp;
   };
@@ -2997,7 +2997,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     thread: ReturnType<typeof useWorkspaceStore.getState>["threads"][number],
     patch: Partial<ThreadSettings>,
   ) => {
-    if ("codexFastMode" in patch) thread = { ...thread, codex_fast_mode: patch.codexFastMode ?? null };
+    if ("fastMode" in patch) thread = { ...thread, fast_mode: patch.fastMode ?? null };
     if ("defaultOpenInApp" in patch) thread = { ...thread, default_open_in_app: patch.defaultOpenInApp ?? null };
     return thread;
   };
@@ -3020,7 +3020,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const nullableThreadSettingsPatch = (patch: Partial<ThreadSettings>) => ({
     ...("contextWindow" in patch ? { contextWindow: patch.contextWindow } : {}),
     ...("thinking" in patch ? { thinking: patch.thinking } : {}),
-    ...("codexFastMode" in patch ? { codexFastMode: patch.codexFastMode } : {}),
+    ...("fastMode" in patch ? { fastMode: patch.fastMode } : {}),
     ...("devinMode" in patch ? { devinMode: patch.devinMode } : {}),
     ...("defaultOpenInApp" in patch ? { defaultOpenInApp: patch.defaultOpenInApp } : {}),
   });
@@ -3190,14 +3190,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     orchestrationMode: OrchestrationMode | undefined,
     contextWindow: ContextWindowMode | undefined,
     thinking: boolean | undefined,
-    codexFastMode: boolean | undefined,
+    fastMode: boolean | undefined,
   ): Partial<ThreadRecord> => {
     const patch: Partial<ThreadSettings> = {};
     if (reasoningLevel !== undefined) patch.reasoningLevel = reasoningLevel;
     if (orchestrationMode !== undefined) patch.orchestrationMode = orchestrationMode;
     if (contextWindow !== undefined) patch.contextWindow = contextWindow;
     if (thinking !== undefined) patch.thinking = thinking;
-    if (codexFastMode !== undefined) patch.codexFastMode = codexFastMode;
+    if (fastMode !== undefined) patch.fastMode = fastMode;
     return Object.keys(patch).length > 0 ? { settings: { ...current, ...patch } } : {};
   };
 
@@ -3211,14 +3211,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const applyOptimisticSend = (
     threadId: string, message: Message, isControlCommand: boolean, responseKey: string,
     reasoningLevel: ReasoningLevel | undefined, orchestrationMode: OrchestrationMode | undefined,
-    contextWindow: ContextWindowMode | undefined, thinking: boolean | undefined, codexFastMode: boolean | undefined,
+    contextWindow: ContextWindowMode | undefined, thinking: boolean | undefined, fastMode: boolean | undefined,
   ): void => {
     set((state) => {
       const record = getThreadRecord(state.records, threadId);
       return {
         records: patchThreadRecord(state.records, threadId, {
           ...resetTurnEphemeral(record),
-          ...sendSettingsPatch(state.getThreadSettings(threadId), reasoningLevel, orchestrationMode, contextWindow, thinking, codexFastMode),
+          ...sendSettingsPatch(state.getThreadSettings(threadId), reasoningLevel, orchestrationMode, contextWindow, thinking, fastMode),
           ...optimisticMessageWindowPatch(state, threadId, message),
           agentStartTime: Date.now(), fileEffectSummary: { revision: 0, fileCount: 0, additions: 0, deletions: 0, effects: [] },
           currentTurnResponseKey: responseKey, ...(isControlCommand ? {} : { turnExecutionId: null, optimisticUserMessageId: message.id }),
@@ -3730,7 +3730,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId, resendOfSteerId, planCommentIds) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, fastMode, replyToMessageId, quotedText, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId, resendOfSteerId, planCommentIds) => {
     conversationResidency.invalidateConversation(threadId);
 
     const { isControlCommand, runningBeforeControl } = prepareOutgoingTurn(threadId, content);
@@ -3743,7 +3743,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     );
     applyOptimisticSend(
       threadId, userMessage, isControlCommand, optimisticTurnResponseKey,
-      reasoningLevel, orchestrationMode, contextWindow, thinking, codexFastMode,
+      reasoningLevel, orchestrationMode, contextWindow, thinking, fastMode,
     );
 
     try {
@@ -3762,7 +3762,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         interactionMode,
         contextWindow,
         thinking,
-        codexFastMode,
+        fastMode,
         replyToMessageId,
         quotedText,
         mentions,

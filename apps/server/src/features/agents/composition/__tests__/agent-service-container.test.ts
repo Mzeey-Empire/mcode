@@ -149,14 +149,14 @@ describe("AgentService container composition", () => {
 
     await container.resolve(AgentService).sendMessage({
       threadId: thread.id, content: "hello", provider: "codex", model: "gpt-5.6-luna",
-      permissionMode: "full", reasoningLevel: "high", codexFastMode: false,
+      permissionMode: "full", reasoningLevel: "high", fastMode: false,
     });
     await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
 
     expect(providerError).toBeUndefined();
     expect(threads.findById(thread.id)).toMatchObject({
       provider: "codex", model: "gpt-5.6-luna", permission_mode: "full",
-      reasoning_level: "high", codex_fast_mode: false, thinking: true,
+      reasoning_level: "high", fast_mode: false, thinking: true,
     });
     expect(pushes.filter((push) => push.channel === "thread.modelUpdated")).toEqual([
       { type: "push", channel: "thread.modelUpdated", data: { threadId: thread.id, model: "gpt-5.6-luna", provider: "codex" } },
@@ -384,7 +384,7 @@ describe("AgentService container composition", () => {
 
     await container.resolve(AgentService).sendMessage({
       threadId: thread.id, content: "hello", provider: "codex", model: "gpt-5.6-luna",
-      permissionMode: "full", reasoningLevel: "high", codexFastMode: false,
+      permissionMode: "full", reasoningLevel: "high", fastMode: false,
     });
     await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
 

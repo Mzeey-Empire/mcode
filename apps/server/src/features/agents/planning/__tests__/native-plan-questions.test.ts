@@ -74,7 +74,7 @@ function createProvider(child: NativeProcess) {
       mcode: { attach: async () => null, close: async () => {} }, grants: { consume: () => false },
       events: { submit: async () => { throw new Error("Unexpected canonical event"); } },
     },
-    codex: { settings: { get: async () => ({ cliPath: "codex", fastMode: false }) },
+    codex: { settings: { get: async () => ({ cliPath: "codex" }) },
       attachments: { persistGeneratedImageFromPath: () => { throw new Error("Unexpected image"); } },
       catalog: { listModels: async () => [], currentSkills: () => [], currentPrompts: () => [],
         refreshCustomPrompts: async () => ({ prompts: [] }), shutdown: async () => {} } },

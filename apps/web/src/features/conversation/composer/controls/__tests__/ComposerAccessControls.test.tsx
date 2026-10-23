@@ -14,7 +14,7 @@ const selection: ComposerAgentSelection = {
   orchestrationMode: "standard",
   contextWindow: null,
   thinking: null,
-  codexFastMode: null,
+  fastMode: null,
   devinMode: null,
 };
 

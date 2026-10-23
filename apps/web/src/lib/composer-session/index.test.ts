@@ -13,7 +13,7 @@ const threadSettings = {
   permissionMode: PERMISSION_MODES.SUPERVISED,
   contextWindow: "1m" as const,
   thinking: true,
-  codexFastMode: false,
+  fastMode: false,
   devinMode: null,
 };
 
@@ -40,7 +40,7 @@ describe("resolveComposerSession", () => {
       modelId: "claude-sonnet-4-20250514",
       provider: "claude",
       reasoning: "medium",
-      codexFastMode: true,
+      fastMode: true,
     };
 
     const session = resolveComposerSession({
@@ -54,7 +54,7 @@ describe("resolveComposerSession", () => {
     expect(session.input).toBe("hello draft");
     expect(session.modelId).toBe("claude-sonnet-4-20250514");
     expect(session.interactionMode).toBe(INTERACTION_MODES.PLAN);
-    expect(session.codexFastMode).toBe(true);
+    expect(session.fastMode).toBe(true);
   });
 
   it("restores saved cards and an open editor without sharing their source ranges", () => {
@@ -135,7 +135,7 @@ describe("resolveComposerSession", () => {
         permission_mode: "full",
         context_window_mode: null,
         thinking: null,
-        codex_fast_mode: null,
+        fast_mode: null,
       } as never,
       threadSettings,
       globalDefaults,

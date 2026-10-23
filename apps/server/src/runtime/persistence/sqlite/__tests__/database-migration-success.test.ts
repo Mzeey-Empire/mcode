@@ -147,6 +147,44 @@ describe("successful database migration recovery", () => {
     } finally { db.close(true); }
   });
 
+  it("copies every thread's Fast value into fast_mode and keeps it current when an older build writes only codex_fast_mode", () => {
+    const current = NodePath.join(process.cwd(), "drizzle");
+    const previous = NodePath.join(directory, "drizzle-through-0097");
+    copyMigrationsThrough(current, previous, "0097_parallel_madelyne_pryor");
+    const db = new Database(databasePath, { strict: true });
+    try {
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(previous) });
+      db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run("ws", "Workspace", "/fixture");
+      const insertThread = db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, codex_fast_mode) VALUES (?, ?, ?, ?, 'codex', ?)");
+      insertThread.run("fast", "ws", "Fast", "main", 1);
+      insertThread.run("standard", "ws", "Standard", "main", 0);
+      insertThread.run("inherit", "ws", "Inherit", "main", null);
+
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
+      const fastModes = db.prepare("SELECT id, fast_mode, codex_fast_mode FROM threads ORDER BY id");
+      expect(fastModes.all()).toEqual([
+        { id: "fast", fast_mode: 1, codex_fast_mode: 1 },
+        { id: "inherit", fast_mode: null, codex_fast_mode: null },
+        { id: "standard", fast_mode: 0, codex_fast_mode: 0 },
+      ]);
+
+      // Writes shaped like a build that predates fast_mode.
+      db.prepare("UPDATE threads SET codex_fast_mode = 0 WHERE id = 'fast'").run();
+      db.prepare("UPDATE threads SET codex_fast_mode = NULL WHERE id = 'standard'").run();
+      insertThread.run("older-build", "ws", "Older build", "main", 1);
+      expect(fastModes.all()).toEqual([
+        { id: "fast", fast_mode: 0, codex_fast_mode: 0 },
+        { id: "inherit", fast_mode: null, codex_fast_mode: null },
+        { id: "older-build", fast_mode: 1, codex_fast_mode: 1 },
+        { id: "standard", fast_mode: null, codex_fast_mode: null },
+      ]);
+
+      // A newer build's insert that sets only fast_mode must keep it.
+      db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, fast_mode) VALUES ('newer-build', 'ws', 'Newer', 'main', 'claude', 1)").run();
+      expect(db.prepare("SELECT fast_mode FROM threads WHERE id = 'newer-build'").get()).toEqual({ fast_mode: 1 });
+    } finally { db.close(true); }
+  });
+
   afterEach(() => {
     if (originalMigrationsDirectory === undefined) {
       delete process.env.MCODE_DRIZZLE_MIGRATIONS_DIR;

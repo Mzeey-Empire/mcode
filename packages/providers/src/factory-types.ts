@@ -56,7 +56,7 @@ export type CopilotProviderBoundary = IAgentProvider & ProviderBoundary & {
 /** Server-owned authorities required by the Codex Provider. */
 export interface CodexProviderPorts {
   settings: {
-    get(): { cliPath: string; fastMode: boolean } | Promise<{ cliPath: string; fastMode: boolean }>;
+    get(): { cliPath: string } | Promise<{ cliPath: string }>;
   };
   attachments: {
     persistGeneratedImageFromPath(threadId: string, sourcePath: string): StoredAttachment;

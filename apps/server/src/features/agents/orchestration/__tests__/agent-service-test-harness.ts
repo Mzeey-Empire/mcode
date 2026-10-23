@@ -281,6 +281,7 @@ export function createAgentServiceForTest(
     workspaceEnvironmentService,
     fileService,
     "linux",
+    { listModels: (providerId) => providerRegistry.resolve(providerId).listModels() },
     undefined,
     undefined,
     providerSwitch,

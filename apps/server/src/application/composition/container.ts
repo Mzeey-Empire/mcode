@@ -270,10 +270,7 @@ export async function setupContainer(mcodeDir: string): Promise<typeof container
       settings: {
         get: () => {
           const settings = container.resolve(SettingsService).get();
-          return {
-            cliPath: settings.provider.cli.codex || "codex",
-            fastMode: settings.provider.codex?.fastMode === true,
-          };
+          return { cliPath: settings.provider.cli.codex || "codex" };
         },
       },
       attachments: container.resolve(AttachmentService),

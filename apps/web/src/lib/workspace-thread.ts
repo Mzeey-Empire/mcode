@@ -55,7 +55,7 @@ type PlaceholderWorkspaceThreadParams = {
   permissionMode?: Thread["permission_mode"];
   contextWindow?: ContextWindowMode | null;
   thinking?: boolean | null;
-  codexFastMode?: boolean | null;
+  fastMode?: boolean | null;
   devinMode?: Thread["devin_mode"];
   parentThreadId?: string | null;
   forkedFromMessageId?: string | null;
@@ -90,7 +90,7 @@ function resolveProviderOptionFields(params: PlaceholderWorkspaceThreadParams) {
     permission_mode: params.permissionMode ?? null,
     context_window_mode: params.contextWindow ?? null,
     thinking: params.thinking ?? null,
-    codex_fast_mode: params.codexFastMode ?? null,
+    fast_mode: params.fastMode ?? null,
     devin_mode: params.devinMode ?? null,
     parent_thread_id: params.parentThreadId ?? null,
     delegation_coordinator_thread_id: null,

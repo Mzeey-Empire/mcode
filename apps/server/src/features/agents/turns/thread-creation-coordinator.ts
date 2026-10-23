@@ -84,7 +84,7 @@ export interface CreateThreadForTurnInput {
   orchestrationMode?: OrchestrationMode;
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
-  codexFastMode?: boolean;
+  fastMode?: boolean;
   devinMode?: DevinMode;
 }
 
@@ -113,7 +113,7 @@ interface BranchedInitialTurnParams {
   maxTurns?: number;
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
-  codexFastMode?: boolean;
+  fastMode?: boolean;
   devinMode?: DevinMode;
   displayContent?: string;
   mentions: SendMessageCommand["mentions"];
@@ -293,7 +293,7 @@ export class ThreadCreationCoordinator {
 
       contextWindow: contextWindowMode,
       thinking,
-      codexFastMode,
+      fastMode,
       devinMode,
       displayContent,
       mentions = [],
@@ -307,7 +307,7 @@ export class ThreadCreationCoordinator {
       existingWorktreePath, existingWorktreeBaseBranch, attachments, reasoningLevel,
       provider, interactionMode, parentThreadId, forkedFromMessageId,
       title: command.title ?? titleFrom(displayContent ?? content), maxBudgetUsd, maxTurns,
-      contextWindowMode, thinking, codexFastMode, devinMode, displayContent, mentions,
+      contextWindowMode, thinking, fastMode, devinMode, displayContent, mentions,
       previewAnnotations, selectedTextComments, goalObjective, orchestrationMode,
     };
     return params;
@@ -335,7 +335,7 @@ export class ThreadCreationCoordinator {
       orchestrationMode: params.orchestrationMode,
       contextWindowMode: params.contextWindowMode,
       thinking: params.thinking,
-      codexFastMode: params.codexFastMode,
+      fastMode: params.fastMode,
       devinMode: params.devinMode,
     };
     try {
@@ -495,7 +495,7 @@ export class ThreadCreationCoordinator {
       selectedTextComments: params.selectedTextComments,
       goalObjective: params.goalObjective,
       orchestrationMode: params.orchestrationMode,
-      codexFastMode: params.codexFastMode,
+      fastMode: params.fastMode,
       devinMode: params.devinMode,
     });
   }
@@ -688,9 +688,7 @@ export class ThreadCreationCoordinator {
 
   private fastModeSetting(created: Thread, input: CreateThreadForTurnInput) {
     return {
-      codex_fast_mode: input.provider === "codex" && input.codexFastMode !== undefined
-        ? input.codexFastMode
-        : created.codex_fast_mode,
+      fast_mode: input.fastMode ?? created.fast_mode,
     };
   }
 
@@ -706,12 +704,12 @@ export class ThreadCreationCoordinator {
       ...(input.permissionMode !== "default" && { permission_mode: input.permissionMode }),
       ...(input.contextWindowMode !== undefined && { context_window_mode: input.contextWindowMode }),
       ...(input.thinking !== undefined && { thinking: input.thinking }),
+      ...(input.fastMode !== undefined && { fast_mode: input.fastMode }),
     };
   }
 
   private providerScopedSettings(input: CreateThreadForTurnInput) {
     return {
-      ...(input.provider === "codex" && input.codexFastMode !== undefined && { codex_fast_mode: input.codexFastMode }),
       ...(input.provider === "devin" && input.devinMode !== undefined && { devin_mode: input.devinMode }),
     };
   }
@@ -777,7 +775,7 @@ export class ThreadCreationCoordinator {
       title: params.title,
       contextWindowMode: params.contextWindowMode,
       thinking: params.thinking,
-      codexFastMode: params.codexFastMode,
+      fastMode: params.fastMode,
       devinMode: params.devinMode,
       orchestrationMode: params.orchestrationMode,
     }, this.branchedLifecycle(startup));
@@ -805,7 +803,7 @@ export class ThreadCreationCoordinator {
         maxTurns: params.maxTurns,
         contextWindow: provisioned.contextWindowMode,
         thinking: provisioned.thinking,
-        codexFastMode: provisioned.codexFastMode,
+        fastMode: provisioned.fastMode,
         devinMode: provisioned.devinMode,
         providerWireOverride,
         handoffPreamble: provisioned.handoffPreamble,

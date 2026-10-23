@@ -80,7 +80,7 @@ function createPersistentQueuePayload(
     provider: selection.provider,
     contextWindow: selection.contextWindow ?? undefined,
     thinking: selection.thinking ?? undefined,
-    codexFastMode: optionalCodexFastMode(selection),
+    fastMode: optionalFastMode(selection),
     devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
     goalObjective: submission.goalObjective,
     browserCaptureSpillPaths: browserCaptureSpillPaths.length > 0 ? browserCaptureSpillPaths : undefined,
@@ -93,6 +93,6 @@ function optionalMentions(mentions: MessageMention[]): MessageMention[] | undefi
 }
 
 /** Keeps fast-mode metadata scoped to Codex submissions. */
-function optionalCodexFastMode(selection: ComposerAgentSelection): boolean | undefined {
-  return selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined;
+function optionalFastMode(selection: ComposerAgentSelection): boolean | undefined {
+  return selection.provider === "codex" ? selection.fastMode ?? undefined : undefined;
 }

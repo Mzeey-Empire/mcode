@@ -175,7 +175,7 @@ export class ThreadService {
       permission_mode?: string;
       context_window_mode?: ContextWindowMode | null;
       thinking?: boolean | null;
-      codex_fast_mode?: boolean | null;
+      fast_mode?: boolean | null;
       default_open_in_app?: string | null;
     },
   ): Promise<boolean> {
@@ -186,7 +186,7 @@ export class ThreadService {
       ...(settings.permission_mode !== undefined && { permission_mode: settings.permission_mode }),
       ...("context_window_mode" in settings && { context_window_mode: settings.context_window_mode }),
       ...("thinking" in settings && { thinking: settings.thinking }),
-      ...("codex_fast_mode" in settings && { codex_fast_mode: settings.codex_fast_mode }),
+      ...("fast_mode" in settings && { fast_mode: settings.fast_mode }),
       ...("default_open_in_app" in settings && { default_open_in_app: settings.default_open_in_app }),
     });
   }

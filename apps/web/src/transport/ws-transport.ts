@@ -1128,7 +1128,7 @@ export function createWsTransport(
         permissionMode: settings.permissionMode,
         contextWindow: settings.contextWindow,
         thinking: settings.thinking,
-        codexFastMode: settings.codexFastMode,
+        fastMode: settings.fastMode,
         devinMode: settings.devinMode,
         defaultOpenInApp: settings.defaultOpenInApp,
       }),

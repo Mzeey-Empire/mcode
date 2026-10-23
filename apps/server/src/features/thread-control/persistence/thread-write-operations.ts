@@ -8,7 +8,7 @@ const settings = z.object({
   reasoning_level: z.string().optional(), interaction_mode: z.string().optional(),
   orchestration_mode: z.string().optional(), permission_mode: z.string().optional(),
   context_window_mode: ContextWindowModeSchema.nullable().optional(),
-  thinking: z.boolean().nullable().optional(), codex_fast_mode: z.boolean().nullable().optional(),
+  thinking: z.boolean().nullable().optional(), fast_mode: z.boolean().nullable().optional(),
   devin_mode: z.string().nullable().optional(),
   default_open_in_app: z.string().nullable().optional(),
 });

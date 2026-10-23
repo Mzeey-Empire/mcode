@@ -33,7 +33,7 @@ interface ModelPreferenceState {
   hasFast: boolean;
   contextWindow: ContextWindowMode;
   thinking: boolean;
-  codexFastMode: boolean;
+  fastMode: boolean;
   reasoningLevels: ReasoningLevel[];
   preferenceLabel: string;
   preferenceTooltip: string;
@@ -56,12 +56,12 @@ function supportsClaudeModelOption(
   return provider === "claude" && supportsOption(modelId);
 }
 
-function getCodexFastMode(
+function getFastMode(
   selection: ComposerAgentSelection,
   defaults: ComposerModelPreferenceDefaults,
 ): boolean {
-  if (selection.codexFastMode === null) return defaults.globalCodexFast;
-  return selection.codexFastMode;
+  if (selection.fastMode === null) return defaults.globalCodexFast;
+  return selection.fastMode;
 }
 
 function getContextWindow(
@@ -90,7 +90,7 @@ function hasAvailablePreference(
 function getPreferenceLabel(state: Omit<ModelPreferenceState, "preferenceLabel" | "preferenceTooltip" | "canShowPreferences">, selection: ComposerAgentSelection): string {
   if (state.reasoningLevels.length > 0) return formatReasoningLabel(selection.reasoning);
   if (state.hasThinking) return "Thinking";
-  if (state.hasFast) return state.codexFastMode ? "Fast" : "Off";
+  if (state.hasFast) return state.fastMode ? "Fast" : "Off";
   return state.contextWindow === "1m" ? "1M" : "200K";
 }
 
@@ -120,8 +120,8 @@ function getModelPreferenceState(
   const hasFast = model?.supportsFastMode === true;
   const contextWindow = getContextWindow(selection, defaults);
   const thinking = getThinking(selection, defaults);
-  const codexFastMode = getCodexFastMode(selection, defaults);
-  const baseState = { has1M, hasThinking, hasFast, contextWindow, thinking, codexFastMode, reasoningLevels };
+  const fastMode = getFastMode(selection, defaults);
+  const baseState = { has1M, hasThinking, hasFast, contextWindow, thinking, fastMode, reasoningLevels };
   return {
     ...baseState,
     preferenceLabel: getPreferenceLabel(baseState, selection),
@@ -142,7 +142,7 @@ export function hasModelPreferences(
 function ComposerModelPreferenceSummaryContent({ state }: { state: ModelPreferenceState }) {
   return (
     <>
-      {state.hasFast && state.codexFastMode && (
+      {state.hasFast && state.fastMode && (
         <Zap
           size={12}
           aria-hidden="true"
@@ -248,14 +248,14 @@ function ComposerOptionToggles({
       {state.hasFast && (
         <ComposerOptionToggle
           label="Fast"
-          pressed={state.codexFastMode}
+          pressed={state.fastMode}
           onPressedChange={(checked) => {
-            const codexFastMode = checked === actionProps.defaults.globalCodexFast ? null : checked;
-            actionProps.onSelectionChange({ codexFastMode });
-            persistThreadSetting(actionProps, { codexFastMode }, { skipForks: true });
+            const fastMode = checked === actionProps.defaults.globalCodexFast ? null : checked;
+            actionProps.onSelectionChange({ fastMode });
+            persistThreadSetting(actionProps, { fastMode }, { skipForks: true });
           }}
         >
-          <Zap aria-hidden="true" className={cn("size-3.5", state.codexFastMode && "fill-current")} />
+          <Zap aria-hidden="true" className={cn("size-3.5", state.fastMode && "fill-current")} />
         </ComposerOptionToggle>
       )}
       {state.has1M && (
