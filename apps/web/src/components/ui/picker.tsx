@@ -11,7 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { CheckIcon, SearchIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, SearchIcon } from "lucide-react";
 
 import { formatKeybinding } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
@@ -46,6 +46,8 @@ export interface PickerRow {
   readonly description?: ReactNode;
   /** A secondary action on the row, such as starring it. Running it never picks the row. */
   readonly action?: PickerRowAction;
+  /** Makes the row a disclosure whose pick shows or hides the rows after it, drawn with a chevron. */
+  readonly expanded?: boolean;
   /** Rows sharing a group sit together; a divider marks where the group changes. */
   readonly group?: string;
   /** Text heading drawn before the first row of this row's group, in place of the divider. */
@@ -559,6 +561,7 @@ function PickerOptionItem({ id, row, digit, active, selected, selectedCheck, onH
       role="option"
       aria-selected={selected}
       aria-disabled={row.disabled || undefined}
+      aria-expanded={row.expanded}
       aria-describedby={descriptions.describedBy}
       aria-keyshortcuts={descriptions.keyShortcuts}
       data-active={active || undefined}
@@ -596,6 +599,7 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
         ) : null}
       </span>
       {row.tag ? <span className="max-w-[60%] min-w-0 text-caption text-fade text-muted">{row.tag}</span> : null}
+      <PickerDisclosureChevron expanded={row.expanded} />
       {digit !== undefined ? (
         <span aria-hidden className="shrink-0 text-muted">
           <Kbd variant="keycap">{formatKeybinding(`mod+${digit}`, isMac)}</Kbd>
@@ -608,6 +612,16 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
         </span>
       ) : null}
     </>
+  );
+}
+
+function PickerDisclosureChevron({ expanded }: { readonly expanded: boolean | undefined }) {
+  if (expanded === undefined) return null;
+  const Chevron = expanded ? ChevronDownIcon : ChevronRightIcon;
+  return (
+    <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center text-muted">
+      <Chevron className="size-[1.4rem]" />
+    </span>
   );
 }
 

@@ -351,4 +351,86 @@ describe("ModelSelector", () => {
     expect(goTo1).not.toHaveBeenCalled();
     expect(onSelect).toHaveBeenCalledWith("gpt-9-zeta", "codex");
   });
+
+  describe("legacy models", () => {
+    const LIVE_CLAUDE = [
+      { id: "claude-opus-5-5", name: "Claude Opus 5.5" },
+      { id: "claude-opus-5", name: "Claude Opus 5", lifecycle: "legacy" },
+      { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+      { id: "claude-sonnet-5", name: "Claude Sonnet 5", lifecycle: "legacy" },
+    ];
+
+    async function openClaudeTab(selectedModelId: string, onSelect = vi.fn()) {
+      listProviderModels.mockResolvedValue(LIVE_CLAUDE);
+      render(<ModelSelector selectedModelId={selectedModelId} selectedProviderId="claude"
+        onSelect={onSelect} locked={false} />);
+      await openPicker();
+      await waitFor(() => expect(optionNames()[0]).toBe("Claude Opus 5.5"));
+    }
+
+    it("folds legacy models behind a counted row that reveals and hides them in place", async () => {
+      const onSelect = vi.fn();
+      await openClaudeTab("claude-opus-5-5", onSelect);
+
+      expect(optionNames()).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5", "Legacy models2"]);
+      const fold = screen.getByRole("option", { name: /Legacy models/ });
+      expect(fold).toHaveAttribute("aria-expanded", "false");
+
+      await userEvent.click(fold);
+      expect(optionNames()).toEqual([
+        "Claude Opus 5.5", "Claude Sonnet 5.5", "Legacy models2", "Claude Opus 5", "Claude Sonnet 5",
+      ]);
+      expect(screen.getByRole("option", { name: /Legacy models/ })).toHaveAttribute("aria-expanded", "true");
+      expect(onSelect).not.toHaveBeenCalled();
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("option", { name: /Legacy models/ }));
+      expect(optionNames()).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5", "Legacy models2"]);
+    });
+
+    it("opens the fold with Enter from the search field", async () => {
+      await openClaudeTab("claude-opus-5-5");
+      await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus());
+
+      await userEvent.keyboard("{End}{Enter}");
+
+      expect(screen.getByRole("option", { name: /Claude Opus 5$/ })).toBeInTheDocument();
+    });
+
+    it("opens the fold on the selected legacy model so it is never hidden", async () => {
+      await openClaudeTab("claude-sonnet-5");
+
+      const selected = screen.getByRole("option", { selected: true });
+      expect(selected).toHaveTextContent("Claude Sonnet 5");
+      expect(screen.getByRole("option", { name: /Legacy models/ })).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("lists matching legacy models unfolded while searching", async () => {
+      await openClaudeTab("claude-opus-5-5");
+
+      await userEvent.type(screen.getByRole("combobox"), "sonnet");
+
+      expect(optionNames()).toEqual(["Claude Sonnet 5.5", "Claude Sonnet 5"]);
+    });
+
+    it("shows no fold for a catalog without legacy models", async () => {
+      listProviderModels.mockResolvedValue(LIVE_CLAUDE.filter((model) => model.lifecycle === undefined));
+      render(<ModelSelector selectedModelId="claude-opus-5-5" selectedProviderId="claude"
+        onSelect={vi.fn()} locked={false} />);
+      await openPicker();
+
+      await waitFor(() => expect(optionNames()).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5"]));
+    });
+
+    it("keeps a starred legacy model in Favourites", async () => {
+      useModelFavoritesStore.setState({
+        entries: [{ providerId: "claude", modelId: "claude-opus-5", label: "Claude Opus 5" }],
+      });
+      await openClaudeTab("claude-opus-5-5");
+
+      await userEvent.click(screen.getByRole("radio", { name: "Favourites" }));
+
+      expect(optionNames()).toEqual(["Claude Opus 5Claude"]);
+    });
+  });
 });
