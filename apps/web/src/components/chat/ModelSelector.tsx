@@ -8,6 +8,7 @@ import {
   findModelById,
   isModelAvailable,
   registerProviderModels,
+  toModelDefinition,
   type ModelProvider,
 } from "@/lib/model-registry";
 import { getTransport } from "@/transport";
@@ -94,6 +95,7 @@ interface ProviderModelCatalog {
 
 /** One model the picker can list, from a provider catalog or the favourites. */
 interface ModelOption {
+  readonly kind: "model";
   readonly modelId: string;
   readonly providerId: string;
   readonly label: string;
@@ -104,6 +106,25 @@ interface ModelOption {
   /** Favourites mix providers, so their rows name the provider under the model. */
   readonly showProvider: boolean;
 }
+
+/** The row at the end of a provider tab that shows or hides its legacy models. */
+interface LegacyFoldOption {
+  readonly kind: "legacy-fold";
+  readonly providerId: string;
+  readonly count: number;
+  readonly expanded: boolean;
+}
+
+type ModelPickerOption = ModelOption | LegacyFoldOption;
+
+/** Divides the legacy fold and the models behind it from the current models above. */
+const LEGACY_GROUP = "legacy";
+
+/**
+ * The fold follows the selected model until the user toggles it: `auto` opens it only when the
+ * selected model is legacy, so a thread's own model is never hidden behind it.
+ */
+type LegacyFoldState = "auto" | "open" | "closed";
 
 function findDisplayProvider(
   selectedProviderId: string | undefined,
@@ -272,16 +293,7 @@ function useProviderModelCatalog(): ProviderModelCatalog {
     setLoadingProviders((currentProviders) => new Set(currentProviders).add(providerId));
     try {
       const providerModels = await getTransport().listProviderModels(providerId);
-      const models: ModelProvider["models"] = providerModels.map((model) => ({
-        id: model.id,
-        label: model.name,
-        providerId,
-        group: model.group,
-        contextWindow: model.contextWindow,
-        supportedReasoningLevels: model.supportedReasoningEfforts,
-        defaultReasoningLevel: model.defaultReasoningEffort,
-        multiplier: model.multiplier,
-      }));
+      const models = providerModels.map((model) => toModelDefinition(providerId, model));
       const updatedModels = new Map(dynamicModelsRef.current).set(providerId, models);
       dynamicModelsRef.current = updatedModels;
       setDynamicModels(updatedModels);
@@ -368,23 +380,55 @@ function formatEndDate(availableUntil: string): string {
   });
 }
 
-function providerModelOptions(
+function isLegacyModel(model: ModelProvider["models"][number]): boolean {
+  return model.lifecycle === "legacy";
+}
+
+/** Whether the legacy fold shows its models, given the user's toggle and the selected model. */
+function isLegacyFoldExpanded(
+  foldState: LegacyFoldState,
+  models: ModelProvider["models"],
+  selectedModelId: string | undefined,
+): boolean {
+  if (foldState !== "auto") return foldState === "open";
+  return models.some((model) => isLegacyModel(model) && model.id === selectedModelId);
+}
+
+function catalogModelOptions(
   providerId: string,
   models: ModelProvider["models"],
-  searchQuery: string,
+  groupOverride?: string,
 ): ModelOption[] {
-  const filteredModels = filterModelsBySearchQuery(models, searchQuery);
-  const groups = groupModels(filteredModels) ?? [{ label: undefined, models: filteredModels }];
+  const groups = groupModels(models) ?? [{ label: undefined, models }];
   return groups.flatMap((group) =>
     group.models.map((model) => ({
+      kind: "model" as const,
       modelId: model.id,
       providerId,
       label: model.label,
-      group: group.label,
+      group: groupOverride ?? group.label,
       endedOn: accessEndedOn(model),
       showProvider: false,
     })),
   );
+}
+
+function providerModelOptions(
+  providerId: string,
+  models: ModelProvider["models"],
+  searchQuery: string,
+  legacyExpanded: boolean,
+): ModelPickerOption[] {
+  // A search reaches every model, so a legacy match is listed with the rest instead of behind the fold.
+  if (tokenizeSearch(searchQuery).length > 0) {
+    return catalogModelOptions(providerId, filterModelsBySearchQuery(models, searchQuery));
+  }
+  const currentOptions = catalogModelOptions(providerId, models.filter((model) => !isLegacyModel(model)));
+  const legacyModels = models.filter(isLegacyModel);
+  if (legacyModels.length === 0) return currentOptions;
+  const fold: LegacyFoldOption = { kind: "legacy-fold", providerId, count: legacyModels.length, expanded: legacyExpanded };
+  const legacyOptions = legacyExpanded ? catalogModelOptions(providerId, legacyModels, LEGACY_GROUP) : [];
+  return [...currentOptions, fold, ...legacyOptions];
 }
 
 function accessEndedOn(model: ModelProvider["models"][number]): string | undefined {
@@ -400,6 +444,7 @@ function favoriteModelOptions(
     const provider = MODEL_PROVIDERS.find((entry) => entry.id === favorite.providerId);
     const model = provider && getModels(provider).find((entry) => entry.id === favorite.modelId);
     return {
+      kind: "model" as const,
       modelId: favorite.modelId,
       providerId: favorite.providerId,
       label: favorite.label,
@@ -442,6 +487,16 @@ function favoriteAction(
     icon: <Star className={starred ? "fill-primary text-primary" : "text-ink"} />,
     pinned: starred,
     run: () => onToggle({ providerId: option.providerId, modelId: option.modelId, label: option.label }),
+  };
+}
+
+function legacyFoldRow(option: LegacyFoldOption): PickerRow {
+  return {
+    key: `${option.providerId}:legacy-fold`,
+    name: "Legacy models",
+    tag: String(option.count),
+    expanded: option.expanded,
+    group: LEGACY_GROUP,
   };
 }
 
@@ -507,6 +562,7 @@ export function ModelSelector({
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ModelPickerTab>(FAVORITES_TAB);
   const [query, setQuery] = useState("");
+  const [legacyFold, setLegacyFold] = useState<LegacyFoldState>("auto");
 
   const favorites = useModelFavoritesStore((store) => store.entries);
   const toggleFavorite = useModelFavoritesStore((store) => store.toggleFavorite);
@@ -538,16 +594,21 @@ export function ModelSelector({
     [favorites],
   );
 
-  const items = useMemo(() => {
+  const selectedModelInTab = presentation.selectedProviderId === activeTab ? presentation.normalizedModelId : undefined;
+  const items = useMemo((): ModelPickerOption[] => {
     if (activeTab === FAVORITES_TAB) {
       return favoriteModelOptions(filterFavoritesBySearchQuery(favoritesVisible, query), getModels);
     }
     const provider = MODEL_PROVIDERS.find((entry) => entry.id === activeTab);
-    return provider ? providerModelOptions(provider.id, getModels(provider), query) : [];
-  }, [activeTab, favoritesVisible, getModels, query]);
+    if (!provider) return [];
+    const models = getModels(provider);
+    const legacyExpanded = isLegacyFoldExpanded(legacyFold, models, selectedModelInTab);
+    return providerModelOptions(provider.id, models, query, legacyExpanded);
+  }, [activeTab, favoritesVisible, getModels, query, legacyFold, selectedModelInTab]);
 
   const renderItem = useCallback(
-    (option: ModelOption): PickerRow => {
+    (option: ModelPickerOption): PickerRow => {
+      if (option.kind === "legacy-fold") return legacyFoldRow(option);
       const key = optionKey(option.providerId, option.modelId);
       const starred = starredKeys.has(key);
       return {
@@ -569,11 +630,20 @@ export function ModelSelector({
     [starredKeys, toggleFavorite],
   );
 
-  useResetPickerOnOpen(open, providerLocked, displayProvider, defaultProviderId, setActiveTab, setQuery);
+  const showTab = useCallback((tab: ModelPickerTab) => {
+    setActiveTab(tab);
+    setLegacyFold("auto");
+  }, []);
+
+  useResetPickerOnOpen(open, providerLocked, displayProvider, defaultProviderId, showTab, setQuery);
   useFetchProviderModelsWhenOpen(open, locked, activeTab, favoritesVisible, fetchProviderModels);
 
-  const handleSelectModel = (modelId: string, providerId: string) => {
-    onSelect(modelId, providerId);
+  const handlePick = (option: ModelPickerOption) => {
+    if (option.kind === "legacy-fold") {
+      setLegacyFold(option.expanded ? "closed" : "open");
+      return;
+    }
+    onSelect(option.modelId, option.providerId);
     setOpen(false);
   };
 
@@ -616,7 +686,7 @@ export function ModelSelector({
           numberedShortcuts
           tabs={tabs}
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={showTab}
           query={query}
           onQueryChange={setQuery}
           searchPlaceholder="Search models"
@@ -629,7 +699,7 @@ export function ModelSelector({
               : undefined
           }
           renderItem={renderItem}
-          onSelect={(option) => handleSelectModel(option.modelId, option.providerId)}
+          onSelect={handlePick}
           footer={settings}
           hairlines={false}
           selectedCheck={false}

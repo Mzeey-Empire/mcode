@@ -112,6 +112,7 @@ describe("ModelRegistry", () => {
       contextWindowOptions: ["200k", "1m"],
       supportedReasoningLevels: ["low", "medium", "high", "xhigh", "max"],
       defaultReasoningLevel: "high",
+      lifecycle: "legacy",
     });
   });
 

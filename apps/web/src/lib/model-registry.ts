@@ -1,6 +1,6 @@
 import { useSettingsStore } from "@/stores/settingsStore";
 import { CLAUDE_STATIC_MODELS, CODEX_STATIC_MODELS, CURSOR_STATIC_MODEL_FALLBACK, DEVIN_STATIC_MODEL_FALLBACK, groupDevinModelFamilies } from "@mcode/contracts";
-import type { ContextWindowMode, ProviderModelInfo, ReasoningLevel } from "@mcode/contracts";
+import type { ContextWindowMode, ModelLifecycle, ProviderModelInfo, ReasoningLevel } from "@mcode/contracts";
 import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
   getModelContextWindow as sharedGetModelContextWindow,
@@ -56,6 +56,8 @@ export interface ModelDefinition {
   supportsFastMode?: boolean;
   /** Context windows the user can choose between. Absent means no choice. */
   contextWindowOptions?: readonly ContextWindowMode[];
+  /** Model generation. Absent means current; pickers fold legacy models away. */
+  lifecycle?: ModelLifecycle;
   /**
    * ISO date (YYYY-MM-DD) after which the model can no longer be selected.
    * Mcode authenticates via subscription credentials (never API keys), so a
@@ -92,6 +94,7 @@ export function toModelDefinition(providerId: string, model: ProviderModelInfo):
     defaultReasoningLevel: model.defaultReasoningEffort,
     supportsFastMode: model.supportsFastMode,
     contextWindowOptions: model.contextWindowOptions,
+    lifecycle: model.lifecycle,
   };
 }
 
