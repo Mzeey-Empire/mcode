@@ -17,7 +17,7 @@ const selection: ComposerAgentSelection = {
   orchestrationMode: "standard",
   contextWindow: null,
   thinking: null,
-  codexFastMode: null,
+  fastMode: null,
   devinMode: null,
 };
 
@@ -72,7 +72,7 @@ describe("ComposerModelControl", () => {
     await userEvent.click(screen.getByTestId("model-selector-trigger"));
     await userEvent.click(await screen.findByRole("button", { name: "Fast" }));
 
-    expect(onSelectionChange).toHaveBeenCalledWith({ codexFastMode: true });
+    expect(onSelectionChange).toHaveBeenCalledWith({ fastMode: true });
     expect(setThreadSettings).not.toHaveBeenCalled();
   });
 

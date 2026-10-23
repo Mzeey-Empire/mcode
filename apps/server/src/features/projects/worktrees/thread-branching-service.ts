@@ -43,7 +43,7 @@ export interface CreateBranchedThreadInput {
   title: string;
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
-  codexFastMode?: boolean;
+  fastMode?: boolean;
   devinMode?: DevinMode;
   orchestrationMode?: OrchestrationMode;
 }
@@ -54,7 +54,7 @@ export interface ProvisionedBranchedThread {
   handoffPreamble: string;
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
-  codexFastMode?: boolean;
+  fastMode?: boolean;
   devinMode?: DevinMode;
   warnings?: string[];
 }
@@ -74,7 +74,7 @@ type Fork = {
 type InheritedThreadSettings = {
   contextWindowMode: ContextWindowMode | undefined;
   thinking: boolean | undefined;
-  codexFastMode: boolean | undefined;
+  fastMode: boolean | undefined;
   devinMode: DevinMode | undefined;
 };
 
@@ -116,7 +116,7 @@ export class ThreadBranchingService {
       handoffPreamble: handoff.preamble,
       contextWindowMode: inherited.contextWindowMode,
       thinking: inherited.thinking,
-      codexFastMode: inherited.codexFastMode,
+      fastMode: inherited.fastMode,
       devinMode: inherited.devinMode,
       warnings: "warnings" in created ? created.warnings : undefined,
     };
@@ -164,7 +164,7 @@ export class ThreadBranchingService {
     return {
       contextWindowMode: input.contextWindowMode ?? parent.context_window_mode as ContextWindowMode | null ?? undefined,
       thinking: input.thinking ?? (parent.thinking === null ? undefined : Boolean(parent.thinking)),
-      codexFastMode: input.codexFastMode ?? parent.codex_fast_mode ?? undefined,
+      fastMode: input.fastMode ?? parent.fast_mode ?? undefined,
       devinMode: input.devinMode
         ?? (input.provider === "devin" ? parent.devin_mode ?? undefined : undefined),
     };
@@ -256,7 +256,7 @@ function threadSettings(
     ...permissionModeSetting(input),
     ...contextWindowModeSetting(inherited),
     ...thinkingSetting(inherited),
-    ...codexFastModeSetting(input, inherited),
+    ...fastModeSetting(inherited),
     ...devinModeSetting(input, inherited),
   };
 }
@@ -286,12 +286,8 @@ function thinkingSetting(inherited: InheritedThreadSettings) {
 }
 
 
-function codexFastModeSetting(
-  input: CreateBranchedThreadInput,
-  inherited: InheritedThreadSettings,
-) {
-  if (input.provider !== "codex" || inherited.codexFastMode === undefined) return {};
-  return { codex_fast_mode: inherited.codexFastMode };
+function fastModeSetting(inherited: InheritedThreadSettings) {
+  return inherited.fastMode === undefined ? {} : { fast_mode: inherited.fastMode };
 }
 
 function devinModeSetting(
@@ -317,20 +313,9 @@ function configuredChildThread(
     permission_mode: input.permissionMode === "default" ? thread.permission_mode : input.permissionMode,
     context_window_mode: inherited.contextWindowMode ?? thread.context_window_mode,
     thinking: inherited.thinking ?? thread.thinking,
-    codex_fast_mode: configuredCodexFastMode(thread, input, inherited),
+    fast_mode: inherited.fastMode ?? thread.fast_mode,
     devin_mode: configuredDevinMode(thread, input, inherited),
   };
-}
-
-function configuredCodexFastMode(
-  thread: Thread,
-  input: CreateBranchedThreadInput,
-  inherited: InheritedThreadSettings,
-) {
-  if (input.provider === "codex" && inherited.codexFastMode !== undefined) {
-    return inherited.codexFastMode;
-  }
-  return thread.codex_fast_mode;
 }
 
 function configuredDevinMode(

@@ -248,7 +248,7 @@ export function useComposerFormController({
     reasoning: selection.reasoning,
     contextWindow: undefined as ContextWindowMode | undefined,
     thinking: undefined as boolean | undefined,
-    codexFastMode: null as boolean | null,
+    fastMode: null as boolean | null,
     devinMode: null as DevinMode | null,
   });
   const agentSettingsTouchedRef = useRef(false);
@@ -568,7 +568,7 @@ export function useComposerFormController({
       reasoning: selection.reasoning,
       contextWindow: selection.contextWindow ?? undefined,
       thinking: selection.thinking ?? undefined,
-      codexFastMode: selection.codexFastMode,
+      fastMode: selection.fastMode,
       devinMode: selection.devinMode,
     };
   });
@@ -741,7 +741,7 @@ export function useComposerFormController({
       permissionMode: session.permissionMode,
       contextWindow: session.contextWindow,
       thinking: session.thinking,
-      codexFastMode: session.codexFastMode,
+      fastMode: session.fastMode,
       devinMode: session.devinMode,
     }));
     // Materializing a draft rebinds the owner mid-keystroke; rewriting the

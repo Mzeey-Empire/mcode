@@ -208,6 +208,13 @@ describe("composer-draft-storage", () => {
     }
   });
 
+  it("keeps the Fast choice of a draft saved before the fastMode rename", () => {
+    const stored = JSON.parse(JSON.stringify(serializeComposerDraft(baseDraft)));
+    expect(parseStoredComposerDraft({ ...stored, codexFastMode: true })?.fastMode).toBe(true);
+    expect(parseStoredComposerDraft({ ...stored, codexFastMode: false })?.fastMode).toBe(false);
+    expect(parseStoredComposerDraft({ ...stored, fastMode: false, codexFastMode: true })?.fastMode).toBe(false);
+  });
+
   it("rejects payloads that are not drafts", () => {
     expect(parseStoredComposerDraft(null)).toBeNull();
     expect(parseStoredComposerDraft("draft")).toBeNull();

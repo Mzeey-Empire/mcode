@@ -320,7 +320,7 @@ function updateThreadSettings(
     permissionMode?: string;
     contextWindow?: Thread["context_window_mode"];
     thinking?: boolean | null;
-    codexFastMode?: boolean | null;
+    fastMode?: boolean | null;
     defaultOpenInApp?: string | null;
   },
 ): Promise<boolean> {
@@ -331,7 +331,7 @@ function updateThreadSettings(
     permission_mode: params.permissionMode,
     context_window_mode: params.contextWindow,
     thinking: params.thinking,
-    codex_fast_mode: params.codexFastMode,
+    fast_mode: params.fastMode,
     default_open_in_app: params.defaultOpenInApp,
   });
 }

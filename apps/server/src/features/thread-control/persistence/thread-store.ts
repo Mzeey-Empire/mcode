@@ -146,12 +146,12 @@ function rowToThreadPreferences(row: ThreadRow): Pick<Thread,
 }
 
 function rowToThreadProviderSettings(row: ThreadRow): Pick<Thread,
-  "thinking" | "codex_fast_mode" | "devin_mode" | "default_open_in_app"
+  "thinking" | "fast_mode" | "devin_mode" | "default_open_in_app"
 > {
   return {
     thinking: row.thinking == null ? null : row.thinking === 1,
-    codex_fast_mode:
-      row.codexFastMode == null ? null : row.codexFastMode === 1,
+    fast_mode:
+      row.fastMode == null ? null : row.fastMode === 1,
     devin_mode: parseStoredDevinMode(row.devinMode),
     default_open_in_app: row.defaultOpenInApp ?? null,
   };
@@ -235,7 +235,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     permission_mode: null,
     context_window_mode: null,
     thinking: null,
-    codex_fast_mode: null,
+    fast_mode: null,
     devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: input.lineage?.parentThreadId ?? null,
@@ -347,7 +347,7 @@ type ThreadSettings = {
   permission_mode?: string;
   context_window_mode?: ContextWindowMode | null;
   thinking?: boolean | null;
-  codex_fast_mode?: boolean | null;
+  fast_mode?: boolean | null;
   devin_mode?: string | null;
   default_open_in_app?: string | null;
 };
@@ -366,7 +366,7 @@ const TEXT_SETTING_COLUMNS = [
 
 const BOOLEAN_SETTING_COLUMNS = [
   ["thinking", "thinking"],
-  ["codex_fast_mode", "codexFastMode"],
+  ["fast_mode", "fastMode"],
 ] as const satisfies readonly (readonly [keyof ThreadSettings, keyof typeof threads.$inferInsert])[];
 
 function buildSettingsSet(settings: ThreadSettings): Partial<typeof threads.$inferInsert> {
@@ -380,6 +380,8 @@ function buildSettingsSet(settings: ThreadSettings): Partial<typeof threads.$inf
     const value = settings[key];
     if (value !== undefined) set[column] = serializeBooleanOverride(value as boolean | null);
   }
+  // Builds before migration 0098 read only the legacy column; see the schema comment.
+  if (set.fastMode !== undefined) set.codexFastMode = set.fastMode;
   return set as Partial<typeof threads.$inferInsert>;
 }
 

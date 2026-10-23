@@ -19,7 +19,7 @@ export interface ComposerAgentSelection {
   orchestrationMode: OrchestrationMode;
   contextWindow: ContextWindowMode | null;
   thinking: boolean | null;
-  codexFastMode: boolean | null;
+  fastMode: boolean | null;
   devinMode: DevinMode | null;
 }
 
@@ -33,7 +33,7 @@ export interface ComposerSelectionState {
 type NullableSelectionField =
   | "contextWindow"
   | "thinking"
-  | "codexFastMode"
+  | "fastMode"
   | "devinMode";
 
 function retainCurrentWhenUndefined<Value>(current: Value, next: Value | undefined): Value {
@@ -69,7 +69,7 @@ function hasSameComposerAgentSelection(
   return hasSameCoreComposerAgentSelection(current, next)
     && current.contextWindow === next.contextWindow
     && current.thinking === next.thinking
-    && current.codexFastMode === next.codexFastMode
+    && current.fastMode === next.fastMode
     && current.devinMode === next.devinMode;
 }
 
@@ -85,7 +85,7 @@ export function createDefaultComposerAgentSelection(): ComposerAgentSelection {
     orchestrationMode: ORCHESTRATION_MODES.STANDARD,
     contextWindow: null,
     thinking: null,
-    codexFastMode: null,
+    fastMode: null,
     devinMode: null,
   };
 }
@@ -108,7 +108,7 @@ export function mergeComposerAgentSelection(
     ),
     contextWindow: readNullableSelectionPatch(current, patch, "contextWindow"),
     thinking: readNullableSelectionPatch(current, patch, "thinking"),
-    codexFastMode: readNullableSelectionPatch(current, patch, "codexFastMode"),
+    fastMode: readNullableSelectionPatch(current, patch, "fastMode"),
     devinMode: readNullableSelectionPatch(current, patch, "devinMode"),
   };
   return hasSameComposerAgentSelection(current, next) ? current : next;

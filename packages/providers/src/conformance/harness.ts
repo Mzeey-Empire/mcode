@@ -525,7 +525,7 @@ function validateBoundaryCapabilityProfiles(registration: ProviderConformanceReg
 
 function createFakeCodexPorts(): NonNullable<ProviderFactoryInput["codex"]> {
   return {
-    settings: { get: async () => ({ cliPath: "codex", fastMode: false }) },
+    settings: { get: async () => ({ cliPath: "codex" }) },
     attachments: { persistGeneratedImageFromPath: () => { throw new Error("unused"); } },
     catalog: {
       currentSkills: () => [],

@@ -49,7 +49,7 @@ function composerDraftForPendingCreation(
     provider: snapshot.selection.provider,
     reasoning: snapshot.selection.reasoning,
     contextWindow: snapshot.selection.contextWindow ?? undefined,
-    codexFastMode: snapshot.selection.codexFastMode,
+    fastMode: snapshot.selection.fastMode,
     devinMode: snapshot.selection.devinMode,
   });
 }
@@ -95,7 +95,7 @@ function createThreadForSubmission(
     selection.interactionMode,
     selection.contextWindow ?? undefined,
     selection.thinking ?? undefined,
-    scoped.codexFastMode,
+    scoped.fastMode,
     prepared.displayContent,
     snapshot.mentions,
     submission.previewAnnotations,
@@ -219,7 +219,7 @@ function branchThreadAgentOptions(selection: ComposerAgentSelection) {
     reasoningLevel: selection.reasoning,
     contextWindow: selection.contextWindow ?? undefined,
     thinking: selection.thinking ?? undefined,
-    codexFastMode: selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined,
+    fastMode: selection.provider === "codex" ? selection.fastMode ?? undefined : undefined,
     devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
     orchestrationMode: selection.orchestrationMode,
   };

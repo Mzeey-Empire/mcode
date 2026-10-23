@@ -31,6 +31,9 @@ import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../../orchestration/agent-turn-command-port.js";
 import { TurnAdmissionDispatchCoordinator, type SendMessageCommand, type TurnParentStartOwner, type TurnRuntimeAdmissionAuthority } from "../turn-admission-dispatch-coordinator.js";
 
+// No catalog model declares Fast, so these turns never carry `fastMode`.
+const noModels = { listModels: async () => [] };
+
 const day = 24 * 60 * 60 * 1000;
 let directory: string;
 let settings: SettingsService;
@@ -74,7 +77,7 @@ async function fixture(providerId: ProviderId = "codex", beforeCommit: () => Pro
     threads, workspaces, messages, new TurnRevertStore(db), worktrees, attachments, providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, writer, commands, canonical), undefined,
-    new FileService(workspaces, threads, worktrees, git, hostRuntime), hostRuntime.platform, owner,
+    new FileService(workspaces, threads, worktrees, git, hostRuntime), hostRuntime.platform, noModels, owner,
   );
   const runtime: TurnRuntimeAdmissionAuthority = {
     reserve: () => ({ threadId: thread.id, turnExecutionId: NodeCrypto.randomUUID(), mutationReservationToken: NodeCrypto.randomUUID(), generation: 1 }),

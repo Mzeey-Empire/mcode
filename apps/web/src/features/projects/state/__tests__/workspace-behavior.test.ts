@@ -57,7 +57,7 @@ const pendingComposerDraft: ComposerDraft = {
   provider: "codex",
   reasoning: "high",
   contextWindow: "1m",
-  codexFastMode: true,
+  fastMode: true,
 };
 
 function createMockCreateAndSendResult(
@@ -107,7 +107,7 @@ function expectPreparedCodexThread(
   expect(thread?.reasoning_level).toBe("high");
   expect(thread?.interaction_mode).toBe("plan");
   expect(thread?.permission_mode).toBe("full");
-  expect(thread?.codex_fast_mode).toBe(true);
+  expect(thread?.fast_mode).toBe(true);
 }
 
 function expectPreparedBranchThread(
@@ -1850,7 +1850,7 @@ describe("Workspace Behavior", () => {
           undefined,
           pendingComposerDraft.contextWindow,
           true,
-          pendingComposerDraft.codexFastMode ?? undefined,
+          pendingComposerDraft.fastMode ?? undefined,
           pendingComposerDraft.input,
           pendingComposerDraft.mentions,
           undefined,
@@ -1971,7 +1971,7 @@ describe("Workspace Behavior", () => {
         undefined,
         draft.contextWindow,
         true,
-        draft.codexFastMode ?? undefined,
+        draft.fastMode ?? undefined,
         draft.input,
         draft.mentions,
         undefined,
@@ -2004,7 +2004,7 @@ describe("Workspace Behavior", () => {
         undefined,
         retryDraft.contextWindow,
         true,
-        retryDraft.codexFastMode ?? undefined,
+        retryDraft.fastMode ?? undefined,
         retryDraft.input,
         retryDraft.mentions,
         undefined,
@@ -2055,7 +2055,7 @@ describe("Workspace Behavior", () => {
           undefined,
           draft.contextWindow,
           true,
-          draft.codexFastMode ?? undefined,
+          draft.fastMode ?? undefined,
           draft.input,
           draft.mentions,
           undefined,
@@ -2129,7 +2129,7 @@ describe("Workspace Behavior", () => {
         forkedFromMessageId: undefined,
         contextWindow: undefined,
         thinking: undefined,
-        codexFastMode: undefined,
+        fastMode: undefined,
         displayContent: undefined,
         mentions: undefined,
         previewAnnotations: undefined,
@@ -2205,7 +2205,7 @@ describe("Workspace Behavior", () => {
         forkedFromMessageId: undefined,
         contextWindow: undefined,
         thinking: undefined,
-        codexFastMode: undefined,
+        fastMode: undefined,
         displayContent: undefined,
         mentions: undefined,
         previewAnnotations: undefined,
@@ -2279,7 +2279,7 @@ describe("Workspace Behavior", () => {
         forkedFromMessageId: undefined,
         contextWindow: undefined,
         thinking: undefined,
-        codexFastMode: undefined,
+        fastMode: undefined,
         displayContent: undefined,
         mentions: undefined,
         previewAnnotations: undefined,
@@ -2591,7 +2591,7 @@ describe("Workspace Behavior", () => {
         forkedFromMessageId: undefined,
         contextWindow: undefined,
         thinking: undefined,
-        codexFastMode: undefined,
+        fastMode: undefined,
         displayContent: undefined,
         mentions: undefined,
         previewAnnotations: undefined,

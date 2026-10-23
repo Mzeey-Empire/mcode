@@ -44,6 +44,9 @@ import { TurnResumeScheduleStore } from "../turn-resume-schedule-store.js";
 import { TurnResumeScheduler, type TurnResumeSchedulerClock } from "../turn-resume-scheduler.js";
 import { RESUME_CONTINUATION_PROMPT } from "../turn-resume.js";
 
+// No catalog model declares Fast, so these turns never carry `fastMode`.
+const noModels = { listModels: async () => [] };
+
 const NOW = "2026-10-11T12:00:00.000Z";
 const THREAD_ID = "scheduled-thread";
 const TURN_ID = "limited-turn";
@@ -254,7 +257,7 @@ describe("TurnResumeScheduler", () => {
     const admission = new TurnAdmissionDispatchCoordinator(threads, workspaces, messageRepo, new TurnRevertStore(db),
       new GitWorktreeService(workspaces, new FakeGitExecutor(), hostRuntime), new AttachmentService(), providers,
       new ProviderAvailabilityService(settings, providers), boundary, settings, plans,
-      new GoalLifecycleService(threads, providers, writer, commands, boundary), undefined, undefined, hostRuntime.platform,
+      new GoalLifecycleService(threads, providers, writer, commands, boundary), undefined, undefined, hostRuntime.platform, noModels,
       { start: async ({ parentTurn }) => {
         if (reschedule) await scheduler.schedule(input("2026-10-11T12:02:00.000Z"));
         await boundary.startParentTurn(parentTurn);

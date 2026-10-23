@@ -1176,7 +1176,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       cliPath: settings.cliPath,
       sandbox: request.permissionMode === "full" ? "danger-full-access" : "workspace-write",
       browserPermissionCapability: providerBrowserPermissionCapability(request.permissionMode, request.interactionMode),
-      turnOptions: this.codexTurnOptions(request, settings.fastMode, nativePlan),
+      turnOptions: this.codexTurnOptions(request, nativePlan),
     };
   }
 
@@ -1206,8 +1206,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return [...nativeSkills, ...prompts];
   }
 
-  private codexTurnOptions(request: TurnRequest<"codex">, defaultFastMode: boolean, nativePlan: boolean): CodexTurnOptions {
-    const fastMode = request.providerOptions.fastMode ?? defaultFastMode;
+  /** Turn admission resolves the Fast default and omits it for models without Fast, so absent means standard. */
+  private codexTurnOptions(request: TurnRequest<"codex">, nativePlan: boolean): CodexTurnOptions {
+    const fastMode = request.providerOptions.fastMode === true;
     const effort = request.reasoningLevel;
     return {
       model: request.model || undefined,

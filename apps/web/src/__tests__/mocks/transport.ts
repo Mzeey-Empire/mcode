@@ -80,7 +80,7 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
     permission_mode: null,
     context_window_mode: null,
     thinking: null,
-    codex_fast_mode: null,
+    fast_mode: null,
     devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: null,

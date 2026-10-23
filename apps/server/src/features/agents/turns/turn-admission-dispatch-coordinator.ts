@@ -16,6 +16,7 @@ import {
   type MessageMention,
   type PermissionMode,
   type ProviderId,
+  type ProviderModelInfo,
   type SendMessageInput,
   type StoredAttachment,
   type SystemNoticeMetadata,
@@ -167,6 +168,11 @@ export interface TurnRuntimeAdmissionAuthority {
   owns(lease: TurnRuntimeLease): boolean;
 }
 
+/** The model catalog admission reads to learn whether the turn's model declares Fast. */
+export interface TurnModelCatalog {
+  listModels(providerId: ProviderId): Promise<ProviderModelInfo[]>;
+}
+
 /** Commits a new parent turn through its exact execution mailbox. */
 export interface TurnParentStartOwner {
   start(input: {
@@ -262,6 +268,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly environment: WorkspaceEnvironmentService | undefined,
     private readonly files: FileService | undefined,
     private readonly platform: NodeJS.Platform,
+    private readonly models: TurnModelCatalog,
     private readonly parentStartOwner?: TurnParentStartOwner,
     private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
     private readonly providerSwitch?: ProviderSwitchService,
@@ -380,7 +387,7 @@ export class TurnAdmissionDispatchCoordinator {
       maxTurns: submission.maxTurns,
       contextWindow: submission.contextWindow as ContextWindowMode | undefined,
       thinking: submission.thinking,
-      codexFastMode: submission.codexFastMode,
+      fastMode: submission.fastMode,
       goalObjective: submission.goalObjective,
       replyToMessageId: submission.replyToMessageId,
       quotedText: submission.quotedText,
@@ -870,7 +877,7 @@ export class TurnAdmissionDispatchCoordinator {
         maxTurns: command.maxTurns,
         contextWindow: command.contextWindow,
         thinking: command.thinking,
-        codexFastMode: command.codexFastMode,
+        fastMode: command.fastMode,
         goalObjective: command.goalObjective,
         replyToMessageId: command.replyToMessageId,
         quotedText: command.quotedText,
@@ -1090,7 +1097,7 @@ export class TurnAdmissionDispatchCoordinator {
     this.assignPermissionSetting(settings, command.permissionMode);
     this.assignSetting(settings, "context_window_mode", command.contextWindow);
     this.assignSetting(settings, "thinking", command.thinking);
-    this.assignCodexFastMode(settings, command.codexFastMode, providerId);
+    this.assignSetting(settings, "fast_mode", command.fastMode);
     this.assignDevinMode(settings, command.devinMode, providerId);
     return settings;
   }
@@ -1101,10 +1108,6 @@ export class TurnAdmissionDispatchCoordinator {
 
   private assignPermissionSetting(target: Record<string, unknown>, value: PermissionMode | "default" | undefined): void {
     if (value !== undefined && value !== "default") target.permission_mode = value;
-  }
-
-  private assignCodexFastMode(target: Record<string, unknown>, value: boolean | undefined, providerId: ProviderId): void {
-    if (providerId === "codex" && value !== undefined) target.codex_fast_mode = value;
   }
 
   private assignDevinMode(target: Record<string, unknown>, value: DevinMode | undefined, providerId: ProviderId): void {
@@ -1207,7 +1210,7 @@ export class TurnAdmissionDispatchCoordinator {
       ...guardrails,
       resumeFrom: this.resumeFrom(prepared, attachments),
       ...(prepared.command.resumeRequired ? { resumeRequired: true } : {}),
-      providerOptions: this.providerOptions(prepared, settings),
+      providerOptions: await this.providerOptions(prepared, settings, model),
     } as TurnRequest;
   }
 
@@ -1225,9 +1228,24 @@ export class TurnAdmissionDispatchCoordinator {
     };
   }
 
-  private providerOptions(prepared: PreparedCommand, settings: ReturnType<SettingsService["get"]>) {
-    const defaults = this.providerDefaults(prepared, settings);
-    return this.providerSpecificOptions(prepared.providerId, defaults);
+  private async providerOptions(prepared: PreparedCommand, settings: ReturnType<SettingsService["get"]>, model: string) {
+    const options = this.providerSpecificOptions(prepared.providerId, this.providerDefaults(prepared, settings));
+    // Adapters treat an absent `fastMode` as standard, so the catalog is consulted only when Fast is on.
+    const fastMode = this.fastModeDefault(prepared.command, prepared, settings);
+    if (!fastMode || !(await this.modelSupportsFastMode(prepared.providerId, model))) return options;
+    return { ...options, fastMode };
+  }
+
+  private async modelSupportsFastMode(providerId: ProviderId, modelId: string): Promise<boolean> {
+    try {
+      const models = await this.models.listModels(providerId);
+      return models.some((entry) => entry.id === modelId && entry.supportsFastMode === true);
+    } catch (error) {
+      logger.warn("Model catalog unavailable; sending the turn without Fast mode", {
+        providerId, modelId, error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   }
 
   private providerDefaults(prepared: PreparedCommand, settings: ReturnType<SettingsService["get"]>) {
@@ -1235,7 +1253,6 @@ export class TurnAdmissionDispatchCoordinator {
     return {
       contextWindow: this.contextWindowDefault(command, prepared, settings),
       thinking: this.thinkingDefault(command, prepared, settings),
-      fastMode: this.fastModeDefault(command, prepared, settings),
       devinMode: command.devinMode ?? prepared.thread.devin_mode ?? undefined,
     };
   }
@@ -1263,18 +1280,16 @@ export class TurnAdmissionDispatchCoordinator {
     prepared: PreparedCommand,
     settings: ReturnType<SettingsService["get"]>,
   ): boolean {
-    return command.codexFastMode
-      ?? prepared.thread.codex_fast_mode
-      ?? settings.provider?.codex?.fastMode
-      ?? false;
+    // Only Codex has a global Fast default so far; other providers start standard.
+    const globalDefault = prepared.providerId === "codex" ? settings.provider?.codex?.fastMode : undefined;
+    return command.fastMode ?? prepared.thread.fast_mode ?? globalDefault ?? false;
   }
 
   private providerSpecificOptions(
     providerId: ProviderId,
-    defaults: { contextWindow: ContextWindowMode; thinking: boolean; fastMode: boolean; devinMode: DevinMode | undefined },
+    defaults: { contextWindow: ContextWindowMode; thinking: boolean; devinMode: DevinMode | undefined },
   ) {
     if (providerId === "claude") return { contextWindowMode: defaults.contextWindow, thinking: defaults.thinking };
-    if (providerId === "codex") return { fastMode: defaults.fastMode };
     if (providerId === "devin") return { mode: defaults.devinMode };
     return {};
   }

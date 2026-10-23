@@ -455,6 +455,6 @@ export function threadContinuationSettings(thread: Thread): Omit<SendMessageComm
     reasoningLevel: thread.reasoning_level ?? undefined, provider: ProviderIdSchema.parse(thread.provider),
     interactionMode: thread.interaction_mode ?? undefined, orchestrationMode: thread.orchestration_mode ?? undefined,
     contextWindow: thread.context_window_mode ?? undefined, thinking: thread.thinking ?? undefined,
-    codexFastMode: thread.codex_fast_mode ?? undefined, devinMode: thread.devin_mode ?? undefined,
+    fastMode: thread.fast_mode ?? undefined, devinMode: thread.devin_mode ?? undefined,
   };
 }

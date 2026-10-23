@@ -34,7 +34,7 @@ function restoreQueuedSelection(message: QueuedMessage): Partial<ComposerAgentSe
     ...(message.permissionMode ? { permissionMode: message.permissionMode } : {}),
     contextWindow: message.contextWindow ?? null,
     thinking: message.thinking ?? null,
-    codexFastMode: message.codexFastMode ?? null,
+    fastMode: message.fastMode ?? null,
   };
 }
 

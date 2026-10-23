@@ -51,7 +51,7 @@ const cases: ReadonlyArray<{
       configuration: { cliPath: "codex", idleSessionTtlMs: 600_000 },
       host,
       codex: {
-        settings: { get: vi.fn(async () => ({ cliPath: "codex", fastMode: false })) },
+        settings: { get: vi.fn(async () => ({ cliPath: "codex" })) },
         attachments: { persistGeneratedImageFromPath: vi.fn() },
         catalog: {
           currentSkills: vi.fn(() => []),

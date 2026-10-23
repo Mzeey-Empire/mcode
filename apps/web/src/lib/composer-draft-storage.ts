@@ -267,6 +267,12 @@ function parseStoredNextMessageFields(candidate: Partial<ComposerDraft>): Pick<
   return fields;
 }
 
+/** Drafts saved before the `fastMode` rename keep their Fast choice under `codexFastMode`. */
+function legacyFastMode(raw: object): boolean | undefined {
+  const value = "codexFastMode" in raw ? raw.codexFastMode : undefined;
+  return typeof value === "boolean" ? value : undefined;
+}
+
 /** Validates a stored draft; returns null when the shape cannot be trusted. */
 export function parseStoredComposerDraft(raw: unknown): ComposerDraft | null {
   if (!raw || typeof raw !== "object") return null;
@@ -296,7 +302,7 @@ export function parseStoredComposerDraft(raw: unknown): ComposerDraft | null {
     provider: typeof candidate.provider === "string" ? candidate.provider : undefined,
     reasoning: candidate.reasoning as ComposerDraft["reasoning"],
     contextWindow: candidate.contextWindow,
-    codexFastMode: candidate.codexFastMode,
+    fastMode: candidate.fastMode ?? legacyFastMode(raw),
     devinMode: candidate.devinMode,
     ...parseStoredNextMessageFields(candidate),
   };

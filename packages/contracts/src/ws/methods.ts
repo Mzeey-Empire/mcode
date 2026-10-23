@@ -334,11 +334,11 @@ export const SendMessageSchema = lazySchema(() => z.object({
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
     /**
-     * Codex: fast service tier for this message. When set, persisted on the
-     * thread like other per-send composer overrides. Undefined uses thread row
-     * then global default.
+     * Fast mode for this message. When set, persisted on the thread like other
+     * per-send composer overrides. Undefined uses the thread row, then the
+     * global default. Sent only to models that declare `supportsFastMode`.
      */
-    codexFastMode: z.boolean().optional(),
+    fastMode: z.boolean().optional(),
     /**
      * Devin: native session mode for this message. When set, persisted on the
      * thread like other per-send composer overrides.
@@ -402,10 +402,10 @@ const createAndSendFields = lazySchema(() =>
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
     /**
-     * Codex: persist fast tier on the new thread before the first message.
-     * Undefined leaves `codex_fast_mode` null (inherit global on each turn).
+     * Persist Fast mode on the new thread before the first message.
+     * Undefined leaves `fast_mode` null (inherit global on each turn).
      */
-    codexFastMode: z.boolean().optional(),
+    fastMode: z.boolean().optional(),
     /**
      * Devin: persist the native session mode on the new thread before the
      * first message. Undefined leaves `devin_mode` null (Devin CLI default).
@@ -830,10 +830,10 @@ export const WS_METHODS = lazySchema(() => ({
       /** Boolean thinking toggle persisted on the thread. Honored only for Haiku-class models. Pass null to clear. */
       thinking: z.boolean().nullable().optional(),
       /**
-       * Codex fast API tier override. True = fast, false = standard, null clears so the thread
-       * inherits `settings.provider.codex.fastMode`.
+       * Fast mode override. True = fast, false = standard, null clears so the thread
+       * inherits the global default (`settings.provider.codex.fastMode`).
        */
-      codexFastMode: z.boolean().nullable().optional(),
+      fastMode: z.boolean().nullable().optional(),
       /**
        * Devin native session mode persisted on the thread. Pass null to clear
        * back to the Devin CLI default (normal).
@@ -852,7 +852,7 @@ export const WS_METHODS = lazySchema(() => ({
         data.permissionMode !== undefined ||
         data.contextWindow !== undefined ||
         data.thinking !== undefined ||
-        data.codexFastMode !== undefined ||
+        data.fastMode !== undefined ||
         data.devinMode !== undefined ||
         data.defaultOpenInApp !== undefined,
       { message: "Must provide at least one setting to update" },

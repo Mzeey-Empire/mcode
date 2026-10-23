@@ -20,25 +20,39 @@ describe("reconcileSwitchOptions", () => {
 
   it("keeps the target provider's own toggles", () => {
     const result = reconcileSwitchOptions({
-      options: { codexFastMode: true },
-      toProvider: "codex",
-      targetModel: null,
-    });
-
-    expect(result.options).toEqual({ codexFastMode: true });
-    expect(result.dropped).toEqual([]);
-  });
-
-  it("drops Fast when switching away from Codex", () => {
-    const result = reconcileSwitchOptions({
-      options: { codexFastMode: true },
+      options: { thinking: true },
       toProvider: "claude",
       targetModel: null,
     });
 
+    expect(result.options).toEqual({ thinking: true });
+    expect(result.dropped).toEqual([]);
+  });
+
+  it("keeps Fast when the target model declares it, whichever provider owns the model", () => {
+    const result = reconcileSwitchOptions({
+      options: { fastMode: true },
+      toProvider: "claude",
+      targetModel: model({ id: "opus", supportsFastMode: true }),
+    });
+
+    expect(result.options).toEqual({ fastMode: true });
+    expect(result.dropped).toEqual([]);
+  });
+
+  it.each([
+    ["does not declare Fast", model({ id: "gpt-5.4-mini", supportsFastMode: false })],
+    ["is missing from the catalog", null],
+  ])("drops Fast when the target model %s", (_case, targetModel) => {
+    const result = reconcileSwitchOptions({
+      options: { fastMode: true },
+      toProvider: "codex",
+      targetModel,
+    });
+
     expect(result.options).toEqual({});
     expect(result.dropped).toEqual([
-      expect.objectContaining({ option: "codexFastMode", value: true }),
+      expect.objectContaining({ option: "fastMode", value: true }),
     ]);
   });
 

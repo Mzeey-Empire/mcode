@@ -55,7 +55,7 @@ function readComposerThreadSettings(threadId: string | undefined) {
       permissionMode: PERMISSION_MODES.FULL,
       contextWindow: null,
       thinking: null,
-      codexFastMode: null,
+      fastMode: null,
       devinMode: null,
     };
   }
@@ -66,7 +66,7 @@ function readComposerThreadSettings(threadId: string | undefined) {
     permissionMode: settings.permissionMode,
     contextWindow: settings.contextWindow ?? null,
     thinking: settings.thinking ?? null,
-    codexFastMode: settings.codexFastMode ?? null,
+    fastMode: settings.fastMode ?? null,
     devinMode: settings.devinMode ?? null,
   };
 }
@@ -100,7 +100,7 @@ function resolveThreadDraftSession(entity: ThreadDraft): ComposerSession {
     thinking: entity.selection.thinking,
     // Draft-owned fields live on the draft itself; the settings fallback re-reads them.
     contextWindow: entity.draft.contextWindow ?? null,
-    codexFastMode: entity.draft.codexFastMode ?? null,
+    fastMode: entity.draft.fastMode ?? null,
     devinMode: entity.draft.devinMode ?? null,
   });
 }

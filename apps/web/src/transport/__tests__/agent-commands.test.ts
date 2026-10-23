@@ -213,7 +213,7 @@ describe("agent command transport", () => {
       interactionMode: "build",
       contextWindow: "200k",
       thinking: false,
-      codexFastMode: true,
+      fastMode: true,
       replyToMessageId: "6b2cf031-4c42-4fe4-8dc0-938756cd31dd",
       quotedText: "Original request",
       mentions: [],
@@ -274,7 +274,7 @@ describe("agent command transport", () => {
       interactionMode: "build",
       contextWindow: "200k",
       thinking: false,
-      codexFastMode: true,
+      fastMode: true,
       mentions: [],
     } satisfies CreateAndSendInput;
 

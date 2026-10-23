@@ -398,10 +398,10 @@ describe("provider switch on send", () => {
     await completeTurn(codex, "start on codex", "codex here", "codex-s1");
     claude.models = [{ id: CLAUDE_MODEL, supportedReasoningEfforts: ["low", "medium"] } as ProviderModelInfo];
 
-    await completeTurn(claude, "now claude", "claude here", "claude-s1", 1, { codexFastMode: true, reasoningLevel: "xhigh" });
+    await completeTurn(claude, "now claude", "claude here", "claude-s1", 1, { fastMode: true, reasoningLevel: "xhigh" });
 
     const request = lastRequest(claude);
-    expect(request.codexFastMode).toBeUndefined();
+    expect(request.fastMode).toBeUndefined();
     expect(request.reasoningLevel).toBeUndefined();
     const audit = await vi.waitFor(async () => {
       const written = await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId);
@@ -412,7 +412,7 @@ describe("provider switch on send", () => {
     expect(audit).toContain("kind: switch");
     expect(audit).toContain('fromProvider: "codex"');
     expect(audit).toContain('toProvider: "claude"');
-    expect(audit).toContain('"option":"codexFastMode"');
+    expect(audit).toContain('"option":"fastMode"');
     expect(audit).toContain('"option":"reasoningLevel"');
   });
 

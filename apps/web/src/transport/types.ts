@@ -534,7 +534,7 @@ export interface McodeTransport {
       permissionMode?: PermissionMode;
       contextWindow?: ContextWindowMode | null;
       thinking?: boolean | null;
-      codexFastMode?: boolean | null;
+      fastMode?: boolean | null;
       devinMode?: DevinMode | null;
       defaultOpenInApp?: string | null;
     },

@@ -29,11 +29,11 @@ export interface ComposerThreadMessagePayload {
 
 /** Provider-scoped composer values, undefined for providers that do not own them. */
 export function providerScopedSelection(selection: ComposerAgentSelection): {
-  codexFastMode: boolean | undefined;
+  fastMode: boolean | undefined;
   devinMode: DevinMode | undefined;
 } {
   return {
-    codexFastMode: selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined,
+    fastMode: selection.provider === "codex" ? selection.fastMode ?? undefined : undefined,
     devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
   };
 }
@@ -56,7 +56,7 @@ export async function sendComposerThreadMessage(
     selection.provider,
     selection.contextWindow ?? undefined,
     selection.thinking ?? undefined,
-    scoped.codexFastMode,
+    scoped.fastMode,
     undefined,
     undefined,
     payload.mentions,

@@ -50,29 +50,29 @@ describe("per-thread settings", () => {
     expect(settings.interactionMode).toBe("build");
     expect(settings.permissionMode).toBe("full");
     expect(settings.reasoningLevel).toBeUndefined();
-    expect(settings.codexFastMode).toBeNull();
+    expect(settings.fastMode).toBeNull();
   });
 
-  it("hydrates codex_fast_mode from the thread row", () => {
+  it("hydrates fast_mode from the thread row", () => {
     const thread = createMockThread({
       id: "thread-codex",
-      codex_fast_mode: true,
+      fast_mode: true,
     });
     useWorkspaceStore.setState({ threads: [thread] });
-    expect(useThreadStore.getState().getThreadSettings("thread-codex").codexFastMode).toBe(true);
+    expect(useThreadStore.getState().getThreadSettings("thread-codex").fastMode).toBe(true);
   });
 
-  it("setThreadSettings forwards codexFastMode to updateThreadSettings", async () => {
+  it("setThreadSettings forwards fastMode to updateThreadSettings", async () => {
     const thread = createMockThread({ id: "thread-codex-patch" });
     useWorkspaceStore.setState({ threads: [thread] });
 
-    await useThreadStore.getState().setThreadSettings("thread-codex-patch", { codexFastMode: false });
+    await useThreadStore.getState().setThreadSettings("thread-codex-patch", { fastMode: false });
 
     expect(mockTransport.updateThreadSettings).toHaveBeenCalledWith("thread-codex-patch", {
-      codexFastMode: false,
+      fastMode: false,
     });
     const updated = useWorkspaceStore.getState().threads.find((t) => t.id === "thread-codex-patch");
-    expect(updated?.codex_fast_mode).toBe(false);
+    expect(updated?.fast_mode).toBe(false);
   });
 
   it("in-memory override takes precedence over DB-persisted values", () => {

@@ -161,6 +161,24 @@ function makeProvider(
  * first turn on queueMicrotask ran before that and skipped runTurn entirely.
  */
 describe("CodexProvider first turn on new session", () => {
+  it.each([
+    [{ fastMode: true }, { serviceTier: "priority" }],
+    [{ fastMode: false }, {}],
+    [{}, {}],
+  ])("sends the priority tier only when the turn asks for Fast: %j", async (providerOptions, tier) => {
+    const provider = makeProvider();
+    await provider.sendTurn({
+      turnId: "fast-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "hello", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions, permissionMode: "supervised",
+    });
+    await vi.waitFor(() => expect(sendTurnMock.mock.calls.length).toBe(1));
+    const turnOptions = sendTurnMock.mock.calls[0]?.[1];
+    expect(turnOptions).toMatchObject(tier);
+    if (!("serviceTier" in tier)) expect(turnOptions).not.toHaveProperty("serviceTier");
+    await provider.shutdown();
+  });
+
   it.each([false, true])("enriches a file approval from native changes arriving late: %s", async (late) => {
     const provider = makeProvider();
     const emitted: ApprovalRequestEnvelope[] = [];

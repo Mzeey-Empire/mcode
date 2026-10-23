@@ -38,7 +38,7 @@ export interface ComposerSession {
   permissionMode: PermissionMode;
   contextWindow: ContextWindowMode | null;
   thinking: boolean | null;
-  codexFastMode: boolean | null;
+  fastMode: boolean | null;
   devinMode: DevinMode | null;
   /** Present only for local draft owners; thread owners resolve modes from thread settings. */
   orchestrationMode?: OrchestrationMode;
@@ -55,7 +55,7 @@ export interface ResolveComposerSessionInput {
     permissionMode: PermissionMode;
     contextWindow: ContextWindowMode | null;
     thinking: boolean | null;
-    codexFastMode: boolean | null;
+    fastMode: boolean | null;
     devinMode: DevinMode | null;
     /** Draft owners carry these; thread owners leave them undefined. */
     orchestrationMode?: OrchestrationMode;
@@ -122,7 +122,7 @@ function buildDefaultComposerSession(
     permissionMode: defaults.permissionMode,
     contextWindow: null,
     thinking: null,
-    codexFastMode: null,
+    fastMode: null,
     devinMode: null,
   };
 }
@@ -152,14 +152,14 @@ export function buildSavedComposerSession(
     permissionMode: threadSettings.permissionMode,
     contextWindow: threadSettings.contextWindow,
     thinking: threadSettings.thinking,
-    codexFastMode: resolveSavedCodexFastMode(saved.codexFastMode, threadSettings.codexFastMode),
+    fastMode: resolveSavedFastMode(saved.fastMode, threadSettings.fastMode),
     devinMode: saved.devinMode === undefined ? threadSettings.devinMode : saved.devinMode,
     orchestrationMode: threadSettings.orchestrationMode,
     approvalReviewMode: threadSettings.approvalReviewMode,
   };
 }
 
-function resolveSavedCodexFastMode(
+function resolveSavedFastMode(
   savedValue: boolean | null | undefined,
   threadValue: boolean | null,
 ): boolean | null {
@@ -211,11 +211,11 @@ function flagOrNull<T>(value: T | null | undefined): T | null {
 
 function buildThreadFlags(
   threadRow: WorkspaceThread | undefined,
-): Pick<ComposerSession, "contextWindow" | "thinking" | "codexFastMode" | "devinMode"> {
+): Pick<ComposerSession, "contextWindow" | "thinking" | "fastMode" | "devinMode"> {
   return {
     contextWindow: flagOrNull(threadRow?.context_window_mode as ContextWindowMode | null | undefined),
     thinking: flagOrNull(threadRow?.thinking),
-    codexFastMode: flagOrNull(threadRow?.codex_fast_mode),
+    fastMode: flagOrNull(threadRow?.fast_mode),
     devinMode: flagOrNull(threadRow?.devin_mode),
   };
 }

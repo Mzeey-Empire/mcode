@@ -29,6 +29,9 @@ import { TurnRevertStore } from "../persistence/turn-revert-store.js";
 import { prepareTurnRevert, settleTurnRevert } from "../persistence/turn-revert-write-operations.js";
 import { TurnAdmissionDispatchCoordinator, type SendMessageCommand, type TurnParentStartOwner, type TurnRuntimeAdmissionAuthority } from "../turn-admission-dispatch-coordinator.js";
 
+// No catalog model declares Fast, so these turns never carry `fastMode`.
+const noModels = { listModels: async () => [] };
+
 let directory: string;
 let settings: SettingsService;
 
@@ -82,7 +85,7 @@ async function fixture(workerOwned: boolean) {
     threads, workspaces, messages, reverts, worktrees, new AttachmentService(), providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, writer, commands, canonical), undefined, undefined,
-    hostRuntime.platform, workerOwned ? owner : undefined,
+    hostRuntime.platform, noModels, workerOwned ? owner : undefined,
   );
   const runtime: TurnRuntimeAdmissionAuthority = {
     reserve: () => ({ threadId: thread.id, turnExecutionId: NodeCrypto.randomUUID(), mutationReservationToken: NodeCrypto.randomUUID(), generation: 1 }),

@@ -58,6 +58,22 @@ export const QueuedTurnSubmissionSchema = z.object({
 /** Persisted Turn data required to dispatch after automatic Setup releases it. */
 export type WorkspaceEnvironmentQueuedTurnSubmission = z.infer<typeof QueuedTurnSubmissionSchema>;
 
+/**
+ * Builds before migration 0098 parse `submission_json` strictly and know Fast only as `codexFastMode`.
+ * Stable and nightly share the database, so the stored JSON keeps that key until the compatibility
+ * floor passes 0098.
+ */
+function storedSubmissionJson(submission: WorkspaceEnvironmentQueuedTurnSubmission): string {
+  const { fastMode, ...rest } = submission;
+  return JSON.stringify(fastMode === undefined ? rest : { ...rest, codexFastMode: fastMode });
+}
+
+function withCurrentFastModeKey(stored: unknown): unknown {
+  if (typeof stored !== "object" || stored === null || !("codexFastMode" in stored)) return stored;
+  const { codexFastMode, ...rest } = stored;
+  return { ...rest, fastMode: codexFastMode };
+}
+
 /** Atomic input for queuing a Turn before automatic Setup releases the gate. */
 export interface WorkspaceEnvironmentQueueFirstTurnInput {
   readonly threadId: string;
@@ -231,7 +247,7 @@ export class WorkspaceEnvironmentAutomaticStore {
       messageId: input.messageId,
       queuePosition,
       state: "queued",
-      submissionJson: JSON.stringify(input.submission),
+      submissionJson: storedSubmissionJson(input.submission),
       createdAt: now,
     }).run();
   }
@@ -613,7 +629,7 @@ export class WorkspaceEnvironmentAutomaticStore {
 
   private parseSubmission(raw: string): WorkspaceEnvironmentQueuedTurnSubmission {
     try {
-      return QueuedTurnSubmissionSchema.parse(JSON.parse(raw));
+      return QueuedTurnSubmissionSchema.parse(withCurrentFastModeKey(JSON.parse(raw)));
     } catch {
       throw new Error("Invalid persisted automatic Setup submission");
     }
