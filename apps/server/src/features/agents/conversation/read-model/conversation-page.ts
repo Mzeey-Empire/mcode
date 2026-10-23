@@ -223,6 +223,7 @@ export function loadConversationTail(
     outcomeExecutionId: message.outcomeExecutionId,
     systemNotice: message.systemNotice,
     providerSwitch: message.providerSwitch,
+    visual: message.visual,
     is_internal: message.is_internal,
     parentAgentProvenance: message.parentAgentProvenance,
   }));

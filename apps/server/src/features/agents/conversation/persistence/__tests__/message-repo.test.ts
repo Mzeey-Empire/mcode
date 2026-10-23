@@ -37,6 +37,7 @@ function createTestDb(): Database {
       outcome_execution_id TEXT,
       provider_switch TEXT
       ,system_notice TEXT
+      ,visual TEXT
     );
     CREATE TABLE tool_call_records (
       id TEXT PRIMARY KEY,

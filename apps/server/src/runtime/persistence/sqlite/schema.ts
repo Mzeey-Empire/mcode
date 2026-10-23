@@ -413,6 +413,8 @@ export const messages = sqliteTable(
     /** Bounded typed provider notice metadata for durable system messages. */
     systemNotice: text("system_notice"),
     providerSwitch: text("provider_switch"),
+    /** JSON HtmlVisual shown by a system message in the timeline. */
+    visual: text("visual"),
   },
   (table) => [
     index("idx_messages_thread").on(table.threadId),
