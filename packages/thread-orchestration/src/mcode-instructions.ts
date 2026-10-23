@@ -77,8 +77,9 @@ const BROWSER_BLOCK = [
   "- Prefer the mcode MCP browser_* tools for any browser work. They drive the Browser the user sees.",
   "- Before concluding the Browser is unavailable, check its status with browser_inspect and open a tab with browser_open. If the tools are missing from an initial tool listing, they may load lazily; make one direct attempt.",
   "- When the user means the page they have open, read their tab instead of opening a new one.",
-  "- After a first failure, follow the error's recovery instruction and retry in Mcode's Browser. Do not switch to another browser, Chrome, Playwright or Node-REPL.",
+  "- After a first failure, follow the error's recovery instruction in Mcode's Browser. Do not switch to another browser, Chrome, Playwright or Node-REPL.",
   "- Switch only after two failures on the same step, or when the user asks. Quote the raw error when you switch.",
+  "- A user hold, Stop or do_not_retry is not a failure to work around: yield to the user instead of switching.",
 ].join("\n");
 
 const SECTION_REGISTRY: readonly {

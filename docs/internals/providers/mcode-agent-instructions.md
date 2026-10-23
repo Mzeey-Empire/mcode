@@ -30,3 +30,5 @@ after failures. Those decisions happen before any Browser tool loads. The
 Browser tool descriptions own the operating rules, and the rules every Browser
 flow needs, such as finalizing tabs before replying, appear on `browser_open`
 and `browser_inspect` because a flow may never load `browser_tabs`.
+`browser_open` also repeats the failure and switch rule, so edit both places
+when that rule changes.
