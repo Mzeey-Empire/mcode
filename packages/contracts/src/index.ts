@@ -355,6 +355,16 @@ export type {
 } from "./models/message.js";
 
 export {
+  HtmlVisualSchema,
+  HTML_VISUAL_MAX_HTML_BYTES,
+  HTML_VISUAL_MIN_HEIGHT,
+  HTML_VISUAL_MAX_HEIGHT,
+  HTML_VISUAL_MAX_TITLE_LENGTH,
+  HTML_VISUAL_THEME_TOKENS,
+} from "./models/html-visual.js";
+export type { HtmlVisual } from "./models/html-visual.js";
+
+export {
   MessageMentionSchema,
   MessageMentionsSchema,
   MAX_MESSAGE_MENTIONS,
