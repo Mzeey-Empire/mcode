@@ -356,13 +356,12 @@ describe("PreviewPanel: unavailable state", () => {
     const key = browserAutomationTargetKey(threadId, threadId, "web-preview");
     useDiffStore.setState({ previewUrlByThread: { [threadId]: window.location.origin + "/fixture" } });
     useBrowserAutomationStore.setState({
-      controllers: new Map([[key, { tabId: "web-preview", controller: "agent", controlEpoch: 1, pointer: { x: 40, y: 50 } }]]),
+      controllers: new Map([[key, { tabId: "web-preview", controller: "agent", controlEpoch: 1 }]]),
       actingTargets: new Set([key]),
     });
     try {
       render(<PreviewPanel threadId={threadId} coveredRight={112} />);
       expect(screen.getByTestId("browser-acting-overlay")).toHaveStyle({ clipPath: "inset(0 112px 0 0)" });
-      expect(screen.getByTestId("browser-automation-pointer")).toHaveStyle({ left: "40px", top: "50px" });
     } finally {
       useBrowserAutomationStore.setState({ controllers: new Map(), actingTargets: new Set() });
     }
@@ -836,7 +835,7 @@ describe("PreviewPanel: full panel state", () => {
     expect(overlay).toHaveStyle({ clipPath: "inset(0 112px 0 0)" });
   });
 
-  it("shows the agent frame and cursor while the active page is still opening", () => {
+  it("shows the agent frame while the active page is still opening", () => {
     useBrowserAutomationStore.setState({
       pendingAgentOpens: new Map([
         [
@@ -855,7 +854,6 @@ describe("PreviewPanel: full panel state", () => {
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
 
     expect(screen.getByTestId("browser-acting-overlay")).toBeInTheDocument();
-    expect(screen.getByTestId("browser-automation-pointer")).toBeInTheDocument();
   });
 
   it("paints no agent overlay while the agent holds the page but is idle", () => {

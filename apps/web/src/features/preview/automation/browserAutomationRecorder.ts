@@ -42,6 +42,8 @@ interface RecordingSession {
   stopped: Promise<void>;
   stopTimer: number;
   error: string | null;
+  /** Turns the in-page agent cursor off; tab capture cannot see the host overlay, so the page draws it. */
+  readonly releaseCursor: () => void;
 }
 
 interface RecordingSessionWithResolver extends RecordingSession {
@@ -197,10 +199,13 @@ export class BrowserAutomationRecorder {
 
   private createSession(
     dispatch: BrowserAutomationHostDispatch,
+    bridge: PreviewAutomationBridge,
     key: string,
     recorder: MediaRecorder,
     stream: MediaStream,
   ): RecordingSessionWithResolver {
+    const { threadId, tabId } = dispatch.target;
+    let cursorReleased = false;
     let resolveStopped!: () => void;
     const stopped = new Promise<void>((resolve) => {
       resolveStopped = resolve;
@@ -219,6 +224,11 @@ export class BrowserAutomationRecorder {
       stopped,
       stopTimer: 0,
       error: null,
+      releaseCursor: () => {
+        if (cursorReleased) return;
+        cursorReleased = true;
+        void bridge.setRecordingCursor({ threadId, tabId, enabled: false });
+      },
       resolveStopped,
     };
   }
@@ -239,6 +249,7 @@ export class BrowserAutomationRecorder {
       session.retainedBytes += event.data.size;
     };
     recorder.onstop = () => {
+      session.releaseCursor();
       window.clearTimeout(session.stopTimer);
       this.stopStream(stream);
       this.clearPendingAcquisition(key, acquisition);
@@ -246,6 +257,7 @@ export class BrowserAutomationRecorder {
     };
     recorder.onerror = () => {
       session.error = "The browser recording encoder failed";
+      session.releaseCursor();
       window.clearTimeout(session.stopTimer);
       if (recorder.state !== "inactive") recorder.stop();
       this.stopStream(stream);
@@ -316,9 +328,10 @@ export class BrowserAutomationRecorder {
     }
     const recorder = this.createRecorder(dispatch, stream.value, key, acquisition);
     if (!recorder.ok) return recorder.response;
-    const session = this.configureRecorder(this.createSession(dispatch, key, recorder.value, stream.value), key, acquisition);
+    const session = this.configureRecorder(this.createSession(dispatch, bridge, key, recorder.value, stream.value), key, acquisition);
     const startFailure = this.startRecorder(dispatch, session, key, acquisition);
     if (startFailure) return startFailure;
+    void bridge.setRecordingCursor({ threadId: dispatch.target.threadId, tabId: dispatch.target.tabId, enabled: true });
     const requestedDuration = dispatch.request.operation === "recordingStart"
       ? dispatch.request.args.maxDurationMs
       : MAX_RECORDING_DURATION_MS;
@@ -356,6 +369,7 @@ export class BrowserAutomationRecorder {
     ]);
     window.clearTimeout(stopTimeout);
     this.sessions.delete(key);
+    session.releaseCursor();
     if (stopTimedOut) return failure(dispatch, "The browser recording encoder did not stop");
     if (session.error) return failure(dispatch, session.error);
     const retained = new Uint8Array(await new Blob(session.chunks, { type: "video/webm" }).arrayBuffer());
@@ -398,6 +412,7 @@ export class BrowserAutomationRecorder {
     const session = this.sessions.get(key);
     if (!session) return;
     this.sessions.delete(session.targetKey);
+    session.releaseCursor();
     window.clearTimeout(session.stopTimer);
     if (session.recorder.state !== "inactive") session.recorder.stop();
     for (const track of session.stream.getTracks()) track.stop();

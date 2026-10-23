@@ -273,6 +273,7 @@ describe("BrowserAutomationHost", () => {
               if (controllerChanged === callback) controllerChanged = null;
             };
           },
+          onPointer: () => () => {},
           onHostHeartbeat(callback: () => void) {
             hostHeartbeat = callback;
             return () => {

@@ -1514,6 +1514,12 @@ export function BrowserAutomationHost() {
   useEffect(() => {
     const bridge = window.desktopBridge?.preview?.automation;
     if (!bridge) return;
+    return bridge.onPointer((pointer) => useBrowserAutomationStore.getState().setPointer(pointer));
+  }, []);
+
+  useEffect(() => {
+    const bridge = window.desktopBridge?.preview?.automation;
+    if (!bridge) return;
     return bridge.onControllerChanged((controller) => {
       const store = useBrowserAutomationStore.getState();
       const target = resolveBrowserAutomationControllerTarget(

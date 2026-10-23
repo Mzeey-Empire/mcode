@@ -622,10 +622,6 @@ export const BrowserAutomationControllerStateSchema = lazySchema(() =>
       controlEpoch: z.number().int().nonnegative(),
       providerSessionId: idSchema.optional(),
       operation: browserRequestOperationSchema.optional(),
-      pointer: z.object({
-        x: z.number().finite().min(0).max(100_000),
-        y: z.number().finite().min(0).max(100_000),
-      }).strict().optional(),
     })
     .strict(),
 );
@@ -633,6 +629,31 @@ export const BrowserAutomationControllerStateSchema = lazySchema(() =>
 /** Browser controller state for one tab; human means held until Hand back. */
 export type BrowserAutomationControllerState = z.infer<
   ReturnType<typeof BrowserAutomationControllerStateSchema>
+>;
+
+/**
+ * Point the agent is about to move to or click, reported before the input is dispatched.
+ * `x` and `y` are CSS pixels relative to the page viewport, so they already account for page
+ * scroll; `zoomFactor` is the page zoom at that moment, which a host overlay needs to place the
+ * point in its own pixels. `sequence` increases with every event so a repeated click on the same
+ * point still reads as new.
+ */
+export const BrowserAutomationPointerEventSchema = lazySchema(() =>
+  z
+    .object({
+      tabId: idSchema,
+      phase: z.enum(["move", "click"]),
+      x: z.number().finite().min(0).max(100_000),
+      y: z.number().finite().min(0).max(100_000),
+      zoomFactor: z.number().finite().positive().max(10),
+      sequence: z.number().int().nonnegative(),
+    })
+    .strict(),
+);
+
+/** One agent cursor point for a Browser tab. */
+export type BrowserAutomationPointerEvent = z.infer<
+  ReturnType<typeof BrowserAutomationPointerEventSchema>
 >;
 
 /** Runtime that owns one browser automation host connection. */

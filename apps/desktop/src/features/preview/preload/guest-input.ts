@@ -1,12 +1,14 @@
 import { ipcRenderer } from "electron";
 import {
   PREVIEW_GUEST_AGENT_INPUT_CHANNEL,
+  PREVIEW_GUEST_AGENT_POINTER_CHANNEL,
   PREVIEW_GUEST_CLIPBOARD_TRUST_CHANNEL,
   PREVIEW_GUEST_HUMAN_INPUT_CHANNEL,
   PREVIEW_GUEST_SCROLL_CHANNEL,
   PreviewGuestInputSuppressor,
   toPreviewGuestHumanInputMessage,
 } from "../contracts/guest-input.js";
+import { createGuestAgentCursor, type GuestAgentCursor } from "./agent-cursor.js";
 
 const suppressor = new PreviewGuestInputSuppressor();
 
@@ -20,6 +22,14 @@ ipcRenderer.on(PREVIEW_GUEST_AGENT_INPUT_CHANNEL, (_event, input: unknown) => {
   } else {
     suppressor.allow(input);
   }
+});
+
+// Created on the first point: the host only sends points while recording, so most pages never pay for it.
+let agentCursor: GuestAgentCursor | null = null;
+
+ipcRenderer.on(PREVIEW_GUEST_AGENT_POINTER_CHANNEL, (_event, pointer: unknown) => {
+  agentCursor ??= createGuestAgentCursor(document);
+  agentCursor.show(pointer);
 });
 
 for (const eventType of ["keydown", "pointerdown", "touchstart", "wheel"] as const) {

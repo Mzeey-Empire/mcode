@@ -517,11 +517,20 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       }): Promise<unknown> {
         return ipcRenderer.invoke("preview:automation.media-source", target);
       },
+      setRecordingCursor(target: { threadId: string; tabId: string; enabled: boolean }): Promise<unknown> {
+        return ipcRenderer.invoke("preview:automation.recording-cursor", target);
+      },
       onControllerChanged(callback: (state: unknown) => void): () => void {
         const listener = (_event: unknown, state: unknown) => callback(state);
         ipcRenderer.send("preview:automation.subscribe");
         ipcRenderer.on("preview:automation.controller", listener);
         return () => ipcRenderer.removeListener("preview:automation.controller", listener);
+      },
+      onPointer(callback: (pointer: unknown) => void): () => void {
+        const listener = (_event: unknown, pointer: unknown) => callback(pointer);
+        ipcRenderer.send("preview:automation.subscribe");
+        ipcRenderer.on("preview:automation.pointer", listener);
+        return () => ipcRenderer.removeListener("preview:automation.pointer", listener);
       },
       onHostHeartbeat(callback: () => void): () => void {
         const listener = () => callback();
