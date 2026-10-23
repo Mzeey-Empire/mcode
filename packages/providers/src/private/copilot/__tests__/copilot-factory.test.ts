@@ -916,7 +916,7 @@ describe("Copilot public factory", () => {
     await provider.sendTurn(request()); await finish();
     const content: string = sdk.create.mock.calls[0]?.[0].systemMessage.content;
     expect(content.includes("thread_target_list")).toBe(expected.thread);
-    expect(content.includes("use only the mcode MCP browser_* tools")).toBe(expected.browser);
+    expect(content.includes("Prefer the mcode MCP browser_* tools")).toBe(expected.browser);
     await provider.stopSession("mcode-thread-1");
   });
 
@@ -926,7 +926,7 @@ describe("Copilot public factory", () => {
     const content = options.systemMessage && "content" in options.systemMessage ? options.systemMessage.content ?? "" : "";
     expect(options.mcpServers).toEqual({});
     expect(content).not.toContain("thread_target_list");
-    expect(content).not.toContain("use only the mcode MCP browser_* tools");
+    expect(content).not.toContain("Prefer the mcode MCP browser_* tools");
   });
 
   it("attaches under the session id the Browser lease is staged for", async () => {

@@ -18,9 +18,17 @@ Claude joins sections in its `systemPrompt` append, Copilot in `systemMessage`,
 and Cursor in the first normal prompt of its logical ACP session. Ephemeral
 Codex completions receive no runtime sections.
 
-The thread-control and Browser sections carry their full operating rules, and
-the descriptions of the tools they govern repeat them. The repetition is
-deliberate. A harness that loads tools lazily shows only tool names until the
-model searches, so a rule that lives only in a description arrives after the
+A harness that loads tools lazily shows only tool names until the model
+searches, so a rule that lives only in a tool description arrives after the
 model has chosen a tool. MCP initialization carries no instructions, and there
 are no guide tools.
+
+The thread-control section therefore carries its full operating rules, and the
+tool descriptions repeat them. The Browser section carries only routing rules:
+which browser to choose, how to confirm it is unavailable, and when to switch
+after failures. Those decisions happen before any Browser tool loads. The
+Browser tool descriptions own the operating rules, and the rules every Browser
+flow needs, such as finalizing tabs before replying, appear on `browser_open`
+and `browser_inspect` because a flow may never load `browser_tabs`.
+`browser_open` also repeats the failure and switch rule, so edit both places
+when that rule changes.

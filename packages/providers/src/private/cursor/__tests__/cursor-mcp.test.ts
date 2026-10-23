@@ -8,7 +8,7 @@ import { AcpSessionRuntime } from "../../protocols/acp/acp-session-runtime.js";
 import { CursorProvider } from "../cursor-provider.js";
 
 const THREAD_TOOL = "thread_target_list";
-const BROWSER_GUIDANCE = "use only the mcode MCP browser_* tools";
+const BROWSER_GUIDANCE = "Prefer the mcode MCP browser_* tools";
 
 function attachment(toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true }): ProviderMcodeAttachment {
   return { serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "mcode-token", toolkits };

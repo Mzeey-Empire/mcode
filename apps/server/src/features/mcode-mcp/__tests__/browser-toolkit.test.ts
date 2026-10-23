@@ -288,6 +288,14 @@ describe("BrowserToolkit", () => {
     expect(tools.map((tool) => tool.name).join(" ")).not.toMatch(/browser_(status|navigate|snapshot|click|type)/);
   });
 
+  // The runtime Browser section carries only routing rules, and lazy tool loading may never load browser_tabs.
+  it("tells the model to finalize tabs from the tools every Browser flow loads", () => {
+    const tools = setup().toolkit.bind(session)?.tools ?? [];
+    for (const name of ["browser_open", "browser_inspect"]) {
+      expect(tools.find((tool) => tool.name === name)?.description).toMatch(/call browser_tabs finalize before replying/i);
+    }
+  });
+
   it("never asks the model for observation, control, idempotency, deadline, or batch fields", () => {
     const tools = setup().toolkit.bind(session)?.tools ?? [];
 
