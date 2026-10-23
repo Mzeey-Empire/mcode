@@ -1602,13 +1602,14 @@ export {
 } from "./providers/devin-models.js";
 export { CURSOR_CLI_MODEL_SNAPSHOT } from "./providers/cursor-cli-models-snapshot.js";
 export { CODEX_STATIC_MODELS, supportsCodexUltraOrchestration } from "./providers/codex-static-fallback.js";
-export { CLAUDE_STATIC_MODELS } from "./providers/claude-static-fallback.js";
+export { CLAUDE_STATIC_MODELS, isLegacyClaudeModelId } from "./providers/claude-static-fallback.js";
 
 export {
   ProviderModelInfoSchema,
   ModelPolicyStateSchema,
+  ModelLifecycleSchema,
 } from "./providers/models.js";
-export type { ProviderModelInfo } from "./providers/models.js";
+export type { ProviderModelInfo, ModelLifecycle } from "./providers/models.js";
 export {
   isChildTurnCancellable,
   isTurnDiffSource,

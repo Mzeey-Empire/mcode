@@ -1,7 +1,33 @@
 import type { ProviderModelInfo } from "./models.js";
 
+/** Claude models superseded by a newer release in the same family. The picker folds these away. */
+const CLAUDE_LEGACY_MODEL_IDS: ReadonlySet<string> = new Set([
+  "claude-opus-5",
+  "claude-fable-5",
+  "claude-sonnet-5",
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+]);
+
+/** Snapshot suffix the Anthropic Models API appends to an alias, e.g. `-20250514`. */
+const DATED_SNAPSHOT_SUFFIX = /-\d{8}$/;
+
+/**
+ * True when a Claude model id, or a dated snapshot of one, is a legacy generation. The suffix
+ * must be a date: a plain prefix match would fold `claude-opus-5-5` under `claude-opus-5`.
+ */
+export function isLegacyClaudeModelId(id: string): boolean {
+  return CLAUDE_LEGACY_MODEL_IDS.has(id.replace(DATED_SNAPSHOT_SUFFIX, ""));
+}
+
+function withClaudeLifecycle(model: ProviderModelInfo): ProviderModelInfo {
+  return isLegacyClaudeModelId(model.id) ? { ...model, lifecycle: "legacy" } : model;
+}
+
 /** Complete Claude fallback catalog shared by server discovery and web pickers. */
-export const CLAUDE_STATIC_MODELS: readonly ProviderModelInfo[] = [
+export const CLAUDE_STATIC_MODELS: readonly ProviderModelInfo[] = ([
   ...[
     ["claude-opus-5-5", "Claude Opus 5.5"],
     ["claude-opus-5", "Claude Opus 5"],
@@ -38,4 +64,4 @@ export const CLAUDE_STATIC_MODELS: readonly ProviderModelInfo[] = [
     contextWindow: 200_000,
     supportsReasoning: false,
   },
-];
+] satisfies ProviderModelInfo[]).map(withClaudeLifecycle);

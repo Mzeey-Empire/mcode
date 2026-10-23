@@ -13,7 +13,7 @@ import {
   supports1MContextWindow,
   supportsEffortParameter,
 } from "@mcode/shared/model-effort";
-import { CLAUDE_STATIC_MODELS } from "@mcode/contracts";
+import { CLAUDE_STATIC_MODELS, isLegacyClaudeModelId } from "@mcode/contracts";
 import type { ProviderModelInfo } from "@mcode/contracts";
 
 /** Cache TTL: 5 minutes, matching the design spec. */
@@ -62,6 +62,7 @@ function fromAnthropicModel(model: AnthropicModelInfo): ProviderModelInfo {
     supportsReasoning: supportedReasoningEfforts.length > 0,
     ...(supportedReasoningEfforts.length > 0 ? { supportedReasoningEfforts } : {}),
     ...(supports1MContextWindow(model.id) ? { contextWindowOptions: ["200k", "1m"] as const } : {}),
+    ...(isLegacyClaudeModelId(model.id) ? { lifecycle: "legacy" as const } : {}),
   };
 }
 

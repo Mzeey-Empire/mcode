@@ -5,6 +5,12 @@ import { lazySchema } from "../utils/lazySchema.js";
 /** Policy state for a provider model (read-only, set by org admins). */
 export const ModelPolicyStateSchema = z.enum(["enabled", "disabled", "unconfigured"]);
 
+/** Whether a model is a current generation or an older one the picker folds away. */
+export const ModelLifecycleSchema = z.enum(["current", "legacy"]);
+
+/** TypeScript type inferred from ModelLifecycleSchema. */
+export type ModelLifecycle = z.infer<typeof ModelLifecycleSchema>;
+
 /** Model metadata returned by a provider's listModels() call. */
 export const ProviderModelInfoSchema = lazySchema(() =>
   z.object({
@@ -30,6 +36,8 @@ export const ProviderModelInfoSchema = lazySchema(() =>
     supportsFastMode: z.boolean().optional(),
     /** Context windows the user can choose between (e.g. ["200k", "1m"]). Absent means no choice. */
     contextWindowOptions: z.array(ContextWindowModeSchema).optional(),
+    /** Model generation. Absent means current; legacy models sit behind the picker's fold. */
+    lifecycle: ModelLifecycleSchema.optional(),
     /** Org/enterprise policy state. Absent when no policy is configured. */
     policy: z.object({ state: ModelPolicyStateSchema }).optional(),
     /** Billing rate multiplier relative to base plan (e.g. 1, 0.33, 3, 30). */

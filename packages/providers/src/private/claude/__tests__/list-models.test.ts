@@ -67,7 +67,7 @@ describe("listClaudeModels", () => {
     });
   });
 
-  it("derives capabilities for dated REST-only ids from the runtime effort rules", async () => {
+  it("derives capabilities and lifecycle for dated REST-only ids", async () => {
     const result = await listClaudeModels();
     expect(result.find((model) => model.id === "claude-sonnet-4-6-20250514")).toEqual<ProviderModelInfo>({
       id: "claude-sonnet-4-6-20250514",
@@ -76,6 +76,7 @@ describe("listClaudeModels", () => {
       contextWindowOptions: ["200k", "1m"],
       supportsReasoning: true,
       supportedReasoningEfforts: ["low", "medium", "high", "max"],
+      lifecycle: "legacy",
     });
     expect(result.find((model) => model.id === "claude-haiku-4-5-20251001")).toEqual<ProviderModelInfo>({
       id: "claude-haiku-4-5-20251001",
