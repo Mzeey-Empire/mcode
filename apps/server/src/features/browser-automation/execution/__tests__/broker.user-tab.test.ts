@@ -226,7 +226,18 @@ describe("BrowserAutomationBroker reading the user's own tab", () => {
     expect(deliveries).toHaveLength(0);
   });
 
-  it("lists every thread tab with the holder the broker enforces", async () => {
+  it("treats a listed tab on a busy host as unavailable for now, not as missing", async () => {
+    const { send, deliveries } = browser();
+    for (let index = 0; index < registration().maxPendingRequests; index += 1) void send("inspect", INSPECT);
+
+    await expect(send("inspect", { ...INSPECT, tabId: USER_TAB })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "TAB_UNAVAILABLE", retryable: true },
+    });
+    expect(deliveries).toHaveLength(registration().maxPendingRequests);
+  });
+
+  it("lists every thread tab with the holder its host published", async () => {
     const { send, answerInspect } = browser({ userController: userHold(4) });
 
     const pending = send("inspect", { ...INSPECT, tabId: AGENT_TAB });

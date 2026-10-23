@@ -183,8 +183,8 @@ function failure(
   code: BrowserAutomationErrorCode,
   message: string,
   retryable: boolean,
+  recovery: ReturnType<typeof browserV2Recovery> = browserV2Recovery(code),
 ): BrowserAutomationResponse {
-  const recovery = browserV2Recovery(code);
   return {
     contractVersion: BROWSER_AUTOMATION_CONTRACT_VERSION,
     requestId: request.requestId,
@@ -204,8 +204,7 @@ function failure(
 
 /** A named tab outside the thread is a bad reference, so the agent re-reads the tab list instead of reopening. */
 function unlistedTabFailure(request: BrowserAutomationRequest): BrowserAutomationResponse {
-  const response = failure(request, "TAB_UNAVAILABLE", "That tab is not open in this thread; browser_inspect lists the thread's tabs", false);
-  return response.ok ? response : { ...response, error: { ...response.error, recovery: "inspect" } };
+  return failure(request, "TAB_UNAVAILABLE", "That tab is not open in this thread; browser_inspect lists the thread's tabs", false, "inspect");
 }
 
 function assignmentKeyParts(
@@ -1273,7 +1272,7 @@ export class BrowserAutomationBroker {
       const host = this.resolveBootstrapHost(claims, request);
       if (host) return this.executeBootstrap(host, claims.providerId, request);
     }
-    if (request.operation === "inspect" && request.args.tabId && this.resolveSelectedHost(claims)) {
+    if (request.operation === "inspect" && request.args.tabId && !this.threadListsTab(claims, request.args.tabId) && this.resolveSelectedHost(claims)) {
       return finishImmediately(unlistedTabFailure(request));
     }
     const code = this.resolveSelectedHost(claims) ? "TAB_UNAVAILABLE" : "HOST_UNAVAILABLE";
@@ -1649,6 +1648,12 @@ export class BrowserAutomationBroker {
         .map((target) => ({ host, target })))
       .sort(compareRoutingCandidates);
     return candidates[0];
+  }
+
+  /** Whether any host in scope lists the tab, busy or not, so a busy host is not reported as a missing tab. */
+  private threadListsTab(claims: BrowserAutomationCredentialClaims, tabId: string): boolean {
+    return [...this.hostsBySocket.values()].some((host) => this.matchesScope(host, claims) &&
+      [...host.targets.values()].some((target) => target.threadId === claims.threadId && target.tabId === tabId));
   }
 
   private canAccept(

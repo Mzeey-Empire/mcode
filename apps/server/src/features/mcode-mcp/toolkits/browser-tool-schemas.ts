@@ -121,7 +121,7 @@ const descriptionByOperation: Record<BrowserAutomationPublicOperation, string> =
     "Inspect before the first action and again whenever an action says to. Tool discovery does not prove readiness.",
     "Request includeScreenshot only for visual evidence or when the user asks. Verify every success claim against current page evidence.",
     "tabs lists every Browser tab in this thread, including tabs the user opened, with who holds each. Pass a tabId to read that tab, even while the user holds it; reading never takes control.",
-    "browser_act targets the current tab, not one read by tabId: to act on another tab, browser_tabs select it while nobody holds the Browser.",
+    "browser_act targets the current tab, not one read by tabId, and refuses refs from another tab. To act on a tab read by tabId, browser_tabs select it while nobody holds the Browser, then inspect again.",
     "Use only mcode MCP browser tools; Browser-only tasks need no shell commands or local skills/files.",
   ].join(" "),
   act: [
