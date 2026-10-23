@@ -4,10 +4,18 @@ import {
   BROWSER_AUTOMATION_MAX_RESULT_BYTES,
   BROWSER_AUTOMATION_OPERATIONS,
   BrowserAutomationRequestSchema,
+  type BrowserAutomationActStep,
+  type BrowserAutomationError,
   type BrowserAutomationPublicOperation,
+  type BrowserAutomationRequest,
   type BrowserAutomationResponse,
   type BrowserAutomationResult,
 } from "@mcode/contracts";
+import {
+  createBrowserThreadControl,
+  reduceBrowserControl,
+  type BrowserThreadControl,
+} from "@mcode/shared/browser-control";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BrowserAutomationCredentialClaims } from "../../browser-automation/index.js";
 import type { McodeSession } from "../mcode-session-authority.js";
@@ -58,11 +66,138 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   return { promise, resolve };
 }
 
-function setup(options: { claims?: BrowserAutomationCredentialClaims | null; maxSequenceEntries?: number } = {}) {
+type Execute = BrowserToolkitOptions["broker"]["execute"];
+
+function textOf(result: CallToolResult): string {
+  const [first] = result.content;
+  return first?.type === "text" ? first.text : "";
+}
+
+function firstRef(result: CallToolResult): string {
+  const parsed = JSON.parse(textOf(result)) as { snapshot?: { elements: { ref: string }[] } };
+  const ref = parsed.snapshot?.elements[0]?.ref;
+  if (!ref) throw new Error("inspect returned no element reference");
+  return ref;
+}
+
+function snapshotOf(semanticIds: readonly string[]): NonNullable<Extract<BrowserAutomationResult, { operation: "inspect" }>["snapshot"]> {
+  const none = { truncated: false } as const;
+  return {
+    url: "https://example.com/",
+    title: "Fixture",
+    loading: false,
+    visibleText: "Fixture form",
+    visibleTextTruncation: none,
+    elements: semanticIds.map((semanticId) => ({
+      semanticId,
+      role: semanticId === "e-name" ? "textbox" : "button",
+      accessibleName: semanticId === "e-name" ? "Name" : "Submit",
+      disabled: false,
+      bounds: { x: 0, y: 0, width: 10, height: 10 },
+    })),
+    elementsTruncation: none,
+    accessibility: [],
+    accessibilityTruncation: none,
+    console: [],
+    consoleTruncation: none,
+    network: [],
+    networkTruncation: none,
+    actions: [],
+    actionsTruncation: none,
+  };
+}
+
+/**
+ * Stands in for the broker and visible host: single-use observations, the
+ * shared control reducer, and idempotent replay keyed like the real broker.
+ */
+function fakeBrowser() {
+  let control: BrowserThreadControl = createBrowserThreadControl();
+  let counter = 0;
+  const live = new Set<string>();
+  const replay = new Map<string, BrowserAutomationResponse>();
+  const effects: BrowserAutomationActStep[] = [];
+  const actResults: BrowserAutomationResult[] = [];
+  const epoch = () => control.epochByTab.get("tab-1") ?? 0;
+  const observe = (prefix = "obs"): string => {
+    const ref = `${prefix}-${(counter += 1)}`;
+    live.add(ref);
+    return ref;
+  };
+  const refuse = (request: BrowserAutomationRequest, error: BrowserAutomationError): BrowserAutomationResponse => ({
+    contractVersion: BROWSER_AUTOMATION_CONTRACT_VERSION,
+    requestId: request.requestId,
+    sequence: request.sequence,
+    ok: false,
+    error,
+  });
+  const act = (request: Extract<BrowserAutomationRequest, { operation: "act" }>): BrowserAutomationResponse => {
+    const decision = reduceBrowserControl(control, { type: "agent-effect", tabId: "tab-1", expectedEpoch: request.expectedControlEpoch });
+    if (!decision.admitted) {
+      const recovery = decision.code === "HUMAN_INTERRUPTED" ? "yield_to_user" : "inspect";
+      return refuse(request, { code: decision.code, message: "refused", retryable: true, recovery });
+    }
+    control = decision.next;
+    if (!live.delete(request.args.observationRef)) {
+      return refuse(request, { code: "STALE_TARGET_GENERATION", message: "stale", retryable: true, recovery: "inspect" });
+    }
+    effects.push(...request.args.steps);
+    const nextObservationRef = observe();
+    const result: BrowserAutomationResult = {
+      operation: "act",
+      outcome: "completed",
+      stoppingPosition: request.args.steps.length,
+      effect: "complete",
+      recovery: "inspect",
+      receipts: request.args.steps.map((step, index) => ({ index, operation: step.operation, status: "applied" })),
+      finalObservation: { observationRef: nextObservationRef, hostRevision: 1, documentRevision: 1, controlRevision: epoch(), capabilityRevision: 1, observationRevision: counter },
+      nextObservationRef,
+    };
+    actResults.push(result);
+    return responseFor(request, result);
+  };
+  const respond = (request: BrowserAutomationRequest): BrowserAutomationResponse => {
+    switch (request.operation) {
+      case "inspect":
+        return responseFor(request, { operation: "inspect", controlEpoch: epoch(), tabs: [], observationRef: observe(), snapshot: snapshotOf(["e-name", "e-submit"]) });
+      case "open":
+        live.add("obs-open");
+        return responseFor(request, { operation: "open", url: "https://example.com/", title: "Fixture", controlEpoch: epoch(), observationRef: "obs-open" });
+      case "tabs":
+        return responseFor(request, { operation: "tabs", action: request.args.action, tabs: [], observationRef: observe() });
+      case "act":
+        return act(request);
+      default:
+        throw new Error(`unexpected ${request.operation}`);
+    }
+  };
+  const execute: Execute = async (_claims, input) => {
+    const request = BrowserAutomationRequestSchema().parse(input);
+    const key = "idempotencyKey" in request.args ? request.args.idempotencyKey : undefined;
+    const cached = key === undefined ? undefined : replay.get(key);
+    if (cached) return { ...cached, requestId: request.requestId, sequence: request.sequence };
+    const response = respond(request);
+    if (key !== undefined) replay.set(key, response);
+    return response;
+  };
+  return {
+    execute,
+    effects,
+    actResults,
+    control(event: Parameters<typeof reduceBrowserControl>[1]) {
+      control = reduceBrowserControl(control, event).next;
+    },
+  };
+}
+
+function setup(options: {
+  claims?: BrowserAutomationCredentialClaims | null;
+  maxSequenceEntries?: number;
+  execute?: Execute;
+} = {}) {
   const claims = options.claims === undefined ? claimsWith() : options.claims;
   const claimsFor = vi.fn<BrowserToolkitOptions["lease"]["claimsFor"]>(() => claims);
-  const execute = vi.fn<BrowserToolkitOptions["broker"]["execute"]>(async (_claims, input) =>
-    responseFor(input, inspectResult));
+  const execute = vi.fn<Execute>(options.execute ?? (async (_claims, input) => responseFor(input, inspectResult)));
   const availableOperations = vi.fn<BrowserToolkitOptions["broker"]["availableOperations"]>(
     (forClaims) => forClaims.allowedOperations,
   );
@@ -128,18 +263,26 @@ describe("BrowserToolkit", () => {
       destructiveHint: true,
       openWorldHint: true,
     });
-    expect(named("browser_evaluate")?.inputSchema.required).toEqual([
-      "idempotencyKey",
-      "observationRef",
-      "deadlineMs",
-      "expression",
-    ]);
+    expect(named("browser_evaluate")?.inputSchema.required).toEqual(["expression"]);
+    expect(named("browser_act")?.inputSchema.required).toEqual(["action"]);
     expect(tools.map((tool) => tool.name).join(" ")).not.toMatch(/browser_(status|navigate|snapshot|click|type)/);
+  });
+
+  it("never asks the model for observation, control, idempotency, deadline, or batch fields", () => {
+    const tools = setup().toolkit.bind(session)?.tools ?? [];
+
+    expect(tools).toHaveLength(5);
+    for (const tool of tools) {
+      const fields = [...Object.keys(tool.inputSchema.properties ?? {}), ...(tool.inputSchema.required ?? [])];
+      for (const internal of ["observationRef", "expectedControlEpoch", "idempotencyKey", "deadlineMs", "steps"]) {
+        expect(fields, `${tool.name} exposes ${internal}`).not.toContain(internal);
+      }
+    }
   });
 
   it("refuses an operation the credential does not allow and evaluation without privilege", async () => {
     const observe = setup({ claims: claimsWith({ permissionCapability: "observe", allowedOperations: ["inspect"] }) });
-    await expect(observe.call("browser_open", { idempotencyKey: "k", url: "https://example.com" }))
+    await expect(observe.call("browser_open", { url: "https://example.com" }))
       .rejects.toMatchObject({ code: -32003, message: expect.stringContaining("Browser operation is forbidden") });
 
     const interact = setup({
@@ -160,10 +303,10 @@ describe("BrowserToolkit", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("binds the request to the credential scope and lifts the control epoch out of the arguments", async () => {
+  it("binds the request to the credential scope", async () => {
     const { call, requestAt, execute } = setup();
 
-    await call("browser_inspect", { expectedControlEpoch: 4, includeDiagnostics: true });
+    await call("browser_inspect", { includeDiagnostics: true });
 
     expect(execute.mock.calls[0]?.[0]).toMatchObject({ credentialId: "credential-a" });
     expect(requestAt(0)).toMatchObject({
@@ -172,34 +315,145 @@ describe("BrowserToolkit", () => {
       providerSessionId: "provider-session",
       providerInstanceId: "mcode-session",
       operation: "inspect",
-      expectedControlEpoch: 4,
+      expectedControlEpoch: 0,
       sequence: 1,
       deadline: 61_000,
       args: { includeDiagnostics: true },
     });
   });
 
-  it("rejects caller-supplied scope and invalid argument shapes before the broker", async () => {
-    const { call, execute } = setup();
+  it("rejects caller-supplied scope, internal fields, and invalid argument shapes before the broker", async () => {
+    const page = fakeBrowser();
+    const { call, execute } = setup({ execute: page.execute });
+    await call("browser_inspect", {}, { toolCallId: "inspect" });
+    execute.mockClear();
 
     await expect(call("browser_inspect", { threadId: "thread-b" }))
       .rejects.toMatchObject({ code: -32602, message: expect.stringContaining("Invalid browser tool arguments") });
-    await expect(call("browser_act", { idempotencyKey: "k", observationRef: "o", deadlineMs: 1_000, steps: [] }))
+    await expect(call("browser_act", { action: "click", ref: "s1e1", expectedControlEpoch: 3 }))
       .rejects.toMatchObject({ code: -32602 });
-    await expect(call("browser_tabs", { action: "select", idempotencyKey: "k", observationRef: "o" }))
+    await expect(call("browser_act", { action: "click", ref: "s1e1", observationRef: "obs-1" }))
       .rejects.toMatchObject({ code: -32602 });
+    await expect(call("browser_act", { action: "click" })).rejects.toMatchObject({ code: -32602 });
+    await expect(call("browser_act", { action: "fly" })).rejects.toMatchObject({ code: -32602 });
+    await expect(call("browser_act", { action: "navigate", url: "https://example.com", ref: "s1e1" }))
+      .rejects.toMatchObject({ code: -32602 });
+    await expect(call("browser_tabs", { action: "select" })).rejects.toMatchObject({ code: -32602 });
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("routes a valid browser_tabs mutation", async () => {
-    const { call, requestAt } = setup();
+  it("opens with a server-generated idempotency key and routes tabs with the observation it returned", async () => {
+    const page = fakeBrowser();
+    const { call, requestAt } = setup({ execute: page.execute });
 
-    await call("browser_tabs", { action: "select", tabId: "tab-2", idempotencyKey: "k", observationRef: "obs-1" });
+    const opened = await call("browser_open", { url: "https://example.com" }, { toolCallId: "open" });
+    await call("browser_tabs", { action: "select", tabId: "tab-2" }, { toolCallId: "tabs" });
 
-    expect(requestAt(0)).toMatchObject({
+    expect(JSON.parse(textOf(opened))).toEqual({ operation: "open", url: "https://example.com/", title: "Fixture" });
+    expect(requestAt(0)).toMatchObject({ operation: "open", args: { url: "https://example.com", idempotencyKey: expect.any(String) } });
+    expect(requestAt(1)).toMatchObject({
       operation: "tabs",
-      args: { action: "select", tabId: "tab-2", idempotencyKey: "k", observationRef: "obs-1" },
+      args: { action: "select", tabId: "tab-2", idempotencyKey: expect.any(String), observationRef: "obs-open" },
     });
+  });
+
+  it("completes a multi-step flow using only snapshot references", async () => {
+    const page = fakeBrowser();
+    const { call, requestAt } = setup({ execute: page.execute });
+
+    const inspected = await call("browser_inspect", {}, { toolCallId: "1" });
+    const snapshot = JSON.parse(textOf(inspected)) as { snapshot: { elements: { ref: string; accessibleName: string }[] } };
+    const refFor = (name: string) => snapshot.snapshot.elements.find((element) => element.accessibleName === name)?.ref;
+    const typed = await call("browser_act", { action: "type", ref: refFor("Name"), text: "Ada" }, { toolCallId: "2" });
+    const clicked = await call("browser_act", { action: "click", ref: refFor("Submit") }, { toolCallId: "3" });
+
+    expect(textOf(inspected)).not.toMatch(/semanticId|observationRef|controlEpoch/);
+    expect([typed.isError, clicked.isError]).toEqual([false, false]);
+    expect(JSON.parse(textOf(clicked))).toEqual({
+      operation: "act",
+      outcome: "completed",
+      stoppingPosition: 1,
+      effect: "complete",
+      recovery: "inspect",
+      receipts: [{ index: 0, operation: "click", status: "applied" }],
+    });
+    expect(page.effects).toEqual([
+      { operation: "type", target: { semanticId: "e-name" }, text: "Ada", clear: false, submit: false },
+      { operation: "click", target: { semanticId: "e-submit" }, button: "left", clickCount: 1 },
+    ]);
+    expect(requestAt(2).args).toMatchObject({ observationRef: (page.actResults[0] as { nextObservationRef: string }).nextObservationRef });
+    expect(requestAt(2).args).toMatchObject({ deadlineMs: 60_000, idempotencyKey: expect.any(String) });
+  });
+
+  it("refuses a reference from an older snapshot and tells the agent to snapshot again", async () => {
+    const page = fakeBrowser();
+    const { call, execute } = setup({ execute: page.execute });
+
+    const beforeInspect = await call("browser_act", { action: "click", ref: "s1e2" }, { toolCallId: "0" });
+    await call("browser_inspect", {}, { toolCallId: "1" });
+    const older = firstRef(await call("browser_inspect", {}, { toolCallId: "2" }));
+    const staleRef = older.replace(/^s(\d+)/, (_match, id: string) => `s${Number(id) - 1}`);
+    const stale = await call("browser_act", { action: "click", ref: staleRef }, { toolCallId: "3" });
+    const unknown = await call("browser_act", { action: "click", ref: older.replace(/e\d+$/, "e99") }, { toolCallId: "4" });
+
+    for (const refused of [beforeInspect, stale, unknown]) {
+      expect(refused.isError).toBe(true);
+      expect(JSON.parse(textOf(refused))).toMatchObject({
+        code: "STALE_TARGET_GENERATION",
+        retryable: true,
+        recovery: "inspect",
+        message: expect.stringContaining("browser_inspect"),
+      });
+    }
+    expect(execute.mock.calls.map(([, request]) => (request as BrowserAutomationRequest).operation)).toEqual(["inspect", "inspect"]);
+    expect(page.effects).toEqual([]);
+  });
+
+  it("drops references once navigation replaces the document", async () => {
+    const page = fakeBrowser();
+    const { call } = setup({ execute: page.execute });
+
+    const ref = firstRef(await call("browser_inspect", {}, { toolCallId: "1" }));
+    await call("browser_act", { action: "navigate", url: "https://example.com/next" }, { toolCallId: "2" });
+    const refused = await call("browser_act", { action: "click", ref }, { toolCallId: "3" });
+
+    expect(JSON.parse(textOf(refused))).toMatchObject({ code: "STALE_TARGET_GENERATION", recovery: "inspect" });
+    expect(page.effects.map((step) => step.operation)).toEqual(["navigate"]);
+  });
+
+  it("refuses an action while the user holds the tab and allows the next one after Hand back", async () => {
+    const page = fakeBrowser();
+    const { call, requestAt } = setup({ execute: page.execute });
+
+    const ref = firstRef(await call("browser_inspect", {}, { toolCallId: "1" }));
+    page.control({ type: "take-control", tabId: "tab-1" });
+    const held = await call("browser_act", { action: "click", ref }, { toolCallId: "2" });
+    page.control({ type: "hand-back" });
+    const staleAfterHold = await call("browser_act", { action: "click", ref }, { toolCallId: "3" });
+    const fresh = firstRef(await call("browser_inspect", {}, { toolCallId: "4" }));
+    const resumed = await call("browser_act", { action: "click", ref: fresh }, { toolCallId: "5" });
+
+    expect(JSON.parse(textOf(held))).toMatchObject({ code: "HUMAN_INTERRUPTED", recovery: "yield_to_user" });
+    expect(JSON.parse(textOf(staleAfterHold))).toMatchObject({ code: "STALE_TARGET_GENERATION", recovery: "inspect" });
+    expect(resumed.isError).toBe(false);
+    expect(requestAt(3).expectedControlEpoch).toBe(2);
+    expect(page.effects).toHaveLength(1);
+  });
+
+  it("applies a redelivered action once and a new call with the same arguments again", async () => {
+    const page = fakeBrowser();
+    const { call, requestAt } = setup({ execute: page.execute });
+    const ref = firstRef(await call("browser_inspect", {}, { toolCallId: "1" }));
+
+    const first = await call("browser_act", { action: "click", ref }, { toolCallId: "7" });
+    const redelivered = await call("browser_act", { action: "click", ref }, { toolCallId: "7" });
+    expect(textOf(redelivered)).toBe(textOf(first));
+    expect(page.effects).toHaveLength(1);
+    expect(requestAt(2).args).toEqual(requestAt(1).args);
+
+    const again = await call("browser_act", { action: "click", ref }, { toolCallId: "8" });
+    expect(again.isError).toBe(false);
+    expect(page.effects).toHaveLength(2);
   });
 
   it("projects inspect screenshots as image content without duplicating the base64 in text", async () => {
@@ -229,7 +483,7 @@ describe("BrowserToolkit", () => {
     const { call, execute } = setup();
 
     const plain = await call("browser_inspect");
-    expect(plain.content).toEqual([{ type: "text", text: JSON.stringify(inspectResult) }]);
+    expect(plain.content).toEqual([{ type: "text", text: JSON.stringify({ operation: "inspect", tabs: [] }) }]);
     expect(plain.isError).toBe(false);
 
     const error = { code: "HOST_UNAVAILABLE", message: "Browser host is unavailable", retryable: true } as const;
