@@ -203,6 +203,27 @@ describe("transcript viewport", () => {
     expect(view.rowBottom("1")).toBe(250);
   });
 
+  it.each<[string, TranscriptPosition]>([
+    ["a navigation target", { kind: "target", key: "5", align: "center" }],
+    ["a reading row", { kind: "reading", key: "5", offset: 25 }],
+  ])("holds %s on screen when a top inset shrinks the viewport", async (_, start) => {
+    let inset = 16;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const key = this.getAttribute("data-transcript-key");
+      return new DOMRect(0, inset + (key === null ? 0 : view.rowTop(key) ?? 0), 600, 100);
+    });
+    view.moveTo(start);
+    const anchor = hosts.find((host) => host.id === "5")!;
+    const screenTop = anchor.element.getBoundingClientRect().top;
+    inset = 58;
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(158);
+    view.shiftReadingPosition(42);
+    expect(anchor.element.getBoundingClientRect().top).toBe(screenTop);
+    LayoutObserver.resize(hosts.find((host) => host.id === "7")!.element, 150);
+    await nextFrame();
+    expect(anchor.element.getBoundingClientRect().top).toBe(screenTop);
+  });
+
   it("keeps tail following when a row control receives pointer or keyboard input", async () => {
     const tail = hosts.find((host) => host.id === "19")!;
     const button = document.createElement("button");
