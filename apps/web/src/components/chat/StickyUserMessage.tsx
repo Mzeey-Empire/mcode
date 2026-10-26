@@ -10,12 +10,10 @@ import {
 } from "@/components/ui/tooltip";
 
 /**
- * Approximate collapsed bar height (outer chrome plus two-line preview) used to
- * reserve scroll padding before ResizeObserver reports the measured height.
+ * Approximate collapsed bar height (outer chrome, two-line preview, and footer
+ * row) used to reserve scroll padding before ResizeObserver reports the measured height.
  */
-export const STICKY_USER_MESSAGE_ESTIMATED_HEIGHT = 64;
-
-const FOOTERLESS_TEXT_CLASS = "max-h-[5.2rem] overflow-hidden break-words px-3 py-1.5 pr-10 leading-5";
+export const STICKY_USER_MESSAGE_ESTIMATED_HEIGHT = 90;
 
 /** Props for {@link StickyUserMessage}. */
 export interface StickyUserMessageProps {
@@ -45,7 +43,7 @@ export function StickyUserMessage({
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const measureRef = useRef<HTMLParagraphElement>(null);
+  const textRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     if (!visible) {
@@ -56,15 +54,15 @@ export function StickyUserMessage({
   }, [visible, preview, onHeightChange]);
 
   useLayoutEffect(() => {
-    const probe = measureRef.current;
-    if (!visible || !probe) return;
-    const measure = () => setOverflows(probe.scrollHeight > probe.clientHeight);
+    const text = textRef.current;
+    if (!visible || expanded || !text) return;
+    const measure = () => setOverflows(text.scrollHeight > text.clientHeight);
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
-    observer.observe(probe);
+    observer.observe(text);
     return () => observer.disconnect();
-  }, [visible, preview]);
+  }, [visible, expanded, preview]);
 
   useEffect(() => {
     if (!visible || !onHeightChange) return;
@@ -84,28 +82,7 @@ export function StickyUserMessage({
   }, [visible, expanded, preview, onHeightChange]);
 
   const clamped = !expanded && overflows;
-  const showFooter = overflows || expanded;
-  const jumpButton = (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-inline"
-            onClick={onJumpToMessage}
-            className="text-muted hover:bg-ink/5 hover:text-ink"
-            aria-label="Jump to your message"
-          >
-            <ArrowUp size={15} aria-hidden />
-          </Button>
-        }
-      />
-      <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-        Jump to message
-      </TooltipContent>
-    </Tooltip>
-  );
+  const canToggle = overflows || expanded;
 
   if (!visible) {
     return null;
@@ -119,27 +96,19 @@ export function StickyUserMessage({
     >
       <div className="w-full" style={{ paddingRight: contentPaddingRight }}>
       <div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>
-        <div className="pointer-events-auto relative overflow-hidden rounded-lg bg-selected text-sm text-ink">
-          {/* Overflow is measured in the footerless layout, so the footer widening the visible text cannot flip it back. */}
+        <div className="pointer-events-auto overflow-hidden rounded-lg bg-selected text-sm text-ink">
           <p
-            ref={measureRef}
-            aria-hidden
-            className={cn(FOOTERLESS_TEXT_CLASS, "pointer-events-none invisible absolute inset-x-0 top-0")}
-          >
-            {preview}
-          </p>
-          <p
+            ref={textRef}
             className={cn(
-              !showFooter && FOOTERLESS_TEXT_CLASS,
-              showFooter && "break-words px-3 pt-1.5 leading-5",
-              expanded && "max-h-40 overflow-y-auto whitespace-pre-wrap",
-              clamped && "max-h-[4.6rem] overflow-hidden [mask-image:linear-gradient(to_bottom,black_calc(100%-2rem),transparent)]",
+              "break-words px-3 pt-1.5 leading-5",
+              expanded ? "max-h-40 overflow-y-auto whitespace-pre-wrap" : "max-h-[4.6rem] overflow-hidden",
+              clamped && "[mask-image:linear-gradient(to_bottom,black_calc(100%-2rem),transparent)]",
             )}
           >
             {preview}
           </p>
-          {showFooter ? (
-            <div className="flex items-center justify-end gap-0.5 px-1 pb-1">
+          <div className="flex items-center justify-end gap-0.5 px-1 pb-1">
+            {canToggle && (
               <Button
                 type="button"
                 variant="ghost"
@@ -150,11 +119,27 @@ export function StickyUserMessage({
               >
                 {expanded ? "Show less" : "Show full message"}
               </Button>
-              {jumpButton}
-            </div>
-          ) : (
-            <div className="absolute top-0.5 right-1">{jumpButton}</div>
-          )}
+            )}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-inline"
+                    onClick={onJumpToMessage}
+                    className="text-muted hover:bg-ink/5 hover:text-ink"
+                    aria-label="Jump to your message"
+                  >
+                    <ArrowUp size={15} aria-hidden />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
+                Jump to message
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
       </div>
       </div>

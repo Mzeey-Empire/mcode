@@ -19,7 +19,7 @@ describe("StickyUserMessage", () => {
     );
 
     expect(screen.getByTestId("sticky-user-message")).toBeInTheDocument();
-    expect(screen.getByText("Refactor the scroll container", { ignore: "[aria-hidden=true]" })).toBeInTheDocument();
+    expect(screen.getByText("Refactor the scroll container")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Jump to your message" }));
     expect(onJumpToMessage).toHaveBeenCalledTimes(1);
