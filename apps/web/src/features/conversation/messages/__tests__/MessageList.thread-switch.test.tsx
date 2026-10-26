@@ -1342,6 +1342,24 @@ describe("MessageList thread switch", () => {
     expect(screen.getByTestId("sticky-user-message")).toHaveTextContent("Earlier request");
   });
 
+  it("lands a jumped prompt at the top of the transcript", async () => {
+    fakeAnimationFrames();
+    messagesValue = transcriptRows().map((message, index) => index === 0 || index === 6
+      ? { ...message, role: "user", content: index === 0 ? "Earlier request" : "Latest request" }
+      : message);
+    const { container } = render(<MessageList />);
+    await measureRows(container, 200);
+    const viewport = screen.getByTestId("transcript-viewport");
+    readAt(viewport, 1500);
+    expect(screen.getByTestId("sticky-user-message")).toHaveTextContent("Latest request");
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    vi.spyOn(window, "matchMedia").mockReturnValue({ ...media, matches: true });
+    fireEvent.click(screen.getByRole("button", { name: "Jump to your message" }));
+    fireEvent.scroll(viewport);
+    expect(viewport.scrollTop).toBe(1200);
+    expect(screen.queryByTestId("sticky-user-message")).not.toBeInTheDocument();
+  });
+
   it("does not apply the sticky prompt inset twice on a cached restore", async () => {
     fakeAnimationFrames();
     const history = [

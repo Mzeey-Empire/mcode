@@ -526,7 +526,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const scrollToMessage = useCallback((messageId: string) => {
     const row = latest.current.items.find((item) => item.type === "message" && item.message.id === messageId);
     if (row) {
-      controllerRef.current?.moveTo({ kind: "target", key: row.key, align: "center" }, true);
+      controllerRef.current?.moveTo({ kind: "target", key: row.key, align: "start" }, true);
       setHighlightedKey(row.key);
     }
   }, []);
