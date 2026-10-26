@@ -363,6 +363,7 @@ export {
   HTML_VISUAL_THEME_TOKENS,
 } from "./models/html-visual.js";
 export type { HtmlVisual } from "./models/html-visual.js";
+export { HTML_VISUAL_SYSTEM_SUBTYPE, HTML_VISUAL_DEFAULT_HEIGHT, htmlVisualContent } from "./models/html-visual.js";
 
 export {
   MessageMentionSchema,
