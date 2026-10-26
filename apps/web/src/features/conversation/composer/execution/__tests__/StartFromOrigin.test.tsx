@@ -35,7 +35,7 @@ describe("Start from origin switch", () => {
     expect(selection(mode).origin).toBeUndefined();
   });
 
-  it("is offered off in New worktree mode, and names origin/main once on", () => {
+  it("is offered off in New worktree mode, and names the remote main once on", () => {
     const off = selection("worktree");
     expect(off.origin).toMatchObject({ checked: false, forced: false });
     expect(targetLabelText(off.label)).toBe("From main");
@@ -44,7 +44,7 @@ describe("Start from origin switch", () => {
 
     const on = selection("worktree");
     expect(on.origin).toMatchObject({ checked: true, forced: false });
-    expect(targetLabelText(on.label)).toBe("From origin/main");
+    expect(targetLabelText(on.label)).toBe("From main (remote)");
   });
 
   it("stays on for a remote-only origin row, which has no local branch", () => {
@@ -53,7 +53,7 @@ describe("Start from origin switch", () => {
     const pick = selection("worktree");
 
     expect(pick.origin).toMatchObject({ checked: true, forced: true });
-    expect(targetLabelText(pick.label)).toBe("From origin/feature/x");
+    expect(targetLabelText(pick.label)).toBe("From feature/x (remote)");
   });
 
   it("names the pull request rather than origin when one is picked", () => {
