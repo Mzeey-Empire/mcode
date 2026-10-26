@@ -8,6 +8,7 @@ import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore
 import {
   findSelectedTextCommentContent,
   reconstructCanonicalMessageRange,
+  visibleTranscriptRect,
 } from "../selected-text-projection";
 import {
   isSelectedTextCommentHighlightActive,
@@ -69,7 +70,7 @@ function commentOverlayGeometry(
     comment.source.quote,
   );
   if (!range) return null;
-  const rects = visibleTranscriptRects(range, viewport.getBoundingClientRect(), root);
+  const rects = visibleTranscriptRects(range, visibleTranscriptRect(viewport), root);
   const markerRect = rects.at(-1);
   return markerRect ? { comment, rects, markerRect } : null;
 }
@@ -129,7 +130,7 @@ export function SelectedTextCommentMarkers({
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const root = overlayRef.current?.getBoundingClientRect();
-        setLayout(root ? { root, viewport: viewport.getBoundingClientRect() } : null);
+        setLayout(root ? { root, viewport: visibleTranscriptRect(viewport) } : null);
       });
     };
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(refresh);

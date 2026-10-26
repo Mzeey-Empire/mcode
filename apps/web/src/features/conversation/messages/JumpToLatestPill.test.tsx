@@ -20,7 +20,7 @@ function renderOverlays(showJumpToLatest: boolean, onJumpToLatest = vi.fn(), con
       contentPaddingRight={contentPaddingRight}
       isStickyVisible={false}
       onJumpToUserMessage={vi.fn()}
-      onStickyHeightChange={vi.fn()}
+      chromeInsets={{ top: 0, bottom: 0 }}
       showJumpToLatest={showJumpToLatest}
       onJumpToLatest={onJumpToLatest}
     />,

@@ -4,10 +4,14 @@ import type { SelectedTextComment } from "@mcode/contracts";
 import { useEffect, useMemo, useState, type RefObject } from "react";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import type { Message } from "@/transport/types";
+import type { ViewportInsets } from "@/components/ui/virtual-viewport";
 import { JumpToLatestPill } from "./JumpToLatestPill";
 import { SelectedTextCommentControls } from "./selection/SelectedTextCommentControls";
 import type { SelectedTextCommentEditorScope } from "./selection/SelectedTextCommentControls";
 import { SelectedTextCommentMarkers } from "./selection/SelectedTextCommentMarkers";
+
+/** Gap between the top of the composer chrome and the composer card. */
+export const COMPOSER_CARD_OFFSET = 16;
 
 /** Props for transcript controls that float above the virtual rows. */
 interface MessageListOverlaysProps {
@@ -30,7 +34,8 @@ interface MessageListOverlaysProps {
   readonly contentPaddingRight?: string;
   readonly isStickyVisible: boolean;
   readonly onJumpToUserMessage: () => void;
-  readonly onStickyHeightChange: (height: number) => void;
+  /** Header and composer chrome the overlays sit inside of. */
+  readonly chromeInsets: ViewportInsets;
   readonly showJumpToLatest: boolean;
   readonly onJumpToLatest: () => void;
 }
@@ -52,7 +57,7 @@ export function MessageListOverlays({
   contentPaddingRight,
   isStickyVisible,
   onJumpToUserMessage,
-  onStickyHeightChange,
+  chromeInsets,
   showJumpToLatest,
   onJumpToLatest,
 }: MessageListOverlaysProps) {
@@ -81,26 +86,29 @@ export function MessageListOverlays({
           onOpenComment={onOpenSelectedTextCommentEditor}
         />
       )}
-      {/* Equal-layer indicators follow the markers so loading and sticky content stay above them. */}
-      {isLoadingMore && <PaginationIndicator placement="top" delayMs={300} />}
-      {isLoadingNewer && <PaginationIndicator placement="bottom" delayMs={300} />}
-      {stickyPreview && (
-        <StickyUserMessage
-          key={stickyPreview}
-          preview={stickyPreview}
-          contentPaddingRight={contentPaddingRight}
-          visible={isStickyVisible}
-          onJumpToMessage={onJumpToUserMessage}
-          onHeightChange={onStickyHeightChange}
-        />
-      )}
+      {/* Equal-layer indicators follow the markers so loading and sticky content stay above them.
+          The anchors hang them from the chrome edges instead of the transcript's. */}
+      <div className="absolute inset-x-0" style={{ top: chromeInsets.top }}>
+        {isLoadingMore && <PaginationIndicator placement="top" delayMs={300} />}
+        {stickyPreview && (
+          <StickyUserMessage
+            key={stickyPreview}
+            preview={stickyPreview}
+            contentPaddingRight={contentPaddingRight}
+            visible={isStickyVisible}
+            onJumpToMessage={onJumpToUserMessage}
+          />
+        )}
+      </div>
+      <div className="absolute inset-x-0" style={{ bottom: chromeInsets.bottom }}>
+        {isLoadingNewer && <PaginationIndicator placement="bottom" delayMs={300} />}
+      </div>
       {showJumpToLatest && (
-        // The list ends 16px above the composer tray, so these offsets set the fade's base and the
-        // pill's 34px lift from the tray top, as the board does. The right inset keeps both off the
-        // docked overview's reserve so the pill centres on the conversation column.
+        // The right inset keeps the pill off the docked overview's reserve so it centres on the
+        // conversation column.
         <div
-          className="pointer-events-none absolute left-0 -bottom-4 h-14 bg-linear-to-t from-background"
-          style={{ right: contentPaddingRight ?? 0 }}
+          className="pointer-events-none absolute left-0 h-14"
+          style={{ right: contentPaddingRight ?? 0, bottom: chromeInsets.bottom - COMPOSER_CARD_OFFSET }}
         >
           {/* A hidden-overflow box with a stable gutter reserves the transcript scrollbar's width, and
               its vertical padding leaves room for the pill's shadow. */}

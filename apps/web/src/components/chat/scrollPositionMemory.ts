@@ -14,7 +14,6 @@ export interface ThreadScrollPosition {
   anchorMessageId?: string;
   anchorTop?: number;
   rowAnchor?: { key: string; offset: number };
-  topInset?: number;
   expandedGroups?: ReadonlySet<string>;
 }
 
@@ -27,7 +26,6 @@ export function rememberScrollTop(
   atTail = false,
   anchor?: { messageId: string; top: number },
   rowAnchor?: { key: string; offset: number },
-  topInset?: number,
   expandedGroups?: ReadonlySet<string>,
 ): void {
   if (!Number.isFinite(scrollTop) || scrollTop < 0) return;
@@ -37,7 +35,6 @@ export function rememberScrollTop(
     anchorMessageId: anchor?.messageId,
     anchorTop: anchor?.top,
     ...(rowAnchor ? { rowAnchor } : {}),
-    ...(topInset !== undefined ? { topInset } : {}),
     ...(expandedGroups ? { expandedGroups } : {}),
   });
 }

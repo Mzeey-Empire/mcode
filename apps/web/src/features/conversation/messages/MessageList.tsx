@@ -27,6 +27,7 @@ import { isTranscriptGroupOpen, toolCallDisclosureKey, type TranscriptNarrativeI
 import { resolveUserMessagePreview } from "@/components/chat/user-message-preview";
 import { estimateMessageListItemHeight, type MessageListItem } from "./message-list-virtualization";
 import { TranscriptViewport, type TranscriptHost, type TranscriptPosition } from "./transcript-viewport";
+import type { ViewportInsets } from "@/components/ui/virtual-viewport";
 import { useToastStore } from "@/stores/toastStore";
 import { useMessageRevealStore, type MessageRevealRequest } from "./message-reveal-store";
 
@@ -35,6 +36,13 @@ const FILL_VIEWPORT_RATIO = 1.5;
 const MAX_FILL_PAGES = 3;
 /** Bounds a Show in chat search so a message that history no longer holds ends in a miss, not endless paging. */
 const MAX_REVEAL_PAGES = 20;
+const TRANSCRIPT_TOP_GAP = 16;
+/**
+ * Row edges are measured from the top inset's edge, TRANSCRIPT_TOP_GAP below the sticky message's top,
+ * so a prompt whose row starts above this line is the one the sticky message stands in for.
+ */
+const STICKY_BOUNDARY = STICKY_USER_MESSAGE_ESTIMATED_HEIGHT - TRANSCRIPT_TOP_GAP;
+const NO_CHROME: ViewportInsets = { top: 0, bottom: 0 };
 
 /** A card source request that MessageList resolves through its resident transcript. */
 export interface SelectedTextCommentSourceNavigationRequest {
@@ -297,6 +305,8 @@ export interface MessageListProps {
   showParentAgentProvenance?: boolean;
   /** Reserved space that keeps transcript content clear of the open Overview. */
   contentPaddingRight?: string;
+  /** Header and composer chrome floating over the transcript's ends. */
+  chromeInsets?: ViewportInsets;
 }
 
 /** Keeps the viewport and its pending work scoped to the rendered thread. */
@@ -397,7 +407,6 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const [atTail, setAtTail] = useState(true);
   const [stickyVisible, setStickyVisible] = useState(false);
   const [stickyKey, setStickyKey] = useState<string>();
-  const [stickyHeight, setStickyHeight] = useState(0);
   const [highlightedKey, setHighlightedKey] = useState<string>();
   const { expanded: expandedGroups, present: presentGroups, entering: enteringGroups, toggle: toggleExpandedGroup } = useTranscriptGroupExpansion(() =>
     data.renderedThreadId ? recallScrollPosition(data.renderedThreadId)?.expandedGroups ?? new Set() : new Set());
@@ -428,7 +437,6 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   latest.current = { data, items, userRows, expandedGroups };
   const paginationDirection = useRef<"older" | "newer" | null>(null);
   const restored = useRef(false);
-  const previousInset = useRef(data.renderedThreadId ? recallScrollPosition(data.renderedThreadId)?.topInset ?? 16 : 16);
 
   const syncPosition = useCallback((position: TranscriptPosition) => {
     positionRef.current = position;
@@ -436,12 +444,10 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     const view = controllerRef.current;
     if (!view) return;
     const current = latest.current;
-    // The inset must not move the selection boundary when the chip appears.
-    const boundary = STICKY_USER_MESSAGE_ESTIMATED_HEIGHT - previousInset.current;
-    const userRow = findReadingUserRow(view, current.userRows, boundary);
+    const userRow = findReadingUserRow(view, current.userRows, STICKY_BOUNDARY);
     setStickyKey(userRow?.key);
     const bottom = userRow ? view.rowBottom(userRow.key) : undefined;
-    setStickyVisible((visible) => bottom !== undefined && bottom <= boundary + (visible ? 4 : -8));
+    setStickyVisible((visible) => bottom !== undefined && bottom <= STICKY_BOUNDARY + (visible ? 4 : -8));
     if (!current.data.renderedThreadId || !restored.current) return;
     rememberScrollTop(
       current.data.renderedThreadId,
@@ -449,7 +455,6 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       position.kind === "end",
       findViewportMessageAnchor(view.viewport),
       position.kind === "reading" ? { key: position.key, offset: position.offset } : view.getReadingAnchor(),
-      previousInset.current,
       withoutKeys(current.expandedGroups, autoOpenedFolds.current),
     );
   }, []);
@@ -466,6 +471,12 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       viewportRef.current = null;
     };
   }, [syncPosition]);
+
+  const chrome = props.chromeInsets ?? NO_CHROME;
+  // Runs before the rows effect so the first restore already lands clear of the chrome.
+  useLayoutEffect(() => {
+    controllerRef.current?.setInsets({ top: chrome.top + TRANSCRIPT_TOP_GAP, bottom: chrome.bottom });
+  }, [chrome.top, chrome.bottom]);
 
   useLayoutEffect(() => {
     const view = controllerRef.current;
@@ -586,22 +597,14 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     return inspectScrolledSource({ containerRef: viewportRef, target: sourceTarget, renderedThreadId: data.renderedThreadId, callbacks: sourceCallbacks });
   }, [sourceTarget, sourceCallbacks, items, data.hasMore, data.hasNewer, data.isLoadingMore, data.isLoadingNewer, data.loadOlderMessages, data.loadNewerMessages, data.renderedThreadId]);
 
-  const topInset = stickyVisible ? stickyHeight || STICKY_USER_MESSAGE_ESTIMATED_HEIGHT : 16;
-  useLayoutEffect(() => {
-    const delta = topInset - previousInset.current;
-    previousInset.current = topInset;
-    controllerRef.current?.shiftReadingPosition(delta);
-  }, [topInset]);
-
   return (
     <div className="relative h-full" data-testid="message-list">
-      <div className="h-full" style={{ paddingTop: topInset }}>
-        <div
-          ref={containerRef}
-          className="h-full data-[sticky=true]:[mask-image:linear-gradient(to_bottom,transparent,black_16px)]"
-          data-sticky={stickyVisible}
-        />
-      </div>
+      {/* Rows fade out under the header and stay visible around the composer card. */}
+      <div
+        ref={containerRef}
+        className="h-full"
+        style={{ maskImage: `linear-gradient(to bottom, transparent, black ${chrome.top}px)` }}
+      />
       <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={(item, id) => (
           <div className={cn("w-full px-4 sm:px-[var(--chat-gutter,--spacing(8))]", transcriptRowPadding(item))} data-performance-virtual-item-key={isMessageListPerformanceBuild() ? item.key : undefined}>
             <div className="w-full overflow-x-clip" style={{ paddingRight: props.contentPaddingRight }}>
@@ -629,7 +632,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
         onSelectedTextCommentEditorChange={props.onSelectedTextCommentEditorChange} onOpenSelectedTextCommentEditor={props.onOpenSelectedTextCommentEditor}
         selectedTextCommentEditor={props.selectedTextCommentEditor} selectedTextCommentEditorScope={props.selectedTextCommentEditorScope}
         viewportRef={viewportRef} renderedThreadId={data.renderedThreadId} stickyPreview={stickyPreview}
-        isStickyVisible={stickyVisible} onJumpToUserMessage={jumpToUser} onStickyHeightChange={setStickyHeight}
+        isStickyVisible={stickyVisible} onJumpToUserMessage={jumpToUser} chromeInsets={chrome}
         showJumpToLatest={!atTail}
         onJumpToLatest={() => controllerRef.current?.moveTo({ kind: "end" }, true)}
       />

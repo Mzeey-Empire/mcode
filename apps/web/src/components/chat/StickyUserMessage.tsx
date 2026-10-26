@@ -11,7 +11,7 @@ import {
 
 /**
  * Approximate collapsed bar height (outer chrome, two-line preview, and footer
- * row) used to reserve scroll padding before ResizeObserver reports the measured height.
+ * row). The transcript treats a prompt that scrolls above it as the one the bar stands in for.
  */
 export const STICKY_USER_MESSAGE_ESTIMATED_HEIGHT = 90;
 
@@ -23,8 +23,6 @@ export interface StickyUserMessageProps {
   visible: boolean;
   /** Scrolls the transcript back to the original message bubble. */
   onJumpToMessage: () => void;
-  /** Reports rendered height so the list can reserve scroll space beneath the bar. */
-  onHeightChange?: (height: number) => void;
   /** Space reserved for Overview, shared with the transcript rows. */
   contentPaddingRight?: string;
 }
@@ -37,21 +35,18 @@ export function StickyUserMessage({
   preview,
   visible,
   onJumpToMessage,
-  onHeightChange,
   contentPaddingRight,
 }: StickyUserMessageProps) {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     if (!visible) {
-      // oxlint-disable-next-line react/set-state-in-effect -- Hiding the sticky message must clear its expanded snapshot before its height is reported as zero.
+      // oxlint-disable-next-line react/set-state-in-effect -- A hidden sticky message must reopen collapsed.
       setExpanded(false);
-      onHeightChange?.(0);
     }
-  }, [visible, preview, onHeightChange]);
+  }, [visible, preview]);
 
   useLayoutEffect(() => {
     const text = textRef.current;
@@ -64,23 +59,6 @@ export function StickyUserMessage({
     return () => observer.disconnect();
   }, [visible, expanded, preview]);
 
-  useEffect(() => {
-    if (!visible || !onHeightChange) return;
-    const el = rootRef.current;
-    if (!el) return;
-
-    const reportHeight = () => {
-      onHeightChange(el.offsetHeight);
-    };
-
-    reportHeight();
-    if (typeof ResizeObserver === "undefined") return;
-
-    const observer = new ResizeObserver(reportHeight);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [visible, expanded, preview, onHeightChange]);
-
   const clamped = !expanded && overflows;
   const canToggle = overflows || expanded;
 
@@ -90,7 +68,6 @@ export function StickyUserMessage({
 
   return (
     <div
-      ref={rootRef}
       className="pointer-events-none absolute inset-x-0 top-0 z-(--layer-sticky) px-4 pb-2 pt-1 sm:px-[var(--chat-gutter,--spacing(8))]"
       data-testid="sticky-user-message"
     >

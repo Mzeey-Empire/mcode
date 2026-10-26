@@ -92,27 +92,4 @@ describe("StickyUserMessage", () => {
 
     expect(screen.queryByTestId("sticky-user-message")).not.toBeInTheDocument();
   });
-
-  it("reports zero height when hidden", () => {
-    const onHeightChange = vi.fn();
-    const { rerender } = render(
-      <StickyUserMessage
-        preview="Short prompt"
-        visible
-        onJumpToMessage={vi.fn()}
-        onHeightChange={onHeightChange}
-      />,
-    );
-
-    rerender(
-      <StickyUserMessage
-        preview="Short prompt"
-        visible={false}
-        onJumpToMessage={vi.fn()}
-        onHeightChange={onHeightChange}
-      />,
-    );
-
-    expect(onHeightChange).toHaveBeenCalledWith(0);
-  });
 });

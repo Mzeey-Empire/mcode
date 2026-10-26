@@ -39,7 +39,8 @@ describe("transcript viewport", () => {
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(200);
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
-      return Number.parseFloat(this.firstElementChild instanceof HTMLElement ? this.firstElementChild.style.height : "0") || 200;
+      const padding = (Number.parseFloat(this.style.paddingTop) || 0) + (Number.parseFloat(this.style.paddingBottom) || 0);
+      return padding + (Number.parseFloat(this.firstElementChild instanceof HTMLElement ? this.firstElementChild.style.height : "0") || 200);
     });
     const container = document.createElement("div");
     document.body.append(container);
@@ -193,6 +194,17 @@ describe("transcript viewport", () => {
     expect(view.viewport.scrollTop).toBe(1900);
   });
 
+  it("rests the first and last rows clear of floating chrome", () => {
+    view.setInsets({ top: 64, bottom: 100 });
+    expect(view.viewport.scrollTop).toBe(1964);
+    expect(view.rowBottom("19")).toBe(36);
+    view.moveTo({ kind: "target", key: "0", align: "start" });
+    expect(view.viewport.scrollTop).toBe(0);
+    expect(view.rowTop("0")).toBe(0);
+    view.moveTo({ kind: "target", key: "1", align: "center" });
+    expect(view.viewport.scrollTop).toBe(132);
+  });
+
   it("keeps an unmounted navigation target centered as its height resolves", async () => {
     view.moveTo({ kind: "target", key: "1", align: "center" });
     expect(view.viewport.scrollTop).toBe(50);
@@ -201,27 +213,6 @@ describe("transcript viewport", () => {
     await nextFrame();
     expect(view.viewport.scrollTop).toBe(150);
     expect(view.rowBottom("1")).toBe(250);
-  });
-
-  it.each<[string, TranscriptPosition]>([
-    ["a navigation target", { kind: "target", key: "5", align: "center" }],
-    ["a reading row", { kind: "reading", key: "5", offset: 25 }],
-  ])("holds %s on screen when a top inset shrinks the viewport", async (_, start) => {
-    let inset = 16;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      const key = this.getAttribute("data-transcript-key");
-      return new DOMRect(0, inset + (key === null ? 0 : view.rowTop(key) ?? 0), 600, 100);
-    });
-    view.moveTo(start);
-    const anchor = hosts.find((host) => host.id === "5")!;
-    const screenTop = anchor.element.getBoundingClientRect().top;
-    inset = 58;
-    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(158);
-    view.shiftReadingPosition(42);
-    expect(anchor.element.getBoundingClientRect().top).toBe(screenTop);
-    LayoutObserver.resize(hosts.find((host) => host.id === "7")!.element, 150);
-    await nextFrame();
-    expect(anchor.element.getBoundingClientRect().top).toBe(screenTop);
   });
 
   it("keeps tail following when a row control receives pointer or keyboard input", async () => {
