@@ -16,7 +16,8 @@ import type { BoundTool, BoundToolkit, McodeToolkit } from "./mcode-toolkit.js";
 export const MCODE_MCP_PATH = "/mcp/mcode";
 
 /** Largest request body the server reads, in bytes. */
-export const MCODE_MCP_MAX_REQUEST_BYTES = 1_048_576;
+// A valid 512 KiB page can exceed 1 MiB when JSON escapes its HTML.
+export const MCODE_MCP_MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 
 const SERVER_VERSION = "0.1.0";
 const BEARER_PATTERN = /^Bearer ([A-Za-z0-9_-]{20,256})$/;
