@@ -115,7 +115,7 @@ describe("narrative tool row layout classes", () => {
     expect(screen.getAllByRole("button")).toHaveLength(1);
     const child = screen.getByRole("button", { name: /Ran command/ });
     expect(child).toHaveAttribute("aria-expanded", "false");
-    expect(within(child).getByText("0:15")).toBeTruthy();
+    expect(within(child).getByText("15s")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Shell output" })).toBeNull();
     const commandPreview = within(child).getByText(LONG_SHELL_COMMAND);
     expect(child.querySelector("[data-slot='tooltip-trigger']")).toBeNull();
@@ -214,7 +214,7 @@ describe("narrative tool row layout classes", () => {
       "aria-expanded",
       "false",
     );
-    expect(screen.getByText("0:15")).toBeTruthy();
+    expect(screen.getByText("15s")).toBeTruthy();
   });
 
   it("ToolSummaryLine maps command_execution to terminal icon via Bash alias", () => {

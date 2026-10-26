@@ -12,7 +12,7 @@ import {
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { OVERVIEW_CANVAS_RESERVE } from "@/lib/composer-layout";
-import { COMPOSER_RAIL_CLASS } from "@/lib/layout-rails";
+import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { cn } from "@/lib/utils";
 import { recordFirstSend } from "@/features/thread-startup";
 import { Composer } from "../../composer/Composer";
@@ -56,7 +56,7 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewT
           style={{ paddingRight: docked ? `${OVERVIEW_CANVAS_RESERVE}px` : undefined }}
         >
           <div className="px-4 pb-4 sm:px-8">
-            <div key={projectName ?? "projectless"} className={cn(COMPOSER_RAIL_CLASS, "animate-fade-up-in flex justify-center")}>
+            <div key={projectName ?? "projectless"} className={cn(PRIMARY_CONTENT_RAIL_CLASS, "animate-fade-up-in flex justify-center")}>
               <ProjectSlotHeading projectName={projectName} />
             </div>
           </div>

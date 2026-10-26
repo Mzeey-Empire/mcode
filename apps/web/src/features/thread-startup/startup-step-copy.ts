@@ -8,6 +8,7 @@ import {
   type ThreadStartupStepState,
   type WorkspaceEnvironmentActionRun,
 } from "@mcode/contracts";
+import { formatDuration } from "@/lib/time";
 
 /** Startup phases the trail draws. The "thread" phase is bookkeeping and never renders. */
 export type TrailPhase = Exclude<ThreadStartupPhase, "thread">;
@@ -76,12 +77,9 @@ const SKIP_REASON_COPY: Record<Exclude<NonNullable<SetupDetail["skipReason"]>, "
   "thread-running-here": "thread running here",
 };
 
-/** Formats elapsed milliseconds as mono `m:ss`, the only duration form the trail uses. */
+/** Formats elapsed milliseconds in words, such as `14s` or `1m 15s`, as the thread timeline does. */
 export function formatStartupDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1_000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return formatDuration(Math.max(0, Math.floor(ms / 1_000)));
 }
 
 /** The first command line of a setup script, which stands in for the whole script in one row. */

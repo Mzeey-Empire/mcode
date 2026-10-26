@@ -134,11 +134,11 @@ describe("StartupStepsTrail", () => {
     seedRun("bun install\nbun run build");
     renderTrail({ startup: startup(), kind: "managed-worktree" });
 
-    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Running setupbun install0:03");
-    expect(screen.getByTestId("startup-step-worktree")).toHaveTextContent("Created worktreemcode-3f2a0:02");
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Running setupbun install3s");
+    expect(screen.getByTestId("startup-step-worktree")).toHaveTextContent("Created worktreemcode-3f2a2s");
 
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
-    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("0:05");
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("5s");
   });
 
   it("labels the live row with the action now running, not the first one", () => {
@@ -226,7 +226,7 @@ describe("StartupStepsTrail", () => {
     });
 
     expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "failed");
-    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Setup failedexit 1 · 0:14");
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Setup failedexit 1 · 14s");
     expect(screen.getByTestId("startup-detail")).toHaveTextContent("error: lockfile had changes");
     expect(screen.getByRole("button", { name: "Retry setup" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
@@ -251,7 +251,7 @@ describe("StartupStepsTrail", () => {
     });
 
     expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "failed");
-    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Setup failedexit 1 · 0:14");
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Setup failedexit 1 · 14s");
     expect(screen.getByRole("alert")).toHaveTextContent("error: lockfile had changes");
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Show output" }));
@@ -482,7 +482,7 @@ describe("StartupStepsTrail", () => {
       startupId,
       kind: "managed-worktree",
     });
-    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Cancelled0:09");
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Cancelled9s");
     expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "cancelled");
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });

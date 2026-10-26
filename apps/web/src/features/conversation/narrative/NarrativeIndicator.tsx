@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
-import { formatClock } from "@/lib/time";
+import { formatDuration } from "@/lib/time";
 import { Spinner } from "@/components/ui/spinner";
 import { StackedLayersIcon, stackedLayersIconClassName } from "@/components/ui/StackedLayersIcon";
 import type { RunStatus } from "./run-status";
@@ -115,12 +115,12 @@ function RunStatusIcon({ icon, running }: { icon: RunStatus["icon"]; running: bo
 }
 
 /**
- * Bottom bar of the narrative flow: step count, run status label, and a clock.
+ * Bottom bar of the narrative flow: step count, run status label, and elapsed time.
  *
  * Example outputs:
- *   6 steps · Thinking 0:22
- *   5 steps · Running bun run lint 0:38
- *   Stopping 1:04
+ *   6 steps · Thinking 22s
+ *   5 steps · Running bun run lint 38s
+ *   Stopping 1m 4s
  *
  * When the turn ends the bar collapses and fades out over
  * {@link STATUS_LINE_EXIT_MS} with its last running label instead of vanishing in
@@ -158,7 +158,7 @@ export function NarrativeIndicator({
       )}
       <span className={cn("min-w-0 text-fade", waiting ? "text-muted" : "font-medium text-ink")}>{shown.label}</span>
       {!waiting && startTime !== undefined && (
-        <span className="shrink-0 font-mono text-muted">{formatClock(elapsed)}</span>
+        <span className="shrink-0 font-mono text-muted">{formatDuration(elapsed)}</span>
       )}
     </div>
   );

@@ -15,13 +15,13 @@ describe("NarrativeIndicator", () => {
     vi.useRealTimers();
   });
 
-  it("reads steps, the status label and a clock, with no parens or shimmer", () => {
+  it("reads steps, the status label and a duration, with no parens or shimmer", () => {
     const { container } = render(
       <NarrativeIndicator stepCount={3} status={lint} startTime={Date.now() - 23000} isAgentRunning />,
     );
     expect(screen.getByText("3 steps ·")).toBeInTheDocument();
     expect(screen.getByText("Running bun run lint")).toBeInTheDocument();
-    expect(screen.getByText("0:23")).toBeInTheDocument();
+    expect(screen.getByText("23s")).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/[()]/);
     expect(container.querySelector("[data-startup-activity-shimmer-text]")).toBeNull();
     expect(container.querySelector('[data-state="running"]')).not.toBeNull();
@@ -36,13 +36,13 @@ describe("NarrativeIndicator", () => {
     expect(container.textContent).not.toMatch(/subagent/i);
   });
 
-  it("drops steps and the clock while the turn waits on the user", () => {
+  it("drops steps and the timer while the turn waits on the user", () => {
     render(
       <NarrativeIndicator stepCount={3} status={{ label: "Waiting for approval", icon: "dot" }} startTime={Date.now() - 23000} isAgentRunning />,
     );
     expect(screen.getByText("Waiting for approval")).toBeInTheDocument();
     expect(screen.queryByText(/steps?/)).not.toBeInTheDocument();
-    expect(screen.queryByText("0:23")).not.toBeInTheDocument();
+    expect(screen.queryByText("23s")).not.toBeInTheDocument();
   });
 
   it("draws animated layers for working rows and a spinner for holding rows", () => {

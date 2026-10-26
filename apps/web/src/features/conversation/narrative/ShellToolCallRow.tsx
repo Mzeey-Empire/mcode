@@ -4,7 +4,7 @@ import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { formatClock } from "@/lib/time";
+import { formatDuration } from "@/lib/time";
 import type { ToolCall } from "@/transport/types";
 import {
   NarrativeToolRow,
@@ -24,10 +24,10 @@ interface ShellToolCallRowProps {
   expansion?: RowExpansion;
 }
 
-/** Formats a completed tool duration as a clock; sub-second runs show none. */
+/** Formats a completed tool duration in words, such as `1m 5s`; sub-second runs show none. */
 function formatToolDuration(durationMs: number | undefined): string | null {
   if (durationMs == null || !Number.isFinite(durationMs) || durationMs < 1000) return null;
-  return formatClock(Math.round(durationMs / 1000));
+  return formatDuration(Math.round(durationMs / 1000));
 }
 
 interface ShellToolCallStatus {
