@@ -332,11 +332,17 @@ export class VirtualViewport {
     this.pinReadingAnchor();
   }
 
-  /** Compensates for a layout inset changing the viewport's screen position. */
+  private anchorSettledPositionToVisibleRow(): void {
+    if (this.animating || this.position.kind === "reading" || this.position.kind === "end") return;
+    this.position = this.readingPosition();
+  }
+
+  /** Keeps on-screen content still when a layout inset moves the viewport's screen position. */
   shiftReadingPosition(delta: number): void {
-    if (this.position.kind !== "reading" || delta === 0) return;
+    if (delta === 0) return;
+    this.anchorSettledPositionToVisibleRow();
+    if (this.position.kind !== "reading") return;
     this.position = { ...this.position, offset: this.position.offset + delta };
-    if (this.pinnedAnchor) this.pinnedAnchor = { ...this.pinnedAnchor, top: this.pinnedAnchor.top + delta };
     this.applyPosition();
   }
 
