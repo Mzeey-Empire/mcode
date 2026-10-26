@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { COMPOSER_RAIL_CLASS } from "@/lib/layout-rails";
+import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { useFileAutocomplete, type MentionSuggestion } from "@/components/chat/useFileAutocomplete";
 import { useFileTagPopup } from "@/components/chat/FileTagPopup";
 import {
@@ -608,7 +608,7 @@ export function Composer({
     <div className="relative px-4 py-4 sm:px-[var(--chat-gutter,--spacing(8))]">
       <ComposerQueueToast toast={toast} />
 
-      <ComposerOverlayLayout className={COMPOSER_RAIL_CLASS}>
+      <ComposerOverlayLayout className={PRIMARY_CONTENT_RAIL_CLASS}>
         <ComposerProviderNoticeSurface
           threadId={threadId}
           composerContainerRef={composerContainerRef}
