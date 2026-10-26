@@ -17,7 +17,7 @@ import { findSelectedTextCommentContent, reconstructCanonicalMessageRange } from
 import { isMessageListPerformanceBuild, measureMessageListPerformance } from "@/performance/message-list-performance";
 import { TranscriptItemRenderer } from "./timeline/TranscriptItemRenderer";
 import { WorkFoldNote } from "../turn/WorkFold";
-import { COMPOSER_CARD_OFFSET, MessageListOverlays } from "./MessageListOverlays";
+import { MessageListOverlays } from "./MessageListOverlays";
 import type { SelectedTextCommentEditorScope } from "./selection/SelectedTextCommentControls";
 import { findViewportMessageAnchor } from "./message-list-scroll";
 import { useMessageListData, type MessageListData } from "./useMessageListData";
@@ -599,11 +599,11 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
 
   return (
     <div className="relative h-full" data-testid="message-list">
-      {/* Rows fade out as they pass under the header and the composer. */}
+      {/* Rows fade out under the header and stay visible around the composer card. */}
       <div
         ref={containerRef}
         className="h-full"
-        style={{ maskImage: `linear-gradient(to bottom, transparent, black ${chrome.top}px, black calc(100% - ${chrome.bottom}px), transparent calc(100% - ${chrome.bottom - COMPOSER_CARD_OFFSET}px))` }}
+        style={{ maskImage: `linear-gradient(to bottom, transparent, black ${chrome.top}px)` }}
       />
       <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={(item, id) => (
           <div className={cn("w-full px-4 sm:px-[var(--chat-gutter,--spacing(8))]", transcriptRowPadding(item))} data-performance-virtual-item-key={isMessageListPerformanceBuild() ? item.key : undefined}>
