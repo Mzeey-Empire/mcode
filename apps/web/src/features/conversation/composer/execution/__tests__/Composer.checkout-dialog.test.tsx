@@ -464,15 +464,6 @@ describe("Composer checkout confirmation", () => {
     expect(within(rail).getByTestId("composer-branch-trigger")).toHaveTextContent("On feature/base");
   });
 
-  it("leaves the workspace and branch to a shown overview card", () => {
-    seedComposerState("direct");
-    const { rerender } = render(<Composer isNewThread workspaceId="ws-1" overviewPresentation="docked" />);
-    expect(screen.queryByTestId("new-thread-target-rail")).not.toBeInTheDocument();
-
-    rerender(<Composer isNewThread workspaceId="ws-1" overviewPresentation="overlay" />);
-    expect(screen.queryByTestId("new-thread-target-rail")).not.toBeInTheDocument();
-  });
-
   it("applies a transcript deletion to the matching ComposerDraft and consumes the handoff", async () => {
     const workspace = seedComposerState("direct");
     const thread = createMockThread({

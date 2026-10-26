@@ -31,8 +31,8 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, cla
   if (!isGitRepo) {
     const { Icon, label } = COMPOSER_MODE_OPTIONS.direct;
     return (
-      <span data-testid="workspace-target-trigger" className={cn(TARGET_TRIGGER_CLASS, "inline-flex h-8 items-center", className)}>
-        <Icon className="size-4" />
+      <span data-testid="workspace-target-trigger" className={cn(TARGET_TRIGGER_CLASS, "inline-flex items-center", className)}>
+        <Icon className="size-3.5" />
         {label}
       </span>
     );
@@ -50,7 +50,7 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, cla
             data-testid="workspace-target-trigger"
             className={cn(TARGET_TRIGGER_CLASS, "min-w-[15.2rem] justify-start", className)}
           >
-            <Icon className="size-4" />
+            <Icon className="size-3.5" />
             <span>{label}</span>
             <ChevronDown className="size-3" aria-hidden />
           </Button>

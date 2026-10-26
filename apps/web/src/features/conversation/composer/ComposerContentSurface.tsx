@@ -1,6 +1,5 @@
 import type { ComponentProps, DragEventHandler, ReactNode, RefObject } from "react";
 import { ArrowUp, X } from "lucide-react";
-import type { OverviewPresentation } from "@/stores/overviewStore";
 import { AttachmentPreview } from "@/components/chat/AttachmentPreview";
 import { ComposerAddMenu } from "@/components/chat/ComposerAddMenu";
 import { ComposerBranchBar } from "@/components/chat/ComposerBranchBar";
@@ -70,7 +69,6 @@ interface ComposerContentSurfaceProps {
       readonly originalIndex: number;
     } | null;
     readonly composerMode: ComposerMode;
-    readonly overviewPresentation: OverviewPresentation;
     readonly isDragOver: boolean;
     /** A new thread or fork has no branch to send yet, so Send waits. */
     readonly targetPending: boolean;
@@ -193,7 +191,6 @@ function ComposerNewThreadSurface({
     <NewThreadTargetRail
       workspaceId={model.workspaceId}
       mode={model.composerMode}
-      overviewPresentation={model.overviewPresentation}
       onModeChange={actions.onComposerModeChange}
     />
   );
