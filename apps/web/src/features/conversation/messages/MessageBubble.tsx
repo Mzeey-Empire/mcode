@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, useSyncExternalStore, lazy, Suspense, type ReactNode } from "react";
 import type { Message } from "@/transport";
-import { ImageIcon, RotateCcw, Copy, Check, GitFork, Target } from "lucide-react";
+import { ImageIcon, RotateCcw, Copy, Check, Target } from "lucide-react";
 import { WarningIcon } from "@/components/ui/icon-map";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
@@ -437,7 +437,7 @@ function BranchButton({ onClick, resting = false }: { onClick: () => void; resti
             className={resting ? RESTING_ACTION_CLASS : HOVER_BRANCH_CLASS}
             aria-label="Fork from this message"
           >
-            {resting ? <ForkIcon /> : <GitFork size={14} />}
+            <ForkIcon />
           </button>
         }
       />
