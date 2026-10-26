@@ -39,7 +39,7 @@ import type {
   ProviderTurnDiffUpdate,
 } from "@mcode/contracts";
 import { fetchCursorCliModels } from "./models/cursor-cli-models.js";
-import { buildMcodeInstructionSections, renderMcodeInstructionSections } from "@mcode/thread-orchestration";
+import { buildMcodeInstructionSections, NO_MCODE_TOOLKITS, renderMcodeInstructionSections } from "@mcode/thread-orchestration";
 import { AcpSessionRuntime, SessionRecoveryFailedError } from "../protocols/acp/acp-session-runtime.js";
 import { CursorAcpClientBridge } from "./acp/cursor-acp-client-bridge.js";
 import { createCursorAcpTurnState } from "./acp/cursor-acp-event-mapper.js";
@@ -1002,7 +1002,7 @@ export class CursorProvider
     browserGrant: BrowserAutomationSessionLeaseGrant | null,
   ): void {
     state.mcodeRuntimeInstructions = renderMcodeInstructionSections(buildMcodeInstructionSections({
-      toolkits: { threadControl: mcode?.toolkits.threadControl ?? false, browser: Boolean(mcode?.toolkits.browser && browserGrant) },
+      toolkits: { ...(mcode?.toolkits ?? NO_MCODE_TOOLKITS), browser: Boolean(mcode?.toolkits.browser && browserGrant) },
     }));
     state.mcodeRuntimeInstructionsSent = false;
     if (!browserGrant) return;

@@ -13,7 +13,7 @@ import {
 describe("provider-native Mcode instruction boundaries", () => {
   it("delivers Cursor guidance once across accepted and unaccepted attempts", () => {
     const runtime = renderMcodeInstructionSections(buildMcodeInstructionSections({
-      toolkits: { browser: true, threadControl: false },
+      toolkits: { browser: true, threadControl: false, visuals: false },
     }));
     const first = appendCursorMcodeInstructions("user rules", runtime, false);
     expect(first).toEqual({ instructionMarkdown: `user rules\n\n${runtime}`, included: true });

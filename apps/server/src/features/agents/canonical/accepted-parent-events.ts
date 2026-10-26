@@ -148,6 +148,7 @@ function terminalEvents(
   events.push(...recoveryEvents(input, { executionId: input.operation.execution.executionId, items: narrative }));
   const terminalMessage = hasMessage ? {
     ...assistantMessage(input, messageId, projection.assistant),
+    sequence: sequenceAfterTurnVisuals(input, messageId),
     is_internal: false,
     outcome: mutation.outcome, outcomeExecutionId: input.operation.execution.executionId,
     tool_call_count: projection.narrative.filter((item) => item.kind === "toolCall").length,
@@ -167,6 +168,17 @@ function terminalEvents(
     input: { ...mutation.input, projection: { kind: "writer-staged", messageId } },
   } };
   return { events, ...(terminalMessage ? { terminalMessage } : {}), storageOperation };
+}
+
+function sequenceAfterTurnVisuals(input: PreparationInput, messageId: string): number {
+  const original = existingAssistantMessage(input.items[`message:${messageId}`]);
+  if (!original) return input.messageSequence;
+  for (const item of Object.values(input.items)) {
+    if (item.threadId !== input.thread.id || item.turnId !== input.turn.id || item.payload.projection !== "message") continue;
+    const message = MessageSchema().parse(item.payload.message);
+    if (message.visual && message.sequence >= original.sequence) return input.messageSequence;
+  }
+  return original.sequence;
 }
 
 function changedTerminalNarrative(input: PreparationInput,

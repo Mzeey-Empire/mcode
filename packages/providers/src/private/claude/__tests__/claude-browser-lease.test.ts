@@ -32,7 +32,7 @@ const attachment = {
   serverName: "mcode" as const,
   url: "http://127.0.0.1:19400/mcp/mcode",
   token: "session-token",
-  toolkits: { browser: true, threadControl: true },
+  toolkits: { browser: true, threadControl: true, visuals: true },
 };
 const mcodeServers = {
   mcode: { type: "http", url: attachment.url, headers: { Authorization: "Bearer session-token" } },

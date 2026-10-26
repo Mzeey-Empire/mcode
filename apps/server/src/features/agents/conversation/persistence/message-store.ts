@@ -355,16 +355,6 @@ export class MessageStore {
     return rowToMessage(row);
   }
 
-  /** Create the system message that shows an HTML visual. Its text names the visual for builds and readers without the frame. */
-  createVisual(threadId: string, sequence: number, input: HtmlVisual): Message {
-    const visual = HtmlVisualSchema().parse(input);
-    const row = this.orm.insert(messages).values({
-      id: NodeCrypto.randomUUID(), threadId, role: "system", content: `Visual: ${visual.title}`, sequence,
-      timestamp: new Date().toISOString(), visual: JSON.stringify(visual),
-    }).returning().get();
-    return rowToMessage(row);
-  }
-
   /** Create a visible system message carrying bounded provider notice metadata. */
   createSystemNotice(
     threadId: string,

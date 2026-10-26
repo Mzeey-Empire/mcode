@@ -70,7 +70,7 @@ describe("Cursor browser MCP configuration", () => {
       serverName: "mcode",
       url: "http://127.0.0.1:19400/mcp/mcode",
       token: "opaque-token",
-      toolkits: { browser: true, threadControl: true },
+      toolkits: { browser: true, threadControl: true, visuals: true },
     })).toEqual([{
       type: "http",
       name: "mcode",
@@ -488,7 +488,7 @@ describe("Cursor browser MCP configuration", () => {
       serverName: "mcode",
       url: "http://127.0.0.1:19400/mcp/mcode",
       token: "mcode-token",
-      toolkits: { browser: true, threadControl: true },
+      toolkits: { browser: true, threadControl: true, visuals: true },
     });
     provider.browserAutomationLease = lease;
     provider.settingsService = { get: vi.fn(() => ({})) };

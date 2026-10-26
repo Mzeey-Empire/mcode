@@ -10,7 +10,7 @@ import { CursorProvider } from "../cursor-provider.js";
 const THREAD_TOOL = "thread_target_list";
 const BROWSER_GUIDANCE = "Prefer the mcode MCP browser_* tools";
 
-function attachment(toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true }): ProviderMcodeAttachment {
+function attachment(toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true, visuals: true }): ProviderMcodeAttachment {
   return { serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "mcode-token", toolkits };
 }
 
@@ -137,7 +137,7 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
 
   it("grants only the toolkits the server lists", async () => {
     const host = createHost();
-    vi.mocked(host.mcode.attach).mockResolvedValue(attachment({ browser: false, threadControl: true }));
+    vi.mocked(host.mcode.attach).mockResolvedValue(attachment({ browser: false, threadControl: true, visuals: true }));
     const fake = createFakeAcpRuntime("acp-1", 101);
     await startProvider(host, [fake]).sendTurn(turn());
 

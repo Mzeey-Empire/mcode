@@ -7,10 +7,14 @@ import {
 } from "../index.js";
 
 const toolkitCombinations = [
-  { threadControl: false, browser: false },
-  { threadControl: false, browser: true },
-  { threadControl: true, browser: false },
-  { threadControl: true, browser: true },
+  { threadControl: false, browser: false, visuals: false },
+  { threadControl: false, browser: true, visuals: false },
+  { threadControl: true, browser: false, visuals: true },
+  { threadControl: true, browser: true, visuals: true },
+  { threadControl: false, browser: false, visuals: true },
+  { threadControl: false, browser: true, visuals: true },
+  { threadControl: true, browser: false, visuals: false },
+  { threadControl: true, browser: true, visuals: false },
 ];
 
 describe("Mcode runtime instruction sections", () => {
@@ -19,11 +23,13 @@ describe("Mcode runtime instruction sections", () => {
     const keys = sections.map((section) => section.key);
     expect(keys.includes("mcode_browser")).toBe(toolkits.browser);
     expect(keys.includes("mcode_thread_control")).toBe(toolkits.threadControl);
+    expect(keys.includes("mcode_visuals")).toBe(toolkits.visuals);
     expect(keys).toEqual([
       "mcode_identity",
       "mcode_provider_subagents",
       ...(toolkits.threadControl ? ["mcode_thread_control"] : []),
       ...(toolkits.browser ? ["mcode_browser"] : []),
+      ...(toolkits.visuals ? ["mcode_visuals"] : []),
       "mcode_repository_search",
     ]);
   });
@@ -54,7 +60,7 @@ describe("Mcode runtime instruction sections", () => {
   }
 
   it("keeps the Browser section to routing rules without call shapes", () => {
-    const browser = buildMcodeInstructionSections({ toolkits: { threadControl: false, browser: true } })
+    const browser = buildMcodeInstructionSections({ toolkits: { threadControl: false, browser: true, visuals: false } })
       .find((section) => section.key === "mcode_browser")?.text ?? "";
     expect(browser.split(/\s+/).filter(Boolean).length).toBeLessThan(200);
     expect(browser).not.toMatch(/[{}`]|\bs\d+e\d+\b/);
@@ -63,7 +69,7 @@ describe("Mcode runtime instruction sections", () => {
   });
 
   it("trims nested models and omits a blank model", () => {
-    const toolkits = { threadControl: false, browser: false };
+    const toolkits = { threadControl: false, browser: false, visuals: false };
     const sections = buildMcodeInstructionSections({ toolkits, nestedDelegationModel: "  gpt-5.6-sol  " });
     expect(sections.map((section) => section.key)).toEqual([
       "mcode_identity", "mcode_provider_subagents", "mcode_nested_delegation", "mcode_repository_search",
@@ -74,7 +80,7 @@ describe("Mcode runtime instruction sections", () => {
   });
 
   it("renders complete sections in order for native single-field delivery", () => {
-    const sections = buildMcodeInstructionSections({ toolkits: { threadControl: false, browser: false } });
+    const sections = buildMcodeInstructionSections({ toolkits: { threadControl: false, browser: false, visuals: false } });
     expect(renderMcodeInstructionSections(sections)).toBe(
       "You are operating inside an Mcode-managed session. Mcode runtime guidance is advisory; MCP authorization and lease state remain authoritative.\n\n"
       + "A child-agent or sub-agent request uses provider-native collaboration in the current turn. Use collaboration tools, preserve the exact requested brief, and keep direct and nested parent relationships intact. Use Mcode delegation for a child-agent request only when native collaboration cannot run the requested provider or model.\n\n"

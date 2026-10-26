@@ -62,6 +62,7 @@ import {
   McodeMcpServer,
   McodeSessionAuthority,
   createThreadControlToolkit,
+  createVisualsToolkit,
 } from "../../features/mcode-mcp";
 import {
   ExternalThreadControlMcpRuntime,
@@ -356,6 +357,16 @@ const mcodeMcpServer = new McodeMcpServer({
   authority: container.resolve(McodeSessionAuthority),
   toolkits: [
     browserToolkit,
+    createVisualsToolkit({
+      authority: container.resolve(McodeSessionAuthority),
+      visuals: {
+        acceptTurnVisual: (request) => {
+          const progress = workerOwnedTurnRuntime.progress;
+          if (!progress) throw new Error("Visual publication is unavailable because the turn runtime is not ready.");
+          return progress.acceptTurnVisual(request);
+        },
+      },
+    }),
     createThreadControlToolkit({
       authority: container.resolve(McodeSessionAuthority),
       service: {

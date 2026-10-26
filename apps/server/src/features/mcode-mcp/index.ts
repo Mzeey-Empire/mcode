@@ -16,6 +16,9 @@ export { McodeProviderPort } from "./mcode-provider-port.js";
 /** Serves the visible-Browser tools. */
 export { BrowserToolkit } from "./toolkits/browser-toolkit.js";
 
+/** Serves inline HTML visuals. */
+export { createVisualsToolkit } from "./toolkits/visuals-toolkit.js";
+
 /** Serves the thread-control tools. */
 export {
   createThreadControlToolkit,

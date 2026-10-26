@@ -23,7 +23,7 @@ function request(overrides: Partial<TurnRequest<"claude">> = {}): TurnRequest<"c
   return { turnId: "turn-1", turnExecutionId: execution1, deliveryAttempt: 1, sessionId: "mcode-thread-1", workspaceId: "workspace-1", threadId: "thread-1", message: "fixture", cwd: process.cwd(), model: "claude-sonnet-4-6", interactionMode: "build", permissionMode: "supervised", providerOptions: {}, ...overrides };
 }
 
-function mcodeAttachment(toolkits = { browser: true, threadControl: true }): ProviderMcodeAttachment {
+function mcodeAttachment(toolkits = { browser: true, threadControl: true, visuals: true }): ProviderMcodeAttachment {
   return { serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "fixture-token", toolkits };
 }
 
@@ -679,9 +679,9 @@ describe("Claude public factory core and capabilities", () => {
   });
 
   it.each([
-    ["thread control only", { browser: false, threadControl: true }, { thread: true, browser: false }],
-    ["browser only", { browser: true, threadControl: false }, { thread: false, browser: true }],
-    ["neither", { browser: false, threadControl: false }, { thread: false, browser: false }],
+    ["thread control only", { browser: false, threadControl: true, visuals: true }, { thread: true, browser: false }],
+    ["browser only", { browser: true, threadControl: false, visuals: false }, { thread: false, browser: true }],
+    ["neither", { browser: false, threadControl: false, visuals: false }, { thread: false, browser: false }],
   ])("grants instructions from the attached toolkits: %s", async (_name, toolkits, expected) => {
     const transport = installTransport();
     const { provider, input, events } = fixture();

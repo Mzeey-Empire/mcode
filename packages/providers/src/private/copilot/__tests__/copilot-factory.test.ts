@@ -48,7 +48,7 @@ class FakeSession {
   }
 }
 
-function mcodeAttachment(toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true }): ProviderMcodeAttachment {
+function mcodeAttachment(toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true, visuals: true }): ProviderMcodeAttachment {
   return { serverName: "mcode", url: "http://127.0.0.1/mcp/mcode", token: "mcode-token", toolkits };
 }
 function request(overrides: Partial<TurnRequest<"copilot">> = {}): TurnRequest<"copilot"> {
@@ -908,8 +908,8 @@ describe("Copilot public factory", () => {
   });
 
   it.each([
-    ["thread control only", { browser: false, threadControl: true }, { thread: true, browser: false }],
-    ["browser only", { browser: true, threadControl: false }, { thread: false, browser: true }],
+    ["thread control only", { browser: false, threadControl: true, visuals: true }, { thread: true, browser: false }],
+    ["browser only", { browser: true, threadControl: false, visuals: false }, { thread: false, browser: true }],
   ])("grants instructions from the attached toolkits: %s", async (_name, toolkits, expected) => {
     ports.browser = { ...ports.browser, isConfigured: () => true, issue: (handle) => ({ ...handle, credentialId: "browser-credential", allowedOperations: ["browser.list_tabs"] }) };
     ports.mcode.attach = vi.fn(async () => mcodeAttachment(toolkits));

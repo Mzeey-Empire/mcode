@@ -83,7 +83,8 @@ interface ServiceToolSpec<Input extends AnySchema, Result extends AnySchema> {
 
 const EMPTY_INPUT_SCHEMA: JsonSchemaObject = { type: "object", properties: {} };
 
-function listedSchema(schema: AnySchema, pipeStrategy: "input" | "output"): JsonSchemaObject | undefined {
+/** Convert a tool schema to the MCP listing format. */
+export function listedSchema(schema: AnySchema, pipeStrategy: "input" | "output"): JsonSchemaObject | undefined {
   const object = normalizeObjectSchema(schema);
   if (!object) return undefined;
   return ToolSchema.shape.inputSchema.parse(toJsonSchemaCompat(object, { strictUnions: true, pipeStrategy }));
@@ -93,9 +94,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function structuredResult(value: unknown): CallToolResult {
+/** Return a validated object as structured content with optional human-readable text. */
+export function structuredResult(value: unknown, summary?: string): CallToolResult {
   if (!isRecord(value)) throw new Error("Thread-control tool result must be an object");
-  const result: CallToolResult = { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
+  const result: CallToolResult = { content: [{ type: "text", text: summary ?? JSON.stringify(value) }], structuredContent: value };
   if (value.status === "rejected") result.isError = true;
   return result;
 }
@@ -111,7 +113,7 @@ function combineAbortSignals(signals: ReadonlyArray<AbortSignal | undefined>): A
  * Failures that are not protocol errors become tool results, so a model can read
  * and recover from them; protocol errors keep their JSON-RPC code.
  */
-async function toToolResult(run: () => Promise<CallToolResult>): Promise<CallToolResult> {
+export async function toToolResult(run: () => Promise<CallToolResult>): Promise<CallToolResult> {
   try {
     return await run();
   } catch (error) {
@@ -121,7 +123,8 @@ async function toToolResult(run: () => Promise<CallToolResult>): Promise<CallToo
   }
 }
 
-async function parseInput<Input extends AnySchema>(
+/** Parse external arguments while retaining the MCP invalid-params error code. */
+export async function parseInput<Input extends AnySchema>(
   name: string,
   schema: Input,
   args: unknown,

@@ -76,6 +76,7 @@ import { SessionRuntime } from "../session-runtime.js";
 import type { ProviderFactoryConfiguration } from "../../factory-types.js";
 import {
   buildMcodeInstructionSections,
+  NO_MCODE_TOOLKITS,
   renderMcodeInstructionSections,
 } from "@mcode/thread-orchestration";
 
@@ -1445,7 +1446,7 @@ export class ClaudeProvider
         context.params.maxTurns > 0 && { maxTurns: context.params.maxTurns }),
       hooks: this.createClaudeHooks(context),
     };
-    return { sdk, mcodeToolkits: mcode?.toolkits ?? { browser: false, threadControl: false } };
+    return { sdk, mcodeToolkits: mcode?.toolkits ?? NO_MCODE_TOOLKITS };
   }
 
   private createClaudeHooks(context: ClaudeTurnContext) {
@@ -1800,7 +1801,7 @@ export class ClaudeProvider
     // The Browser toolkit is listed per session, but the lease is issued after attach and can fail.
     const instructions = renderMcodeInstructionSections(
       buildMcodeInstructionSections({
-        toolkits: { threadControl: mcodeToolkits.threadControl, browser: mcodeToolkits.browser && browserGrant !== null },
+        toolkits: { ...mcodeToolkits, browser: mcodeToolkits.browser && browserGrant !== null },
       }),
     );
     const options = {

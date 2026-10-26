@@ -5,6 +5,7 @@ import type {
 } from "@mcode/agent-model";
 import { AgentEventType, type AgentEvent, type InteractionMode } from "@mcode/contracts";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
+import type { McodeAttachedToolkits } from "@mcode/thread-orchestration";
 
 /** Provider event input submitted to the server-owned canonical event sink. */
 export interface ProviderEventDraft {
@@ -102,7 +103,7 @@ export interface ProviderMcodeAttachment {
   url: string;
   /** Opaque bearer for this session; never log or persist it. */
   token: string;
-  toolkits: { browser: boolean; threadControl: boolean };
+  toolkits: McodeAttachedToolkits;
 }
 
 /** Gives a Provider its per-session `mcode` MCP server connection. */

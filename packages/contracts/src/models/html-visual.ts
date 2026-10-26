@@ -12,6 +12,10 @@ export const HTML_VISUAL_MIN_HEIGHT = 80;
 export const HTML_VISUAL_MAX_HEIGHT = 2000;
 /** Longest title, used as the frame's accessible name and the plain-text fallback. */
 export const HTML_VISUAL_MAX_TITLE_LENGTH = 200;
+/** System event subtype for a published visual. */
+export const HTML_VISUAL_SYSTEM_SUBTYPE = "mcode.visual";
+/** Default maximum frame height when the agent omits a height. */
+export const HTML_VISUAL_DEFAULT_HEIGHT = 720;
 
 /**
  * App design tokens injected into every visual's `:root` as CSS custom properties.
@@ -37,3 +41,8 @@ export const HtmlVisualSchema = lazySchema(() => z.object({
 
 /** A self-contained HTML page shown in a sandboxed frame in the thread timeline. */
 export type HtmlVisual = z.infer<ReturnType<typeof HtmlVisualSchema>>;
+
+/** Timeline and search text shared by live and reloaded visuals. */
+export function htmlVisualContent(visual: HtmlVisual): string {
+  return `Visual: ${visual.title}`;
+}
