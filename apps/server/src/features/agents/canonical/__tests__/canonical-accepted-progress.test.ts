@@ -16,7 +16,13 @@ import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agen
 import { syntheticThreadExecutionId } from "../canonical-thread-execution.js";
 import { CanonicalAgentBoundary as MainCanonicalAgentBoundary } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient, CanonicalWriterAcknowledgementCapacity } from "../canonical-agent-writer-client.js";
-import { CanonicalAcceptedProgress } from "../canonical-accepted-progress.js";
+import { CanonicalAcceptedProgress, TurnVisualRejectedError } from "../canonical-accepted-progress.js";
+import { MessageStore } from "../../conversation/persistence/message-store.js";
+import { NarrativeReadStore } from "../../conversation/narrative/narrative-read-store.js";
+import { ToolCallRecordStore } from "../../tools/persistence/tool-call-record-store.js";
+import { HookExecutionStore } from "../../events/persistence/hook-execution-store.js";
+import { PlanQuestionAnswersStore } from "../../planning/persistence/plan-question-answers-store.js";
+import { loadConversationPage } from "../../conversation/read-model/conversation-page.js";
 import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { createDevinAcpTurnState, mapDevinAcpSessionNotification } from "../../../../../../../packages/providers/src/private/devin/devin-acp-event-mapper.js";
@@ -190,6 +196,94 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
   function frames(): CanonicalAgentProgressFrame[] {
     return pushes.frames.map((frame) => CanonicalAgentProgressFrameSchema().parse(frame));
   }
+
+  function acceptedEvents() {
+    return frames().flatMap((frame) => frame.phase === "accepted" ? frame.events : []);
+  }
+
+  function conversationPage() {
+    return loadConversationPage({ messageRepo: new MessageStore(reader),
+      narrativeStore: new NarrativeReadStore(new ToolCallRecordStore(reader), new ThoughtSegmentStore(reader), new HookExecutionStore(reader)),
+      planQuestionAnswersRepo: new PlanQuestionAnswersStore(reader) }, { threadId: execution.threadId, limit: 20 });
+  }
+
+  it.each([true, false])("reloads a visual before the final reply with staged assistant = %s", async (staged) => {
+    await send(1, start("codex"));
+    const messageId = deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`);
+    if (staged) {
+      await send(2, { kind: "live-event", text: { kind: "unchanged" },
+        message: { precedingMessageId: `${execution.turnId}:user`, messageId, content: "Early answer", model: "fixture", attachments: [] },
+        publication: { after: "writer", event: { type: "message", threadId: execution.threadId,
+          turnExecutionId: execution.executionId, messageId, content: "Early answer", model: "fixture", tokens: 0 } } });
+    }
+    const visual = { title: "Latency", html: "<svg><rect/></svg>", maxHeight: 480 };
+    const published = progress.acceptTurnVisual({ ...execution, visual });
+    const visualItem = acceptedEvents().map(acceptedMessage)
+      .find((message) => message?.id === published.messageId);
+    expect(visualItem).toMatchObject({ role: "system", content: "Visual: Latency", visual });
+    expect(visualItem?.systemNotice).toBeUndefined();
+    const publication = acceptedEvents().find((event) =>
+      event.payload.type === "publication.recorded" && event.payload.event.type === "system");
+    expect(publication).toMatchObject({ payload: { event: { type: "system", messageId: published.messageId, visual } } });
+    await send(staged ? 3 : 2, { kind: "finish-live-event", outcome: "completed",
+      livePublication: [{ after: "terminal", event: { type: "turnComplete", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, reason: "completed", costUsd: 0, tokensIn: 0, tokensOut: 0 } }],
+      projection: { ...execution, outcome: "completed", endedAt: NOW,
+        assistant: { messageId, content: "Final answer", model: "fixture", attachments: [] }, narrative: [] },
+      input: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged", messageId } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const messages = conversationPage().messages;
+    expect(messages.map((message) => [message.role, message.content])).toEqual([
+      ["user", "Task"], ["system", "Visual: Latency"], ["assistant", "Final answer"],
+    ]);
+    const visualMessage = messages[1];
+    const finalMessage = messages[2];
+    if (!visualMessage || !finalMessage) throw new Error("Expected the reloaded visual and final reply");
+    expect(visualMessage.sequence).toBeLessThan(finalMessage.sequence);
+    const liveFinal = acceptedEvents().map(acceptedMessage)
+      .filter((message) => message?.id === messageId).at(-1);
+    expect(liveFinal).toMatchObject({ sequence: finalMessage.sequence });
+    expect(pushes.turns.find((push) => push.channel === "turn.persisted")?.data)
+      .toMatchObject({ messageId, settledMessage: { id: messageId, sequence: finalMessage.sequence } });
+  });
+
+  it("round trips a canonical visual through conversation-page", async () => {
+    await send(1, start("codex"));
+    const visual = { title: "Reload", html: "<p>Saved page</p>", maxHeight: 720 };
+    const event = progress.acceptThreadSystemObservation({ type: "system", threadId: execution.threadId,
+      turnExecutionId: execution.executionId, subtype: "mcode.visual", visual });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(conversationPage().messages.find((message) => message.id === event.messageId))
+      .toMatchObject({ role: "system", content: "Visual: Reload", visual });
+  });
+
+  it("rejects visuals without the running head without consuming a message sequence", async () => {
+    const visual = { title: "Chart", html: "<p/>", maxHeight: 720 };
+    expect(() => progress.acceptTurnVisual({ ...execution, visual })).toThrow(TurnVisualRejectedError);
+    await send(1, start("codex"));
+    expect(() => progress.acceptTurnVisual({ ...execution, turnId: "wrong-turn", visual })).toThrow(TurnVisualRejectedError);
+    const published = progress.acceptTurnVisual({ ...execution, visual });
+    await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "turnComplete")],
+      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    expect(() => progress.acceptTurnVisual({ ...execution, visual })).toThrow(TurnVisualRejectedError);
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(conversationPage().messages.map((message) => [message.id, message.sequence])).toEqual([
+      [`${execution.turnId}:user`, 1], [published.messageId, 2],
+    ]);
+  });
+
+  it("rejects an invalid visual before consuming a sequence or publishing", async () => {
+    await send(1, start("codex"));
+    const before = frames().length;
+    expect(() => progress.acceptTurnVisual({ ...execution,
+      visual: { title: "Too tall", html: "<p/>", maxHeight: 5000 } })).toThrow();
+    expect(frames()).toHaveLength(before);
+    const published = progress.acceptTurnVisual({ ...execution, visual: { title: "Valid", html: "<p/>", maxHeight: 720 } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(conversationPage().messages.map((message) => [message.id, message.sequence])).toEqual([
+      [`${execution.turnId}:user`, 1], [published.messageId, 2],
+    ]);
+  });
 
   it.each(["snapshot", "delta-only", "abort", "error"] as const)("persists Copilot model loops and their %s terminal through the public factory", async (ending) => {
     const expected = copilotTerminalCases[ending];

@@ -640,32 +640,3 @@ describe("loadNewerConversationPage", () => {
   });
 });
 
-describe("HTML visual replay", () => {
-  it("reloads a published visual between the prompt and the reply it precedes", () => {
-    const db = openMemoryDatabase();
-    seedThread(db);
-    const deps = createDeps(db);
-    insertMessage(db, "u1", "user", "chart the latency", 1);
-    const visual = { title: "Latency by provider", html: "<svg><rect/></svg>", maxHeight: 480 };
-    const published = deps.messageRepo.createVisual("thread-1", 2, visual);
-    insertMessage(db, "a1", "assistant", "Codex is fastest.", 3);
-
-    const page = loadConversationPage(deps, { threadId: "thread-1", limit: 20 });
-    const tail = loadConversationTail(deps, { threadId: "thread-1", limit: 2 });
-
-    expect(page.messages.map((message) => [message.id, message.role, message.visual ?? null])).toEqual([
-      ["u1", "user", null],
-      [published.id, "system", visual],
-      ["a1", "assistant", null],
-    ]);
-    expect(tail.messages[0]).toMatchObject({ id: published.id, content: "Visual: Latency by provider", visual });
-  });
-
-  it("refuses to store a visual over the contract limits", () => {
-    const db = openMemoryDatabase();
-    seedThread(db);
-    const store = createDeps(db).messageRepo;
-    expect(() => store.createVisual("thread-1", 1, { title: "Too tall", html: "<p/>", maxHeight: 5000 })).toThrow();
-    expect(store.listByThread("thread-1", 10).messages).toEqual([]);
-  });
-});

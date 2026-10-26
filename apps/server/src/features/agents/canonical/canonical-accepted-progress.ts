@@ -12,6 +12,7 @@ import {
   AgentEventSchema,
   MessageSchema, HookExecutionRecordSchema,
   type PlanVersion,
+  type HtmlVisual, HtmlVisualSchema, HTML_VISUAL_SYSTEM_SUBTYPE, htmlVisualContent,
 } from "@mcode/contracts";
 import { broadcast, subscribedThreadIds } from "../../../application/transport/push.js";
 import { BoundedProgressRetention } from "../execution/progress-retention-budget.js";
@@ -70,6 +71,14 @@ export interface AcceptedSteerMessage {
 const MAX_OWNERS = 8;
 const LOCAL_LIMITS = { maxEvents: 8_192, maxBytes: 16 * 1024 * 1024,
   reservedControlEvents: 4_096, reservedControlBytes: 8 * 1024 * 1024 };
+
+/** Raised when a visual's turn is no longer the running head. */
+export class TurnVisualRejectedError extends Error {
+  constructor() {
+    super("turn_not_running");
+    this.name = "TurnVisualRejectedError";
+  }
+}
 
 interface ProgressThread {
   owner: ThreadProgressOwner<AcceptedExecutionWriteIntent, ExecutionAcceptedReceipt>;
@@ -443,6 +452,21 @@ export class CanonicalAcceptedProgress {
     this.advanceMessageSequence(thread, events);
     this.publishSaving(execution.threadId);
     return acceptedEnvelopes(admission.batch);
+  }
+
+  /** Append a validated visual to the running turn before its final reply. */
+  acceptTurnVisual(request: { readonly threadId: string; readonly turnId: string; readonly visual: HtmlVisual }): { readonly messageId: string } {
+    this.assertOpen();
+    const head = this.threads.get(request.threadId)?.head;
+    if (!head || head.execution.turnId !== request.turnId || head.phase !== "running") {
+      throw new TurnVisualRejectedError();
+    }
+    const visual = HtmlVisualSchema().parse(request.visual);
+    const published = this.acceptThreadSystemObservation({ type: "system", threadId: request.threadId,
+      turnExecutionId: head.execution.executionId, subtype: HTML_VISUAL_SYSTEM_SUBTYPE,
+      message: htmlVisualContent(visual), visual });
+    if (!published.messageId) throw new Error("Accepted visual lost its message identity");
+    return { messageId: published.messageId };
   }
 
   /** Publish session diagnostics before saving while retaining their genuine source ownership. */

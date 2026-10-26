@@ -6,6 +6,8 @@ import {
   MessageSchema,
   ProviderIdSchema,
   AgentThreadIdSchema,
+  HTML_VISUAL_SYSTEM_SUBTYPE,
+  htmlVisualContent,
   type AgentEvent,
   type Message,
 } from "@mcode/contracts";
@@ -81,6 +83,9 @@ export function prepareAcceptedThreadSystemObservation(input: SystemMessageInput
 }
 
 function validateInput(input: PreparationInput): void {
+  if (input.event.type === "system" && input.event.visual) {
+    throw new Error("Provider workers cannot publish visuals");
+  }
   AgentEventIdSchema.parse(input.operationId);
   if (input.operationId.length > 240 || input.operationId.trim() !== input.operationId) {
     throw new Error("Accepted system operation identity must be immutable and at most 240 characters");
@@ -94,6 +99,8 @@ function validateInput(input: PreparationInput): void {
 }
 
 function systemObservation(input: SystemMessageInput, event: SystemEvent): AcceptedSystemObservation {
+  if (event.subtype === HTML_VISUAL_SYSTEM_SUBTYPE) return visualObservation(input, event);
+  if (event.visual) throw new Error(`visual is only valid on ${HTML_VISUAL_SYSTEM_SUBTYPE}`);
   if (event.subtype === "provider.session.started") return { event, noticeSessionId: event.systemNotice?.sessionId };
   if (!event.subtype.startsWith("provider.notice.") || !event.message) return { event };
   const message = systemMessage(input, event.message, event.systemNotice);
@@ -103,7 +110,16 @@ function systemObservation(input: SystemMessageInput, event: SystemEvent): Accep
   return { event: { ...event, messageId: message.id }, message };
 }
 
-function systemMessage(input: SystemMessageInput, content: string, systemNotice?: SystemEvent["systemNotice"]): Message {
+function visualObservation(input: SystemMessageInput, event: SystemEvent): AcceptedSystemObservation {
+  if (!event.visual) throw new Error("Visual system observation requires a visual");
+  const message = systemMessage(input, htmlVisualContent(event.visual), undefined, event.visual);
+  if (event.messageId !== undefined && event.messageId !== message.id) {
+    throw new Error("Accepted visual has a conflicting message identity");
+  }
+  return { event: { ...event, message: message.content, messageId: message.id, systemNotice: undefined }, message };
+}
+
+function systemMessage(input: SystemMessageInput, content: string, systemNotice?: SystemEvent["systemNotice"], visual?: SystemEvent["visual"]): Message {
   return MessageSchema().parse({
     id: uuidv5(`mcode:accepted-system-observation:${input.operationId}`, uuidv5.URL),
     thread_id: input.threadId,
@@ -119,6 +135,7 @@ function systemMessage(input: SystemMessageInput, content: string, systemNotice?
     model: null,
     is_internal: false,
     ...(systemNotice ? { systemNotice } : {}),
+    ...(visual ? { visual } : {}),
   });
 }
 

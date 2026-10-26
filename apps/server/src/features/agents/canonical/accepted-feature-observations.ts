@@ -24,6 +24,14 @@ import { matchesCodexSystemIntents } from "./codex-system-intents.js";
 
 const MAX_FEATURE_BYTES = 2 * 1024 * 1024;
 const MAX_FEATURE_EVENTS = 256;
+
+/** Raised when one accepted operation would retain more feature events than the bounded budget allows. */
+export class FeatureRetentionLimitError extends Error {
+  constructor(subject: string) {
+    super(`${subject} exceed their retention limit`);
+    this.name = "FeatureRetentionLimitError";
+  }
+}
 const storedTaskSchema = z.object({
   id: z.string().max(256).optional(), content: z.string().min(1).max(16 * 1024),
   status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
@@ -84,7 +92,7 @@ export function prepareAcceptedFeatureObservations(input: {
   const events = [...systems.events, ...tasks, ...plans.events];
   assertStorageMetadata(systems, plans);
   if (events.length > MAX_FEATURE_EVENTS || Buffer.byteLength(JSON.stringify(events)) > MAX_FEATURE_BYTES) {
-    throw new Error("Accepted feature observations exceed their retention limit");
+    throw new FeatureRetentionLimitError("Accepted feature observations");
   }
   return { ...systems, ...plans, events };
 }
@@ -138,7 +146,7 @@ export function prepareAcceptedThreadSystemFeatures(input: SystemFeatureInput & 
     notices.observation, notices.expiredIds);
   assertStorageMetadata(features, { events: [] });
   if (events.length > MAX_FEATURE_EVENTS || Buffer.byteLength(JSON.stringify(events)) > MAX_FEATURE_BYTES) {
-    throw new Error("Accepted thread system observations exceed their retention limit");
+    throw new FeatureRetentionLimitError("Accepted thread system observations");
   }
   return features;
 }

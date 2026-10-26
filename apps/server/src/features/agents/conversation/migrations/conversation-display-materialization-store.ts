@@ -121,6 +121,7 @@ export class ConversationDisplayMaterializationStore {
       outcome: placeholder("outcome"),
       outcomeExecutionId: placeholder("outcomeExecutionId"),
       systemNotice: placeholder("systemNotice"),
+      visual: placeholder("visual"),
     }).onConflictDoUpdate({
       target: messages.id,
       set: {
@@ -153,6 +154,7 @@ export class ConversationDisplayMaterializationStore {
         outcome: sql`COALESCE(excluded.outcome, ${messages.outcome})`,
         outcomeExecutionId: sql`COALESCE(excluded.outcome_execution_id, ${messages.outcomeExecutionId})`,
         systemNotice: sql`COALESCE(excluded.system_notice, ${messages.systemNotice})`,
+        visual: sql`COALESCE(excluded.visual, ${messages.visual})`,
       },
     }).prepare();
   }
@@ -570,6 +572,7 @@ export class ConversationDisplayMaterializationStore {
       outcome: message.outcome ?? null,
       outcomeExecutionId: message.outcomeExecutionId ?? null,
       systemNotice: jsonValue(message.systemNotice),
+      visual: jsonValue(message.visual),
     });
   }
 
