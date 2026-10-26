@@ -82,7 +82,7 @@ function TargetTrigger({ pick, workspaceId, threadId, testId }: TargetTriggerPro
           </Button>
         }
       />
-      {/* The triggers sit right-pinned, so a longer label grows leftward; end alignment keeps the panel still when the Start from origin switch relabels the trigger. */}
+      {/* Triggers are right-pinned and grow leftward, so end alignment keeps the panel still when the label changes. */}
       <PopoverContent align="end" side="top" sideOffset={4} className={PICKER_PANEL_CLASS}>
         <BranchTargetPicker
           workspaceId={workspaceId}

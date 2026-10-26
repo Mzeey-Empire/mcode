@@ -99,7 +99,13 @@ function newWorktreePick(
   const fromOrigin = number === undefined && origin.checked;
   return {
     origin,
-    label: newThreadTargetLabel({ mode: "worktree", branch: branch.name, pullRequestNumber: number, fromOrigin })
+    label: newThreadTargetLabel({
+      mode: "worktree",
+      branch: branch.name,
+      remote: branch.remote,
+      pullRequestNumber: number,
+      fromOrigin,
+    })
       ?? unknownBranchLabel(branch),
     list: "branches-and-pull-requests",
     value: number === undefined ? branchTarget.value : { kind: "pull-request", number },

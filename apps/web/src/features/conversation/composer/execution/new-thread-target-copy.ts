@@ -6,6 +6,8 @@ export type NewThreadTargetCopyInput =
     readonly mode: "worktree";
     readonly branch: string;
     readonly pullRequestNumber?: number;
+    /** Remote of a remote-only ref, such as `origin` for `origin/x`. */
+    readonly remote?: string | null;
     /** Names the branch as the fetched remote copy the worktree starts from. */
     readonly fromOrigin?: boolean;
   }
@@ -37,8 +39,8 @@ export function newThreadTargetLabel(input: NewThreadTargetCopyInput): TargetLab
   if (input.pullRequestNumber !== undefined) return { prefix: "From", name: `#${input.pullRequestNumber}` };
   if (!input.branch) return null;
   if (!input.fromOrigin) return { prefix: "From", name: input.branch };
-  // A remote-only row's name carries "origin/"; strip it so both ways of starting from origin read alike.
-  return { prefix: "From", name: `${input.branch.replace(/^origin\//, "")} (remote)` };
+  const shortName = input.remote ? input.branch.slice(input.remote.length + 1) : input.branch;
+  return { prefix: "From", name: `${shortName} (remote)` };
 }
 
 /** A label with no relation verb, for placeholders such as "Choose branch". */
