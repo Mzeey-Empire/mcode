@@ -131,6 +131,19 @@ describe("SessionRuntime recovery", () => {
     expect(terminateTree).toHaveBeenCalledOnce();
   });
 
+  it("retries a failed retirement and spawns a replacement once it succeeds", async () => {
+    const protocol = adapter(() => undefined);
+    const terminateTree = vi.fn()
+      .mockRejectedValueOnce(new Error("process enumeration timed out"))
+      .mockResolvedValue(undefined);
+    const runtime = new SessionRuntime(protocol, { jobObject, envService, processes: { attach: () => undefined, terminateTree } });
+    await runtime.acquire(request);
+    await expect(runtime.stop(request.sessionId)).rejects.toThrow("retirement failed");
+    expect(await runtime.acquire(request)).toBe(2);
+    expect(terminateTree.mock.calls).toEqual([[1], [1]]);
+    await runtime.shutdown();
+  });
+
   it("keeps empty-PID replacement fenced when adapter disposal fails", async () => {
     const protocol = adapter(() => { throw new Error("SDK disposal failed"); });
     protocol.spawn = vi.fn(async () => ({ state: 1, pids: [] }));

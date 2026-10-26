@@ -97,6 +97,20 @@ describe("Claude factory SDK process ownership", () => {
     await vi.waitFor(() => expect(host.processes.terminateTree).toHaveBeenCalledExactlyOnceWith(child.pid));
   });
 
+  it("runs the next turn after one failed process retirement", async () => {
+    const { provider, host, child } = fixture();
+    installTransport();
+    await provider.sendTurn(turn());
+    host.processes.terminateTree = vi.fn()
+      .mockRejectedValueOnce(new Error("process enumeration timed out"))
+      .mockResolvedValue(undefined);
+    await expect(provider.stopSession("mcode-thread-1")).rejects.toThrow("Claude session cleanup failed");
+    await provider.sendTurn({ ...turn(), turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002" });
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(host.processes.terminateTree).toHaveBeenCalledTimes(2);
+    expect(host.processes.terminateTree).toHaveBeenNthCalledWith(2, child.pid);
+  });
+
   it("still closes and retires the query when mcode cleanup rejects", async () => {
     const { provider, host, child } = fixture();
     const transport = installTransport();
