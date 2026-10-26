@@ -35,17 +35,23 @@ describe("ThoughtRow", () => {
     expect(screen.getByRole("button")).toHaveTextContent(/^Thinking$/);
   });
 
-  it("reads Thought with its clock duration once settled", () => {
+  it("reads Thought with its duration in words once settled", () => {
     render(<ThoughtRow segment={reasoning({ endedAt: 66_000 })} isActive={false} />);
 
-    expect(screen.getByRole("button")).toHaveTextContent(/^Thought1:05$/);
+    expect(screen.getByRole("button")).toHaveTextContent(/^Thought for 1m 5s$/);
+  });
+
+  it("rounds a sub-second thought up to one second", () => {
+    render(<ThoughtRow segment={reasoning({ endedAt: 1_300 })} isActive={false} />);
+
+    expect(screen.getByRole("button")).toHaveTextContent(/^Thought for 1s$/);
   });
 
   it("renders a static row with no chevron when there is no text", () => {
     render(<ThoughtRow segment={reasoning({ text: "  ", endedAt: 3_000 })} isActive={false} />);
 
     expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByText("Thought")).toBeInTheDocument();
+    expect(screen.getByText("Thought for 2s")).toBeInTheDocument();
   });
 
   it("shows the reasoning text only after the row is opened", async () => {

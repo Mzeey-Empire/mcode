@@ -18,10 +18,10 @@ function managed(steps: ThreadStartupStep[]): Pick<ThreadStartup, "kind" | "step
 
 describe("formatStartupDuration", () => {
   it("formats m:ss and clamps negatives", () => {
-    expect(formatStartupDuration(0)).toBe("0:00");
-    expect(formatStartupDuration(14_900)).toBe("0:14");
-    expect(formatStartupDuration(75_000)).toBe("1:15");
-    expect(formatStartupDuration(-5_000)).toBe("0:00");
+    expect(formatStartupDuration(0)).toBe("0s");
+    expect(formatStartupDuration(14_900)).toBe("14s");
+    expect(formatStartupDuration(75_000)).toBe("1m 15s");
+    expect(formatStartupDuration(-5_000)).toBe("0s");
   });
 });
 
@@ -51,9 +51,9 @@ describe("startupTrailRows", () => {
     ]), { now: Date.parse(at(17)), setupCommand: "bun install" });
 
     expect(rows).toEqual([
-      { phase: "fetch", tone: "done", label: "Fetched", meta: ["origin/main", "0:01"], title: undefined, expandable: false },
-      { phase: "worktree", tone: "done", label: "Created worktree", meta: ["mcode-3f2a", "0:02"], title: "/w/mcode-3f2a", expandable: false },
-      { phase: "setup", tone: "live", label: "Running setup", meta: ["bun install", "0:14"], title: undefined, expandable: true },
+      { phase: "fetch", tone: "done", label: "Fetched", meta: ["origin/main", "1s"], title: undefined, expandable: false },
+      { phase: "worktree", tone: "done", label: "Created worktree", meta: ["mcode-3f2a", "2s"], title: "/w/mcode-3f2a", expandable: false },
+      { phase: "setup", tone: "live", label: "Running setup", meta: ["bun install", "14s"], title: undefined, expandable: true },
       { phase: "agent", tone: "pending", label: "Start thread", meta: [], title: undefined, expandable: false },
     ]);
   });
@@ -62,14 +62,14 @@ describe("startupTrailRows", () => {
     const [setup] = startupTrailRows(managed([
       { phase: "setup", state: "failed", startedAt: at(0), endedAt: at(14), detail: { phase: "setup", exitCode: 1 } },
     ]), { now: 0, setupCommand: "bun install" });
-    expect(setup).toMatchObject({ tone: "failed", label: "Setup failed", meta: ["exit 1 · 0:14"] });
+    expect(setup).toMatchObject({ tone: "failed", label: "Setup failed", meta: ["exit 1 · 14s"] });
   });
 
   it("reads a setup step the server blocked on a failed command as failed, with its exit code", () => {
     const [setup] = startupTrailRows(managed([
       { phase: "setup", state: "blocked", startedAt: at(0), endedAt: at(14), detail: { phase: "setup", exitCode: 1 } },
     ]), { now: 0, setupCommand: "bun install" });
-    expect(setup).toEqual({ phase: "setup", tone: "failed", label: "Setup failed", meta: ["exit 1 · 0:14"], title: undefined, expandable: false });
+    expect(setup).toEqual({ phase: "setup", tone: "failed", label: "Setup failed", meta: ["exit 1 · 14s"], title: undefined, expandable: false });
   });
 
   it("reads a setup step waiting on approval as a quiet decision row without meta", () => {
@@ -88,10 +88,10 @@ describe("startupTrailRows", () => {
       { phase: "agent", state: "failed", startedAt: at(0), endedAt: at(30) },
     ]), { now: 0, setupCommand: "bun install" });
     expect(rows.map(({ label, meta, tone }) => ({ label, meta, tone }))).toEqual([
-      { label: "Fetch stopped", meta: ["origin/main · 0:02"], tone: "failed" },
-      { label: "Cancelled", meta: ["0:09"], tone: "cancelled" },
+      { label: "Fetch stopped", meta: ["origin/main · 2s"], tone: "failed" },
+      { label: "Cancelled", meta: ["9s"], tone: "cancelled" },
       { label: "Setup failed", meta: ["bun install"], tone: "failed" },
-      { label: "Thread didn't start", meta: ["0:30"], tone: "failed" },
+      { label: "Thread didn't start", meta: ["30s"], tone: "failed" },
     ]);
   });
 
@@ -101,8 +101,8 @@ describe("startupTrailRows", () => {
       { phase: "fetch", state: "completed", startedAt: at(0), endedAt: at(3), detail: { phase: "fetch", ref: "pull/1804/head", pullRequestNumber: 1804 } },
     ]), { now: 0 });
     expect(rows.map((row) => row.meta)).toEqual([
-      ["#1804 · feat/sidebar-resize", "0:03"],
-      ["#1804", "0:03"],
+      ["#1804 · feat/sidebar-resize", "3s"],
+      ["#1804", "3s"],
     ]);
   });
 

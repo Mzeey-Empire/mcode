@@ -1,7 +1,7 @@
 import { lazy, memo, Suspense, useCallback, useId, useState } from "react";
 import { Brain } from "lucide-react";
-import { formatClock } from "@/lib/time";
-import { NarrativeToolRow, NarrativeToolRowMeta, type RowExpansion } from "./NarrativeToolRow";
+import { formatDuration } from "@/lib/time";
+import { NarrativeToolRow, type RowExpansion } from "./NarrativeToolRow";
 import type { ThoughtSegment } from "./types";
 
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
@@ -39,17 +39,20 @@ const ThoughtRowHeader = memo(function ThoughtRowHeader({
   onToggle,
   panelId,
 }: ThoughtRowHeaderProps) {
-  const settledSeconds = !isActive && endedAt !== undefined ? (endedAt - startedAt) / 1000 : undefined;
   return (
     <NarrativeToolRow
       icon={Brain}
-      label={isActive ? "Thinking" : "Thought"}
+      label={thoughtLabel(startedAt, endedAt, isActive)}
       disclosure={hasText ? { open, onToggle, controlsId: open ? panelId : undefined } : undefined}
-    >
-      {settledSeconds !== undefined ? <NarrativeToolRowMeta>{formatClock(settledSeconds)}</NarrativeToolRowMeta> : null}
-    </NarrativeToolRow>
+    />
   );
 });
+
+function thoughtLabel(startedAt: number, endedAt: number | undefined, isActive: boolean): string {
+  if (isActive) return "Thinking";
+  if (endedAt === undefined) return "Thought";
+  return `Thought for ${formatDuration(Math.max(1, Math.round((endedAt - startedAt) / 1000)))}`;
+}
 
 function ThoughtRowBody({ text, panelId }: { text: string; panelId: string }) {
   return (

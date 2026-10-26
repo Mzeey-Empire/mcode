@@ -72,12 +72,12 @@ describe("ShellToolCallRow automatic expansion", () => {
 
   it("reads a finished command as duration then command", () => {
     render(<ShellToolCallRow toolCall={{ ...call, isComplete: true, durationMs: 2_000 }} />);
-    expect(screen.getByRole("button", { name: /^Ran command/ })).toHaveTextContent(/^Ran command0:02echo hello$/);
+    expect(screen.getByRole("button", { name: /^Ran command/ })).toHaveTextContent(/^Ran command2secho hello$/);
   });
 
   it("reads a failed command as command then exit and duration", () => {
     render(<ShellToolCallRow toolCall={{ ...call, isComplete: true, isError: true, exitCode: 1, durationMs: 3_000 }} />);
-    expect(screen.getByRole("button", { name: /^Ran command/ })).toHaveTextContent(/^Ran commandecho helloexit 1 · 0:03$/);
+    expect(screen.getByRole("button", { name: /^Ran command/ })).toHaveTextContent(/^Ran commandecho helloexit 1 · 3s$/);
   });
 
   it("shows no duration for a running command", () => {

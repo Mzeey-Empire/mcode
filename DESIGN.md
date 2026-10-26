@@ -580,7 +580,7 @@ inset. Code blocks use a `2.4rem` inset.
 ### Named Rules
 **The Mono-Is-Scannable-Data Rule.** Use monospace for code, identifiers, branch and worktree names, paths, durations, and aligned values. Mono meta (a branch under a thread title, a duration on a tool row) uses the caption size in `muted`. Keep numerals in Public Sans inside prose or human-facing labels. Tabular data uses `tabular-nums`.
 
-**The Duration Rule.** Live timers and tool-row durations render in mono as `m:ss` (`0:42`, `12:05`), never in parentheses. A sentence that names an ending may use words ("Failed after 1m 02s").
+**The Duration Rule.** Durations on thought rows, tool rows, and live timers read as compact words (`22s`, `1m 5s`, `2h 3m`), matching "Worked for 9s", never in parentheses. A thought row reads as one phrase: "Thought for 2s".
 
 **The No-Ligatures-In-Code Rule.** JetBrains Mono turns `=>` and `!==` into ligatures. Code views, diffs, file views, and the terminal switch ligatures off (`font-variant-ligatures: none`; for Pierre diffs, its font-features variable). A reader must see the characters the agent wrote.
 
