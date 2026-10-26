@@ -43,11 +43,6 @@ function toPlainPreview(text: string): string {
   return "";
 }
 
-/** Returns true when the sticky preview should offer an expand control. */
-export function isStickyPreviewExpandable(preview: string): boolean {
-  return preview.length > 140;
-}
-
 function pluralAttachmentLabel(count: number, noun: "image" | "file"): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }

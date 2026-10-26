@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
 import type { Message } from "@/transport";
-import { resolveUserMessagePreview, isStickyPreviewExpandable } from "../user-message-preview";
+import { resolveUserMessagePreview } from "../user-message-preview";
 
 function userMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -80,10 +80,5 @@ describe("resolveUserMessagePreview", () => {
         userMessage({ content: "```ts\nexport const sticky = true;\n```" }),
       ),
     ).toBe("[Code] export const sticky = true;");
-  });
-
-  it("marks long previews as expandable", () => {
-    expect(isStickyPreviewExpandable("x".repeat(141))).toBe(true);
-    expect(isStickyPreviewExpandable("short prompt")).toBe(false);
   });
 });
