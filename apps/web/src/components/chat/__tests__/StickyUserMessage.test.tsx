@@ -4,7 +4,8 @@ import { StickyUserMessage } from "../StickyUserMessage";
 
 describe("StickyUserMessage", () => {
   afterEach(() => {
-    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("renders the preview and jumps when the jump control is clicked", () => {
@@ -24,104 +25,50 @@ describe("StickyUserMessage", () => {
     expect(onJumpToMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("jumps short previews when the preview area is clicked", () => {
-    const onJumpToMessage = vi.fn();
-    render(
-      <StickyUserMessage
-        preview="Short prompt"
-        visible
-        onJumpToMessage={onJumpToMessage}
-      />,
-    );
+  function overflowWhenTaller(heights: { scroll: number }) {
+    class ManualResizeObserver implements ResizeObserver {
+      static readonly all: ManualResizeObserver[] = [];
+      constructor(readonly callback: ResizeObserverCallback) { ManualResizeObserver.all.push(this); }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", ManualResizeObserver);
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(() => heights.scroll);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(52);
+    return () => act(() => ManualResizeObserver.all.forEach((observer) => observer.callback([], observer)));
+  }
 
-    fireEvent.click(screen.getByRole("button", { name: "Jump to your message in transcript" }));
-    expect(onJumpToMessage).toHaveBeenCalledTimes(1);
+  it("offers no Show all when the prompt fits", () => {
+    overflowWhenTaller({ scroll: 40 });
+    render(<StickyUserMessage preview="Short prompt" visible onJumpToMessage={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
   });
 
-  it("expands long previews on single click without triggering jump", () => {
-    vi.useFakeTimers();
+  it("offers Show all once a narrower transcript makes the prompt overflow", () => {
+    const heights = { scroll: 40 };
+    const resize = overflowWhenTaller(heights);
+    render(<StickyUserMessage preview={"word ".repeat(60)} visible onJumpToMessage={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
+    heights.scroll = 120;
+    resize();
+    expect(screen.getByRole("button", { name: "Show all" })).toBeInTheDocument();
+  });
+
+  it("toggles an overflowing prompt between Show all and Show less without jumping", () => {
+    overflowWhenTaller({ scroll: 120 });
     const onJumpToMessage = vi.fn();
-    const preview = "A".repeat(180);
-    render(
-      <StickyUserMessage
-        preview={preview}
-        visible
-        onJumpToMessage={onJumpToMessage}
-      />,
-    );
+    render(<StickyUserMessage preview={"word ".repeat(60)} visible onJumpToMessage={onJumpToMessage} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Expand your message" }));
-    act(() => {
-      vi.advanceTimersByTime(250);
-    });
-
+    const showAll = screen.getByRole("button", { name: "Show all" });
+    expect(showAll).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(showAll);
+    const showLess = screen.getByRole("button", { name: "Show less" });
+    expect(showLess).toHaveAttribute("aria-expanded", "true");
     expect(onJumpToMessage).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Collapse your message" })).toBeInTheDocument();
-    expect(screen.getByText("Collapse")).toBeInTheDocument();
-  });
 
-  it("jumps long previews on double click without expanding", () => {
-    vi.useFakeTimers();
-    const onJumpToMessage = vi.fn();
-    const preview = "A".repeat(180);
-    render(
-      <StickyUserMessage
-        preview={preview}
-        visible
-        onJumpToMessage={onJumpToMessage}
-      />,
-    );
-
-    fireEvent.doubleClick(screen.getByRole("button", { name: "Expand your message" }));
-    act(() => {
-      vi.advanceTimersByTime(250);
-    });
-
-    expect(onJumpToMessage).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Expand your message" })).toBeInTheDocument();
-  });
-
-  it("collapses an expanded long preview on single click", () => {
-    vi.useFakeTimers();
-    const preview = "A".repeat(180);
-    render(
-      <StickyUserMessage
-        preview={preview}
-        visible
-        onJumpToMessage={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Expand your message" }));
-    act(() => {
-      vi.advanceTimersByTime(250);
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Collapse your message" }));
-    act(() => {
-      vi.advanceTimersByTime(250);
-    });
-
-    expect(screen.getByRole("button", { name: "Expand your message" })).toBeInTheDocument();
-  });
-
-  it("exposes screen-reader hint for double-click jump on long previews", () => {
-    const preview = "A".repeat(180);
-    render(
-      <StickyUserMessage
-        preview={preview}
-        visible
-        onJumpToMessage={vi.fn()}
-      />,
-    );
-
-    const previewButton = screen.getByRole("button", { name: "Expand your message" });
-    expect(previewButton).toHaveAttribute(
-      "aria-describedby",
-      "sticky-user-message-preview-hint",
-    );
-    expect(
-      screen.getByText("Double-click to jump to your message in the transcript"),
-    ).toHaveClass("sr-only");
+    fireEvent.click(showLess);
+    expect(screen.getByRole("button", { name: "Show all" })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("unmounts when hidden so focused controls are not aria-hidden", () => {
@@ -134,7 +81,7 @@ describe("StickyUserMessage", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Jump to your message in transcript" }));
+    fireEvent.click(screen.getByRole("button", { name: "Jump to your message" }));
     rerender(
       <StickyUserMessage
         preview="Short prompt"

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { ArrowUp, ChevronDown } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { Button } from "@/components/ui/button";
@@ -8,23 +8,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { isStickyPreviewExpandable } from "./user-message-preview";
-
-/** Delay before a single click toggles expand, so double-click can jump instead. */
-const EXPAND_CLICK_DELAY_MS = 250;
 
 /**
  * Approximate collapsed bar height (outer chrome plus two-line preview) used to
  * reserve scroll padding before ResizeObserver reports the measured height.
  */
-export const STICKY_USER_MESSAGE_ESTIMATED_HEIGHT = 56;
-
-const STICKY_PREVIEW_HINT_ID = "sticky-user-message-preview-hint";
-
-function getPreviewAriaLabel(expandable: boolean, expanded: boolean): string {
-  if (!expandable) return "Jump to your message in transcript";
-  return expanded ? "Collapse your message" : "Expand your message";
-}
+export const STICKY_USER_MESSAGE_ESTIMATED_HEIGHT = 64;
 
 /** Props for {@link StickyUserMessage}. */
 export interface StickyUserMessageProps {
@@ -52,33 +41,28 @@ export function StickyUserMessage({
   contentPaddingRight,
 }: StickyUserMessageProps) {
   const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const expandClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const expandable = isStickyPreviewExpandable(preview);
-
-  const clearExpandClickTimer = () => {
-    if (expandClickTimerRef.current) {
-      clearTimeout(expandClickTimerRef.current);
-      expandClickTimerRef.current = null;
-    }
-  };
+  const textRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     if (!visible) {
       // oxlint-disable-next-line react/set-state-in-effect -- Hiding the sticky message must clear its expanded snapshot before its height is reported as zero.
       setExpanded(false);
-      clearExpandClickTimer();
       onHeightChange?.(0);
     }
   }, [visible, preview, onHeightChange]);
 
-  useEffect(() => {
-    return () => {
-      if (expandClickTimerRef.current) {
-        clearTimeout(expandClickTimerRef.current);
-      }
-    };
-  }, []);
+  useLayoutEffect(() => {
+    const text = textRef.current;
+    if (!visible || expanded || !text) return;
+    const measure = () => setOverflows(text.scrollHeight > text.clientHeight);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(text);
+    return () => observer.disconnect();
+  }, [visible, expanded, preview]);
 
   useEffect(() => {
     if (!visible || !onHeightChange) return;
@@ -97,25 +81,7 @@ export function StickyUserMessage({
     return () => observer.disconnect();
   }, [visible, expanded, preview, onHeightChange]);
 
-  const handlePreviewClick = () => {
-    if (!expandable) {
-      onJumpToMessage();
-      return;
-    }
-    clearExpandClickTimer();
-    expandClickTimerRef.current = setTimeout(() => {
-      expandClickTimerRef.current = null;
-      setExpanded((value) => !value);
-    }, EXPAND_CLICK_DELAY_MS);
-  };
-
-  const handlePreviewDoubleClick = (event: MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    clearExpandClickTimer();
-    onJumpToMessage();
-  };
-
-  const previewAriaLabel = getPreviewAriaLabel(expandable, expanded);
+  const clamped = !expanded && overflows;
 
   if (!visible) {
     return null;
@@ -129,72 +95,50 @@ export function StickyUserMessage({
     >
       <div className="w-full" style={{ paddingRight: contentPaddingRight }}>
       <div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>
-        <div className="pointer-events-auto flex items-start gap-0.5 overflow-hidden rounded-lg bg-selected text-sm text-ink">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={handlePreviewClick}
-            onDoubleClick={handlePreviewDoubleClick}
-            aria-expanded={expandable ? expanded : undefined}
-            aria-describedby={expandable ? STICKY_PREVIEW_HINT_ID : undefined}
-            aria-label={previewAriaLabel}
-            className="h-auto min-w-0 flex-1 cursor-pointer justify-start px-3 py-1.5 text-left font-normal text-ink transition-colors hover:bg-ink/5 hover:text-ink"
-          >
-            <p
-              className={cn(
-                "break-words",
-                expanded ? "max-h-40 overflow-y-auto whitespace-pre-wrap" : "text-fade-lines-2",
-              )}
-            >
-              {preview}
-            </p>
-            {expandable && (
-              <>
-                <span
-                  id={STICKY_PREVIEW_HINT_ID}
-                  className="sr-only"
-                >
-                  Double-click to jump to your message in the transcript
-                </span>
-                <span
-                  aria-hidden
-                  className="mt-1 inline-flex items-center gap-0.5 font-mono text-xs uppercase tracking-[0.14em] text-muted"
-                >
-                  <ChevronDown
-                    size={11}
-                    aria-hidden
-                    className={cn("transition-transform duration-150", expanded && "rotate-180")}
-                  />
-                  {expanded ? "Collapse" : "Expand"}
-                  {!expanded && (
-                    <span className="normal-case tracking-normal text-muted/70">
-                      · Double-click to jump
-                    </span>
-                  )}
-                </span>
-              </>
+        <div className="pointer-events-auto flex items-end gap-1 overflow-hidden rounded-lg bg-selected text-sm text-ink">
+          <p
+            ref={textRef}
+            className={cn(
+              "min-w-0 flex-1 break-words px-3 py-1.5 leading-5",
+              expanded ? "max-h-40 overflow-y-auto whitespace-pre-wrap" : "max-h-[5.2rem] overflow-hidden",
+              clamped && "[mask-image:linear-gradient(to_bottom,black_calc(100%-2.4rem),transparent)]",
             )}
-          </Button>
-
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-compact"
-                  onClick={onJumpToMessage}
-                  className="mt-0.5 mr-0.5 size-11 shrink-0 text-muted hover:bg-ink/5 hover:text-ink"
-                  aria-label="Jump to your message"
-                >
-                  <ArrowUp size={15} aria-hidden />
-                </Button>
-              }
-            />
-            <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-              Jump to message
-            </TooltipContent>
-          </Tooltip>
+          >
+            {preview}
+          </p>
+          <div className="flex shrink-0 items-center gap-0.5 p-0.5">
+            {(overflows || expanded) && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="compact"
+                aria-expanded={expanded}
+                onClick={() => setExpanded((value) => !value)}
+                className="text-muted hover:bg-ink/5 hover:text-ink"
+              >
+                {expanded ? "Show less" : "Show all"}
+              </Button>
+            )}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-compact"
+                    onClick={onJumpToMessage}
+                    className="text-muted hover:bg-ink/5 hover:text-ink"
+                    aria-label="Jump to your message"
+                  >
+                    <ArrowUp size={15} aria-hidden />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
+                Jump to message
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
       </div>
       </div>
