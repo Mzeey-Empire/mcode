@@ -64,6 +64,7 @@ export class SessionRuntime<TState> {
   private readonly pendingSpawns = new Map<string, Promise<TState>>();
   private readonly stopsDuringSpawn = new Set<string>();
   private readonly teardowns = new Map<string, Promise<void>>();
+  private readonly unretired = new Map<string, PoolEntry<TState>>();
   private evictionTimer: ReturnType<typeof setInterval> | null = null;
   private readonly idleTtlMs: number;
   private shuttingDown = false;
@@ -93,18 +94,15 @@ export class SessionRuntime<TState> {
     args.signal?.throwIfAborted();
     if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
     this.ensureEvictionTimer();
-    const teardown = this.teardowns.get(args.sessionId);
-    if (teardown) {
+    if (this.teardowns.has(args.sessionId) || this.unretired.has(args.sessionId)) {
       // Providers can hold exclusive resources (state DBs, sockets) that a
       // spawn would race while the previous incarnation is still closing.
-      await waitForAcquisition(teardown, args.signal);
-      if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
+      await this.stopBeforeSpawn(args.sessionId, args.signal);
     }
     const existing = this.sessions.get(args.sessionId);
     if (existing) {
       if (this.adapter.isStale(existing.state, args)) {
-        await waitForAcquisition(this.stop(args.sessionId), args.signal);
-        if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
+        await this.stopBeforeSpawn(args.sessionId, args.signal);
       }
       else {
         existing.lastUsedAt = Date.now();
@@ -122,6 +120,11 @@ export class SessionRuntime<TState> {
     });
     this.pendingSpawns.set(args.sessionId, spawn);
     return waitForAcquisition(spawn, args.signal);
+  }
+
+  private async stopBeforeSpawn(sessionId: string, signal: AbortSignal | undefined): Promise<void> {
+    await waitForAcquisition(this.stop(sessionId), signal);
+    if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
   }
 
   /** Returns the live state for one session. */
@@ -167,8 +170,11 @@ export class SessionRuntime<TState> {
     // spawning alongside teardown or joining a spawn that is being stopped.
     const work = Promise.resolve().then(() => this.performStop(sessionId));
     this.teardowns.set(sessionId, work);
-    await work;
-    if (this.teardowns.get(sessionId) === work) this.teardowns.delete(sessionId);
+    try {
+      await work;
+    } finally {
+      if (this.teardowns.get(sessionId) === work) this.teardowns.delete(sessionId);
+    }
   }
 
   private async performStop(sessionId: string): Promise<void> {
@@ -179,10 +185,10 @@ export class SessionRuntime<TState> {
       catch (error) { if (error instanceof SpawnRetirementFailure) throw error.cause; }
       finally { this.stopsDuringSpawn.delete(sessionId); }
     }
-    const entry = this.sessions.get(sessionId);
+    const entry = this.sessions.get(sessionId) ?? this.unretired.get(sessionId);
     if (!entry) return;
     this.sessions.delete(sessionId);
-    await this.closeEntry(sessionId, entry);
+    await this.retire(sessionId, entry);
   }
 
   /** Stops all sessions and rejects later acquisitions. */
@@ -194,7 +200,7 @@ export class SessionRuntime<TState> {
     }
     // A session leaves the pool before native close finishes, so pool entries alone miss active teardowns.
     const teardowns = [...this.teardowns.values()];
-    const sessionIds = new Set([...this.pendingSpawns.keys(), ...this.sessions.keys()]);
+    const sessionIds = new Set([...this.pendingSpawns.keys(), ...this.sessions.keys(), ...this.unretired.keys()]);
     const results = await Promise.allSettled([...teardowns, ...[...sessionIds].map((sessionId) => this.stop(sessionId))]);
     const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
     if (failures.length > 0) throw new AggregateError(failures, "Provider session shutdown failed");
@@ -210,7 +216,7 @@ export class SessionRuntime<TState> {
     const env = this.deps.envService.getEnv();
     const result = await this.adapter.spawn({ ...args, env });
     if (this.shuttingDown || this.stopsDuringSpawn.has(args.sessionId)) {
-      try { await this.closeEntry(args.sessionId, { ...result, lastUsedAt: Date.now() }); }
+      try { await this.retire(args.sessionId, { ...result, lastUsedAt: Date.now() }); }
       catch (error) { throw new SpawnRetirementFailure(error); }
       throw new Error(`Provider session stopped during spawn: ${args.sessionId}`);
     }
@@ -247,6 +253,12 @@ export class SessionRuntime<TState> {
         await this.stop(sessionId);
       }
     }
+  }
+
+  private async retire(sessionId: string, entry: PoolEntry<TState>): Promise<void> {
+    this.unretired.set(sessionId, entry);
+    await this.closeEntry(sessionId, entry);
+    this.unretired.delete(sessionId);
   }
 
   private async closeEntry(sessionId: string, entry: PoolEntry<TState>): Promise<void> {

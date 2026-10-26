@@ -128,7 +128,7 @@ describe("SessionRuntime recovery", () => {
     await expect(runtime.acquire(request)).rejects.toThrow("retirement failed");
     await expect(runtime.shutdown()).rejects.toThrow("shutdown failed");
     expect(protocol.spawn).toHaveBeenCalledOnce();
-    expect(terminateTree).toHaveBeenCalledOnce();
+    expect(terminateTree.mock.calls).toEqual([[1], [1], [1]]);
   });
 
   it("retries a failed retirement and spawns a replacement once it succeeds", async () => {
