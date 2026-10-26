@@ -52,6 +52,22 @@ describe("handleAgentEvent branches", () => {
     vi.useRealTimers();
   });
 
+  it("publishes a visual system message once without retaining it as a session notice", () => {
+    const event: Extract<AgentEvent, { type: "system" }> = {
+      type: "system", threadId: "thread-1", subtype: "mcode.visual", message: "Visual: Latency",
+      messageId: "09201c64-30cf-4ef3-b58d-cecb05834856",
+      visual: { title: "Latency", html: "<svg><rect/></svg>", maxHeight: 720 },
+    };
+    useThreadStore.getState().handleAgentEvent(event);
+    useThreadStore.getState().handleAgentEvent(event);
+    expect(getTestActiveMessages()).toMatchObject([
+      { id: event.messageId, role: "system", content: "Visual: Latency",
+        visual: { title: "Latency", html: "<svg><rect/></svg>", maxHeight: 720 } },
+    ]);
+    expect(getTestActiveMessages()).toHaveLength(1);
+    expect(readThreadField("thread-1", (record) => record.sessionNotices)).toEqual([]);
+  });
+
   it("session.error clears thread running state and sets error", () => {
     useThreadStore.getState().handleAgentEvent({ type: "error", threadId: "thread-1", error: "Out of tokens", failure: { kind: "fatal" } });
 

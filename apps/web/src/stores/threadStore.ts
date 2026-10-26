@@ -1650,6 +1650,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     content: string,
     messageId: string = crypto.randomUUID(),
     systemNotice?: Message["systemNotice"],
+    visual?: Message["visual"],
   ): Message => ({
     id: messageId,
     thread_id: threadId,
@@ -1663,6 +1664,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     sequence: messageSequenceFor(threadId),
     attachments: null,
     systemNotice,
+    visual,
   });
 
   const appendCurrentSessionNotice = (record: ThreadRecord, next: Message): Message[] => {
@@ -1762,8 +1764,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }
     const notice = systemNoticeFor(event.subtype, event.message);
     if (!notice) return;
-    const next = createSystemMessage(event.threadId, notice, event.messageId, event.systemNotice);
-    rememberCurrentSessionNotice(event.threadId, next);
+    const next = createSystemMessage(event.threadId, notice, event.messageId, event.systemNotice, event.visual);
+    if (!event.visual) rememberCurrentSessionNotice(event.threadId, next);
     if (event.systemNotice?.scope === "session") {
       return;
     }
