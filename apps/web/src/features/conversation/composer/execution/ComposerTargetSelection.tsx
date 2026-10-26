@@ -76,7 +76,7 @@ function TargetTrigger({ pick, workspaceId, threadId, testId }: TargetTriggerPro
             data-testid={testId}
             className={cn(TARGET_TRIGGER_CLASS, "min-w-0 shrink")}
           >
-            <Icon className="size-4" aria-hidden />
+            <Icon className="size-3.5" aria-hidden />
             <span className="min-w-0 text-fade">{targetLabelText(pick.label)}</span>
             <ChevronDown className="size-3" aria-hidden />
           </Button>
