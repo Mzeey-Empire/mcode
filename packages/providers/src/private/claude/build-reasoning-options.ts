@@ -26,7 +26,7 @@ export function buildReasoningOptions(
   // Models that ignore the effort parameter (Haiku 4.5).
   if (!supportsEffortParameter(modelId)) {
     if (thinking === true && supportsThinkingToggle(modelId)) {
-      return { thinking: { type: "adaptive" } };
+      return { thinking: { type: "adaptive", display: "summarized" } };
     }
     return {};
   }
@@ -45,6 +45,7 @@ export function buildReasoningOptions(
   // "none" / "minimal" are OpenAI Codex presets; Claude path normalizes them to "low" above.
   return {
     effort: normalized === "none" || normalized === "minimal" ? "low" : normalized,
-    thinking: { type: "adaptive" },
+    // Newer models omit thinking text unless display is summarized; Mcode renders it in Thought rows.
+    thinking: { type: "adaptive", display: "summarized" },
   };
 }
