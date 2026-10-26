@@ -10,6 +10,7 @@ export type McodeInstructionSectionKey =
   | "mcode_nested_delegation"
   | "mcode_thread_control"
   | "mcode_browser"
+  | "mcode_visuals"
   | "mcode_repository_search";
 
 /** One self-contained concern delivered through a provider's native context. */
@@ -22,7 +23,11 @@ export interface McodeInstructionSection {
 export interface McodeAttachedToolkits {
   readonly threadControl: boolean;
   readonly browser: boolean;
+  readonly visuals: boolean;
 }
+
+/** Toolkit flags used when the session has no mcode attachment. */
+export const NO_MCODE_TOOLKITS: McodeAttachedToolkits = { threadControl: false, browser: false, visuals: false };
 
 /** Inputs for selecting runtime guidance after provider setup succeeds. */
 export interface BuildMcodeInstructionSectionsInput {
@@ -82,6 +87,12 @@ const BROWSER_BLOCK = [
   "- A user hold, Stop or do_not_retry is not a failure to work around: yield to the user instead of switching.",
 ].join("\n");
 
+const VISUALS_BLOCK = [
+  "Mcode Visuals",
+  "- When a chart, table, diagram, or mockup says more than prose would, build it as a self-contained HTML page, check it carefully, and publish it with html_render before you write your reply.",
+  "- Do not restate the page's contents in the reply.",
+].join("\n");
+
 const SECTION_REGISTRY: readonly {
   key: McodeInstructionSectionKey;
   text(input: BuildMcodeInstructionSectionsInput): string | undefined;
@@ -91,6 +102,7 @@ const SECTION_REGISTRY: readonly {
   { key: "mcode_nested_delegation", text: (input) => nestedDelegationBlock(input.nestedDelegationModel) },
   { key: "mcode_thread_control", text: (input) => input.toolkits.threadControl ? THREAD_CONTROL_BLOCK : undefined },
   { key: "mcode_browser", text: (input) => input.toolkits.browser ? BROWSER_BLOCK : undefined },
+  { key: "mcode_visuals", text: (input) => input.toolkits.visuals ? VISUALS_BLOCK : undefined },
   { key: "mcode_repository_search", text: () => REPOSITORY_SEARCH_BLOCK },
 ];
 

@@ -154,7 +154,7 @@ export class BrowserAutomationSessionLease {
 
 /** Builds the attachment the server hands a Codex session; tests override the toolkits they exercise. */
 export function mcodeAttachment(
-  toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true },
+  toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true, visuals: true },
 ): ProviderMcodeAttachment {
   return { serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "session-token-fixture", toolkits };
 }

@@ -16,7 +16,7 @@ import type { ApprovalOutcome, ApprovalChoice, TurnFailure } from "@mcode/contra
 import { classifyCodexLocalFailure } from "./codex-failure-classifier.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
-import { buildMcodeInstructionSections, type McodeInstructionSection } from "@mcode/thread-orchestration";
+import { buildMcodeInstructionSections, NO_MCODE_TOOLKITS, type McodeInstructionSection } from "@mcode/thread-orchestration";
 import {
   providerBrowserPermissionCapability,
   type ProviderBrowserCredentialMetadata,
@@ -1529,7 +1529,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     // Luna variants lack Ultra orchestration, so a nested spawn must route to the same-generation Sol.
     const nestedDelegationModel = spawnModel?.endsWith("-luna") ? spawnModel.replace(/-luna$/, "-sol") : undefined;
     return buildMcodeInstructionSections({
-      toolkits: { threadControl: context.mcode?.toolkits.threadControl ?? false, browser: Boolean(context.mcode?.toolkits.browser && context.browserGrant) },
+      toolkits: { ...(context.mcode?.toolkits ?? NO_MCODE_TOOLKITS), browser: Boolean(context.mcode?.toolkits.browser && context.browserGrant) },
       nestedDelegationModel,
     });
   }

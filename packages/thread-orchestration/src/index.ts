@@ -62,6 +62,7 @@ export function isInternalThreadTargetAllowed(
 
 export {
   MCODE_INSTRUCTION_SECTION_MAX_BYTES,
+  NO_MCODE_TOOLKITS,
   buildMcodeInstructionSections,
   renderMcodeInstructionSections,
 } from "./mcode-instructions.js";

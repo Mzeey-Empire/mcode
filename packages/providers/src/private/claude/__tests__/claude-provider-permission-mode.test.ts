@@ -220,7 +220,7 @@ describe("ClaudeProvider permission mode changes", () => {
       {
         ...mockProviderHost(),
         mcode: {
-          attach: async () => ({ serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "session-token-0123456789", toolkits: { browser: true, threadControl: true } }),
+          attach: async () => ({ serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "session-token-0123456789", toolkits: { browser: true, threadControl: true, visuals: true } }),
           close: async () => undefined,
         },
       },

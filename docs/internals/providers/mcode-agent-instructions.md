@@ -32,3 +32,6 @@ flow needs, such as finalizing tabs before replying, appear on `browser_open`
 and `browser_inspect` because a flow may never load `browser_tabs`.
 `browser_open` also repeats the failure and switch rule, so edit both places
 when that rule changes.
+
+The Visuals section is included only when the Visuals toolkit is attached. It
+guides when to publish a page; `html_render` describes layout, images and limits.

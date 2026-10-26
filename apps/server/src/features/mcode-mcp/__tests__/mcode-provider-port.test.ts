@@ -27,7 +27,7 @@ describe("McodeProviderPort", () => {
     expect(attachment).toMatchObject({
       serverName: "mcode",
       url: "http://127.0.0.1:4000/mcp/mcode",
-      toolkits: { browser: true, threadControl: true },
+      toolkits: { browser: true, threadControl: true, visuals: true },
     });
     expect(authority.resolve(attachment?.token ?? "")).toMatchObject({ sessionId: "session-a", threadId: "thread-a" });
   });
@@ -43,7 +43,7 @@ describe("McodeProviderPort", () => {
     const { port } = createPort({ browser: false });
 
     expect(await port.attach({ ...request, threadControl: false })).toBeNull();
-    expect(await port.attach(request)).toMatchObject({ toolkits: { browser: false, threadControl: true } });
+    expect(await port.attach(request)).toMatchObject({ toolkits: { browser: false, threadControl: true, visuals: true } });
   });
 
   it("revokes the token and ends in-flight requests when the session closes", async () => {
@@ -54,5 +54,11 @@ describe("McodeProviderPort", () => {
 
     expect(authority.resolve(attachment?.token ?? "")).toBeNull();
     expect(server.closeSession).toHaveBeenCalledWith("session-a");
+  });
+
+  it.each([true, false])("attaches visuals only with thread control = %s", async (threadControl) => {
+    const { port } = createPort({ browser: true });
+    const attachment = await port.attach({ ...request, threadControl });
+    expect(attachment?.toolkits.visuals).toBe(threadControl);
   });
 });

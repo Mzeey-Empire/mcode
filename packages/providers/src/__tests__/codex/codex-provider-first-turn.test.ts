@@ -460,7 +460,7 @@ describe("CodexProvider first turn on new session", () => {
       'plugins."browser@openai-bundled".enabled=false',
     ]);
     expect(server.options.instructionSections?.map((section) => section.key)).toEqual([
-      "mcode_identity", "mcode_provider_subagents", "mcode_thread_control", "mcode_browser", "mcode_repository_search",
+      "mcode_identity", "mcode_provider_subagents", "mcode_thread_control", "mcode_browser", "mcode_visuals", "mcode_repository_search",
     ]);
     expect(server.options.instructionSections?.find((section) => section.key === "mcode_browser")?.text)
       .toContain("Prefer the mcode MCP browser_* tools");
@@ -481,9 +481,9 @@ describe("CodexProvider first turn on new session", () => {
   });
 
   it.each([
-    ["thread control only", { browser: false, threadControl: true }, { thread: true, browser: false, plugin: false }],
-    ["Browser only", { browser: true, threadControl: false }, { thread: false, browser: true, plugin: true }],
-    ["neither toolkit listed", { browser: false, threadControl: false }, { thread: false, browser: false, plugin: false }],
+    ["thread control only", { browser: false, threadControl: true, visuals: true }, { thread: true, browser: false, plugin: false }],
+    ["Browser only", { browser: true, threadControl: false, visuals: false }, { thread: false, browser: true, plugin: true }],
+    ["neither toolkit listed", { browser: false, threadControl: false, visuals: false }, { thread: false, browser: false, plugin: false }],
   ])("grants instructions and the Browser plugin switch from the listed toolkits: %s", async (_name, toolkits, expected) => {
     const lease = configuredLease();
     const provider = makeProvider(undefined, lease, { attach: vi.fn().mockResolvedValue(mcodeAttachment(toolkits)) });
@@ -515,7 +515,7 @@ describe("CodexProvider first turn on new session", () => {
   });
 
   it("attaches the Delegation toolkit whatever the user's wording, without a Browser grant", async () => {
-    const attach = vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true }));
+    const attach = vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true }));
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), { attach });
 
     const send = provider.sendTurn({
@@ -541,7 +541,7 @@ describe("CodexProvider first turn on new session", () => {
 
   it("settles startup only on the mcode server's status", async () => {
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
+      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true })),
     });
     let settled = false;
 
@@ -2576,7 +2576,7 @@ describe("CodexProvider first turn on new session", () => {
   it("continues the first turn when internal MCP startup reports failure", async () => {
     const close = vi.fn().mockResolvedValue(undefined);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
+      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true })),
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
@@ -2637,7 +2637,7 @@ describe("CodexProvider first turn on new session", () => {
   it("normalizes a legacy internal MCP error status without duplicating the failure event", async () => {
     const close = vi.fn().mockResolvedValue(undefined);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
+      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true })),
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
@@ -2695,7 +2695,7 @@ describe("CodexProvider first turn on new session", () => {
   it("continues promptly when native internal MCP startup is cancelled", async () => {
     const close = vi.fn().mockResolvedValue(undefined);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
+      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true })),
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
@@ -2764,7 +2764,7 @@ describe("CodexProvider first turn on new session", () => {
     }
     const close = vi.fn().mockResolvedValue(undefined);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
+      attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true })),
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
@@ -2867,7 +2867,7 @@ describe("CodexProvider first turn on new session", () => {
       readConfigMock.mockImplementation(() => new Promise(() => undefined));
       const close = vi.fn().mockResolvedValue(undefined);
       const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
-        attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true })),
+        attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true })),
         close,
       });
       const events: ProviderRuntimeEvent[] = [];

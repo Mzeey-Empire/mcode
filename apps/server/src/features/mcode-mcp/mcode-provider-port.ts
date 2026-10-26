@@ -22,7 +22,7 @@ export class McodeProviderPort implements ProviderMcodePort {
   async attach(request: ProviderMcodeAttachRequest): Promise<ProviderMcodeAttachment | null> {
     const url = this.options.server().endpoint();
     if (url === null) return null;
-    const toolkits = { browser: this.options.isBrowserConfigured(), threadControl: request.threadControl };
+    const toolkits = { browser: this.options.isBrowserConfigured(), threadControl: request.threadControl, visuals: request.threadControl };
     if (!toolkits.browser && !toolkits.threadControl) return null;
     const { token } = this.options.authority.attach(request);
     return { serverName: "mcode", url, token, toolkits };
