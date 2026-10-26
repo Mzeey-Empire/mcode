@@ -153,31 +153,36 @@ describe("new-thread Overview", () => {
     vi.restoreAllMocks();
   });
 
-  it("docks the card with the new worktree and its base branch, without the rail", async () => {
+  it("docks the card with the new worktree and its base branch, beside the rail", async () => {
     renderColumn();
 
     const card = await screen.findByTestId("thread-overview-card");
     expect(within(card).getByTestId("overview-target-workspace")).toHaveTextContent("New worktree · Create");
     await waitFor(() => expect(within(card).getByTestId("overview-target-branch")).toHaveTextContent("From main"));
-    expect(screen.queryByTestId("new-thread-target-rail")).not.toBeInTheDocument();
+    expect(screen.getByTestId("new-thread-target-rail")).toBeInTheDocument();
     expect(screen.getByTestId("new-thread-start-column")).toHaveStyle({ paddingRight: "328px" });
   });
 
-  it("hands the targets to the rail when the card closes, and takes them back when it reopens", async () => {
+  it("keeps the rail with the targets while the card is open, closed, and reopened", async () => {
     const user = userEvent.setup();
     renderColumn();
     await screen.findByTestId("thread-overview-card");
 
+    const expectRailTargets = async () => {
+      const rail = screen.getByTestId("new-thread-target-rail");
+      expect(within(rail).getByTestId("workspace-target-trigger")).toHaveTextContent("New worktree");
+      await waitFor(() => expect(within(rail).getByTestId("composer-branch-trigger")).toHaveTextContent("From main"));
+    };
+    await expectRailTargets();
+
     await toggleOverview(user);
     expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument();
-    const rail = screen.getByTestId("new-thread-target-rail");
-    expect(within(rail).getByTestId("workspace-target-trigger")).toHaveTextContent("New worktree");
-    await waitFor(() => expect(within(rail).getByTestId("composer-branch-trigger")).toHaveTextContent("From main"));
+    await expectRailTargets();
     expect(screen.getByTestId("new-thread-start-column").style.paddingRight).toBe("");
 
     await toggleOverview(user);
     expect(screen.getByTestId("thread-overview-card")).toBeInTheDocument();
-    expect(screen.queryByTestId("new-thread-target-rail")).not.toBeInTheDocument();
+    await expectRailTargets();
   });
 
   it("reopens the card for the next new thread after the user closed it", async () => {
@@ -190,10 +195,10 @@ describe("new-thread Overview", () => {
     startNewThread();
 
     expect(await screen.findByTestId("thread-overview-card")).toBeInTheDocument();
-    expect(screen.queryByTestId("new-thread-target-rail")).not.toBeInTheDocument();
+    expect(screen.getByTestId("new-thread-target-rail")).toBeInTheDocument();
   });
 
-  it("restores a draft's mode and branch in the card row and then in the rail", async () => {
+  it("restores a draft's mode and branch in the card row and the rail", async () => {
     const user = userEvent.setup();
     const draftId = useThreadDraftStore.getState().saveDraft({
       workspaceId: WORKSPACE_ID,

@@ -64,7 +64,6 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewT
             isNewThread
             workspaceId={workspaceId}
             draftId={draftId}
-            overviewPresentation={overview.presentation}
             onThreadPreparing={(thread) => {
               if (columnRef.current) recordFirstSend(thread.id, columnRef.current);
             }}
