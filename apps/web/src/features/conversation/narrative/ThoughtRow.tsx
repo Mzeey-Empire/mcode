@@ -22,6 +22,7 @@ interface ThoughtRowHeaderProps {
   isActive: boolean;
   hasText: boolean;
   open: boolean;
+  preview: string;
   onToggle: () => void;
   panelId: string;
 }
@@ -36,6 +37,7 @@ const ThoughtRowHeader = memo(function ThoughtRowHeader({
   isActive,
   hasText,
   open,
+  preview,
   onToggle,
   panelId,
 }: ThoughtRowHeaderProps) {
@@ -44,7 +46,9 @@ const ThoughtRowHeader = memo(function ThoughtRowHeader({
       icon={Brain}
       label={thoughtLabel(startedAt, endedAt, isActive)}
       disclosure={hasText ? { open, onToggle, controlsId: open ? panelId : undefined } : undefined}
-    />
+    >
+      {preview ? <span className="min-w-0 text-fade whitespace-nowrap text-sm text-muted">{preview}</span> : null}
+    </NarrativeToolRow>
   );
 });
 
@@ -54,9 +58,18 @@ function thoughtLabel(startedAt: number, endedAt: number | undefined, isActive: 
   return `Thought for ${formatDuration(Math.max(1, Math.round((endedAt - startedAt) / 1000)))}`;
 }
 
+const LEADING_MARKER = /^(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)+/;
+const WRAPPING_EMPHASIS = /^(\*\*|__|\*|_)(.+)\1$/;
+
+function thoughtPreview(text: string): string {
+  const firstLine = text.split("\n").find((line) => line.trim().length > 0) ?? "";
+  const unmarked = firstLine.trim().replace(LEADING_MARKER, "");
+  return unmarked.replace(WRAPPING_EMPHASIS, "$2").trim();
+}
+
 function ThoughtRowBody({ text, panelId }: { text: string; panelId: string }) {
   return (
-    <div id={panelId} className="min-w-0 max-w-full pt-1 pb-2 pl-6 text-sm text-muted">
+    <div id={panelId} className="scroll-fade-y max-h-[24rem] min-w-0 max-w-full pt-1 pb-2 pl-6 text-sm text-muted">
       <Suspense fallback={<p className="whitespace-pre-wrap">{text}</p>}>
         <LazyMarkdownContent content={text} isStreaming={false} />
       </Suspense>
@@ -83,6 +96,7 @@ export function ThoughtRow({ segment, isActive, virtualExpansion }: ThoughtRowPr
         isActive={isActive}
         hasText={hasText}
         open={open}
+        preview={hasText && !open ? thoughtPreview(segment.text) : ""}
         onToggle={virtualExpansion?.onToggle ?? toggleLocal}
         panelId={panelId}
       />
