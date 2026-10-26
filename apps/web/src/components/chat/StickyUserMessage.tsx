@@ -15,6 +15,8 @@ import {
  */
 export const STICKY_USER_MESSAGE_ESTIMATED_HEIGHT = 64;
 
+const FOOTERLESS_TEXT_CLASS = "max-h-[5.2rem] overflow-hidden break-words px-3 py-1.5 pr-10 leading-5";
+
 /** Props for {@link StickyUserMessage}. */
 export interface StickyUserMessageProps {
   /** Plain-text preview of the prompt for the turn in view. */
@@ -43,7 +45,7 @@ export function StickyUserMessage({
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const textRef = useRef<HTMLParagraphElement>(null);
+  const measureRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     if (!visible) {
@@ -54,15 +56,15 @@ export function StickyUserMessage({
   }, [visible, preview, onHeightChange]);
 
   useLayoutEffect(() => {
-    const text = textRef.current;
-    if (!visible || expanded || !text) return;
-    const measure = () => setOverflows(text.scrollHeight > text.clientHeight);
+    const probe = measureRef.current;
+    if (!visible || !probe) return;
+    const measure = () => setOverflows(probe.scrollHeight > probe.clientHeight);
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
-    observer.observe(text);
+    observer.observe(probe);
     return () => observer.disconnect();
-  }, [visible, expanded, preview]);
+  }, [visible, preview]);
 
   useEffect(() => {
     if (!visible || !onHeightChange) return;
@@ -118,14 +120,20 @@ export function StickyUserMessage({
       <div className="w-full" style={{ paddingRight: contentPaddingRight }}>
       <div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>
         <div className="pointer-events-auto relative overflow-hidden rounded-lg bg-selected text-sm text-ink">
+          {/* Overflow is measured in the footerless layout, so the footer widening the visible text cannot flip it back. */}
           <p
-            ref={textRef}
+            ref={measureRef}
+            aria-hidden
+            className={cn(FOOTERLESS_TEXT_CLASS, "pointer-events-none invisible absolute inset-x-0 top-0")}
+          >
+            {preview}
+          </p>
+          <p
             className={cn(
-              "break-words px-3 pt-1.5 pr-10 leading-5",
+              !showFooter && FOOTERLESS_TEXT_CLASS,
+              showFooter && "break-words px-3 pt-1.5 leading-5",
               expanded && "max-h-40 overflow-y-auto whitespace-pre-wrap",
-              // Both collapsed layouts hold exactly two lines, so showing the footer cannot flip the overflow it depends on.
-              !expanded && (showFooter ? "max-h-[4.6rem] overflow-hidden" : "max-h-[5.2rem] overflow-hidden pb-1.5"),
-              clamped && "[mask-image:linear-gradient(to_bottom,black_calc(100%-2rem),transparent)]",
+              clamped && "max-h-[4.6rem] overflow-hidden [mask-image:linear-gradient(to_bottom,black_calc(100%-2rem),transparent)]",
             )}
           >
             {preview}
