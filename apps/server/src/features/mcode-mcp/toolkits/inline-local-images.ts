@@ -57,7 +57,6 @@ function localImageReferences(html: string): string[] {
   return [...references];
 }
 
-// Pages often carry absolute links and stylesheet paths that never load in the frame, so only image files are read.
 function isLocalImageReference(value: string): boolean {
   const local = (value.startsWith("/") && !value.startsWith("//"))
     || value.startsWith("\\\\") || /^[a-z]:[\\/]/i.test(value) || /^file:/i.test(value);
