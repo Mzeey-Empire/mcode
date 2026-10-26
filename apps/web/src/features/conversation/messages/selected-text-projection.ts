@@ -255,9 +255,18 @@ export function findSelectedTextCommentContent(
   }) ?? null;
 }
 
+/** Returns the part of the transcript viewport that its padding keeps clear of the floating chrome. */
+export function visibleTranscriptRect(viewport: Element): DOMRect {
+  const rect = viewport.getBoundingClientRect();
+  const style = getComputedStyle(viewport);
+  const top = rect.top + (parseFloat(style.paddingTop) || 0);
+  const bottom = rect.bottom - (parseFloat(style.paddingBottom) || 0);
+  return new DOMRect(rect.left, top, rect.width, Math.max(0, bottom - top));
+}
+
 /** Returns the last selected range rectangle that intersects the message viewport. */
 export function lastVisibleRangeRect(range: Range, viewport: Element): DOMRect | null {
-  const viewportRect = viewport.getBoundingClientRect();
+  const viewportRect = visibleTranscriptRect(viewport);
   return [...range.getClientRects()].reverse().find((rect) => (
     rect.right > viewportRect.left
     && rect.left < viewportRect.right

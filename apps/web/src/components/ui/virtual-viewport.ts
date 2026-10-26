@@ -19,6 +19,12 @@ export type ViewportPosition =
   | { readonly kind: "reading"; readonly key: string; readonly offset: number }
   | { readonly kind: "target"; readonly key: string; readonly align: "start" | "center" };
 
+/** Scroller space covered by floating chrome at each end. */
+export interface ViewportInsets {
+  readonly top: number;
+  readonly bottom: number;
+}
+
 /** Configuration for a measured list, independent of any feature's scroll policy. */
 export interface VirtualViewportOptions {
   readonly classPrefix?: string;
@@ -44,6 +50,7 @@ export class VirtualViewport {
   private disposed = false;
   private animating = false;
   private pinnedAnchor: { key: string; top: number } | undefined;
+  private insets: ViewportInsets = { top: 0, bottom: 0 };
 
   constructor(
     container: HTMLElement,
@@ -200,7 +207,7 @@ export class VirtualViewport {
     // A short initial page needs its trailing space retained when history is prepended.
     this.context.updateContentSize(Math.max(
       this.context.sizeCache.getTotalSize(),
-      this.position.kind === "reading" ? target + this.viewport.clientHeight : 0,
+      this.position.kind === "reading" ? target + this.viewport.clientHeight - this.insets.top - this.insets.bottom : 0,
     ));
     if (!this.animating) {
       this.context.scrollTo(target);
@@ -233,23 +240,17 @@ export class VirtualViewport {
 
   private targetScrollTop(): number {
     const cache = this.context.sizeCache;
-    let top = this.viewport.scrollTop;
-    if (this.position.kind === "offset") {
-      top = this.position.top;
-    } else if (this.position.kind === "end") {
-      top = cache.getTotalSize() - this.viewport.clientHeight;
-    } else {
-      const index = this.rowIndexes.get(this.position.key);
-      if (index !== undefined) {
-        top = cache.getOffset(index);
-        top += this.position.kind === "reading"
-          ? this.position.offset
-          : this.position.align === "center"
-            ? (cache.getSize(index) - this.viewport.clientHeight) / 2
-            : 0;
-      }
-    }
-    return top;
+    const { top: insetTop, bottom: insetBottom } = this.insets;
+    const height = this.viewport.clientHeight;
+    if (this.position.kind === "offset") return this.position.top;
+    if (this.position.kind === "end") return insetTop + cache.getTotalSize() + insetBottom - height;
+    const index = this.rowIndexes.get(this.position.key);
+    if (index === undefined) return this.viewport.scrollTop;
+    const offset = cache.getOffset(index);
+    if (this.position.kind === "reading") return offset + this.position.offset;
+    return this.position.align === "center"
+      ? offset + (insetTop + cache.getSize(index) + insetBottom - height) / 2
+      : offset;
   }
 
   private readingPosition(): ViewportPosition {
@@ -332,27 +333,29 @@ export class VirtualViewport {
     this.pinReadingAnchor();
   }
 
-  private anchorSettledPositionToVisibleRow(): void {
-    if (this.animating || this.position.kind === "reading" || this.position.kind === "end") return;
-    this.position = this.readingPosition();
-  }
-
-  /** Keeps on-screen content still when a layout inset moves the viewport's screen position. */
-  shiftReadingPosition(delta: number): void {
-    if (delta === 0) return;
-    this.anchorSettledPositionToVisibleRow();
-    if (this.position.kind !== "reading") return;
-    this.position = { ...this.position, offset: this.position.offset + delta };
+  /**
+   * Pads the scroller so rows pass under floating chrome mid-scroll but rest clear of it at either end.
+   * Reading offsets and row edges are measured from the top inset's edge, so a reading row follows the
+   * chrome when it resizes. vlist still sizes its range from the raw scrollTop, so rows behind the top
+   * inset render through overscan.
+   */
+  setInsets(insets: ViewportInsets): void {
+    const shift = insets.top - this.insets.top;
+    if (shift === 0 && insets.bottom === this.insets.bottom) return;
+    this.insets = insets;
+    this.viewport.style.paddingTop = `${insets.top}px`;
+    this.viewport.style.paddingBottom = `${insets.bottom}px`;
+    if (this.pinnedAnchor) this.pinnedAnchor = { ...this.pinnedAnchor, top: this.pinnedAnchor.top + shift };
     this.applyPosition();
   }
 
-  /** Returns a row's measured or estimated top in viewport coordinates. */
+  /** Returns a row's measured or estimated top, measured from the top inset's edge. */
   rowTop(key: string): number | undefined {
     const index = this.rowIndexes.get(key);
     return index === undefined ? undefined : this.context.sizeCache.getOffset(index) - this.viewport.scrollTop;
   }
 
-  /** Returns a row's measured or estimated bottom in viewport coordinates. */
+  /** Returns a row's measured or estimated bottom, measured from the top inset's edge. */
   rowBottom(key: string): number | undefined {
     const index = this.rowIndexes.get(key);
     return index === undefined ? undefined

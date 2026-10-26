@@ -222,7 +222,6 @@ vi.mock("@/components/ui/virtual-viewport", async (importOriginal) => {
     restoreOffset(top: number): void {
       this.viewport.scrollTop = top;
     }
-    shiftReadingPosition(): void {}
     rowTop(): undefined {
       return undefined;
     }

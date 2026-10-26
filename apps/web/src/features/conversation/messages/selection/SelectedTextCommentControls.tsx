@@ -11,6 +11,7 @@ import {
   findSelectedTextCommentContent,
   lastVisibleRangeRect,
   reconstructCanonicalMessageRange,
+  visibleTranscriptRect,
   type SelectedTextCommentSource,
 } from "../selected-text-projection";
 import {
@@ -125,7 +126,7 @@ function currentSourcePosition(
   const range = reconstructCanonicalMessageRange(content, source.start, source.end, source.quote);
   if (!range) return null;
   const visibleRect = lastVisibleRangeRect(range, viewport);
-  const rangeEdge = sourceEdgeFromRange(range, viewport.getBoundingClientRect());
+  const rangeEdge = sourceEdgeFromRange(range, visibleTranscriptRect(viewport));
   if (visibleRect) {
     history.lastVisibleScrollTop = viewport.scrollTop;
     history.lastDockedEdge = rangeEdge;
@@ -294,7 +295,7 @@ export function SelectedTextCommentControls({
       ? editorHeight ?? INITIAL_EDITOR_HEIGHT
       : 40;
     const placement = placeSelectedTextCommentEditor({
-      viewport: viewport.getBoundingClientRect(),
+      viewport: visibleTranscriptRect(viewport),
       source,
       preferredWidth,
       editorHeight: preferredHeight,

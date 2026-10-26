@@ -6,13 +6,16 @@ export interface JumpToLatestPillProps {
   readonly onJumpToLatest: () => void;
 }
 
-/** Neutral pill that returns a reader who scrolled away from the tail to the newest row. */
+/**
+ * Neutral pill that returns a reader who scrolled away from the tail to the newest row.
+ * DESIGN.md bans glassmorphism, so the fill is see-through with no backdrop blur.
+ */
 export function JumpToLatestPill({ onJumpToLatest }: JumpToLatestPillProps) {
   return (
     <button
       type="button"
       onClick={onJumpToLatest}
-      className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-selected pr-3 pl-2.5 text-xs font-medium text-ink shadow-floating focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus"
+      className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-selected/60 pr-3 pl-2.5 text-xs font-medium text-ink shadow-floating focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus"
     >
       <ArrowDown size={14} aria-hidden />
       Jump to latest
