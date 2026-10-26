@@ -51,7 +51,13 @@ export class ClaudeOwnedProcess {
     if (!this.processes.delete(pid) || child.exitCode !== null || child.signalCode != null) return;
     const task = this.port.terminateTree(pid);
     this.retirements.add(task);
-    // Keep the rejection on the task for retire() while avoiding an unobserved late rejection.
-    void task.catch((error: unknown) => { logger.error("Claude owned process retirement failed", { pid, error: String(error) }); });
+    void task.then(
+      () => { this.retirements.delete(task); },
+      (error: unknown) => {
+        this.retirements.delete(task);
+        this.processes.set(pid, child);
+        logger.error("Claude owned process retirement failed", { pid, error: String(error) });
+      },
+    );
   }
 }
