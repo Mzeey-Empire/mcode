@@ -27,7 +27,11 @@ export function NewThreadTargetRail({ workspaceId, mode, onModeChange }: NewThre
       className="mx-[1.4rem] flex min-w-0 items-center gap-1 overflow-x-auto rounded-t-xl border border-b-0 border-border bg-background px-2 py-0.5"
     >
       <WorkspaceTargetMenu mode={mode} isGitRepo={isGitRepo} folder={basename(workspace.path)} onModeChange={onModeChange} />
-      {isGitRepo ? <ComposerTargetSelection scope="new-thread" mode={mode} workspaceId={workspace.id} /> : null}
+      {isGitRepo ? (
+        <div className="ml-auto flex min-w-0 items-center gap-1">
+          <ComposerTargetSelection scope="new-thread" mode={mode} workspaceId={workspace.id} />
+        </div>
+      ) : null}
     </div>
   );
 }
