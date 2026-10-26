@@ -36,10 +36,16 @@ export class ImageInlineError extends Error {
   }
 }
 
-const REFERENCE_PATTERN = /(?:\b(?:src|href|xlink:href|poster)\s*=\s*(["'])(.*?)\1)|(?:\burl\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\))/gi;
+const MAX_REFERENCE_LENGTH = 4096;
+// Bounded classes keep each match attempt linear: an unbounded lazy value rescans to the end of the page for every unterminated reference.
+const REFERENCE_PATTERN = new RegExp(
+  String.raw`(?:\b(?:src|href|xlink:href|poster)\s*=\s*(?:"([^"]{0,${MAX_REFERENCE_LENGTH}})"|'([^']{0,${MAX_REFERENCE_LENGTH}})'))`
+    + String.raw`|(?:\burl\(\s*(?:"([^"]{0,${MAX_REFERENCE_LENGTH}})"|'([^']{0,${MAX_REFERENCE_LENGTH}})'|([^\s)"']{1,${MAX_REFERENCE_LENGTH}}))\s*\))`,
+  "gi",
+);
 
-function referenceValue(groups: readonly (string | undefined)[]): string | undefined {
-  return groups[1] ?? groups[2] ?? groups[3] ?? groups[4];
+function referenceValue(groups: readonly unknown[]): string | undefined {
+  return groups.slice(0, 5).find((group): group is string => typeof group === "string");
 }
 
 function localImageReferences(html: string): string[] {
@@ -59,7 +65,7 @@ function isLocalImageReference(value: string): boolean {
 }
 
 function replaceReferences(html: string, replacements: ReadonlyMap<string, string>): string {
-  return html.replace(REFERENCE_PATTERN, (match: string, ...groups: (string | undefined)[]) => {
+  return html.replace(REFERENCE_PATTERN, (match: string, ...groups: unknown[]) => {
     const value = referenceValue(groups);
     const uri = value === undefined ? undefined : replacements.get(value);
     if (value === undefined || uri === undefined) return match;

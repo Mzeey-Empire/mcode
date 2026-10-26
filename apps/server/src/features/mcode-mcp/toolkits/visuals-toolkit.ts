@@ -9,7 +9,8 @@ import { inlineLocalImages, type ImageFileReader } from "./inline-local-images.j
 import { listedSchema, parseInput, structuredResult, toToolResult } from "./thread-control-toolkit.js";
 
 const HtmlRenderInputSchema = z.object({
-  html: z.string().min(1, "html must not be empty"),
+  // Inlining only grows a page, so a source over the page limit can never publish; rejecting it first bounds the scan.
+  html: z.string().min(1, "html must not be empty").max(HTML_VISUAL_MAX_HTML_BYTES),
   title: z.string().trim().min(1).max(HTML_VISUAL_MAX_TITLE_LENGTH),
   height: z.number().int().min(HTML_VISUAL_MIN_HEIGHT).max(HTML_VISUAL_MAX_HEIGHT).default(HTML_VISUAL_DEFAULT_HEIGHT)
     .describe("Maximum frame height in px. The frame shrinks to shorter content."),

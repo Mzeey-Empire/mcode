@@ -58,6 +58,15 @@ describe("Visuals toolkit", () => {
     expect(published).toEqual([]);
   });
 
+  it("rejects a source page over the page limit before reading images", async () => {
+    const readFile = vi.fn((file: string) => NodeFSPromises.readFile(file));
+    const { call, published } = setup({ files: { realpath: NodeFSPromises.realpath, stat: NodeFSPromises.stat, readFile } });
+    const html = `<img src='${NodePath.join(directory, "chart.png")}'>` + "a".repeat(HTML_VISUAL_MAX_HTML_BYTES);
+    await expect(call({ title: "Huge", html })).rejects.toMatchObject({ code: -32602 });
+    expect(readFile).not.toHaveBeenCalled();
+    expect(published).toEqual([]);
+  });
+
   it("defaults the height and reports the published page", async () => {
     const { call, published } = setup();
     expect((await call({ title: " Chart ", html: "<p/>" })).structuredContent)
