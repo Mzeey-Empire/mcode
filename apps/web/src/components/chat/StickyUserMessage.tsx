@@ -82,6 +82,28 @@ export function StickyUserMessage({
   }, [visible, expanded, preview, onHeightChange]);
 
   const clamped = !expanded && overflows;
+  const showFooter = overflows || expanded;
+  const jumpButton = (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-inline"
+            onClick={onJumpToMessage}
+            className="text-muted hover:bg-ink/5 hover:text-ink"
+            aria-label="Jump to your message"
+          >
+            <ArrowUp size={15} aria-hidden />
+          </Button>
+        }
+      />
+      <TooltipContent side="bottom" sideOffset={6} className="text-xs">
+        Jump to message
+      </TooltipContent>
+    </Tooltip>
+  );
 
   if (!visible) {
     return null;
@@ -95,50 +117,36 @@ export function StickyUserMessage({
     >
       <div className="w-full" style={{ paddingRight: contentPaddingRight }}>
       <div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>
-        <div className="pointer-events-auto flex items-end gap-1 overflow-hidden rounded-lg bg-selected text-sm text-ink">
+        <div className="pointer-events-auto relative overflow-hidden rounded-lg bg-selected text-sm text-ink">
           <p
             ref={textRef}
             className={cn(
-              "min-w-0 flex-1 break-words px-3 py-1.5 leading-5",
-              expanded ? "max-h-40 overflow-y-auto whitespace-pre-wrap" : "max-h-[5.2rem] overflow-hidden",
-              clamped && "[mask-image:linear-gradient(to_bottom,black_calc(100%-2.4rem),transparent)]",
+              "break-words px-3 pt-1.5 pr-10 leading-5",
+              expanded && "max-h-40 overflow-y-auto whitespace-pre-wrap",
+              // Both collapsed layouts hold exactly two lines, so showing the footer cannot flip the overflow it depends on.
+              !expanded && (showFooter ? "max-h-[4.6rem] overflow-hidden" : "max-h-[5.2rem] overflow-hidden pb-1.5"),
+              clamped && "[mask-image:linear-gradient(to_bottom,black_calc(100%-2rem),transparent)]",
             )}
           >
             {preview}
           </p>
-          <div className="flex shrink-0 items-center gap-0.5 p-0.5">
-            {(overflows || expanded) && (
+          {showFooter ? (
+            <div className="flex items-center justify-end gap-0.5 px-1 pb-1">
               <Button
                 type="button"
                 variant="ghost"
                 size="compact"
                 aria-expanded={expanded}
                 onClick={() => setExpanded((value) => !value)}
-                className="text-muted hover:bg-ink/5 hover:text-ink"
+                className="h-7 px-2 text-muted hover:bg-ink/5 hover:text-ink"
               >
-                {expanded ? "Show less" : "Show all"}
+                {expanded ? "Show less" : "Show full message"}
               </Button>
-            )}
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-compact"
-                    onClick={onJumpToMessage}
-                    className="text-muted hover:bg-ink/5 hover:text-ink"
-                    aria-label="Jump to your message"
-                  >
-                    <ArrowUp size={15} aria-hidden />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom" sideOffset={6} className="text-xs">
-                Jump to message
-              </TooltipContent>
-            </Tooltip>
-          </div>
+              {jumpButton}
+            </div>
+          ) : (
+            <div className="absolute top-0.5 right-1">{jumpButton}</div>
+          )}
         </div>
       </div>
       </div>

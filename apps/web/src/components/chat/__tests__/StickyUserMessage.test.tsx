@@ -42,17 +42,17 @@ describe("StickyUserMessage", () => {
   it("offers no Show all when the prompt fits", () => {
     overflowWhenTaller({ scroll: 40 });
     render(<StickyUserMessage preview="Short prompt" visible onJumpToMessage={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show full message" })).toBeNull();
   });
 
   it("offers Show all once a narrower transcript makes the prompt overflow", () => {
     const heights = { scroll: 40 };
     const resize = overflowWhenTaller(heights);
     render(<StickyUserMessage preview={"word ".repeat(60)} visible onJumpToMessage={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show full message" })).toBeNull();
     heights.scroll = 120;
     resize();
-    expect(screen.getByRole("button", { name: "Show all" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show full message" })).toBeInTheDocument();
   });
 
   it("toggles an overflowing prompt between Show all and Show less without jumping", () => {
@@ -60,7 +60,7 @@ describe("StickyUserMessage", () => {
     const onJumpToMessage = vi.fn();
     render(<StickyUserMessage preview={"word ".repeat(60)} visible onJumpToMessage={onJumpToMessage} />);
 
-    const showAll = screen.getByRole("button", { name: "Show all" });
+    const showAll = screen.getByRole("button", { name: "Show full message" });
     expect(showAll).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(showAll);
     const showLess = screen.getByRole("button", { name: "Show less" });
@@ -68,7 +68,7 @@ describe("StickyUserMessage", () => {
     expect(onJumpToMessage).not.toHaveBeenCalled();
 
     fireEvent.click(showLess);
-    expect(screen.getByRole("button", { name: "Show all" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Show full message" })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("unmounts when hidden so focused controls are not aria-hidden", () => {
