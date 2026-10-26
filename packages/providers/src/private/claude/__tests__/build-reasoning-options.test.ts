@@ -134,7 +134,7 @@ describe("buildReasoningOptions", () => {
 
   it("includes thinking adaptive for non-haiku models when level is set", () => {
     const result = buildReasoningOptions("high", "claude-sonnet-4-6");
-    expect(result).toMatchObject({ thinking: { type: "adaptive" } });
+    expect(result).toMatchObject({ thinking: { type: "adaptive", display: "summarized" } });
   });
 
   it("does not include thinking field for haiku", () => {
@@ -148,7 +148,7 @@ describe("buildReasoningOptions", () => {
 
   it("emits thinking adaptive for haiku-4-5 when thinking is true", () => {
     const result = buildReasoningOptions("high", "claude-haiku-4-5", true);
-    expect(result).toEqual({ thinking: { type: "adaptive" } });
+    expect(result).toEqual({ thinking: { type: "adaptive", display: "summarized" } });
     expect(result).not.toHaveProperty("effort");
   });
 
@@ -167,6 +167,9 @@ describe("buildReasoningOptions", () => {
     // the thinking field is already set to adaptive whenever a level is provided,
     // and the boolean is not consulted.
     const result = buildReasoningOptions("high", "claude-sonnet-4-6", true);
-    expect(result).toMatchObject({ effort: "high", thinking: { type: "adaptive" } });
+    expect(result).toMatchObject({
+      effort: "high",
+      thinking: { type: "adaptive", display: "summarized" },
+    });
   });
 });
