@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentProps, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode, type Ref } from "react";
 import { GitFork } from "lucide-react";
 import type { Message, SelectedTextComment, ThreadStartup, ThreadStartupKind } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,9 @@ import { useToastStore } from "@/stores/toastStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
+import { threadOverviewScope, useOverviewPresentation } from "@/features/thread-overview/overview-presentation";
+import { useElementWidth } from "@/hooks/useElementWidth";
+import { OVERVIEW_CANVAS_RESERVE } from "@/lib/composer-layout";
 import { StartupStepsTrail, editStartupMessage, editStartupSetupScript, openStartupSetupTerminal, startupDecision, useFirstSendMotion, useStartingThread, useStartupAgentRetry, useThreadStartup } from "@/features/thread-startup";
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
@@ -308,8 +311,8 @@ interface ThreadHeaderRename {
   readonly onSaveTitle: (title: string) => void;
 }
 
-/** Renders the thread header for both surface variants; the preparing variant omits `rename` and has no actions yet. */
-function ThreadHeader({ state, rename }: { state: ChatViewState; rename?: ThreadHeaderRename }) {
+/** Renders the thread header for both surface variants; the preparing variant omits `rename` and `paneWidth` and has no actions yet. */
+function ThreadHeader({ state, rename, paneWidth }: { state: ChatViewState; rename?: ThreadHeaderRename; paneWidth?: number }) {
   const thread = state.activeThread!;
   return (
     <CanvasHeader>
@@ -331,7 +334,7 @@ function ThreadHeader({ state, rename }: { state: ChatViewState; rename?: Thread
           </Tooltip>
         )}
       </div>
-      {rename ? <HeaderActions thread={thread} threadPaneWidth={state.threadPaneWidth} /> : null}
+      {paneWidth !== undefined ? <HeaderActions thread={thread} threadPaneWidth={paneWidth} /> : null}
     </CanvasHeader>
   );
 }
@@ -525,10 +528,10 @@ function shouldKeepPreparingShell(
   return pendingStartup !== undefined && startupResolving;
 }
 
-function ChatMessageStage({ state, interactions, startupTrail, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly startupTrail: ReactNode }) {
+function ChatMessageStage({ state, interactions, startupTrail, contentPaddingRight, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly startupTrail: ReactNode; readonly contentPaddingRight: string | undefined }) {
   const thread = state.activeThread!;
   const messageListProps = {
-    contentPaddingRight: state.overviewPaddingRight,
+    contentPaddingRight,
     onBranch: interactions.onBranch,
     onSelectedTextComment: interactions.onSelectedTextComment,
     onDeleteSelectedTextComment: interactions.onDeleteSelectedTextComment,
@@ -555,10 +558,10 @@ function ChatMessageStage({ state, interactions, startupTrail, selectedTextComme
 }
 
 /** Renders the composer and plan question wizard for an active thread. */
-function ActiveThreadComposer({ state, interactions, pendingSelectedTextComment, pendingSelectedTextCommentDeletion, pendingSelectedTextCommentEditor, unavailableSelectedTextCommentIds, startingThread }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "pendingSelectedTextComment" | "pendingSelectedTextCommentDeletion" | "pendingSelectedTextCommentEditor" | "unavailableSelectedTextCommentIds"> & { readonly startingThread: ComposerStartingThread | undefined }) {
+function ActiveThreadComposer({ state, interactions, pendingSelectedTextComment, pendingSelectedTextCommentDeletion, pendingSelectedTextCommentEditor, unavailableSelectedTextCommentIds, startingThread, paddingRight }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "pendingSelectedTextComment" | "pendingSelectedTextCommentDeletion" | "pendingSelectedTextCommentEditor" | "unavailableSelectedTextCommentIds"> & { readonly startingThread: ComposerStartingThread | undefined; readonly paddingRight: string | undefined }) {
   const thread = state.activeThread!;
   return (
-    <div data-testid="chat-composer-stage" className="relative flex-shrink-0" style={{ paddingRight: state.overviewPaddingRight }}>
+    <div data-testid="chat-composer-stage" className="relative flex-shrink-0" style={{ paddingRight }}>
       <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} branchFromMessageId={state.branchFromMessageId} branchFromMessageContent={state.branchFromMessageContent} selectedTextComment={pendingSelectedTextComment ?? undefined} onSelectedTextCommentConsumed={interactions.onSelectedTextCommentConsumed} selectedTextCommentDeletion={pendingSelectedTextCommentDeletion ?? undefined} onSelectedTextCommentDeletionConsumed={interactions.onSelectedTextCommentDeletionConsumed} selectedTextCommentEditorUpdate={pendingSelectedTextCommentEditor} onSelectedTextCommentEditorUpdateConsumed={interactions.onSelectedTextCommentEditorChangeConsumed} onOpenSelectedTextCommentSource={interactions.onOpenSelectedTextCommentSource} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} onBranchModeExit={interactions.onExitForkMode} startingThread={startingThread} />
     </div>
   );
@@ -596,19 +599,23 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
   const thread = state.activeThread!;
   const conversationErrorBanner = state.messageCount > 0 || state.isAgentRunning ? conversationErrorLabel(state) : null;
   const showCliError = isVisibleCliError(state.sessionError, dismissedError);
+  const paneRef = useRef<HTMLDivElement>(null);
+  const paneWidth = useElementWidth(paneRef, thread.id);
+  const overviewDocked = useOverviewPresentation(threadOverviewScope(thread), paneWidth).presentation === "docked";
+  const overviewReserve = overviewDocked ? `${OVERVIEW_CANVAS_RESERVE}px` : undefined;
   return (
     // The docked card's reserve takes the right gutter's room, so rows and the composer use 24px
     // gutters while docked. That keeps the composer at 520 or wider down to OVERVIEW_DOCK_MIN_CANVAS.
-    <div ref={state.chatPaneRef} className={cn("relative flex h-full flex-col bg-background", state.overviewPaddingRight && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view" data-thread-view>
+    <div ref={paneRef} className={cn("relative flex h-full flex-col bg-background", overviewDocked && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view" data-thread-view>
       <OverviewLayer>
-        <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} />
+        <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} paneWidth={paneWidth} />
         <ActiveThreadBanners state={state} />
         {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
         <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
         <TurnSavingNotice lostProgress={state.lostProgress} />
-        <ChatMessageStage state={state} interactions={interactions} startupTrail={startup && startup.state !== "completed" ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
+        <ChatMessageStage state={state} interactions={interactions} contentPaddingRight={overviewReserve} startupTrail={startup && startup.state !== "completed" ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
         {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
-        <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} startingThread={startingThread} />
+        <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} startingThread={startingThread} paddingRight={overviewReserve} />
       </OverviewLayer>
     </div>
   );
