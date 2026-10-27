@@ -1,5 +1,7 @@
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 function percentile(sortedSamples, quantile) {
   return sortedSamples[Math.ceil(sortedSamples.length * quantile) - 1] ?? Number.NaN;
@@ -128,6 +130,7 @@ async function installAttributionRuntime(page) {
       longTasks: [],
       longTaskTimestampsSupported: PerformanceObserver.supportedEntryTypes?.includes("longtask") === true,
       rowRenders: {},
+      counters: {},
     };
     window.__mcodePerformanceAttribution = state;
     window.__mcodeReactPerformanceSink = {
@@ -136,6 +139,9 @@ async function installAttributionRuntime(page) {
       },
       recordRowRender(rowId) {
         state.rowRenders[rowId] = (state.rowRenders[rowId] ?? 0) + 1;
+      },
+      recordCounter(name) {
+        state.counters[name] = (state.counters[name] ?? 0) + 1;
       },
     };
     if (state.longTaskTimestampsSupported) {
@@ -161,6 +167,7 @@ async function resetAttributionRuntime(page) {
     if (!state) throw new Error("Performance attribution runtime is not installed");
     state.commits = [];
     state.rowRenders = {};
+    state.counters = {};
     return {
       frameIndex: state.frameTimes.length,
       longTaskIndex: state.longTasks.length,
@@ -178,6 +185,7 @@ async function readAttributionRuntime(page, indexes) {
       longTasks: state.longTasks.slice(longTaskIndex),
       longTaskTimestampsSupported: state.longTaskTimestampsSupported,
       rowRenders: { ...state.rowRenders },
+      counters: { ...state.counters },
     };
   }, indexes);
 }
@@ -241,6 +249,11 @@ async function startTrace(session) {
   return { session, traceEvents, onTraceData };
 }
 
+async function writeTraceFile(file, traceEvents) {
+  await NodeFSPromises.mkdir(NodePath.dirname(file), { recursive: true });
+  await NodeFSPromises.writeFile(file, JSON.stringify({ traceEvents }));
+}
+
 async function stopTrace(trace) {
   if (!trace) return;
   const completed = new Promise((resolveComplete) => {
@@ -272,7 +285,7 @@ function buildChromiumAttribution(mode, traceEnabled, before, after, signals, tr
 }
 
 function buildReactAttribution(mode, signals) {
-  return mode === "profiling" ? { commits: signals.commits, rowRenders: signals.rowRenders } : null;
+  return mode === "profiling" ? { commits: signals.commits, rowRenders: signals.rowRenders, counters: signals.counters } : null;
 }
 
 /** Creates the mode-specific React, Chromium, and Electron process collector. */
@@ -307,6 +320,7 @@ export async function createModeSignalCollector(page, mode) {
       } finally {
         await stopTrace(trace);
       }
+      if (options.traceFile && trace) await writeTraceFile(options.traceFile, trace.traceEvents);
       const processAfter = await readModeProcessMetrics(page, mode);
       const after = await readChromiumMetrics(activeSession, mode);
       const signals = await readAttributionRuntime(page, indexes);

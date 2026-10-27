@@ -11,6 +11,8 @@ export interface ReactPerformanceSink {
     readonly commitTimeMs: number;
   }): void;
   recordRowRender(rowId: string): void;
+  /** Counts a named event, such as a virtual list `setRows` call. Older sinks omit it. */
+  recordCounter?(name: string): void;
 }
 
 declare global {
