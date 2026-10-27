@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 /** Formats elapsed seconds into a compact duration label. */
 export function formatDuration(totalSeconds: number): string {
   if (totalSeconds < 60) return `${totalSeconds}s`;
@@ -43,4 +45,35 @@ export function relativeTime(dateStr: string): string {
 
   const months = Math.floor(days / 30);
   return `${months}mo`;
+}
+
+const MINUTE_MS = 60_000;
+const minuteListeners = new Set<() => void>();
+let minuteTimer: ReturnType<typeof setInterval> | undefined;
+
+// One interval serves every subscribed label, and it stops with the last one so an idle sidebar
+// leaves no timer running.
+function subscribeToMinute(listener: () => void): () => void {
+  minuteListeners.add(listener);
+  minuteTimer ??= setInterval(() => {
+    for (const notify of minuteListeners) notify();
+  }, MINUTE_MS);
+  return () => {
+    minuteListeners.delete(listener);
+    if (minuteListeners.size > 0 || minuteTimer === undefined) return;
+    clearInterval(minuteTimer);
+    minuteTimer = undefined;
+  };
+}
+
+// The snapshot changes once a minute, so labels re-render on the tick and never in between.
+function currentMinute(): number {
+  return Math.floor(Date.now() / MINUTE_MS);
+}
+
+/** {@link relativeTime} that stays current, re-rendering on a shared minute ticker. */
+export function useRelativeTime(dateStr: string): string {
+  // The minute only schedules the re-render; the label reads the real clock so it never lags.
+  useSyncExternalStore(subscribeToMinute, currentMinute, currentMinute);
+  return relativeTime(dateStr);
 }

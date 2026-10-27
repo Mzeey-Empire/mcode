@@ -1,4 +1,4 @@
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, type ComponentPropsWithoutRef } from "react";
+import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type CSSProperties } from "react";
 import { Check, GitBranch, Laptop, RefreshCw, Undo2 } from "lucide-react";
 import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
 import { MoreIcon } from "@/components/ui/icon-map";
@@ -8,15 +8,14 @@ import { ProviderIcon, ProviderIconStack, providerLabel } from "@/components/ui/
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { StatusMark } from "@/components/ui/status-mark";
 import { cancelPrefetch, prefetchOnPointerDown, schedulePrefetch } from "@/features/conversation";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
-import { ThreadStatusLane } from "@/features/thread-attention/ThreadStatusLane";
 import { threadRowLook, threadTitleTone, useThreadRowState, type ThreadRowLook, type ThreadTitleTone } from "@/features/thread-attention/thread-row-presentation";
 import type { ThreadRowState } from "@/features/thread-attention/thread-row-state";
-import { getPrVisual } from "@/lib/pr-status";
 import { isPrable } from "@/lib/is-prable";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
-import { relativeTime } from "@/lib/time";
+import { useRelativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
@@ -26,6 +25,7 @@ import { selectThreadIndex } from "../state/thread-index";
 import { IDLE_CLEANUP_RETRY, useRowLifecycleStore } from "./row-lifecycle-store";
 import type { SidebarItem } from "./sidebar-model";
 import type { InlineEditState, SidebarProviderAvailability, SidebarRowContext } from "./sidebar-row-context";
+import { PullRequestChip, PullRequestList } from "./PullRequestChip";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
 
@@ -302,6 +302,9 @@ function ThreadRowVisual({
   presentation,
   lifecycle,
 }: ThreadRowVisualProps) {
+  const [revealed, setRevealed] = useState(false);
+  const [prListOpen, setPrListOpen] = useState(false);
+  const rankedPrs = useMemo(() => (isPrable(thread) ? rankPullRequests(thread.pull_requests) : []), [thread]);
   const row = (
     <ThreadRowSurface
       thread={thread}
@@ -312,9 +315,9 @@ function ThreadRowVisual({
       onThreadDoubleClick={onThreadDoubleClick}
       onSelectThread={onSelectThread}
       onThreadContextMenu={onThreadContextMenu}
+      onRevealChange={setRevealed}
     >
-      <ThreadStatusLane mark={presentation.look.mark} />
-      <div className={cn("flex min-w-0 flex-1 flex-col gap-1", presentation.scaffoldDim)}>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
         {showProject && <ThreadRowProjectLine workspaceId={thread.workspace_id} workspaceName={workspaceName} />}
         <ThreadRowTitleLine
           thread={thread}
@@ -324,17 +327,27 @@ function ThreadRowVisual({
           onInlineEditChange={onInlineEditChange}
           onInlineEditCommit={onInlineEditCommit}
           onInlineEditCancel={onInlineEditCancel}
-        />
-        <ThreadRowBranchLine thread={thread} presentation={presentation} />
-        <ThreadRowThirdLine thread={thread} presentation={presentation} lifecycle={lifecycle} />
+        >
+          <ThreadRowTrailingSlot
+            thread={thread}
+            isEditing={isEditing}
+            presentation={presentation}
+            lifecycle={lifecycle}
+            revealed={revealed}
+            onThreadContextMenu={onThreadContextMenu}
+          />
+        </ThreadRowTitleLine>
+        <ThreadRowBranchLine thread={thread} presentation={presentation}>
+          <PullRequestChip
+            threadId={thread.id}
+            ranked={rankedPrs}
+            expanded={prListOpen}
+            onToggleExpanded={() => setPrListOpen((open) => !open)}
+            dimmed={presentation.isUserCompleted}
+          />
+        </ThreadRowBranchLine>
+        {prListOpen && rankedPrs.length > 1 && <PullRequestList threadId={thread.id} ranked={rankedPrs} />}
       </div>
-      <ThreadRowActions
-        thread={thread}
-        isEditing={isEditing}
-        presentation={presentation}
-        lifecycle={lifecycle}
-        onThreadContextMenu={onThreadContextMenu}
-      />
     </ThreadRowSurface>
   );
   return <ThreadRowPreview isEditing={isEditing} row={row} workspaceName={workspaceName} thread={thread} />;
@@ -352,7 +365,7 @@ function ThreadRowProjectLine({ workspaceId, workspaceName }: { workspaceId: str
 type ThreadRowSurfaceProps = Pick<
   ThreadRowVisualProps,
   "thread" | "depth" | "isActive" | "isEditing" | "onThreadClick" | "onThreadDoubleClick" | "onSelectThread" | "onThreadContextMenu"
-> & ComponentPropsWithoutRef<"div"> & { children: React.ReactNode };
+> & ComponentPropsWithoutRef<"div"> & { children: React.ReactNode; onRevealChange: (revealed: boolean) => void };
 
 const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(function ThreadRowSurface({
   thread,
@@ -364,9 +377,12 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
   onSelectThread,
   onThreadContextMenu,
   children,
+  onRevealChange,
   className: triggerClassName,
   onMouseEnter: onTriggerMouseEnter,
   onMouseLeave: onTriggerMouseLeave,
+  onFocus: onTriggerFocus,
+  onBlur: onTriggerBlur,
   ...triggerProps
 }, ref) {
   return (
@@ -382,11 +398,21 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
       onContextMenu={(event) => onThreadContextMenu(event, thread)}
       onMouseEnter={(event) => {
         scheduleThreadRowPrefetch(thread);
+        onRevealChange(true);
         onTriggerMouseEnter?.(event);
       }}
       onMouseLeave={(event) => {
         cancelPrefetch();
+        onRevealChange(false);
         onTriggerMouseLeave?.(event);
+      }}
+      onFocus={(event) => {
+        onRevealChange(true);
+        onTriggerFocus?.(event);
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) onRevealChange(false);
+        onTriggerBlur?.(event);
       }}
       className={cn(
         "group/row relative flex min-h-16 items-start gap-2 rounded-lg py-3 pr-2 cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
@@ -460,36 +486,40 @@ function ThreadRowTitleLine({
   onInlineEditChange,
   onInlineEditCommit,
   onInlineEditCancel,
-}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "inlineEdit" | "presentation" | "onInlineEditChange" | "onInlineEditCommit" | "onInlineEditCancel">) {
-  // The right padding keeps the title clear of the hover actions so it never reflows on hover.
+  children,
+}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "inlineEdit" | "presentation" | "onInlineEditChange" | "onInlineEditCommit" | "onInlineEditCancel"> & { children: React.ReactNode }) {
   return (
-    <div className={cn("flex h-5 min-w-0 items-center gap-2", !isEditing && "pr-[60px]")}>
-      <ThreadRowProviderSlot provider={presentation.provider} providersUsed={thread.providers_used} isUserCompleted={presentation.isUserCompleted} />
-      {isEditing ? (
-        <Input
-          type="text"
-          size="compact"
-          value={inlineEdit?.title ?? ""}
-          onChange={(event) => onInlineEditChange(event.target.value)}
-          onKeyDown={(event) => handleInlineEditKeyDown(event, onInlineEditCommit, onInlineEditCancel)}
-          onBlur={onInlineEditCancel}
-          autoFocus
-          onFocus={(event) => event.currentTarget.select()}
-          onClick={(event) => event.stopPropagation()}
-          className="flex-1 border-focus"
-        />
-      ) : (
-        <div
-          className={cn(
-            "text-fade min-w-0 flex-1 text-label",
-            presentation.titleTone === "prominent" ? "text-ink" : "text-muted",
-            presentation.isUserCompleted && "text-muted/55 line-through decoration-muted/55 decoration-1",
-          )}
-          data-testid="thread-title"
-        >
-          {thread.title}
-        </div>
-      )}
+    <div className="flex h-5 min-w-0 items-center gap-2">
+      {/* A scaffold row dims what it is, never its status: the status is the part that is live. */}
+      <div className={cn("flex min-w-0 flex-1 items-center gap-2", presentation.scaffoldDim)}>
+        <ThreadRowProviderSlot provider={presentation.provider} providersUsed={thread.providers_used} isUserCompleted={presentation.isUserCompleted} />
+        {isEditing ? (
+          <Input
+            type="text"
+            size="compact"
+            value={inlineEdit?.title ?? ""}
+            onChange={(event) => onInlineEditChange(event.target.value)}
+            onKeyDown={(event) => handleInlineEditKeyDown(event, onInlineEditCommit, onInlineEditCancel)}
+            onBlur={onInlineEditCancel}
+            autoFocus
+            onFocus={(event) => event.currentTarget.select()}
+            onClick={(event) => event.stopPropagation()}
+            className="flex-1 border-focus"
+          />
+        ) : (
+          <div
+            className={cn(
+              "text-fade min-w-0 flex-1 text-label",
+              presentation.titleTone === "prominent" ? "text-ink" : "text-muted",
+              presentation.isUserCompleted && "text-muted/55 line-through decoration-muted/55 decoration-1",
+            )}
+            data-testid="thread-title"
+          >
+            {thread.title}
+          </div>
+        )}
+      </div>
+      {children}
     </div>
   );
 }
@@ -504,11 +534,12 @@ function handleInlineEditKeyDown(
   event.stopPropagation();
 }
 
-function ThreadRowBranchLine({ thread, presentation }: Pick<ThreadRowVisualProps, "thread" | "presentation">) {
+function ThreadRowBranchLine({ thread, presentation, children }: Pick<ThreadRowVisualProps, "thread" | "presentation"> & { children: React.ReactNode }) {
   const checkoutLabel = resolveThreadCheckoutLabel(thread);
+  const age = useRelativeTime(threadActivityAt(thread));
   const stale = presentation.isStaleWorktree;
   return (
-    <div className="flex h-4 min-w-0 items-center gap-2 text-caption text-muted">
+    <div className={cn("flex h-4 min-w-0 items-center gap-2 text-caption text-muted", presentation.scaffoldDim)}>
       <ThreadModeIcon thread={thread} stale={stale} />
       <div
         aria-label={`Branch, ${checkoutLabel}`}
@@ -516,9 +547,15 @@ function ThreadRowBranchLine({ thread, presentation }: Pick<ThreadRowVisualProps
       >
         {checkoutLabel}
       </div>
-      <div className="w-6 shrink-0 text-right tabular-nums">{relativeTime(thread.updated_at)}</div>
+      {children}
+      <div className="w-6 shrink-0 text-right tabular-nums">{age}</div>
     </div>
   );
+}
+
+// A completed row ages from its completion; an open one from its last turn, not from metadata writes.
+function threadActivityAt(thread: WorkspaceThread): string {
+  return thread.user_completed_at ?? thread.last_activity_at ?? thread.created_at;
 }
 
 /** Leads the branch line, so the checkout mode (worktree or local) takes the place of a branch glyph. */
@@ -541,14 +578,47 @@ function ThreadModeIcon({ thread, stale }: { thread: WorkspaceThread; stale: boo
   );
 }
 
-/** The third line: a row state label when there is one, otherwise the most urgent thread context. */
-function ThreadRowThirdLine({
+// Hidden layers stay in the accessibility tree and the tab order; only the eye loses them.
+const HIDDEN_LAYER: CSSProperties = { opacity: 0, pointerEvents: "none" };
+
+/**
+ * One fixed cell at the end of the title line. The status and the row actions overlap in it, so
+ * the cell is as wide as the wider of the two and swapping them on hover never moves the title.
+ */
+function ThreadRowTrailingSlot({
   thread,
+  isEditing,
   presentation,
   lifecycle,
-}: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {
-  const label = presentation.look.label;
-  if (label) return <ThreadRowCaption className={label.className}>{label.text}</ThreadRowCaption>;
+  revealed,
+  onThreadContextMenu,
+}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "presentation" | "lifecycle" | "onThreadContextMenu"> & { revealed: boolean }) {
+  if (isEditing) return null;
+  return (
+    <div className="grid max-w-[55%] shrink-0 items-center justify-items-end">
+      <div data-testid="thread-status" style={revealed ? HIDDEN_LAYER : undefined} className="col-start-1 row-start-1 flex min-w-0 max-w-full items-center gap-1 transition-opacity">
+        <ThreadRowStatus thread={thread} presentation={presentation} lifecycle={lifecycle} />
+      </div>
+      <div style={revealed ? undefined : HIDDEN_LAYER} className="col-start-1 row-start-1 flex items-center gap-0.5 transition-opacity">
+        <ThreadRowActions thread={thread} presentation={presentation} lifecycle={lifecycle} onThreadContextMenu={onThreadContextMenu} />
+      </div>
+    </div>
+  );
+}
+
+/** The row's status: its state mark and label, else the most urgent standing caption. */
+function ThreadRowStatus({ thread, presentation, lifecycle }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {
+  const { mark, label } = presentation.look;
+  if (!mark && !label) return <ThreadRowStandingCaption thread={thread} presentation={presentation} lifecycle={lifecycle} />;
+  return (
+    <>
+      {mark && <StatusMark state={mark.state} label={mark.label} />}
+      {label && <ThreadRowCaption className={label.className}>{label.text}</ThreadRowCaption>}
+    </>
+  );
+}
+
+function ThreadRowStandingCaption({ thread, presentation, lifecycle }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {
   // A retry in flight or its failure is newer news than the standing block it retries.
   if (lifecycle.cleanupStatusLabel) {
     return (
@@ -563,16 +633,12 @@ function ThreadRowThirdLine({
   if (presentation.unusable) {
     return <ThreadRowCaption className="text-error" data-testid={`sidebar-unusable-${thread.id}`}>{presentation.unusableReason}</ThreadRowCaption>;
   }
-  const primaryPr = rankPullRequests(thread.pull_requests)[0];
-  if (isPrable(thread) && primaryPr) {
-    return <ThreadPrLine threadId={thread.id} prNumber={primaryPr.number} prStatus={primaryPr.state} dimmed={presentation.isUserCompleted} />;
-  }
   return null;
 }
 
 function ThreadRowCaption({ className, children, ...props }: ComponentPropsWithoutRef<"div">) {
   return (
-    <div {...props} className={cn("flex h-4 min-w-0 items-center gap-1.5 text-caption", className)}>
+    <div {...props} className={cn("text-fade flex min-w-0 items-center gap-1.5 whitespace-nowrap text-caption", className)}>
       {children}
     </div>
   );
@@ -580,14 +646,12 @@ function ThreadRowCaption({ className, children, ...props }: ComponentPropsWitho
 
 function ThreadRowActions({
   thread,
-  isEditing,
   presentation,
   lifecycle,
   onThreadContextMenu,
-}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "presentation" | "lifecycle" | "onThreadContextMenu">) {
-  if (isEditing) return null;
+}: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle" | "onThreadContextMenu">) {
   return (
-    <div className="absolute right-2 top-3 flex h-5 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-within:opacity-100">
+    <>
       {presentation.cleanupBlocked ? <ThreadCleanupRetry thread={thread} lifecycle={lifecycle} /> : null}
       <ThreadLifecycleAction thread={thread} presentation={presentation} lifecycle={lifecycle} />
       <ThreadRowAction
@@ -597,7 +661,7 @@ function ThreadRowActions({
       >
         <MoreIcon size={14} />
       </ThreadRowAction>
-    </div>
+    </>
   );
 }
 
@@ -760,31 +824,4 @@ function formatLifecycleDate(iso: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(iso));
-}
-
-/** The PR context line: the PR icon and number, tinted by PR state. */
-function ThreadPrLine({
-  threadId,
-  prNumber,
-  prStatus,
-  dimmed,
-}: {
-  threadId: string;
-  prNumber: number;
-  prStatus: string | null;
-  dimmed: boolean;
-}) {
-  const { Icon: PrIcon, color: prColor } = getPrVisual(prStatus);
-  return (
-    <div
-      aria-label={`PR #${prNumber}, ${prStatus ?? "open"}`}
-      data-testid={`thread-pr-indicator-${threadId}`}
-      className={cn("flex h-5 min-w-0 items-center gap-1 text-caption text-muted", dimmed && "grayscale opacity-45")}
-    >
-      <span className="flex size-5 shrink-0 items-center justify-center">
-        <PrIcon size={16} aria-hidden className={prColor} />
-      </span>
-      <span className={cn("shrink-0 font-medium underline underline-offset-2", prColor)}>PR #{prNumber}</span>
-    </div>
-  );
 }
