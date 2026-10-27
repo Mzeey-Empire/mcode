@@ -232,6 +232,29 @@ describe("ws-events thread.status", () => {
     resetThreadStoreForTests();
   });
 
+  it("leaves the thread array untouched for a repeated status or an unknown thread", () => {
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1", status: "active" }), createMockThread({ id: "thread-2" })] });
+    const before = useWorkspaceStore.getState().threads;
+    startPushListeners();
+
+    pushEmitter.emit("thread.status", { threadId: "thread-1", status: "active" });
+    pushEmitter.emit("thread.status", { threadId: "missing", status: "paused" });
+
+    expect(useWorkspaceStore.getState().threads).toBe(before);
+  });
+
+  it("replaces only the thread whose status changed", () => {
+    const threads = [createMockThread({ id: "thread-1", status: "active" }), createMockThread({ id: "thread-2" })];
+    useWorkspaceStore.setState({ threads });
+    startPushListeners();
+
+    pushEmitter.emit("thread.status", { threadId: "thread-1", status: "paused" });
+
+    const next = useWorkspaceStore.getState().threads;
+    expect(next[0]?.status).toBe("paused");
+    expect(next[1]).toBe(threads[1]);
+  });
+
   it("stops in-flight calls on interruption but leaves a background call for its late result", () => {
     const running = { toolInput: {}, output: null, isError: false, isComplete: false };
     resetThreadStoreForTests({

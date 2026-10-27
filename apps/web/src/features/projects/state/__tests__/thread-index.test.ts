@@ -1,6 +1,6 @@
 import { createMockThread } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
-import { selectSidebarFacts, selectThreadIndex } from "../thread-index";
+import { selectPreparingThreadIds, selectSidebarFacts, selectThreadIndex } from "../thread-index";
 
 describe("selectSidebarFacts", () => {
   it("returns the same facts array when only a thread's status changed", () => {
@@ -19,6 +19,17 @@ describe("selectSidebarFacts", () => {
     expect(moved).not.toBe(first);
     expect(moved[0]?.activityMs).toBe(Date.parse("2026-10-02T00:00:00.000Z"));
     expect(moved[1]).toBe(first[1]);
+  });
+});
+
+describe("selectPreparingThreadIds", () => {
+  it("keeps the same set until a thread starts or stops preparing", () => {
+    const threads = [createMockThread({ id: "a" }), { ...createMockThread({ id: "b" }), clientPreparing: true }];
+    const first = selectPreparingThreadIds(threads);
+    const statusOnly = threads.map((thread) => (thread.id === "a" ? { ...thread, status: "paused" as const } : thread));
+
+    expect(selectPreparingThreadIds(statusOnly)).toBe(first);
+    expect([...selectPreparingThreadIds([threads[0]!, { ...threads[1]!, clientPreparing: false }])]).toEqual([]);
   });
 });
 
