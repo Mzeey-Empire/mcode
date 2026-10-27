@@ -216,20 +216,23 @@ describe("runSQLiteProfile", () => {
     }
   }, 30_000);
 
-  it("measures active-turn batches through the real owner and counts the owner's changed rows", async () => {
+  it("measures a worker-owned completed turn and counts its changed rows", async () => {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-sqlite-profile-"));
     try {
       for (let index = 1; index <= 3; index++) {
         const database = openSQLiteProfileDatabase(NodePath.join(directory, `active-turn-writes-${index}.sqlite`));
         try {
           const sample = await runSQLiteProfileWorkload(database, "active-turn-writes", index);
-          expect(sample.activeTurnWrite?.rowsChanged).toBeGreaterThan(67);
-          expect(sample.activeTurnWrite?.batches).toBeGreaterThanOrEqual(4);
-          expect(sample.activeTurnWrite?.boundedRows).toBeGreaterThanOrEqual(67);
-          expect(database.db.query("SELECT role, sequence, is_internal FROM messages WHERE id = ?").get("active-assistant"))
-            .toEqual({ role: "assistant", sequence: 2, is_internal: 0 });
-          expect(database.db.query("SELECT COUNT(*) AS count FROM tool_call_records WHERE message_id = ?").get("active-assistant"))
+          expect(sample.activeTurnWrite?.rowsChanged).toBeGreaterThanOrEqual(3_000);
+          expect(database.db.query("SELECT role, sequence, is_internal, outcome FROM messages WHERE role = 'assistant'").get())
+            .toEqual({ role: "assistant", sequence: 2, is_internal: 0, outcome: "completed" });
+          expect(database.db.query("SELECT COUNT(*) AS count FROM tool_call_records WHERE status = 'completed' AND tool_name = 'Read'").get())
             .toEqual({ count: 65 });
+          expect(database.db.query("SELECT text FROM thought_segments").all()).toEqual([{ text: "Measured thought" }]);
+          expect(database.db.query("SELECT hook_name, tool_name, duration_ms, did_block FROM hook_executions").all())
+            .toEqual([{ hook_name: "PreToolUse", tool_name: "Read", duration_ms: 1, did_block: 0 }]);
+          expect(database.db.query("SELECT status FROM canonical_agent_turns WHERE id = 'sqlite-profile-turn'").get())
+            .toEqual({ status: "Completed" });
         } finally {
           database.db.close(true);
         }
