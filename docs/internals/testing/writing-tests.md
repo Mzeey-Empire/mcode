@@ -22,6 +22,7 @@ A quick check: if the test would still pass when every imported function returne
 A test that restates a fact another module owns breaks when that module changes, even when behavior is correct. Adding `plan_phase` to threads changed 10 test files whose only edit was `plan_phase: null`.
 
 - **Assert structure, not wording.** Check that an instruction section arrived by building the expected section with `buildMcodeInstructionSections`, not by searching the prompt for a tool name. Only the tests of the module that owns the copy should break when the copy changes.
+- **Assert what a migration changed, not the whole table.** Check the columns the migration adds or drops with `expectColumns`. A full column list breaks when a later migration changes the same table.
 
 ## Keep tests cheap
 
