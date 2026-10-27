@@ -40,16 +40,23 @@ export function percentile(values, quantile) {
   return sorted[Math.max(0, Math.ceil(sorted.length * quantile) - 1)];
 }
 
+// Fixed 120 Hz and 60 Hz budgets, so runs on displays with different refresh rates compare like for like.
+const FIXED_FRAME_BUDGETS_MS = Object.freeze({ "8.3": 1000 / 120, "16.7": 1000 / 60 });
+
 /** Summarizes rAF intervals against a frame budget. A frame is over budget when it spans at least half a missed vsync. */
 export function summarizeFrameIntervals(intervalsMs, budgetMs) {
   const intervals = intervalsMs.filter(Number.isFinite);
+  const overBudget = (budget) => intervals.filter((interval) => interval > budget * 1.5).length;
   return {
     frameCount: intervals.length,
     p50Ms: percentile(intervals, 0.5),
     p95Ms: percentile(intervals, 0.95),
     maxMs: intervals.length > 0 ? Math.max(...intervals) : null,
     budgetMs,
-    overBudgetFrames: intervals.filter((interval) => interval > budgetMs * 1.5).length,
+    overBudgetFrames: overBudget(budgetMs),
+    overBudgetFramesAtFixedBudgets: Object.fromEntries(
+      Object.entries(FIXED_FRAME_BUDGETS_MS).map(([label, budget]) => [label, overBudget(budget)]),
+    ),
   };
 }
 
