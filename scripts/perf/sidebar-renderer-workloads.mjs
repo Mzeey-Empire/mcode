@@ -426,8 +426,16 @@ async function runScrollSample(context) {
 /** Installs a pre-navigation sink that records sidebar commits and the first painted seeded thread row during boot. */
 async function installBootProbe(page) {
   await page.addInitScript(({ profilerId, prefix }) => {
-    const boot = { sidebarCommits: [], firstThreadRowMs: null };
+    const boot = { sidebarCommits: [], firstThreadRowMs: null, firstSocketMs: null };
     window.__mcodeSidebarBoot = boot;
+    // M6 starts when the app constructs its socket, so the handshake the user waits through counts.
+    const NativeWebSocket = window.WebSocket;
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(...args) {
+        boot.firstSocketMs ??= performance.now();
+        super(...args);
+      }
+    };
     window.__mcodeReactPerformanceSink = {
       recordCommit(commit) {
         if (commit.profilerId === profilerId) boot.sidebarCommits.push(commit);
@@ -490,8 +498,12 @@ async function readBootProbe(page) {
   return page.evaluate(() => {
     const boot = window.__mcodeSidebarBoot;
     const commits = boot?.sidebarCommits ?? [];
+    const socketMs = boot?.firstSocketMs ?? null;
+    const since = (time) => (socketMs === null || time == null ? null : time - socketMs);
     return {
       firstThreadRowMs: boot?.firstThreadRowMs ?? null,
+      socketToFirstRowMs: since(boot?.firstThreadRowMs),
+      socketToFirstSidebarCommitMs: since(commits[0]?.commitTimeMs),
       firstSidebarCommitMs: commits[0]?.commitTimeMs ?? null,
       sidebarCommitsBeforeSettle: commits.length,
       sidebarCommitDurationMs: commits.reduce((total, commit) => total + commit.actualDurationMs, 0),
