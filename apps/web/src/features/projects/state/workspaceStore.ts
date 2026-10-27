@@ -604,7 +604,6 @@ interface WorkspaceState {
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
   threads: WorkspaceThread[];
-  /** Bumped each time `hydrateThreads` replaces the index, so the sidebar places those changes without motion. */
   threadSnapshotEpoch: number;
   activeThreadId: string | null;
   /** Startup identity retained per thread until its startup lifecycle resolves. */
@@ -792,6 +791,11 @@ interface WorkspaceState {
 }
 
 /** Zustand store for workspace, thread, branch, and PR state management. */
+/** True only for the active-to-completed transition, so snapshots and replayed pushes release nothing. */
+function isConfirmedCompletion(previous: Thread | undefined, next: Thread): boolean {
+  return previous?.user_completed_at === null && next.user_completed_at !== null;
+}
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   let activationQueued = false;
   let activationGeneration = 0;
@@ -1693,9 +1697,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   applyThreadLifecycle: (thread) => {
-    // Release belongs to the confirmed transition, not to every completed record: snapshots and
-    // repeated pushes of an already-completed thread must not release twice or at hydration.
-    const wasActive = get().threads.find((candidate) => candidate.id === thread.id)?.user_completed_at === null;
+    const confirmsCompletion = isConfirmedCompletion(get().threads.find((candidate) => candidate.id === thread.id), thread);
     set((state) => {
       if (isDelegatedSubagent(thread)) {
         return { threads: state.threads.filter((candidate) => candidate.id !== thread.id) };
@@ -1711,7 +1713,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           : [nextThread, ...state.threads],
       };
     });
-    if (wasActive && thread.user_completed_at !== null) {
+    if (confirmsCompletion) {
       releaseBrowserAutomationThreadScope(thread.workspace_id, thread.id);
       void clearPreviewResources(thread.workspace_id, thread.id);
       useTerminalStore.getState().clearThread(thread.id);
