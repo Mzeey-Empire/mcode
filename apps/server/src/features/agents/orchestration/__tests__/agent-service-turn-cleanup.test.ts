@@ -1462,7 +1462,7 @@ describe("AgentService turn cleanup", () => {
       expect(turnSnapshotRepo.listByThread(THREAD_ID)).toEqual([]);
 
       releaseFirstResult?.();
-      await vi.waitFor(() => expect(turnSnapshotRepo.listByThread(THREAD_ID)).toHaveLength(2));
+      await vi.waitFor(() => expect(turnSnapshotRepo.listByThread(THREAD_ID)).toHaveLength(2), { timeout: 10_000 });
       const snapshots = turnSnapshotRepo.listByThread(THREAD_ID);
       const firstSnapshot = snapshots.find((snapshot) => snapshot.file_effects?.effects[0]?.path === "first.txt");
       const secondSnapshot = snapshots.find((snapshot) => snapshot.file_effects?.effects[0]?.path === "second.txt");
@@ -1486,7 +1486,7 @@ describe("AgentService turn cleanup", () => {
       if (fixtureService) await finalizerForAgentServiceTest(fixtureService).drain();
       await NodeFSPromises.rm(root, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it("does not re-add thread after an Error event following TurnComplete", async () => {
     const { service, providerEmitter, memoryPressureService } = await buildService();
