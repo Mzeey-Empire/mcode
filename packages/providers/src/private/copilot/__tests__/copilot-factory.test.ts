@@ -8,6 +8,8 @@ import * as NodeURL from "node:url";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import { NO_MCODE_TOOLKITS } from "@mcode/thread-orchestration";
+import { expectInstructionSections } from "../../../__tests__/mcode-instruction-sections.js";
 
 const sdk = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), forceStop: vi.fn(), getState: vi.fn(), create: vi.fn(), resume: vi.fn(), models: vi.fn(), session: undefined as FakeSession | undefined }));
 vi.mock("node:os", async (importOriginal) => {
@@ -908,15 +910,14 @@ describe("Copilot public factory", () => {
   });
 
   it.each([
-    ["thread control only", { browser: false, threadControl: true, visuals: true }, { thread: true, browser: false }],
-    ["browser only", { browser: true, threadControl: false, visuals: false }, { thread: false, browser: true }],
-  ])("grants instructions from the attached toolkits: %s", async (_name, toolkits, expected) => {
+    ["thread control only", { browser: false, threadControl: true, visuals: true }],
+    ["browser only", { browser: true, threadControl: false, visuals: false }],
+  ])("grants instructions from the attached toolkits: %s", async (_name, toolkits) => {
     ports.browser = { ...ports.browser, isConfigured: () => true, issue: (handle) => ({ ...handle, credentialId: "browser-credential", allowedOperations: ["browser.list_tabs"] }) };
     ports.mcode.attach = vi.fn(async () => mcodeAttachment(toolkits));
     await provider.sendTurn(request()); await finish();
     const content: string = sdk.create.mock.calls[0]?.[0].systemMessage.content;
-    expect(content.includes("thread_target_list")).toBe(expected.thread);
-    expect(content.includes("Prefer the mcode MCP browser_* tools")).toBe(expected.browser);
+    expectInstructionSections(content, toolkits);
     await provider.stopSession("mcode-thread-1");
   });
 
@@ -925,8 +926,7 @@ describe("Copilot public factory", () => {
     const options: SessionConfig = sdk.create.mock.calls[0]?.[0];
     const content = options.systemMessage && "content" in options.systemMessage ? options.systemMessage.content ?? "" : "";
     expect(options.mcpServers).toEqual({});
-    expect(content).not.toContain("thread_target_list");
-    expect(content).not.toContain("Prefer the mcode MCP browser_* tools");
+    expectInstructionSections(content, NO_MCODE_TOOLKITS);
   });
 
   it("attaches under the session id the Browser lease is staged for", async () => {

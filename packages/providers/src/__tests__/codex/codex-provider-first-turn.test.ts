@@ -88,6 +88,7 @@ import { BrowserAutomationSessionLease, CodexProvider, mcodeAttachment, stubEnvS
 import { AgentEventSchema, AgentEventType, ProviderRuntimeEventSchema } from "@mcode/contracts";
 import type { ApprovalRequestEnvelope, ProviderFileMutationStart, ProviderRuntimeEvent, ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts";
 import type { ProviderEventBatch, ProviderEventSinkPort, ProviderEventSubmissionReceipt, ProviderMcodeAttachRequest, ProviderMcodeAttachment } from "../../host-ports.js";
+import { buildMcodeInstructionSections, NO_MCODE_TOOLKITS } from "@mcode/thread-orchestration";
 
 const schemaValidExecutionId = "00000000-0000-4000-8000-000000000001";
 const acceptedEventReceipt: ProviderEventSubmissionReceipt = {
@@ -462,10 +463,7 @@ describe("CodexProvider first turn on new session", () => {
     expect(server.options.instructionSections?.map((section) => section.key)).toEqual([
       "mcode_identity", "mcode_provider_subagents", "mcode_thread_control", "mcode_browser", "mcode_visuals", "mcode_repository_search",
     ]);
-    expect(server.options.instructionSections?.find((section) => section.key === "mcode_browser")?.text)
-      .toContain("Prefer the mcode MCP browser_* tools");
-    expect(server.options.instructionSections?.find((section) => section.key === "mcode_thread_control")?.text)
-      .toContain("thread_target_list");
+    expect(server.options.instructionSections).toEqual(buildMcodeInstructionSections({ toolkits: mcodeAttachment().toolkits }));
     expect(server.spawnedEnv?.MCODE_MCP_TOKEN).toBe("session-token-fixture");
     expect(server.spawnedEnv).not.toHaveProperty("MCODE_BROWSER_MCP_TOKEN");
     expect(JSON.stringify(server.options.configOverrides)).not.toContain("session-token-fixture");
@@ -506,8 +504,7 @@ describe("CodexProvider first turn on new session", () => {
     await send;
 
     const server = appServers.at(-1)!;
-    expect(server.options.instructionSections?.some((section) => section.key === "mcode_thread_control")).toBe(expected.thread);
-    expect(server.options.instructionSections?.some((section) => section.key === "mcode_browser")).toBe(expected.browser);
+    expect(server.options.instructionSections).toEqual(buildMcodeInstructionSections({ toolkits }));
     expect(server.options.configOverrides?.includes('plugins."browser@openai-bundled".enabled=false')).toBe(expected.plugin);
     // A Browser grant the server does not list would sit unused until it expires.
     expect(lease.status().active).toBe(expected.browser ? 1 : 0);
@@ -614,9 +611,7 @@ describe("CodexProvider first turn on new session", () => {
 
     const server = appServers.at(-1)!;
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(server.options.instructionSections?.find((section) => section.key === "mcode_provider_subagents")?.text).toContain("provider-native collaboration");
-    expect(server.options.instructionSections?.find((section) => section.key === "mcode_provider_subagents")?.text).toContain("preserve the exact requested brief");
-    expect(server.options.instructionSections?.find((section) => section.key === "mcode_provider_subagents")?.text).toContain("only when native collaboration cannot run the requested provider or model");
+    expect(server.options.instructionSections).toEqual(buildMcodeInstructionSections({ toolkits: NO_MCODE_TOOLKITS }));
     expect(sendTurnMock).toHaveBeenCalledWith(
       [{ type: "text", text: childBrief }],
       { model, approvalsReviewer: "user" },
@@ -642,8 +637,10 @@ describe("CodexProvider first turn on new session", () => {
     });
 
     const server = appServers.at(-1)!;
-    expect(server.options.instructionSections?.find((section) => section.key === "mcode_nested_delegation")?.text).toContain("gpt-5.6-sol");
-    expect(server.options.instructionSections?.find((section) => section.key === "mcode_nested_delegation")?.text).toContain("parent spawn_agent call");
+    expect(server.options.instructionSections).toEqual(buildMcodeInstructionSections({
+      toolkits: NO_MCODE_TOOLKITS,
+      nestedDelegationModel: "gpt-5.6-sol",
+    }));
     await provider.stopSession("mcode-nested-model-guidance");
   });
 

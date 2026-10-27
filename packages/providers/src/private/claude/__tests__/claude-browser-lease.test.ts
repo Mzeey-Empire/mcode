@@ -4,6 +4,7 @@ import {
   type BrowserAutomationSessionLeaseScope,
 } from "./helpers/provider-fixture.js";
 import { fixtureHost, ClaudeProvider } from "./helpers/provider-fixture.js";
+import { buildMcodeInstructionSections } from "@mcode/thread-orchestration";
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 
@@ -128,7 +129,9 @@ describe("ClaudeProvider browser session lease lifecycle", () => {
     await (harness.provider as any).sendTurn(request());
 
     const append = mockQuery.mock.calls[0][0].options.systemPrompt.append;
-    expect(append).toContain("Prefer the mcode MCP browser_* tools");
+    for (const section of buildMcodeInstructionSections({ toolkits: attachment.toolkits })) {
+      expect(append).toContain(section.text);
+    }
     await (harness.provider as any).close(harness.spawnedState);
   });
 
