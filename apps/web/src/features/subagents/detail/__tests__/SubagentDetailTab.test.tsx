@@ -5,6 +5,7 @@ import {
   createAgentModelState, type AgentItem, type AgentTurn, type Message, type SubagentDetail, type SubagentRoster, type SubagentRosterEntry,
 } from "@mcode/contracts";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
+import { useDiffStore } from "@/stores/diffStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -134,6 +135,18 @@ describe("SubagentDetailTab", () => {
     expect(useMessageRevealStore.getState().request).toEqual({ threadId: "thread-1", messageId: "message-7" });
     expect(useUiStore.getState().rightPanelMaximized).toBe(false);
     expect(transport.loadSubagentDetail).not.toHaveBeenCalled();
+  });
+
+  it("goes back to the Subagents list and keeps the detail tab open", async () => {
+    transport.loadSubagentDetail.mockResolvedValue(detail());
+    useWorkspaceStore.setState({ activeWorkspaceId: "workspace-1", activeThreadId: "thread-1" });
+    useDiffStore.getState().openSubagentTab("workspace-1", "thread-1", "call:explore");
+    await renderTab([entry()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to subagents" }));
+    const panel = useDiffStore.getState().getRightPanel("workspace-1", "thread-1");
+    expect(panel.activeTabId).toBe("singleton:subagents");
+    expect(panel.tabInstances.map((tab) => tab.id)).toContain("subagent:call:explore");
   });
 
   it("fills in a prompt that arrives after the tab opened", async () => {
