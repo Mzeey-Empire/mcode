@@ -516,6 +516,33 @@ describe("ProjectSidebar thread interactions", () => {
     expect(within(bar).getByRole("radio", { name: /^Completed/ })).toHaveTextContent("Completed1");
   });
 
+  it.each([
+    ["collapses before it leaves", false],
+    ["leaves at once under reduced motion", true],
+  ])("when the last completed thread goes, the scope bar %s", (_behaviour, reduced) => {
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      matches: reduced && query.includes("reduce"), media: query, onchange: null,
+      addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
+    }));
+    const activeThread = makeThread({ id: "thread-active", title: "Active work" });
+    setupStoreMocks({ threads: [activeThread, makeThread({ id: "thread-done", title: "Done work", user_completed_at: "2026-08-12T08:00:00.000Z" })] });
+    const view = render(<ProjectSidebar />);
+
+    setupStoreMocks({ threads: [activeThread] });
+    view.rerender(<ProjectSidebar />);
+
+    const collapsing = screen.queryByRole("radiogroup", { name: "Thread scope", hidden: true });
+    if (reduced) {
+      expect(collapsing).toBeNull();
+      return;
+    }
+    expect(collapsing?.closest("[inert]")).not.toBeNull();
+    const host = collapsing?.closest("[inert]")?.parentElement;
+    if (!host) throw new Error("The collapsing bar has a host");
+    fireEvent.transitionEnd(host);
+    expect(screen.queryByRole("radiogroup", { name: "Thread scope", hidden: true })).toBeNull();
+  });
+
   it("falls back to Active when the last completed thread is deleted", () => {
     const activeThread = makeThread({ id: "thread-active", title: "Active work" });
     setupStoreMocks({
