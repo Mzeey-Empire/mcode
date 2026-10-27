@@ -8,6 +8,7 @@ import {
   normalizeFrontendRendererWorkloads,
   runRendererMatrix,
 } from "./frontend-renderer-fixture.mjs";
+import { SIDEBAR_RENDERER_WORKLOADS } from "./sidebar-renderer-workloads.mjs";
 
 const VIEWPORT = Object.freeze({ width: 1440, height: 1000 });
 const WARMUP_COUNT = 1;
@@ -131,6 +132,9 @@ async function run() {
         context.electronSubagentDetailFixture = await readSubagentDetailFixture(context.repoRoot, "subagent-detail-fixture-electron.json");
       }
     }
+    if (context.workloads.some((workload) => SIDEBAR_RENDERER_WORKLOADS.includes(workload))) {
+      await readSidebarInputs(context);
+    }
     ({ browser, result: browserResult } = await runStandaloneWeb(context));
     ({ electronSession, result: electronResult } = await runElectron(context));
     const result = buildWorkerResult(context, browserResult, electronResult);
@@ -157,6 +161,24 @@ async function readSubagentDetailFixture(repoRoot, name) {
     throw new Error("subagentDetailExpand fixture is missing or invalid.");
   }
   return fixture;
+}
+
+async function readSidebarFixture(repoRoot, name) {
+  const path = NodePath.join(repoRoot, ".dev", "verification", "performance", name);
+  const fixture = JSON.parse(await NodeFSPromises.readFile(path, "utf8"));
+  if (fixture?.marker !== "__mcode_perf_sidebar__") throw new Error("The sidebar thread fixture is missing or invalid.");
+  return fixture;
+}
+
+async function readSidebarInputs(context) {
+  const capturePath = NodePath.join(context.repoRoot, "apps", "web", "src", "__tests__", "fixtures", "canonical-saved-admission.json");
+  context.canonicalCapture = JSON.parse(await NodeFSPromises.readFile(capturePath, "utf8"));
+  if (context.runtimes.includes("standalone-web")) {
+    context.sidebarFixture = await readSidebarFixture(context.repoRoot, "sidebar-thread-fixture.json");
+  }
+  if (context.runtimes.includes("electron")) {
+    context.electronSidebarFixture = await readSidebarFixture(context.repoRoot, "sidebar-thread-fixture-electron.json");
+  }
 }
 
 async function prepareWorkerContext() {
@@ -200,6 +222,8 @@ async function runStandaloneWeb(context) {
     await runRendererMatrix(page, "standalone-web", context.sampleCount, context.mode, {
       workload: context.workloads.join(","),
       subagentDetailFixture: context.subagentDetailFixture,
+      sidebarFixture: context.sidebarFixture,
+      canonicalCapture: context.canonicalCapture,
     }),
     context.runEnvironment,
     await collectPageEnvironment(page),
@@ -232,6 +256,8 @@ async function runElectron(context) {
     await runRendererMatrix(electronSession.page, "electron", context.sampleCount, context.mode, {
       workload: context.workloads.join(","),
       subagentDetailFixture: context.electronSubagentDetailFixture,
+      sidebarFixture: context.electronSidebarFixture,
+      canonicalCapture: context.canonicalCapture,
     }),
     context.runEnvironment,
     await collectPageEnvironment(electronSession.page),

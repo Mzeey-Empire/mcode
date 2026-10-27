@@ -3,6 +3,7 @@ import {
   createPageSignalCollector,
   summarizeDurationSamples,
 } from "./frontend-performance-collectors.mjs";
+import { SIDEBAR_RENDERER_WORKLOADS, runSidebarMatrix } from "./sidebar-renderer-workloads.mjs";
 
 /** Ordered workload names in the shared web and Electron matrix. */
 export const FRONTEND_RENDERER_WORKLOADS = Object.freeze([
@@ -20,6 +21,7 @@ export const FRONTEND_RENDERER_WORKLOADS = Object.freeze([
 export const FRONTEND_RENDERER_EXPLICIT_WORKLOADS = Object.freeze([
   "vlistLifecycle",
   "subagentDetailExpand",
+  ...SIDEBAR_RENDERER_WORKLOADS,
 ]);
 
 const ALL_FRONTEND_RENDERER_WORKLOADS = Object.freeze([
@@ -45,6 +47,10 @@ export function normalizeFrontendRendererWorkloads(value) {
   }
   if (requested.includes("vlistLifecycle") && requested.length !== 1) {
     throw new Error("vlistLifecycle must be selected without another frontend renderer workload");
+  }
+  const sidebarCount = requested.filter((workload) => SIDEBAR_RENDERER_WORKLOADS.includes(workload)).length;
+  if (sidebarCount > 0 && sidebarCount !== requested.length) {
+    throw new Error("Sidebar workloads must be selected without chat renderer workloads");
   }
   return ALL_FRONTEND_RENDERER_WORKLOADS.filter((workload) => requested.includes(workload));
 }
@@ -1508,6 +1514,15 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
   if (!Number.isSafeInteger(sampleCount) || sampleCount < 1 || sampleCount > 50) {
     throw new Error("sampleCount must be an integer from 1 through 50");
   }
+  const workloads = normalizeFrontendRendererWorkloads(options.workload ?? null);
+  if (workloads.some((workload) => SIDEBAR_RENDERER_WORKLOADS.includes(workload))) {
+    await page.bringToFront();
+    return runSidebarMatrix(page, runtime, sampleCount, mode, { ...options, workloads });
+  }
+  return runChatRendererMatrix(page, runtime, sampleCount, mode, options);
+}
+
+async function runChatRendererMatrix(page, runtime, sampleCount, mode, options) {
   const workloads = normalizeFrontendRendererWorkloads(options.workload ?? null);
   const selectedWorkloads = new Set(workloads);
   const expectedPageUrl = page.url();
