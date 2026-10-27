@@ -644,7 +644,7 @@ export const FilesystemBrowseResultSchema = lazySchema(() => z.object({
 /** Result of browsing a folder in the add-project folder picker. */
 export type FilesystemBrowseResult = z.infer<ReturnType<typeof FilesystemBrowseResultSchema>>;
 
-// Keep repeated thread results from expanding the entire shape in the registry declaration.
+// TS7056: without an explicit type, tsc refuses to serialize the registry's inferred declaration.
 const threadResultSchema: () => z.ZodType<import("../models/thread.js").Thread, z.ZodTypeDef, z.input<ReturnType<typeof ThreadSchema>>> = lazySchema(() => ThreadSchema());
 
 /** All WebSocket methods with runtime-validating parameter and result schemas. */
