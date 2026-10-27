@@ -1,19 +1,15 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { MessageSchema } from "../message.js";
 
-const legacyMessage = {
+const legacyMessage = createMockMessage({
   id: "message-1",
   thread_id: "thread-1",
-  role: "assistant" as const,
+  role: "assistant",
   content: "answer",
-  tool_calls: null,
-  files_changed: null,
-  cost_usd: null,
-  tokens_used: null,
   timestamp: "2026-08-20T12:00:00.000Z",
   sequence: 1,
-  attachments: null,
-};
+});
 
 describe("Message outcome metadata", () => {
   it("accepts legacy rows without outcome metadata", () => {

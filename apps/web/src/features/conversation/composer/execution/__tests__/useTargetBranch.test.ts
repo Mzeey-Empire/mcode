@@ -1,8 +1,9 @@
+import { createMockWorkspace } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { createMockWorkspace } from "@/__tests__/mocks/transport";
+
 import type { BranchRefTarget } from "../targets/branch-target";
 import { useNewThreadTargetBranch } from "../useTargetBranch";
 

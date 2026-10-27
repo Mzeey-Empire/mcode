@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import {
   CanonicalAgentEventSchema,
   CanonicalAgentSemanticEnvelopeSchema,
@@ -223,12 +224,22 @@ describe("prepareAcceptedParentEvents", () => {
       message: { precedingMessageId: "user", messageId: "live-assistant", content: "Plan body",
         model: "fixture-model", attachments: [] } }));
     const item = projectedItems(result.events)[0];
-    expect(item?.payload).toEqual({ projection: "message", message: {
-      id: "live-assistant", thread_id: thread.id, role: "assistant", content: "Plan body",
+    expect(item?.payload).toEqual({ projection: "message", message: createMockMessage({
+      id: "live-assistant",
+      thread_id: thread.id,
+      role: "assistant",
+      content: "Plan body",
       is_internal: true,
-      timestamp: ACCEPTED_AT, sequence: 3, model: "fixture-model", provider: "codex", attachments: [],
-      tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null,
-    } });
+      timestamp: ACCEPTED_AT,
+      sequence: 3,
+      model: "fixture-model",
+      provider: "codex",
+      attachments: [],
+      tool_calls: null,
+      files_changed: null,
+      cost_usd: null,
+      tokens_used: null,
+    }) });
     expect(result.terminalMessage).toBeUndefined();
   });
 

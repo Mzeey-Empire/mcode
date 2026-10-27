@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, it, expect } from "vitest";
 import {
   buildStableItems,
@@ -44,20 +45,16 @@ describe("activity heading row identity", () => {
 });
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
-  return {
+  return createMockMessage({
     id: "msg-1",
     thread_id: "thread-1",
     role: "assistant",
     content: "Hello world",
-    tool_calls: null,
-    files_changed: null,
-    cost_usd: null,
     tokens_used: null,
     timestamp: "2026-01-01T00:00:00Z",
     sequence: 1,
-    attachments: null,
     ...overrides,
-  };
+  });
 }
 
 function makeToolCall(overrides: Partial<ToolCall> = {}): ToolCall {

@@ -1,3 +1,4 @@
+import { createMockWorkspace, createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -11,7 +12,7 @@ import {
 import { usePreviewFocusStore } from "../../state/previewFocusStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { createMockWorkspace, createMockThread } from "@/__tests__/mocks/transport";
+
 import {
   previewTabsScopeKey,
   usePreviewTabsStore,

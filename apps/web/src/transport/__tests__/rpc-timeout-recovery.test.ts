@@ -1,8 +1,9 @@
+import { createMockApproval } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { createMockApproval } from "@/__tests__/mocks/transport";
+
 import { useApprovalStore } from "@/stores/approvalStore";
 import * as transportRegistry from "@/transport";
 import {

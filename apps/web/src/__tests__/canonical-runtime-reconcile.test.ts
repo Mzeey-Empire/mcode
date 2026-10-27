@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type CanonicalAgentEventEnvelope, type Message, type TurnSavingStatus } from "@mcode/contracts";
@@ -130,8 +131,14 @@ describe("canonical runtime reconciliation", () => {
     const textSlot = (content: string, isStreaming: boolean) => ({ id: `assistant-response-text:${EXECUTION_ID}`,
       threadId: THREAD_ID, turnId: TURN_ID, kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
       payload: { projection: "assistantText", content, isStreaming } } satisfies import("@mcode/contracts").AgentItem);
-    const prompt: Message = { id: "admitted-prompt", thread_id: THREAD_ID, role: "user", content: "Prompt",
-      timestamp: NOW, sequence: 1, attachments: null, cost_usd: null, tokens_used: null, tool_calls: null, files_changed: null };
+    const prompt: Message = createMockMessage({
+      id: "admitted-prompt",
+      thread_id: THREAD_ID,
+      role: "user",
+      content: "Prompt",
+      timestamp: NOW,
+      sequence: 1,
+    });
     const partial = [...promptAdmission(prompt), envelope("partial", 5, EXECUTION_ID, {
       type: "item.recorded", item: textSlot("Partial answer", true) })];
     const reduced = reduceAgentEventBatch(createAgentModelState(), partial);
@@ -142,8 +149,14 @@ describe("canonical runtime reconciliation", () => {
     expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("Partial answer");
     expect(readThreadField(THREAD_ID, (record) => record.responseTextIsStreaming)).toBe(true);
     expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(true);
-    const response: Message = { id: "closed-answer", thread_id: THREAD_ID, role: "assistant", content: "Authoritative answer",
-      timestamp: NOW, sequence: 2, attachments: null, cost_usd: null, tokens_used: null, tool_calls: null, files_changed: null };
+    const response: Message = createMockMessage({
+      id: "closed-answer",
+      thread_id: THREAD_ID,
+      role: "assistant",
+      content: "Authoritative answer",
+      timestamp: NOW,
+      sequence: 2,
+    });
     const closed = [envelope("closed", 6, EXECUTION_ID, { type: "item.recorded", item: textSlot(response.content, false) }),
       envelope("closed-message", 7, EXECUTION_ID, { type: "item.recorded", item: { id: "message:closed-answer",
         threadId: THREAD_ID, turnId: TURN_ID, kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
@@ -458,8 +471,14 @@ describe("canonical runtime reconciliation", () => {
 
   it.each(["running", "completed"] as const)("keeps %s transcript references through sequential saved acknowledgements", (phase) => {
     seedRuntime("running", EXECUTION_ID, true);
-    const response: Message = { id: "ack-response", thread_id: THREAD_ID, role: "assistant", content: "Accepted response",
-      tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: NOW, sequence: 1, attachments: null };
+    const response: Message = createMockMessage({
+      id: "ack-response",
+      thread_id: THREAD_ID,
+      role: "assistant",
+      content: "Accepted response",
+      timestamp: NOW,
+      sequence: 1,
+    });
     const commonItem = { threadId: THREAD_ID, turnId: TURN_ID, providerIdentities: [], createdAt: NOW, updatedAt: NOW };
     const events = [...turnEvents(EXECUTION_ID),
       envelope("ack-tool-use", 4, EXECUTION_ID, { type: "publication.recorded", publicationId: "4", event: {
@@ -677,8 +696,14 @@ describe("canonical runtime reconciliation", () => {
   });
 
   it.each([false, true])("removes an assigned-ID response after restart only when unsaved, acknowledged=%s", (acknowledged) => {
-    const savedMessage: Message = { id: "saved-message", thread_id: THREAD_ID, role: "assistant", content: "Already saved reply",
-      tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: NOW, sequence: 1, attachments: null };
+    const savedMessage: Message = createMockMessage({
+      id: "saved-message",
+      thread_id: THREAD_ID,
+      role: "assistant",
+      content: "Already saved reply",
+      timestamp: NOW,
+      sequence: 1,
+    });
     const response: Message = { ...savedMessage, id: "unsaved-message", content: "Accepted unsaved reply", sequence: 2 };
     resetThreadStoreForTests({ currentThreadId: THREAD_ID, records: seedThreadRecord(THREAD_ID, {
       runtimePhase: "running", turnExecutionId: EXECUTION_ID, messages: [savedMessage], serverMessageIds: { [savedMessage.id]: savedMessage.id },

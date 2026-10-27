@@ -1,3 +1,4 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { WS_CHANNELS } from "../channels.js";
 import { WS_METHODS } from "../methods.js";
@@ -19,50 +20,23 @@ describe("thread completion transport", () => {
   });
 
   it("validates the full persisted thread in lifecycle pushes", () => {
-    const thread = {
+    const thread = createMockThread({
       id: "thread-1",
       workspace_id: "workspace-1",
       title: "Completed thread",
       status: "paused",
       mode: "direct",
-      worktree_path: null,
       branch: "main",
       checkout_state: "named",
-      base_branch: null,
-      head_sha: null,
       worktree_managed: true,
-      issue_number: null,
-      pr_number: null,
-      pr_status: null,
-      has_file_changes: false,
-      sdk_session_id: null,
       created_at: "2026-08-12T08:00:00.000Z",
       updated_at: "2026-08-12T08:00:00.000Z",
-      model: null,
       provider: "claude",
-      deleted_at: null,
       user_completed_at: "2026-08-12T08:00:00.000Z",
-      scheduled_resume: null,
       scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
       cleanup_state: "blocked",
       cleanup_reason: "The worktree has uncommitted changes.",
-      last_context_tokens: null,
-      context_window: null,
-      reasoning_level: null,
-      interaction_mode: null,
-      orchestration_mode: null,
-      permission_mode: null,
-      context_window_mode: null,
-      thinking: null,
-      fast_mode: null,
-      devin_mode: null,
-      default_open_in_app: null,
-      parent_thread_id: null,
-      delegation_coordinator_thread_id: null,
-      forked_from_message_id: null,
-      last_compact_summary: null,
-      plan_phase: null,
-    };
+    });
 
     expect(WS_CHANNELS["thread.lifecycleChanged"].parse({ thread })).toEqual({ thread });
   });

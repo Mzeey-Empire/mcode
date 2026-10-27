@@ -1,6 +1,7 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createMockThread } from "@/__tests__/mocks/transport";
+
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useOpenPlanWhenReady } from "./use-open-plan-when-ready";
 

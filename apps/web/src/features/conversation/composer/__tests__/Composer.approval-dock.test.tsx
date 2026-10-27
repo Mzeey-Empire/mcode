@@ -1,3 +1,4 @@
+import { createMockApproval, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import React from "react";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,7 +7,7 @@ import { Composer } from "../Composer";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
-import { mockTransport, createMockApproval, createMockThread, createMockWorkspace } from "@/__tests__/mocks/transport";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { useApprovalStore } from "@/stores/approvalStore";
 
 vi.mock("@/transport", async () => ({

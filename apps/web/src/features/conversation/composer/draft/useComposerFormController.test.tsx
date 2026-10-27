@@ -1,8 +1,9 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ORCHESTRATION_MODES, type SelectedTextComment } from "@mcode/contracts";
 import { INTERACTION_MODES, PERMISSION_MODES } from "@/transport";
-import { createMockThread } from "@/__tests__/mocks/transport";
+
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useSettingsStore } from "@/stores/settingsStore";

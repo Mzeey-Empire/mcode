@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import type { Message } from "@mcode/contracts";
 import { expandTranscriptNarrative, expandTranscriptToolGroups } from "../transcript-narrative-items";
@@ -5,11 +6,15 @@ import { createTranscriptItemProjector, type ChatVirtualItem, type PersistedNarr
 
 describe("transcript narrative rows", () => {
   it.each([undefined, "pending-answer", "answer"])("renders hydrated live narrative once with response id %s", (messageId) => {
-    const answer: Message = {
-      id: "answer", thread_id: "thread", role: "assistant", content: "Final response", sequence: 2,
-      outcomeExecutionId: "execution", timestamp: new Date(3000).toISOString(),
-      tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, attachments: null,
-    };
+    const answer: Message = createMockMessage({
+      id: "answer",
+      thread_id: "thread",
+      role: "assistant",
+      content: "Final response",
+      sequence: 2,
+      outcomeExecutionId: "execution",
+      timestamp: new Date(3000).toISOString(),
+    });
     const input: TranscriptProjectionInput = {
       messages: [answer], currentTurn: { threadId: "thread", executionId: "execution", messageId, responseKey: "live-answer" },
       agentDisplayState: { phase: "finalizing" }, agentStartTime: 1000, streamingText: answer.content,
@@ -233,11 +238,15 @@ function fold(key: string, messageId: string, messageContent: string): Extract<C
 }
 
 function message(id: string, content: string, outcomeExecutionId?: string): Message {
-  return {
-    id, thread_id: "thread", role: "assistant", content, sequence: 2, outcomeExecutionId,
+  return createMockMessage({
+    id,
+    thread_id: "thread",
+    role: "assistant",
+    content,
+    sequence: 2,
+    outcomeExecutionId,
     timestamp: new Date(3000).toISOString(),
-    tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, attachments: null,
-  };
+  });
 }
 
 function rowLabel(row: { type: string; item?: { type: string } }): string {

@@ -1,3 +1,4 @@
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import type { AgentEvent } from "@mcode/contracts";
 import {
@@ -11,7 +12,7 @@ import {
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
-import { mockTransport, createMockThread } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 
 vi.mock("@/transport", async () => ({
@@ -318,19 +319,14 @@ describe("duplicate message prevention", () => {
           ...createEmptyThreadRecord(),
           currentTurnMessageId: "client-provisional-id",
           messages: [
-            {
+            createMockMessage({
               id: "client-provisional-id",
               thread_id: "thread-1",
               role: "assistant",
               content: "Hello world",
-              tool_calls: null,
-              files_changed: null,
-              cost_usd: null,
               tokens_used: null,
               sequence: 1,
-              timestamp: new Date().toISOString(),
-              attachments: null,
-            },
+            }),
           ],
         }],
       ]),

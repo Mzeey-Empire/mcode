@@ -1,3 +1,4 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { createAgentModelState, type AgentEvent } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useQueueStore } from "@/stores/queueStore";
@@ -5,7 +6,7 @@ import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-reco
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { createMockThread, mockTransport } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

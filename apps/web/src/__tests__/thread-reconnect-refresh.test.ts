@@ -1,3 +1,4 @@
+import { createMockMessage, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 /**
  * Verifies that the thread list is refreshed after a WebSocket reconnect,
  * so that statuses updated on the server during a restart (e.g., "interrupted")
@@ -8,7 +9,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import { createWsTransport } from "@/transport/ws-transport";
-import { mockTransport, createMockWorkspace, createMockThread } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -106,7 +107,14 @@ describe("thread status refresh after reconnect", () => {
       currentThreadId: thread.id,
       records: new Map([[thread.id, {
         ...createEmptyThreadRecord(),
-        messages: [{ id: "resident", thread_id: thread.id, role: "assistant", content: "Kept", tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: "", sequence: 1, attachments: null }],
+        messages: [createMockMessage({
+          id: "resident",
+          thread_id: thread.id,
+          role: "assistant",
+          content: "Kept",
+          timestamp: "",
+          sequence: 1,
+        })],
       }]]),
     });
     (mockTransport.loadConversationPage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("offline"));

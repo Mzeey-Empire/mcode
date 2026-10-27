@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { render, act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { StrictMode, useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -85,19 +86,14 @@ function canonicalChildState(content: string, status: "Running" | "Completed") {
   const threadId = "child-thread";
   const turnId = "child-turn";
   const timestamp = "2026-09-06T00:00:00.000Z";
-  const answer: Message = {
+  const answer: Message = createMockMessage({
     id: "child-answer",
     thread_id: threadId,
     role: "assistant",
     content,
-    tool_calls: null,
-    files_changed: null,
-    cost_usd: null,
-    tokens_used: null,
     timestamp,
     sequence: 1,
-    attachments: null,
-  };
+  });
   const turn: AgentTurn = {
     id: turnId,
     threadId,

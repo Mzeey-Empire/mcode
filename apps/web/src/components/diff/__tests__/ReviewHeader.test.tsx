@@ -1,8 +1,9 @@
+import { createMockWorkspace } from "@mcode/contracts/testing";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewState, ReviewTurn, TurnSnapshot } from "@mcode/contracts";
-import { createMockWorkspace } from "@/__tests__/mocks/transport";
+
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useDiffStore } from "@/stores/diffStore";

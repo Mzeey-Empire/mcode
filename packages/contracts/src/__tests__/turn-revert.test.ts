@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { WS_METHODS, WS_CHANNELS, TurnRevertPreviewSchema, TurnRevertResultSchema, SystemNoticeMetadataSchema, TurnSnapshotSchema } from "../index.js";
 
@@ -43,9 +44,16 @@ describe("turn revert wire contract", () => {
       const notice = { kind, presentation: "timeline", revertId: "r" };
       expect(SystemNoticeMetadataSchema().parse(notice)).toEqual(notice);
     }
-    const receipt = { id: "receipt", thread_id: "t", role: "system", content: "Reverted Turn 1 · 1 file", tool_calls: null,
-      files_changed: null, cost_usd: null, tokens_used: null, timestamp: "2026-10-11T00:00:00Z", sequence: 3, attachments: null,
-      systemNotice: { kind: "turn-reverted", presentation: "timeline", revertId: "r" } };
+    const receipt = createMockMessage({
+      id: "receipt",
+      thread_id: "t",
+      role: "system",
+      content: "Reverted Turn 1 · 1 file",
+      files_changed: null,
+      timestamp: "2026-10-11T00:00:00Z",
+      sequence: 3,
+      systemNotice: { kind: "turn-reverted", presentation: "timeline", revertId: "r" },
+    });
     const revert = { id: "r", threadId: "t", targetMessageId: "m", fromMessageId: null, kind: "turn", path: null, undoesRevertId: null,
       undoneByRevertId: null, files: [{ path: "a", action: "restore" }], receiptMessageId: "receipt", createdAt: receipt.timestamp };
     expect(TurnRevertResultSchema().parse({ status: "reverted", revert, receipt })).toEqual({ status: "reverted", revert, receipt });

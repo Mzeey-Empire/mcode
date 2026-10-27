@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentTurn, Message, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
@@ -15,9 +16,16 @@ const NOW = "2026-01-01T00:00:00Z";
 
 function answer(id: string, executionId: string): Message & { outcome: TurnOutcome; outcomeExecutionId: string } {
   return {
-    id, thread_id: THREAD, role: "assistant", content: "Saved answer", outcome: "interrupted",
-    outcomeExecutionId: executionId, tool_calls: null, files_changed: null, cost_usd: null,
-    tokens_used: null, timestamp: NOW, sequence: 1, attachments: null,
+    ...createMockMessage({
+      id,
+      thread_id: THREAD,
+      role: "assistant",
+      content: "Saved answer",
+      timestamp: NOW,
+      sequence: 1,
+    }),
+    outcome: "interrupted",
+    outcomeExecutionId: executionId,
   };
 }
 

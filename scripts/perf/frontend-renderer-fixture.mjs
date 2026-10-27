@@ -866,54 +866,26 @@ async function installFixtureRuntime(page) {
     const [primaryThreadId, secondaryThreadId] = fixtureThreads.map((thread) => thread.id);
 
     const now = "2026-08-09T21:00:00.000Z";
-    const baseThread = (id, title) => ({
+    const baseThread = (id, title) => modules.createMockThread({
       id,
       workspace_id: workspace.id,
       title,
       status: "idle",
       mode: "local",
-      worktree_path: null,
       branch: "main",
       checkout_state: "named",
-      base_branch: null,
-      worktree_managed: false,
-      issue_number: null,
-      pr_number: null,
-      pr_status: null,
-      has_file_changes: false,
-      sdk_session_id: null,
       created_at: now,
       updated_at: now,
-      model: null,
       provider: "codex",
-      deleted_at: null,
-      last_context_tokens: null,
-      context_window: null,
-      reasoning_level: null,
-      interaction_mode: null,
-      orchestration_mode: null,
-      permission_mode: null,
-      context_window_mode: null,
-      thinking: null,
-      fast_mode: null,
-      default_open_in_app: null,
-      parent_thread_id: null,
-      forked_from_message_id: null,
-      last_compact_summary: null,
     });
 
-    const message = (threadId, index, content, role = index % 2 ? "assistant" : "user") => ({
+    const message = (threadId, index, content, role = index % 2 ? "assistant" : "user") => modules.createMockMessage({
       id: `${threadId}-message-${index}`,
       thread_id: threadId,
       role,
       content,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
       timestamp: now,
       sequence: index + 1,
-      attachments: null,
       model: role === "assistant" ? "gpt-5.6" : null,
     });
 

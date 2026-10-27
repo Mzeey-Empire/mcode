@@ -1,3 +1,4 @@
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, onTestFinished, vi } from "vitest";
@@ -206,7 +207,7 @@ vi.mock("@/components/chat/cli-error", () => ({
 
 import { useWorkspaceStore, type QueuedMessageParts } from "@/features/projects/state/workspaceStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
-import { createMockMessage } from "@/__tests__/mocks/transport";
+
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { useToastStore } from "@/stores/toastStore";
 import { useThreadDraftStore } from "@/stores/threadDraftStore";
@@ -219,7 +220,7 @@ import { KEPT_ALIVE_THREAD_COUNT } from "../chat-view/useChatViewState";
 
 /** Build a minimal Thread fixture. */
 function makeThread(overrides: Partial<Thread> = {}): Thread {
-  return {
+  return createMockThread({
     id: "thread-1",
     workspace_id: "ws-1",
     title: "My Thread",
@@ -229,41 +230,13 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: "main",
     checkout_state: "named",
     base_branch: null,
-    head_sha: null,
     worktree_managed: false,
-    issue_number: null,
-    pr_number: null,
-    pr_status: null,
-    sdk_session_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     model: null,
     provider: "claude",
-    deleted_at: null,
-    user_completed_at: null,
-    scheduled_deletion_at: null,
-    scheduled_resume: null,
-    cleanup_state: null,
-    cleanup_reason: null,
-    last_context_tokens: null,
-    context_window: null,
-    reasoning_level: null,
-    interaction_mode: null,
-    orchestration_mode: null,
-    permission_mode: null,
-    context_window_mode: null,
-    thinking: null,
-    fast_mode: null,
-    devin_mode: null,
-    parent_thread_id: null,
-    delegation_coordinator_thread_id: null,
-    forked_from_message_id: null,
-    last_compact_summary: null,
-    plan_phase: null,
-    default_open_in_app: null,
-    has_file_changes: false,
     ...overrides,
-  };
+  });
 }
 
 const WORKSPACE = {

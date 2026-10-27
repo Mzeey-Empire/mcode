@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import {
   ConversationNewerPageRequestSchema,
@@ -46,19 +47,14 @@ describe("ConversationNewerPageSchema", () => {
     const result = ConversationNewerPageSchema().safeParse({
       identity,
       messages: [
-        {
+        createMockMessage({
           id: "m11",
           thread_id: "thread-1",
           role: "user",
           content: "eleven",
           timestamp: "2026-08-10T00:00:00.000Z",
           sequence: 11,
-          tool_calls: null,
-          files_changed: null,
-          cost_usd: null,
-          tokens_used: null,
-          attachments: null,
-        },
+        }),
       ],
       hasMore: true,
       nextCursor: { version: 1, afterSequence: 11 },
@@ -72,19 +68,14 @@ describe("ConversationNewerPageSchema", () => {
     const result = ConversationNewerPageSchema().safeParse({
       identity,
       messages: [
-        {
+        createMockMessage({
           id: "m10",
           thread_id: "thread-1",
           role: "user",
           content: "ten",
           timestamp: "2026-08-10T00:00:00.000Z",
           sequence: 10,
-          tool_calls: null,
-          files_changed: null,
-          cost_usd: null,
-          tokens_used: null,
-          attachments: null,
-        },
+        }),
       ],
       hasMore: false,
       nextCursor: { version: 1, afterSequence: 10 },

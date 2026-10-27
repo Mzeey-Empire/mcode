@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import type { Database } from "bun:sqlite";
 import type { Message } from "@mcode/contracts";
@@ -11,19 +12,14 @@ const THREAD_ID = "thread-1";
 const TURN_ID = "turn-1";
 
 function message(id: string, role: "user" | "assistant", sequence: number): Message {
-  return {
+  return createMockMessage({
     id,
     thread_id: THREAD_ID,
     role,
     content: role === "assistant" ? "Completed answer" : "Question",
-    tool_calls: null,
-    files_changed: null,
-    cost_usd: null,
-    tokens_used: null,
     timestamp: NOW,
     sequence,
-    attachments: null,
-  };
+  });
 }
 
 function seedCanonicalTurn(

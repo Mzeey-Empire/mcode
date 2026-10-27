@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { createAgentModelState, type AgentModelState, type AgentTurn, type Message } from "@mcode/contracts";
 import { describe, expect, it } from "vitest";
 import { recoverParentNarrative, steeredUserMessages } from "./parent-narrative-recovery";
@@ -116,8 +117,15 @@ describe("recoverParentNarrative", () => {
 });
 
 function userMessage(id: string, content: string, sequence: number): Message {
-  return { id, thread_id: THREAD, role: "user", content, tool_calls: null, files_changed: null, cost_usd: null,
-    tokens_used: null, timestamp: NOW, sequence, attachments: null, is_internal: false };
+  return createMockMessage({
+    id,
+    thread_id: THREAD,
+    role: "user",
+    content,
+    timestamp: NOW,
+    sequence,
+    is_internal: false,
+  });
 }
 
 function withMessage(state: AgentModelState, message: Message): AgentModelState {

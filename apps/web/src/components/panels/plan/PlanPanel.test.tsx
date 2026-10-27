@@ -1,9 +1,10 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanImplement, PlanImplementReceipt, PlanSaveVersion, PlanVersion, ReviewState } from "@mcode/contracts";
-import { createMockThread } from "@/__tests__/mocks/transport";
+
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { usePlanStore } from "@/stores/planStore";

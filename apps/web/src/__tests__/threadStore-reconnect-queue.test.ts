@@ -1,3 +1,4 @@
+import { createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import type { AgentEvent, AgentStopResult } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +10,7 @@ import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { restoreQueuedSteers, sendHeldSteerAgain } from "@/features/conversation/composer/queue/queued-steer";
-import { createMockThread, mockTransport } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

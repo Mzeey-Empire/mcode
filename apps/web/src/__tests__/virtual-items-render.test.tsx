@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { memo } from "react";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -5,7 +6,7 @@ import {
   createTranscriptItemProjector,
   type ChatVirtualItem,
 } from "@/features/conversation/messages/virtual-items";
-import type { Message, ToolCall } from "@/transport/types";
+import type { ToolCall } from "@/transport/types";
 
 const renderCounts = new Map<string, number>();
 
@@ -22,23 +23,6 @@ function ItemList({ items }: { items: readonly ChatVirtualItem[] }) {
       ))}
     </>
   );
-}
-
-function makeMessage(overrides: Partial<Message> = {}): Message {
-  return {
-    id: "msg-1",
-    thread_id: "thread-1",
-    role: "assistant",
-    content: "Settled response",
-    tool_calls: null,
-    files_changed: null,
-    cost_usd: null,
-    tokens_used: null,
-    timestamp: "2026-01-01T00:00:00Z",
-    sequence: 1,
-    attachments: null,
-    ...overrides,
-  };
 }
 
 function makeToolCall(overrides: Partial<ToolCall> = {}): ToolCall {
@@ -66,8 +50,8 @@ describe("virtual item render isolation", () => {
       responseKey: "turn-response:thread-1:typing",
     };
     const messages = [
-      makeMessage({ id: "user-1", role: "user", content: "Prompt", sequence: 1 }),
-      makeMessage({ id: "assistant-1", role: "assistant", sequence: 2 }),
+      createMockMessage({ id: "user-1", role: "user", content: "Prompt", sequence: 1, thread_id: "thread-1" }),
+      createMockMessage({ id: "assistant-1", role: "assistant", sequence: 2, content: "Settled response", thread_id: "thread-1" }),
     ];
     const firstItems = projectTranscript({
       messages,

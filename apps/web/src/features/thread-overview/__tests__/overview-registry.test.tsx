@@ -1,4 +1,5 @@
-import { createMockMessage, createMockThread, createMockWorkspace, mockTransport } from "@/__tests__/mocks/transport";
+import { createMockMessage, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { ThreadOverview } from "@/components/chat/ThreadOverview";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";

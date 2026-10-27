@@ -1,6 +1,7 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createMockMessage } from "@/__tests__/mocks/transport";
+
 import { useThreadStore } from "@/stores/threadStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { TurnRevertAnnouncer } from "../TurnRevertAnnouncer";

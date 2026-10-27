@@ -1,3 +1,4 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
@@ -5,7 +6,7 @@ import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { sendQueuedMessage, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { createMockThread, mockTransport } from "@/__tests__/mocks/transport";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { seedPage, tickClockPerRead } from "@/features/preview/notes/__tests__/fixtures";
 import { readVisibleBrowserNotePages } from "../draft/draft-browser-notes";
 import { deleteDraftDiffComment, readVisibleDiffComments, saveDraftDiffComment } from "../draft/draft-diff-comments";

@@ -1,3 +1,4 @@
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import {
   activateTestConversation,
   resetThreadStoreForTests,
@@ -18,7 +19,7 @@ import {
   clearRecordCache,
   getCachedRecord,
 } from "@/features/conversation/hydration/record-cache";
-import { mockTransport, createMockMessage } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -50,50 +51,17 @@ function resetState() {
   // listSnapshots path. This is critical for warmCache() to work correctly.
   useWorkspaceStore.setState({
     threads: [
-      {
+      createMockThread({
         id: THREAD_ID,
         workspace_id: "ws-1",
         title: "Test thread",
-        status: "active" as const,
-        mode: "direct" as const,
-        worktree_path: null,
+        status: "active",
+        mode: "direct",
         branch: "main",
-        checkout_state: "named" as const,
-        base_branch: null,
-        head_sha: null,
-        worktree_managed: false,
-        issue_number: null,
-        pr_number: null,
-        pr_status: null,
+        checkout_state: "named",
         has_file_changes: false,
-        sdk_session_id: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        model: null,
         provider: "claude",
-        deleted_at: null,
-        user_completed_at: null,
-    scheduled_deletion_at: null,
-    scheduled_resume: null,
-    cleanup_state: null,
-    cleanup_reason: null,
-        last_context_tokens: null,
-        context_window: null,
-        reasoning_level: null,
-    interaction_mode: null,
-    orchestration_mode: null,
-        permission_mode: null,
-        context_window_mode: null,
-        thinking: null,
-        fast_mode: null,
-    devin_mode: null,
-        parent_thread_id: null,
-        delegation_coordinator_thread_id: null,
-        forked_from_message_id: null,
-        last_compact_summary: null,
-        plan_phase: null,
-        default_open_in_app: null,
-      },
+      }),
     ],
   });
 

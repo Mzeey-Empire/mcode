@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   getCachedRecord,
@@ -6,7 +7,7 @@ import {
   projectConversationCacheState,
 } from "@/features/conversation/hydration/record-cache";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
-import { mockTransport, createMockMessage } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", () => ({
   getTransport: () => mockTransport,

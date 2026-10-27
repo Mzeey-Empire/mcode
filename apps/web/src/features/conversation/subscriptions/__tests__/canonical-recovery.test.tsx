@@ -1,8 +1,9 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope,
   type CanonicalAgentEventEnvelope, type ConversationPage, type SetThreadSubscriptionsResult } from "@mcode/contracts";
-import { createMockMessage } from "@/__tests__/mocks/transport";
+
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";

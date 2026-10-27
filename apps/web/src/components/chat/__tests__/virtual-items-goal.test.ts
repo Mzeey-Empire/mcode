@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import type { Message, ToolCall } from "@/transport/types";
 import {
@@ -13,19 +14,14 @@ function message(
   content: string,
   sequence: number,
 ): Message {
-  return {
+  return createMockMessage({
     id,
     thread_id: "thread-1",
     role,
     content,
-    tool_calls: null,
-    files_changed: null,
-    cost_usd: null,
-    tokens_used: null,
     timestamp: "2026-06-29T00:00:00.000Z",
     sequence,
-    attachments: null,
-  };
+  });
 }
 
 function toolCall(): ToolCall {

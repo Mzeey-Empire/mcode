@@ -6,21 +6,15 @@ import type { Workspace } from "@/transport/types";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { Command } from "@/components/ui/command";
 
-const hoisted = vi.hoisted(() => {
-  const pinnedWorkspace: Workspace = {
+const hoisted = await vi.hoisted(async () => {
+  const { createMockWorkspace } = await import("@mcode/contracts/testing");
+  const pinnedWorkspace: Workspace = createMockWorkspace({
     id: "ws-1",
     name: "Alpha",
     path: "/alpha",
-    provider_config: {},
-    is_git_repo: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
     pinned: true,
     last_opened_at: Date.now(),
-    sort_order: 0,
-    deleted_at: null,
-    icon_path: null,
-  };
+  });
   return {
     pinnedWorkspace,
     setActiveWorkspace: vi.fn(),

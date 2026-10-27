@@ -1,3 +1,4 @@
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import type { AgentEvent } from "@mcode/contracts";
 import {
@@ -11,7 +12,7 @@ import {
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { countActiveSubagentCalls, useThreadStore } from "@/stores/threadStore";
-import { mockTransport, createMockMessage, createMockThread } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useTaskStore } from "@/stores/taskStore";

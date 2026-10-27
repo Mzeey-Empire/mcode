@@ -1,3 +1,4 @@
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import type { AgentEvent } from "@mcode/contracts";
 import {
   resetThreadStoreForTests,
@@ -35,7 +36,7 @@ import {
   RECORD_MESSAGE_CACHE_SIZE,
   type ThreadHydrator,
 } from "..";
-import { mockTransport, createMockMessage, createMockThread } from "@/__tests__/mocks/transport";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { shallowEqualBy } from "@/lib/shallowEqualBy";
 import { coerceTaskStatus } from "@/stores/taskStore";
 import { getTransport } from "@/transport";

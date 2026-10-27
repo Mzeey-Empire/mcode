@@ -1,4 +1,5 @@
-import { createMockApproval, createMockThread } from "@/__tests__/mocks/transport";
+import { createMockApproval, createMockThread } from "@mcode/contracts/testing";
+
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useApprovalStore } from "@/stores/approvalStore";
 import type { McodeTransport } from "@/transport/types";

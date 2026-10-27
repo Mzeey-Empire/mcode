@@ -1,3 +1,4 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport";
@@ -31,7 +32,7 @@ vi.mock("@/features/preview/navigation/open-url-in-preview", () => ({
 import { useThreadGitActions } from "./useThreadGitActions";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
-  return {
+  return createMockThread({
     id: "thread-1",
     workspace_id: "ws-1",
     title: "Test Thread",
@@ -41,41 +42,12 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: "feat/test",
     checkout_state: "named",
     base_branch: null,
-    head_sha: null,
     worktree_managed: true,
-    issue_number: null,
     pr_number: null,
     pr_status: null,
-    sdk_session_id: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    model: null,
     provider: "claude",
-    deleted_at: null,
-    user_completed_at: null,
-    scheduled_deletion_at: null,
-    scheduled_resume: null,
-    cleanup_state: null,
-    cleanup_reason: null,
-    last_context_tokens: null,
-    context_window: null,
-    reasoning_level: null,
-    interaction_mode: null,
-    orchestration_mode: null,
-    permission_mode: null,
-    context_window_mode: null,
-    thinking: null,
-    fast_mode: null,
-    devin_mode: null,
-    default_open_in_app: null,
-    parent_thread_id: null,
-    delegation_coordinator_thread_id: null,
-    forked_from_message_id: null,
-    last_compact_summary: null,
-    plan_phase: null,
-    has_file_changes: false,
     ...overrides,
-  };
+  });
 }
 
 function seedWorkspace(prUrlsByThreadId: Record<string, string> = {}) {

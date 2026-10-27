@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import {
   AgentEventSchema, CanonicalAgentSemanticEnvelopeSchema, MessageSchema, PlanVersionSchema,
   createAgentModelState, reduceAgentEventBatch,
@@ -76,9 +77,18 @@ function notice(message = "Provider warning", noticeKey = "warning"): Extract<Ag
 }
 
 function noticeMessage(id: string, sequence: number, overrides: Partial<Message> = {}): Message {
-  return MessageSchema().parse({ id, thread_id: thread.id, role: "system", content: "Earlier warning",
-    timestamp: STARTED_AT, sequence, tool_calls: null, files_changed: null, cost_usd: null,
-    tokens_used: null, attachments: null, model: null, systemNotice: notice().systemNotice, ...overrides });
+  return MessageSchema().parse(createMockMessage({
+    id,
+    thread_id: thread.id,
+    role: "system",
+    content: "Earlier warning",
+    timestamp: STARTED_AT,
+    sequence,
+    attachments: null,
+    model: null,
+    systemNotice: notice().systemNotice,
+    ...overrides,
+  }));
 }
 
 describe("prepareAcceptedFeatureObservations", () => {
