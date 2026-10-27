@@ -2,7 +2,6 @@ import { logger } from "@mcode/shared";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import type { GithubService } from "../github/github-service.js";
-import { normalizeThreadPullRequestState } from "../github/github-pull-request-normalizers.js";
 import type { PullRequestLinkFunnel } from "../links/pull-request-link-funnel.js";
 
 /** Refreshes a feature-branch pull-request link after a turn is terminally published. */
@@ -27,17 +26,17 @@ export class TurnPullRequestCompletionEffect {
   private async refresh(threadId: string): Promise<void> {
     const target = this.target(threadId);
     if (!target) return;
-    const pr = await this.github.getBranchPr(target.branch, target.workspacePath);
-    if (!pr) return;
-    await this.funnel.observe(target.threadId, [{
-      number: pr.number, state: normalizeThreadPullRequestState(pr.state), title: pr.title, url: pr.url,
-    }], "turn-settled");
+    const prs = await this.github.listBranchPrs(target.branch, target.workspacePath);
+    const current = this.threads.findById(target.threadId);
+    if (current?.branch !== target.branch || current.checkout_state !== target.checkoutState) return;
+    await this.funnel.observe(target.threadId, prs, "turn-settled");
   }
 
   private target(threadId: string): {
     threadId: string;
     branch: string;
     workspacePath: string;
+    checkoutState: "named" | "branchless";
   } | null {
     const thread = this.threads.findById(threadId);
     if (!thread || thread.branch === "main" || thread.branch === "master") return null;
@@ -47,6 +46,7 @@ export class TurnPullRequestCompletionEffect {
       threadId: thread.id,
       branch: thread.branch,
       workspacePath: workspace.path,
+      checkoutState: thread.checkout_state,
     };
   }
 }

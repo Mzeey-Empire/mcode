@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { type ThreadPullRequest, type ThreadPullRequestState } from "@mcode/contracts/models/thread-pull-request";
+import { rankPullRequests, type ThreadPullRequest, type ThreadPullRequestState } from "@mcode/contracts/models/thread-pull-request";
 import type { Workspace, Thread, PermissionMode, WorktreeInfo, AttachmentMeta } from "@/transport";
 import {
   type WorkspaceThread,
@@ -1714,12 +1714,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   applyThreadPullRequests: (threadId, prs) => {
-    set((state) => ({
-      threads: state.threads.map((thread) => {
-        if (thread.id !== threadId) return thread;
-        return { ...thread, pull_requests: prs };
-      }),
-    }));
+    set((state) => {
+      const previous = state.threads.find((thread) => thread.id === threadId);
+      const checksById = { ...state.checksById };
+      if (rankPullRequests(previous?.pull_requests ?? [])[0]?.number !== rankPullRequests(prs)[0]?.number) {
+        delete checksById[threadId];
+      }
+      return {
+        threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, pull_requests: prs } : thread),
+        checksById,
+      };
+    });
   },
 
   applyThreadActivity: (threadId, at) => {

@@ -3,7 +3,7 @@ import type { GithubService, PullRequestWatchSnapshot } from "../github/github-s
 import type { ChecksStatus } from "@mcode/contracts/github";
 import type { Thread } from "@mcode/contracts/models/thread";
 
-/** Internal tracking entry for a watched thread. */
+/** Internal tracking entry for one thread and linked PR. */
 export interface WatchEntry {
   threadId: string;
   prNumber: number;
@@ -12,33 +12,22 @@ export interface WatchEntry {
   cache: ChecksStatus | null;
 }
 
-/** Broadcast function signature matching the server push system. */
-type BroadcastFn = (channel: string, data: unknown) => void;
+type BroadcastFn = (channel: "thread.checksUpdated", data: { threadId: string; prNumber: number; checks: ChecksStatus }) => void;
 
-/** A terminal lifecycle change detected while polling a linked pull request. */
-export interface PullRequestStateChange {
-  threadId: string;
-  prNumber: number;
-  state: "CLOSED" | "MERGED";
-}
+/** Normalized PR observation detected while polling lifecycle and checks. */
+export type PullRequestStateChange = Pick<PullRequestWatchSnapshot, "threadId" | "prNumber" | "state" | "title" | "url">;
 
-/** Persists and publishes a terminal pull request lifecycle change. */
-type PullRequestStateChangeFn = (change: PullRequestStateChange) => void;
+type PullRequestStateChangeFn = (change: PullRequestStateChange) => void | Promise<void>;
 
-// In-progress checks refresh every 15s. Threads in one repository share a bounded batch,
-// so adding another watched PR does not add another request to that polling cycle.
 const ACTIVE_INTERVAL_MS = 15_000;
-// Terminal checks refresh every 20s to catch a new external run without polling each PR alone.
 const PASSIVE_INTERVAL_MS = 20_000;
-// When the user just pushed, GitHub Actions take a few seconds to register the new run.
-// Bump the cache on this curve so "pending" appears within ~3s of push completion.
 const POST_PUSH_BUMP_DELAYS_MS = [3_000, 8_000, 20_000];
 
-/**
- * Server-side CI check watcher with adaptive dual-interval polling.
- * Threads with in-progress checks poll at 15s; terminal checks poll at 20s.
- * Broadcasts `thread.checksUpdated` only when state changes.
- */
+function watchKey(threadId: string, prNumber: number): string {
+  return JSON.stringify([threadId, prNumber]);
+}
+
+/** Adaptive CI and lifecycle polling, independently keyed by thread and PR number. */
 export class CiWatcherService {
   private active = new Map<string, WatchEntry>();
   private passive = new Map<string, WatchEntry>();
@@ -52,135 +41,111 @@ export class CiWatcherService {
     private readonly githubService: Pick<GithubService, "getCheckRuns" | "getPullRequestWatchSnapshots" | "cancelCheckRuns" | "cancelAllInFlight">,
     private readonly broadcast: BroadcastFn,
     private readonly onPullRequestStateChange?: PullRequestStateChangeFn,
-  ) {
-    this.startPassiveTimer();
-  }
+  ) {}
 
-  /**
-   * Add a thread to the watcher. Starts in the passive set with an immediate first fetch.
-   * Pass `skipInitialFetch: true` when the caller will fetch and broadcast the result itself,
-   * to avoid spawning a redundant concurrent subprocess.
-   */
+  /** Add a PR without replacing other PRs linked to the same thread. */
   watch(threadId: string, prNumber: number, branch: string, repoPath: string, opts?: { skipInitialFetch?: boolean }): void {
-    if (this.active.has(threadId) || this.passive.has(threadId)) return;
-    this.passive.set(threadId, { threadId, prNumber, branch, repoPath, cache: null });
+    const previous = this.getEntry(threadId, prNumber);
+    if (previous?.branch === branch && previous.repoPath === repoPath) return;
+    if (previous) this.unwatch(threadId, prNumber);
+    const entry: WatchEntry = { threadId, prNumber, branch, repoPath, cache: null };
+    this.passive.set(watchKey(threadId, prNumber), entry);
     this.startPassiveTimer();
-
     if (opts?.skipInitialFetch) return;
-
-    // Fetch immediately so the client gets data without waiting for the passive tick.
-    this.githubService.getCheckRuns(branch, repoPath).then((checks) => {
-      const entry = this.passive.get(threadId) ?? this.active.get(threadId);
-      if (!entry) return; // unwatched during fetch
-      entry.cache = checks;
-      this.broadcast("thread.checksUpdated", { threadId, checks });
-      if (checks.aggregate === "pending") {
-        this.passive.delete(threadId);
-        this.active.set(threadId, entry);
-        this.startActiveTimer();
-        // Passive set just shrank — stop passive timer if it's now empty.
-        if (this.passive.size === 0) this.stopPassiveTimer();
-      }
-    }).catch((err) => {
-      logger.debug("CiWatcher initial fetch failed", { threadId, error: String(err) });
-    });
+    void this.fetchInitialChecks(entry);
   }
 
-  /** Remove a thread from the watcher entirely. */
-  unwatch(threadId: string): void {
-    this.active.delete(threadId);
-    this.passive.delete(threadId);
-    this.clearBumpTimers(threadId);
+  private async fetchInitialChecks(entry: WatchEntry): Promise<void> {
+    try {
+      const checks = await this.githubService.getCheckRuns(entry.branch, entry.repoPath);
+      if (this.getEntry(entry.threadId, entry.prNumber) === entry) this.refresh(entry.threadId, entry.prNumber, checks);
+    } catch (error) {
+      logger.debug("CiWatcher initial fetch failed", { threadId: entry.threadId, error: String(error) });
+    }
+  }
+
+  /** Replace the open/draft watch set while retaining unchanged entries and their caches. */
+  setWatchSet(threadId: string, numbers: readonly number[], branch: string, repoPath: string): void {
+    const desired = new Set(numbers);
+    for (const entry of this.entriesForThread(threadId)) {
+      if (!desired.has(entry.prNumber)) this.unwatch(threadId, entry.prNumber);
+    }
+    for (const number of numbers) this.watch(threadId, number, branch, repoPath);
+  }
+
+  /** Remove one PR, or every PR when tearing down a thread. */
+  unwatch(threadId: string, prNumber?: number): void {
+    const entries = prNumber === undefined ? this.entriesForThread(threadId) : [this.getEntry(threadId, prNumber)];
+    for (const entry of entries) {
+      if (!entry) continue;
+      const key = watchKey(entry.threadId, entry.prNumber);
+      this.active.delete(key);
+      this.passive.delete(key);
+    }
+    if (!this.isWatching(threadId)) this.clearBumpTimers(threadId);
     if (this.active.size === 0) this.stopActiveTimer();
-    // Stop the passive timer independently — it's not needed just because active is non-empty.
     if (this.passive.size === 0) this.stopPassiveTimer();
   }
 
-  /** Remove a thread from the watcher and cancel its in-flight GitHub check process. */
+  /** Remove all thread entries and cancel GitHub processes holding its checkout. */
   async teardownThread(threadId: string): Promise<void> {
-    const entry = this.active.get(threadId) ?? this.passive.get(threadId);
+    const entries = this.entriesForThread(threadId);
     this.unwatch(threadId);
-    if (entry) {
-      await this.githubService.cancelCheckRuns(entry.branch, entry.repoPath);
-    }
+    const paths = new Map(entries.map((entry) => [JSON.stringify([entry.branch, entry.repoPath]), entry]));
+    await Promise.all([...paths.values()].map((entry) => this.githubService.cancelCheckRuns(entry.branch, entry.repoPath)));
   }
 
-  /** Check if a thread is being watched. */
-  isWatching(threadId: string): boolean {
-    return this.active.has(threadId) || this.passive.has(threadId);
+  /** Whether one PR, or any PR belonging to a thread, is watched. */
+  isWatching(threadId: string, prNumber?: number): boolean {
+    return prNumber === undefined ? this.entriesForThread(threadId).length > 0 : this.getEntry(threadId, prNumber) !== null;
   }
 
-  /** Get the current entry for a thread (for manual refresh). */
-  getEntry(threadId: string): WatchEntry | null {
-    return this.active.get(threadId) ?? this.passive.get(threadId) ?? null;
+  /** Read the independent cache for a specific linked PR. */
+  getEntry(threadId: string, prNumber: number): WatchEntry | null {
+    const key = watchKey(threadId, prNumber);
+    return this.active.get(key) ?? this.passive.get(key) ?? null;
   }
 
-  /**
-   * Return the cached status only if it was fetched within `maxAgeMs`. Returns null
-   * when the thread is not watched, has no cached result, or the cache is older than
-   * `maxAgeMs`. Used by the `github.checkStatus` RPC handler to short-circuit live
-   * fetches when the watcher already has a fresh result.
-   */
-  getFreshCache(threadId: string, maxAgeMs: number): ChecksStatus | null {
-    const entry = this.getEntry(threadId);
-    if (!entry?.cache) return null;
-    if (Date.now() - entry.cache.fetchedAt > maxAgeMs) return null;
+  /** Return a PR's cached checks only while its fetch time is fresh. */
+  getFreshCache(threadId: string, prNumber: number, maxAgeMs: number): ChecksStatus | null {
+    const entry = this.getEntry(threadId, prNumber);
+    if (!entry?.cache || Date.now() - entry.cache.fetchedAt > maxAgeMs) return null;
     return entry.cache;
   }
 
-  /**
-   * Update the cached status for a thread and broadcast if anything changed.
-   * Mirrors tick()'s promote/demote logic so a manual refresh keeps the
-   * polling cadence correct (e.g. pending → active set, terminal → passive set).
-   * Used by the manual-refresh RPC to keep all clients in sync.
-   */
-  refresh(threadId: string, checks: ChecksStatus): void {
-    const entry = this.active.get(threadId) ?? this.passive.get(threadId);
+  /** Refresh one PR's checks and adapt its polling cadence. */
+  refresh(threadId: string, prNumber: number, checks: ChecksStatus): void {
+    const entry = this.getEntry(threadId, prNumber);
     if (!entry) return;
     const changed = this.hasChanged(entry.cache, checks);
     entry.cache = checks;
-    if (changed) {
-      this.broadcast("thread.checksUpdated", { threadId, checks });
-    }
+    if (changed) this.broadcast("thread.checksUpdated", { threadId, prNumber, checks });
+    this.setCadence(entry, checks.aggregate === "pending");
+  }
 
-    // Promote to active when checks are running, demote to passive when terminal.
-    if (this.passive.has(threadId) && checks.aggregate === "pending") {
-      this.passive.delete(threadId);
-      this.active.set(threadId, entry);
+  private setCadence(entry: WatchEntry, pending: boolean): void {
+    const key = watchKey(entry.threadId, entry.prNumber);
+    if (pending) {
+      this.passive.delete(key);
+      this.active.set(key, entry);
       this.startActiveTimer();
       if (this.passive.size === 0) this.stopPassiveTimer();
-    } else if (this.active.has(threadId) && checks.aggregate !== "pending") {
-      this.active.delete(threadId);
-      this.passive.set(threadId, entry);
+    } else {
+      this.active.delete(key);
+      this.passive.set(key, entry);
       this.startPassiveTimer();
       if (this.active.size === 0) this.stopActiveTimer();
     }
   }
 
-  /**
-   * Force an immediate fetch + broadcast for a watched thread, bypassing the passive/active
-   * tick cadence. Used by push-completion paths so a fresh CI run surfaces within seconds
-   * of the push instead of waiting for the next passive tick.
-   */
+  /** Refresh every PR on a thread after an explicit push. */
   async bump(threadId: string): Promise<void> {
-    const entry = this.active.get(threadId) ?? this.passive.get(threadId);
-    if (!entry) return;
-    try {
-      const checks = await this.githubService.getCheckRuns(entry.branch, entry.repoPath);
-      this.refresh(threadId, checks);
-    } catch (err) {
-      logger.debug("CiWatcher bump failed", { threadId, error: String(err) });
-    }
+    await Promise.all(this.entriesForThread(threadId).map((entry) => this.fetchInitialChecks(entry)));
   }
 
-  /**
-   * Schedule a burst of bumps on the GitHub Actions registration curve. After a push,
-   * runs appear 3-15s later depending on repo size and workflow triggers; this burst
-   * catches them without waiting up to a full passive tick.
-   */
+  /** Poll on the existing Actions registration curve after a push. */
   scheduleBumpAfterPush(threadId: string): void {
-    const entry = this.active.get(threadId) ?? this.passive.get(threadId);
-    if (!entry) return;
+    if (!this.isWatching(threadId)) return;
     this.clearBumpTimers(threadId);
     const timers = new Set<ReturnType<typeof setTimeout>>();
     this.bumpTimers.set(threadId, timers);
@@ -195,68 +160,48 @@ export class CiWatcherService {
     }
   }
 
-  /**
-   * Find all watched threads matching a workspace + branch pair. Used by the push handler
-   * to schedule bumps for any PRs tied to that branch (typically 0 or 1).
-   */
+  /** Find watched threads on a pushed branch, returning each thread once. */
   findByWorkspaceBranch(
     threadLookup: (threadId: string) => { branch: string; workspace_id: string } | null,
     workspaceId: string,
     branch: string,
   ): string[] {
-    const ids: string[] = [];
-    for (const id of [...this.active.keys(), ...this.passive.keys()]) {
-      const t = threadLookup(id);
-      if (t && t.workspace_id === workspaceId && t.branch === branch) ids.push(id);
-    }
-    return ids;
+    const ids = new Set([...this.active.values(), ...this.passive.values()].map((entry) => entry.threadId));
+    return [...ids].filter((id) => {
+      const thread = threadLookup(id);
+      return thread?.workspace_id === workspaceId && thread.branch === branch;
+    });
   }
 
-  /**
-   * Seed the watcher from existing threads with open PRs.
-   * Called once on server startup.
-   */
+  /** Seed every observed open or draft PR without relying on the legacy primary link. */
   async seed(
     threads: Array<Pick<Thread, "id" | "pull_requests" | "branch">>,
     workspacePaths: Map<string, string>,
     getWorkspaceId: (threadId: string) => string | null,
   ): Promise<void> {
-    const candidates = threads.flatMap((thread) => thread.pull_requests
-      .filter((pr) => pr.state === "open" || pr.state === "draft")
-      .map((pr) => ({ ...thread, prNumber: pr.number })));
-
-    const targets = candidates.flatMap((t) => {
-      const wsId = getWorkspaceId(t.id);
-      const repoPath = wsId ? workspacePaths.get(wsId) : undefined;
-      if (!repoPath) return [];
-
-      // Insert placeholder synchronously so concurrent watch() calls see this threadId
-      // and skip re-insertion during the async fetch window.
-      if (!this.active.has(t.id) && !this.passive.has(t.id)) {
-        this.passive.set(t.id, { threadId: t.id, prNumber: t.prNumber, branch: t.branch, repoPath, cache: null });
-      }
-      return [{ threadId: t.id, prNumber: t.prNumber, repoPath }];
-    });
-
-    try {
-      const snapshots = await this.githubService.getPullRequestWatchSnapshots(targets);
-      for (const snapshot of snapshots) {
-        const entry = this.passive.get(snapshot.threadId) ?? this.active.get(snapshot.threadId);
-        if (entry) this.applyWatchSnapshot(entry, snapshot);
-      }
-    } catch (err) {
-      logger.debug("CiWatcher seed batch failed", { error: String(err) });
+    const entries: WatchEntry[] = [];
+    for (const thread of threads) {
+      const workspaceId = getWorkspaceId(thread.id);
+      const repoPath = workspaceId ? workspacePaths.get(workspaceId) : undefined;
+      if (!repoPath) continue;
+      this.seedThread(thread, repoPath, entries);
     }
-
-    if (this.active.size > 0) this.startActiveTimer();
+    await this.poll(entries);
     logger.info(`CiWatcher seeded: ${this.active.size} active, ${this.passive.size} passive`);
   }
 
-  /** Clean up all timers. Called on server shutdown. */
-  async dispose(): Promise<void> {
-    for (const threadId of this.bumpTimers.keys()) {
-      this.clearBumpTimers(threadId);
+  private seedThread(thread: Pick<Thread, "id" | "pull_requests" | "branch">, repoPath: string, entries: WatchEntry[]): void {
+    for (const pr of thread.pull_requests) {
+      if (pr.state !== "open" && pr.state !== "draft") continue;
+      this.watch(thread.id, pr.number, thread.branch, repoPath, { skipInitialFetch: true });
+      const entry = this.getEntry(thread.id, pr.number);
+      if (entry) entries.push(entry);
     }
+  }
+
+  /** Cancel timers and in-flight work on server shutdown. */
+  async dispose(): Promise<void> {
+    for (const threadId of this.bumpTimers.keys()) this.clearBumpTimers(threadId);
     this.stopActiveTimer();
     this.stopPassiveTimer();
     this.active.clear();
@@ -264,20 +209,22 @@ export class CiWatcherService {
     await this.githubService.cancelAllInFlight();
   }
 
+  private entriesForThread(threadId: string): WatchEntry[] {
+    return [...this.active.values(), ...this.passive.values()].filter((entry) => entry.threadId === threadId);
+  }
+
   private startActiveTimer(): void {
     if (this.activeTimer) return;
     this.activeTimer = setInterval(async () => {
       if (this.activeTicking) return;
       this.activeTicking = true;
-      try { await this.tick(this.active); } finally { this.activeTicking = false; }
+      try { await this.poll([...this.active.values()]); } finally { this.activeTicking = false; }
     }, ACTIVE_INTERVAL_MS);
   }
 
   private stopActiveTimer(): void {
-    if (this.activeTimer) {
-      clearInterval(this.activeTimer);
-      this.activeTimer = null;
-    }
+    if (this.activeTimer) clearInterval(this.activeTimer);
+    this.activeTimer = null;
   }
 
   private startPassiveTimer(): void {
@@ -285,15 +232,13 @@ export class CiWatcherService {
     this.passiveTimer = setInterval(async () => {
       if (this.passiveTicking) return;
       this.passiveTicking = true;
-      try { await this.tick(this.passive); } finally { this.passiveTicking = false; }
+      try { await this.poll([...this.passive.values()]); } finally { this.passiveTicking = false; }
     }, PASSIVE_INTERVAL_MS);
   }
 
   private stopPassiveTimer(): void {
-    if (this.passiveTimer) {
-      clearInterval(this.passiveTimer);
-      this.passiveTimer = null;
-    }
+    if (this.passiveTimer) clearInterval(this.passiveTimer);
+    this.passiveTimer = null;
   }
 
   private clearBumpTimers(threadId: string): void {
@@ -303,49 +248,41 @@ export class CiWatcherService {
     this.bumpTimers.delete(threadId);
   }
 
-  /** Returns true when `next` differs semantically from `cached` (aggregate, run count, or per-run status/conclusion). */
   private hasChanged(cached: ChecksStatus | null, next: ChecksStatus): boolean {
     return cached == null
       || cached.aggregate !== next.aggregate
       || cached.runs.length !== next.runs.length
-      || cached.runs.some((r, i) => {
-        const nr = next.runs[i];
-        return nr && (r.status !== nr.status || r.conclusion !== nr.conclusion);
+      || cached.runs.some((run, index) => {
+        const updated = next.runs[index];
+        return updated && (run.status !== updated.status || run.conclusion !== updated.conclusion);
       });
   }
 
-  private async tick(set: Map<string, WatchEntry>): Promise<void> {
-    if (set.size === 0) return;
-
-    const entries = [...set.values()];
+  private async poll(entries: WatchEntry[]): Promise<void> {
+    if (entries.length === 0) return;
     try {
-      const snapshots = await this.githubService.getPullRequestWatchSnapshots(
-        entries.map((entry) => ({
-          threadId: entry.threadId,
-          prNumber: entry.prNumber,
-          repoPath: entry.repoPath,
-        })),
-      );
+      const snapshots = await this.githubService.getPullRequestWatchSnapshots(entries.map((entry) => ({
+        threadId: entry.threadId, prNumber: entry.prNumber, repoPath: entry.repoPath,
+      })));
+      const requested = new Map(entries.map((entry) => [watchKey(entry.threadId, entry.prNumber), entry]));
       for (const snapshot of snapshots) {
-        const entry = this.active.get(snapshot.threadId) ?? this.passive.get(snapshot.threadId);
-        if (entry) this.applyWatchSnapshot(entry, snapshot);
+        const entry = requested.get(watchKey(snapshot.threadId, snapshot.prNumber));
+        if (entry && this.getEntry(entry.threadId, entry.prNumber) === entry) await this.applyWatchSnapshot(entry, snapshot);
       }
-    } catch (err) {
-      logger.debug("CiWatcher batch tick failed", { error: String(err) });
+    } catch (error) {
+      logger.debug("CiWatcher batch tick failed", { error: String(error) });
     }
   }
 
-  private applyWatchSnapshot(entry: WatchEntry, snapshot: PullRequestWatchSnapshot): void {
-    if (entry.prNumber !== snapshot.prNumber) return;
-    if (snapshot.state === "CLOSED" || snapshot.state === "MERGED") {
-      this.onPullRequestStateChange?.({
-        threadId: entry.threadId,
-        prNumber: entry.prNumber,
-        state: snapshot.state,
-      });
-      this.unwatch(entry.threadId);
+  private async applyWatchSnapshot(entry: WatchEntry, snapshot: PullRequestWatchSnapshot): Promise<void> {
+    await this.onPullRequestStateChange?.({
+      threadId: entry.threadId, prNumber: entry.prNumber, state: snapshot.state, title: snapshot.title, url: snapshot.url,
+    });
+    if (this.getEntry(entry.threadId, entry.prNumber) !== entry) return;
+    if (snapshot.state === "closed" || snapshot.state === "merged") {
+      this.unwatch(entry.threadId, entry.prNumber);
       return;
     }
-    this.refresh(entry.threadId, snapshot.checks);
+    this.refresh(entry.threadId, entry.prNumber, snapshot.checks);
   }
 }
