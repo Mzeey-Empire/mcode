@@ -33,10 +33,7 @@ interface OlderBarProps {
   readonly onToggle: () => void;
 }
 
-/**
- * The one Older bar, portalled into the viewport's sticky flow host. It sits on the list's bottom
- * edge with a fade above it until the list scrolls it into its own place.
- */
+/** Renders the Older toggle in the viewport's sticky flow host, with a fade while pinned. */
 export function OlderBar({ item, viewport, onToggle }: OlderBarProps) {
   const pinned = usePinned(viewport);
   const host = viewport.flowHost;
