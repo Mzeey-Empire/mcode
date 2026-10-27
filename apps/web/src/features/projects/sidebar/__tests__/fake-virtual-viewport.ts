@@ -7,19 +7,27 @@ export class FakeVirtualViewport {
   static readonly published: string[][] = [];
   /** Whether each `setRows` call asked for a FLIP, parallel to `published`. */
   static readonly flips: boolean[] = [];
+  /** The most recently constructed viewport. */
+  static latest: FakeVirtualViewport | undefined;
   readonly viewport: HTMLElement;
-  readonly flowHost = null;
+  readonly flowHost: HTMLDivElement | undefined;
+  private readonly flowHostId: string | undefined;
   private readonly hosts = new Map<string, HTMLDivElement>();
 
   constructor(
     container: HTMLElement,
     private readonly publish: (hosts: ReadonlyArray<{ id: string; element: HTMLDivElement }>) => void,
     _onPosition: (position: unknown) => void,
-    options: { classPrefix?: string },
+    options: { classPrefix?: string; flowHostId?: string },
   ) {
     this.viewport = document.createElement("div");
     this.viewport.dataset.testid = `${options.classPrefix ?? "virtual"}-viewport`;
     container.append(this.viewport);
+    FakeVirtualViewport.latest = this;
+    this.flowHostId = options.flowHostId;
+    if (options.flowHostId === undefined) return;
+    this.flowHost = document.createElement("div");
+    this.viewport.append(this.flowHost);
   }
 
   setRows(rows: ReadonlyArray<{ id: string }>, options?: { flip?: boolean }): void {
@@ -31,7 +39,8 @@ export class FakeVirtualViewport {
       element.remove();
       this.hosts.delete(id);
     }
-    const hosts = rows.map((row) => ({ id: row.id, element: this.hostFor(row.id) }));
+    // Like the real viewport, the flow host row is never published; callers portal into it.
+    const hosts = rows.filter((row) => row.id !== this.flowHostId).map((row) => ({ id: row.id, element: this.hostFor(row.id) }));
     // DOM order stands in for the real viewport's offsets, so a reorder must move the hosts.
     this.viewport.append(...hosts.map((host) => host.element));
     this.publish(hosts);
@@ -46,11 +55,20 @@ export class FakeVirtualViewport {
     return element;
   }
 
+  // jsdom has no layout: nothing scrolls, so chrome that tracks rows sees an empty scroller.
+  readonly clientHeight = 0;
+  onLayout(): () => void {
+    return () => {};
+  }
   releaseHosts(): void {}
   getReadingAnchor(): undefined {
     return undefined;
   }
-  moveTo(): void {}
+  /** Every `moveTo` call, oldest first. */
+  readonly moves: Array<{ position: unknown; smooth: boolean | undefined }> = [];
+  moveTo(position: unknown, smooth?: boolean): void {
+    this.moves.push({ position, smooth });
+  }
   restoreOffset(top: number): void {
     this.viewport.scrollTop = top;
   }

@@ -37,6 +37,13 @@ export interface VirtualViewportOptions {
    * {@link VirtualViewport.flowHost}.
    */
   readonly flowHostId?: string;
+  /**
+   * Hold a reading row's screen position even when the rows after it no longer fill the
+   * scroller, by padding the end with blank space. Chat needs this so history prepended into a
+   * short page does not jump. A list whose rows can vanish below the reader leaves it off, so the
+   * scroller shrinks back to its rows.
+   */
+  readonly padBelowReadingRow?: boolean;
 }
 
 /** Options for {@link VirtualViewport.setRows}. */
@@ -46,6 +53,15 @@ export interface SetRowsOptions {
    * not animate, and reduced motion animates nothing.
    */
   readonly flip?: boolean;
+}
+
+/** Options for {@link VirtualViewport.moveTo}. */
+export interface MoveOptions {
+  /**
+   * Hand the position to the reading row once the move lands. Later row changes then hold the
+   * visible rows still instead of chasing the target again.
+   */
+  readonly release?: boolean;
 }
 
 const FLIP_DURATION_MS = 180;
@@ -338,10 +354,10 @@ export class VirtualViewport {
     this.fitFlowFill();
     const anchor = correctAnchor ? this.readingAnchorHost() : undefined;
     const target = Math.max(0, this.targetScrollTop());
-    // A short initial page needs its trailing space retained when history is prepended.
+    const padsBelowReadingRow = this.position.kind === "reading" && this.options.padBelowReadingRow === true;
     this.context.updateContentSize(Math.max(
       this.context.sizeCache.getTotalSize(),
-      this.position.kind === "reading" ? target + this.viewport.clientHeight - this.insets.top - this.insets.bottom : 0,
+      padsBelowReadingRow ? target + this.viewport.clientHeight - this.insets.top - this.insets.bottom : 0,
     ));
     if (!this.animating) {
       this.context.scrollTo(target);
@@ -447,18 +463,25 @@ export class VirtualViewport {
   }
 
   /** Restores an anchor, follows the end, or keeps a navigation target centered. */
-  moveTo(position: ViewportPosition, smooth = false): void {
+  moveTo(position: ViewportPosition, smooth = false, options: MoveOptions = {}): void {
     this.context.cancelScroll();
     this.position = position;
     this.animating = smooth && !prefersReducedMotion();
     if (this.animating) {
       this.context.smoothScrollTo(() => Math.max(0, this.targetScrollTop()), 250, undefined, () => {
         this.animating = false;
-        this.applyPosition();
-        this.pinReadingAnchor();
+        this.settle(options.release === true);
       });
     }
+    this.settle(!this.animating && options.release === true);
+  }
+
+  private settle(release: boolean): void {
     this.applyPosition();
+    if (release) {
+      this.position = this.readingPosition();
+      this.applyPosition();
+    }
     this.pinReadingAnchor();
   }
 

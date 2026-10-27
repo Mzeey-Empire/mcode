@@ -18,6 +18,7 @@ export class TranscriptViewport extends VirtualViewport {
       ariaLabel: "Conversation",
       initialPosition: { kind: "end" },
       positionOnScroll: (anchor, atEnd) => atEnd ? { kind: "end" } : anchor,
+      padBelowReadingRow: true,
     });
     this.viewport.addEventListener("click", this.anchorDisclosure, true);
   }
