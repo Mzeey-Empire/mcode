@@ -8,7 +8,7 @@ export interface PrStateVisual {
   color: string;
 }
 
-/** Returns the icon and color for a PR state. Shared by PrBadge and the sidebar thread row. */
+/** Returns the icon and color for a PR state. */
 export function getPrVisual(state: string | null | undefined): PrStateVisual {
   switch (state) {
     case "merged":
@@ -20,10 +20,7 @@ export function getPrVisual(state: string | null | undefined): PrStateVisual {
   }
 }
 
-/**
- * Icon and icon color for a linked PR in the sidebar chip. An `unresolved` link was never
- * verified against GitHub, so it claims no state: its color is empty and the icon inherits.
- */
+/** Returns the PR state's icon and color; unresolved links inherit the surrounding color. */
 export function getPullRequestStateVisual(state: ThreadPullRequestState): PrStateVisual {
   switch (state) {
     case "open":
