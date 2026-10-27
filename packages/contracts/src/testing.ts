@@ -2,6 +2,12 @@ import type { ApprovalRequest } from "./models/approval.js";
 import type { Workspace } from "./models/workspace.js";
 import type { Thread } from "./models/thread.js";
 import type { Message } from "./models/message.js";
+import type { ThreadPullRequest } from "./models/thread-pull-request.js";
+
+/** Build a linked PR with valid defaults for contract consumers' tests. */
+export function createMockThreadPullRequest(overrides: Partial<ThreadPullRequest> = {}): ThreadPullRequest {
+  return { number: 42, state: "open", title: null, url: null, ...overrides };
+}
 
 /** A valid approval used to arrange transport and store tests. */
 export function createMockApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
@@ -55,6 +61,7 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
     issue_number: null,
     pr_number: null,
     pr_status: null,
+    pull_requests: [],
     sdk_session_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

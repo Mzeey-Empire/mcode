@@ -11,6 +11,24 @@ import { ThreadStore } from "../thread-store.js";
 afterEach(() => vi.restoreAllMocks());
 
 describe("whole thread index", () => {
+  it("reads a legacy-only PR as unresolved regardless of its legacy status", () => {
+    const db = openMemoryDatabase();
+    try {
+      const workspace = new WorkspaceStore(db).create("Legacy", "/legacy");
+      const threads = new ThreadStore(db);
+      const thread = threads.create(workspace.id, "Legacy PR", "worktree", "feature");
+      db.query("UPDATE threads SET pr_number = ?, pr_status = ? WHERE id = ?").run(42, "MERGED", thread.id);
+      expect(threads.findById(thread.id)?.pull_requests).toEqual([
+        { number: 42, state: "unresolved", title: null, url: null },
+      ]);
+      expect(threads.listAll()[0]?.pull_requests).toEqual([
+        { number: 42, state: "unresolved", title: null, url: null },
+      ]);
+    } finally {
+      db.close(true);
+    }
+  });
+
   it("includes a 101st thread and threads in another workspace", () => {
     const db = openMemoryDatabase();
     try {

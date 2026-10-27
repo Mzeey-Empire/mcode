@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ThreadPullRequestSchema } from "../models/thread-pull-request.js";
 import { TurnRevertedEventSchema } from "../models/turn-revert.js";
 import { ThreadAttentionSchema } from "../models/thread-attention.js";
 import { CanonicalAgentProgressFrameSchema } from "../models/canonical-agent-progress.js";
@@ -115,6 +116,10 @@ export const WS_CHANNELS = {
   /** Removes a thread after successful automatic retention cleanup. */
   "thread.deleted": z.object({
     threadId: z.string(),
+  }),
+  "thread.pullRequests": z.object({
+    threadId: z.string(),
+    pullRequests: z.array(ThreadPullRequestSchema()),
   }),
   "thread.prLinked": z.object({
     threadId: z.string(),

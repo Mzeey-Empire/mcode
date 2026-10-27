@@ -9,6 +9,7 @@ describe("pull requests feature boundary", () => {
       "GithubPullRequestClient",
       "GithubService",
       "PrDraftService",
+      "PullRequestLinkFunnel",
       "PullRequestMutationService",
       "PullRequestService",
       "ReviewWorktreeService",

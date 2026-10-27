@@ -318,6 +318,13 @@ export function startPushListeners(): void {
     }),
   );
 
+  unsubs.push(
+    pushEmitter.on("thread.pullRequests", (data) => {
+      const parsed = WS_CHANNELS["thread.pullRequests"].safeParse(data);
+      if (parsed.success) useWorkspaceStore.getState().applyThreadPullRequests(parsed.data.threadId, parsed.data.pullRequests);
+    }),
+  );
+
   // thread.prLinked: a PR was detected and linked to a thread
   unsubs.push(
     pushEmitter.on("thread.prLinked", (data) => {
