@@ -36,6 +36,13 @@ function mirrorPrimaryIntoLegacyColumnsForOlderBuilds(db: Database, threadId: st
     .where(eq(threads.id, threadId)).run();
 }
 
+function clearPauseOnStateChange(db: Database, threadId: string, current: ThreadPullRequest[], next: ThreadPullRequest[]): void {
+  const previousStates = new Map(current.map((pr) => [pr.number, pr.state]));
+  const changed = current.length !== next.length || next.some((pr) => previousStates.get(pr.number) !== pr.state);
+  if (!changed) return;
+  db.query("UPDATE threads SET auto_complete_paused_at = NULL WHERE id = ?").run(threadId);
+}
+
 function readLinks(db: Database, threadId: string): ThreadPullRequest[] {
   const orm = drizzle(db);
   const thread = orm.select({ number: threads.prNumber }).from(threads).where(eq(threads.id, threadId)).get();
@@ -54,6 +61,7 @@ export function observeThreadPullRequests(db: Database, threadId: string, observ
     const next = mergeObservations(current, observations);
     if (JSON.stringify(rankPullRequests(current)) === JSON.stringify(next)) return null;
     writeLinks(db, threadId, next);
+    clearPauseOnStateChange(db, threadId, current, next);
     return next;
   })();
 }
@@ -62,6 +70,7 @@ export function observeThreadPullRequests(db: Database, threadId: string, observ
 export function forgetThreadPullRequests(db: Database, threadId: string): ThreadPullRequest[] | null {
   if (readLinks(db, threadId).length === 0) return null;
   writeLinks(db, threadId, []);
+  db.query("UPDATE threads SET auto_complete_paused_at = NULL WHERE id = ?").run(threadId);
   return [];
 }
 
@@ -76,11 +85,19 @@ export function buildThreadPullRequestWriteHandlers(db: Database): ReadonlyMap<s
 
 /** Single owner of linked PR mutations, their committed pushes and watch sets. */
 export class PullRequestLinkFunnel {
+  private readonly listeners = new Set<(threadId: string) => void>();
+
   constructor(
     private readonly writer: ApplicationDatabaseWriter,
     private readonly publish: (threadId: string, prs: ThreadPullRequest[]) => void,
     private readonly setWatchSet: (threadId: string, numbers: number[]) => void,
   ) {}
+
+  /** Observe committed link changes after their push and watch-set update. */
+  onChanged(listener: (threadId: string) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
 
   /** Retain existing numbers and merged states while applying a new observation. */
   async observe(threadId: string, observations: readonly ThreadPullRequest[]): Promise<void> {
@@ -98,5 +115,6 @@ export class PullRequestLinkFunnel {
   publishCommitted(threadId: string, prs: ThreadPullRequest[]): void {
     this.publish(threadId, prs);
     this.setWatchSet(threadId, prs.filter((pr) => pr.state === "open" || pr.state === "draft").map((pr) => pr.number));
+    for (const listener of this.listeners) listener(threadId);
   }
 }

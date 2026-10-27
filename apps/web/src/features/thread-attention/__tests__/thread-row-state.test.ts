@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadAttention, ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
+import { threadAttentionNeedsUser, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import {
   deriveThreadRowState,
@@ -47,6 +47,23 @@ const interrupted: ThreadRowState = { kind: "needs-you", label: "Interrupted" };
 const setupFailed: ThreadRowState = { kind: "needs-you", label: "Setup failed" };
 
 describe("deriveThreadRowState", () => {
+  it.each([
+    attention({}),
+    attention({ waiting: "approval" }),
+    attention({ waiting: "questions" }),
+    attention({ waiting: "plan" }),
+    attention({ outcome: "completed" }),
+    attention({ outcome: "completed", seen: 8 }),
+    attention({ outcome: "errored" }),
+    attention({ outcome: "errored", seen: 8 }),
+    attention({ outcome: "interrupted" }),
+    attention({ outcome: "interrupted", seen: 8 }),
+    attention({ outcome: "cancelled" }),
+    attention({ delegating: true }),
+  ])("agrees with the shared quiet rule for %j", (input) => {
+    expect(deriveThreadRowState(facts({ attention: input })).kind === "quiet")
+      .toBe(!threadAttentionNeedsUser(input));
+  });
   it.each<[string, ThreadRowFacts, ThreadRowState]>([
     ["no facts is quiet", facts({}), QUIET],
     ["running turn", facts({ running: true }), RUNNING],
