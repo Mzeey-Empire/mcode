@@ -178,6 +178,7 @@ import { listenWithPortRetry } from "../../runtime/http/http-listener.js";
 import { createReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
 import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
 import { normalizeThreadPullRequestState } from "../../features/pull-requests/github/github-pull-request-normalizers.js";
+import { PullRequestReviewLinkRepo } from "../../features/pull-requests/reviews/persistence/pull-request-review-link-repo.js";
 import { TurnSteerService } from "../../features/agents/steering/turn-steer-service.js";
 
 function createPlanService(writer: ApplicationDatabaseWriter, runtime: WorkerOwnedTurnRuntime,
@@ -581,6 +582,8 @@ const pullRequestLinkFunnel = new PullRequestLinkFunnel(databaseWriter, (threadI
   for (const number of numbers) ciWatcherService.watch(threadId, number, thread.branch, workspace.path);
 });
 container.registerInstance(PullRequestLinkFunnel, pullRequestLinkFunnel);
+threadRepo.pullRequests = pullRequestLinkFunnel;
+container.resolve(PullRequestReviewLinkRepo).pullRequests = pullRequestLinkFunnel;
 container.registerInstance(CiWatcherService, ciWatcherService);
 const gitPush = container.resolve(GitPushService);
 const gitCommit = container.resolve(GitCommitService);
@@ -829,11 +832,7 @@ skillWatcherService.registerDebouncedInvalidateListener(() => {
 /** Seeds CI watching from threads that still have open pull requests. */
 function seedCiWatcher(allWorkspaces: ReturnType<typeof workspaceRepo.listAll>): void {
   const workspacePaths = new Map(allWorkspaces.map((ws) => [ws.id, ws.path]));
-  const allThreads: ReturnType<typeof threadService.list> = [];
-  for (const ws of allWorkspaces) {
-    const threads = threadService.list(ws.id);
-    allThreads.push(...threads);
-  }
+  const allThreads = threadRepo.listAll().filter((thread) => thread.user_completed_at === null);
   ciWatcherService.seed(
     allThreads,
     workspacePaths,

@@ -3,19 +3,24 @@ import type { Database } from "bun:sqlite";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { PullRequestReviewLinkStore } from "./pull-request-review-link-store.js";
 import { reviewWriteOperations } from "./review-write-operations.js";
+import type { PullRequestLinkFunnel } from "../../links/pull-request-link-funnel.js";
 export type { PullRequestReviewLinkIdentity, PullRequestReviewLink, CreatePullRequestReviewLinkInput, ReplacePullRequestReviewCheckoutInput, UpdatePullRequestReviewRemoteStateInput } from "./pull-request-review-link-store.js";
 
 /** Read-only queries and committed mutations for PullRequestReviewLinkRepo. */
 @injectable()
 export class PullRequestReviewLinkRepo {
+  /** Composition-root PR publication for the compound Review task write. */
+  pullRequests?: Pick<PullRequestLinkFunnel, "publishCommitted">;
   private readonly reader: PullRequestReviewLinkStore;
 
   constructor(@inject("Database") db: Database, @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {
     this.reader = new PullRequestReviewLinkStore(db);
   }
 
-  persistReviewTask(input: Parameters<PullRequestReviewLinkStore["persistReviewTask"]>[0]): Promise<ReturnType<PullRequestReviewLinkStore["persistReviewTask"]>> {
-    return this.writer.execute(reviewWriteOperations.persistReviewTask, [input]);
+  async persistReviewTask(input: Parameters<PullRequestReviewLinkStore["persistReviewTask"]>[0]): Promise<ReturnType<PullRequestReviewLinkStore["persistReviewTask"]>> {
+    const committed = await this.writer.execute(reviewWriteOperations.persistReviewTask, [input]);
+    this.pullRequests?.publishCommitted(committed.thread.id, committed.thread.pull_requests);
+    return committed;
   }
 
   findByIdentity(identity: Parameters<PullRequestReviewLinkStore["findByIdentity"]>[0]): ReturnType<PullRequestReviewLinkStore["findByIdentity"]> {

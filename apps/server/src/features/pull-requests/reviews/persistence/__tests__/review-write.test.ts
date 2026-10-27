@@ -1,3 +1,4 @@
+import { createMockThreadPullRequest } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -9,10 +10,11 @@ import { openReadOnlyDatabase } from "../../../../../runtime/persistence/sqlite/
 import { ApplicationDatabaseWriter } from "../../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { PullRequestReviewLinkRepo } from "../pull-request-review-link-repo.js";
 import type { CreateReviewTaskInput } from "../review-write-operations.js";
+import { PullRequestLinkFunnel } from "../../../links/pull-request-link-funnel.js";
 
 const request: CreateReviewTaskInput = {
   identity: { provider: "github", repositoryNodeId: "repository", owner: "owner", repository: "repo", number: 42 },
-  title: "Review #42", baseBranch: "main",
+  title: "Review #42", pullRequestTitle: "Add the feature", baseBranch: "main",
   checkout: {
     pullRequestUrl: "https://github.com/owner/repo/pull/42", pullRequestState: "open", workspaceId: "workspace",
     worktreePath: "fixture-review", worktreeManaged: true, headRepositoryNodeId: "head-repository",
@@ -47,11 +49,27 @@ describe("Review task owner transaction", () => {
   });
 
   it("returns fully configured committed thread and link data through a physically readonly reader", async () => {
+    const published: unknown[] = [];
+    repo.pullRequests = new PullRequestLinkFunnel(writer, (threadId, pullRequests) => {
+      expect(reader.query("SELECT state FROM thread_pull_requests WHERE thread_id = ?").all(threadId))
+        .toEqual([{ state: "open" }]);
+      published.push(pullRequests);
+    }, () => undefined);
     const committed = await repo.persistReviewTask(request);
-    expect(committed.thread).toMatchObject({ worktree_path: "fixture-review", branch: "review-42", provider: "codex", model: "gpt-6-sol", reasoning_level: "high", interaction_mode: "build", permission_mode: "full", pr_number: 42, pr_status: "OPEN" });
+    expect(committed.thread).toMatchObject({ worktree_path: "fixture-review", branch: "review-42", provider: "codex", model: "gpt-6-sol", reasoning_level: "high", interaction_mode: "build", permission_mode: "full", pull_requests: [createMockThreadPullRequest({ title: "Add the feature", url: "https://github.com/owner/repo/pull/42" })] });
     expect(committed.link).toMatchObject({ threadId: committed.thread.id, worktreePath: "fixture-review", pushRemote: "origin", pushRef: "feature" });
     expect(repo.findByPrimaryThreadId(committed.thread.id)?.primaryThreadId).toBe(committed.thread.id);
+    expect(published).toEqual([[createMockThreadPullRequest({ title: "Add the feature", url: "https://github.com/owner/repo/pull/42" })]]);
     expect(() => reader.run("DELETE FROM threads")).toThrow(/readonly/);
+  });
+
+  it("rolls back Review creation when the funnel cannot persist its PR link", async () => {
+    const db = openDatabase({ dbPath: NodePath.join(directory, "app.sqlite") });
+    db.exec("CREATE TRIGGER reject_pr_link BEFORE INSERT ON thread_pull_requests BEGIN SELECT RAISE(ABORT, 'link rejected'); END");
+    db.close(true);
+    await expect(repo.persistReviewTask(request)).rejects.toThrow();
+    expect(reader.query("SELECT COUNT(*) AS count FROM threads").get()).toEqual({ count: 0 });
+    expect(reader.query("SELECT COUNT(*) AS count FROM pull_request_review_links").get()).toEqual({ count: 0 });
   });
 
   it("rolls back the entire thread/link operation after mid-configuration failure and permits subsequent work", async () => {

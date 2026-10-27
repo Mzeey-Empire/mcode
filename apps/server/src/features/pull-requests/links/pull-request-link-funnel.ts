@@ -1,11 +1,10 @@
 import type { Database } from "bun:sqlite";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { rankPullRequests, type ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
+import { rankPullRequests, ThreadPullRequestSchema, type ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
 import type { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { databaseWriteHandler } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { threadPullRequests, threads } from "../../../runtime/persistence/sqlite/schema.js";
-import { ThreadStore } from "../../thread-control/persistence/thread-store.js";
 import { threadPullRequestWriteOperations } from "./thread-pull-request-write-operations.js";
 
 /** Source of a PR observation, for callers' diagnostics. */
@@ -38,21 +37,31 @@ function writeLinks(db: Database, threadId: string, next: ThreadPullRequest[]): 
     .where(eq(threads.id, threadId)).run();
 }
 
+function readLinks(db: Database, threadId: string): ThreadPullRequest[] {
+  const orm = drizzle(db);
+  const thread = orm.select({ number: threads.prNumber }).from(threads).where(eq(threads.id, threadId)).get();
+  if (!thread) throw new Error(`Thread ${threadId} not found`);
+  const rows = orm.select({ number: threadPullRequests.number, state: threadPullRequests.state,
+    title: threadPullRequests.title, url: threadPullRequests.url }).from(threadPullRequests)
+    .where(eq(threadPullRequests.threadId, threadId)).all();
+  if (rows.length > 0) return rows.map((row) => ThreadPullRequestSchema().parse(row));
+  return thread.number === null ? [] : [{ number: thread.number, state: "unresolved", title: null, url: null }];
+}
+
 /** Merge links on the writable owner, joining an enclosing transaction when present. */
 export function observeThreadPullRequests(db: Database, threadId: string, observations: readonly ThreadPullRequest[]): ThreadPullRequest[] | null {
   return db.transaction(() => {
-    const thread = new ThreadStore(db).findById(threadId);
-    if (!thread) throw new Error(`Thread ${threadId} not found`);
-    const next = mergeObservations(thread.pull_requests, observations);
-    if (JSON.stringify(rankPullRequests(thread.pull_requests)) === JSON.stringify(next)) return null;
+    const current = readLinks(db, threadId);
+    const next = mergeObservations(current, observations);
+    if (JSON.stringify(rankPullRequests(current)) === JSON.stringify(next)) return null;
     writeLinks(db, threadId, next);
     return next;
   })();
 }
 
-function forgetBranch(db: Database, threadId: string): ThreadPullRequest[] | null {
-  const thread = new ThreadStore(db).findById(threadId);
-  if (!thread || thread.pull_requests.length === 0) return null;
+/** Clear PR links inside a checkout transaction on the writable owner. */
+export function forgetThreadPullRequests(db: Database, threadId: string): ThreadPullRequest[] | null {
+  if (readLinks(db, threadId).length === 0) return null;
   writeLinks(db, threadId, []);
   return [];
 }
@@ -62,7 +71,7 @@ export function buildThreadPullRequestWriteHandlers(db: Database): ReadonlyMap<s
   const ops = threadPullRequestWriteOperations;
   return new Map([
     [ops.observe.name, databaseWriteHandler(ops.observe, ([threadId, prs]) => observeThreadPullRequests(db, threadId, prs))],
-    [ops.forgetBranch.name, databaseWriteHandler(ops.forgetBranch, ([threadId]) => forgetBranch(db, threadId))],
+    [ops.forgetBranch.name, databaseWriteHandler(ops.forgetBranch, ([threadId]) => forgetThreadPullRequests(db, threadId))],
   ]);
 }
 

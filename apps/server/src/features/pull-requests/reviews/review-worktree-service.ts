@@ -314,9 +314,8 @@ export class ReviewWorktreeService {
       };
     }
     if (
-      thread.pr_number !== null
-      && thread.worktree_path
-      && this.reviewLinkRepo.findByWorktreePath(thread.worktree_path, thread.pr_number)
+      thread.worktree_path
+      && thread.pull_requests.some((pr) => this.reviewLinkRepo.findByWorktreePath(thread.worktree_path ?? "", pr.number))
     ) {
       return { kind: "invalid_review" };
     }
@@ -575,7 +574,8 @@ export class ReviewWorktreeService {
   private async persistReviewTask(identity: PullRequestIdentity, source: ResolvedReviewSource, workspaceId: string, provisioned: Extract<Awaited<ReturnType<PullRequestReviewGitService["provisionPullRequestReviewWorktree"]>>, { kind: "ready" }>): Promise<{ threadId: string; link: PullRequestReviewLinkDto }> {
     const settings = this.settingsService.get();
     const committed = await this.reviewLinkRepo.persistReviewTask({
-      identity, title: `Review #${identity.number}: ${source.remote.detail.title}`.slice(0, 200), baseBranch: source.remote.detail.base.name,
+      identity, title: `Review #${identity.number}: ${source.remote.detail.title}`.slice(0, 200),
+      pullRequestTitle: source.remote.detail.title, baseBranch: source.remote.detail.base.name,
       checkout: {
         pullRequestUrl: source.remote.detail.url, pullRequestState: source.remote.detail.state, workspaceId,
         worktreePath: provisioned.path, worktreeManaged: provisioned.managed,

@@ -1,4 +1,6 @@
+import { createMockThreadPullRequest } from "@mcode/contracts/testing";
 import "reflect-metadata";
+import { PullRequestLinkFunnel } from "../../../pull-requests/links/pull-request-link-funnel.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { canonicalRuntimeWriteOperations } from "../../../agents/canonical/canonical-runtime-write-operations.js";
@@ -38,11 +40,11 @@ describe("thread activity", () => {
   });
 
   it("does not count settings, PRs, titles, completion, reopen or tokens as activity", async () => {
-    const { threads, thread } = await fixture();
+    const { threads, thread, writer } = await fixture();
     await threads.advanceActivity(thread.id, ADMITTED);
     const broadcast = vi.spyOn(push, "broadcast");
     await threads.updateSettings(thread.id, { model: "another-model" });
-    await threads.updatePr(thread.id, 42, "MERGED");
+    await new PullRequestLinkFunnel(writer, () => undefined, () => undefined).observe(thread.id, [createMockThreadPullRequest({ state: "merged" })], "sync");
     await threads.updateTitle(thread.id, "Renamed");
     await threads.complete(thread.id, SETTLED, null);
     await threads.reopen(thread.id, SETTLED);

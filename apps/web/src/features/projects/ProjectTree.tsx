@@ -78,6 +78,7 @@ import {
   prefetchOnPointerDown,
 } from "@/features/conversation";
 import { isPrable } from "@/lib/is-prable";
+import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
 import { getCiVisual } from "@/lib/ci-status";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { FILE_EXPLORER_ID } from "@/lib/resolveDefaultOpenInApp";
@@ -1940,8 +1941,9 @@ function ThreadRowThirdLine({
   if (presentation.unusable) {
     return <ThreadRowCaption className="text-error" data-testid={`sidebar-unusable-${thread.id}`}>{presentation.unusableReason}</ThreadRowCaption>;
   }
-  if (isPrable(thread) && thread.pr_number !== null) {
-    return <ThreadPrLine threadId={thread.id} prNumber={thread.pr_number} prStatus={thread.pr_status} dimmed={presentation.isUserCompleted} />;
+  const primaryPr = rankPullRequests(thread.pull_requests)[0];
+  if (isPrable(thread) && primaryPr) {
+    return <ThreadPrLine threadId={thread.id} prNumber={primaryPr.number} prStatus={primaryPr.state} dimmed={presentation.isUserCompleted} />;
   }
   return null;
 }

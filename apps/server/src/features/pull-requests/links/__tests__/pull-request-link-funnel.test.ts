@@ -18,6 +18,7 @@ async function setup() {
     expect(threads.findById(id)?.pull_requests).toEqual(prs);
     published.push(prs);
   }, (_id, numbers) => watchSets.push(numbers));
+  threads.pullRequests = funnel;
   return { ...runtime, threads, thread, funnel, published, watchSets };
 }
 
@@ -69,7 +70,7 @@ describe("PullRequestLinkFunnel", () => {
     expect(watchSets).toEqual([[1, 2]]);
     await funnel.forgetBranch(thread.id);
     expect(threads.findById(thread.id)?.pull_requests).toEqual([]);
-    expect(threads.findById(thread.id)?.pr_number).toBeNull();
+    expect(threads.findById(thread.id)?.pull_requests).toEqual([]);
     expect(watchSets).toEqual([[1, 2], []]);
     expect(published.at(-1)).toEqual([]);
   });
@@ -82,5 +83,15 @@ describe("PullRequestLinkFunnel", () => {
     expect(threads.findById(thread.id)?.pull_requests).toEqual([]);
     expect(published).toEqual([]);
     expect(watchSets).toEqual([]);
+  });
+
+  it("publishes a checkout clear only after its new branch and empty links commit", async () => {
+    const { funnel, thread, threads, published, watchSets } = await setup();
+    await funnel.observe(thread.id, [createMockThreadPullRequest()], "created");
+    await threads.updateCheckoutFromHead(thread.id, "new-feature", "named", null, null);
+    expect(threads.findById(thread.id)?.branch).toBe("new-feature");
+    expect(threads.findById(thread.id)?.pull_requests).toEqual([]);
+    expect(published).toEqual([[createMockThreadPullRequest()], []]);
+    expect(watchSets).toEqual([[42], []]);
   });
 });

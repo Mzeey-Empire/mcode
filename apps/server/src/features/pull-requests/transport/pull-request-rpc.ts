@@ -12,6 +12,7 @@ import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js
 import type { ThreadService } from "../../thread-control/lifecycle/thread-service.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { PullRequestLinkFunnel } from "../links/pull-request-link-funnel.js";
+import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
 import type { PrDraftService } from "../drafts/pr-draft-service.js";
 import type { GithubService } from "../github/github-service.js";
 import type { PullRequestMutationService } from "../mutations/pull-request-mutation-service.js";
@@ -239,19 +240,19 @@ function bootstrapCheckStatusWatch(
   threadId: string,
 ): CheckStatusBootstrap {
   const thread = deps.threadRepo.findById(threadId);
-  const prState = thread?.pr_status?.toLowerCase();
-  const isTerminal = prState === "merged" || prState === "closed";
   if (
-    !thread?.pr_number
+    !thread
     || thread.mode !== "worktree"
     || thread.checkout_state !== "named"
   ) {
     return { kind: "entry", entry: null };
   }
+  const primary = rankPullRequests(thread.pull_requests)[0];
+  if (!primary) return { kind: "entry", entry: null };
 
   const workspace = deps.workspaceRepo.findById(thread.workspace_id);
   if (!workspace) return { kind: "entry", entry: null };
-  if (isTerminal) {
+  if (primary.state === "merged" || primary.state === "closed") {
     return {
       kind: "terminal",
       branch: thread.branch,
@@ -260,7 +261,7 @@ function bootstrapCheckStatusWatch(
   }
   deps.ciWatcherService.watch(
     threadId,
-    thread.pr_number,
+    primary.number,
     thread.branch,
     workspace.path,
     { skipInitialFetch: true },
