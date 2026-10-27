@@ -5,7 +5,6 @@ import { openReadOnlyDatabase } from "../../../../../runtime/persistence/sqlite/
 import { createOwnedTestDatabase } from "../../../testing/owned-test-database.js";
 import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../persistence/workspace-repo.js";
-import { listWorkspaceThreads } from "../workspace-thread-rpc.js";
 
 it("lists persisted sidebar threads while a WAL writer is held without changing workspace recency", async () => {
   const owned = createOwnedTestDatabase();
@@ -19,9 +18,7 @@ it("lists persisted sidebar threads while a WAL writer is held without changing 
       .run("thread", workspace.id, "Thread", "main", "codex", now, now);
     const threadRepo = new ThreadRepo(db, owned.writer);
     held.run("BEGIN IMMEDIATE");
-    const result = listWorkspaceThreads({ workspaceService: { findById: (id) => workspaceRepo.findById(id) },
-      threadService: { list: (id) => threadRepo.listByWorkspace(id) }, gitWatcherService: { retryWatch: async () => false } },
-    { workspaceId: workspace.id });
+    const result = threadRepo.listAll();
     expect(result.map((thread) => thread.id)).toEqual(["thread"]);
     expect(workspaceRepo.findById(workspace.id)?.updated_at).toBe(workspace.updated_at);
   } finally {

@@ -7,7 +7,7 @@ import {
 } from "@/stores/thread-store-test-utils";
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { useWorkspaceStore, __resetThreadListMutationEpochForTests, __clearPendingThreadCreationsForTests } from "../workspaceStore";
+import { useWorkspaceStore, __clearPendingThreadCreationsForTests } from "../workspaceStore";
 import { isThreadExecuting, scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";
 import { useQueueStore } from "@/stores/queueStore";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
@@ -169,7 +169,6 @@ describe("Workspace Behavior", () => {
   });
 
   beforeEach(() => {
-    __resetThreadListMutationEpochForTests();
     __clearPendingThreadCreationsForTests();
     useWorkspaceStore.setState({
       workspaces: [],
@@ -393,7 +392,7 @@ describe("Workspace Behavior", () => {
     expect(state.activeThreadId).toBe(thread.id);
   });
 
-  it("when the user loads threads for multiple workspaces, all threads are merged", async () => {
+  it("ignores an older hydration response after a newer whole-index snapshot", async () => {
     const ws1 = createMockWorkspace({ id: "ws-1" });
     const ws2 = createMockWorkspace({ id: "ws-2" });
     const threads1 = [
@@ -405,29 +404,26 @@ describe("Workspace Behavior", () => {
 
     useWorkspaceStore.setState({ workspaces: [ws1, ws2] });
 
-    // ws-1's listThreads settles only after ws-2's has finished.
     let resolveSlowList!: (threads: typeof threads1) => void;
-    (mockTransport.listThreads as ReturnType<typeof vi.fn>)
+    (mockTransport.listAllThreads as ReturnType<typeof vi.fn>)
       .mockImplementationOnce(
         () => new Promise((resolve) => {
           resolveSlowList = resolve;
         }),
       )
-      .mockImplementationOnce(() => Promise.resolve(threads2));
+      .mockImplementationOnce(() => Promise.resolve([...threads1, ...threads2]));
 
-    // Load threads for both workspaces (simulates expanding both folders)
-    const slowLoad = useWorkspaceStore.getState().loadThreads("ws-1");
-    await useWorkspaceStore.getState().loadThreads("ws-2");
+    const slowLoad = useWorkspaceStore.getState().hydrateThreads();
+    await useWorkspaceStore.getState().hydrateThreads();
     resolveSlowList(threads1);
     await slowLoad;
 
     const state = useWorkspaceStore.getState();
-    // Both workspaces' threads should be present (merged, not replaced)
     expect(state.threads).toHaveLength(2);
     expect(state.threads.map((t) => t.title).sort()).toEqual(["Thread A", "Thread B"]);
   });
 
-  it("when branchThread completes while loadThreads is in flight, stale listThreads does not drop the new branch", async () => {
+  it("when branchThread completes while hydrateThreads is in flight, stale listAllThreads does not drop the new branch", async () => {
     const ws = createMockWorkspace({ id: "ws-branch" });
     const parent = createMockThread({
       id: "parent-1",
@@ -445,9 +441,9 @@ describe("Workspace Behavior", () => {
       threads: [parent],
     });
 
-    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
+    (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
 
-    void useWorkspaceStore.getState().loadThreads(ws.id);
+    void useWorkspaceStore.getState().hydrateThreads();
 
     const child = createMockThread({
       id: "child-1",
@@ -485,9 +481,9 @@ describe("Workspace Behavior", () => {
       listResolve = resolve;
     });
     useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id, threads: [thread] });
-    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
+    (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
 
-    const loading = useWorkspaceStore.getState().loadThreads(ws.id);
+    const loading = useWorkspaceStore.getState().hydrateThreads();
     const retry = { turnId: "turn-1", at: "2026-10-11T16:00:00.000Z" };
     useWorkspaceStore.getState().applyScheduledResume(thread.id, retry);
     listResolve([thread]);
@@ -496,7 +492,7 @@ describe("Workspace Behavior", () => {
     expect(useWorkspaceStore.getState().threads.find((t) => t.id === thread.id)?.scheduled_resume).toEqual(retry);
   });
 
-  it("when createAndSendMessage completes while loadThreads is in flight, stale listThreads does not drop the new thread", async () => {
+  it("when createAndSendMessage completes while hydrateThreads is in flight, stale listAllThreads does not drop the new thread", async () => {
     const ws = createMockWorkspace({ id: "ws-first-msg" });
     const existing = createMockThread({
       id: "existing-1",
@@ -514,9 +510,9 @@ describe("Workspace Behavior", () => {
       threads: [existing],
     });
 
-    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
+    (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
 
-    void useWorkspaceStore.getState().loadThreads(ws.id);
+    void useWorkspaceStore.getState().hydrateThreads();
 
     const created = createMockThread({
       id: "new-first-send",
@@ -559,8 +555,8 @@ describe("Workspace Behavior", () => {
     const before = useWorkspaceStore.getState().pendingStartupByThreadId[created.id];
     expect(before).toMatchObject({ context: "new-direct", queuedMessage: "Hello" });
 
-    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValue([created]);
-    await useWorkspaceStore.getState().loadThreads(ws.id);
+    (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValue([created]);
+    await useWorkspaceStore.getState().hydrateThreads();
 
     expect(useWorkspaceStore.getState().pendingStartupByThreadId[created.id]).toEqual(before);
   });
@@ -1462,7 +1458,7 @@ describe("Workspace Behavior", () => {
         createdAt: "2026-09-02T12:00:00.000Z",
         updatedAt: "2026-09-02T12:00:00.000Z",
       });
-      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+      (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
 
       await useWorkspaceStore.getState().recoverPreparingThreads();
       expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id);
@@ -1505,7 +1501,7 @@ describe("Workspace Behavior", () => {
         createdAt: "2026-10-06T12:00:00.000Z",
         updatedAt: "2026-10-06T12:00:00.000Z",
       });
-      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+      (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
       (mockTransport.listRunning as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
         { threadId: durable.id, turnExecutionId: executionId, phase: "running" } satisfies TurnRuntimeSnapshot,
       ]);
@@ -1541,7 +1537,7 @@ describe("Workspace Behavior", () => {
         createdAt: "2026-10-11T12:00:00.000Z",
         updatedAt: "2026-10-11T12:00:00.000Z",
       });
-      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+      (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
       (mockTransport.listRunning as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
 
       await expect(useWorkspaceStore.getState().adoptPreparingThread(placeholderId)).resolves.toMatchObject({ id: durable.id });
@@ -1588,7 +1584,7 @@ describe("Workspace Behavior", () => {
       (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockReturnValueOnce(
         new Promise<ThreadStartup | null>((resolve) => { resolveLookup = resolve; }),
       );
-      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+      (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
       const recovery = useWorkspaceStore.getState().recoverPreparingThreads();
       const startup: ThreadStartup = {
         startupId: placeholderId,
@@ -1609,7 +1605,7 @@ describe("Workspace Behavior", () => {
 
       expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual([durable.id]);
       expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id);
-      expect(mockTransport.listThreads).toHaveBeenCalledTimes(1);
+      expect(mockTransport.listAllThreads).toHaveBeenCalledTimes(1);
       expect(mockTransport.createAndSendMessage).toHaveBeenCalledTimes(1);
     });
 
@@ -1665,7 +1661,7 @@ describe("Workspace Behavior", () => {
         createdAt: "2026-09-02T12:00:00.000Z",
         updatedAt: "2026-09-02T12:00:00.000Z",
       });
-      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+      (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
 
       await useWorkspaceStore.getState().recoverPreparingThreads();
 
@@ -1717,7 +1713,7 @@ describe("Workspace Behavior", () => {
         revision: 2,
       };
       (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce(bound);
-      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+      (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
       useThreadStartupStore.getState().apply(bound);
 
       await vi.waitFor(() => expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id));
@@ -2655,7 +2651,7 @@ describe("Workspace Behavior", () => {
       expect(fin.threads.some((t) => t.id === "server-thread-2")).toBe(true);
     });
 
-    it("stale loadThreads does not drop a preparing placeholder mid-RPC", async () => {
+    it("stale hydrateThreads does not drop a preparing placeholder mid-RPC", async () => {
       const ws = createMockWorkspace({ id: "ws-ph" });
       const existing = createMockThread({ id: "old-1", workspace_id: ws.id, title: "Old" });
       let listResolve!: (value: typeof existing[]) => void;
@@ -2668,9 +2664,9 @@ describe("Workspace Behavior", () => {
         activeWorkspaceId: ws.id,
         threads: [existing],
       });
-      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
+      (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
 
-      void useWorkspaceStore.getState().loadThreads(ws.id);
+      void useWorkspaceStore.getState().hydrateThreads();
 
       let resolveRpc!: (value: ReturnType<typeof createMockThread>) => void;
       const rpcPromise = new Promise<ReturnType<typeof createMockThread>>((resolve) => {
@@ -2696,7 +2692,7 @@ describe("Workspace Behavior", () => {
       await sendOp;
     });
 
-    it("loadThreads retains errored client placeholders for retry UI", async () => {
+    it("hydrateThreads retains errored client placeholders for retry UI", async () => {
       const ws = createMockWorkspace({ id: "ws-err-ph" });
       const errRow = {
         ...createMockThread({
@@ -2715,8 +2711,8 @@ describe("Workspace Behavior", () => {
           "ph-err": { startupId: "ph-err", context: "new-direct", queuedMessage: "hello" },
         },
       });
-      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-      await useWorkspaceStore.getState().loadThreads(ws.id);
+      (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      await useWorkspaceStore.getState().hydrateThreads();
       expect(useWorkspaceStore.getState().threads.some((t) => t.id === "ph-err")).toBe(true);
     });
   });

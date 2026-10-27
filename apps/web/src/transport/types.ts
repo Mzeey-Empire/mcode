@@ -292,7 +292,6 @@ export interface McodeTransport {
     mode: "direct" | "worktree",
     branch: string,
   ): Promise<Thread>;
-  listThreads(workspaceId: string): Promise<Thread[]>;
   /** Read every visible thread across workspaces. */
   listAllThreads(): Promise<Thread[]>;
   /** List the most recently active threads across all workspaces, joined with workspace name + path. */

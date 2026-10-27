@@ -89,6 +89,8 @@ const workspaceThreadHandlers = {
   },
   "workspace.touchLastOpened": async (deps, params) => {
     await deps.workspaceRepo.touchLastOpened(params.id);
+    const workspace = deps.workspaceService.findById(params.id);
+    if (workspace && !workspace.is_git_repo) deps.gitWatcherService.retryWatch(workspace.id, workspace.path);
     return { ok: true as const };
   },
   "workspace.reorder": async (deps, params) => {
@@ -98,7 +100,6 @@ const workspaceThreadHandlers = {
   },
   "workspace.enrich": enrichWorkspaces,
   "filesystem.browse": (deps, params) => deps.filesystemBrowser.browse(params.path),
-  "thread.list": listWorkspaceThreads,
   "thread.listAll": (deps) => deps.threadRepo.listAll(),
   "thread.recent": (deps, params) => deps.threadService.listRecent(params.limit),
   "thread.create": createThread,
@@ -216,24 +217,6 @@ async function enrichWorkspaces(
     .filter((workspace): workspace is NonNullable<typeof workspace> => workspace !== null && workspace !== undefined)
     .map((workspace) => ({ id: workspace.id, path: workspace.path }));
   return { items: await deps.enricher.enrich(workspaces) };
-}
-
-/** Read sidebar threads without requiring SQLite's writer lock during reconnect. */
-export function listWorkspaceThreads(
-  deps: {
-    workspaceService: Pick<WorkspaceService, "findById">;
-    threadService: Pick<ThreadService, "list">;
-    gitWatcherService: Pick<GitWatcherService, "retryWatch">;
-  },
-  params: { workspaceId: string },
-): Thread[] {
-  // Opening is recorded by workspace.touchLastOpened; reconnect reads must not need the writer lock.
-  // Re-detect git status for non-git workspaces (catches `git init` within a session)
-  const workspace = deps.workspaceService.findById(params.workspaceId);
-  if (workspace && !workspace.is_git_repo) {
-    deps.gitWatcherService.retryWatch(workspace.id, workspace.path);
-  }
-  return deps.threadService.list(params.workspaceId);
 }
 
 async function createThread(

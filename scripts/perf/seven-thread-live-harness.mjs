@@ -1302,9 +1302,10 @@ async function cleanupThreads(socket, threads, workspaceId, runId, threadCount, 
 
 async function currentWorkspaceThreads(socket, workspaceId, cleanup) {
   try {
-    return await cleanupRpc(socket, "thread.list", { workspaceId });
+    const threads = await cleanupRpc(socket, "thread.listAll", {});
+    return threads.filter((thread) => thread.workspace_id === workspaceId);
   } catch (error) {
-    cleanup.failures.push(`thread.list: ${safeError(error)}`);
+    cleanup.failures.push(`thread.listAll: ${safeError(error)}`);
     return null;
   }
 }
@@ -1339,14 +1340,15 @@ function matchesReceiptThread(found, thread, runId, threadCount, scenario) {
 
 async function verifyThreadsRemoved(socket, threads, workspaceId, cleanup) {
   try {
-    const remaining = await cleanupRpc(socket, "thread.list", { workspaceId });
+    const allThreads = await cleanupRpc(socket, "thread.listAll", {});
+    const remaining = allThreads.filter((thread) => thread.workspace_id === workspaceId);
     for (const thread of threads) {
       if (isOwnedThread(remaining, thread)) {
         cleanup.failures.push(`Owned thread ${thread.id} remains after cleanup`);
       }
     }
   } catch (error) {
-    cleanup.failures.push(`thread.list after cleanup: ${safeError(error)}`);
+    cleanup.failures.push(`thread.listAll after cleanup: ${safeError(error)}`);
   }
 }
 

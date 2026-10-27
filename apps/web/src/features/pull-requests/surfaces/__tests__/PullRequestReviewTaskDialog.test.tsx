@@ -22,7 +22,7 @@ const { workspaceState } = vi.hoisted(() => ({
     threads: [] as Array<{ id: string; workspace_id: string }>,
     recordPullRequestLink: vi.fn(),
     setActiveWorkspace: vi.fn(),
-    loadThreads: vi.fn().mockResolvedValue(undefined),
+    hydrateThreads: vi.fn().mockResolvedValue(undefined),
     loadWorktrees: vi.fn().mockResolvedValue(undefined),
     setActiveThread: vi.fn(),
   },
@@ -114,7 +114,7 @@ describe("PullRequestReviewTaskDialog", () => {
     vi.clearAllMocks();
     workspaceState.activeWorkspaceId = "workspace-other";
     workspaceState.threads = [];
-    workspaceState.loadThreads.mockImplementation(async () => {
+    workspaceState.hydrateThreads.mockImplementation(async () => {
       workspaceState.threads = [
         { id: reviewLink.threadId, workspace_id: reviewLink.workspaceId },
       ];
@@ -150,7 +150,7 @@ describe("PullRequestReviewTaskDialog", () => {
     await user.type(screen.getByLabelText("Worktree name"), "pr-42-local");
     await user.click(screen.getByRole("button", { name: "Create Review task" }));
 
-    await waitFor(() => expect(workspaceState.loadThreads).toHaveBeenCalledWith(workspace.id));
+    await waitFor(() => expect(workspaceState.hydrateThreads).toHaveBeenCalledWith());
     expect(workspaceState.loadWorktrees).toHaveBeenCalledWith(workspace.id);
     const createRequest = vi.mocked(transport.createReviewTask).mock.calls[1]?.[0];
     expect(createRequest).toMatchObject({
@@ -169,8 +169,6 @@ describe("PullRequestReviewTaskDialog", () => {
     );
     expect(workspaceState.setActiveWorkspace).toHaveBeenCalledWith(
       workspace.id,
-      undefined,
-      false,
     );
     expect(workspaceState.setActiveThread).toHaveBeenCalledWith(reviewLink.threadId);
     expect(useOverviewStore.getState().requestedSubject).toBe(`thread:${reviewLink.threadId}`);
@@ -209,7 +207,7 @@ describe("PullRequestReviewTaskDialog", () => {
     });
 
     resolveCreation({ ok: true, status: "ready", reused: false, reviewLink });
-    await waitFor(() => expect(workspaceState.loadThreads).toHaveBeenCalledWith(workspace.id));
+    await waitFor(() => expect(workspaceState.hydrateThreads).toHaveBeenCalledWith());
   });
 
   it("reuses a compatible worktree by opaque candidate ID, never display path", async () => {
@@ -349,7 +347,7 @@ describe("PullRequestReviewTaskDialog", () => {
   });
 
   it("keeps the dialog recoverable when thread loading fails", async () => {
-    workspaceState.loadThreads.mockRejectedValueOnce(new Error("Thread list unavailable"));
+    workspaceState.hydrateThreads.mockRejectedValueOnce(new Error("Thread list unavailable"));
     const transport = transportWith(confirmation, {
       ok: true,
       status: "ready",
@@ -378,8 +376,8 @@ describe("PullRequestReviewTaskDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 
-  it("does not navigate when an epoch-discarded load leaves the linked thread absent", async () => {
-    workspaceState.loadThreads.mockResolvedValueOnce(undefined);
+  it("does not navigate when hydration leaves the linked thread absent", async () => {
+    workspaceState.hydrateThreads.mockResolvedValueOnce(undefined);
     const transport = transportWith(confirmation, {
       ok: true,
       status: "ready",

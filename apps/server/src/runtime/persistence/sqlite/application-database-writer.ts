@@ -106,7 +106,7 @@ export class ApplicationDatabaseWriter {
   ): Promise<CanonicalWriterResponse> {
     if (request.kind === "open" || request.kind === "close") throw new Error("Database lifecycle belongs to its owner");
     const response = await this.admit(request, onPublication);
-    if (response.kind === "ordinary-written" || response.kind === "ordinary-failed") {
+    if (response.kind === "ordinary-written" || response.kind === "ordinary-failed" || response.kind === "thread-activity") {
       throw new Error("Database writer returned an unexpected canonical result");
     }
     return response;
