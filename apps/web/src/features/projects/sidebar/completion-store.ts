@@ -19,6 +19,8 @@ interface CompletionStoreActions {
   pointerLeft(threadId: string): void;
   /** Applies a lifecycle push; an automatic completion offers the Undo line like a local one. */
   observeServerLifecycle(threadId: string, completed: boolean, completedAutomatically?: boolean): void;
+  /** Applies an activity push; it clears a refusal whose reason is now stale. */
+  observeServerActivity(threadId: string): void;
   /** Reopens the Undo line's thread; the completion already committed, so this is `thread.reopen`. */
   undoFromLine(): void;
   hideUndoLine(): void;
@@ -101,6 +103,7 @@ export const useCompletionStore = create<CompletionStore>((set, get) => {
       if (completed && completedAutomatically) set({ undoLineThreadId: threadId });
       dispatch(threadId, { type: "server-lifecycle", completed });
     },
+    observeServerActivity: (threadId) => dispatch(threadId, { type: "server-activity" }),
     undoFromLine: () => {
       const threadId = get().undoLineThreadId;
       if (threadId === null) return;
