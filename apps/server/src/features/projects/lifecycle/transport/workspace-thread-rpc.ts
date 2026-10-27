@@ -104,7 +104,7 @@ const workspaceThreadHandlers = {
   "thread.recent": (deps, params) => deps.threadService.listRecent(params.limit),
   "thread.create": createThread,
   "thread.delete": (deps, params) => deleteThread(deps, params),
-  "thread.complete": (deps, params) => deps.threadCompletionService.complete(params.threadId),
+  "thread.complete": (deps, params) => deps.threadCompletionService.complete(params.threadId, params.holdMs),
   "thread.reopen": (deps, params) => reopenThread(deps, params.threadId),
   "thread.cleanupBlockedCount": (deps) => deps.threadCompletionService.cleanupBlockedCount(),
   "thread.retryCleanup": (deps, params) => retryThreadCleanup(deps, params.threadId),

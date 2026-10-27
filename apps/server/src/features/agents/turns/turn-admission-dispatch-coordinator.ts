@@ -34,6 +34,7 @@ import {
   ProviderDisabledError,
 } from "../../providers/availability/provider-availability-errors.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import { CompletionHolds } from "../../thread-control/lifecycle/completion-holds.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import { TurnRevertStore } from "./persistence/turn-revert-store.js";
 import {
@@ -261,6 +262,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly parentStartOwner?: TurnParentStartOwner,
     private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
     private readonly providerSwitch?: ProviderSwitchService,
+    private readonly completionHolds: CompletionHolds = new CompletionHolds(),
   ) {}
 
   /** Admit one command and return an immutable package for the runtime owner. */
@@ -269,6 +271,7 @@ export class TurnAdmissionDispatchCoordinator {
     runtime: TurnRuntimeAdmissionAuthority,
     canReserve?: () => boolean,
   ): Promise<TurnAdmissionResult> {
+    this.completionHolds.cancel(command.threadId);
     await this.resumeScheduler?.unschedule(command.threadId);
     const release = command.stagedDraftImageIds?.length
       ? this.attachments.leaseDraftImages(command.threadId, command.stagedDraftImageIds)
@@ -298,6 +301,7 @@ export class TurnAdmissionDispatchCoordinator {
     }
     let lease: TurnRuntimeLease | undefined;
     try {
+      this.completionHolds.cancel(command.threadId);
       lease = runtime.reserve(prepared.value.providerSwitch?.command ?? command);
       this.reserveCommandEffect(prepared.value.commandEffect);
       return await this.commit(prepared.value, lease, runtime);
@@ -441,6 +445,7 @@ export class TurnAdmissionDispatchCoordinator {
     | { readonly kind: "queued" }
     | { readonly kind: "ready"; readonly attachments: PersistedAttachmentData }
   > {
+    this.completionHolds.cancel(command.threadId);
     const release = command.stagedDraftImageIds?.length
       ? this.attachments.leaseDraftImages(command.threadId, command.stagedDraftImageIds)
       : undefined;

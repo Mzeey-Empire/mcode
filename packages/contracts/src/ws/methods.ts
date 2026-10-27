@@ -819,7 +819,10 @@ export const WS_METHODS = lazySchema(() => ({
   },
   /** Persist explicit user completion and release thread-owned runtime resources. */
   "thread.complete": {
-    params: z.object({ threadId: z.string() }),
+    params: z.object({
+      threadId: z.string(),
+      holdMs: z.number().int().nonnegative().transform((value) => Math.min(value, 5000)).optional(),
+    }),
     result: ThreadCompletionResultSchema(),
   },
   /** Clear explicit user completion and cancel pending automatic deletion. */

@@ -270,16 +270,18 @@ describe("ThreadCompletionService", () => {
     expect(threadRepo.findById(threadId)?.scheduled_deletion_at).toBe(persistedDeadline);
   });
 
-  it("keeps the thread active when runtime resource release fails", async () => {
+  it("keeps completion committed when runtime resource release fails", async () => {
     vi.mocked(teardownService.teardownThread).mockRejectedValueOnce(
       new Error("terminal teardown failed"),
     );
 
-    await expect(service.complete(threadId)).rejects.toThrow("terminal teardown failed");
+    await expect(service.complete(threadId)).resolves.toMatchObject({ ok: true, thread: { cleanup_state: "blocked" } });
 
     expect(threadRepo.findById(threadId)).toMatchObject({
-      user_completed_at: null,
-      scheduled_deletion_at: null,
+      user_completed_at: "2026-08-12T08:00:00.000Z",
+      scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
+      cleanup_state: "blocked",
+      cleanup_reason: "terminal teardown failed",
     });
   });
 
@@ -293,7 +295,7 @@ describe("ThreadCompletionService", () => {
     expect(releaseCiWatcher).toHaveBeenCalledWith(threadId);
   });
 
-  it("retains a resource-owner barrier through completion and releases it when persistence fails", async () => {
+  it("leaves resources untouched when completion persistence fails", async () => {
     const releaseBarrier = vi.fn();
     const releaseOwner = vi.fn().mockResolvedValue(releaseBarrier);
     service.registerResourceOwner("workspace-environment", releaseOwner);
@@ -301,8 +303,8 @@ describe("ThreadCompletionService", () => {
 
     await expect(service.complete(threadId)).rejects.toThrow(`Thread not found: ${threadId}`);
 
-    expect(releaseOwner).toHaveBeenCalledWith(threadId);
-    expect(releaseBarrier).toHaveBeenCalledOnce();
+    expect(releaseOwner).not.toHaveBeenCalled();
+    expect(releaseBarrier).not.toHaveBeenCalled();
     expect(threadRepo.findById(threadId)?.user_completed_at).toBeNull();
   });
 
@@ -311,13 +313,13 @@ describe("ThreadCompletionService", () => {
     service.registerResourceOwner("workspace-environment", vi.fn().mockResolvedValue(releaseBarrier));
     service.registerResourceOwner("broken-owner", vi.fn().mockRejectedValue(new Error("release failed")));
 
-    await expect(service.complete(threadId)).rejects.toThrow("release failed");
+    await expect(service.complete(threadId)).resolves.toMatchObject({ ok: true, thread: { cleanup_state: "blocked" } });
 
     expect(releaseBarrier).toHaveBeenCalledOnce();
-    expect(threadRepo.findById(threadId)?.user_completed_at).toBeNull();
+    expect(threadRepo.findById(threadId)?.user_completed_at).toBe("2026-08-12T08:00:00.000Z");
   });
 
-  it("releases registered thread resources before completion becomes visible", async () => {
+  it("releases registered thread resources after completion commits", async () => {
     const cancelSetup = vi.fn().mockResolvedValue(undefined);
     service.registerResourceOwner("workspace-environment", cancelSetup);
 
@@ -327,7 +329,7 @@ describe("ThreadCompletionService", () => {
     expect(threadRepo.findById(threadId)?.user_completed_at).toBe(now.toISOString());
   });
 
-  it("does not expose completion while releasing runtime resources", async () => {
+  it("exposes committed completion while releasing runtime resources", async () => {
     let observedCompletion: string | null | undefined;
     service.registerResourceOwner("completion-observer", async (id) => {
       observedCompletion = threadRepo.findById(id)?.user_completed_at;
@@ -335,7 +337,7 @@ describe("ThreadCompletionService", () => {
 
     await service.complete(threadId);
 
-    expect(observedCompletion).toBeNull();
+    expect(observedCompletion).toBe("2026-08-12T08:00:00.000Z");
   });
 
   it("rejects completion while the thread is running", async () => {
