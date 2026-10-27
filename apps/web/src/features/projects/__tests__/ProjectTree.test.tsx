@@ -1420,8 +1420,6 @@ describe("ProjectTree thread interactions", () => {
 });
 
 describe("ProjectTree action-required indicator", () => {
-  // Holder the tests mutate before calling installWorkspaceMock so they can
-  // Swap the rendered thread's PR links and CI check map.
   let currentThread: TestWorkspaceThread;
   // Shape matches ChecksStatus just enough for sidebar CI aggregation,
   // while keeping the action-required ring tests focused on row state.
