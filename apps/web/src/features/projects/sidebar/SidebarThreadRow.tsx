@@ -565,6 +565,7 @@ function handleInlineEditKeyDown(
 function ThreadRowBranchLine({ thread, presentation, children }: Pick<ThreadRowVisualProps, "thread" | "presentation"> & { children: React.ReactNode }) {
   const checkoutLabel = resolveThreadCheckoutLabel(thread);
   const age = useRelativeTime(threadActivityAt(thread));
+  if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordRowRender(`sidebar-age:${thread.id}`);
   const stale = presentation.isStaleWorktree;
   return (
     <div className={cn("flex h-4 min-w-0 items-center gap-2 text-caption text-muted", presentation.scaffoldDim)}>
