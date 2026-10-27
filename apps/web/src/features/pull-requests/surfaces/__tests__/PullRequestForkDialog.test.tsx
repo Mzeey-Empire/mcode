@@ -322,11 +322,7 @@ describe("PullRequestForkDialog", () => {
       detail.url,
       "open",
     );
-    expect(workspaceState.setActiveWorkspace).toHaveBeenCalledWith(
-      "workspace-previous",
-      undefined,
-      false,
-    );
+    expect(workspaceState.setActiveWorkspace).toHaveBeenCalledWith("workspace-previous");
     expect(workspaceState.setActiveThread).toHaveBeenCalledWith(
       "thread-previous",
     );
