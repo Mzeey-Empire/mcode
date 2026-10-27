@@ -5,7 +5,7 @@ import { broadcast } from "../../../application/transport/push.js";
 const activityRow = z.object({ last_activity_at: z.string().nullable() });
 const pendingByDatabase = new WeakMap<Database, Map<string, string | null>>();
 
-/** Advance only the turn activity clock, retaining its pre-transaction value for notification. */
+/** Advance the turn activity clock monotonically. */
 export function advanceThreadActivity(db: Database, threadId: string, at: string): boolean {
   const before = activityRow.nullable().parse(db.query(
     "SELECT last_activity_at FROM threads WHERE id = ?",

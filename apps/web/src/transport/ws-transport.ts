@@ -577,7 +577,6 @@ export function createWsTransport(
         });
       }
 
-      // Reconnect must refresh every workspace, including projects never expanded here.
       // Deferred import avoids a circular dependency at module evaluation time.
       import("@/features/projects/state/workspaceStore").then(({ useWorkspaceStore }) => {
         if (reconnecting) void useWorkspaceStore.getState().loadWorkspaces();

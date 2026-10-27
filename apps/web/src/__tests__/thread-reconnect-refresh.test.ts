@@ -88,7 +88,6 @@ describe("thread status refresh after reconnect", () => {
 
     useWorkspaceStore.setState({ threads: [myThread, otherThread] });
 
-    // The whole-index snapshot includes both workspaces.
     const fresh = { ...myThread, status: "interrupted" as const };
     (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValue([fresh, otherThread]);
 
