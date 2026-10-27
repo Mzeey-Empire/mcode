@@ -57,7 +57,7 @@ describe("registerServerConnectionHandlers", () => {
     if (!getServerUrl) throw new Error("get-server-url handler was not registered");
 
     expect(getServerUrl({ sender: mainWebContents })).toEqual({
-      url: "ws://localhost:43127?token=token-with-unicode-✓",
+      url: "ws://127.0.0.1:43127?token=token-with-unicode-✓",
       ipcPath: "\\\\.\\pipe\\mcode-✓",
     });
     expect(getConnection).toHaveBeenCalledOnce();
@@ -265,7 +265,7 @@ describe("ServerRuntime entry point", () => {
     }
 
     expect(getServerUrl({ sender: window.webContents })).toEqual({
-      url: "ws://localhost:43210?token=entry-token",
+      url: "ws://127.0.0.1:43210?token=entry-token",
       ipcPath: "entry-ipc-path",
     });
 
