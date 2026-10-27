@@ -48,6 +48,15 @@ export interface SetRowsOptions {
   readonly flip?: boolean;
 }
 
+/** Options for {@link VirtualViewport.moveTo}. */
+export interface MoveOptions {
+  /**
+   * Hand the position to the reading row once the move lands. Later row changes then hold the
+   * visible rows still instead of chasing the target again.
+   */
+  readonly release?: boolean;
+}
+
 const FLIP_DURATION_MS = 180;
 const FLIP_EASING = "cubic-bezier(0.2, 0, 0, 1)";
 
@@ -427,18 +436,25 @@ export class VirtualViewport {
   }
 
   /** Restores an anchor, follows the end, or keeps a navigation target centered. */
-  moveTo(position: ViewportPosition, smooth = false): void {
+  moveTo(position: ViewportPosition, smooth = false, options: MoveOptions = {}): void {
     this.context.cancelScroll();
     this.position = position;
     this.animating = smooth && !prefersReducedMotion();
     if (this.animating) {
       this.context.smoothScrollTo(() => Math.max(0, this.targetScrollTop()), 250, undefined, () => {
         this.animating = false;
-        this.applyPosition();
-        this.pinReadingAnchor();
+        this.settle(options.release === true);
       });
     }
+    this.settle(!this.animating && options.release === true);
+  }
+
+  private settle(release: boolean): void {
     this.applyPosition();
+    if (release) {
+      this.position = this.readingPosition();
+      this.applyPosition();
+    }
     this.pinReadingAnchor();
   }
 
