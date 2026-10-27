@@ -10,7 +10,6 @@ const SOURCE_ROOTS = [
   "packages/contracts/src",
 ] as const;
 const ALLOWED_LEGACY_IMPORTERS = new Set([
-  // These consumers already imported legacy contracts through the removed contracts barrel.
   "apps/server/src/application/transport/__tests__/push.test.ts",
   "apps/server/src/application/transport/push.ts",
   "apps/server/src/features/terminal/backends/terminal-backend.ts",

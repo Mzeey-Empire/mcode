@@ -3,7 +3,6 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
-// TypeScript belongs to the contracts workspace, rather than the repository root.
 import ts from "../../packages/contracts/node_modules/typescript/lib/typescript.js";
 
 interface ImportTarget {
@@ -62,7 +61,6 @@ function definingTarget(checker: ts.TypeChecker, symbol: ts.Symbol, boundaries: 
   if (!declaration) throw new Error(`No declaration for ${symbol.name}`);
   let source = declaration.getSourceFile();
   if (!NodePath.resolve(source.fileName).startsWith(`${contractsRoot}${NodePath.sep}`)) {
-    // Keep external packages behind the contracts compatibility boundary.
     const boundary = boundaries.find((candidate) => moduleExports(checker, candidate)
       .some((entry) => originalSymbol(checker, entry) === original));
     if (!boundary) throw new Error(`No contracts boundary for ${symbol.name}`);
