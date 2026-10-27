@@ -18,6 +18,12 @@ it("keeps the confirmed value and returns a rejected write's reason", async () =
   expect(useSettingsStore.getState().settings.thread.completion.completeOnPrMerge).toBe(true);
 });
 
+it("returns the validation message instead of the server's raw issue list", async () => {
+  const issues = [{ code: "custom", path: ["thread"], message: "Must provide at least one setting to update" }];
+  vi.mocked(mockTransport.updateSettings).mockRejectedValueOnce(new Error(JSON.stringify(issues)));
+  expect(await useSettingsStore.getState().update({ thread: {} })).toBe("Must provide at least one setting to update");
+});
+
 it("applies a confirmed settings write", async () => {
   const confirmed = getDefaultSettings();
   confirmed.thread.completion.completeOnPrMerge = false;
