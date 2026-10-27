@@ -151,6 +151,11 @@ NodeTest.describe("sidebar renderer workloads", () => {
     assert.equal(frames.p95Ms, 50);
   });
 
+  NodeTest.it("counts over-budget frames at the 120 Hz and 60 Hz budgets whatever the measured refresh", () => {
+    const frames = summarizeFrameIntervals([8.3, 12.6, 16.7, 25.1, 33.4], 8.3);
+    assert.deepEqual(frames.overBudgetFramesAtFixedBudgets, { "8.3": 4, "16.7": 2 });
+  });
+
   NodeTest.it("rejects a hydration sample whose Profiler recorded nothing in a profiling build", () => {
     const check = { firstThreadRowMs: 900, sidebarCommitsBeforeSettle: 0 };
     assert.deepEqual(validateSidebarCheck("sidebarHydration", check, "profiling"), ["the sidebar Profiler recorded no commits"]);
