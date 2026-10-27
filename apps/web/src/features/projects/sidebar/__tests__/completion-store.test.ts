@@ -12,7 +12,6 @@ vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
 const active = createMockThread({ id: "thread-1", workspace_id: "ws-1", user_completed_at: null });
 const completed = { ...active, user_completed_at: "2026-10-27T10:00:03.000Z" };
 
-/** The server's hold: the reply arrives when `ms` of fake time have passed. */
 function replyAfter(ms: number, result: ThreadCompletionResult): Promise<ThreadCompletionResult> {
   return new Promise((resolve) => setTimeout(() => resolve(result), ms));
 }

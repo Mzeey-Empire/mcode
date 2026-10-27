@@ -9,14 +9,12 @@ export type SidebarScope = "active" | "completed";
 export type SidebarView = "projects" | "threads";
 
 interface SidebarUiState {
-  /** The scope the user picked. Read it through {@link effectiveSidebarScope}, never directly. */
   readonly scope: SidebarScope;
   readonly view: SidebarView;
   readonly olderOpen: boolean;
   readonly collapsedProjects: ReadonlySet<string>;
   readonly collapsedOlderProjects: ReadonlySet<string>;
   readonly showMore: ReadonlySet<string>;
-  /** Set while the pointer is inside the list, so reorders wait until it leaves. */
   readonly frozen: FrozenOrder | null;
 }
 
@@ -37,9 +35,7 @@ function toggled(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
 }
 
 /**
- * Sidebar UI state the model reads: one global scope (transient, per app session), the persisted
- * view, and the open and collapsed sections. Replaces the per-project lifecycle views that lived
- * in `uiStore`.
+ * Sidebar scope, view and section state. Only the view persists across app sessions.
  */
 export const useSidebarUiStore = create<SidebarUiState & SidebarUiActions>()(
   persist(
@@ -71,8 +67,7 @@ export const useSidebarUiStore = create<SidebarUiState & SidebarUiActions>()(
 );
 
 /**
- * The scope the sidebar shows. With nothing completed the scope bar is hidden, so a stored
- * Completed scope would strand the user on an empty list; it reads as Active instead.
+ * Returns Active when no threads are completed, otherwise the requested scope.
  */
 export function effectiveSidebarScope(scope: SidebarScope, completedCount: number): SidebarScope {
   return completedCount === 0 ? "active" : scope;

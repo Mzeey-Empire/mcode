@@ -18,7 +18,7 @@ export interface SegmentedOption {
   readonly title?: string;
   /** Draws a small primary dot after the label, flagging an option that holds content. */
   readonly marker?: boolean;
-  /** Plain count drawn after the label, for a segment whose size the user tracks (the sidebar's Completed scope). */
+  /** Plain count drawn after the label. */
   readonly count?: number;
 }
 
