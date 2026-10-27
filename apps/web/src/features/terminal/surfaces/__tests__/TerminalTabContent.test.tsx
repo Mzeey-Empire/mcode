@@ -1,27 +1,30 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const terminalKill = vi.fn();
-const terminalHasChildren = vi.fn();
-const terminalCreate = vi.fn();
-const getWorkspaceActionRun = vi.fn();
+const terminalKill = vi.mocked(mockTransport.terminalKill);
+const terminalHasChildren = vi.mocked(mockTransport.terminalHasChildren);
+const terminalCreate = vi.mocked(mockTransport.terminalCreate);
+const getWorkspaceActionRun = vi.mocked(mockTransport.getWorkspaceActionRun);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({
-    terminalKill,
-    terminalHasChildren,
-    terminalCreate,
-    terminalPause: vi.fn().mockResolvedValue(undefined),
-    terminalDiagnostics: vi.fn(),
-    openIn: vi.fn(),
-    listOpenInApps: vi.fn().mockResolvedValue([]),
-    getWorkspaceActionRun,
-    readWorkspaceEnvironment: vi.fn().mockResolvedValue({ document: { version: "0.0.1", actions: [] }, revision: null, status: "absent" }),
-    listWorkspaceActionRuns: vi.fn().mockResolvedValue([]),
-    restartWorkspaceAction: vi.fn(),
-    stopWorkspaceAction: vi.fn(),
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalKill).mockReset();
+  vi.mocked(mockTransport.terminalHasChildren).mockReset();
+  vi.mocked(mockTransport.terminalCreate).mockReset();
+  vi.mocked(mockTransport.terminalPause).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.terminalDiagnostics).mockReset();
+  vi.mocked(mockTransport.openIn).mockReset();
+  vi.mocked(mockTransport.listOpenInApps).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.getWorkspaceActionRun).mockReset();
+  vi.mocked(mockTransport.readWorkspaceEnvironment).mockReset().mockResolvedValue({ document: { version: "0.0.1", actions: [] }, revision: null, status: "absent" });
+  vi.mocked(mockTransport.listWorkspaceActionRuns).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.restartWorkspaceAction).mockReset();
+  vi.mocked(mockTransport.stopWorkspaceAction).mockReset();
+});
 
 import { TERMINAL_MAX_PER_SCOPE, type WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";

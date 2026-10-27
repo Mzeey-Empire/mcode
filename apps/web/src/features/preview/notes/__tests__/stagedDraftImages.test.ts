@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildComposerAnnotationBundle } from "@/features/conversation/composer/submission/composer-annotations";
 import { stagedSnapshotIds } from "@/lib/staged-snapshot-ids";
@@ -5,8 +6,12 @@ import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { materializeStagedSnapshots, readStagedDraftImage, stageDraftImage } from "../stagedDraftImages";
 import { BILLING_PAGE, seedPage, stagedImage } from "./fixtures";
 
-const { mockStage } = vi.hoisted(() => ({ mockStage: vi.fn() }));
-vi.mock("@/transport", () => ({ getTransport: () => ({ stageDraftImage: mockStage }) }));
+const mockStage = vi.mocked(mockTransport.stageDraftImage);
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.stageDraftImage).mockReset();
+});
 
 const THREAD = "thread-staged-images";
 const readStaged = vi.fn();

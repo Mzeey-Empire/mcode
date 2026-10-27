@@ -1,9 +1,10 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentReadResult } from "@mcode/contracts";
 
-const { transport, MockRpcError, applyActionRun } = vi.hoisted(() => {
+const { MockRpcError, applyActionRun } = vi.hoisted(() => {
   class MockRpcError extends Error {
     readonly data?: Record<string, unknown>;
 
@@ -16,17 +17,26 @@ const { transport, MockRpcError, applyActionRun } = vi.hoisted(() => {
   return {
     MockRpcError,
     applyActionRun: vi.fn(),
-    transport: {
-      readWorkspaceEnvironment: vi.fn(),
-      saveWorkspaceEnvironment: vi.fn(),
-      setWorkspaceEnvironmentStorageMode: vi.fn(),
-      forgetWorkspaceEnvironmentApproval: vi.fn(),
-      startWorkspaceAction: vi.fn(),
-    },
   };
 });
 
-vi.mock("@/transport", () => ({ getTransport: () => transport, RpcError: MockRpcError }));
+const transport = {
+  readWorkspaceEnvironment: vi.mocked(mockTransport.readWorkspaceEnvironment),
+  saveWorkspaceEnvironment: vi.mocked(mockTransport.saveWorkspaceEnvironment),
+  setWorkspaceEnvironmentStorageMode: vi.mocked(mockTransport.setWorkspaceEnvironmentStorageMode),
+  forgetWorkspaceEnvironmentApproval: vi.mocked(mockTransport.forgetWorkspaceEnvironmentApproval),
+  startWorkspaceAction: vi.mocked(mockTransport.startWorkspaceAction),
+};
+
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport, RpcError: MockRpcError }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.readWorkspaceEnvironment).mockReset();
+  vi.mocked(mockTransport.saveWorkspaceEnvironment).mockReset();
+  vi.mocked(mockTransport.setWorkspaceEnvironmentStorageMode).mockReset();
+  vi.mocked(mockTransport.forgetWorkspaceEnvironmentApproval).mockReset();
+  vi.mocked(mockTransport.startWorkspaceAction).mockReset();
+});
 vi.mock("@/features/terminal/state/applyActionRun", () => ({ applyActionRun: applyActionRun }));
 vi.mock("@/features/projects/state/workspaceStore", () => ({
   useWorkspaceStore: (selector: (state: { workspaces: readonly { id: string; name: string; path: string; icon_path: null }[] }) => unknown) =>
@@ -290,7 +300,7 @@ describe("ProjectSettingsPanel", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(transport.saveWorkspaceEnvironment).toHaveBeenCalledOnce());
-    const [, saved] = transport.saveWorkspaceEnvironment.mock.calls[0] as [string, WorkspaceEnvironmentReadResult["document"]];
+    const [, saved] = transport.saveWorkspaceEnvironment.mock.calls[0];
     expect(saved.actions.map((action) => [action.name, action.command.default])).toEqual([
       ["Build", "bun run build"],
       ["Build copy", "bun run build"],
@@ -350,7 +360,29 @@ describe("ProjectSettingsPanel", () => {
 
   it("runs a saved action in the open thread and shows its terminal", async () => {
     const user = userEvent.setup();
-    const run = { actionId: "build", threadId: "thread-1" };
+    const run: Awaited<ReturnType<typeof mockTransport.startWorkspaceAction>> = {
+      actionId: "build",
+      threadId: "thread-1",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      revision: 1,
+      terminalSessionId: "terminal-1",
+      trigger: "manual",
+      port: null,
+      actionName: "Build",
+      status: "running",
+      snapshot: {
+        platform: "windows",
+        script: "bun run build",
+        checkoutPath: "C:/repo",
+        terminal: null,
+        environmentNames: [],
+      },
+      createdAt: "2026-10-27T10:00:00.000Z",
+      startedAt: "2026-10-27T10:00:00.000Z",
+      finishedAt: null,
+      exitCode: null,
+    };
     transport.startWorkspaceAction.mockResolvedValue(run);
     render(<ProjectSettingsPanel workspaceId="workspace-1" threadId="thread-1" />);
 
@@ -372,7 +404,7 @@ describe("ProjectSettingsPanel", () => {
 
   describe("action options", () => {
     const savedActions = () =>
-      (transport.saveWorkspaceEnvironment.mock.calls[0] as [string, WorkspaceEnvironmentReadResult["document"]])[1].actions;
+      transport.saveWorkspaceEnvironment.mock.calls[0][1].actions;
 
     it("disables the wait row with its reason until Run on startup is on", async () => {
       const user = userEvent.setup();

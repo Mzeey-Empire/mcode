@@ -1,4 +1,5 @@
 import { createMockThread } from "@mcode/contracts/testing";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { StrictMode } from "react";
 import { render, screen, act, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -135,11 +136,19 @@ vi.mock("@/stores/threadStore", async (importActual) => {
   };
 });
 
-const startupTransport = vi.hoisted(() => ({ listThreadStartups: vi.fn(), getThreadStartup: vi.fn() }));
+const startupTransport = {
+  listThreadStartups: vi.mocked(mockTransport.listThreadStartups),
+  getThreadStartup: vi.mocked(mockTransport.getThreadStartup),
+};
 
 vi.mock("@/transport", () => ({
-  getTransport: () => startupTransport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.listThreadStartups).mockReset();
+  vi.mocked(mockTransport.getThreadStartup).mockReset();
+});
 
 function setupStartup(threadId: string, setup: ThreadStartup["steps"][number]["state"], block?: ThreadStartup["block"]): ThreadStartup {
   return {

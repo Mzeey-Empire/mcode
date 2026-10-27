@@ -1,5 +1,6 @@
 import { createMockWorkspace } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useToastStore } from "@/stores/toastStore";
 import { useTerminalStore } from "@/features/terminal";
@@ -7,16 +8,18 @@ import { createTerminalForScope } from "../ensure-terminal";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
 
-const terminalCreate = vi.fn();
-const terminalKill = vi.fn().mockResolvedValue(undefined);
+const terminalCreate = vi.mocked(mockTransport.terminalCreate);
+const terminalKill = vi.mocked(mockTransport.terminalKill);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({
-    terminalCreate,
-    terminalKill,
-    terminalPause: vi.fn().mockResolvedValue(undefined),
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalCreate).mockReset();
+  vi.mocked(mockTransport.terminalKill).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.terminalPause).mockReset().mockResolvedValue(undefined);
+});
 
 describe("createTerminalForScope", () => {
   beforeEach(() => {

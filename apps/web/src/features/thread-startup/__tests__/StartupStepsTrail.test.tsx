@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import type { ThreadStartup, ThreadStartupAction, ThreadStartupStep, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -5,18 +6,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const startupTransport = {
-  cancelThreadStartup: vi.fn(),
-  retryAutomaticSetup: vi.fn(),
-  continueAutomaticSetup: vi.fn(),
-  approveWorkspaceEnvironmentCommand: vi.fn(),
-  startWorkspaceAction: vi.fn(),
-  resolveThreadStartup: vi.fn(),
-  listWorkspaceActionRuns: vi.fn(),
+  cancelThreadStartup: vi.mocked(mockTransport.cancelThreadStartup),
+  retryAutomaticSetup: vi.mocked(mockTransport.retryAutomaticSetup),
+  continueAutomaticSetup: vi.mocked(mockTransport.continueAutomaticSetup),
+  approveWorkspaceEnvironmentCommand: vi.mocked(mockTransport.approveWorkspaceEnvironmentCommand),
+  startWorkspaceAction: vi.mocked(mockTransport.startWorkspaceAction),
+  resolveThreadStartup: vi.mocked(mockTransport.resolveThreadStartup),
+  listWorkspaceActionRuns: vi.mocked(mockTransport.listWorkspaceActionRuns),
 };
 
 vi.mock("@/transport", () => ({
-  getTransport: () => startupTransport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.cancelThreadStartup).mockReset();
+  vi.mocked(mockTransport.retryAutomaticSetup).mockReset();
+  vi.mocked(mockTransport.continueAutomaticSetup).mockReset();
+  vi.mocked(mockTransport.approveWorkspaceEnvironmentCommand).mockReset();
+  vi.mocked(mockTransport.startWorkspaceAction).mockReset();
+  vi.mocked(mockTransport.resolveThreadStartup).mockReset();
+  vi.mocked(mockTransport.listWorkspaceActionRuns).mockReset();
+});
 
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -103,7 +114,7 @@ function rowLabels() {
 
 describe("StartupStepsTrail", () => {
   beforeEach(() => {
-    const gate = { gate: "not-required", attempt: null, queuedTurns: [] };
+    const gate = { gate: "not-required" as const, attempt: null, queuedTurns: [] };
     startupTransport.retryAutomaticSetup.mockResolvedValue(gate);
     startupTransport.continueAutomaticSetup.mockResolvedValue(gate);
     startupTransport.approveWorkspaceEnvironmentCommand.mockResolvedValue(undefined);

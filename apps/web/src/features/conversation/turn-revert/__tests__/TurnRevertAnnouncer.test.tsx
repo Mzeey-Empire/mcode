@@ -1,15 +1,23 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { useThreadStore } from "@/stores/threadStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { TurnRevertAnnouncer } from "../TurnRevertAnnouncer";
 import { TurnRevertReceipt } from "../TurnRevertReceipt";
 import { acceptTurnRevert } from "../useTurnRevert";
 
-const transport = vi.hoisted(() => ({ listSnapshots: vi.fn(), undoTurnRevert: vi.fn() }));
-vi.mock("@/transport", () => ({ getTransport: () => transport }));
+const transport = {
+  listSnapshots: vi.mocked(mockTransport.listSnapshots),
+  undoTurnRevert: vi.mocked(mockTransport.undoTurnRevert),
+};
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.listSnapshots).mockReset();
+  vi.mocked(mockTransport.undoTurnRevert).mockReset();
+});
 
 function receipt(id: string, threadId: string, content: string) {
   return createMockMessage({

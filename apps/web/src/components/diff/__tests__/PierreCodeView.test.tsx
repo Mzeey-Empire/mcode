@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { parsePatchFiles } from "@pierre/diffs";
@@ -8,16 +9,22 @@ import { ReviewDiffView } from "@/components/diff/ReviewDiffView";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 
-const transport = vi.hoisted(() => ({
-  getWorkingTreeDiff: vi.fn(),
-  readFileContent: vi.fn(),
-  readFileAtRef: vi.fn(),
-}));
+const transport = {
+  getWorkingTreeDiff: vi.mocked(mockTransport.getWorkingTreeDiff),
+  readFileContent: vi.mocked(mockTransport.readFileContent),
+  readFileAtRef: vi.mocked(mockTransport.readFileAtRef),
+};
 
 vi.mock("@/transport", async (original) => ({
   ...(await original<object>()),
-  getTransport: () => transport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getWorkingTreeDiff).mockReset();
+  vi.mocked(mockTransport.readFileContent).mockReset();
+  vi.mocked(mockTransport.readFileAtRef).mockReset();
+});
 
 vi.mock("@/hooks/useOpenInApps", () => ({
   useOpenInApps: () => [],

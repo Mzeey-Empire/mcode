@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { ReactNode, ReactElement } from "react";
 import type { Thread } from "@/transport/types";
 import type { ProviderUsageInfo, ReviewFileChange, TurnSnapshot } from "@mcode/contracts";
-
+import { mockTransport } from "@/__tests__/mocks/transport";
 
 // vi.hoisted runs before vi.mock hoisting, so these are available in mock factories.
 const {
@@ -13,7 +13,6 @@ const {
   mockUseHasCommitsAhead,
   mockSetCommitSheetScopeId,
   mockWorkspaceSelector,
-  mockGetProviderUsage,
   mockGetRightPanel,
   mockGetRightPanelVisible,
   mockShowRightPanel,
@@ -24,7 +23,7 @@ const {
   mockUseHasCommitsAhead: vi.fn().mockReturnValue(null),
   mockSetCommitSheetScopeId: vi.fn(),
   mockWorkspaceSelector: vi.fn(),
-  mockGetProviderUsage: vi.fn<() => Promise<ProviderUsageInfo>>(),
+
   mockGetRightPanel: vi.fn().mockReturnValue({
     visible: false,
     width: 380,
@@ -36,6 +35,8 @@ const {
   mockSetRightPanelTab: vi.fn(),
   mockSetRightPanelWidth: vi.fn(),
 }));
+
+const mockGetProviderUsage = vi.mocked(mockTransport.getProviderUsage);
 
 vi.mock("@/features/projects/state/workspaceStore", () => {
   const store = Object.assign(
@@ -49,31 +50,33 @@ vi.mock("@/transport", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/transport")>();
   return {
     ...actual,
-    getTransport: () => ({
-      getProviderUsage: mockGetProviderUsage,
-      listSnapshots: vi.fn().mockResolvedValue([]),
-      getSnapshotDiffStats: vi.fn().mockResolvedValue([]),
-      getReviewComparison: vi.fn().mockResolvedValue({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } }),
-      getReviewState: vi.fn().mockResolvedValue({ isGitRepo: false }),
-      getBranchComparison: vi.fn().mockResolvedValue(null),
-      readWorkspaceEnvironment: vi.fn().mockResolvedValue({
-        document: { version: "0.0.1", actions: [] },
-        revision: null,
-        status: "absent",
-      }),
-      listWorkspaceActionRuns: vi.fn().mockResolvedValue([]),
-      generateRecap: vi.fn().mockImplementation(async (
-        _threadId: string,
-        _messages: Array<{ role: "user" | "assistant"; content: string }>,
-        previousRecap: string | null,
-      ) => ({ text: previousRecap ?? "" })),
-      getRemoteUrl: vi.fn().mockResolvedValue({
-        label: "Mzeey-Empire/mcode",
-        webUrl: "https://github.com/Mzeey-Empire/mcode",
-      }),
-      createBranch: vi.fn().mockResolvedValue({ branch: "feat/my-feature" }),
-    }),
+    getTransport: () => mockTransport,
   };
+});
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getProviderUsage).mockReset();
+  vi.mocked(mockTransport.listSnapshots).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.getSnapshotDiffStats).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.getReviewComparison).mockReset().mockResolvedValue({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } });
+  vi.mocked(mockTransport.getReviewState).mockReset().mockResolvedValue({ isGitRepo: false });
+  vi.mocked(mockTransport.getBranchComparison).mockReset().mockResolvedValue({ base: null, compare: null, isUnborn: false, isComparisonAvailable: false });
+  vi.mocked(mockTransport.readWorkspaceEnvironment).mockReset().mockResolvedValue({
+    document: { version: "0.0.1", actions: [] },
+    revision: null,
+    status: "absent",
+  });
+  vi.mocked(mockTransport.listWorkspaceActionRuns).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.generateRecap).mockReset().mockImplementation(async (
+    _threadId: string,
+    _messages: Array<{ role: "user" | "assistant"; content: string }>,
+    previousRecap: string | null,
+  ) => ({ text: previousRecap ?? "" }));
+  vi.mocked(mockTransport.getRemoteUrl).mockReset().mockResolvedValue({
+    label: "Mzeey-Empire/mcode",
+    webUrl: "https://github.com/Mzeey-Empire/mcode",
+  });
+  vi.mocked(mockTransport.createBranch).mockReset().mockResolvedValue({ branch: "feat/my-feature" });
 });
 
 vi.mock("@/features/terminal", () => ({

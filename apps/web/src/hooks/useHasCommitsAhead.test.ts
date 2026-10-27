@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 
-const mockGetGitLog = vi.fn().mockResolvedValue([]);
+const mockGetGitLog = vi.mocked(mockTransport.getGitLog);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ getGitLog: mockGetGitLog }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getGitLog).mockReset().mockResolvedValue([]);
+});
 
 import { useHasCommitsAhead } from "./useHasCommitsAhead";
 
@@ -53,7 +58,7 @@ describe("useHasCommitsAhead", () => {
 
   it("returns true when branch has commits ahead", async () => {
     mockGetGitLog.mockResolvedValue([
-      { sha: "abc123", message: "feat: something", author: "user", date: "2026-01-01" },
+      { sha: "abc123", shortSha: "abc123", filesChanged: 1, message: "feat: something", author: "user", date: "2026-01-01" },
     ]);
 
     const { result } = renderHook(() =>
@@ -93,7 +98,7 @@ describe("useHasCommitsAhead", () => {
 
   it("resets when branch changes", async () => {
     mockGetGitLog.mockResolvedValue([
-      { sha: "abc123", message: "feat: something", author: "user", date: "2026-01-01" },
+      { sha: "abc123", shortSha: "abc123", filesChanged: 1, message: "feat: something", author: "user", date: "2026-01-01" },
     ]);
 
     const { result, rerender } = renderHook(

@@ -9,6 +9,7 @@ import { noNativeTitleTooltip } from "./rules/no-native-title-tooltip.ts";
 import { noRawColor } from "./rules/no-raw-color.ts";
 import { noRawShadow } from "./rules/no-raw-shadow.ts";
 import { noRealTimerSleep } from "./rules/no-real-timer-sleep.ts";
+import { noInlineModuleMock } from "./rules/no-inline-module-mock.ts";
 import { noSourceTextTest } from "./rules/no-source-text-test.ts";
 import { requireLazyNontrivialSchema } from "./rules/require-lazy-nontrivial-schema.ts";
 import { useTestBuilder } from "./rules/use-test-builder.ts";
@@ -27,6 +28,7 @@ export const mcodePlugin = definePlugin({
     "no-raw-color": noRawColor,
     "no-raw-shadow": noRawShadow,
     "no-real-timer-sleep": noRealTimerSleep,
+    "no-inline-module-mock": noInlineModuleMock,
     "no-source-text-test": noSourceTextTest,
     "require-lazy-nontrivial-schema": requireLazyNontrivialSchema,
     "use-test-builder": useTestBuilder,

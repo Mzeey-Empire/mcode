@@ -1,19 +1,25 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { useProjectActionStore } from "../../environment/state/project-action-store";
 import { useProjectActions } from "../useProjectActions";
 
-const { transport } = vi.hoisted(() => ({
-  transport: {
-    readWorkspaceEnvironment: vi.fn(),
-    listWorkspaceActionRuns: vi.fn(),
-    restartWorkspaceAction: vi.fn(),
-    stopWorkspaceAction: vi.fn(),
-  },
-}));
+const transport = {
+  readWorkspaceEnvironment: vi.mocked(mockTransport.readWorkspaceEnvironment),
+  listWorkspaceActionRuns: vi.mocked(mockTransport.listWorkspaceActionRuns),
+  restartWorkspaceAction: vi.mocked(mockTransport.restartWorkspaceAction),
+  stopWorkspaceAction: vi.mocked(mockTransport.stopWorkspaceAction),
+};
 
-vi.mock("@/transport", () => ({ getTransport: () => transport }));
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.readWorkspaceEnvironment).mockReset();
+  vi.mocked(mockTransport.listWorkspaceActionRuns).mockReset();
+  vi.mocked(mockTransport.restartWorkspaceAction).mockReset();
+  vi.mocked(mockTransport.stopWorkspaceAction).mockReset();
+});
 
 const action = { id: "build", name: "Build", command: { default: "bun run build" } };
 
@@ -61,8 +67,9 @@ describe("useProjectActions", () => {
   });
 
   it("retains a post-request push while pruning a pre-request omitted phantom", async () => {
-    let resolveList!: (runs: readonly WorkspaceEnvironmentActionRun[]) => void;
+    let resolveList!: (runs: WorkspaceEnvironmentActionRun[]) => void;
     transport.readWorkspaceEnvironment.mockResolvedValue({
+      revision: "revision-1", status: "present",
       document: { version: "0.0.1", actions: [action] },
     });
     transport.listWorkspaceActionRuns.mockReturnValueOnce(new Promise((resolve) => {
@@ -100,8 +107,9 @@ describe("useProjectActions", () => {
   });
 
   it("ignores an in-flight Action list after its Thread is cleared", async () => {
-    let resolveList!: (runs: readonly WorkspaceEnvironmentActionRun[]) => void;
+    let resolveList!: (runs: WorkspaceEnvironmentActionRun[]) => void;
     transport.readWorkspaceEnvironment.mockResolvedValue({
+      revision: "revision-1", status: "present",
       document: { version: "0.0.1", actions: [action] },
     });
     transport.listWorkspaceActionRuns.mockReturnValueOnce(new Promise((resolve) => {
@@ -117,8 +125,9 @@ describe("useProjectActions", () => {
   });
 
   it("does not hydrate Action state after its hook unmounts", async () => {
-    let resolveList!: (runs: readonly WorkspaceEnvironmentActionRun[]) => void;
+    let resolveList!: (runs: WorkspaceEnvironmentActionRun[]) => void;
     transport.readWorkspaceEnvironment.mockResolvedValue({
+      revision: "revision-1", status: "present",
       document: { version: "0.0.1", actions: [action] },
     });
     transport.listWorkspaceActionRuns.mockReturnValueOnce(new Promise((resolve) => {

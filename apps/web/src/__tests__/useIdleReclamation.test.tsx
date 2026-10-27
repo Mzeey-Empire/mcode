@@ -1,15 +1,20 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 
-const setBackground = vi.fn().mockResolvedValue(undefined);
+const setBackground = vi.mocked(mockTransport.setBackground);
 const applyConversationMemoryPressure = vi.fn();
 
 vi.mock("@/transport", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/transport")>();
   return {
     ...actual,
-    getTransport: () => ({ setBackground }),
+    getTransport: () => mockTransport,
   };
+});
+
+beforeEach(() => {
+  vi.mocked(mockTransport.setBackground).mockReset().mockResolvedValue(undefined);
 });
 
 // threadStore.clearToolCallRecordCache is called during idle — stub the module

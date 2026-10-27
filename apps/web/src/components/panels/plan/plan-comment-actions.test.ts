@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanComment, PlanCommentEditorDraft } from "@mcode/contracts";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
@@ -12,14 +13,21 @@ import {
   setPlanCommentEditor,
 } from "./plan-comment-actions";
 
-const createPlanComment = vi.hoisted(() => vi.fn<(payload: { commentId: string; body: string }) => Promise<PlanComment>>());
-const updatePlanComment = vi.hoisted(() => vi.fn<(payload: { commentId: string; body: string }) => Promise<PlanComment>>());
-const setPlanCommentStatus = vi.hoisted(() => vi.fn<(payload: { commentId: string; status: string }) => Promise<PlanComment>>());
-const deleteComment = vi.hoisted(() => vi.fn<(payload: { commentId: string }) => Promise<void>>());
+const createPlanComment = vi.mocked(mockTransport.createPlanComment);
+const updatePlanComment = vi.mocked(mockTransport.updatePlanComment);
+const setPlanCommentStatus = vi.mocked(mockTransport.setPlanCommentStatus);
+const deleteComment = vi.mocked(mockTransport.deletePlanComment);
 vi.mock("@/transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/transport")>()),
-  getTransport: () => ({ createPlanComment, updatePlanComment, setPlanCommentStatus, deletePlanComment: deleteComment }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.createPlanComment).mockReset();
+  vi.mocked(mockTransport.updatePlanComment).mockReset();
+  vi.mocked(mockTransport.setPlanCommentStatus).mockReset();
+  vi.mocked(mockTransport.deletePlanComment).mockReset();
+});
 
 const THREAD = "thread-plan";
 const VERSION = "00000000-0000-4000-8000-000000000001";

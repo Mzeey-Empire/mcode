@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { createRef } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,10 +8,20 @@ import { useSubagentRosterStore } from "../../state/subagentRosterStore";
 import { SubagentsPanel } from "../../roster/SubagentsPanel";
 import { SubagentList } from "../SubagentList";
 
-const transport = vi.hoisted(() => ({ loadSubagentRoster: vi.fn(), loadSubagentDetail: vi.fn(), stopCanonicalSubagent: vi.fn() }));
+const transport = {
+  loadSubagentRoster: vi.mocked(mockTransport.loadSubagentRoster),
+  loadSubagentDetail: vi.mocked(mockTransport.loadSubagentDetail),
+  stopCanonicalSubagent: vi.mocked(mockTransport.stopCanonicalSubagent),
+};
 vi.mock("@/transport", async (original) => ({
-  ...await original<typeof import("@/transport")>(), getTransport: () => transport,
+  ...await original<typeof import("@/transport")>(), getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.loadSubagentRoster).mockReset();
+  vi.mocked(mockTransport.loadSubagentDetail).mockReset();
+  vi.mocked(mockTransport.stopCanonicalSubagent).mockReset();
+});
 
 const START = Date.parse("2026-10-10T10:00:00.000Z");
 

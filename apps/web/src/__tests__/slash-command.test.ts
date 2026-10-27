@@ -1,24 +1,27 @@
 // @vitest-environment jsdom
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
 // Mock transport so IPC doesn't run
 vi.mock("@/transport", () => ({
-  getTransport: vi.fn(() => ({
-    getProviderCatalog: vi.fn().mockResolvedValue({
-      providerId: "claude",
-      context: { scope: "user" },
-      freshness: { status: "fresh", fetchedAt: "2026-07-20T12:00:00.000Z" },
-      diagnostics: [],
-      entries: [
-        { kind: "skill", identity: { providerId: "claude", kind: "skill", nativeId: "commit" }, name: "commit", description: "Create a git commit", source: "user" },
-        { kind: "skill", identity: { providerId: "claude", kind: "skill", nativeId: "review-pr" }, name: "review-pr", description: "Review a pull request", source: "user" },
-        { kind: "skill", identity: { providerId: "claude", kind: "skill", nativeId: "tdd" }, name: "tdd", description: "Write tests first", source: "user" },
-      ],
-      selectableAgents: [],
-    }),
-  })),
+  getTransport: vi.fn(() => mockTransport),
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getProviderCatalog).mockReset().mockResolvedValue({
+    providerId: "claude",
+    context: { scope: "user" },
+    freshness: { status: "fresh", fetchedAt: "2026-07-20T12:00:00.000Z" },
+    diagnostics: [],
+    entries: [
+      { kind: "skill", identity: { providerId: "claude", kind: "skill", nativeId: "commit" }, name: "commit", description: "Create a git commit", source: "user" },
+      { kind: "skill", identity: { providerId: "claude", kind: "skill", nativeId: "review-pr" }, name: "review-pr", description: "Review a pull request", source: "user" },
+      { kind: "skill", identity: { providerId: "claude", kind: "skill", nativeId: "tdd" }, name: "tdd", description: "Write tests first", source: "user" },
+    ],
+    selectableAgents: [],
+  });
+});
 
 import { useSlashCommand } from "@/components/chat/useSlashCommand";
 import { getTransport, type ProviderCatalogRequest } from "@/transport";

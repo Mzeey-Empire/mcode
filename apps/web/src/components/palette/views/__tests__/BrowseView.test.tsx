@@ -1,7 +1,8 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => {
+const storeMocks = vi.hoisted(() => {
   let pendingConfirm: (() => void) | null = null;
   let pendingBack: (() => void) | null = null;
   const palette = {
@@ -23,11 +24,15 @@ const mocks = vi.hoisted(() => {
   return {
     palette,
     workspace,
-    filesystemBrowse: vi.fn(),
     getPendingConfirm: () => pendingConfirm,
     getPendingBack: () => pendingBack,
   };
 });
+
+const mocks = {
+  ...storeMocks,
+  filesystemBrowse: vi.mocked(mockTransport.filesystemBrowse),
+};
 
 vi.mock("@/stores/commandPaletteStore", () => ({
   useCommandPaletteStore: (selector: (state: typeof mocks.palette) => unknown) =>
@@ -40,8 +45,12 @@ vi.mock("@/features/projects/state/workspaceStore", () => ({
 }));
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ filesystemBrowse: mocks.filesystemBrowse }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.filesystemBrowse).mockReset();
+});
 
 vi.mock("@/lib/platform", () => ({ isMac: false, isWindows: true }));
 

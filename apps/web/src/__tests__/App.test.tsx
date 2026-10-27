@@ -1,3 +1,6 @@
+import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { mockTransport } from "@/__tests__/mocks/transport";
+import { getDefaultSettings } from "@mcode/contracts";
 import {
   act,
   fireEvent,
@@ -26,62 +29,66 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
   initTransport: vi.fn().mockResolvedValue({}),
-  getTransport: () => ({
-    listWorkspaces: vi.fn().mockResolvedValue([]),
-    listThreads: vi.fn().mockResolvedValue([]),
-    getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
-    sendMessage: vi.fn().mockResolvedValue(undefined),
-    createAndSendMessage: vi
-      .fn()
-      .mockResolvedValue({ id: "t1", title: "test", model: null }),
-    updateThreadTitle: vi.fn().mockResolvedValue(true),
-    createWorkspace: vi.fn().mockResolvedValue({}),
-    deleteWorkspace: vi.fn().mockResolvedValue(true),
-    createThread: vi.fn().mockResolvedValue({}),
-    deleteThread: vi.fn().mockResolvedValue(true),
-    continueWithoutSaving: vi.fn().mockResolvedValue(undefined),
-    stopAgent: vi.fn().mockImplementation((threadId: string) => Promise.resolve({
-      threadId,
-      turnExecutionId: null,
-      snapshot: { threadId, turnExecutionId: null, phase: "idle" },
-      status: "already-terminal",
-      dispatchState: "unknown",
-    })),
-    getActiveAgentCount: vi.fn().mockResolvedValue(0),
-    discoverConfig: vi.fn().mockResolvedValue({}),
-    getVersion: vi.fn().mockResolvedValue("0.2.0"),
-    touchLastOpened: vi.fn().mockResolvedValue(undefined),
-    pinWorkspace: vi.fn().mockResolvedValue(undefined),
-    removeRecent: vi.fn().mockResolvedValue(undefined),
-    enrichWorkspaces: vi.fn().mockResolvedValue({ items: [] }),
-    filesystemBrowse: vi.fn().mockResolvedValue({
-      path: "/",
-      parent: null,
-      entries: [],
-      requestedPath: "folder",
-    }),
-    getSettings: vi.fn().mockResolvedValue({}),
-    getPullRequestCapabilities: vi.fn().mockResolvedValue({
-      ok: false,
-      error: {
-        code: "unauthenticated",
-        message: "GitHub authentication required",
-      },
-    }),
-    listPullRequests: vi.fn().mockResolvedValue({
-      ok: true,
-      items: [],
-      nextCursor: null,
-      snapshotVersion: "test",
-      fetchedAt: "2026-07-11T12:00:00.000Z",
-      staleAt: "2026-07-11T12:00:30.000Z",
-      limitations: [],
-    }),
-    cancelPullRequestOperation: vi
-      .fn()
-      .mockResolvedValue({ ok: true, cancelled: false }),
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.listWorkspaces).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.listThreads).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.getMessages).mockReset().mockResolvedValue({ messages: [], hasMore: false });
+  vi.mocked(mockTransport.sendMessage).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.createAndSendMessage).mockReset()
+    .mockResolvedValue({
+      ...createMockThread({ id: "t1", title: "test", model: null }),
+      runtimeSnapshot: { threadId: "t1", turnExecutionId: null, phase: "idle" },
+    });
+  vi.mocked(mockTransport.updateThreadTitle).mockReset().mockResolvedValue(true);
+  vi.mocked(mockTransport.createWorkspace).mockReset().mockResolvedValue({ ok: true, reused: false, workspace: createMockWorkspace() });
+  vi.mocked(mockTransport.deleteWorkspace).mockReset().mockResolvedValue(true);
+  vi.mocked(mockTransport.createThread).mockReset().mockResolvedValue(createMockThread());
+  vi.mocked(mockTransport.deleteThread).mockReset().mockResolvedValue(true);
+  vi.mocked(mockTransport.continueWithoutSaving).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.stopAgent).mockReset().mockImplementation((threadId: string) => Promise.resolve({
+    threadId,
+    turnExecutionId: null,
+    snapshot: { threadId, turnExecutionId: null, phase: "idle" },
+    status: "already-terminal",
+    dispatchState: "unknown",
+  }));
+  vi.mocked(mockTransport.getActiveAgentCount).mockReset().mockResolvedValue(0);
+  vi.mocked(mockTransport.discoverConfig).mockReset().mockResolvedValue({});
+  vi.mocked(mockTransport.getVersion).mockReset().mockResolvedValue("0.2.0");
+  vi.mocked(mockTransport.touchLastOpened).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.pinWorkspace).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.removeRecent).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.enrichWorkspaces).mockReset().mockResolvedValue({ items: [] });
+  vi.mocked(mockTransport.filesystemBrowse).mockReset().mockResolvedValue({
+    path: "/",
+    parent: null,
+    entries: [],
+    requestedPath: "folder",
+    isTooBroad: false,
+  });
+  vi.mocked(mockTransport.getSettings).mockReset().mockResolvedValue(getDefaultSettings());
+  vi.mocked(mockTransport.getPullRequestCapabilities).mockReset().mockResolvedValue({
+    ok: false,
+    error: {
+      code: "unauthenticated",
+      message: "GitHub authentication required",
+    },
+  });
+  vi.mocked(mockTransport.listPullRequests).mockReset().mockResolvedValue({
+    ok: true,
+    items: [],
+    nextCursor: null,
+    snapshotVersion: "test",
+    fetchedAt: "2026-07-11T12:00:00.000Z",
+    staleAt: "2026-07-11T12:00:30.000Z",
+    limitations: [],
+  });
+  vi.mocked(mockTransport.cancelPullRequestOperation).mockReset()
+  .mockResolvedValue({ ok: true, cancelled: false });
+});
 
 // Mock ScrollArea since @base-ui/react may not work in jsdom
 vi.mock("@/components/ui/scroll-area", () => ({

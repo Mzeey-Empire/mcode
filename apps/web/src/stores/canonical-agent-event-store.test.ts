@@ -1,20 +1,22 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { createAgentModelState, type AgentItem, type CanonicalAgentEventEnvelope, type Message } from "@mcode/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import { projectCanonicalMessageList } from "@/features/conversation/messages/canonical-message-projection";
 import { resetThreadStoreForTests } from "./thread-store-test-utils";
 import { useThreadStore } from "./threadStore";
 
-const loadConversationPage = vi.hoisted(() => vi.fn());
+const loadConversationPage = vi.mocked(mockTransport.loadConversationPage);
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
-  getTransport: () => ({
-    loadConversationPage,
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.loadConversationPage).mockReset();
+});
 
 const NOW = "2026-08-14T12:00:00.000Z";
 

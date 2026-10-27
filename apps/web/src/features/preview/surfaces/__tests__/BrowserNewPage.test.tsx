@@ -1,15 +1,22 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserHistory, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 
 const transport = {
-  listWorkspaceActionRuns: vi.fn(),
-  startWorkspaceAction: vi.fn(),
-  restartWorkspaceAction: vi.fn(),
+  listWorkspaceActionRuns: vi.mocked(mockTransport.listWorkspaceActionRuns),
+  startWorkspaceAction: vi.mocked(mockTransport.startWorkspaceAction),
+  restartWorkspaceAction: vi.mocked(mockTransport.restartWorkspaceAction),
 };
 
-vi.mock("@/transport", () => ({ getTransport: () => transport }));
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.listWorkspaceActionRuns).mockReset();
+  vi.mocked(mockTransport.startWorkspaceAction).mockReset();
+  vi.mocked(mockTransport.restartWorkspaceAction).mockReset();
+});
 
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

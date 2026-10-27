@@ -3,21 +3,27 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiffStats, FileEffect, TurnSnapshot } from "@mcode/contracts";
-
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { TurnChangesBar } from "../TurnChangesBar";
 
-const transport = vi.hoisted(() => ({
-  listSnapshots: vi.fn(),
-  getSnapshotDiffStats: vi.fn(),
-  previewTurnRevert: vi.fn(),
-}));
+const transport = {
+  listSnapshots: vi.mocked(mockTransport.listSnapshots),
+  getSnapshotDiffStats: vi.mocked(mockTransport.getSnapshotDiffStats),
+  previewTurnRevert: vi.mocked(mockTransport.previewTurnRevert),
+};
 
 vi.mock("@/transport", () => ({
-  getTransport: () => transport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.listSnapshots).mockReset();
+  vi.mocked(mockTransport.getSnapshotDiffStats).mockReset();
+  vi.mocked(mockTransport.previewTurnRevert).mockReset();
+});
 
 vi.mock("@/stores/thread-selectors", () => ({
   readThreadRecord: () => ({ serverMessageIds: {} }),

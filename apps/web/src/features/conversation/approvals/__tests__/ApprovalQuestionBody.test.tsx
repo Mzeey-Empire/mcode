@@ -1,7 +1,7 @@
 import { createMockApproval } from "@mcode/contracts/testing";
-
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { useApprovalStore } from "@/stores/approvalStore";
-import type { McodeTransport } from "@/transport/types";
+
 import type { ApprovalQuestion, ApprovalRequest } from "@mcode/contracts";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,13 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APPROVAL_ARM_DELAY_MS } from "../ApprovalDock";
 import { ApprovalQuestionBody } from "../ApprovalQuestionBody";
 
-const { respondToApproval } = vi.hoisted(() => ({
-  respondToApproval: vi.fn<McodeTransport["respondToApproval"]>(),
-}));
+const respondToApproval = vi.mocked(mockTransport.respondToApproval);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ respondToApproval }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.respondToApproval).mockReset();
+});
 
 const SINGLE: ApprovalQuestion = {
   header: "Scope",

@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
@@ -92,18 +93,6 @@ const term = {
   dispose: vi.fn(),
 };
 
-const transport = {
-  terminalWrite: vi.fn(() => Promise.resolve()),
-  terminalResize: vi.fn(() => Promise.resolve()),
-  terminalPause: vi.fn(() => Promise.resolve()),
-  terminalResume: vi.fn(() => Promise.resolve()),
-  terminalSubscribe: vi.fn(() => vi.fn()),
-  terminalDetachForSwitch: vi.fn(async () => undefined),
-  terminalReattach: vi.fn(async () => ({ mode: "delta" as const })),
-  terminalCheckpoint: vi.fn(async () => ({ accepted: true })),
-  ptySetLastSeq: vi.fn(),
-  ptyDeleteLastSeq: vi.fn(),
-};
 
 let synchronousFrameCount = 0;
 
@@ -143,7 +132,20 @@ vi.mock("../terminalSearchAddon", () => ({
 
 vi.mock("@/transport", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/transport")>();
-  return { ...actual, getTransport: () => transport };
+  return { ...actual, getTransport: () => mockTransport };
+});
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalWrite).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalResize).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalPause).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalResume).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalSubscribe).mockReset().mockImplementation(() => vi.fn());
+  vi.mocked(mockTransport.terminalDetachForSwitch).mockReset().mockImplementation(async () => undefined);
+  vi.mocked(mockTransport.terminalReattach).mockReset().mockImplementation(async () => ({ mode: "delta" as const }));
+  vi.mocked(mockTransport.terminalCheckpoint).mockReset().mockImplementation(async () => ({ accepted: true }));
+  vi.mocked(mockTransport.ptySetLastSeq).mockReset();
+  vi.mocked(mockTransport.ptyDeleteLastSeq).mockReset();
 });
 
 import { TerminalView } from "../TerminalView";

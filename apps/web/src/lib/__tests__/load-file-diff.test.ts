@@ -5,14 +5,14 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { loadFileDiff } from "../load-file-diff";
 
 const mocks = {
-  getTurnDiffFile: vi.fn(),
-  getCumulativeDiff: vi.fn(),
-  getSnapshotDiff: vi.fn(),
-  getWorkingTreeDiff: vi.fn(),
-  getBranchDiff: vi.fn(),
-  getCommitDiff: vi.fn(),
+  getTurnDiffFile: vi.mocked(mockTransport.getTurnDiffFile),
+  getCumulativeDiff: vi.mocked(mockTransport.getCumulativeDiff),
+  getSnapshotDiff: vi.mocked(mockTransport.getSnapshotDiff),
+  getWorkingTreeDiff: vi.mocked(mockTransport.getWorkingTreeDiff),
+  getBranchDiff: vi.mocked(mockTransport.getBranchDiff),
+  getCommitDiff: vi.mocked(mockTransport.getCommitDiff),
 };
-const transport = { ...mockTransport, ...mocks };
+const transport = mockTransport;
 const HIDDEN = { ignoreWhitespace: true };
 
 beforeEach(() => {

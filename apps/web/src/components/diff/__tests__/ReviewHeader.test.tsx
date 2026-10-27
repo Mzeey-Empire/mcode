@@ -3,15 +3,19 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewState, ReviewTurn, TurnSnapshot } from "@mcode/contracts";
-
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useDiffStore } from "@/stores/diffStore";
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
 import { ReviewHeader } from "../ReviewHeader";
 
-const { getReviewState } = vi.hoisted(() => ({ getReviewState: vi.fn<() => Promise<ReviewState>>() }));
-vi.mock("@/transport", () => ({ getTransport: () => ({ getReviewState }) }));
+const getReviewState = vi.mocked(mockTransport.getReviewState);
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getReviewState).mockReset();
+});
 
 const NOTHING_AHEAD: ReviewState = {
   isGitRepo: true, head: "abc123", branch: "feature",

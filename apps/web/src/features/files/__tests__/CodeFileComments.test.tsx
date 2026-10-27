@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { LexicalEditor } from "lexical";
@@ -8,15 +9,22 @@ import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { FilesTool } from "../FilesTool";
 import { getFilesScope, useFilesTabsStore } from "../filesTabsStore";
 
-const transport = vi.hoisted(() => ({
-  listWorkspaceFiles: vi.fn(),
-  getWorkspaceFileChanges: vi.fn(),
-  readFileContent: vi.fn(),
-  refreshWorkspaceFiles: vi.fn(),
-}));
+const transport = {
+  listWorkspaceFiles: vi.mocked(mockTransport.listWorkspaceFiles),
+  getWorkspaceFileChanges: vi.mocked(mockTransport.getWorkspaceFileChanges),
+  readFileContent: vi.mocked(mockTransport.readFileContent),
+  refreshWorkspaceFiles: vi.mocked(mockTransport.refreshWorkspaceFiles),
+};
 const scrollToIndex = vi.hoisted(() => vi.fn());
 
-vi.mock("@/transport", async () => ({ ...(await vi.importActual("@/transport")), getTransport: () => transport }));
+vi.mock("@/transport", async () => ({ ...(await vi.importActual("@/transport")), getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.listWorkspaceFiles).mockReset();
+  vi.mocked(mockTransport.getWorkspaceFileChanges).mockReset();
+  vi.mocked(mockTransport.readFileContent).mockReset();
+  vi.mocked(mockTransport.refreshWorkspaceFiles).mockReset();
+});
 vi.mock("@/hooks/useOpenInApps", () => ({ useOpenInApps: () => [] }));
 // jsdom has no layout, so render every virtual row; scrollToIndex is the layout seam the jump drives.
 vi.mock("@tanstack/react-virtual", () => ({

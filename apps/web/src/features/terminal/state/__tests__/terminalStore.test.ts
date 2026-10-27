@@ -1,11 +1,17 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const terminalPause = vi.fn().mockResolvedValue(undefined);
-const terminalResume = vi.fn().mockResolvedValue(undefined);
+const terminalPause = vi.mocked(mockTransport.terminalPause);
+const terminalResume = vi.mocked(mockTransport.terminalResume);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ terminalPause, terminalResume }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalPause).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.terminalResume).mockReset().mockResolvedValue(undefined);
+});
 
 // Import AFTER vi.mock — vitest hoists vi.mock to the top automatically,
 // so the store sees the mocked transport when the module initializes.

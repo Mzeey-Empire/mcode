@@ -1,23 +1,36 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts";
 
-const { transport } = vi.hoisted(() => ({
-  transport: {
-    getSettings: vi.fn(),
-    terminalProfileList: vi.fn(),
-    terminalProfileCreate: vi.fn(),
-    terminalProfileUpdate: vi.fn(),
-    terminalProfileDelete: vi.fn(),
-    terminalProfileSetDefault: vi.fn(),
-    terminalWorkspacePreferencesGet: vi.fn(),
-    terminalWorkspacePreferencesUpdate: vi.fn(),
-    terminalWorkspacePreferencesReset: vi.fn(),
-    terminalPreferencesReset: vi.fn(),
-    terminalPreferencesUpdate: vi.fn(),
-  },
-}));
+const transport = {
+  getSettings: vi.mocked(mockTransport.getSettings),
+  terminalProfileList: vi.mocked(mockTransport.terminalProfileList),
+  terminalProfileCreate: vi.mocked(mockTransport.terminalProfileCreate),
+  terminalProfileUpdate: vi.mocked(mockTransport.terminalProfileUpdate),
+  terminalProfileDelete: vi.mocked(mockTransport.terminalProfileDelete),
+  terminalProfileSetDefault: vi.mocked(mockTransport.terminalProfileSetDefault),
+  terminalWorkspacePreferencesGet: vi.mocked(mockTransport.terminalWorkspacePreferencesGet),
+  terminalWorkspacePreferencesUpdate: vi.mocked(mockTransport.terminalWorkspacePreferencesUpdate),
+  terminalWorkspacePreferencesReset: vi.mocked(mockTransport.terminalWorkspacePreferencesReset),
+  terminalPreferencesReset: vi.mocked(mockTransport.terminalPreferencesReset),
+  terminalPreferencesUpdate: vi.mocked(mockTransport.terminalPreferencesUpdate),
+};
 
-vi.mock("@/transport", () => ({ getTransport: () => transport }));
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getSettings).mockReset();
+  vi.mocked(mockTransport.terminalProfileList).mockReset();
+  vi.mocked(mockTransport.terminalProfileCreate).mockReset();
+  vi.mocked(mockTransport.terminalProfileUpdate).mockReset();
+  vi.mocked(mockTransport.terminalProfileDelete).mockReset();
+  vi.mocked(mockTransport.terminalProfileSetDefault).mockReset();
+  vi.mocked(mockTransport.terminalWorkspacePreferencesGet).mockReset();
+  vi.mocked(mockTransport.terminalWorkspacePreferencesUpdate).mockReset();
+  vi.mocked(mockTransport.terminalWorkspacePreferencesReset).mockReset();
+  vi.mocked(mockTransport.terminalPreferencesReset).mockReset();
+  vi.mocked(mockTransport.terminalPreferencesUpdate).mockReset();
+});
 
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTerminalSettingsStore } from "../terminalSettingsStore";

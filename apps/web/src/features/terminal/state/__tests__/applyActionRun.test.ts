@@ -1,9 +1,15 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ terminalPause: vi.fn().mockResolvedValue(undefined), terminalResume: vi.fn() }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalPause).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.terminalResume).mockReset();
+});
 
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { applyActionRun } from "../applyActionRun";

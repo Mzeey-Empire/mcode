@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { vi } from "vitest";
-import { mockTransport } from "@/__tests__/mocks/transport";
 import type { Thread } from "@/transport";
 import type { ThreadRecord } from "@/stores/thread-record";
 
@@ -24,11 +23,6 @@ export const mockGetRightPanelVisible = vi.fn();
 
 /** Replaces `openSubagentsPanel` from `@/features/subagents`. */
 export const mockOpenSubagentsPanel = vi.fn();
-
-/** `@/transport` with `getTransport` answering the shared {@link mockTransport}. */
-export function mockTransportModule<T extends object>(actual: T) {
-  return { ...actual, getTransport: () => mockTransport };
-}
 
 /** `@/features/projects/state/workspaceStore` backed by {@link mockWorkspaceState}. */
 export function mockWorkspaceStoreModule() {

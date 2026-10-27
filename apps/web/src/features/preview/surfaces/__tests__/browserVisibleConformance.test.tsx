@@ -1,4 +1,5 @@
 import { createMockThread } from "@mcode/contracts/testing";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement, ReactNode } from "react";
@@ -56,20 +57,22 @@ vi.mock("@/transport", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/transport")>();
   return {
     ...actual,
-    getTransport: () => ({
-      createBranch: vi.fn(),
-      listSnapshots: vi.fn().mockResolvedValue([]),
-      getReviewState: vi.fn().mockResolvedValue({ isGitRepo: false }),
-      getBranchComparison: vi.fn().mockResolvedValue(null),
-      getRemoteUrl: vi.fn().mockResolvedValue({ label: "repo", webUrl: null }),
-      readWorkspaceEnvironment: vi.fn().mockResolvedValue({
-        document: { version: "0.0.1", actions: [] },
-        revision: null,
-        status: "absent",
-      }),
-      listWorkspaceActionRuns: vi.fn().mockResolvedValue([]),
-    }),
+    getTransport: () => mockTransport,
   };
+});
+
+beforeEach(() => {
+  vi.mocked(mockTransport.createBranch).mockReset();
+  vi.mocked(mockTransport.listSnapshots).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.getReviewState).mockReset().mockResolvedValue({ isGitRepo: false });
+  vi.mocked(mockTransport.getBranchComparison).mockReset().mockResolvedValue({ base: null, compare: null, isUnborn: false, isComparisonAvailable: false });
+  vi.mocked(mockTransport.getRemoteUrl).mockReset().mockResolvedValue({ label: "repo", webUrl: null });
+  vi.mocked(mockTransport.readWorkspaceEnvironment).mockReset().mockResolvedValue({
+    document: { version: "0.0.1", actions: [] },
+    revision: null,
+    status: "absent",
+  });
+  vi.mocked(mockTransport.listWorkspaceActionRuns).mockReset().mockResolvedValue([]);
 });
 
 vi.mock("@/features/projects/state/workspaceStore", () => {

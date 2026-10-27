@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import React from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -6,16 +7,26 @@ import type { OpenInApp } from "@/transport/types";
 import { executeCommand, getCommand, clearCommands } from "@/lib/command-registry";
 
 // vi.hoisted so spies are available inside the hoisted vi.mock factories below.
-const { openInSpy, setThreadSettingsSpy, appsRef, globalDefaultRef } = vi.hoisted(() => ({
-  openInSpy: vi.fn().mockResolvedValue(undefined),
+const {
+  setThreadSettingsSpy,
+  appsRef,
+  globalDefaultRef,
+} = vi.hoisted(() => ({
+
   setThreadSettingsSpy: vi.fn().mockResolvedValue(true),
   appsRef: { current: [] as OpenInApp[] },
   globalDefaultRef: { current: "" as string },
 }));
 
+const openInSpy = vi.mocked(mockTransport.openIn);
+
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ openIn: openInSpy }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.openIn).mockReset().mockResolvedValue(undefined);
+});
 
 vi.mock("@/hooks/useOpenInApps", () => ({
   useOpenInApps: () => appsRef.current,

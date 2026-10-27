@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderCatalogRequest, ProviderCatalogSnapshot } from "@/transport";
 import type { ProviderCatalogChange } from "@mcode/contracts";
@@ -31,11 +32,15 @@ const STALE_SNAPSHOT: ProviderCatalogSnapshot = {
   },
 };
 
-const getProviderCatalogMock = vi.fn(async () => SNAPSHOT);
+const getProviderCatalogMock = vi.mocked(mockTransport.getProviderCatalog);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ getProviderCatalog: getProviderCatalogMock }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getProviderCatalog).mockReset().mockImplementation(async () => SNAPSHOT);
+});
 
 describe("providerCatalogStore", () => {
   beforeEach(() => {

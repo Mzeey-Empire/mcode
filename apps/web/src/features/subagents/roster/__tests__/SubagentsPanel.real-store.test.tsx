@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
@@ -8,10 +9,20 @@ import { pushEmitter } from "@/transport";
 import { useSubagentRosterStore } from "../../state/subagentRosterStore";
 import { SubagentsPanel } from "../SubagentsPanel";
 
-const transport = vi.hoisted(() => ({ loadSubagentRoster: vi.fn(), loadSubagentDetail: vi.fn(), stopCanonicalSubagent: vi.fn() }));
+const transport = {
+  loadSubagentRoster: vi.mocked(mockTransport.loadSubagentRoster),
+  loadSubagentDetail: vi.mocked(mockTransport.loadSubagentDetail),
+  stopCanonicalSubagent: vi.mocked(mockTransport.stopCanonicalSubagent),
+};
 vi.mock("@/transport", async (original) => ({
-  ...await original<typeof import("@/transport")>(), getTransport: () => transport,
+  ...await original<typeof import("@/transport")>(), getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.loadSubagentRoster).mockReset();
+  vi.mocked(mockTransport.loadSubagentDetail).mockReset();
+  vi.mocked(mockTransport.stopCanonicalSubagent).mockReset();
+});
 
 function row(id: string, status: SubagentRosterEntry["status"] = "running"): SubagentRosterEntry {
   return {

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewState } from "@mcode/contracts";
@@ -6,8 +7,12 @@ import { reviewViewAvailability } from "@/lib/review-views";
 import { useDiffStore } from "@/stores/diffStore";
 import { useReviewState } from "./useReviewState";
 
-const { getReviewState } = vi.hoisted(() => ({ getReviewState: vi.fn<(...args: unknown[]) => Promise<ReviewState>>() }));
-vi.mock("@/transport", () => ({ getTransport: () => ({ getReviewState }) }));
+const getReviewState = vi.mocked(mockTransport.getReviewState);
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getReviewState).mockReset();
+});
 
 const clean: ReviewState = {
   isGitRepo: true, head: "abc123", branch: "main",
