@@ -57,7 +57,7 @@ export class ThreadRepo {
     return changed;
   }
 
-  /** Advance the turn clock through the shared writer and its post-commit notifier. */
+  /** Commit a monotonic advance to the turn activity clock. */
   advanceActivity(id: string, at: string): Promise<boolean> {
     return this.writer.execute(threadWriteOperations.advanceActivity, [id, at]);
   }

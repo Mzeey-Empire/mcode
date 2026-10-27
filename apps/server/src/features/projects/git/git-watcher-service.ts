@@ -245,7 +245,6 @@ export class GitWatcherService {
 
   /**
    * Attempt to start watching a workspace that was previously detected as non-git.
-   * Called when opening a workspace to catch `git init` within a session.
    * Returns true if the workspace is now a git repo and the watcher was started.
    */
   async retryWatch(workspaceId: string, workspacePath: string): Promise<boolean> {

@@ -234,7 +234,6 @@ export function __clearPendingThreadCreationsForTests(): void {
 
 /**
  * Startup identity retained while a thread's startup lifecycle is unresolved.
- * Kept outside thread rows so index hydration can never strip it.
  */
 export interface PendingStartup {
   /** Client-generated identity matching `ThreadStartup.startupId`. */
