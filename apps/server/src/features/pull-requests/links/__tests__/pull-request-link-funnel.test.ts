@@ -25,8 +25,8 @@ async function setup() {
 describe("PullRequestLinkFunnel", () => {
   it("keeps the first PR when a second arrives and projects the ranked primary into legacy columns", async () => {
     const { funnel, thread, threads, database, published } = await setup();
-    await funnel.observe(thread.id, [createMockThreadPullRequest({ number: 10, state: "merged" })], "sync");
-    await funnel.observe(thread.id, [createMockThreadPullRequest({ number: 20, state: "draft" })], "created");
+    await funnel.observe(thread.id, [createMockThreadPullRequest({ number: 10, state: "merged" })]);
+    await funnel.observe(thread.id, [createMockThreadPullRequest({ number: 20, state: "draft" })]);
     expect(threads.findById(thread.id)?.pull_requests.map((pr) => pr.number)).toEqual([20, 10]);
     expect(database.query("SELECT pr_number, pr_status FROM threads WHERE id = ?").get(thread.id))
       .toEqual({ pr_number: 20, pr_status: "draft" });
@@ -42,8 +42,8 @@ describe("PullRequestLinkFunnel", () => {
       CREATE TRIGGER audit_pr_delete AFTER DELETE ON thread_pull_requests
       BEGIN INSERT INTO pr_write_audit VALUES (old.number); END;`);
     const pr = createMockThreadPullRequest();
-    await funnel.observe(thread.id, [pr], "created");
-    await funnel.observe(thread.id, [pr], "sync");
+    await funnel.observe(thread.id, [pr]);
+    await funnel.observe(thread.id, [pr]);
     expect(database.query("SELECT number FROM pr_write_audit").all()).toEqual([{ number: 42 }]);
     expect(published).toEqual([[pr]]);
     expect(watchSets).toEqual([[42]]);
@@ -52,8 +52,8 @@ describe("PullRequestLinkFunnel", () => {
   it("keeps merged sticky and preserves metadata from a fuller observation", async () => {
     const { funnel, thread, threads, published } = await setup();
     const pr = createMockThreadPullRequest({ state: "merged", title: "Feature", url: "https://github.com/o/r/pull/42" });
-    await funnel.observe(thread.id, [pr], "watcher");
-    await funnel.observe(thread.id, [createMockThreadPullRequest({ state: "open" })], "turn-settled");
+    await funnel.observe(thread.id, [pr]);
+    await funnel.observe(thread.id, [createMockThreadPullRequest({ state: "open" })]);
     expect(threads.findById(thread.id)?.pull_requests).toEqual([pr]);
     expect(published).toEqual([[pr]]);
   });
@@ -66,7 +66,7 @@ describe("PullRequestLinkFunnel", () => {
       createMockThreadPullRequest({ number: 3, state: "merged" }),
       createMockThreadPullRequest({ number: 4, state: "closed" }),
       createMockThreadPullRequest({ number: 5, state: "unresolved" }),
-    ], "sync");
+    ]);
     expect(watchSets).toEqual([[1, 2]]);
     await funnel.forgetBranch(thread.id);
     expect(threads.findById(thread.id)?.pull_requests).toEqual([]);
@@ -79,7 +79,7 @@ describe("PullRequestLinkFunnel", () => {
     const { funnel, thread, database, threads, published, watchSets } = await setup();
     database.exec(`CREATE TRIGGER reject_link BEFORE INSERT ON thread_pull_requests
       BEGIN SELECT RAISE(ABORT, 'rejected'); END;`);
-    await expect(funnel.observe(thread.id, [createMockThreadPullRequest()], "created")).rejects.toThrow();
+    await expect(funnel.observe(thread.id, [createMockThreadPullRequest()])).rejects.toThrow();
     expect(threads.findById(thread.id)?.pull_requests).toEqual([]);
     expect(published).toEqual([]);
     expect(watchSets).toEqual([]);
@@ -87,7 +87,7 @@ describe("PullRequestLinkFunnel", () => {
 
   it("publishes a checkout clear only after its new branch and empty links commit", async () => {
     const { funnel, thread, threads, published, watchSets } = await setup();
-    await funnel.observe(thread.id, [createMockThreadPullRequest()], "created");
+    await funnel.observe(thread.id, [createMockThreadPullRequest()]);
     await threads.updateCheckoutFromHead(thread.id, "new-feature", "named", null, null);
     expect(threads.findById(thread.id)?.branch).toBe("new-feature");
     expect(threads.findById(thread.id)?.pull_requests).toEqual([]);

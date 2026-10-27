@@ -577,7 +577,7 @@ const ciWatcherService = new CiWatcherService(githubService, (channel, data) => 
   broadcast(channel, data);
   portPush.send(channel, data);
 }, async ({ threadId, prNumber, state, title, url }) => {
-  await pullRequestLinkFunnel.observe(threadId, [{ number: prNumber, state, title, url }], "watcher");
+  await pullRequestLinkFunnel.observe(threadId, [{ number: prNumber, state, title, url }]);
 });
 const pullRequestLinkFunnel = new PullRequestLinkFunnel(databaseWriter, (threadId, pullRequests) => {
   broadcast("thread.pullRequests", { threadId, pullRequests });
