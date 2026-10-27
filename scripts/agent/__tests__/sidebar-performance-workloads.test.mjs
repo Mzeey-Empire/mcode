@@ -146,6 +146,7 @@ NodeTest.describe("sidebar renderer workloads", () => {
     assert.deepEqual(validateSidebarCheck("sidebarScroll", check({ scrollHeightPx: 800, clientHeightPx: 800, contentHeightPx: 300 }), "production"), []);
     assert.deepEqual(validateSidebarCheck("sidebarScroll", check({ scrollHeightPx: 180_000, clientHeightPx: 800, contentHeightPx: 90_000 }), "production"), ["the list's scroll height differs from the content height vlist set"]);
     assert.deepEqual(validateSidebarCheck("sidebarScroll", check(null), "production"), ["the list's scroll height differs from the content height vlist set"]);
+    assert.deepEqual(validateSidebarCheck("sidebarScroll", { reachedBottom: true, scrollable: false, frames: { frameCount: 0 }, listHeight: null }, "production"), []);
   });
 
   NodeTest.it("rejects an idle tick sample outside a profiling build or shorter than a minute", () => {
