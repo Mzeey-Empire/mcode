@@ -737,10 +737,19 @@ const SIDEBAR_SAMPLE_RUNNERS = {
 
 const TRACED_SIDEBAR_WORKLOADS = new Set(["sidebarCompleteFlight", "sidebarOlderCrossing"]);
 
-/** Saves a Chrome trace of each flight workload's first measured sample beside the results. */
-function sampleMeasureOptions(context, workload, index) {
-  if (!TRACED_SIDEBAR_WORKLOADS.has(workload) || index !== 0 || !context.traceDirectory) return {};
-  return { trace: true, traceFile: `${context.traceDirectory}/${context.runtime}-${context.mode}-${context.fixture.requestedThreadCount}-${workload}.trace.json` };
+/**
+ * Saves a Chrome trace of the first measured sample beside the results: always for flight
+ * workloads, and for every workload with a V8 CPU profile when the run asks for one.
+ */
+export function sampleMeasureOptions(context, workload, index) {
+  const traced = TRACED_SIDEBAR_WORKLOADS.has(workload) || context.cpuProfile === true;
+  if (!traced || index !== 0 || !context.traceDirectory) return {};
+  const stem = `${context.traceDirectory}/${context.runtime}-${context.mode}-${context.fixture.requestedThreadCount}-${workload}`;
+  return {
+    trace: true,
+    traceFile: `${stem}.trace.json`,
+    ...(context.cpuProfile === true ? { cpuProfileFile: `${stem}.cpuprofile` } : {}),
+  };
 }
 
 async function runSidebarWorkload(context, workload) {
@@ -777,7 +786,7 @@ function buildSidebarMetric(workload, rawSamples) {
 
 /** Runs the selected sidebar workloads against the seeded sidebar fixture in one runtime. */
 export async function runSidebarMatrix(page, runtime, sampleCount, mode, options) {
-  const { sidebarFixture: fixture, canonicalCapture: capture, workloads, traceDirectory = null } = options;
+  const { sidebarFixture: fixture, canonicalCapture: capture, workloads, traceDirectory = null, cpuProfile = false } = options;
   if (!fixture || !capture) throw new Error("Sidebar workloads need the sidebar thread fixture and the canonical capture.");
   await installBootProbe(page);
   const byteCounter = createThreadListByteCounter(page);
@@ -788,7 +797,7 @@ export async function runSidebarMatrix(page, runtime, sampleCount, mode, options
     const refresh = await measureRefreshRate(page);
     const context = {
       page, runtime, sampleCount, mode, fixture, capture, byteCounter, modeCollector, signalCollector,
-      frameBudgetMs: refresh.medianFrameIntervalMs, traceDirectory,
+      frameBudgetMs: refresh.medianFrameIntervalMs, traceDirectory, cpuProfile,
     };
     const metrics = {};
     for (const workload of workloads) metrics[workload] = await runSidebarWorkload(context, workload);

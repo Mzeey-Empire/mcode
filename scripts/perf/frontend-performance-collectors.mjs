@@ -266,6 +266,23 @@ async function startTrace(session) {
   return { session, traceEvents, onTraceData };
 }
 
+const CPU_PROFILE_SAMPLING_INTERVAL_US = 100;
+
+async function startCpuProfile(session) {
+  if (!session) return false;
+  await session.send("Profiler.enable");
+  await session.send("Profiler.setSamplingInterval", { interval: CPU_PROFILE_SAMPLING_INTERVAL_US });
+  await session.send("Profiler.start");
+  return true;
+}
+
+async function stopCpuProfile(session, file) {
+  const { profile } = await session.send("Profiler.stop");
+  await session.send("Profiler.disable");
+  await NodeFSPromises.mkdir(NodePath.dirname(file), { recursive: true });
+  await NodeFSPromises.writeFile(file, JSON.stringify(profile));
+}
+
 async function writeTraceFile(file, traceEvents) {
   await NodeFSPromises.mkdir(NodePath.dirname(file), { recursive: true });
   await NodeFSPromises.writeFile(file, JSON.stringify({ traceEvents }));
@@ -331,10 +348,12 @@ export async function createModeSignalCollector(page, mode) {
       const before = await readChromiumMetrics(activeSession, mode);
       const processBefore = await readModeProcessMetrics(page, mode);
       const trace = await startTrace(activeSession);
+      const profiling = options.cpuProfileFile ? await startCpuProfile(activeSession) : false;
       let result;
       try {
         result = await operation();
       } finally {
+        if (profiling) await stopCpuProfile(activeSession, options.cpuProfileFile);
         await stopTrace(trace);
       }
       if (options.traceFile && trace) await writeTraceFile(options.traceFile, trace.traceEvents);
