@@ -1,3 +1,7 @@
+// The server binds IPv4 loopback only. Dialing `localhost` lets Chromium try `::1` first and wait
+// about 300 ms before falling back to IPv4 on every connect.
+const SERVER_LOOPBACK_HOST = "127.0.0.1";
+
 const SERVER_CONNECTION_AUTHORIZATION_ERROR =
   "Server connection requires the main renderer";
 
@@ -48,7 +52,7 @@ export function registerServerConnectionHandlers({
     requireMainRenderer(event, getMainWebContents);
     const { port, authToken, ipcPath } = getConnection();
     return {
-      url: `ws://localhost:${port}?token=${authToken}`,
+      url: `ws://${SERVER_LOOPBACK_HOST}:${port}?token=${authToken}`,
       ipcPath,
     };
   });
