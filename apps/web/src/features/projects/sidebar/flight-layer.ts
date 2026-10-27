@@ -39,8 +39,8 @@ function copyOf(line: HTMLElement, rect: DOMRect): HTMLElement {
 
 /**
  * Flies a copy of a thread row's title line to the Completed segment or the Older bar, outside
- * the virtual list so recycling cannot touch it. Resolves when the copy lands, or at once when
- * either end is not on screen.
+ * the virtual list so recycling cannot touch it. Resolves when the copy lands, or immediately
+ * when either endpoint is unavailable.
  */
 export function flyCopy(threadId: string, to: FlightTarget, timing: FlightTiming): Promise<void> {
   const line = sourceLine(threadId);
@@ -69,8 +69,7 @@ export function flyCopy(threadId: string, to: FlightTarget, timing: FlightTiming
   return flight.finished.then(land, land);
 }
 
-// The target can move while the copy is in the air (the Older bar rises as closing rows collapse),
-// so the copy is offset by the target's drift each frame until it lands. The loop ends with the flight.
+// The Older bar rises as closing rows collapse, so the copy follows the target's drift until it lands.
 function followTarget(copy: HTMLElement, target: Element, start: DOMRect): () => void {
   let frame = requestAnimationFrame(function follow() {
     if (target.isConnected) {

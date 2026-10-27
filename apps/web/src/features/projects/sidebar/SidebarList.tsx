@@ -266,7 +266,6 @@ interface SidebarListProps {
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 
-// While the pointer is inside, order and the clock hold still; leaving applies what was deferred.
 const freezeOnEnter = () => useSidebarUiStore.getState().freeze(freezeOrder(selectSidebarFacts(useWorkspaceStore.getState().threads), Date.now()));
 const unfreezeOnLeave = () => useSidebarUiStore.getState().unfreeze();
 

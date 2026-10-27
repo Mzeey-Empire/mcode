@@ -35,9 +35,8 @@ interface ScopeBarProps {
 }
 
 /**
- * Shows Active / Completed while completed threads exist; resets to Active when none remain. It
- * expands when the first thread completes and collapses when the last one goes, so the list
- * below slides instead of jumping. Hydration shows or hides it at once.
+ * Shows Active / Completed while completed threads exist; resets to Active when none remain.
+ * Animates live visibility changes; hydration applies immediately.
  */
 export function ScopeBar({ visible, completedCount, scope }: ScopeBarProps) {
   const setScope = useSidebarUiStore((state) => state.setScope);
@@ -92,11 +91,6 @@ function barTransition(seen: { visible: boolean; epoch: number }, visible: boole
   return { animate, entering: animate && !seen.visible && visible, hiding: animate && seen.visible && !visible };
 }
 
-/**
- * Animates only visibility changes made by pushes, never under reduced motion: a new snapshot
- * epoch (startup, reconnect) shows or hides the bar at once. A collapsing bar stays mounted until
- * its transition ends.
- */
 function useBarEntrance(visible: boolean) {
   const epoch = useWorkspaceStore((state) => state.threadSnapshotEpoch);
   const seen = useRef({ visible, epoch });
