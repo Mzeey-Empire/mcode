@@ -298,6 +298,21 @@ async function stopTrace(trace) {
   trace.session.off("Tracing.dataCollected", trace.onTraceData);
 }
 
+/** Runs one sample inside the optional Chrome trace and V8 CPU profile, then saves what was asked for. */
+async function runCaptured(session, options, operation) {
+  const trace = await startTrace(session);
+  const profiling = options.cpuProfileFile ? await startCpuProfile(session) : false;
+  let result;
+  try {
+    result = await operation();
+  } finally {
+    if (profiling) await stopCpuProfile(session, options.cpuProfileFile);
+    await stopTrace(trace);
+  }
+  if (options.traceFile && trace) await writeTraceFile(options.traceFile, trace.traceEvents);
+  return { result, trace };
+}
+
 function buildChromiumAttribution(mode, traceEnabled, before, after, signals, traceEvents) {
   const longTaskAttribution = {
     longTasksMs: signals.longTasks.map((entry) => entry.duration),
@@ -347,16 +362,7 @@ export async function createModeSignalCollector(page, mode) {
       const activeSession = traceEnabled ? await ensureSession() : null;
       const before = await readChromiumMetrics(activeSession, mode);
       const processBefore = await readModeProcessMetrics(page, mode);
-      const trace = await startTrace(activeSession);
-      const profiling = options.cpuProfileFile ? await startCpuProfile(activeSession) : false;
-      let result;
-      try {
-        result = await operation();
-      } finally {
-        if (profiling) await stopCpuProfile(activeSession, options.cpuProfileFile);
-        await stopTrace(trace);
-      }
-      if (options.traceFile && trace) await writeTraceFile(options.traceFile, trace.traceEvents);
+      const { result, trace } = await runCaptured(activeSession, options, operation);
       const processAfter = await readModeProcessMetrics(page, mode);
       const after = await readChromiumMetrics(activeSession, mode);
       const signals = await readAttributionRuntime(page, indexes);
