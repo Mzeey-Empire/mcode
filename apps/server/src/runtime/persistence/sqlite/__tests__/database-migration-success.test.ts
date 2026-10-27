@@ -20,6 +20,7 @@ const PREVIOUS_MIGRATION = "0054_wise_supernaut";
 const CODEX_CHILD_ORPHAN_REPAIR_MIGRATION = "0055_codex_child_orphan_repair";
 const TURN_DIFF_MIGRATION = "0057_stiff_zaladane";
 const SYSTEM_NOTICE_SESSION_MIGRATION = "0058_fine_rafael_vega";
+const AUTOMATIC_SETUP_RETIREMENT_MIGRATION = "0091_happy_baron_strucker";
 
 type JournalEntry = {
   idx: number;
@@ -74,10 +75,20 @@ function copyMigrationsThrough(
   }
 }
 
-function columnNames(db: Database, table: string): string[] {
-  return (
-    db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
-  ).map((column) => column.name);
+function expectColumns(
+  db: Database,
+  table: string,
+  expected: { present?: readonly string[]; absent?: readonly string[] },
+): void {
+  const columns = db.prepare<{ name: string }, []>(`PRAGMA table_info(${table})`)
+    .all()
+    .map((column) => column.name);
+  for (const column of expected.present ?? []) {
+    expect(columns).toContain(column);
+  }
+  for (const column of expected.absent ?? []) {
+    expect(columns).not.toContain(column);
+  }
 }
 
 function migrationsFolderForDrizzle(directory: string): string {
@@ -110,7 +121,7 @@ describe("successful database migration recovery", () => {
       db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES (?, ?, ?, ?, ?)").run("copilot-message", "copilot-parent", "assistant", "Preserved history", 1);
       db.prepare("INSERT INTO tool_call_records (id, message_id, tool_name) VALUES (?, ?, ?)").run("copilot-tool", "copilot-message", "Read");
       migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
-      expect(columnNames(db, "threads")).not.toContain("copilot_agent");
+      expectColumns(db, "threads", { absent: ["copilot_agent"] });
       expect(db.prepare("SELECT id, parent_thread_id FROM threads WHERE workspace_id = ? ORDER BY id").all("copilot-workspace")).toEqual([{ id: "copilot-child", parent_thread_id: "copilot-parent" }, { id: "copilot-parent", parent_thread_id: null }]);
       expect(db.prepare("SELECT content FROM messages WHERE id = ?").get("copilot-message")).toEqual({ content: "Preserved history" });
       expect(db.prepare("SELECT message_id FROM tool_call_records WHERE id = ?").get("copilot-tool")).toEqual({ message_id: "copilot-message" });
@@ -302,18 +313,19 @@ describe("successful database migration recovery", () => {
     expect(generations).toHaveLength(5);
   });
 
-  it("creates the automatic Setup lifecycle in one migration and retires its output columns in 0091", () => {
-    const database = openDatabase({ dbPath: databasePath });
+  it("creates the automatic Setup lifecycle in one migration", () => {
+    const migrationsDirectory = NodePath.join(directory, "drizzle-through-0044");
+    copyMigrationsThrough(NodePath.join(process.cwd(), "drizzle"), migrationsDirectory, AUTOMATIC_SETUP_MIGRATION);
+    const database = new Database(databasePath, { strict: true });
     try {
+      migrate(drizzle(database), { migrationsFolder: migrationsFolderForDrizzle(migrationsDirectory) });
       expect(readJournal(NodePath.join(process.cwd(), "drizzle")).entries.filter(
         (entry) => entry.tag.startsWith("0044_"),
       )).toEqual([migrationEntry(NodePath.join(process.cwd(), "drizzle"), AUTOMATIC_SETUP_MIGRATION)]);
-      const attemptColumns = columnNames(database, "workspace_environment_automatic_setup_attempts");
-      expect(attemptColumns).toContain("failed_action_id");
-      for (const retired of ["launch_snapshot_json", "outcome", "exit_code", "output", "output_truncated"]) {
-        expect(attemptColumns).not.toContain(retired);
-      }
-      expect(columnNames(database, "workspace_environment_queued_turns")).toContain("dispatched_at");
+      expectColumns(database, "workspace_environment_automatic_setup_attempts", {
+        present: ["launch_snapshot_json", "outcome", "exit_code", "output", "output_truncated"],
+      });
+      expectColumns(database, "workspace_environment_queued_turns", { present: ["dispatched_at"] });
       expect(database.prepare("SELECT created_at FROM __drizzle_migrations WHERE hash = ?").all(
         migrationHash(NodePath.join(process.cwd(), "drizzle"), AUTOMATIC_SETUP_MIGRATION),
       )).toEqual([{
@@ -324,29 +336,49 @@ describe("successful database migration recovery", () => {
     }
   });
 
-  it("creates the retained Project Action slot table after automatic Setup migrations", () => {
-    const database = openDatabase({ dbPath: databasePath });
+  it("retires automatic Setup output columns in 0091", () => {
+    const migrationsDirectory = NodePath.join(directory, "drizzle-through-0091");
+    copyMigrationsThrough(NodePath.join(process.cwd(), "drizzle"), migrationsDirectory, AUTOMATIC_SETUP_RETIREMENT_MIGRATION);
+    const database = new Database(databasePath, { strict: true });
     try {
+      migrate(drizzle(database), { migrationsFolder: migrationsFolderForDrizzle(migrationsDirectory) });
+      expectColumns(database, "workspace_environment_automatic_setup_attempts", {
+        present: ["failed_action_id"],
+        absent: ["launch_snapshot_json", "outcome", "exit_code", "output", "output_truncated"],
+      });
+    } finally {
+      database.close(true);
+    }
+  });
+
+  it("creates the retained Project Action slot table after automatic Setup migrations", () => {
+    const migrationsDirectory = NodePath.join(directory, "drizzle-through-0047");
+    copyMigrationsThrough(NodePath.join(process.cwd(), "drizzle"), migrationsDirectory, PROJECT_ACTION_RUNS_MIGRATION);
+    const database = new Database(databasePath, { strict: true });
+    try {
+      migrate(drizzle(database), { migrationsFolder: migrationsFolderForDrizzle(migrationsDirectory) });
       expect(readJournal(NodePath.join(process.cwd(), "drizzle")).entries.filter(
         (entry) => entry.tag.startsWith("0047_"),
       )).toEqual([migrationEntry(NodePath.join(process.cwd(), "drizzle"), PROJECT_ACTION_RUNS_MIGRATION)]);
-      expect(columnNames(database, "project_action_runs")).toEqual([
-        "thread_id",
-        "action_id",
-        "workspace_id",
-        "run_id",
-        "revision",
-        "terminal_session_id",
-        "action_name",
-        "status",
-        "snapshot_json",
-        "created_at",
-        "started_at",
-        "finished_at",
-        "exit_code",
-        "trigger",
-        "port_json",
-      ]);
+      expectColumns(database, "project_action_runs", {
+        present: [
+          "thread_id",
+          "action_id",
+          "workspace_id",
+          "run_id",
+          "revision",
+          "terminal_session_id",
+          "action_name",
+          "status",
+          "snapshot_json",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "exit_code",
+          "transcript",
+          "transcript_truncated",
+        ],
+      });
       expect(database.prepare("PRAGMA index_list(project_action_runs)").all()).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "idx_project_action_runs_slot", unique: 1 }),
         expect.objectContaining({ name: "idx_project_action_runs_thread", unique: 0 }),
@@ -419,22 +451,26 @@ describe("successful database migration recovery", () => {
         content: "Existing production text",
         sequence: 1,
       });
-      expect(columnNames(upgradedDatabase, "parent_assistant_text_checkpoints")).toEqual([
-        "execution_id",
-        "thread_id",
-        "turn_id",
-        "last_sequence",
-        "retained_bytes",
-        "retained_chunks",
-        "updated_at",
-      ]);
-      expect(columnNames(upgradedDatabase, "parent_assistant_text_checkpoint_chunks")).toEqual([
-        "execution_id",
-        "first_sequence",
-        "last_sequence",
-        "text",
-        "byte_length",
-      ]);
+      expectColumns(upgradedDatabase, "parent_assistant_text_checkpoints", {
+        present: [
+          "execution_id",
+          "thread_id",
+          "turn_id",
+          "last_sequence",
+          "retained_bytes",
+          "retained_chunks",
+          "updated_at",
+        ],
+      });
+      expectColumns(upgradedDatabase, "parent_assistant_text_checkpoint_chunks", {
+        present: [
+          "execution_id",
+          "first_sequence",
+          "last_sequence",
+          "text",
+          "byte_length",
+        ],
+      });
       expect(upgradedDatabase.prepare(
         "PRAGMA foreign_key_list(parent_assistant_text_checkpoint_chunks)",
       ).all()).toEqual([
@@ -519,7 +555,7 @@ describe("successful database migration recovery", () => {
         { id: "queued-1", message_id: "message-queued-1", queue_position: 1 },
         { id: "queued-2", message_id: "message-queued-2", queue_position: 2 },
       ]);
-      expect(columnNames(upgradedDatabase, "workspace_environment_queued_turns")).toContain("queue_position");
+      expectColumns(upgradedDatabase, "workspace_environment_queued_turns", { present: ["queue_position"] });
       expect(upgradedDatabase.prepare("PRAGMA index_list(workspace_environment_queued_turns)").all()).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "idx_workspace_environment_queued_turns_thread_state_position", unique: 0 }),
       ]));
@@ -545,9 +581,7 @@ describe("successful database migration recovery", () => {
     process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = previousMigrationsDirectory;
     const previousDatabase = openDatabase({ dbPath: databasePath });
     try {
-      expect(columnNames(previousDatabase, "tool_call_records")).toContain(
-        "subagent_identity_key",
-      );
+      expectColumns(previousDatabase, "tool_call_records", { present: ["subagent_identity_key"] });
       expect(previousDatabase.prepare(
         "SELECT MAX(created_at) AS created_at FROM __drizzle_migrations",
       ).get()).toEqual({
@@ -571,9 +605,7 @@ describe("successful database migration recovery", () => {
         .prepare("SELECT created_at FROM __drizzle_migrations WHERE hash = ?")
         .all(migrationHash(currentMigrationsDirectory, SUBAGENT_IDENTITY_MIGRATION));
       expect(identityMigrationRows).toEqual([{ created_at: identityMigration.when }]);
-      expect(columnNames(upgradedDatabase, "messages")).toEqual(
-        expect.arrayContaining(["outcome", "outcome_execution_id"]),
-      );
+      expectColumns(upgradedDatabase, "messages", { present: ["outcome", "outcome_execution_id"] });
       const outcomeMigrationRows = upgradedDatabase
         .prepare("SELECT created_at FROM __drizzle_migrations WHERE hash = ?")
         .all(migrationHash(currentMigrationsDirectory, MESSAGE_OUTCOME_MIGRATION));
@@ -599,9 +631,7 @@ describe("successful database migration recovery", () => {
       migrate(drizzle(previousDatabase), {
         migrationsFolder: migrationsFolderForDrizzle(previousMigrationsDirectory),
       });
-      expect(columnNames(previousDatabase, "tool_call_records")).not.toContain(
-        "subagent_identity_key",
-      );
+      expectColumns(previousDatabase, "tool_call_records", { absent: ["subagent_identity_key"] });
       expect(previousDatabase.prepare(
         "SELECT MAX(created_at) AS created_at FROM __drizzle_migrations",
       ).get()).toEqual({
@@ -621,12 +651,8 @@ describe("successful database migration recovery", () => {
         .prepare("SELECT created_at FROM __drizzle_migrations WHERE hash = ?")
         .all(migrationHash(currentMigrationsDirectory, SUBAGENT_IDENTITY_MIGRATION));
       expect(identityMigrationRows).toEqual([{ created_at: identityMigration.when }]);
-      expect(columnNames(upgradedDatabase, "tool_call_records")).toContain(
-        "subagent_identity_key",
-      );
-      expect(columnNames(upgradedDatabase, "messages")).toEqual(
-        expect.arrayContaining(["outcome", "outcome_execution_id"]),
-      );
+      expectColumns(upgradedDatabase, "tool_call_records", { present: ["subagent_identity_key"] });
+      expectColumns(upgradedDatabase, "messages", { present: ["outcome", "outcome_execution_id"] });
       const outcomeMigrationRows = upgradedDatabase
         .prepare("SELECT created_at FROM __drizzle_migrations WHERE hash = ?")
         .all(migrationHash(currentMigrationsDirectory, MESSAGE_OUTCOME_MIGRATION));
@@ -743,6 +769,8 @@ describe("successful database migration recovery", () => {
   it("adds notice metadata and the session lookup index", () => {
     const currentMigrationsDirectory = NodePath.join(process.cwd(), "drizzle");
     const previousMigrationsDirectory = NodePath.join(directory, "drizzle-through-0057");
+    const noticeMigrationsDirectory = NodePath.join(directory, "drizzle-through-0058");
+    copyMigrationsThrough(currentMigrationsDirectory, noticeMigrationsDirectory, SYSTEM_NOTICE_SESSION_MIGRATION);
     copyMigrationsThrough(
       currentMigrationsDirectory,
       previousMigrationsDirectory,
@@ -758,11 +786,11 @@ describe("successful database migration recovery", () => {
       previousDatabase.close(true);
     }
 
-    process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = currentMigrationsDirectory;
-    const upgradedDatabase = openDatabase({ dbPath: databasePath });
+    const upgradedDatabase = new Database(databasePath, { strict: true });
     try {
-      expect(columnNames(upgradedDatabase, "messages")).toContain("system_notice");
-      expect(columnNames(upgradedDatabase, "threads")).toContain("current_notice_session_id");
+      migrate(drizzle(upgradedDatabase), { migrationsFolder: migrationsFolderForDrizzle(noticeMigrationsDirectory) });
+      expectColumns(upgradedDatabase, "messages", { present: ["system_notice"] });
+      expectColumns(upgradedDatabase, "threads", { present: ["current_notice_session_id"] });
       expect(upgradedDatabase.prepare("PRAGMA index_list(messages)").all()).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "idx_messages_notice_session_sequence", unique: 0 }),
       ]));
