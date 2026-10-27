@@ -58,12 +58,7 @@ function useThreadPrState(thread: Thread) {
   };
 }
 
-/**
- * Shared commit / create-PR orchestration for a thread, so the chat
- * header and the Review toolbar surface the same actions and PR state from one
- * place. Polls the branch PR + commits-ahead and derives the displayed primary PR. "Commit…" opens the Commit sheet over Review. "Create PR" opens
- * `CreatePrDialog`, which the consumer renders with `createPrOpen`.
- */
+/** Provide shared commit and PR actions, PR state, and creation-dialog state for a thread. */
 export function useThreadGitActions(thread: Thread) {
   const [createPrOpen, setCreatePrOpen] = useState(false);
   const { workspace, prable, pr, checks, openPrDetail } = useThreadPrState(thread);
