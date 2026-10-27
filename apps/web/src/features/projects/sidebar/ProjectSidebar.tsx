@@ -12,6 +12,7 @@ import { SidebarList } from "./SidebarList";
 import { useRowLifecycleStore } from "./row-lifecycle-store";
 import { useSidebarUiStore } from "./sidebar-ui-store";
 import { useSidebarModel } from "./use-sidebar-model";
+import { useSidebarMotion } from "./sidebar-motion";
 
 function SidebarProjectsHeader() {
   // The palette's folder-browse view works across Electron and standalone web without the desktop bridge.
@@ -49,6 +50,7 @@ function useWorkspaceLoading(): void {
  */
 export function ProjectSidebar() {
   const { model, cause } = useSidebarModel();
+  const shown = useSidebarMotion(model, cause);
   const { ctx, overlays } = useProjectTreeMenus();
   const hasProjects = useWorkspaceStore((s) => s.workspaces.length > 0);
   const error = useWorkspaceStore((s) => s.error);
@@ -56,10 +58,11 @@ export function ProjectSidebar() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
       <SidebarProjectsHeader />
-      <ScopeBar completedCount={model.scopeBar.completedCount} scope={model.scope} />
-      <CompletionUndoLine onOpen={ctx.onSelectThread} />
+      <ScopeBar visible={model.scopeBar.visible} completedCount={shown.completedCount} scope={model.scope} />
+      <CompletionUndoLine onOpen={ctx.onSelectThread} flying={shown.flying} />
       <SidebarList
-        items={model.items}
+        items={shown.items}
+        closing={shown.closing}
         ctx={ctx}
         flip={cause === "push"}
         overlay={hasProjects ? null : <div className="absolute inset-x-1.5 inset-y-0"><ProjectDropWell /></div>}
