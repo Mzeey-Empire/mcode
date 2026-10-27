@@ -35,6 +35,19 @@ vi.mock("@/lib/checkout-label", async (importOriginal) => {
   };
 });
 
+// Every rendered project header draws its icon once, so counting calls per workspace counts header renders.
+const projectIconCalls = vi.hoisted(() => new Map<string, number>());
+vi.mock("@/features/projects/icons/ProjectIcon", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/projects/icons/ProjectIcon")>();
+  return {
+    ...actual,
+    ProjectIcon: (props: Parameters<typeof actual.ProjectIcon>[0]) => {
+      projectIconCalls.set(props.workspaceId, (projectIconCalls.get(props.workspaceId) ?? 0) + 1);
+      return actual.ProjectIcon(props);
+    },
+  };
+});
+
 import { useWorkspaceStore } from "../../state/workspaceStore";
 import { useSidebarUiStore } from "../sidebar-ui-store";
 import { useProjectTreeMenus } from "../../ProjectTree";
@@ -147,6 +160,24 @@ describe("SidebarList order", () => {
 
     expect(checkoutLabelCalls.get("first")).toBe(before.get("first"));
     expect(checkoutLabelCalls.get("second")).toBe(before.get("second"));
+  });
+
+  it("re-renders no other project header when one project's thread changes", () => {
+    useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1", "ws-2"]) });
+    useWorkspaceStore.setState({
+      workspaces: [WORKSPACE, SECOND_WORKSPACE],
+      threads: [threadAt("first", 1), threadAt("second", 2, { workspace_id: "ws-2" })],
+      activeWorkspaceId: "ws-1",
+      activeThreadId: null,
+    });
+    render(<Harness />);
+    const before = projectIconCalls.get("ws-1");
+    expect(before).toBeGreaterThan(0);
+
+    act(() => useWorkspaceStore.setState((state) => ({ threads: [...state.threads, threadAt("third", 3, { workspace_id: "ws-2" })] })));
+
+    expect(renderedThreadIds()).toContain("third");
+    expect(projectIconCalls.get("ws-1")).toBe(before);
   });
 });
 

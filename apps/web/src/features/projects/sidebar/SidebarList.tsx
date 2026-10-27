@@ -13,6 +13,8 @@ import {
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
+  type KeyboardSensorOptions,
+  type PointerSensorOptions,
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
@@ -126,13 +128,18 @@ function sameIndicator(a: DropIndicator | null, b: DropIndicator | null): boolea
   return a === b || (a !== null && b !== null && a.id === b.id && a.edge === b.edge);
 }
 
+// useSensor memoizes on its options object, so inline options would rebuild every sortable's
+// listeners on each list render and re-render every memoized project header.
+const POINTER_SENSOR_OPTIONS: PointerSensorOptions = { activationConstraint: { distance: 5 } };
+const KEYBOARD_SENSOR_OPTIONS: KeyboardSensorOptions = { coordinateGetter: sortableKeyboardCoordinates };
+
 function useProjectDrag(controllerRef: React.RefObject<VirtualViewport | null>) {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
   const suppressClickUntil = useRef(0);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(PointerSensor, POINTER_SENSOR_OPTIONS),
+    useSensor(KeyboardSensor, KEYBOARD_SENSOR_OPTIONS),
   );
   const endDrag = useCallback(() => {
     setActiveDragId(null);
