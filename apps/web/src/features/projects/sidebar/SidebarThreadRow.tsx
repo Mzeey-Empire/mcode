@@ -128,13 +128,11 @@ interface ThreadRowPresentation {
   scaffoldDim: string | false;
   isUserCompleted: boolean;
   cleanupBlocked: boolean;
-  /** Struck through in place: the server is holding the completion, or the pointer keeps it. */
   completing: boolean;
   completionFailure: string | null;
   lifecycleKind: ThreadLifecycleKind;
 }
 
-/** What the row's lifecycle button does now. */
 type ThreadLifecycleKind = "complete" | "undo" | "retry" | "reopen";
 
 function lifecycleKindOf(completion: CompletionEntry | undefined, isUserCompleted: boolean): ThreadLifecycleKind {

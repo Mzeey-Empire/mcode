@@ -21,7 +21,7 @@ interface CompletionStoreActions {
   observeServerLifecycle(threadId: string, completed: boolean, completedAutomatically?: boolean): void;
   /** Applies an activity push; it clears a refusal whose reason is now stale. */
   observeServerActivity(threadId: string): void;
-  /** Reopens the Undo line's thread; the completion already committed, so this is `thread.reopen`. */
+  /** Reopens the Undo line's completed thread. */
   undoFromLine(): void;
   hideUndoLine(): void;
 }
@@ -34,8 +34,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// A confirmed completion leaves Active when its row is released: at once, or when the pointer
-// that kept it lingering leaves. Either way that is when the Undo line takes over from the row.
+// The Undo line takes over from the row when a confirmed completion's row is released.
 function leftActive(previous: CompletionEntry | undefined, next: CompletionEntry | undefined, event: CompletionEvent): boolean {
   if (next !== undefined) return false;
   if (event.type === "confirmed") return true;
