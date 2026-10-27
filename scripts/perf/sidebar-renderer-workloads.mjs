@@ -32,6 +32,7 @@ const ROW_RENDER_PREFIX = "sidebar-thread:";
 const AGE_RENDER_PREFIX = "sidebar-age:";
 const SET_ROWS_COUNTER = "sidebar.setRows";
 const HEAP_PROBE = "__mcodeSidebarHeapProbe";
+const LOCAL_CHECKS_CHANNEL = "local.checksById";
 
 /** Returns the nearest-rank percentile of finite values, or null when there are none. */
 export function percentile(values, quantile) {
@@ -144,6 +145,8 @@ export function buildSidebarSignalPushes(targetThreadId, atIso, prNumber) {
         pullRequests: [{ number: prNumber, state: "open", title: "Sidebar perf PR", url: `https://example.com/pull/${prNumber}` }],
       },
     },
+    // Checks arrive by polling, not a push, so this one writes the store the poller writes.
+    { channel: LOCAL_CHECKS_CHANNEL, data: { threadId: targetThreadId, checks: { aggregate: "failing", fetchedAt: Date.parse(atIso), runs: [] } } },
   ];
 }
 
@@ -271,7 +274,7 @@ async function openStreamTarget(page, fixture) {
 }
 
 async function replayStreamEvents(page, events, profiling) {
-  return page.evaluate(async ({ events: pushes, profilerId, profiling: enabled, rowPrefix, setRowsCounter }) => {
+  return page.evaluate(async ({ events: pushes, profilerId, profiling: enabled, rowPrefix, setRowsCounter, checksChannel }) => {
     const modules = window.__mcodeFrontendPerformanceModules;
     const commits = () => window.__mcodePerformanceAttribution?.commits ?? [];
     const rowRenders = () => ({ ...window.__mcodePerformanceAttribution?.rowRenders });
@@ -291,7 +294,11 @@ async function replayStreamEvents(page, events, profiling) {
       const before = commits().length;
       const rendersBefore = rowRenders();
       const setRowsBefore = setRows();
-      modules.push(push.channel, data);
+      if (push.channel === checksChannel) {
+        modules.workspaceStore.setState((state) => ({ checksById: { ...state.checksById, [data.threadId]: data.checks } }));
+      } else {
+        modules.push(push.channel, data);
+      }
       await frame();
       await frame();
       const sidebar = commits().slice(before).filter((commit) => commit.profilerId === profilerId);
@@ -308,7 +315,7 @@ async function replayStreamEvents(page, events, profiling) {
       });
     }
     return records;
-  }, { events, profilerId: SIDEBAR_PROFILER_ID, profiling, rowPrefix: ROW_RENDER_PREFIX, setRowsCounter: SET_ROWS_COUNTER });
+  }, { events, profilerId: SIDEBAR_PROFILER_ID, profiling, rowPrefix: ROW_RENDER_PREFIX, setRowsCounter: SET_ROWS_COUNTER, checksChannel: LOCAL_CHECKS_CHANNEL });
 }
 
 async function readAppliedTurnStatus(page, threadId, executionId) {
