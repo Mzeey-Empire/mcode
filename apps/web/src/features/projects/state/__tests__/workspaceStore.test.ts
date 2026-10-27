@@ -623,6 +623,19 @@ describe("workspaceStore whole thread hydration", () => {
     expect(useWorkspaceStore.getState().threads.map((thread) => thread.title)).toEqual(["Pushed title"]);
   });
 
+  it("releases nothing when hydration and a replayed push carry an already-completed thread", async () => {
+    const clearTerminal = vi.spyOn(useTerminalStore.getState(), "clearThread");
+    const done = createMockThread({ id: "done", workspace_id: "ws-1", user_completed_at: "2026-08-12T08:00:00.000Z" });
+    vi.mocked(mockTransport.listAllThreads).mockResolvedValue([done]);
+
+    await useWorkspaceStore.getState().hydrateThreads();
+    useWorkspaceStore.getState().applyThreadLifecycle(done);
+
+    expect(clearTerminal).not.toHaveBeenCalledWith("done");
+    expect(releaseBrowserScope).not.toHaveBeenCalledWith("ws-1", "done");
+    clearTerminal.mockRestore();
+  });
+
   it("preserves preparing placeholders while replacing an obsolete server snapshot", async () => {
     useWorkspaceStore.setState({ threads: [
       createMockThread({ id: "obsolete" }),

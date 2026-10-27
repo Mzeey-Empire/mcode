@@ -305,7 +305,7 @@ export interface McodeTransport {
   }): Promise<{ threads: Thread[]; workspaces: { id: string; name: string; path: string }[] }>;
   deleteThread(threadId: string, cleanupWorktree: boolean): Promise<boolean>;
   /** Persist explicit user completion after server-side lifecycle guards pass. */
-  completeThread(threadId: string): Promise<ThreadCompletionResult>;
+  completeThread(threadId: string, holdMs?: number): Promise<ThreadCompletionResult>;
   /** Reopen a completed thread and cancel its pending automatic deletion. */
   reopenThread(threadId: string): Promise<Thread>;
   /** Count completed threads that are blocked by the unsafe-worktree policy. */
