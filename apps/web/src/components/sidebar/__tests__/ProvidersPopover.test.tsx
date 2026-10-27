@@ -44,7 +44,7 @@ function serve(statuses: ProviderStatus[]) {
 }
 
 function openBell() {
-  fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+  fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
   return screen.findByTestId("providers-popover");
 }
 
@@ -65,13 +65,13 @@ afterEach(() => {
 });
 
 describe("ProvidersBell", () => {
-  it("shows the header and a No notifications empty state, with no dot, when nothing needs attention", async () => {
+  it("shows the Notifications header and a No notifications empty state, with no dot, when nothing needs attention", async () => {
     serve([status("claude", {})]);
     render(<ProvidersBell />);
 
     expect(screen.queryByTestId("providers-bell-dot")).toBeNull();
     const popover = await openBell();
-    expect(within(popover).getByText("Providers")).toBeInTheDocument();
+    expect(within(popover).getByText("Notifications")).toBeInTheDocument();
     expect(within(popover).getByRole("status")).toHaveTextContent("No notifications");
     expect(within(popover).queryAllByRole("listitem")).toHaveLength(0);
     expect(mockTransport.listProviderStatus).toHaveBeenCalledWith(false);
