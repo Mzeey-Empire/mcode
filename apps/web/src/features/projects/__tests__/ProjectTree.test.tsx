@@ -256,6 +256,7 @@ afterEach(() => {
 
 // Import after mocks are registered.
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { useSidebarUiStore } from "../sidebar/sidebar-ui-store";
 import { useUiStore } from "@/stores/uiStore";
 import { prefetchOnPointerDown } from "@/features/conversation";
 import { ProjectTree } from "../ProjectTree";
@@ -292,6 +293,10 @@ function makeThread(
     delegation_coordinator_thread_id: null,
     ...overrides,
   });
+}
+
+function selectCompletedScope(): void {
+  fireEvent.click(screen.getByRole("radio", { name: /^Completed/ }));
 }
 
 function rowIndent(row: HTMLElement | undefined): string | undefined {
@@ -384,7 +389,7 @@ describe("ProjectTree thread interactions", () => {
       "mcode-expanded-projects",
       JSON.stringify({ "ws-1": true }),
     );
-    useUiStore.setState({ projectThreadViews: {} });
+    useSidebarUiStore.setState({ scope: "active" });
     publishedRowIdHistory.length = 0;
     vi.useFakeTimers();
   });
@@ -561,15 +566,11 @@ describe("ProjectTree thread interactions", () => {
       reopenThread,
     });
     render(<ProjectTree />);
-    const viewSwitch = screen.getByRole("button", {
-      name: "View 1 completed thread for Test Project",
-    });
-    expect(viewSwitch).toHaveAttribute("aria-pressed", "false");
-    expect(viewSwitch).toHaveAttribute("data-view", "active");
-    expect(within(viewSwitch).getByTestId("project-monogram")).toHaveTextContent("T");
-    viewSwitch.focus();
-    expect(viewSwitch).toHaveFocus();
-    fireEvent.click(viewSwitch);
+    const completedScope = screen.getByRole("radio", { name: /^Completed/ });
+    expect(completedScope).toHaveAttribute("aria-checked", "false");
+    completedScope.focus();
+    expect(completedScope).toHaveFocus();
+    fireEvent.click(completedScope);
 
     const action = screen.getByRole("button", { name: "Reopen My Thread" });
     action.focus();
@@ -577,14 +578,9 @@ describe("ProjectTree thread interactions", () => {
     fireEvent.click(action);
 
     expect(reopenThread).toHaveBeenCalledWith("thread-1");
-    const activeViewSwitch = screen.getByRole("button", {
-      name: "View 0 active threads for Test Project",
-    });
-    expect(activeViewSwitch).toBeVisible();
-    expect(within(activeViewSwitch).getByTestId("project-monogram")).toHaveTextContent("T");
   });
 
-  it("shows one lifecycle set at a time and remembers the Project view across remounts", () => {
+  it("shows one lifecycle set at a time and keeps the global scope across remounts", () => {
     const activeThread = makeThread({ id: "thread-active", title: "Active work" });
     const completedThread = makeThread({
       id: "thread-completed",
@@ -597,68 +593,77 @@ describe("ProjectTree thread interactions", () => {
     expect(screen.getByRole("button", { name: /^Provider, Claude Active work/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Provider, Claude Completed work/i })).toBeNull();
     expect(
-      screen.getByRole("group", {
-        name: "Test Project project, active view, 1 active thread, 1 completed thread",
-      }),
+      screen.getByRole("group", { name: "Test Project project, 1 active thread, 1 completed thread" }),
     ).toBeVisible();
 
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "View 1 completed thread for Test Project",
-      }),
-    );
+    selectCompletedScope();
     expect(screen.queryByRole("button", { name: /^Provider, Claude Active work/i })).toBeNull();
     expect(screen.getByRole("button", { name: /^Provider, Claude Completed work/i })).toBeVisible();
 
     firstRender.unmount();
     render(<ProjectTree />);
     expect(screen.getByRole("button", { name: /^Provider, Claude Completed work/i })).toBeVisible();
-    expect(useUiStore.getState().projectThreadViews).toEqual({
-      "ws-1": "completed",
-    });
   });
 
-  it("switches each Project independently", () => {
-    const secondWorkspace = {
-      ...WORKSPACE,
-      id: "ws-2",
-      name: "Second Project",
-      path: "/second",
-    };
-    localStorage.setItem(
-      "mcode-expanded-projects",
-      JSON.stringify({ "ws-1": true, "ws-2": true }),
-    );
+  it("applies the scope to every project at once", () => {
+    const secondWorkspace = { ...WORKSPACE, id: "ws-2", name: "Second Project", path: "/second" };
+    localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": true, "ws-2": true }));
     setupStoreMocks({
       workspaces: [WORKSPACE, secondWorkspace],
       threads: [
-        makeThread({
-          id: "first-completed",
-          title: "First completed",
-          user_completed_at: "2026-08-12T08:00:00.000Z",
-        }),
-        makeThread({
-          id: "second-active",
-          workspace_id: "ws-2",
-          title: "Second active",
-        }),
+        makeThread({ id: "first-completed", title: "First completed", user_completed_at: "2026-08-12T08:00:00.000Z" }),
+        makeThread({ id: "second-active", workspace_id: "ws-2", title: "Second active" }),
       ],
     });
 
     render(<ProjectTree />);
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "View 1 completed thread for Test Project",
-      }),
-    );
-
-    expect(
-      screen.getByRole("button", { name: "View 0 active threads for Test Project" }),
-    ).toHaveAttribute("data-view", "completed");
-    expect(
-      screen.getByRole("button", { name: "View 0 completed threads for Second Project" }),
-    ).toHaveAttribute("data-view", "active");
     expect(screen.getByRole("button", { name: /^Provider, Claude Second active/i })).toBeVisible();
+    selectCompletedScope();
+
+    expect(screen.getByRole("button", { name: /^Provider, Claude First completed/i })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Provider, Claude Second active/i })).toBeNull();
+    expect(screen.getByTestId("project-empty-ws-2")).toHaveTextContent("No completed threads");
+  });
+
+  it("hides the scope bar while no thread is completed", () => {
+    setupStoreMocks({ threads: [makeThread({ id: "thread-active", title: "Active work" })] });
+    render(<ProjectTree />);
+
+    expect(screen.queryByTestId("sidebar-scope-bar")).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Thread scope" })).toBeNull();
+  });
+
+  it("shows the scope bar with the completed count once a thread is completed", () => {
+    setupStoreMocks({ threads: [makeThread({ id: "thread-active", title: "Active work" })] });
+    const view = render(<ProjectTree />);
+    setupStoreMocks({
+      threads: [
+        makeThread({ id: "thread-active", title: "Active work" }),
+        makeThread({ id: "thread-done", title: "Done work", user_completed_at: "2026-08-12T08:00:00.000Z" }),
+      ],
+    });
+    view.rerender(<ProjectTree />);
+
+    const bar = screen.getByRole("radiogroup", { name: "Thread scope" });
+    expect(within(bar).getByRole("radio", { name: "Active" })).toHaveAttribute("aria-checked", "true");
+    expect(within(bar).getByRole("radio", { name: /^Completed/ })).toHaveTextContent("Completed1");
+  });
+
+  it("falls back to Active when the last completed thread is deleted", () => {
+    const activeThread = makeThread({ id: "thread-active", title: "Active work" });
+    setupStoreMocks({
+      threads: [activeThread, makeThread({ id: "thread-done", title: "Done work", user_completed_at: "2026-08-12T08:00:00.000Z" })],
+    });
+    const view = render(<ProjectTree />);
+    selectCompletedScope();
+    expect(screen.queryByRole("button", { name: /^Provider, Claude Active work/i })).toBeNull();
+
+    setupStoreMocks({ threads: [activeThread] });
+    view.rerender(<ProjectTree />);
+
+    expect(screen.queryByTestId("sidebar-scope-bar")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Provider, Claude Active work/i })).toBeVisible();
+    expect(useSidebarUiStore.getState().scope).toBe("active");
   });
 
   it("labels a thread that switched provider with every provider, current first", () => {
@@ -690,11 +695,7 @@ describe("ProjectTree thread interactions", () => {
     });
 
     render(<ProjectTree />);
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "View 1 completed thread for Test Project",
-      }),
-    );
+    selectCompletedScope();
 
     expect(screen.getByRole("button", { name: "Reopen Completed work" })).toBeInTheDocument();
     screen.getByRole("button", { name: /^Provider, Claude Completed work/i }).focus();
@@ -719,11 +720,7 @@ describe("ProjectTree thread interactions", () => {
     });
 
     render(<ProjectTree />);
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "View 1 completed thread for Test Project",
-      }),
-    );
+    selectCompletedScope();
     screen.getByRole("button", { name: /^Provider, Claude Kept work/i }).focus();
 
     expect(await screen.findByTestId("thread-preview-thread-1")).toHaveTextContent(
@@ -745,11 +742,7 @@ describe("ProjectTree thread interactions", () => {
     });
 
     render(<ProjectTree />);
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "View 1 completed thread for Test Project",
-      }),
-    );
+    selectCompletedScope();
     screen.getByRole("button", { name: /^Provider, Claude Dirty work/i }).focus();
 
     const preview = await screen.findByTestId("thread-preview-thread-1");
@@ -776,11 +769,7 @@ describe("ProjectTree thread interactions", () => {
     });
 
     render(<ProjectTree />);
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "View 1 completed thread for Test Project",
-      }),
-    );
+    selectCompletedScope();
 
     expect(
       screen.getByRole("button", { name: "Retry cleanup for Blocked work" }),
@@ -812,11 +801,7 @@ describe("ProjectTree thread interactions", () => {
       });
 
       render(<ProjectTree />);
-      fireEvent.click(
-        screen.getByRole("button", {
-          name: "View 1 completed thread for Test Project",
-        }),
-      );
+      selectCompletedScope();
       fireEvent.click(screen.getByRole("button", { name: "Retry cleanup for Blocked work" }));
 
       expect(await screen.findByText("Cleanup retry failed: Error: still blocked")).toBeInTheDocument();
@@ -1336,11 +1321,7 @@ describe("ProjectTree thread interactions", () => {
       });
 
       render(<ProjectTree />);
-      fireEvent.click(
-        screen.getByRole("button", {
-          name: "View 1 completed thread for Test Project",
-        }),
-      );
+      selectCompletedScope();
       fireEvent.click(
         screen.getByRole("button", { name: "Retry cleanup for Blocked work" }),
       );
