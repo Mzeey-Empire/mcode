@@ -67,26 +67,3 @@ describe("TurnErrorPolicy.classify", () => {
     expect(policy.classify(undefined)).toBe("fatal");
   });
 });
-
-describe("TurnErrorPolicy.shouldRetry", () => {
-  const policy = new TurnErrorPolicy();
-
-  it("retries a transient failure on the first attempt", () => {
-    expect(policy.shouldRetry(new Error("read ECONNRESET"), 1)).toBe(true);
-  });
-
-  it("never retries a fatal failure", () => {
-    expect(policy.shouldRetry(new Error("permission denied"), 1)).toBe(false);
-  });
-
-  it("stops retrying once the attempt cap is reached", () => {
-    const transient = new Error("read ECONNRESET");
-    expect(policy.shouldRetry(transient, 2)).toBe(false);
-    expect(policy.shouldRetry(transient, 3)).toBe(false);
-  });
-
-  it("honors a custom attempt cap", () => {
-    const noRetry = new TurnErrorPolicy(1);
-    expect(noRetry.shouldRetry(new Error("read ECONNRESET"), 1)).toBe(false);
-  });
-});

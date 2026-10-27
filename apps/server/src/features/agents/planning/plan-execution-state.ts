@@ -73,11 +73,6 @@ export class PlanExecutionState {
     if (this.fenceParser) this.fenceParser = new PlanFenceParser();
   }
 
-  /** Keep assistant materialization armed until a valid capture can be persisted. */
-  needsAssistantMaterialization(): boolean {
-    return this.planning && !this.captured;
-  }
-
   /** Read only explicit fences from complete messages; prose headings are never a plan. */
   consumeAssistantMessage(content: string): PlanPersistenceReady | null {
     if (!this.planning || this.captured) return null;
@@ -96,11 +91,6 @@ export class PlanExecutionState {
   /** Return the planning result without creating a persisted phase. */
   finishTurn(): PlanCaptureOutcome | null {
     return this.planning ? { outcome: this.captured ? "captured" : "missing" } : null;
-  }
-
-  /** Report whether this execution already owns a plan version. */
-  hasPersistedPlan(): boolean {
-    return this.captured;
   }
 
   /** Prevent a second version after the first capture was accepted. */

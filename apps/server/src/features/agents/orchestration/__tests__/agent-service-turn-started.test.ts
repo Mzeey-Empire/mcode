@@ -83,7 +83,6 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       stopSession: vi.fn(),
       shutdown: vi.fn(),
     }));
-    providerStub.on("event", (event: ProviderRuntimeEvent) => capturedEvents.push(event));
 
     const registryStub: IProviderRegistry = {
       resolve: () => providerStub as unknown as IAgentProvider,
@@ -102,7 +101,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     } as unknown as AttachmentService;
 
     const snapshotServiceStub = {
-      captureRef: vi.fn(async () => "ref-before-sha"),
+      captureRef: vi.fn(async () => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
     } as unknown as SnapshotService;
 
     const memoryPressureServiceStub = {
@@ -155,6 +154,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       undefined,
       canonicalSink,
     );
+    startAgentServiceIngressForTest(svc, (event) => capturedEvents.push({ event }));
   });
 
   afterEach(async () => {

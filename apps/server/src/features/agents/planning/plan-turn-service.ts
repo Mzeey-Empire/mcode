@@ -1,17 +1,16 @@
 import { inject, injectable } from "tsyringe";
-import { logger } from "@mcode/shared";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { PlanCapture, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { InteractionMode, PermissionMode } from "@mcode/contracts/models/enums";
-import type { PlanQuestion, NativePlanQuestionBatch, PlanQuestionSettlement } from "@mcode/contracts/models/plan-questions";
+import type { NativePlanQuestionBatch, PlanQuestionSettlement } from "@mcode/contracts/models/plan-questions";
 import { broadcast } from "../../../application/transport/push.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import {
   AGENT_TURN_COMMAND_PORT,
   type AgentTurnCommandPort,
 } from "../orchestration/agent-turn-command-port.js";
-import { PlanExecutionState, type PlanPersistenceReady } from "./plan-execution-state.js";
+import { PlanExecutionState } from "./plan-execution-state.js";
 import { PlanQuestionService, type PlanAnswerInput } from "./plan-question-service.js";
 import { PlanRepo } from "./persistence/plan-repo.js";
 import { isNativePlanQuestionId } from "@mcode/contracts/models/plan-questions";
@@ -23,15 +22,13 @@ import type { SendMessageCommand } from "../turns/turn-admission-dispatch-coordi
 /** Admission decision shared by the provider request and worker capture setup. */
 export type PlanTurnClassification = NonNullable<TurnRequest["planTurn"]> | { kind: "implement" | "none" };
 
-type PlanMessage = Extract<AgentEvent, { type: "message" }>;
-
 /** Owns plan-question turns and durable plan capture materialization. */
 @injectable()
 export class PlanTurnService {
   private readonly executionByThread = new Map<string, PlanExecutionState>();
   private readonly nativeQuestionThreads = new Set<string>();
   private publishNativeReceipt: ((event: AgentEvent) => void) | undefined;
-  private projection: { progress: Pick<CanonicalAcceptedProgress, "reloadPlans" | "waitForTerminalSaves"> | undefined; files: PlanFileWriter } | undefined;
+  private projection: { progress: Pick<CanonicalAcceptedProgress, "waitForTerminalSaves"> | undefined; files: PlanFileWriter } | undefined;
 
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
@@ -41,8 +38,8 @@ export class PlanTurnService {
     @inject(AGENT_TURN_COMMAND_PORT) private readonly commands: AgentTurnCommandPort,
   ) {}
 
-  /** Connect the legacy capture path to the same post-commit projections as canonical capture. */
-  bindPlanProjection(progress: Pick<CanonicalAcceptedProgress, "reloadPlans" | "waitForTerminalSaves"> | undefined, files: PlanFileWriter): void {
+  /** Connect plan answers and endings to the worker's terminal saves and the plan file. */
+  bindPlanProjection(progress: Pick<CanonicalAcceptedProgress, "waitForTerminalSaves"> | undefined, files: PlanFileWriter): void {
     this.projection = { progress, files };
   }
 
@@ -188,40 +185,9 @@ ${userMessage}`;
     return this.questions.buildPlanOutputInstructions();
   }
 
-  /** Consume one visible text delta while a plan turn is active. */
-  onTextDelta(threadId: string, delta: string): void {
-    const ready = this.executionByThread.get(threadId)?.feedText(delta);
-    if (ready) this.publishQuestions(threadId, ready.questions);
-  }
-
-  /** The broadcast stays synchronous with the parsed delta; the phase write follows and republishes the thread. */
-  private publishQuestions(threadId: string, questions: PlanQuestion[]): void {
-    broadcast("plan.questions", { threadId, questions });
-    this.threadRepo.updatePlanPhase(threadId, "questions").catch((error: unknown) => {
-      logger.error("Failed to record the questions plan phase", {
-        threadId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
-  }
-
   /** Capture native plan markdown until its assistant message receives a durable identity. */
   handlePlanCaptured(capture: PlanCapture): void {
     this.execution(capture.threadId).handlePlanCapture(capture);
-  }
-
-  /** Return whether a message needs early durable materialization for a plan record. */
-  needsAssistantMaterialization(event: PlanMessage): boolean {
-    if (!event.messageId) return false;
-    return this.executionByThread.get(event.threadId)?.needsAssistantMaterialization() ?? false;
-  }
-
-  /** Persist the one plan record that an assistant message can materialize. */
-  async persistAssistantMessage(event: PlanMessage): Promise<void> {
-    if (!event.messageId) return;
-    const execution = this.executionByThread.get(event.threadId);
-    const ready = execution?.consumeAssistantMessage(event.content);
-    if (execution && ready) await this.persistPlan(event.threadId, event.messageId, ready, execution);
   }
 
   /** Submit answers and dispatch the complete answer turn through the command facade. */
@@ -285,30 +251,6 @@ ${userMessage}`;
   /** Clear volatile plan state once a turn reaches its terminal lifecycle. */
   clearTurn(threadId: string): void {
     this.executionByThread.delete(threadId);
-  }
-
-  private async persistPlan(
-    threadId: string,
-    messageId: string,
-    ready: PlanPersistenceReady,
-    execution: PlanExecutionState,
-  ): Promise<void> {
-    if (execution.hasPersistedPlan()) return;
-    try {
-      const provider = ProviderIdSchema.safeParse(this.threadRepo.findById(threadId)?.provider);
-      await this.planRepo.create(threadId, messageId, ready, provider.success ? provider.data : null);
-      execution.markPlanPersisted();
-      this.threadRepo.publishPlanPhase(threadId);
-      this.projection?.progress?.reloadPlans(threadId);
-      for (const version of this.planRepo.listByThread(threadId)) broadcast("plan.versionUpserted", { threadId, version });
-      broadcast("plan.commentsChanged", { threadId, upserted: this.planRepo.listComments(threadId), deletedIds: [] });
-      await this.projection?.files.writeAfterCommit(threadId);
-    } catch (error) {
-      logger.error("Failed to persist plan output", {
-        threadId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
 
   private execution(threadId: string): PlanExecutionState {

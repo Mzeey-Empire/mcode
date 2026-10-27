@@ -28,7 +28,7 @@ import * as NodeEvents from "node:events";
 
 // Capture canonical progress published by the real service.
 // without a real WebSocket server.
-vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
+vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn(), subscribedThreadIds: () => new Set<string>() }));
 import { broadcast } from "../../../../application/transport/push.js";
 function publishedEvents() {
   return vi.mocked(broadcast).mock.calls.flatMap(([topic, payload]) => {
@@ -120,11 +120,13 @@ function buildService({
 
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn(() => Promise.resolve()),
+    stopSession: vi.fn(async () => undefined),
+    shutdown: vi.fn(),
   }, getApprovalReviewSupport ? { getApprovalReviewSupport } : {});
 
   const providerRegistry = {
     resolve: resolveProvider.getMockImplementation() ? resolveProvider : vi.fn(() => providerStub),
-    resolveAll: vi.fn(() => []),
+    resolveAll: vi.fn(() => [providerStub]),
     shutdown: vi.fn(),
   } as unknown as IProviderRegistry;
 
@@ -142,7 +144,7 @@ function buildService({
   } as unknown as TurnSnapshotRepo;
 
   const snapshotService = {
-    captureRef: vi.fn(() => Promise.resolve("abc123")),
+    captureRef: vi.fn(() => Promise.resolve("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
     getFilesChanged: vi.fn(() => Promise.resolve([])),
   } as unknown as SnapshotService;
 

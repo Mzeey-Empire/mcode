@@ -6,7 +6,6 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
-import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
@@ -15,7 +14,6 @@ import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js"
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { ParentAssistantTextCoordinator } from "../../turns/parent-assistant-text-coordinator.js";
-import { ParentNarrativeRecoveryCoordinator } from "../../turns/parent-narrative-recovery-coordinator.js";
 import { LegacyConversationMigration } from "../../conversation/migrations/legacy-conversation-migration.js";
 import { ConversationDisplayMaterializer } from "../../conversation/migrations/conversation-display-materializer.js";
 import { TurnSteerRepo } from "../../steering/persistence/turn-steer-repo.js";
@@ -29,11 +27,6 @@ const start = { thread: { id: threadId, workspaceId: "workspace-1", providerId: 
   turnId, executionId, permissionMode: "supervised" as const, providerIdentities: [],
   userMessage: { kind: "create" as const, messageId: "user-1", content: "Question", sequence: 1 } };
 
-function thought(id: string, text: string, sortOrder = 1): ParentNarrativeRecoveryItem {
-  return { kind: "narrationSegment", record: { id, message_id: "", text,
-    started_at: NOW, ended_at: NOW, sort_order: sortOrder } };
-}
-
 describe("main canonical operations through the sole writer", () => {
   let directory: string;
   let path: string;
@@ -43,7 +36,6 @@ describe("main canonical operations through the sole writer", () => {
   let text: ParentAssistantTextCheckpointService;
   let published: CanonicalAgentEventEnvelope[][];
   let coordinator: ParentAssistantTextCoordinator | undefined;
-  let narrativeRecovery: ParentNarrativeRecoveryCoordinator | undefined;
 
   beforeEach(() => {
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-canonical-runtime-"));
@@ -62,8 +54,6 @@ describe("main canonical operations through the sole writer", () => {
   });
 
   afterEach(async () => {
-    narrativeRecovery?.clear(executionId);
-    narrativeRecovery = undefined;
     coordinator?.discard(executionId);
     coordinator = undefined;
     await writer.close();
@@ -294,52 +284,6 @@ describe("main canonical operations through the sole writer", () => {
     await writer.setQueryOnlyForReliability(false);
     expect(await coordinator.flush(executionId)).toBe(true);
     expect(text.restore(executionId)).toBe(responseText);
-  });
-
-  it("prepares concurrent recovery snapshots only after the preceding commit acknowledges its delta", async () => {
-    await canonical.startParentTurn(start);
-    let snapshot = [thought("old-thought", "Before")];
-    narrativeRecovery = new ParentNarrativeRecoveryCoordinator(canonical, { terminalSnapshot: () => snapshot });
-    const event = { type: "textDelta" as const, threadId, turnExecutionId: executionId, delta: "Live" };
-    const peer = new Database(path, { strict: true });
-    peer.run("BEGIN IMMEDIATE");
-    try {
-      const first = narrativeRecovery.checkpoint(event);
-      snapshot = [thought("new-thought", "After")];
-      const second = narrativeRecovery.checkpoint(event);
-      peer.run("COMMIT");
-      await Promise.all([first, second]);
-      expect(canonical.loadParentNarrativeRecovery(turnId)).toEqual(snapshot);
-      await narrativeRecovery.close(() => Promise.resolve());
-    } finally { if (peer.inTransaction) peer.run("ROLLBACK"); peer.close(true); }
-  });
-
-  it("drains a failed recovery head and its dependent text classification without deadlocking", async () => {
-    await canonical.startParentTurn(start);
-    await writer.setQueryOnlyForReliability(true);
-    let snapshot = [thought("reasoning", "Reasoning")];
-    narrativeRecovery = new ParentNarrativeRecoveryCoordinator(canonical, { terminalSnapshot: () => snapshot });
-    const event = { type: "textDelta" as const, threadId, turnExecutionId: executionId, delta: "Reasoning" };
-    await expect(narrativeRecovery.checkpoint(event)).rejects.toThrow(/readonly/);
-    coordinator = new ParentAssistantTextCoordinator(canonical, text, () => {});
-    coordinator.start(executionId, turnId);
-    const stopped = vi.fn();
-    coordinator.queueText(event, () => {}, stopped);
-    snapshot = [thought("reasoning", "Classified reasoning")];
-    const classified = narrativeRecovery.runOrdered(event, snapshot, (ready) => coordinator!.classify(executionId, async () => {
-      const checkpoint = await ready;
-      await canonical.classifyParentNarrativeRecovery(checkpoint.input, checkpoint.operationId);
-      checkpoint.confirm();
-    }));
-    void classified.catch(() => undefined);
-    snapshot = [thought("reasoning", "Classified reasoning"), thought("later", "Later", 2)];
-    const later = narrativeRecovery.checkpoint(event);
-    await writer.setQueryOnlyForReliability(false);
-    await narrativeRecovery.close(() => coordinator!.close());
-    await later;
-    expect(stopped).not.toHaveBeenCalled();
-    expect(canonical.loadParentNarrativeRecovery(turnId)).toEqual(snapshot);
-    expect(text.restore(executionId)).toBe("");
   });
 
   it("drains admitted checkpoints before shutdown and reports retained save failure", async () => {

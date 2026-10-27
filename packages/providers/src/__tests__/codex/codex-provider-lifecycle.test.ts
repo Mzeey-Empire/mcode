@@ -77,7 +77,7 @@ class NativeProcess extends NodeEvents.EventEmitter {
 }
 
 const request: TurnRequest<"codex"> = {
-  turnId: "turn-1", turnExecutionId: "execution-1", sessionId: "mcode-lifecycle",
+  turnId: "turn-1", turnExecutionId: "63093cff-69b8-4efb-82db-20a75f993612", sessionId: "mcode-lifecycle",
   threadId: "lifecycle", workspaceId: "fixture", cwd: process.cwd(), message: "hello",
   model: "gpt-5.4", permissionMode: "supervised", approvalReviewMode: "manual", interactionMode: "build", providerOptions: {},
 };
@@ -100,7 +100,7 @@ function createProvider() {
     },
   );
   const events: ProviderRuntimeEvent[] = [];
-  provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+  provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
   const starts = () => child.requests.filter(({ method }) => method === "turn/start");
   const complete = async (number: number, executionId: string) => {
     await vi.waitFor(() => expect(starts()).toHaveLength(number));
@@ -230,13 +230,15 @@ describe("Codex provider lifecycle through native transport", () => {
     }
   });
 
-  it("keeps a standalone nonretry error diagnostic active until native completion", async () => {
+  it("drops an unscoped nonretry diagnostic without ending the active canonical turn", async () => {
     const { provider, child, complete, events } = createProvider();
     try {
       await provider.sendTurn(request);
       child.stdout.write(JSON.stringify({ method: "error", params: { threadId: "native-thread", turnId: "native-turn-1",
         willRetry: false, error: { message: "Tool update failed" } } }) + "\n");
-      await vi.waitFor(() => expect(events.some(({ event }) => event.type === AgentEventType.System && event.subtype === "provider.notice.codex-error")).toBe(true));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await provider.flushCanonicalEvents();
+      expect(events.filter(({ event }) => event.type === AgentEventType.System && event.subtype === "provider.notice.codex-error")).toEqual([]);
       expect(events.some(({ event }) => event.type === AgentEventType.Ended || event.type === AgentEventType.Error)).toBe(false);
       await complete(1, request.turnExecutionId);
     } finally {
@@ -339,10 +341,10 @@ describe("Codex provider lifecycle through native transport", () => {
     const { provider, child, complete } = createProvider();
     try {
       await provider.sendTurn(request);
-      await complete(1, "execution-1");
+      await complete(1, "63093cff-69b8-4efb-82db-20a75f993612");
       expect(child.kill).not.toHaveBeenCalled();
-      await provider.sendTurn({ ...request, turnId: "turn-2", turnExecutionId: "execution-2" });
-      await complete(2, "execution-2");
+      await provider.sendTurn({ ...request, turnId: "turn-2", turnExecutionId: "44fa60e2-d5d4-423a-89d0-7852a1e951de" });
+      await complete(2, "44fa60e2-d5d4-423a-89d0-7852a1e951de");
       expect(spawn).toHaveBeenCalledTimes(1);
       expect(child.kill).not.toHaveBeenCalled();
     } finally {
@@ -356,18 +358,19 @@ describe("Codex provider lifecycle through native transport", () => {
     const { provider, child, settings, getSettings, starts, complete } = createProvider();
     try {
       await provider.sendTurn(request);
-      await complete(1, "execution-1");
+      await complete(1, "63093cff-69b8-4efb-82db-20a75f993612");
       let releaseSettings!: (value: typeof settings) => void;
       getSettings.mockImplementationOnce(() => new Promise((resolve) => { releaseSettings = resolve; }));
-      const sending = provider.sendTurn({ ...request, turnId: "turn-2", turnExecutionId: "execution-2" });
+      const sending = provider.sendTurn({ ...request, turnId: "turn-2", turnExecutionId: "44fa60e2-d5d4-423a-89d0-7852a1e951de" });
+      await vi.waitFor(() => expect(releaseSettings).toBeTypeOf("function"));
       await provider.stopSession(request.sessionId);
       releaseSettings(settings);
       await sending;
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(starts()).toHaveLength(1);
       expect(child.kill).not.toHaveBeenCalled();
-      await provider.sendTurn({ ...request, turnId: "turn-3", turnExecutionId: "execution-3" });
-      await complete(2, "execution-3");
+      await provider.sendTurn({ ...request, turnId: "turn-3", turnExecutionId: "5e53289f-8482-4b33-8d2d-9eef25d7899c" });
+      await complete(2, "5e53289f-8482-4b33-8d2d-9eef25d7899c");
       expect(spawn).toHaveBeenCalledTimes(1);
     } finally {
       await provider.discardSession(request.sessionId);

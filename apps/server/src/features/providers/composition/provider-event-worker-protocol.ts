@@ -23,43 +23,10 @@ export type ProviderEventWorkerTask =
     envelope: unknown;
   };
 
-/** The only message sent from the server process to a provider event worker. */
-export interface ProviderEventWorkerRequest {
-  requestIds: readonly number[];
-  tasks: readonly ProviderEventWorkerTask[];
-}
-
 /** A validated event or its content-free rejection returned by a worker. */
 export type ProviderEventWorkerOutcome =
   | { status: "accepted"; event: ProviderEventIngressEvent }
   | { status: "rejected"; diagnostic: ProviderEventIngressDiagnostic };
-
-/** The only message sent from a provider event worker to the server process. */
-export interface ProviderEventWorkerResponse {
-  requestIds: readonly number[];
-  outcomes: readonly ProviderEventWorkerOutcome[];
-}
-
-/** Return the stable worker key without treating this shallow lookup as validation. */
-export function providerEventWorkerThreadId(task: ProviderEventWorkerTask): string {
-  const threadId = task.kind === "canonical-commit"
-    ? nestedString(task.envelope, "routing", "threadId")
-    : nestedString(task.runtimeEvent, "event", "threadId");
-  return threadId ?? "__invalid-provider-event__";
-}
-
-/**
- * Identify terminal lifecycle payloads for bounded worker admission without
- * treating this shallow lookup as validation.
- */
-export function isProviderEventWorkerTerminalTask(task: ProviderEventWorkerTask): boolean {
-  const eventType = task.kind === "canonical-commit"
-    ? nestedString(task.envelope, "payload", "item", "payload", "runtimeEvent", "event", "type")
-    : nestedString(task.runtimeEvent, "event", "type");
-  return eventType === AgentEventType.TurnComplete
-    || eventType === AgentEventType.Error
-    || eventType === AgentEventType.Ended;
-}
 
 /** Return a canonical identity early enough to coalesce duplicate in-flight work. */
 export function canonicalEventIdentity(task: ProviderEventWorkerTask): string | undefined {
@@ -233,19 +200,6 @@ function accepted(event: ProviderEventIngressEvent): ProviderEventWorkerOutcome 
 
 function rejected(diagnostic: ProviderEventIngressDiagnostic): ProviderEventWorkerOutcome {
   return { status: "rejected", diagnostic };
-}
-
-function nestedString(value: unknown, ...keys: readonly string[]): string | undefined {
-  try {
-    let current = value;
-    for (const key of keys) {
-      if (!current || typeof current !== "object") return undefined;
-      current = Reflect.get(current, key);
-    }
-    return stringValue(current);
-  } catch {
-    return undefined;
-  }
 }
 
 function directString(value: unknown, key: string): string | undefined {

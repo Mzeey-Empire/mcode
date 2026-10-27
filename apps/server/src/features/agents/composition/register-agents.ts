@@ -18,7 +18,6 @@ import {
 import { LegacyConversationMigration } from "../conversation/migrations/legacy-conversation-migration.js";
 import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import { PlanQuestionService } from "../planning/plan-question-service.js";
-import { TurnSnapshotRepo } from "../turns/persistence/turn-snapshot-repo.js";
 import { TurnDiffService } from "../turns/turn-diff-service.js";
 import { ProviderSwitchService } from "../turns/provider-switch-service.js";
 import { TurnDiffRepo } from "../turns/persistence/turn-diff-repo.js";
@@ -30,7 +29,6 @@ import {
 import { SubagentRosterService } from "../collaboration/subagent-roster-service.js";
 import { GoalLifecycleService } from "../goals/goal-lifecycle-service.js";
 import { PlanTurnService } from "../planning/plan-turn-service.js";
-import { TaskPersistenceService } from "../tasks/task-persistence-service.js";
 import {
   PARENT_TURN_DURABILITY,
 } from "../turns/parent-turn-durability.js";
@@ -75,7 +73,6 @@ import type { ProviderTurnPort } from "@mcode/providers";
 import { SettingsService } from "../../settings/settings-service.js";
 import { TURN_FINALIZER, TurnFinalizer } from "../turns/turn-finalizer.js";
 import { TURN_FILE_TRACKER, TurnFileTracker } from "../turns/turn-file-tracker.js";
-import { TURN_FILE_EFFECTS, TurnFileEffects } from "../turns/turn-file-effects.js";
 import {
   TURN_ADMISSION_DISPATCH_COORDINATOR,
   TurnAdmissionDispatchCoordinator,
@@ -87,13 +84,11 @@ import {
 } from "../turns/turn-runtime-persistence.js";
 import { TurnConversationProjectionService } from "../turns/turn-conversation-projection-service.js";
 import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
-import { PostTerminalHookCompletionEffect } from "../turns/post-terminal-hook-completion-effect.js";
 import { BackgroundToolSettlementEffect } from "../turns/background-tool-settlement-effect.js";
 import { ThreadCreationCoordinator } from "../turns/thread-creation-coordinator.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup-fetch-decisions.js";
 import { CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
-import { ProviderSessionCursorPersistence } from "../turns/provider-session-cursor-persistence.js";
 import { ProviderTurnEventApplication } from "../turns/provider-turn-event-application.js";
 import {
   TURN_RUNTIME_EVENT_CONTROL,
@@ -196,19 +191,14 @@ export function registerAgentServices(container: DependencyContainer): void {
   container.register("PlanQuestionService", {
     useFactory: (c) => c.resolve(PlanQuestionService),
   });
-  container.register("TurnSnapshotPersistence", {
-    useFactory: (c) => c.resolve(TurnSnapshotRepo),
-  });
   container.register(PlanTurnService, { useClass: PlanTurnService }, { lifecycle: Lifecycle.Singleton });
   container.register(GoalLifecycleService, { useClass: GoalLifecycleService }, { lifecycle: Lifecycle.Singleton });
   container.register(SubagentRosterService, { useClass: SubagentRosterService }, { lifecycle: Lifecycle.Singleton });
-  container.register(TaskPersistenceService, { useClass: TaskPersistenceService }, { lifecycle: Lifecycle.Singleton });
   container.register<TurnFeatureEffects>(TURN_FEATURE_EFFECTS, {
     useFactory: instanceCachingFactory((c) => new TurnFeatureEffects(
       c.resolve(PlanTurnService),
       c.resolve(GoalLifecycleService),
       c.resolve(SubagentRosterService),
-      c.resolve(TaskPersistenceService),
     )),
   });
   container.register(AgentRuntimeCommandPort, { useClass: AgentRuntimeCommandPort }, { lifecycle: Lifecycle.Singleton });
@@ -253,31 +243,7 @@ export function registerAgentServices(container: DependencyContainer): void {
     useFactory: (c) => c.resolve(SnapshotRefPins),
   });
   container.register<TurnFinalizer>(TURN_FINALIZER, {
-    useFactory: instanceCachingFactory((c) => new TurnFinalizer(
-      c.resolve(MessageRepo),
-      c.resolve(ThreadRepo),
-      c.resolve(NarrativeStore),
-      c.resolve(SnapshotService),
-      c.resolve("TurnSnapshotPersistence"),
-      c.resolve(ApplicationDatabaseWriter),
-      c.resolve<TurnFileTracker>(TURN_FILE_TRACKER),
-      c.resolve(PARENT_TURN_DURABILITY),
-      c.resolve(ParentAssistantTextCheckpointService),
-      c.resolve(TurnDiffService),
-      c.resolve(SnapshotRefPins),
-      c.resolve(CompletedTurnWatermark),
-    )),
-  });
-  container.register<TurnFileEffects>(TURN_FILE_EFFECTS, {
-    useFactory: instanceCachingFactory((c) => new TurnFileEffects(
-      c.resolve(ThreadRepo),
-      c.resolve(WorkspaceRepo),
-      c.resolve(GitWorktreeService),
-      c.resolve(SnapshotService),
-      c.resolve(TURN_FILE_TRACKER),
-      c.resolve(TURN_FINALIZER),
-      c.resolve(SnapshotRefPins),
-    )),
+    useFactory: instanceCachingFactory(() => new TurnFinalizer()),
   });
   container.register<TurnAdmissionDispatchCoordinator>(TURN_ADMISSION_DISPATCH_COORDINATOR, {
     useFactory: instanceCachingFactory((c) => new TurnAdmissionDispatchCoordinator(
@@ -303,9 +269,7 @@ export function registerAgentServices(container: DependencyContainer): void {
     )),
   });
   container.register(TurnConversationProjectionService, { useClass: TurnConversationProjectionService }, { lifecycle: Lifecycle.Singleton });
-  container.register(PostTerminalHookCompletionEffect, { useClass: PostTerminalHookCompletionEffect }, { lifecycle: Lifecycle.Singleton });
   container.register(BackgroundToolSettlementEffect, { useClass: BackgroundToolSettlementEffect }, { lifecycle: Lifecycle.Singleton });
-  container.register(ProviderSessionCursorPersistence, { useClass: ProviderSessionCursorPersistence }, { lifecycle: Lifecycle.Singleton });
   container.register(ThreadCreationCoordinator, {
     useFactory: instanceCachingFactory((c) => new ThreadCreationCoordinator(
       c.resolve(ThreadRepo),

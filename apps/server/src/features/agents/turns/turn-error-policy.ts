@@ -1,6 +1,5 @@
 /**
- * Classifies a failed turn as `transient` or `fatal` and gates an automatic
- * retry on an attempt cap.
+ * Classifies failed turns for transient-error publication suppression.
  */
 
 /** Whether a turn failure is worth one automatic retry (`transient`) or not (`fatal`). */
@@ -36,17 +35,8 @@ const TRANSIENT_SIGNATURES: readonly RegExp[] = [
   /\bhttp\/request failed\b/i,
 ];
 
-/** One original send plus one automatic retry. */
-const DEFAULT_MAX_ATTEMPTS = 2;
-
-/** Decides retry eligibility for a failed turn from an explicit transient-signature allowlist. */
+/** Classifies a failed turn from an explicit transient-signature allowlist. */
 export class TurnErrorPolicy {
-  /**
-   * @param maxAttempts - Total attempts allowed per turn, including the original
-   *   send. Defaults to {@link DEFAULT_MAX_ATTEMPTS} (one automatic retry). The
-   *   cap is what stops a misclassified fatal error from looping.
-   */
-  constructor(private readonly maxAttempts: number = DEFAULT_MAX_ATTEMPTS) {}
 
   /**
    * Classify a turn failure against the transient allowlist.
@@ -56,18 +46,5 @@ export class TurnErrorPolicy {
   classify(err: unknown): TurnErrorKind {
     const message = err instanceof Error ? err.message : String(err);
     return TRANSIENT_SIGNATURES.some((re) => re.test(message)) ? "transient" : "fatal";
-  }
-
-  /**
-   * Decide whether a failed turn should be retried against a fresh session.
-   * Retries only a {@link classify}-transient failure that has not yet hit the
-   * attempt cap.
-   *
-   * @param err - The error that ended the turn.
-   * @param attempt - Attempts made so far, 1-based (the original send is `1`).
-   */
-  shouldRetry(err: unknown, attempt: number): boolean {
-    if (this.classify(err) !== "transient") return false;
-    return attempt < this.maxAttempts;
   }
 }

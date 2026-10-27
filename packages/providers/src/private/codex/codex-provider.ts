@@ -602,7 +602,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       if (runtimeEvent.event.type === AgentEventType.Ended && codexCollaborationExtension(runtimeEvent.extension)?.child === undefined) state.kind = "fenced";
       return;
     }
-    super.emit("event", runtimeEvent);
+    logger.debug("Codex event dropped without active turn routing", {
+      threadId: runtimeEvent.event.threadId,
+      event: runtimeEvent.event.type,
+    });
   }
 
   private emitSessionRuntimeEvent(threadId: string, runtimeEvent: ProviderRuntimeEvent): void {
@@ -667,12 +670,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     kind: "active" | "fenced";
     routing: CodexCanonicalEventRouting;
   }>();
-  private canonicalTurnEventDeliveryEnabled = false;
-
-  /** Enables the server-owned event route for newly dispatched Codex parent turns. */
-  setCanonicalTurnEventDeliveryEnabled(enabled: boolean): void {
-    this.canonicalTurnEventDeliveryEnabled = enabled;
-  }
 
   /** Report a failed canonical sink promptly for the exact turn attempt. */
   setCanonicalTurnDeliveryFailureHandler(
@@ -1124,12 +1121,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     try {
       const preparingSession = this.runtime.get(req.sessionId);
       if (preparingSession) preparingSession.nextTurnExecutionId = req.turnExecutionId;
-      if (this.canonicalTurnEventDeliveryEnabled) {
-        const threadId = this.threadIdForSession(req.sessionId);
-        await this.retirePreviousCanonicalTurn(threadId);
-        signal.throwIfAborted();
-        this.bindCanonicalCodexRequest(req);
-      }
+      const threadId = this.threadIdForSession(req.sessionId);
+      await this.retirePreviousCanonicalTurn(threadId);
+      signal.throwIfAborted();
+      this.bindCanonicalCodexRequest(req);
       const turn = await this.prepareCodexTurn(req, signal);
       if (!turn) return;
       if (this.consumePendingCodexStop(turn)) return;

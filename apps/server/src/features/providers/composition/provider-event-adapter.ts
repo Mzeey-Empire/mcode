@@ -4,8 +4,6 @@ import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { CodexChildRoutingDiagnosticInput } from "../../agents/collaboration/codex-collaboration-durability.js";
 import type { ProviderEventIngressEvent } from "./provider-event-ingress.js";
 
-/** Injection token for the optional Codex-specific provider event adapter. */
-export const CODEX_PROVIDER_EVENT_ADAPTER = Symbol("CodexProviderEventAdapter");
 
 /** The normalized outcome of one provider-specific event interpretation. */
 export type ProviderEventProjection =

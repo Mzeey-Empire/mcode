@@ -580,7 +580,6 @@ export async function buildServerRuntimeBundles({
   serverRoot,
   serverOutFile,
   ptyHostOutFile,
-  providerEventWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "provider-event.worker.cjs"),
   canonicalWriterWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "canonical-agent-writer.worker.cjs"),
   executionWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "execution.worker.cjs"),
   production = false,
@@ -614,15 +613,6 @@ export async function buildServerRuntimeBundles({
       outfile: ptyHostOutFile,
     }),
   ];
-  const providerEventWorkerEntry = NodePath.resolve(
-    serverRoot,
-    "dist-tsc/features/providers/composition/provider-event.worker.js",
-  );
-  bundles.push(build({
-    ...shared,
-    entryPoints: [providerEventWorkerEntry],
-    outfile: providerEventWorkerOutFile,
-  }));
   bundles.push(build({
     ...shared,
     entryPoints: [NodePath.resolve(serverRoot, "dist-tsc/features/agents/canonical/canonical-agent-writer.worker.js")],

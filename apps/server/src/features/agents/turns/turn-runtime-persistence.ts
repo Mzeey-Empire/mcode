@@ -1,5 +1,4 @@
 import { inject, injectable } from "tsyringe";
-import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { Thread } from "@mcode/contracts/models/thread";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
@@ -12,14 +11,6 @@ export type TurnRuntimePersistenceState = Pick<Thread, "provider" | "status">;
 export interface TurnRuntimePersistence {
   /** Load the provider, status, and cursor state for one runtime decision. */
   load(threadId: string): TurnRuntimePersistenceState | null;
-  /** Store context usage reported by a provider turn. */
-  recordContextUsage(threadId: string, tokens: number, contextWindow?: number): Promise<void>;
-  /** Store a provider-produced compaction summary. */
-  recordCompactionSummary(threadId: string, summary: string): Promise<void>;
-  /** Store a provider cursor that can resume a later turn. */
-  saveProviderCursor(threadId: string, providerId: ProviderId, cursor: string): Promise<void>;
-  /** Remove a cursor that the provider has invalidated. */
-  clearProviderCursor(threadId: string, providerId: ProviderId): Promise<void>;
   /** Store a terminal lifecycle state selected by the runtime owner. */
   setRuntimeStatus(threadId: string, status: "paused" | "interrupted"): Promise<void>;
   /** Record the real terminal outcome before applying the legacy runtime status. */
@@ -36,22 +27,6 @@ export class ThreadRuntimePersistence implements TurnRuntimePersistence {
 
   load(threadId: string): TurnRuntimePersistenceState | null {
     return this.threads.findById(threadId);
-  }
-
-  async recordContextUsage(threadId: string, tokens: number, contextWindow?: number): Promise<void> {
-    await this.threads.updateContextUsage(threadId, tokens, contextWindow);
-  }
-
-  recordCompactionSummary(threadId: string, summary: string): Promise<void> {
-    return this.threads.updateCompactSummary(threadId, summary);
-  }
-
-  async saveProviderCursor(threadId: string, providerId: ProviderId, cursor: string): Promise<void> {
-    await this.threads.updateSdkSessionId(threadId, providerId, cursor);
-  }
-
-  async clearProviderCursor(threadId: string, providerId: ProviderId): Promise<void> {
-    await this.threads.clearSdkSessionId(threadId, providerId);
   }
 
   async setRuntimeStatus(threadId: string, status: "paused" | "interrupted"): Promise<void> {

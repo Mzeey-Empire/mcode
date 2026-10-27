@@ -1,5 +1,5 @@
-import { startupEnvironmentFixture } from "../../../projects/environment/testing/startup-environment-fixture.js";
 import "reflect-metadata";
+import { startupEnvironmentFixture } from "../../../projects/environment/testing/startup-environment-fixture.js";
 import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -97,7 +97,7 @@ function createAgentServiceHarness(automaticSetup?:
     threadService,
     {} as never,
     {
-      captureRef: vi.fn(async () => "ref-before"),
+      captureRef: vi.fn(async () => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
       getFilesChanged: vi.fn(async () => []),
     } as never,
     db,
@@ -921,7 +921,7 @@ describe("AgentService.createAndSend defaults", () => {
     expect(direct.runtimeSnapshot.phase).toBe("running");
     expect(attached.runtimeSnapshot).toEqual({ threadId: attached.id, turnExecutionId: null, phase: "idle" });
     expect(automaticSetup.admitAutomaticTurn).toHaveBeenCalledWith(expect.objectContaining({ threadId: attached.id, content: "Existing dispatch" }));
-    expect(provider.sendTurn).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
   });
 
   it("returns the authoritative running runtime snapshot after startup", async () => {

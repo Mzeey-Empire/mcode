@@ -10,7 +10,6 @@ import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
 import type { EnvService } from "../../../runtime/environment/env-service.js";
 import type { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
-import type { CanonicalAgentBoundary } from "../../agents/index.js";
 import type { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import { killProcessTree } from "../../../runtime/process/containment/process-kill.js";
 import type { ProviderEventIngress } from "./provider-event-ingress.js";
@@ -32,7 +31,6 @@ export interface WorkerOwnedProviderEventResult {
 
 /** One durable route decision for an execution. Retired executions must resolve to rejected. */
 export type ProviderEventOwnershipRoute =
-  | { kind: "legacy" }
   | { kind: "rejected" }
   | {
     kind: "worker";
@@ -56,7 +54,6 @@ export interface ProviderHostPortDependencies {
   browser: BrowserAutomationSessionLease;
   mcode: ProviderMcodePort;
   grants: ScopedPreGrantService;
-  events: CanonicalAgentBoundary;
   ingress: ProviderEventIngress;
   eventOwnership?: ProviderEventOwnership;
   /** Resolved per call because the turn owner itself depends on the provider registry. */
@@ -125,10 +122,9 @@ async function submitProviderEvents(
   const route: ProviderEventOwnershipRoute = dependencies.eventOwnership?.resolve(
     batch.executionId, batch.events[0]?.sourceProviderId,
   )
-    ?? { kind: "legacy" };
+    ?? { kind: "rejected" };
   if (route.kind === "rejected") throw new Error("Canonical event execution is no longer admitted");
-  if (route.kind === "worker") return await submitWorkerEvents(dependencies, route, batch);
-  return submitLegacyEvents(dependencies, batch);
+  return await submitWorkerEvents(dependencies, route, batch);
 }
 
 async function submitWorkerEvents(
@@ -152,38 +148,6 @@ async function submitWorkerEvents(
     delivery: { ingress: result.commit.outcome === "committed" && result.providerEvents.length > 0
       ? "queued" : "not-required" },
   };
-}
-
-async function submitLegacyEvents(
-  dependencies: ProviderHostPortDependencies,
-  batch: ProviderEventBatch,
-): Promise<ProviderEventSubmissionReceipt> {
-  const result = await dependencies.events.commit({
-    threadId: batch.threadId,
-    turnId: batch.turnId,
-    executionId: batch.executionId,
-    phase: batch.phase,
-    nativeCursor: batch.nativeCursor,
-    events: batch.events,
-  });
-  return deliverCommitted(dependencies.ingress, {
-    outcome: providerCommitOutcome(result.outcome),
-    conversationRevision: result.conversationRevision,
-    rosterRevision: result.rosterRevision,
-    acceptedThrough: result.acceptedThrough,
-    durableThrough: result.durableThrough,
-    eventCount: result.events.length,
-  }, result.providerProjection.events);
-}
-
-function deliverCommitted(
-  ingress: ProviderEventIngress,
-  commit: ProviderEventCommitReceipt,
-  events: readonly ProjectedCommittedProviderEvent[],
-): ProviderEventSubmissionReceipt {
-  const handoff = commit.outcome === "committed" && events.length > 0;
-  if (handoff) ingress.acceptLegacyProjected(events);
-  return { commit, delivery: { ingress: handoff ? "queued" : "not-required" } };
 }
 
 function matchesWorkerReceipt(
@@ -217,11 +181,4 @@ function matchesExecution(
 ): boolean {
   return routing.threadId === route.threadId && routing.turnId === route.turnId
     && routing.executionId === route.executionId;
-}
-
-function providerCommitOutcome(
-  outcome: "committed" | "duplicate" | "conflict" | "terminal-outcome-confirmed" | "ingest-overflow",
-): "committed" | "duplicate" | "conflict" | "ingest-overflow" {
-  if (outcome === "terminal-outcome-confirmed") return "duplicate";
-  return outcome;
 }

@@ -1,28 +1,4 @@
-import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { AgentStopResult, TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
-import type { Thread } from "@mcode/contracts/models/thread";
-import type { FinalizeTurnCommand } from "../turns/turn-event-pipeline.js";
-import type { TurnEndingCause } from "../canonical/turn-ending.js";
-
-/** Select serializable tool-result fields for the narrative projection. */
-export function toolResultMetadata(event: Extract<AgentEvent, { type: "toolResult" }>): {
-  outputTruncated?: true;
-  outputTotalBytes?: number;
-  outputArtifactPath?: string;
-  exitCode?: number;
-} {
-  return {
-    ...(event.outputTruncated === true ? { outputTruncated: true as const } : {}),
-    ...(event.outputTotalBytes != null ? { outputTotalBytes: event.outputTotalBytes } : {}),
-    ...(event.outputArtifactPath ? { outputArtifactPath: event.outputArtifactPath } : {}),
-    ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
-  };
-}
-
-/** Return whether persisted thread state prevents a new provider turn. */
-export function isStoppedThread(status: Thread["status"] | undefined): boolean {
-  return status === undefined || ["paused", "stopped", "completed", "errored", "failed", "interrupted"].includes(status);
-}
 
 /** Return whether an event still belongs to a runtime that can change state. */
 export function isActiveRuntimeExecution(
@@ -60,17 +36,4 @@ export function stopDispatchState(
   return reservationState === "activeTurn" || reservationState === "stopping" || reservationState === undefined
     ? "not-dispatched"
     : "unknown";
-}
-
-/** The interruption cause implied by a terminal source that has no provider event behind it. */
-export function terminalSourceEnding(source: FinalizeTurnCommand["source"]): TurnEndingCause | undefined {
-  if (source === "checkpoint-failure") return { cause: "saving_stopped" };
-  return undefined;
-}
-
-/** Convert legacy terminal labels to the pipeline source vocabulary. */
-export function pipelineTerminalSource(source: string): FinalizeTurnCommand["source"] {
-  if (source === "user stop") return "user-stop";
-  if (source.includes("checkpoint failure")) return "checkpoint-failure";
-  return "provider";
 }

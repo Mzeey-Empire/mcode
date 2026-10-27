@@ -588,7 +588,6 @@ function fakeProvider(id: "claude" | "codex"): FakeProvider {
     stopSession: async () => undefined,
     shutdown: () => undefined,
     listModels: async () => provider.models,
-    setCanonicalTurnEventDeliveryEnabled: () => undefined,
     setCanonicalTurnDeliveryFailureHandler: () => undefined,
     fenceCanonicalTurnEvents: async () => undefined,
     retireCanonicalTurnEvents: async () => undefined,

@@ -34,7 +34,6 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
 import { PlanTurnService } from "../../planning/plan-turn-service.js";
 import { PlanRepo } from "../../planning/persistence/plan-repo.js";
-import { ProviderTurnEventApplication } from "../../turns/provider-turn-event-application.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { McodeSessionAuthority } from "../../../mcode-mcp/mcode-session-authority.js";
 import type { WorkerOwnedProviderEventResult } from "../../../providers/composition/provider-host-ports.js";
@@ -347,21 +346,22 @@ describe("AgentService container composition", () => {
       ...(scoped ? { turnExecutionId: workerRuntime?.owner.current(thread.id)?.execution.executionId } : {}),
       subtype: "provider.notice.warning", message: "Session warning",
       systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "session", sessionId: "notice-session" } };
+    let messageId = "";
     try {
       const sourceExecutionId = event.turnExecutionId;
-      expect(container.resolve(ProviderTurnEventApplication).apply({ providerId: "codex", sourceKind: "provider-runtime", event }, event, true)).toBe(true);
+      messageId = workerRuntime!.progress!.acceptThreadSystemObservation(event).messageId;
       expect(event.turnExecutionId).toBe(sourceExecutionId);
-      expect(event.messageId).toBeDefined();
-      expect(container.resolve(MessageRepo).findById(event.messageId!)).toBeUndefined();
+      expect(messageId).not.toBe("");
+      expect(container.resolve(MessageRepo).findById(messageId)).toBeUndefined();
       expect(pushes.filter((push) => push.channel === "agent.canonical").map((push) => JSON.stringify(push.data)))
-        .toContainEqual(expect.stringContaining(event.messageId!));
+        .toContainEqual(expect.stringContaining(messageId));
       expect(legacyPublications.filter((published) => published.type === "system" && published.message === event.message)).toHaveLength(0);
     } finally {
       releaseSave?.();
       await waitFor(() => workerRuntime?.progress?.depth().pending === 0);
       heldWrite.mockRestore();
     }
-    expect(container.resolve(MessageRepo).findById(event.messageId!)).toMatchObject({ content: "Session warning" });
+    expect(container.resolve(MessageRepo).findById(messageId)).toMatchObject({ content: "Session warning" });
   });
 
   it("credits the completed turn's reply to the session its provider reported", async () => {
@@ -787,7 +787,6 @@ function fakeCodexProvider(
     stopSession,
     shutdown: () => undefined,
     listModels: async () => [],
-    setCanonicalTurnEventDeliveryEnabled: () => undefined,
     setCanonicalTurnDeliveryFailureHandler: () => undefined,
     fenceCanonicalTurnEvents,
     retireCanonicalTurnEvents: async () => undefined,

@@ -29,7 +29,7 @@ import type { ThreadService } from "../../../thread-control/index.js";
 import * as NodeEvents from "node:events";
 
 // Stub broadcast so we can assert push events without a real WebSocket server.
-vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
+vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn(), subscribedThreadIds: () => new Set<string>() }));
 import { broadcast } from "../../../../application/transport/push.js";
 
 /**
@@ -74,7 +74,7 @@ function buildService(db: Database) {
   const threadService = { create: vi.fn() } as unknown as ThreadService;
 
   const snapshotService = {
-    captureRef: vi.fn(() => Promise.resolve("abc123")),
+    captureRef: vi.fn(() => Promise.resolve("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
     getFilesChanged: vi.fn(() => Promise.resolve([])),
   } as unknown as SnapshotService;
 

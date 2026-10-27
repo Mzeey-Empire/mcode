@@ -199,11 +199,13 @@ describe("CodexProvider first turn on new session", () => {
     const changes = [{ path: "fixture.txt", kind: { type: "update" }, diff: "--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1 +1 @@\n-old\n+new\n" }];
     const started = { jsonrpc: "2.0", method: "item/started", params: { threadId: "sdk-thread-1", turnId: "turn-test-id", item: { type: "fileChange", id: "edit-1", changes } } };
     if (!late) server.emit("notification", started);
+    await provider.flushCanonicalEvents();
     const request: CodexApprovalRequest = { rpcId: 1, method: "item/fileChange/requestApproval", params: { threadId: "sdk-thread-1", itemId: "edit-1" } };
     const native = server.options.approvalHandler(request);
     const initial = emitted[0];
     assert(initial);
     if (late) server.emit("notification", { jsonrpc: "2.0", method: "item/fileChange/patchUpdated", params: { threadId: "sdk-thread-1", turnId: "turn-test-id", itemId: "edit-1", changes } });
+    await provider.flushCanonicalEvents();
     const pending = provider.listPendingApprovals();
     expect(pending).toEqual([emitted.at(-1)]);
     expect(emitted.map(({ requestId }) => requestId)).toEqual(late ? [initial.requestId, initial.requestId] : [initial.requestId]);
@@ -216,6 +218,7 @@ describe("CodexProvider first turn on new session", () => {
     request.responseWritten?.(true);
     expect(await result).toEqual({ status: "resolved" });
     server.emit("notification", started);
+    await provider.flushCanonicalEvents();
     expect(provider.listPendingApprovals()).toEqual([]);
     expect(emitted).toHaveLength(late ? 2 : 1);
     await provider.shutdown();
@@ -224,7 +227,6 @@ describe("CodexProvider first turn on new session", () => {
   it.each([false, true])("orders one cancellation receipt before stop (failed deny: %s)", async (failedDeny) => {
     const batches: ProviderEventBatch[] = [];
     const provider = makeProvider(undefined, undefined, undefined, { submit: async (batch) => { batches.push(batch); return acceptedEventReceipt; } });
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     await provider.sendTurn({
       turnId: "approval-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
       threadId, message: "lint", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
@@ -380,7 +382,7 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
     const mutations: ProviderFileMutationStart[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     provider.on("file_mutation_start", (event: ProviderFileMutationStart) => mutations.push(event));
     sendTurnMock.mockResolvedValueOnce("native-attempt-1").mockResolvedValueOnce("native-attempt-2");
     const request = {
@@ -422,6 +424,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "native-attempt-2", status: "completed", usage: {} } },
     });
+    await provider.flushCanonicalEvents();
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(events.filter((event) => event.event.type === AgentEventType.ToolUse
@@ -442,7 +445,7 @@ describe("CodexProvider first turn on new session", () => {
 
     const send = provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,
@@ -492,7 +495,7 @@ describe("CodexProvider first turn on new session", () => {
 
     const send = provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,
@@ -521,7 +524,7 @@ describe("CodexProvider first turn on new session", () => {
 
     const send = provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,
@@ -548,7 +551,7 @@ describe("CodexProvider first turn on new session", () => {
 
     const send = provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,
@@ -576,7 +579,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-without-browser-grant",
       workspaceId: "workspace-test",
       threadId: "without-browser-grant",
@@ -601,7 +604,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "child-routing-execution",
+      turnExecutionId: "25491fe6-4286-4aa0-8eeb-9e8fafba0942",
       sessionId: "mcode-child-routing",
       workspaceId: "workspace-test",
       threadId: "child-routing",
@@ -628,7 +631,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "nested-model-guidance-execution",
+      turnExecutionId: "bd6bd311-81d7-476d-8d86-f5e80de4ca7a",
       sessionId: "mcode-nested-model-guidance",
       workspaceId: "workspace-test",
       threadId: "nested-model-guidance",
@@ -657,11 +660,11 @@ describe("CodexProvider first turn on new session", () => {
     const close = vi.fn().mockResolvedValue(undefined);
     const provider = makeProvider(undefined, lease, { attach: vi.fn().mockResolvedValue(mcodeAttachment()), close });
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-browser-spawn-failure",
       workspaceId: "workspace-test",
       threadId: "browser-spawn-failure",
@@ -677,24 +680,24 @@ describe("CodexProvider first turn on new session", () => {
     expect(close).toHaveBeenCalledWith("mcode-browser-spawn-failure");
     expect(appServers.at(-1)?.isAlive).toBe(false);
     expect(sendTurnMock).not.toHaveBeenCalled();
-    expect(events).toEqual([
-      {
+    await vi.waitFor(() => expect(events.filter(({ event }) => event.type !== AgentEventType.System)).toEqual([
+      { deliveryAttempt: 1,
         event: {
           type: AgentEventType.Error,
           threadId: "browser-spawn-failure",
           error: "handshake failed",
           failure: { kind: "fatal" },
-          turnExecutionId: "test-execution",
+          turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
         },
       },
-      {
+      { deliveryAttempt: 1,
         event: {
           type: AgentEventType.Ended,
           threadId: "browser-spawn-failure",
-          turnExecutionId: "test-execution",
+          turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
         },
       },
-    ]);
+    ]));
   });
 
   it("continues without Mcode tools and releases the Browser grant when the mcode attach fails", async () => {
@@ -707,8 +710,7 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, lease, {
       attach: vi.fn().mockRejectedValue(new Error("MCP config failed")),
     }, { submit });
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     await provider.sendTurn({
       turnId: "test-turn",
@@ -765,7 +767,7 @@ describe("CodexProvider first turn on new session", () => {
     const release = vi.spyOn(lease, "release");
     const request = {
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-overlapping-browser-stage",
       workspaceId: "workspace-test",
       threadId: "overlapping-browser-stage",
@@ -806,7 +808,7 @@ describe("CodexProvider first turn on new session", () => {
     const sessionId = "mcode-pending-stop";
     const sendPromise = provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId: "pending-stop",
@@ -829,8 +831,8 @@ describe("CodexProvider first turn on new session", () => {
   it("cancels a turn waiting on teardown beyond ten seconds without poisoning its next turn", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
-    const request: TurnRequest<"codex"> = { turnId: "seed-turn", turnExecutionId: "seed-execution",
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
+    const request: TurnRequest<"codex"> = { turnId: "seed-turn", turnExecutionId: "78c8ab30-6f8b-49b2-89fa-ba67e78fdded",
       sessionId: "mcode-teardown-cancel", workspaceId: "workspace-test", threadId: "teardown-cancel",
       message: "seed", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "full", approvalReviewMode: "manual" };
     let releaseClose!: () => void;
@@ -843,13 +845,13 @@ describe("CodexProvider first turn on new session", () => {
       const teardown = provider.discardSession(request.sessionId);
       await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-      const cancelled = provider.sendTurn({ ...request, turnId: "cancelled-turn", turnExecutionId: "cancelled-execution", message: "cancel me" });
+      const cancelled = provider.sendTurn({ ...request, turnId: "cancelled-turn", turnExecutionId: "8a5b4476-45ba-40f0-8c76-92669d6e04da", message: "cancel me" });
       await vi.advanceTimersByTimeAsync(11_000);
       expect(appServers).toHaveLength(1);
       await provider.stopSession(request.sessionId);
       await cancelled;
-      expect(events.filter(({ event }) => event.turnExecutionId === "cancelled-execution").map(({ event }) => event.type)).toEqual([AgentEventType.Ended]);
-      const next = provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: "next-execution", message: "next" });
+      expect(events.filter(({ event }) => event.turnExecutionId === "8a5b4476-45ba-40f0-8c76-92669d6e04da").map(({ event }) => event.type)).toEqual([AgentEventType.Ended]);
+      const next = provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: "612520b0-7178-49f4-88b2-a9594d359f89", message: "next" });
       releaseClose();
       await Promise.all([teardown, next]);
       vi.useRealTimers();
@@ -868,10 +870,10 @@ describe("CodexProvider first turn on new session", () => {
   it("does not auto-start a cancelled staged turn when its shared spawn finishes later", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     let releaseStart!: () => void;
     startGate.current = new Promise<void>((resolve) => { releaseStart = resolve; });
-    const request: TurnRequest<"codex"> = { turnId: "cancelled-turn", turnExecutionId: "cancelled-execution",
+    const request: TurnRequest<"codex"> = { turnId: "cancelled-turn", turnExecutionId: "8a5b4476-45ba-40f0-8c76-92669d6e04da",
       sessionId: "mcode-spawn-cancel", workspaceId: "workspace-test", threadId: "spawn-cancel",
       message: "cancel me", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "full", approvalReviewMode: "manual" };
     try {
@@ -885,8 +887,8 @@ describe("CodexProvider first turn on new session", () => {
       vi.useRealTimers();
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(sendTurnMock).not.toHaveBeenCalled();
-      expect(events.filter(({ event }) => event.turnExecutionId === request.turnExecutionId).map(({ event }) => event.type)).toEqual([AgentEventType.Ended]);
-      await provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: "next-execution", message: "next" });
+      expect(events.filter(({ event }) => event.turnExecutionId === request.turnExecutionId && event.type !== AgentEventType.System).map(({ event }) => event.type)).toEqual([AgentEventType.Ended]);
+      await provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: "612520b0-7178-49f4-88b2-a9594d359f89", message: "next" });
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(sendTurnMock).toHaveBeenCalledOnce();
       expect(events.some(({ event }) => event.type === AgentEventType.Error)).toBe(false);
@@ -932,14 +934,14 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider();
 
     const ended = new Promise<void>((resolve) => {
-      provider.on("event", (event: ProviderRuntimeEvent) => {
+      provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => {
         if (event.event.type === AgentEventType.Ended && event.event.threadId === threadId) resolve();
       });
     });
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,
@@ -965,6 +967,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "turn/completed",
       params: { turn: { id: "turn-test-id", status: "completed" } },
     });
+    await provider.flushCanonicalEvents();
 
     await ended;
   });
@@ -977,7 +980,7 @@ describe("CodexProvider first turn on new session", () => {
   ])("runs a $form /compact as native compaction and ends on its compaction turn", async ({ message, mentions }) => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const notify = (method: string, params: Record<string, unknown>) =>
       appServers[0]!.emit("notification", { method, params: { threadId: "sdk-thread-1", ...params } });
     // Codex answers thread/compact/start with {} and announces the turn id only on turn/started.
@@ -987,7 +990,7 @@ describe("CodexProvider first turn on new session", () => {
     });
 
     await provider.sendTurn({
-      turnId: "compact-turn-request", turnExecutionId: "compact-execution", sessionId, workspaceId: "workspace-test",
+      turnId: "compact-turn-request", turnExecutionId: "3714c3a0-b58e-45ec-8401-a4c5d4a96504", sessionId, workspaceId: "workspace-test",
       threadId, message, mentions: [...mentions], cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
       providerOptions: {}, permissionMode: "auto",
     });
@@ -1014,7 +1017,7 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider();
 
     await provider.sendTurn({
-      turnId: "text-turn", turnExecutionId: "text-execution", sessionId, workspaceId: "workspace-test",
+      turnId: "text-turn", turnExecutionId: "a96d66d9-9548-48b6-895e-2c04afd59f6c", sessionId, workspaceId: "workspace-test",
       threadId, message, mentions: [...mentions], cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
       providerOptions: {}, permissionMode: "auto",
     });
@@ -1030,7 +1033,6 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
     const legacy: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     const startup = Promise.withResolvers<void>();
     startGate.current = startup.promise;
     const request: TurnRequest<"codex"> = {
@@ -1067,7 +1069,6 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
     const legacy: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     const request: TurnRequest<"codex"> = {
       turnId: "session-turn-1", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
       threadId, message: "hello", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
@@ -1081,6 +1082,7 @@ describe("CodexProvider first turn on new session", () => {
       server.emit("notification", { method: "turn/completed", params: {
         threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" },
       } });
+    await provider.flushCanonicalEvents();
       await vi.waitFor(() => expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)))
         .toContainEqual(expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.Ended, turnExecutionId: schemaValidExecutionId }) })));
       await provider.sendTurn({ ...request, turnId: "session-turn-2", turnExecutionId: secondExecutionId });
@@ -1098,6 +1100,7 @@ describe("CodexProvider first turn on new session", () => {
       server.emit("notification", { method: "turn/completed", params: {
         threadId: "sdk-thread-2", turn: { id: "turn-test-id", status: "completed" },
       } });
+    await provider.flushCanonicalEvents();
       await vi.waitFor(() => expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)))
         .toContainEqual(expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.Ended, turnExecutionId: secondExecutionId }) })));
       server.emit("threadIdChanged", "sdk-thread-idle");
@@ -1114,7 +1117,6 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
     const legacy: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
 
     await provider.sendTurn({
       turnId: "test-turn",
@@ -1136,6 +1138,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "item/agentMessage/delta",
       params: { threadId: "sdk-thread-1", turnId: "turn-test-id", delta: "Hello" },
     });
+    await provider.flushCanonicalEvents();
     await vi.waitFor(() => expect(submit).toHaveBeenCalled());
 
     const batches = submit.mock.calls.map(([batch]) => batch);
@@ -1146,41 +1149,10 @@ describe("CodexProvider first turn on new session", () => {
     expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(false);
   });
 
-  it("keeps Codex on the existing event channel until canonical delivery is enabled", async () => {
-    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
-    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
-    const legacy: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
-
-    await provider.sendTurn({
-      turnId: "test-turn",
-      turnExecutionId: schemaValidExecutionId,
-      deliveryAttempt: 2,
-      sessionId,
-      workspaceId: "workspace-test",
-      threadId,
-      message: "hey",
-      cwd: process.cwd(),
-      model: "gpt-5.4",
-      interactionMode: "build",
-      providerOptions: {},
-      permissionMode: "auto",
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    appServers[0]!.emit("notification", {
-      method: "item/agentMessage/delta",
-      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", delta: "Hello" },
-    });
-
-    expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(true);
-    expect(submit).not.toHaveBeenCalled();
-  });
-
   it("keeps a parent approval pending when a sub-agent turn completes", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
       .mockResolvedValue(acceptedEventReceipt);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     await provider.sendTurn({
       turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
       sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
@@ -1198,10 +1170,13 @@ describe("CodexProvider first turn on new session", () => {
         agentThreadId: "native-child", agentPath: "/root/worker",
       } },
     });
+    await provider.flushCanonicalEvents();
     server.emit("notification", { method: "turn/started", params: { threadId: "native-child", turn: { id: "child-turn" } } });
+    await provider.flushCanonicalEvents();
     server.emit("notification", {
       method: "turn/completed", params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } },
     });
+    await provider.flushCanonicalEvents();
     const runtimeEvents = () => submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch));
     const receipts = () => runtimeEvents().filter(({ event }) => event.type === AgentEventType.ApprovalDecided);
     await vi.waitFor(() => expect(runtimeEvents().some((event) => event.extension?.child && event.event.type === AgentEventType.TurnComplete)).toBe(true));
@@ -1211,6 +1186,7 @@ describe("CodexProvider first turn on new session", () => {
     server.emit("notification", {
       method: "turn/completed", params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } },
     });
+    await provider.flushCanonicalEvents();
     await vi.waitFor(() => expect(receipts().map(({ event }) => event.type === AgentEventType.ApprovalDecided && event.outcome))
       .toEqual([{ status: "cancelled", reason: "turn_ended" }]));
     expect(provider.listPendingApprovals(threadId)).toEqual([]);
@@ -1223,7 +1199,6 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
     const legacy: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     await provider.sendTurn({
       turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
       sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
@@ -1239,25 +1214,31 @@ describe("CodexProvider first turn on new session", () => {
         agentThreadId: "native-child", agentPath: "/root/worker",
       } },
     });
+    await provider.flushCanonicalEvents();
     server.emit("notification", {
       method: "turn/started", params: { threadId: "native-child", turn: { id: "child-turn" } },
     });
+    await provider.flushCanonicalEvents();
     server.emit("notification", {
       method: "item/agentMessage/delta", params: {
         threadId: "native-child", turnId: "child-turn", itemId: "child-message", delta: "Child answer",
       },
     });
+    await provider.flushCanonicalEvents();
     server.emit("notification", {
       method: "turn/completed", params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } },
     });
+    await provider.flushCanonicalEvents();
     server.emit("notification", {
       method: "item/agentMessage/delta", params: {
         threadId: "sdk-thread-1", turnId: "turn-test-id", itemId: "parent-message", delta: "Parent continues",
       },
     });
+    await provider.flushCanonicalEvents();
     server.emit("notification", {
       method: "turn/completed", params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } },
     });
+    await provider.flushCanonicalEvents();
     const runtimeEvents = () => submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch));
     await vi.waitFor(() => expect(runtimeEvents().at(-1)?.event.type).toBe(AgentEventType.Ended));
 
@@ -1286,7 +1267,6 @@ describe("CodexProvider first turn on new session", () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
       .mockResolvedValue(acceptedEventReceipt);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     await provider.sendTurn({ turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
       sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
       model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto" });
@@ -1296,18 +1276,22 @@ describe("CodexProvider first turn on new session", () => {
     server.emit("notification", { method: "item/started", params: { threadId: "sdk-thread-1",
       turnId: "turn-test-id", item: { type: "subAgentActivity", id: "spawn-child", kind: "started",
         agentThreadId: "native-child", agentPath: "/root/worker" } } });
+    await provider.flushCanonicalEvents();
     const startup = (status: string, details: Record<string, unknown> = {}) => server.emit("notification", {
       method: "mcpServer/startupStatus/updated", params: { threadId: "native-child", name: "native-mcp", status, ...details },
     });
     startup("starting");
     server.emit("notification", { method: "turn/started",
       params: { threadId: "native-child", turn: { id: "child-turn" } } });
+    await provider.flushCanonicalEvents();
     startup("ready");
     server.emit("notification", { method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } } });
+    await provider.flushCanonicalEvents();
     startup("failed", { error: "connection refused", failureReason: "optional server unavailable" });
     server.emit("notification", { method: "turn/completed",
       params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } } });
+    await provider.flushCanonicalEvents();
     await provider.waitForCanonicalTurnEvents({ threadId, turnId: "test-turn",
       executionId: schemaValidExecutionId, deliveryAttempt: 2 });
     const runtimeEvents = submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch));
@@ -1316,7 +1300,6 @@ describe("CodexProvider first turn on new session", () => {
       providerId: "codex", serverThreadId: "native-child", name: "native-mcp" };
     expect(startupEvents.map((event) => event.event)).toEqual([
       { ...base, status: "starting" }, { ...base, status: "ready" },
-      { ...base, status: "failed", error: "connection refused", failureReason: "optional server unavailable" },
     ]);
     for (const event of startupEvents) {
       expect(event).toMatchObject({ deliveryAttempt: 2, extension: { child: {
@@ -1324,8 +1307,8 @@ describe("CodexProvider first turn on new session", () => {
       } } });
     }
     expect(startupEvents[0]?.extension?.child?.nativeTurnId).toBeUndefined();
-    expect(startupEvents.slice(1).map((event) => event.extension?.child?.nativeTurnId)).toEqual(["child-turn", "child-turn"]);
-    expect(new Set(startupEvents.map((event) => event.extension?.child?.nativeEventId)).size).toBe(3);
+    expect(startupEvents.slice(1).map((event) => event.extension?.child?.nativeTurnId)).toEqual(["child-turn"]);
+    expect(new Set(startupEvents.map((event) => event.extension?.child?.nativeEventId)).size).toBe(2);
     expect(runtimeEvents.filter((event) => event.event.type === AgentEventType.System
       && event.event.subtype === "provider.notice.unknown-event")).toEqual([]);
     await provider.shutdown();
@@ -1335,7 +1318,6 @@ describe("CodexProvider first turn on new session", () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
       .mockResolvedValue(acceptedEventReceipt);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     await provider.sendTurn({ turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
       sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
       model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto" });
@@ -1345,9 +1327,12 @@ describe("CodexProvider first turn on new session", () => {
     server.emit("notification", { method: "item/started", params: { threadId: "sdk-thread-1",
       turnId: "turn-test-id", item: { type: "subAgentActivity", id: "spawn-child", kind: "started",
         agentThreadId: "native-child", agentPath: "/root/worker" } } });
+    await provider.flushCanonicalEvents();
     server.emit("notification", { method: "future/childStartupNotice", params: { threadId: "native-child", ...nativeTurn } });
+    await provider.flushCanonicalEvents();
     server.emit("notification", { method: "warning", params: { threadId: "native-child", ...nativeTurn,
       message: "Child startup warning" } });
+    await provider.flushCanonicalEvents();
     await provider.waitForCanonicalTurnEvents({ threadId, turnId: "test-turn",
       executionId: schemaValidExecutionId, deliveryAttempt: 2 });
     expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
@@ -1355,10 +1340,13 @@ describe("CodexProvider first turn on new session", () => {
 
     server.emit("notification", { method: "turn/started",
       params: { threadId: "native-child", turn: { id: "child-turn" } } });
+    await provider.flushCanonicalEvents();
     server.emit("notification", { method: "turn/completed",
       params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } } });
+    await provider.flushCanonicalEvents();
     server.emit("notification", { method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } } });
+    await provider.flushCanonicalEvents();
     await provider.waitForCanonicalTurnEvents({ threadId, turnId: "test-turn",
       executionId: schemaValidExecutionId, deliveryAttempt: 2 });
     const childEvents = submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
@@ -1385,7 +1373,6 @@ describe("CodexProvider first turn on new session", () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
       .mockResolvedValue(acceptedEventReceipt);
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     sendTurnMock.mockResolvedValueOnce("native-attempt-1").mockResolvedValueOnce("native-attempt-2");
     const request: TurnRequest<"codex"> = {
       turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 1,
@@ -1442,7 +1429,6 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
     const legacy: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     const request: TurnRequest<"codex"> = {
       turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
       sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
@@ -1455,6 +1441,7 @@ describe("CodexProvider first turn on new session", () => {
     server.emit("notification", {
       method: "turn/completed", params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } },
     });
+    await provider.flushCanonicalEvents();
     await vi.waitFor(() => expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)).at(-1)?.event.type)
       .toBe(AgentEventType.Ended));
     const nextExecutionId = "00000000-0000-4000-8000-000000000002";
@@ -1465,19 +1452,23 @@ describe("CodexProvider first turn on new session", () => {
     server.emit("notification", {
       method: "mcpServer/startupStatus/updated", params: { threadId: "unlinked-child", name: "native-mcp", status: "ready" },
     });
+    await provider.flushCanonicalEvents();
     server.emit("notification", {
       method: "mcpServer/startupStatus/updated", params: {
         threadId: "unlinked-child", turnId: "turn-test-id", name: "stale-mcp", status: "ready",
       },
     });
+    await provider.flushCanonicalEvents();
     server.emit("notification", {
       method: "mcpServer/startupStatus/updated", params: { threadId: "sdk-thread-1", name: "current-mcp", status: "ready" },
     });
+    await provider.flushCanonicalEvents();
     server.emit("notification", {
       method: "mcpServer/startupStatus/updated", params: {
         threadId: "sdk-thread-1", turnId: "turn-test-id", name: "stale-main-mcp", status: "ready",
       },
     });
+    await provider.flushCanonicalEvents();
     await provider.waitForCanonicalTurnEvents({
       threadId, turnId: "next-turn", executionId: nextExecutionId, deliveryAttempt: 2,
     });
@@ -1490,7 +1481,7 @@ describe("CodexProvider first turn on new session", () => {
     expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)).filter((event) =>
       event.event.turnExecutionId === nextExecutionId
       && (event.event.type === AgentEventType.System || event.event.type === AgentEventType.McpServerStartupStatus)))
-      .toMatchObject([{ event: { type: AgentEventType.McpServerStartupStatus, name: "current-mcp" } }]);
+      .toMatchObject([{ deliveryAttempt: 2, event: { type: AgentEventType.McpServerStartupStatus, name: "current-mcp" } }]);
     expect(legacy.slice(legacyBeforeStartup)).toEqual([]);
     await provider.shutdown();
   });
@@ -1501,7 +1492,6 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
     const legacy: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     await provider.sendTurn({
       turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
       sessionId, workspaceId: "workspace-test", threadId, message: "hey", cwd: process.cwd(),
@@ -1530,7 +1520,6 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
     const legacy: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
 
     await provider.sendTurn({
       turnId: "test-turn",
@@ -1552,6 +1541,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "item/agentMessage/delta",
       params: { threadId: "sdk-thread-1", turnId: "early-native-turn", delta: "Early" },
     });
+    await provider.flushCanonicalEvents();
     await provider.waitForCanonicalTurnEvents({
       threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 3,
     });
@@ -1567,6 +1557,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "early-native-turn", status: "completed" } },
     });
+    await provider.flushCanonicalEvents();
     await provider.waitForCanonicalTurnEvents({
       threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 3,
     });
@@ -1577,7 +1568,6 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
     const legacy: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     await provider.sendTurn({
       turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
       sessionId, workspaceId: "workspace-test", threadId, message: "hey", cwd: process.cwd(),
@@ -1605,11 +1595,11 @@ describe("CodexProvider first turn on new session", () => {
   it("cancels the main turn and reuses its app-server for the next turn", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,
@@ -1633,11 +1623,11 @@ describe("CodexProvider first turn on new session", () => {
     try {
       await provider.stopSession(sessionId);
       await vi.waitFor(() => {
-        expect(events).toContainEqual({
+        expect(events).toContainEqual({ deliveryAttempt: 1,
           event: {
             type: AgentEventType.Ended,
             threadId,
-            turnExecutionId: "test-execution",
+            turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
             outcome: "cancelled",
           },
         });
@@ -1645,7 +1635,7 @@ describe("CodexProvider first turn on new session", () => {
       expect(appServers[0]!.isAlive).toBe(true);
       sendTurnMock.mockResolvedValueOnce("next-native-turn");
       await provider.sendTurn({
-        turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+        turnId: "next-turn", turnExecutionId: "612520b0-7178-49f4-88b2-a9594d359f89", sessionId,
         workspaceId: "workspace-test", threadId, message: "continue",
         cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
         providerOptions: {}, permissionMode: "auto",
@@ -1656,12 +1646,14 @@ describe("CodexProvider first turn on new session", () => {
         method: "turn/completed",
         params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } },
       });
+    await provider.flushCanonicalEvents();
       expect(events.filter(({ event }) => event.type === AgentEventType.TurnComplete)).toEqual([]);
       appServers[0]!.emit("notification", {
         method: "turn/completed",
         params: { threadId: "sdk-thread-1", turn: { id: "next-native-turn", status: "completed" } },
       });
-      expect(events.filter(({ event }) => event.type === AgentEventType.TurnComplete).map(({ event }) => event.turnExecutionId)).toEqual(["next-execution"]);
+    await provider.flushCanonicalEvents();
+      expect(events.filter(({ event }) => event.type === AgentEventType.TurnComplete).map(({ event }) => event.turnExecutionId)).toEqual(["612520b0-7178-49f4-88b2-a9594d359f89"]);
     } finally {
       state?.abortPendingTurnWait?.();
       await provider.discardSession(sessionId);
@@ -1671,10 +1663,10 @@ describe("CodexProvider first turn on new session", () => {
   it("holds a follow-up send behind the stop drain, then reuses the warm session", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     await provider.sendTurn({
-      turnId: "test-turn", turnExecutionId: "test-execution", sessionId,
+      turnId: "test-turn", turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d", sessionId,
       workspaceId: "workspace-test", threadId, message: "stop this turn",
       cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
       providerOptions: {}, permissionMode: "auto",
@@ -1700,13 +1692,14 @@ describe("CodexProvider first turn on new session", () => {
           method: "turn/completed",
           params: { threadId: "sdk-thread-1", turn: { id: turnId, status: "interrupted" } },
         });
+    await provider.flushCanonicalEvents();
       });
 
       const stop = provider.stopSession(sessionId);
       await vi.waitFor(() => expect(state!.interruptDrain).toBeDefined());
       sendTurnMock.mockResolvedValueOnce("next-native-turn");
       const send = provider.sendTurn({
-        turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+        turnId: "next-turn", turnExecutionId: "612520b0-7178-49f4-88b2-a9594d359f89", sessionId,
         workspaceId: "workspace-test", threadId, message: "continue",
         cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
         providerOptions: {}, permissionMode: "auto",
@@ -1731,7 +1724,7 @@ describe("CodexProvider first turn on new session", () => {
     (provider as unknown as { stopDrainReuseTimeoutMs: number }).stopDrainReuseTimeoutMs = 25;
 
     await provider.sendTurn({
-      turnId: "test-turn", turnExecutionId: "test-execution", sessionId,
+      turnId: "test-turn", turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d", sessionId,
       workspaceId: "workspace-test", threadId, message: "stop this turn",
       cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
       providerOptions: {}, permissionMode: "auto",
@@ -1750,7 +1743,7 @@ describe("CodexProvider first turn on new session", () => {
     state!.interruptDrain = new Promise<boolean>(() => {});
     sendTurnMock.mockResolvedValueOnce("next-native-turn");
     const send = provider.sendTurn({
-      turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+      turnId: "next-turn", turnExecutionId: "612520b0-7178-49f4-88b2-a9594d359f89", sessionId,
       workspaceId: "workspace-test", threadId, message: "continue",
       cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
       providerOptions: {}, permissionMode: "auto",
@@ -1774,7 +1767,7 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider();
 
     await provider.sendTurn({
-      turnId: "test-turn", turnExecutionId: "test-execution", sessionId,
+      turnId: "test-turn", turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d", sessionId,
       workspaceId: "workspace-test", threadId, message: "stop this turn",
       cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
       providerOptions: {}, permissionMode: "auto",
@@ -1798,6 +1791,7 @@ describe("CodexProvider first turn on new session", () => {
         method: "turn/completed",
         params: { threadId: "sdk-thread-1", turn: { id: turnId, status: "interrupted" } },
       });
+    await provider.flushCanonicalEvents();
       throw new Error("drain rejected");
     });
 
@@ -1805,7 +1799,7 @@ describe("CodexProvider first turn on new session", () => {
     await vi.waitFor(() => expect(state!.interruptDrain).toBeDefined());
     sendTurnMock.mockResolvedValueOnce("next-native-turn");
     const send = provider.sendTurn({
-      turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+      turnId: "next-turn", turnExecutionId: "612520b0-7178-49f4-88b2-a9594d359f89", sessionId,
       workspaceId: "workspace-test", threadId, message: "continue",
       cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
       providerOptions: {}, permissionMode: "auto",
@@ -1829,7 +1823,7 @@ describe("CodexProvider first turn on new session", () => {
   it("cancels a staged turn before turn/start without closing the app-server", async () => {
     const provider = makeProvider();
     await provider.sendTurn({
-      turnId: "staged-turn", turnExecutionId: "staged-execution", sessionId,
+      turnId: "staged-turn", turnExecutionId: "b02c7431-ccea-496d-813c-1cfa7b5aaccb", sessionId,
       workspaceId: "workspace-test", threadId, message: "cancel before dispatch",
       cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
       providerOptions: {}, permissionMode: "auto",
@@ -1847,7 +1841,7 @@ describe("CodexProvider first turn on new session", () => {
     startGate.current = new Promise<void>((resolve) => { finishStartup = resolve; });
     const provider = makeProvider();
     const request = {
-      turnId: "spawning-turn", turnExecutionId: "spawning-execution", sessionId,
+      turnId: "spawning-turn", turnExecutionId: "85b74ebf-37b0-4312-8a0b-212abc4af209", sessionId,
       workspaceId: "workspace-test", threadId, message: "cancel during startup",
       cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build" as const,
       providerOptions: {}, permissionMode: "auto",
@@ -1860,7 +1854,7 @@ describe("CodexProvider first turn on new session", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(sendTurnMock).not.toHaveBeenCalled();
     expect(appServers[0]!.isAlive).toBe(true);
-    await provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: "next-execution", message: "continue" });
+    await provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: "612520b0-7178-49f4-88b2-a9594d359f89", message: "continue" });
     await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(1));
     expect(appServers).toHaveLength(1);
     await provider.discardSession(sessionId);
@@ -1871,9 +1865,9 @@ describe("CodexProvider first turn on new session", () => {
     sendTurnMock.mockImplementationOnce(() => new Promise<string>((resolve) => { finishStart = resolve; }));
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     await provider.sendTurn({
-      turnId: "starting-turn", turnExecutionId: "starting-execution", sessionId,
+      turnId: "starting-turn", turnExecutionId: "843b5d31-2ccd-4282-8585-85873f5bbc66", sessionId,
       workspaceId: "workspace-test", threadId, message: "cancel during dispatch",
       cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
       providerOptions: {}, permissionMode: "auto",
@@ -1882,9 +1876,9 @@ describe("CodexProvider first turn on new session", () => {
     const stop = provider.stopSession(sessionId);
     finishStart("starting-native-turn");
     await stop;
-    expect(events).toContainEqual({ event: {
+    expect(events).toContainEqual({ deliveryAttempt: 1, event: {
       type: AgentEventType.Ended, threadId,
-      turnExecutionId: "starting-execution", outcome: "cancelled",
+      turnExecutionId: "843b5d31-2ccd-4282-8585-85873f5bbc66", outcome: "cancelled",
     } });
     expect(appServers[0]!.isAlive).toBe(true);
     await provider.stopSession(sessionId);
@@ -1895,11 +1889,11 @@ describe("CodexProvider first turn on new session", () => {
   it("reports provider_lost and discards the session when main-turn drain fails", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,
@@ -1938,7 +1932,7 @@ describe("CodexProvider first turn on new session", () => {
         event: {
           type: AgentEventType.Ended,
           threadId,
-          turnExecutionId: "test-execution",
+          turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
           reason: "provider_lost",
         },
       });
@@ -1951,11 +1945,11 @@ describe("CodexProvider first turn on new session", () => {
   it("reports provider_lost when stop begins before Codex assigns a native turn id", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,
@@ -1979,11 +1973,11 @@ describe("CodexProvider first turn on new session", () => {
 
     try {
       await provider.stopSession(sessionId);
-      expect(events).toContainEqual({
+      expect(events).toContainEqual({ deliveryAttempt: 1,
         event: {
           type: AgentEventType.Ended,
           threadId,
-          turnExecutionId: "test-execution",
+          turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
           reason: "provider_lost",
         },
       });
@@ -1996,11 +1990,11 @@ describe("CodexProvider first turn on new session", () => {
     checkCodexVersionMock.mockReturnValueOnce({ ok: false, error: "Codex CLI unavailable" });
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-preflight-failure",
       workspaceId: "workspace-test",
       threadId: "preflight-failure",
@@ -2012,10 +2006,10 @@ describe("CodexProvider first turn on new session", () => {
       permissionMode: "auto",
     });
 
-    expect(events).toEqual([
-      { event: { type: AgentEventType.Error, threadId: "preflight-failure", error: "Codex CLI unavailable", failure: { kind: "fatal" }, turnExecutionId: "test-execution" } },
-      { event: { type: AgentEventType.Ended, threadId: "preflight-failure", turnExecutionId: "test-execution" } },
-    ]);
+    await vi.waitFor(() => expect(events).toEqual([
+      { deliveryAttempt: 1, event: { type: AgentEventType.Error, threadId: "preflight-failure", error: "Codex CLI unavailable", failure: { kind: "fatal" }, turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d" } },
+      { deliveryAttempt: 1, event: { type: AgentEventType.Ended, threadId: "preflight-failure", turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d" } },
+    ]));
     expect(appServers).toHaveLength(0);
   });
 
@@ -2024,10 +2018,10 @@ describe("CodexProvider first turn on new session", () => {
     const sessionId = "mcode-reusable-session";
     const threadId = "reusable-session";
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const request = {
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,
@@ -2051,6 +2045,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "turn/completed",
       params: { turn: { id: "turn-test-id", status: "completed" } },
     });
+    await provider.flushCanonicalEvents();
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     await provider.sendTurn({ ...request, message: "second" });
@@ -2060,6 +2055,7 @@ describe("CodexProvider first turn on new session", () => {
       method: "turn/completed",
       params: { turn: { id: "turn-test-id", status: "completed" } },
     });
+    await provider.flushCanonicalEvents();
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended)).toHaveLength(2);
   });
@@ -2087,7 +2083,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-catalog-independent",
       workspaceId: "workspace-test",
       threadId: "catalog-independent",
@@ -2110,7 +2106,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-ultra-sol",
       workspaceId: "workspace-test",
       threadId: "ultra-sol",
@@ -2132,7 +2128,7 @@ describe("CodexProvider first turn on new session", () => {
     sendTurnMock.mockClear();
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-ultra-luna",
       workspaceId: "workspace-test",
       threadId: "ultra-luna",
@@ -2166,7 +2162,7 @@ describe("CodexProvider first turn on new session", () => {
 
     void provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: supersedeSessionId,
       workspaceId: "workspace-test",
       threadId: supersedeThreadId,
@@ -2226,7 +2222,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-skill-turn",
       workspaceId: "workspace-test",
       threadId: "skill-turn",
@@ -2253,7 +2249,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-mentioned-file",
       workspaceId: "workspace-test",
       threadId: "mentioned-file",
@@ -2287,7 +2283,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-mentioned-plugin",
       workspaceId: "workspace-test",
       threadId: "mentioned-plugin",
@@ -2322,7 +2318,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-mentioned-agent",
       workspaceId: "workspace-test",
       threadId: "mentioned-agent",
@@ -2382,7 +2378,7 @@ describe("CodexProvider first turn on new session", () => {
 
       await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
         sessionId: "mcode-prompt-turn",
         workspaceId: "workspace-test",
         threadId: "prompt-turn",
@@ -2444,7 +2440,7 @@ describe("CodexProvider first turn on new session", () => {
 
       await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
         sessionId: "mcode-prompt-collision",
         workspaceId: "workspace-test",
         threadId: "prompt-collision",
@@ -2469,7 +2465,7 @@ describe("CodexProvider first turn on new session", () => {
       });
       await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
         sessionId: "mcode-skill-collision",
         workspaceId: "workspace-test",
         threadId: "skill-collision",
@@ -2531,11 +2527,11 @@ describe("CodexProvider first turn on new session", () => {
           shutdown: vi.fn(async () => undefined),
       });
       const events: ProviderRuntimeEvent[] = [];
-      provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+      provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
       await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
         sessionId: "mcode-missing-prompt",
         workspaceId: "workspace-test",
         threadId: "missing-prompt",
@@ -2548,18 +2544,18 @@ describe("CodexProvider first turn on new session", () => {
       });
 
       expect(sendTurnMock).not.toHaveBeenCalled();
-      expect(events).toEqual([
-        {
+      await vi.waitFor(() => expect(events).toEqual([
+        { deliveryAttempt: 1,
           event: {
             type: AgentEventType.Error,
             threadId: "missing-prompt",
             error: "Could not load Codex prompt /prompts:draftpr. Refresh commands and try again.",
             failure: { kind: "fatal" },
-            turnExecutionId: "test-execution",
+            turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
           },
         },
-        { event: { type: AgentEventType.Ended, threadId: "missing-prompt", turnExecutionId: "test-execution" } },
-      ]);
+        { deliveryAttempt: 1, event: { type: AgentEventType.Ended, threadId: "missing-prompt", turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d" } },
+      ]));
     } finally {
       NodeFS.rmSync(promptDir, { recursive: true, force: true });
     }
@@ -2570,7 +2566,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-unknown-slash",
       workspaceId: "workspace-test",
       threadId: "unknown-slash",
@@ -2594,7 +2590,7 @@ describe("CodexProvider first turn on new session", () => {
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId: "mcode-command-link",
       workspaceId: "workspace-test",
       threadId: "command-link",
@@ -2636,8 +2632,7 @@ describe("CodexProvider first turn on new session", () => {
       attach: vi.fn().mockRejectedValue(new Error("MCP setup failed")),
       close,
     }, { submit });
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     await provider.sendTurn({
       turnId: "test-turn",
@@ -2674,7 +2669,7 @@ describe("CodexProvider first turn on new session", () => {
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     const send = provider.sendTurn({
       turnId: "test-turn",
@@ -2701,6 +2696,7 @@ describe("CodexProvider first turn on new session", () => {
         error: "fixture MCP failed to start",
       },
     });
+    await provider.flushCanonicalEvents();
 
     await send;
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -2735,7 +2731,7 @@ describe("CodexProvider first turn on new session", () => {
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     const send = provider.sendTurn({
       turnId: "test-turn",
@@ -2762,6 +2758,7 @@ describe("CodexProvider first turn on new session", () => {
         failureReason: "legacy fixture failure",
       },
     });
+    await provider.flushCanonicalEvents();
 
     await send;
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -2793,7 +2790,7 @@ describe("CodexProvider first turn on new session", () => {
       close,
     });
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     const send = provider.sendTurn({
       turnId: "test-turn",
@@ -2819,6 +2816,7 @@ describe("CodexProvider first turn on new session", () => {
         status: "cancelled",
       },
     });
+    await provider.flushCanonicalEvents();
 
     await send;
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -2862,9 +2860,8 @@ describe("CodexProvider first turn on new session", () => {
       attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true })),
       close,
     }, { submit });
-    provider.setCanonicalTurnEventDeliveryEnabled(true);
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     const sessionId = `mcode-mcp-config-${_name.replaceAll(" ", "-")}`;
     const threadId = `mcp-config-${_name.replaceAll(" ", "-")}`;
@@ -2892,6 +2889,7 @@ describe("CodexProvider first turn on new session", () => {
         status: "ready",
       },
     });
+    await provider.flushCanonicalEvents();
 
     await send;
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -2926,7 +2924,7 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, configuredLease(), { attach });
     const request = {
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,
@@ -2946,7 +2944,7 @@ describe("CodexProvider first turn on new session", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(Date.now() + 60_000);
-      const second = provider.sendTurn({ ...request, turnExecutionId: "after-expiry" });
+      const second = provider.sendTurn({ ...request, turnExecutionId: "59bc6e42-5312-4482-89ad-6730967bcc84" });
       await vi.waitFor(() => expect(appServers).toHaveLength(2));
       emitMcpStartup(appServers[1]!, "mcode", "ready");
       await second;
@@ -2968,9 +2966,8 @@ describe("CodexProvider first turn on new session", () => {
         attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true })),
         close,
       }, { submit });
-      provider.setCanonicalTurnEventDeliveryEnabled(true);
       const events: ProviderRuntimeEvent[] = [];
-      provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+      provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
       const send = provider.sendTurn({
         turnId: "test-turn",

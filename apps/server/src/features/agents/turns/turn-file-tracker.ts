@@ -231,19 +231,6 @@ export class TurnFileTracker {
     return this.enqueue(threadId, (turn) => this.applyBaselineRef(turn, threadId, baselineRef), generation);
   }
 
-  /** Capture baselines for explicit file mutations named by a provider ToolUse event. */
-  observeToolUse(
-    threadId: string,
-    toolCallId: string,
-    toolName: string,
-    toolInput: Record<string, unknown>,
-  ): Promise<void> {
-    const captured = this.captureToolUseObservation(threadId, toolCallId, toolName, toolInput);
-    return captured
-      ? this.observeCapturedToolUse({ threadId, toolCallId, toolName, toolInput }, captured).then(() => undefined)
-      : Promise.resolve();
-  }
-
   /** Take the bounded filesystem baseline synchronously, before the provider may edit. */
   captureToolUseObservation(
     threadId: string,

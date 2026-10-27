@@ -34,11 +34,19 @@ export function registerAgentStorageTestProducer(db: Database, drain: () => Prom
 
 /** Drain producers before closing readers and removing only this test's temporary directories. */
 export async function closeAgentStorageTestDatabases(): Promise<void> {
-  for (const [db, fixture] of fixtures) {
-    await Promise.all([...fixture.producers].map((drain) => drain()));
-    await fixture.writer.close();
-    db.close(true);
-    NodeFS.rmSync(fixture.directory, { recursive: true, force: true });
-    fixtures.delete(db);
-  }
+  const results = await Promise.allSettled([...fixtures].map(async ([db, fixture]) => {
+    try {
+      await Promise.all([...fixture.producers].map((drain) => drain()));
+    } finally {
+      try {
+        await fixture.writer.close();
+      } finally {
+        db.close(true);
+        fixtures.delete(db);
+        NodeFS.rmSync(fixture.directory, { recursive: true, force: true });
+      }
+    }
+  }));
+  const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+  if (failures.length > 0) throw new AggregateError(failures, "Agent storage fixture cleanup failed");
 }

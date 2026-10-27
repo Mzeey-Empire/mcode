@@ -11,7 +11,6 @@ import { CodexAppServer } from "../../private/codex/codex-app-server.js";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
 import type { ApprovalRequestEnvelope, ApprovalOutcome, ApprovalOrigin } from "@mcode/contracts/models/approval";
 import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
-import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { logger } from "@mcode/shared";
 
 /**
@@ -290,11 +289,11 @@ describe("CodexProvider permission flow", () => {
     expect(resolved[0].outcome).toEqual({ status: "cancelled", reason: "session_stopped" });
   });
 
-  it("logs fatal breadcrumbs and preserves failure events from the app-server", async () => {
+  it("logs fatal breadcrumbs and drops failure events without an admitted turn", async () => {
     const start = vi.spyOn(CodexAppServer.prototype, "start").mockResolvedValue(undefined);
     try {
       const events: ProviderRuntimeEvent[] = [];
-      provider.on("event", (event) => events.push(event));
+      provider.observeCanonicalEvents((event) => events.push(event));
 
       const result = await (provider as unknown as {
         spawn: (args: {
@@ -331,9 +330,7 @@ describe("CodexProvider permission flow", () => {
         "CodexAppServer fatal",
         expect.objectContaining({ sessionId, error: "simulated fatal", breadcrumb }),
       );
-      expect(events).toEqual([
-        { event: { type: AgentEventType.Error, threadId, error: "simulated fatal", failure: { kind: "retryable" } } },
-      ]);
+      expect(events).toEqual([]);
     } finally {
       start.mockRestore();
     }
@@ -393,7 +390,7 @@ describe("CodexProvider permission flow", () => {
     vi.useRealTimers();
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "test-execution",
+      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
       sessionId,
       workspaceId: "workspace-test",
       threadId,

@@ -58,12 +58,15 @@ async function fixture() {
   const classify = (command: Partial<SendMessageCommand> = {}) => turns.classify({ threadId: thread.id, ...command });
   const capture = async () => {
     const message = await messages.create(thread.id, "assistant", planText, messages.getLatestSequenceIncludingInternal(thread.id) + 1);
-    await turns.persistAssistantMessage({ type: "message", threadId: thread.id, messageId: message.id, content: planText });
+    await plans.create(thread.id, message.id, {
+      title: "Local storage", contentMd: "# Local storage\n\nUse SQLite.", captureSource: "fence",
+    }, "codex");
+    threads.publishPlanPhase(thread.id);
   };
   const publishQuestions = async () => {
     classify();
     await messages.create(thread.id, "assistant", questionText, messages.getLatestSequenceIncludingInternal(thread.id) + 1);
-    turns.onTextDelta(thread.id, questionText);
+    await threads.updatePlanPhase(thread.id, "questions");
     await vi.waitFor(() => expect(threads.findById(thread.id)?.plan_phase).toBe("questions"));
   };
   return { db, writer, threads, messages, plans, thread, turns, service, attention, pushes, classify, capture, publishQuestions };
@@ -119,7 +122,7 @@ describe("durable planning phases and attention", () => {
     expect(f.pushes.at(-1)?.waiting).toBeNull();
     await f.capture();
     expect(f.threads.findById(f.thread.id)?.plan_phase).toBe("ready");
-    expect(f.pushes.at(-1)?.waiting?.kind).toBe("plan");
+    await vi.waitFor(() => expect(f.pushes.at(-1)?.waiting?.kind).toBe("plan"));
     await f.threads.recordTurnOutcome(f.thread.id, "completed", new Date().toISOString());
     expect(f.threads.findById(f.thread.id)?.plan_phase).toBe("ready");
   });
