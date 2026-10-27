@@ -356,10 +356,30 @@ async function readScrollPosition(page) {
     const body = document.querySelector('[data-testid="sidebar-body"]');
     const scroller = [...(body?.querySelectorAll("*") ?? [])].find((element) =>
       /(auto|scroll)/.test(getComputedStyle(element).overflowY) && element.scrollHeight > element.clientHeight);
+    const prefix = scroller instanceof HTMLElement ? scroller.dataset.testid?.replace(/-viewport$/, "") : undefined;
+    const content = prefix ? scroller.querySelector(`.${prefix}-content`) : null;
     return scroller
-      ? { scrollTop: scroller.scrollTop, maxScrollTop: scroller.scrollHeight - scroller.clientHeight }
-      : { scrollTop: 0, maxScrollTop: 0 };
+      ? {
+        scrollTop: scroller.scrollTop,
+        maxScrollTop: scroller.scrollHeight - scroller.clientHeight,
+        listHeight: {
+          scrollHeightPx: scroller.scrollHeight,
+          clientHeightPx: scroller.clientHeight,
+          contentHeightPx: content instanceof HTMLElement ? Number.parseFloat(content.style.height) : Number.NaN,
+        },
+      }
+      : { scrollTop: 0, maxScrollTop: 0, listHeight: null };
   });
+}
+
+/**
+ * True when the scroller is exactly as tall as the content height vlist set. A stray in-flow
+ * element (a doubled list, for one) makes the scroll longer than the list and skews scroll timing.
+ */
+export function listHeightMatchesContent(listHeight) {
+  if (!listHeight || !Number.isFinite(listHeight.contentHeightPx)) return false;
+  const expected = Math.max(listHeight.contentHeightPx, listHeight.clientHeightPx);
+  return Math.abs(listHeight.scrollHeightPx - expected) <= 1;
 }
 
 async function wheelToBottom(page) {
@@ -396,6 +416,7 @@ async function runScrollSample(context) {
       scrollHeightPx: position.maxScrollTop,
       scrollable,
       reachedBottom: position.scrollTop >= position.maxScrollTop - 2,
+      listHeight: position.listHeight,
       frames,
       ...rows,
     },
@@ -750,6 +771,7 @@ const SIDEBAR_CHECKS = {
   sidebarScroll: (check) => [
     [check.reachedBottom, "the wheel did not reach the bottom of the sidebar"],
     [!check.scrollable || check.frames.frameCount > 0, "no frames were recorded during the scroll"],
+    [listHeightMatchesContent(check.listHeight), "the list's scroll height differs from the content height vlist set"],
   ],
   sidebarHydration: (check, mode) => [
     [Number.isFinite(check.firstThreadRowMs), "no seeded thread row painted after reload"],
