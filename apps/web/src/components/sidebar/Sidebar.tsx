@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ProjectTree, useWorkspaceStore } from "@/features/projects";
+import { ProjectSidebar, useWorkspaceStore } from "@/features/projects";
 import { ArrowLeft, Search, SquarePen } from "lucide-react";
 import { Button, IconButton } from "@/components/ui/button";
 import { SettingsNav } from "@/components/settings/SettingsNav";
@@ -57,7 +57,7 @@ function SidebarBody({ settingsOpen, settingsSection, onSettingsSection }: { set
   }
   return <>
     <SidebarGoZone />
-    <div data-testid="sidebar-body" className="flex min-h-0 flex-1 flex-col overflow-hidden px-1.5"><ReactPerformanceProfiler id="sidebar"><ProjectTree /></ReactPerformanceProfiler></div>
+    <div data-testid="sidebar-body" className="flex min-h-0 flex-1 flex-col overflow-hidden px-1.5"><ReactPerformanceProfiler id="sidebar"><ProjectSidebar /></ReactPerformanceProfiler></div>
   </>;
 }
 

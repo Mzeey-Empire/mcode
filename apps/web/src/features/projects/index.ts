@@ -1,6 +1,6 @@
 /** Public Projects feature surface for workbench composition. */
 export { ProjectRow } from "./ProjectRow";
-export { ProjectTree } from "./ProjectTree";
+export { ProjectSidebar } from "./sidebar/ProjectSidebar";
 export { ProjectsView } from "./ProjectsView";
 export {
   useWorkspaceStore,

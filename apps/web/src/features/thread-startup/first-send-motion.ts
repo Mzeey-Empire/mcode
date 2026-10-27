@@ -174,7 +174,7 @@ export function useFirstSendMotion(threadId: string): FirstSendMotionRefs {
  * Fades in a sidebar row for a thread that was just sent and slides the rows that moved into place.
  *
  * `rowKeys` is the section's row order: thread ids, and `draft:<id>` for drafts, so a draft that turns into
- * the new thread nets out to no movement. `list` holds one child per row, carrying `data-thread-id` or
+ * the new thread nets out to no movement. `list` contains one element per row, carrying `data-thread-id` or
  * `data-draft-id`. Only a preparing thread whose row did not exist before animates, so a retried
  * placeholder or a project opened with a thread already preparing stays still.
  */
@@ -195,8 +195,8 @@ export function usePreparingRowEntrance(
     const entering = splitKey(preparingKey).find((id) => !before.includes(id));
     if (!entering) return;
     const elements = new Map<string, HTMLElement>();
-    for (const child of container.children) {
-      if (!(child instanceof HTMLElement)) continue;
+    // Rows may sit at any depth, such as inside a virtual list's recycled wrappers.
+    for (const child of container.querySelectorAll<HTMLElement>("[data-thread-id], [data-draft-id]")) {
       const { threadId, draftId } = child.dataset;
       if (threadId) elements.set(threadId, child);
       else if (draftId) elements.set(`draft:${draftId}`, child);
