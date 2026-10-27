@@ -412,8 +412,8 @@ describe("startup actions through the real action service and port probe", () =>
     });
     try {
       f.host.emitExit(id, 0);
-      await eventually(() => expect(sent).toEqual(["first-message"]));
-      expect(f.gate().queuedTurns.map((turn) => turn.state)).toEqual(["dispatched", "released", "released"]);
+      await eventually(() => expect(f.gate().queuedTurns.map((turn) => turn.state)).toEqual(["dispatched", "released", "released"]));
+      expect(sent).toEqual(["first-message"]);
       firstProvider.resolve();
       await eventually(() => expect(f.gate().queuedTurns.map((turn) => turn.state)).toEqual(["dispatched", "dispatched", "dispatched"]));
       expect(sent).toEqual(["first-message", "second-message", "third-message"]);
