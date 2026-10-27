@@ -1,14 +1,14 @@
 import type * as NodeChildProcess from "node:child_process";
 import * as NodeEvents from "node:events";
-import type { McpServer } from "@agentclientprotocol/sdk";
+import type { ContentBlock, McpServer } from "@agentclientprotocol/sdk";
 import { getDefaultSettings, type TurnRequest } from "@mcode/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderHostPorts, ProviderMcodeAttachment } from "../../../host-ports.js";
 import { AcpSessionRuntime } from "../../protocols/acp/acp-session-runtime.js";
 import { CursorProvider } from "../cursor-provider.js";
+import { NO_MCODE_TOOLKITS } from "@mcode/thread-orchestration";
+import { expectInstructionSections } from "../../../__tests__/mcode-instruction-sections.js";
 
-const THREAD_TOOL = "thread_target_list";
-const BROWSER_GUIDANCE = "Prefer the mcode MCP browser_* tools";
 
 function attachment(toolkits: ProviderMcodeAttachment["toolkits"] = { browser: true, threadControl: true, visuals: true }): ProviderMcodeAttachment {
   return { serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "mcode-token", toolkits };
@@ -58,7 +58,7 @@ function createFakeAcpRuntime(acpSessionId: string, pid: number) {
       state.sessionId = acpSessionId;
       return { sessionId: acpSessionId, reloaded: false };
     }),
-    prompt: vi.fn(async (_request: { prompt: unknown }) => ({ stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1 } })),
+    prompt: vi.fn(async (_request: { prompt: ContentBlock[] }) => ({ stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1 } })),
     cancel: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
   };
@@ -102,7 +102,8 @@ function openedServers(fake: ReturnType<typeof createFakeAcpRuntime>): McpServer
 }
 
 function promptText(fake: ReturnType<typeof createFakeAcpRuntime>): string {
-  return JSON.stringify(fake.prompt.mock.calls[0]?.[0].prompt);
+  const blocks = fake.prompt.mock.calls[0]?.[0].prompt ?? [];
+  return blocks.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n");
 }
 
 describe("Cursor reaches Mcode tools through one mcode server", () => {
@@ -117,8 +118,7 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
       url: "http://127.0.0.1:19400/mcp/mcode",
       headers: [{ name: "Authorization", value: "Bearer mcode-token" }],
     }]);
-    expect(promptText(fake)).toContain(THREAD_TOOL);
-    expect(promptText(fake)).toContain(BROWSER_GUIDANCE);
+    expectInstructionSections(promptText(fake), attachment().toolkits);
   });
 
   it("attaches under the session id the Browser lease is staged for", async () => {
@@ -141,8 +141,7 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
     const fake = createFakeAcpRuntime("acp-1", 101);
     await startProvider(host, [fake]).sendTurn(turn());
 
-    expect(promptText(fake)).toContain(THREAD_TOOL);
-    expect(promptText(fake)).not.toContain(BROWSER_GUIDANCE);
+    expectInstructionSections(promptText(fake), { browser: false, threadControl: true, visuals: true });
     expect(host.browser.release).toHaveBeenCalledWith("lease-1");
   });
 
@@ -153,8 +152,7 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
     await startProvider(host, [fake]).sendTurn(turn());
 
     expect(openedServers(fake)).toEqual([]);
-    expect(promptText(fake)).not.toContain(THREAD_TOOL);
-    expect(promptText(fake)).not.toContain(BROWSER_GUIDANCE);
+    expectInstructionSections(promptText(fake), NO_MCODE_TOOLKITS);
     expect(host.browser.release).toHaveBeenCalledWith("lease-1");
   });
 
@@ -167,8 +165,7 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
 
     expect(openedServers(first)).toHaveLength(1);
     expect(openedServers(second)).toEqual([]);
-    expect(promptText(second)).not.toContain(THREAD_TOOL);
-    expect(promptText(second)).not.toContain(BROWSER_GUIDANCE);
+    expectInstructionSections(promptText(second), NO_MCODE_TOOLKITS);
     expect(host.mcode.close).toHaveBeenCalledWith("mcode-thread-1");
   });
 
@@ -184,7 +181,7 @@ describe("Cursor reaches Mcode tools through one mcode server", () => {
     expect(openedServers(first)).toEqual([]);
     expect(openedServers(second)).toHaveLength(1);
     expect(second.openSession.mock.calls[0]?.[0]).toMatchObject({ resumeFrom: "acp-1" });
-    expect(promptText(second)).toContain(THREAD_TOOL);
+    expectInstructionSections(promptText(second), attachment().toolkits);
   });
 
   it("keeps reusing a session that started with the mcode server", async () => {

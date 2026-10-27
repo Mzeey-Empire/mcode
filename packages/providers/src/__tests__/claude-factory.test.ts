@@ -12,6 +12,8 @@ import { PLAN_MAX_CONTENT_CHARS, type PlanCapture } from "@mcode/contracts";
 import { loadProviderFixtureManifest, validateProviderFixtureManifest } from "../conformance/fixture-safety.js";
 import { ProviderParentEvidenceSchema } from "@mcode/contracts";
 import { queryMethodStubs } from "../private/claude/__tests__/helpers/mock-sdk-query.js";
+import { NO_MCODE_TOOLKITS } from "@mcode/thread-orchestration";
+import { expectInstructionSections } from "./mcode-instruction-sections.js";
 
 const { sdkQuery } = vi.hoisted(() => ({ sdkQuery: vi.fn() }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: sdkQuery }));
@@ -26,6 +28,7 @@ function request(overrides: Partial<TurnRequest<"claude">> = {}): TurnRequest<"c
 function mcodeAttachment(toolkits = { browser: true, threadControl: true, visuals: true }): ProviderMcodeAttachment {
   return { serverName: "mcode", url: "http://127.0.0.1:19400/mcp/mcode", token: "fixture-token", toolkits };
 }
+
 
 type NativeMessage = Record<string, unknown>;
 function result(id = "RESULT_1"): NativeMessage { return { type: "result", uuid: id, is_error: false, usage: { input_tokens: 1, output_tokens: 2 }, total_cost_usd: 0.01, num_turns: 1, duration_ms: 3 }; }
@@ -649,10 +652,9 @@ describe("Claude public factory core and capabilities", () => {
     assert(options);
     expect(options.mcpServers).toEqual({ mcode: { type: "http", url: "http://127.0.0.1:19400/mcp/mcode", headers: { Authorization: "Bearer fixture-token" } } });
     expect(options.settings).toMatchObject({ ultracode: true });
-    expect(options.systemPrompt).toMatchObject({ append: expect.stringContaining("browser_inspect") });
     assert(typeof options.systemPrompt === "object" && !Array.isArray(options.systemPrompt));
     const append = options.systemPrompt.append ?? "";
-    expect(append).toContain("thread_target_list");
+    expectInstructionSections(append, mcodeAttachment().toolkits);
     expect(append).not.toContain("Source thread:");
     expect(append).not.toContain("thread-1");
     expect(await provider.getGoal("mcode-thread-1")).toMatchObject({ objective: "fixture objective" });
@@ -679,10 +681,10 @@ describe("Claude public factory core and capabilities", () => {
   });
 
   it.each([
-    ["thread control only", { browser: false, threadControl: true, visuals: true }, { thread: true, browser: false }],
-    ["browser only", { browser: true, threadControl: false, visuals: false }, { thread: false, browser: true }],
-    ["neither", { browser: false, threadControl: false, visuals: false }, { thread: false, browser: false }],
-  ])("grants instructions from the attached toolkits: %s", async (_name, toolkits, expected) => {
+    ["thread control only", { browser: false, threadControl: true, visuals: true }],
+    ["browser only", { browser: true, threadControl: false, visuals: false }],
+    ["neither", { browser: false, threadControl: false, visuals: false }],
+  ])("grants instructions from the attached toolkits: %s", async (_name, toolkits) => {
     const transport = installTransport();
     const { provider, input, events } = fixture();
     const browser = new BrowserAutomationSessionLease();
@@ -694,8 +696,7 @@ describe("Claude public factory core and capabilities", () => {
     const prompt = transport.optionsSeen[0]?.systemPrompt;
     assert(typeof prompt === "object" && !Array.isArray(prompt));
     const append = prompt.append ?? "";
-    expect(append.includes("thread_target_list")).toBe(expected.thread);
-    expect(append.includes("browser_inspect")).toBe(expected.browser);
+    expectInstructionSections(append, toolkits);
   });
 
   it("emits no Mcode server and grants nothing when the server declines to attach", async () => {
@@ -706,8 +707,7 @@ describe("Claude public factory core and capabilities", () => {
     const options = transport.optionsSeen[0];
     expect(options?.mcpServers).toEqual({});
     assert(typeof options?.systemPrompt === "object" && !Array.isArray(options.systemPrompt));
-    expect(options.systemPrompt.append ?? "").not.toContain("thread_target_list");
-    expect(options.systemPrompt.append ?? "").not.toContain("browser_inspect");
+    expectInstructionSections(options.systemPrompt.append ?? "", NO_MCODE_TOOLKITS);
   });
 
   it("attaches under the session id the Browser lease is staged for, not the resume or thread id", async () => {

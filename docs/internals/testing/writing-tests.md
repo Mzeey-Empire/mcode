@@ -17,6 +17,12 @@ A quick check: if the test would still pass when every imported function returne
 - **Restated constants.** Asserting that a constant, schema default, or type equals its own definition.
 - **jsdom geometry.** jsdom does no layout, so `scrollWidth`, `clientWidth`, and `getBoundingClientRect` are always zero. Assertions on them always pass.
 
+## Keep one copy of each fact
+
+A test that restates a fact another module owns breaks when that module changes, even when behavior is correct. Adding `plan_phase` to threads changed 10 test files whose only edit was `plan_phase: null`.
+
+- **Assert structure, not wording.** Check that an instruction section arrived by building the expected section with `buildMcodeInstructionSections`, not by searching the prompt for a tool name. Only the tests of the module that owns the copy should break when the copy changes.
+
 ## Keep tests cheap
 
 The web suite pays about 0.65 s of environment setup and imports per file before any test runs, and more than half of its files have under 50 ms of test body. In the server suite, a new database writer worker costs about 250 ms, almost all of it spent loading the writer's modules. That was most of each test in the slowest server files.
