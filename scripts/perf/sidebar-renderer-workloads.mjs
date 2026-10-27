@@ -1,3 +1,4 @@
+import { measureSidebarRetained } from "./heap-snapshot-retained.mjs";
 import {
   createModeSignalCollector,
   createPageSignalCollector,
@@ -12,6 +13,7 @@ export const SIDEBAR_RENDERER_WORKLOADS = Object.freeze([
   "sidebarCompleteFlight",
   "sidebarOlderCrossing",
   "sidebarIdleTick",
+  "sidebarRetainedHeap",
 ]);
 
 const SIDEBAR_PROFILER_ID = "sidebar";
@@ -29,6 +31,7 @@ const IDLE_WINDOW_MS = 61_000;
 const ROW_RENDER_PREFIX = "sidebar-thread:";
 const AGE_RENDER_PREFIX = "sidebar-age:";
 const SET_ROWS_COUNTER = "sidebar.setRows";
+const HEAP_PROBE = "__mcodeSidebarHeapProbe";
 
 /** Returns the nearest-rank percentile of finite values, or null when there are none. */
 export function percentile(values, quantile) {
@@ -485,6 +488,44 @@ async function runHydrationSample(context) {
   };
 }
 
+async function takeHeapSnapshot(page) {
+  const session = await page.context().newCDPSession(page);
+  const chunks = [];
+  const onChunk = ({ chunk }) => chunks.push(chunk);
+  session.on("HeapProfiler.addHeapSnapshotChunk", onChunk);
+  try {
+    await session.send("HeapProfiler.enable");
+    await session.send("HeapProfiler.collectGarbage");
+    await session.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+    return chunks.join("");
+  } finally {
+    session.off("HeapProfiler.addHeapSnapshotChunk", onChunk);
+    await session.detach();
+  }
+}
+
+async function runRetainedHeapSample(context) {
+  const { page, fixture } = context;
+  const threadCount = await page.evaluate((probeName) => {
+    const modules = window.__mcodeFrontendPerformanceModules;
+    const threads = modules.workspaceStore.getState().threads;
+    window[probeName] = { threads, facts: modules.sidebarCaches.facts(threads), index: modules.sidebarCaches.index(threads) };
+    return threads.length;
+  }, HEAP_PROBE);
+  let text;
+  try {
+    text = await takeHeapSnapshot(page);
+  } finally {
+    await page.evaluate((probeName) => { delete window[probeName]; }, HEAP_PROBE);
+  }
+  const retained = measureSidebarRetained(JSON.parse(text), HEAP_PROBE);
+  const rows = await readSidebarState(page, fixture.workspaces.map((workspace) => workspace.id));
+  return {
+    durationMs: retained.threadsAndCachesBytes ?? Number.NaN,
+    check: { ...retained, storeThreads: threadCount, snapshotBytes: text.length, ...rows },
+  };
+}
+
 /**
  * Counts rAF intervals that end inside a window, against the frame budget. A flight's frames are
  * the intervals whose end falls from its first copy appearing to its last copy landing.
@@ -715,6 +756,9 @@ const SIDEBAR_CHECKS = {
     [check.crossing.length === CROSSING_THREAD_COUNT, "fewer than five Recent rows were on screen"],
     [check.crossing.length < CROSSING_THREAD_COUNT || check.flights >= 1, "no row flew to the Older bar"],
   ],
+  sidebarRetainedHeap: (check) => [
+    [Object.values(check.found).every(Boolean), "the heap snapshot lacks the store threads or a sidebar cache"],
+  ],
   sidebarIdleTick: (check) => [
     [check.profiling, "row renders are only counted in a profiling build"],
     [check.elapsedMs >= 60_000, "the idle window was shorter than one minute tick"],
@@ -733,6 +777,7 @@ const SIDEBAR_SAMPLE_RUNNERS = {
   sidebarCompleteFlight: (context) => runCompletionFlightSample(context),
   sidebarOlderCrossing: (context) => runOlderCrossingSample(context),
   sidebarIdleTick: (context) => runIdleTickSample(context),
+  sidebarRetainedHeap: (context) => runRetainedHeapSample(context),
 };
 
 const TRACED_SIDEBAR_WORKLOADS = new Set(["sidebarCompleteFlight", "sidebarOlderCrossing"]);
