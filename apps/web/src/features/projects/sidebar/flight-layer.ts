@@ -61,8 +61,23 @@ export function flyCopy(threadId: string, to: FlightTarget, timing: FlightTiming
     ],
     { duration: timing.durationMs, delay: timing.delayMs, easing: timing.easing, fill: "backwards" },
   );
-  return flight.finished.then(
-    () => copy.remove(),
-    () => copy.remove(),
-  );
+  const stopFollowing = followTarget(copy, target, end);
+  const land = () => {
+    stopFollowing();
+    copy.remove();
+  };
+  return flight.finished.then(land, land);
+}
+
+// The target can move while the copy is in the air (the Older bar rises as closing rows collapse),
+// so the copy is offset by the target's drift each frame until it lands. The loop ends with the flight.
+function followTarget(copy: HTMLElement, target: Element, start: DOMRect): () => void {
+  let frame = requestAnimationFrame(function follow() {
+    if (target.isConnected) {
+      const now = target.getBoundingClientRect();
+      copy.style.translate = `${now.left - start.left}px ${now.top - start.top}px`;
+    }
+    frame = requestAnimationFrame(follow);
+  });
+  return () => cancelAnimationFrame(frame);
 }
