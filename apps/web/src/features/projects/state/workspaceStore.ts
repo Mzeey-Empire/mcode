@@ -1693,6 +1693,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   applyThreadLifecycle: (thread) => {
+    // Release belongs to the confirmed transition, not to every completed record: snapshots and
+    // repeated pushes of an already-completed thread must not release twice or at hydration.
+    const wasActive = get().threads.find((candidate) => candidate.id === thread.id)?.user_completed_at === null;
     set((state) => {
       if (isDelegatedSubagent(thread)) {
         return { threads: state.threads.filter((candidate) => candidate.id !== thread.id) };
@@ -1708,7 +1711,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           : [nextThread, ...state.threads],
       };
     });
-    if (thread.user_completed_at !== null) {
+    if (wasActive && thread.user_completed_at !== null) {
       releaseBrowserAutomationThreadScope(thread.workspace_id, thread.id);
       void clearPreviewResources(thread.workspace_id, thread.id);
       useTerminalStore.getState().clearThread(thread.id);

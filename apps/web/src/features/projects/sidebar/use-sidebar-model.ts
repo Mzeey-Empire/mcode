@@ -10,14 +10,13 @@ import {
   reconcileItems,
   trackNeedsUserEnds,
   type ModelCause,
-  type PendingCompletion,
   type SidebarInputs,
   type SidebarModel,
   type SidebarModelUi,
 } from "./sidebar-model";
 import { useSidebarUiStore } from "./sidebar-ui-store";
+import { useCompletionStore } from "./completion-store";
 
-const NO_COMPLETIONS: ReadonlyMap<string, PendingCompletion> = new Map();
 const NO_IDS: ReadonlySet<string> = new Set();
 const NO_ENDS: ReadonlyMap<string, number> = new Map();
 
@@ -100,6 +99,7 @@ function useSidebarInputs(now: number): SidebarInputs {
   const snapshotEpoch = useWorkspaceStore((state) => state.threadSnapshotEpoch);
   const drafts = useThreadDraftStore((state) => state.drafts);
   const olderAfterDays = useSettingsStore((state) => state.settings.thread.olderAfterDays);
+  const completions = useCompletionStore((state) => state.entries);
   const needsUserIds = useNeedsUserIds();
   const needsUserEndedAt = useNeedsUserEndedAt(needsUserIds);
   const ui = useModelUi();
@@ -107,8 +107,8 @@ function useSidebarInputs(now: number): SidebarInputs {
   const projectOrder = useMemo(() => workspaces.map((workspace) => workspace.id), [workspaces]);
   const draftsByWorkspace = useMemo(() => draftIdsByWorkspace(drafts), [drafts]);
   return useMemo(
-    () => ({ facts, projectOrder, draftsByWorkspace, needsUserIds, needsUserEndedAt, completions: NO_COMPLETIONS, olderAfterDays, ui, selectedThreadId, now, snapshotEpoch }),
-    [facts, projectOrder, draftsByWorkspace, needsUserIds, needsUserEndedAt, olderAfterDays, ui, selectedThreadId, now, snapshotEpoch],
+    () => ({ facts, projectOrder, draftsByWorkspace, needsUserIds, needsUserEndedAt, completions, olderAfterDays, ui, selectedThreadId, now, snapshotEpoch }),
+    [facts, projectOrder, draftsByWorkspace, needsUserIds, needsUserEndedAt, completions, olderAfterDays, ui, selectedThreadId, now, snapshotEpoch],
   );
 }
 
