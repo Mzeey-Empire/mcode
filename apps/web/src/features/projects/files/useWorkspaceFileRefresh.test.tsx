@@ -3,13 +3,17 @@ import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { mockTransport } from "@/__tests__/mocks/transport";
 
-
-const refreshWorkspaceFiles = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const refreshWorkspaceFiles = vi.mocked(mockTransport.refreshWorkspaceFiles);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ refreshWorkspaceFiles }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.refreshWorkspaceFiles).mockReset().mockResolvedValue(undefined);
+});
 
 import { useWorkspaceFileRefresh } from "./useWorkspaceFileRefresh";
 

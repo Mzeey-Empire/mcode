@@ -1,17 +1,25 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import type { AgentTurn, ThreadStartup } from "@mcode/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const startupTransport = {
-  cancelThreadStartup: vi.fn(),
-  resolveThreadStartup: vi.fn(),
-  retryErroredTurn: vi.fn(),
-  retryThreadStartupAgent: vi.fn(),
+  cancelThreadStartup: vi.mocked(mockTransport.cancelThreadStartup),
+  resolveThreadStartup: vi.mocked(mockTransport.resolveThreadStartup),
+  retryErroredTurn: vi.mocked(mockTransport.retryErroredTurn),
+  retryThreadStartupAgent: vi.mocked(mockTransport.retryThreadStartupAgent),
 };
 
 vi.mock("@/transport", () => ({
-  getTransport: () => startupTransport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.cancelThreadStartup).mockReset();
+  vi.mocked(mockTransport.resolveThreadStartup).mockReset();
+  vi.mocked(mockTransport.retryErroredTurn).mockReset();
+  vi.mocked(mockTransport.retryThreadStartupAgent).mockReset();
+});
 
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
@@ -161,7 +169,7 @@ describe("useStartupAgentRetry", () => {
 
   beforeEach(() => {
     startupTransport.retryErroredTurn.mockReset();
-    startupTransport.retryErroredTurn.mockResolvedValue(undefined);
+    startupTransport.retryErroredTurn.mockResolvedValue({ turnId: "turn-retried" });
     startupTransport.retryThreadStartupAgent.mockReset();
     useThreadStartupStore.setState({ recordsByStartupId: {}, startupIdByThreadId: {} });
   });

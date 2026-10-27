@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,11 +7,15 @@ import { useUpdateStore } from "@/stores/updateStore";
 import { ReleaseNotesCard } from "../ReleaseNotesCard";
 import { AGENT_COUNT_DEADLINE_MS, UP_TO_DATE_FLASH_MS, UpdateButton } from "../UpdateButton";
 
-const getActiveAgentCount = vi.fn<() => Promise<number>>();
+const getActiveAgentCount = vi.mocked(mockTransport.getActiveAgentCount);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ getActiveAgentCount }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getActiveAgentCount).mockReset();
+});
 
 function createApp() {
   return {

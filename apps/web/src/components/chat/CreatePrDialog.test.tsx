@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement, ReactNode } from "react";
@@ -6,10 +7,8 @@ import type { GitRef } from "@mcode/contracts";
 import { installListboxLayout } from "@/__tests__/helpers/picker-layout";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 
-const { mockGeneratePrDraft, mockListRefs } = vi.hoisted(() => ({
-  mockGeneratePrDraft: vi.fn(),
-  mockListRefs: vi.fn(),
-}));
+const mockGeneratePrDraft = vi.mocked(mockTransport.generatePrDraft);
+const mockListRefs = vi.mocked(mockTransport.listRefs);
 
 vi.mock("@/features/projects/state/workspaceStore", () => ({
   useWorkspaceStore: { getState: vi.fn(() => ({ recordPrCreated: vi.fn() })) },
@@ -22,12 +21,14 @@ vi.mock("@/stores/toastStore", () => ({
 }));
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({
-    createPr: vi.fn(),
-    generatePrDraft: mockGeneratePrDraft,
-    listRefs: mockListRefs,
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.createPr).mockReset();
+  vi.mocked(mockTransport.generatePrDraft).mockReset();
+  vi.mocked(mockTransport.listRefs).mockReset();
+});
 
 vi.mock("@/components/ui/dialog", () => ({
   Dialog: ({ open, children }: { open?: boolean; children: ReactNode }) =>
@@ -69,7 +70,7 @@ function gitRef(shortName: string, overrides: Partial<GitRef> = {}): GitRef {
 }
 
 function refsPage(items: GitRef[]) {
-  return { ok: true, items, total: items.length, nextCursor: null };
+  return { ok: true as const, items, total: items.length, nextCursor: null };
 }
 
 function renderDialog(preferredBaseBranch?: string) {

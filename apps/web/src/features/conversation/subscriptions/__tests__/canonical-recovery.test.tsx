@@ -1,22 +1,29 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope,
   type CanonicalAgentEventEnvelope, type ConversationPage, type SetThreadSubscriptionsResult } from "@mcode/contracts";
-
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
 import { useThreadSubscriptionReconciler } from "../useThreadSubscriptionReconciler";
 
-const setThreadSubscriptions = vi.hoisted(() => vi.fn(async (): Promise<SetThreadSubscriptionsResult> => ({
-  canonicalRecoveries: [],
-})));
-const loadConversationPage = vi.hoisted(() => vi.fn());
+const setThreadSubscriptions = vi.mocked(mockTransport.setThreadSubscriptions);
+if (!setThreadSubscriptions) throw new Error("The transport fake must provide atomic subscriptions");
+const loadConversationPage = vi.mocked(mockTransport.loadConversationPage);
 vi.mock("@/transport", async () => ({
-  ...(await vi.importActual("@/transport")), getTransport: () => ({ setThreadSubscriptions, loadConversationPage, loadTurn: async () => [] }),
+  ...(await vi.importActual("@/transport")), getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  setThreadSubscriptions.mockReset().mockImplementation(async (): Promise<SetThreadSubscriptionsResult> => ({
+    canonicalRecoveries: [],
+  }));
+  vi.mocked(mockTransport.loadConversationPage).mockReset();
+  vi.mocked(mockTransport.loadTurn).mockReset().mockImplementation(async () => []);
+});
 
 const THREAD = "parent-recovery";
 const TURN = "admitted-turn";

@@ -3,8 +3,8 @@ import { act, render, renderHook, screen, waitFor } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanImplement, PlanImplementReceipt, PlanSaveVersion, PlanVersion, ReviewState } from "@mcode/contracts";
-
+import type { PlanImplement, PlanImplementReceipt, PlanVersion, ReviewState } from "@mcode/contracts";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { usePlanStore } from "@/stores/planStore";
@@ -17,20 +17,22 @@ import { PlanPanel, planEditorAccess } from "./PlanPanel";
 import { planSaveScheduler } from "./plan-draft-sessions";
 import { IMPLEMENT_FAILED_NOTICE, PLAN_CHANGED_NOTICE, implementPlan as implementPlanAction, usePlanImplementStore } from "./plan-implement";
 
-const savePlanVersion = vi.hoisted(() => vi.fn<(payload: PlanSaveVersion) => Promise<PlanVersion>>());
-const implementPlan = vi.hoisted(() => vi.fn<(payload: PlanImplement) => Promise<PlanImplementReceipt>>());
-const getReviewState = vi.hoisted(() => vi.fn<() => Promise<ReviewState>>());
+const savePlanVersion = vi.mocked(mockTransport.savePlanVersion);
+const implementPlan = vi.mocked(mockTransport.implementPlan);
+const getReviewState = vi.mocked(mockTransport.getReviewState);
 vi.mock("@/transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/transport")>()),
-  getTransport: () => ({
-    savePlanVersion,
-    implementPlan,
-    getReviewState,
-    updateThreadSettings: vi.fn(async () => true),
-    touchLastOpened: vi.fn(async () => undefined),
-    listThreads: vi.fn(async () => useWorkspaceStore.getState().threads),
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.savePlanVersion).mockReset();
+  vi.mocked(mockTransport.implementPlan).mockReset();
+  vi.mocked(mockTransport.getReviewState).mockReset();
+  vi.mocked(mockTransport.updateThreadSettings).mockReset().mockImplementation(async () => true);
+  vi.mocked(mockTransport.touchLastOpened).mockReset().mockImplementation(async () => undefined);
+  vi.mocked(mockTransport.listThreads).mockReset().mockImplementation(async () => useWorkspaceStore.getState().threads);
+});
 
 const THREAD = "thread-plan";
 

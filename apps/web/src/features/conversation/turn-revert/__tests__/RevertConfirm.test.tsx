@@ -3,18 +3,24 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RevertFilePlan, TurnRevertPreview, TurnRevertResult } from "@mcode/contracts";
-
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { useThreadStore } from "@/stores/threadStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { TurnRevertBarConfirm } from "../TurnRevertBarConfirm";
 
-const transport = vi.hoisted(() => ({
-  previewTurnRevert: vi.fn(),
-  applyTurnRevert: vi.fn(),
-  listSnapshots: vi.fn(),
-}));
+const transport = {
+  previewTurnRevert: vi.mocked(mockTransport.previewTurnRevert),
+  applyTurnRevert: vi.mocked(mockTransport.applyTurnRevert),
+  listSnapshots: vi.mocked(mockTransport.listSnapshots),
+};
 
-vi.mock("@/transport", () => ({ getTransport: () => transport }));
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.previewTurnRevert).mockReset();
+  vi.mocked(mockTransport.applyTurnRevert).mockReset();
+  vi.mocked(mockTransport.listSnapshots).mockReset();
+});
 
 type ReadyPreview = Extract<TurnRevertPreview, { status: "ready" }>;
 

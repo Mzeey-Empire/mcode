@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useDiffStore } from "@/stores/diffStore";
@@ -8,13 +9,14 @@ vi.mock("@/hooks/useOpenInApps", () => ({
   useOpenInApps: () => [],
 }));
 
-const transport = vi.hoisted(() => ({
-  getSnapshotDiff: vi.fn().mockResolvedValue(""),
-}));
 
 vi.mock("@/transport", () => ({
-  getTransport: () => transport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getSnapshotDiff).mockReset().mockResolvedValue("");
+});
 
 class IntersectionObserverMock {
   constructor(private readonly callback: IntersectionObserverCallback) {}

@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReviewDiffView } from "@/components/diff/ReviewDiffView";
@@ -5,18 +6,25 @@ import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { parsePatchFiles, type BaseDiffOptions } from "@pierre/diffs";
 
-const transport = vi.hoisted(() => ({
-  getWorkingTreeDiff: vi.fn(),
-  getBranchDiff: vi.fn(),
-  readFileContent: vi.fn(),
-  readFileAtRef: vi.fn(),
-}));
+const transport = {
+  getWorkingTreeDiff: vi.mocked(mockTransport.getWorkingTreeDiff),
+  getBranchDiff: vi.mocked(mockTransport.getBranchDiff),
+  readFileContent: vi.mocked(mockTransport.readFileContent),
+  readFileAtRef: vi.mocked(mockTransport.readFileAtRef),
+};
 const observeOptions = vi.hoisted(() => vi.fn<(options: BaseDiffOptions) => void>());
 
 vi.mock("@/transport", async (original) => ({
   ...(await original<object>()),
-  getTransport: () => transport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getWorkingTreeDiff).mockReset();
+  vi.mocked(mockTransport.getBranchDiff).mockReset();
+  vi.mocked(mockTransport.readFileContent).mockReset();
+  vi.mocked(mockTransport.readFileAtRef).mockReset();
+});
 
 // Observe the exact item contents delivered by the real component to its
 // renderer; the bug under test lives in ReviewDiffView's patch state, not in
@@ -104,9 +112,9 @@ describe("ReviewDiffView refresh", () => {
   });
 
   it.each([
-    { kind: "binary", path: "file.txt", size: 4 },
-    { kind: "image", path: "file.txt", size: 4, mime: "image/png", url: "/image" },
-    { kind: "too-large", path: "file.txt", size: 3145728, limit: 2097152 },
+    { kind: "binary" as const, path: "file.txt", size: 4 },
+    { kind: "image" as const, path: "file.txt", size: 4, mime: "image/png", url: "/image" },
+    { kind: "too-large" as const, path: "file.txt", size: 3145728, limit: 2097152 },
   ])("rejects context expansion for $kind without fabricating text", async (result) => {
     transport.readFileContent.mockResolvedValue(result);
     const load = await contextLoader();

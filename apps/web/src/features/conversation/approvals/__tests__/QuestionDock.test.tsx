@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import type { PlanQuestion } from "@mcode/contracts";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -8,14 +9,17 @@ import { QuestionDock } from "../QuestionDock";
 import { readThreadField, resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
 
-const { answerPlanQuestions, dismissPlanQuestions } = vi.hoisted(() => ({
-  answerPlanQuestions: vi.fn().mockResolvedValue(undefined),
-  dismissPlanQuestions: vi.fn().mockResolvedValue(undefined),
-}));
+const answerPlanQuestions = vi.mocked(mockTransport.answerPlanQuestions);
+const dismissPlanQuestions = vi.mocked(mockTransport.dismissPlanQuestions);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ answerPlanQuestions, dismissPlanQuestions }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.answerPlanQuestions).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.dismissPlanQuestions).mockReset().mockResolvedValue(undefined);
+});
 
 const THREAD_ID = "thread-1";
 

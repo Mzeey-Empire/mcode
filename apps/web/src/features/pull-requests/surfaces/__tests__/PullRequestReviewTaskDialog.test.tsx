@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import type {
   PullRequestCreateReviewTaskResult,
   PullRequestIdentity,
@@ -9,15 +10,16 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PullRequestReviewTaskTransport } from "@/transport/pull-request-review-task";
 
-const startupTransport = vi.hoisted(() => ({
-  getThreadStartup: vi.fn().mockResolvedValue(null),
-  listThreadStartups: vi.fn().mockResolvedValue({ records: [] }),
-  cancelThreadStartup: vi.fn(),
-}));
 
 vi.mock("@/transport", () => ({
-  getTransport: () => startupTransport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getThreadStartup).mockReset().mockResolvedValue(null);
+  vi.mocked(mockTransport.listThreadStartups).mockReset().mockResolvedValue({ records: [] });
+  vi.mocked(mockTransport.cancelThreadStartup).mockReset();
+});
 
 const { workspaceState } = vi.hoisted(() => ({
   workspaceState: {

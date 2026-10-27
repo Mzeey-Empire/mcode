@@ -3,24 +3,24 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewComparison, ReviewComparisonResult, ReviewTurn, TurnSnapshot } from "@mcode/contracts";
-
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { useDiffStore, type DiffViewMode } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { DiffPanel } from "../DiffPanel";
 
 let measuredWidth = 900;
-const transport = vi.hoisted(() => ({
-  listWorkspaceFiles: vi.fn().mockResolvedValue({ paths: ["src/App.tsx", "README.md"], truncated: false }),
-  refreshWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
-  listSnapshots: vi.fn().mockResolvedValue([]),
-  getSnapshotDiffStats: vi.fn().mockResolvedValue([]),
-  getTurnDiffComparison: vi.fn(),
-  getCumulativeDiffStats: vi.fn(),
-  getReviewComparison: vi.fn(),
-  getReviewState: vi.fn(),
-  listReviewTurns: vi.fn().mockResolvedValue([]),
-}));
+const transport = {
+  listWorkspaceFiles: vi.mocked(mockTransport.listWorkspaceFiles),
+  refreshWorkspaceFiles: vi.mocked(mockTransport.refreshWorkspaceFiles),
+  listSnapshots: vi.mocked(mockTransport.listSnapshots),
+  getSnapshotDiffStats: vi.mocked(mockTransport.getSnapshotDiffStats),
+  getTurnDiffComparison: vi.mocked(mockTransport.getTurnDiffComparison),
+  getCumulativeDiffStats: vi.mocked(mockTransport.getCumulativeDiffStats),
+  getReviewComparison: vi.mocked(mockTransport.getReviewComparison),
+  getReviewState: vi.mocked(mockTransport.getReviewState),
+  listReviewTurns: vi.mocked(mockTransport.listReviewTurns),
+};
 
 const EMPTY_READY: ReviewComparisonResult = { status: "ready", comparison: { files: [], additions: 0, deletions: 0 } };
 
@@ -29,8 +29,20 @@ vi.mock("@/hooks/useElementWidth", () => ({
 }));
 
 vi.mock("@/transport", () => ({
-  getTransport: () => transport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.listWorkspaceFiles).mockReset().mockResolvedValue({ paths: ["src/App.tsx", "README.md"], truncated: false });
+  vi.mocked(mockTransport.refreshWorkspaceFiles).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.listSnapshots).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.getSnapshotDiffStats).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.getTurnDiffComparison).mockReset();
+  vi.mocked(mockTransport.getCumulativeDiffStats).mockReset();
+  vi.mocked(mockTransport.getReviewComparison).mockReset();
+  vi.mocked(mockTransport.getReviewState).mockReset();
+  vi.mocked(mockTransport.listReviewTurns).mockReset().mockResolvedValue([]);
+});
 
 vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -226,8 +238,8 @@ describe("DiffPanel", () => {
   ])("rereads $view without whitespace-only files", async ({ view, baseline }) => {
     pickThreadView(view);
     threadAttentionStore.setState({ visitBaselines: { "thread-1": 4 } });
-    transport.getCumulativeDiffStats.mockImplementation((_thread: string, _after: number | undefined, options: { ignoreWhitespace?: boolean }) =>
-      Promise.resolve(options.ignoreWhitespace ? stats("logic.ts") : stats("logic.ts", "indent.ts")));
+    transport.getCumulativeDiffStats.mockImplementation((_thread, _after, options) =>
+      Promise.resolve(options?.ignoreWhitespace ? stats("logic.ts") : stats("logic.ts", "indent.ts")));
     render(<DiffPanel />);
 
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("indent.ts,logic.ts"));
@@ -269,7 +281,7 @@ describe("DiffPanel", () => {
   it("keeps the shown turn while following latest until the next turn's diff settles", async () => {
     transport.listReviewTurns.mockResolvedValue([turn("msg-1", 1)]);
     const next = deferred<ReviewComparisonResult>();
-    transport.getTurnDiffComparison.mockImplementation((_thread: string, messageId: string) =>
+    transport.getTurnDiffComparison.mockImplementation((_thread, messageId) =>
       messageId === "msg-1" ? Promise.resolve(comparison("turn-1", "first.ts")) : next.promise);
     render(<DiffPanel />);
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("first.ts"));

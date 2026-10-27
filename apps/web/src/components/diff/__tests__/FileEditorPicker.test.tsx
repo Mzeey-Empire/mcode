@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { OpenInApp } from "@/transport/types";
@@ -22,10 +23,14 @@ vi.mock("@/hooks/useOpenInApps", () => ({
   useOpenInApps: () => apps,
 }));
 
-const openIn = vi.fn().mockResolvedValue(undefined);
+const openIn = vi.mocked(mockTransport.openIn);
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ openIn }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.openIn).mockReset().mockResolvedValue(undefined);
+});
 
 import { FileEditorPicker } from "../FileEditorPicker";
 

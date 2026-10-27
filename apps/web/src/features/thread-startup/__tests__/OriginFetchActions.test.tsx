@@ -1,12 +1,19 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import type { ThreadStartup } from "@mcode/contracts";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const startupTransport = { resolveThreadStartup: vi.fn() };
+const startupTransport = {
+  resolveThreadStartup: vi.mocked(mockTransport.resolveThreadStartup),
+};
 
 vi.mock("@/transport", () => ({
-  getTransport: () => startupTransport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.resolveThreadStartup).mockReset();
+});
 
 import { useToastStore } from "@/stores/toastStore";
 import { OriginFetchActions } from "../OriginFetchActions";

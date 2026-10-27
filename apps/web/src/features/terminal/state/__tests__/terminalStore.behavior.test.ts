@@ -1,10 +1,15 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const terminalPause = vi.fn().mockResolvedValue(undefined);
+const terminalPause = vi.mocked(mockTransport.terminalPause);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ terminalPause }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalPause).mockReset().mockResolvedValue(undefined);
+});
 
 import { useTerminalStore } from "../terminalStore";
 

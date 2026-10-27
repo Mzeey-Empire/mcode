@@ -1,37 +1,40 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@mcode/contracts";
 
 const {
-  completeThread,
-  reopenThread,
-  retryThreadCleanup,
-  mockDeleteThread,
   clearScope,
   clearPreviewReferences,
   releaseBrowserScope,
 } = vi.hoisted(() => ({
-  completeThread: vi.fn(),
-  reopenThread: vi.fn(),
-  retryThreadCleanup: vi.fn(),
-  mockDeleteThread: vi.fn().mockResolvedValue(undefined),
+
+
+
+
   clearScope: vi.fn().mockResolvedValue(undefined),
   clearPreviewReferences: vi.fn(),
   releaseBrowserScope: vi.fn(),
 }));
 
+const completeThread = vi.mocked(mockTransport.completeThread);
+const reopenThread = vi.mocked(mockTransport.reopenThread);
+const retryThreadCleanup = vi.mocked(mockTransport.retryThreadCleanup);
+
 vi.mock("@/transport", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/transport")>();
   return {
     ...original,
-    getTransport: () => ({
-      completeThread,
-      reopenThread,
-      retryThreadCleanup,
-      deleteThread: mockDeleteThread,
-    }),
+    getTransport: () => mockTransport,
   };
+});
+
+beforeEach(() => {
+  vi.mocked(mockTransport.completeThread).mockReset();
+  vi.mocked(mockTransport.reopenThread).mockReset();
+  vi.mocked(mockTransport.retryThreadCleanup).mockReset();
+  vi.mocked(mockTransport.deleteThread).mockReset().mockResolvedValue(true);
 });
 vi.mock("@/features/preview/state/previewTabsStore", () => ({
   usePreviewTabsStore: { getState: () => ({ clearScope }) },

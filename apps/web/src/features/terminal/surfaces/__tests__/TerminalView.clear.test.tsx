@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { render } from "@testing-library/react";
 import { act } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -52,25 +53,18 @@ const term = {
 };
 
 const transport = {
-  terminalCapabilities: vi.fn(() => Promise.resolve({ contractVersion: 1, backend: "modern" })),
-  terminalCreate: vi.fn(),
-  terminalKill: vi.fn(() => Promise.resolve()),
-  terminalWrite: vi.fn(() => Promise.resolve()),
-  terminalResize: vi.fn(() => Promise.resolve()),
-  terminalPause: vi.fn(() => Promise.resolve()),
-  terminalResume: vi.fn(() => Promise.resolve()),
-  terminalSubscribe: vi.fn((ptyId: string, subscription: {
-    onData?: (event: { ptyId: string; payload: Uint8Array; seq: number }) => void;
-  }) => {
-    const unsubscribe = subscription.onData ? onPtyData(ptyId, subscription.onData) : undefined;
-    return () => unsubscribe?.();
-  }),
-  terminalDetachForSwitch: vi.fn(() => Promise.resolve()),
-  terminalReattach: vi.fn(() => Promise.resolve({ mode: "delta" })),
-  terminalCheckpoint: vi.fn((_ptyId: string, _seq: number, _data: string) =>
-    Promise.resolve({ accepted: true })),
-  ptySetLastSeq: vi.fn(),
-  ptyDeleteLastSeq: vi.fn(),
+  terminalCreate: vi.mocked(mockTransport.terminalCreate),
+  terminalKill: vi.mocked(mockTransport.terminalKill),
+  terminalWrite: vi.mocked(mockTransport.terminalWrite),
+  terminalResize: vi.mocked(mockTransport.terminalResize),
+  terminalPause: vi.mocked(mockTransport.terminalPause),
+  terminalResume: vi.mocked(mockTransport.terminalResume),
+  terminalSubscribe: vi.mocked(mockTransport.terminalSubscribe),
+  terminalDetachForSwitch: vi.mocked(mockTransport.terminalDetachForSwitch),
+  terminalReattach: vi.mocked(mockTransport.terminalReattach),
+  terminalCheckpoint: vi.mocked(mockTransport.terminalCheckpoint),
+  ptySetLastSeq: vi.mocked(mockTransport.ptySetLastSeq),
+  ptyDeleteLastSeq: vi.mocked(mockTransport.ptyDeleteLastSeq),
 };
 
 vi.mock("@xterm/xterm", () => {
@@ -99,7 +93,28 @@ vi.mock("@xterm/addon-serialize", () => ({
 
 vi.mock("@/transport", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/transport")>();
-  return { ...actual, getTransport: () => transport };
+  return { ...actual, getTransport: () => mockTransport };
+});
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalCreate).mockReset();
+  vi.mocked(mockTransport.terminalKill).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalWrite).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalResize).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalPause).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalResume).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalSubscribe).mockReset().mockImplementation((ptyId: string, subscription: {
+    onData?: (event: { ptyId: string; payload: Uint8Array; seq: number }) => void;
+  }) => {
+    const unsubscribe = subscription.onData ? onPtyData(ptyId, subscription.onData) : undefined;
+    return () => unsubscribe?.();
+  });
+  vi.mocked(mockTransport.terminalDetachForSwitch).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalReattach).mockReset().mockImplementation(() => Promise.resolve({ mode: "delta" }));
+  vi.mocked(mockTransport.terminalCheckpoint).mockReset().mockImplementation((_ptyId: string, _seq: number, _data: string) =>
+    Promise.resolve({ accepted: true }));
+  vi.mocked(mockTransport.ptySetLastSeq).mockReset();
+  vi.mocked(mockTransport.ptyDeleteLastSeq).mockReset();
 });
 
 import { TerminalView } from "../TerminalView";

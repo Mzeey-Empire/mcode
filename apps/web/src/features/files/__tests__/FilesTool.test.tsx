@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { FileReadResult, WorkspaceFileChanges } from "@mcode/contracts";
@@ -5,14 +6,21 @@ import { pushEmitter } from "@/transport";
 import { FilesTool } from "../FilesTool";
 import { getFilesScope, useFilesTabsStore } from "../filesTabsStore";
 
-const transport = vi.hoisted(() => ({
-  listWorkspaceFiles: vi.fn(),
-  getWorkspaceFileChanges: vi.fn(),
-  readFileContent: vi.fn(),
-  refreshWorkspaceFiles: vi.fn(),
-}));
+const transport = {
+  listWorkspaceFiles: vi.mocked(mockTransport.listWorkspaceFiles),
+  getWorkspaceFileChanges: vi.mocked(mockTransport.getWorkspaceFileChanges),
+  readFileContent: vi.mocked(mockTransport.readFileContent),
+  refreshWorkspaceFiles: vi.mocked(mockTransport.refreshWorkspaceFiles),
+};
 
-vi.mock("@/transport", async () => ({ ...(await vi.importActual("@/transport")), getTransport: () => transport }));
+vi.mock("@/transport", async () => ({ ...(await vi.importActual("@/transport")), getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.listWorkspaceFiles).mockReset();
+  vi.mocked(mockTransport.getWorkspaceFileChanges).mockReset();
+  vi.mocked(mockTransport.readFileContent).mockReset();
+  vi.mocked(mockTransport.refreshWorkspaceFiles).mockReset();
+});
 vi.mock("@/hooks/useOpenInApps", () => ({ useOpenInApps: () => [] }));
 // jsdom has no layout, so render every virtual row.
 vi.mock("@tanstack/react-virtual", () => ({
@@ -29,7 +37,7 @@ const WORKSPACE = "ws-1";
 const PATHS = ["src/a.ts", "src/b.ts", "README.md"];
 const NO_CHANGES: WorkspaceFileChanges = { git: true, truncated: false, entries: [] };
 
-function textFile(path: string, changedLines: [number, number][] | null): FileReadResult {
+function textFile(path: string, changedLines: [number, number][] | null): Extract<FileReadResult, { kind: "text" }> {
   return { kind: "text", path, size: 20, encoding: "utf-8", content: "one\ntwo\nthree", changedLines };
 }
 

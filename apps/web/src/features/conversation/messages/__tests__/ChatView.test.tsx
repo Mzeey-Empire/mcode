@@ -1,6 +1,7 @@
 import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { describe, it, expect, beforeEach, onTestFinished, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 import type { ReactNode } from "react";
@@ -14,7 +15,6 @@ const {
   chatViewThreadMockRef,
   chatViewConnectionStatusRef,
   chatViewGetTransportMock,
-  chatViewTransportMock,
   chatViewStopAgentMock,
   chatViewThreadStoreSetStateMock,
   chatViewApplyCanonicalRecoveriesMock,
@@ -33,19 +33,6 @@ const {
     chatViewThreadMockRef: { current: null as Record<string, unknown> | null },
     chatViewConnectionStatusRef: { current: "connected" as "connected" | "reconnecting" | "authFailed" },
     chatViewGetTransportMock: vi.fn(),
-    chatViewTransportMock: {
-      subscribeThread: vi.fn(),
-      unsubscribeThread: vi.fn(),
-      setThreadSubscriptions: vi.fn(),
-      continueWithoutSaving: vi.fn(),
-      stopAgent: vi.fn(),
-      continueAutomaticSetup: vi.fn(),
-      retryAutomaticSetup: vi.fn(),
-      getThreadStartup: vi.fn(),
-      listThreadStartups: vi.fn(),
-      cancelThreadStartup: vi.fn(),
-      retryThreadStartupAgent: vi.fn(),
-    },
     chatViewStopAgentMock: vi.fn(),
     chatViewThreadStoreSetStateMock: vi.fn(),
     chatViewApplyCanonicalRecoveriesMock: vi.fn(),
@@ -79,6 +66,8 @@ const {
     },
   };
 });
+
+const chatViewTransportMock = vi.mocked(mockTransport);
 
 vi.mock("@/features/projects/state/workspaceStore", () => ({
   useWorkspaceStore: Object.assign(
@@ -161,7 +150,7 @@ vi.mock("@/stores/composerDraftStore", () => ({
 
 vi.mock("@/transport", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/transport")>(),
-  getTransport: chatViewGetTransportMock,
+  getTransport: chatViewGetTransportMock.mockImplementation(() => mockTransport),
 }));
 
 vi.mock("@/features/conversation/residency/conversation-residency", async (importOriginal) => ({
@@ -380,7 +369,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewTransportMock.cancelThreadStartup.mockReset();
     chatViewTransportMock.getThreadStartup.mockResolvedValue(null);
     chatViewTransportMock.listThreadStartups.mockResolvedValue({ records: [] });
-    chatViewTransportMock.cancelThreadStartup.mockResolvedValue(undefined);
     chatViewStopAgentMock.mockClear();
     chatViewGetTransportMock.mockReset();
     chatViewGetTransportMock.mockReturnValue(chatViewTransportMock);

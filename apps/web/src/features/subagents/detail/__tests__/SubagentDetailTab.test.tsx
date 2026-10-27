@@ -1,4 +1,5 @@
 import { createMockMessage } from "@mcode/contracts/testing";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -15,15 +16,25 @@ import { useMessageRevealStore } from "@/features/conversation/messages/message-
 import { useSubagentRosterStore } from "../../state/subagentRosterStore";
 import { SubagentDetailTab } from "../SubagentDetailTab";
 
-const transport = vi.hoisted(() => ({ loadSubagentRoster: vi.fn(), loadSubagentDetail: vi.fn(), stopCanonicalSubagent: vi.fn() }));
+const transport = {
+  loadSubagentRoster: vi.mocked(mockTransport.loadSubagentRoster),
+  loadSubagentDetail: vi.mocked(mockTransport.loadSubagentDetail),
+  stopCanonicalSubagent: vi.mocked(mockTransport.stopCanonicalSubagent),
+};
 vi.mock("@/features/conversation", async (original) => ({
   ...await original<typeof import("@/features/conversation")>(),
   getConversationResidency: () => ({ mountDisplayConversation: () => {}, unmountDisplayConversation: () => {} }),
   MessageList: ({ leadingContent }: { readonly leadingContent?: ReactNode }) => <div data-testid="child-transcript">{leadingContent}</div>,
 }));
 vi.mock("@/transport", async (original) => ({
-  ...await original<typeof import("@/transport")>(), getTransport: () => transport,
+  ...await original<typeof import("@/transport")>(), getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.loadSubagentRoster).mockReset();
+  vi.mocked(mockTransport.loadSubagentDetail).mockReset();
+  vi.mocked(mockTransport.stopCanonicalSubagent).mockReset();
+});
 
 function entry(overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
   return {

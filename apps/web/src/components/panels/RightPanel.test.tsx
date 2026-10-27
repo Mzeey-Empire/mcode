@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -5,7 +6,6 @@ const {
   activatePreviewPage,
   closePreviewPage,
   openPreviewPage,
-  terminalKill,
   previewPanelRender,
   previewTabSet,
   previewTabsBridge,
@@ -13,7 +13,7 @@ const {
   activatePreviewPage: vi.fn(),
   closePreviewPage: vi.fn(),
   openPreviewPage: vi.fn(),
-  terminalKill: vi.fn(),
+
   previewPanelRender: vi.fn(),
   previewTabSet: { current: null as {
     threadId: string;
@@ -34,6 +34,8 @@ const {
     updatedListener: { current: null as ((payload: unknown) => void) | null },
   },
 }));
+
+const terminalKill = vi.mocked(mockTransport.terminalKill);
 
 vi.mock("./ActivityRail", () => ({
   ACTIVITY_RAIL_FLOATING_OVERLAP_PX: 112,
@@ -148,17 +150,18 @@ vi.mock("@/features/preview/state/previewTabsStore", () => ({
 }));
 vi.mock("@/lib/ensure-terminal", () => ({ createTerminalForScope: vi.fn() }));
 vi.mock("@/lib/right-panel-layout", () => ({ toggleRightPanelAdaptive: vi.fn() }));
-vi.mock("@/transport", () => ({ getTransport: () => ({
-    terminalKill,
-    terminalPause: vi.fn().mockResolvedValue(undefined),
-    terminalHasChildren: vi.fn().mockResolvedValue({ hasChildren: false }),
-    listOpenInApps: vi.fn().mockResolvedValue([]),
-    getWorkspaceActionRun: vi.fn(),
-    readWorkspaceEnvironment: vi.fn().mockResolvedValue({ document: { version: "0.0.1", actions: [] }, revision: null, status: "absent" }),
-    // Echo the seeded runs: hydration treats runs the server omits as deleted.
-    listWorkspaceActionRuns: vi.fn(async (threadId: string) =>
-      Object.values(useProjectActionStore.getState().runsByThread[threadId] ?? {})),
-  }) }));
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalKill).mockReset();
+  vi.mocked(mockTransport.terminalPause).mockReset().mockResolvedValue(undefined);
+  vi.mocked(mockTransport.terminalHasChildren).mockReset().mockResolvedValue({ hasChildren: false });
+  vi.mocked(mockTransport.listOpenInApps).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.getWorkspaceActionRun).mockReset();
+  vi.mocked(mockTransport.readWorkspaceEnvironment).mockReset().mockResolvedValue({ document: { version: "0.0.1", actions: [] }, revision: null, status: "absent" });
+  vi.mocked(mockTransport.listWorkspaceActionRuns).mockReset().mockImplementation(async (threadId: string) =>
+  Object.values(useProjectActionStore.getState().runsByThread[threadId] ?? {}));
+});
 
 import { reconcileWarmPreviewScopes, RightPanel } from "./RightPanel";
 import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";

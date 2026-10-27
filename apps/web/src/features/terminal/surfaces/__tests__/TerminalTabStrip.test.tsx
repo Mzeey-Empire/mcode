@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,14 +7,17 @@ import type { TerminalInstance } from "@/features/terminal/state/terminalStore";
 import { createTerminalForScope } from "@/lib/ensure-terminal";
 import { TerminalTabStrip } from "../TerminalTabStrip";
 
-const { transport } = vi.hoisted(() => ({
-  transport: {
-    readWorkspaceEnvironment: vi.fn(),
-    listWorkspaceActionRuns: vi.fn(),
-  },
-}));
+const transport = {
+  readWorkspaceEnvironment: vi.mocked(mockTransport.readWorkspaceEnvironment),
+  listWorkspaceActionRuns: vi.mocked(mockTransport.listWorkspaceActionRuns),
+};
 
-vi.mock("@/transport", () => ({ getTransport: () => transport }));
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.readWorkspaceEnvironment).mockReset();
+  vi.mocked(mockTransport.listWorkspaceActionRuns).mockReset();
+});
 vi.mock("@/lib/ensure-terminal", () => ({ createTerminalForScope: vi.fn() }));
 
 function terminal(id: string, label: string): TerminalInstance {

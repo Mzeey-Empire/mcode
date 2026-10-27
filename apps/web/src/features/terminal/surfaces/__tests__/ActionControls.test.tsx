@@ -1,18 +1,26 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 
 const transport = {
-  restartWorkspaceAction: vi.fn(),
-  stopWorkspaceAction: vi.fn(),
-  getWorkspaceActionRun: vi.fn(),
-  terminalPause: vi.fn().mockResolvedValue(undefined),
+  restartWorkspaceAction: vi.mocked(mockTransport.restartWorkspaceAction),
+  stopWorkspaceAction: vi.mocked(mockTransport.stopWorkspaceAction),
+  getWorkspaceActionRun: vi.mocked(mockTransport.getWorkspaceActionRun),
+  terminalPause: vi.mocked(mockTransport.terminalPause),
 };
 
 const openUrlInPreview = vi.hoisted(() => vi.fn());
 
-vi.mock("@/transport", () => ({ getTransport: () => transport }));
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.restartWorkspaceAction).mockReset();
+  vi.mocked(mockTransport.stopWorkspaceAction).mockReset();
+  vi.mocked(mockTransport.getWorkspaceActionRun).mockReset();
+  vi.mocked(mockTransport.terminalPause).mockReset().mockResolvedValue(undefined);
+});
 vi.mock("@/features/preview", () => ({ openUrlInPreview }));
 
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";

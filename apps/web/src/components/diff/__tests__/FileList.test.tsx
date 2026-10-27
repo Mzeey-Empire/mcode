@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,14 +13,19 @@ vi.mock("@/hooks/useOpenInApps", () => ({
   useOpenInApps: () => [],
 }));
 
-const transport = vi.hoisted(() => ({
-  getSnapshotDiff: vi.fn(),
-  getReviewState: vi.fn(),
-}));
+const transport = {
+  getSnapshotDiff: vi.mocked(mockTransport.getSnapshotDiff),
+  getReviewState: vi.mocked(mockTransport.getReviewState),
+};
 
 vi.mock("@/transport", () => ({
-  getTransport: () => transport,
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getSnapshotDiff).mockReset();
+  vi.mocked(mockTransport.getReviewState).mockReset();
+});
 
 /** The header's Files popover and the list it scrolls, as the Review panel pairs them below 800. */
 function ReviewWithJump({ files }: { readonly files: ReviewFileChange[] }) {

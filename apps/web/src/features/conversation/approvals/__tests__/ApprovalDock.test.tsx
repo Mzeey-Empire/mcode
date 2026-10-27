@@ -1,8 +1,8 @@
 import { createMockApproval, createMockThread } from "@mcode/contracts/testing";
-
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useApprovalStore } from "@/stores/approvalStore";
-import type { McodeTransport } from "@/transport/types";
+
 import type { ApprovalRequest, ApprovalSubject } from "@mcode/contracts";
 import { disposeHighlighter } from "@pierre/diffs";
 import { act, fireEvent, render, screen } from "@testing-library/react";
@@ -11,13 +11,15 @@ import { StrictMode, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APPROVAL_ARM_DELAY_MS, ApprovalAnnouncer, ApprovalDock, useDockApprovals } from "../ApprovalDock";
 
-const { respondToApproval } = vi.hoisted(() => ({
-  respondToApproval: vi.fn<McodeTransport["respondToApproval"]>(),
-}));
+const respondToApproval = vi.mocked(mockTransport.respondToApproval);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ respondToApproval }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.respondToApproval).mockReset();
+});
 
 interface DockHarnessProps {
   readonly threadId?: string;

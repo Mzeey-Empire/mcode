@@ -1,16 +1,16 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts";
 
-const { transport } = vi.hoisted(() => ({
-  transport: {
-    terminalProfileList: vi.fn().mockResolvedValue({ certified: [], custom: [] }),
-    terminalWorkspacePreferencesGet: vi.fn(),
-  },
-}));
 
-vi.mock("@/transport", () => ({ getTransport: () => transport }));
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalProfileList).mockReset().mockResolvedValue({ certified: [], custom: [] });
+  vi.mocked(mockTransport.terminalWorkspacePreferencesGet).mockReset();
+});
 
 import { TerminalSection } from "../TerminalSection";
 import { useSettingsStore } from "@/stores/settingsStore";

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 const { createTerminalForScope } = vi.hoisted(() => ({
   createTerminalForScope: vi.fn(),
@@ -6,8 +7,12 @@ const { createTerminalForScope } = vi.hoisted(() => ({
 
 vi.mock("@/lib/ensure-terminal", () => ({ createTerminalForScope }));
 vi.mock("@/transport", () => ({
-  getTransport: () => ({ terminalPause: vi.fn().mockResolvedValue(undefined) }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalPause).mockReset().mockResolvedValue(undefined);
+});
 
 import { summonTab } from "@/lib/summon-tab";
 import { useDiffStore } from "@/stores/diffStore";

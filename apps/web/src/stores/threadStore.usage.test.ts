@@ -1,17 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mockTransport } from "@/__tests__/mocks/transport";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderUsageInfo } from "@mcode/contracts";
 import { mergeProviderUsageSnapshot, useThreadStore } from "./threadStore";
 import { createEmptyThreadRecord } from "./thread-record";
 
-const { getProviderUsage } = vi.hoisted(() => ({
-  getProviderUsage: vi.fn<() => Promise<ProviderUsageInfo>>(),
-}));
+const getProviderUsage = vi.mocked(mockTransport.getProviderUsage);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({
-    getProviderUsage,
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getProviderUsage).mockReset();
+});
 
 const READY_USAGE: ProviderUsageInfo = {
   providerId: "claude",

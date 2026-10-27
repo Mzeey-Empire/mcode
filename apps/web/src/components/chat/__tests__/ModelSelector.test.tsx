@@ -1,3 +1,5 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
+import type { ProviderModelInfo } from "@/transport/types";
 import { describe, it, expect, beforeEach, onTestFinished, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -37,12 +39,14 @@ vi.mock("@/components/ui/tooltip", () => ({
 }));
 
 // Prevent real RPC calls triggered when a provider tab loads models.
-const { listProviderModels } = vi.hoisted(() => ({ listProviderModels: vi.fn() }));
+const listProviderModels = vi.mocked(mockTransport.listProviderModels);
 vi.mock("@/transport", () => ({
-  getTransport: () => ({
-    listProviderModels,
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.listProviderModels).mockReset();
+});
 
 import { ModelSelector } from "../ModelSelector";
 
@@ -353,7 +357,7 @@ describe("ModelSelector", () => {
   });
 
   describe("legacy models", () => {
-    const LIVE_CLAUDE = [
+    const LIVE_CLAUDE: ProviderModelInfo[] = [
       { id: "claude-opus-5-5", name: "Claude Opus 5.5" },
       { id: "claude-opus-5", name: "Claude Opus 5", lifecycle: "legacy" },
       { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },

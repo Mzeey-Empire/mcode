@@ -1,13 +1,20 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
 import { pushEmitter } from "@/transport";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSubagentRosterStore } from "../subagentRosterStore";
 
-const transport = vi.hoisted(() => ({ loadSubagentRoster: vi.fn() }));
+const transport = {
+  loadSubagentRoster: vi.mocked(mockTransport.loadSubagentRoster),
+};
 vi.mock("@/transport", async (original) => ({
-  ...await original<typeof import("@/transport")>(), getTransport: () => transport,
+  ...await original<typeof import("@/transport")>(), getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.loadSubagentRoster).mockReset();
+});
 
 function entry(overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
   return {

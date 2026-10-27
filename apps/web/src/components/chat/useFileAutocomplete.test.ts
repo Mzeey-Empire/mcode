@@ -1,19 +1,21 @@
 // @vitest-environment jsdom
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderCatalogSnapshot, WorkspaceFileList } from "@mcode/contracts";
 
-const listWorkspaceFiles = vi.fn<() => Promise<WorkspaceFileList>>();
-const getProviderCatalog = vi.fn<() => Promise<ProviderCatalogSnapshot>>();
-const refreshWorkspaceFiles = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+const listWorkspaceFiles = vi.mocked(mockTransport.listWorkspaceFiles);
+const getProviderCatalog = vi.mocked(mockTransport.getProviderCatalog);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({
-    listWorkspaceFiles,
-    getProviderCatalog,
-    refreshWorkspaceFiles,
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.listWorkspaceFiles).mockReset();
+  vi.mocked(mockTransport.getProviderCatalog).mockReset();
+  vi.mocked(mockTransport.refreshWorkspaceFiles).mockReset().mockResolvedValue(undefined);
+});
 
 import {
   clearFileListCache,

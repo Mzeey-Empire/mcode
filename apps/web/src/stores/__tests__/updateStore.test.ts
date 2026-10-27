@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mockTransport } from "@/__tests__/mocks/transport";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
-const getStage = vi.fn();
-vi.mock("@/transport", () => ({ getTransport: () => ({ getStage }) }));
+const getStage = vi.mocked(mockTransport.getStage);
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getStage).mockReset();
+});
 
 import { useUpdateStore } from "../updateStore";
 

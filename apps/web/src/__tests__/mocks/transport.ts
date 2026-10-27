@@ -6,7 +6,7 @@ import type {
 import { getDefaultSettings } from "@mcode/contracts";
 import { vi } from "vitest";
 
-export const mockTransport: McodeTransport = {
+const transportDefaults: Partial<McodeTransport> = {
   registerBrowserAutomationHost: vi.fn().mockResolvedValue({
     generation: 1,
     desktopInstanceId: "desktop-test",
@@ -15,12 +15,9 @@ export const mockTransport: McodeTransport = {
   respondToBrowserAutomationRequest: vi.fn().mockResolvedValue(undefined),
   heartbeatBrowserAutomationHost: vi.fn().mockResolvedValue(undefined),
   cancelBrowserAutomationRequest: vi.fn().mockResolvedValue(undefined),
-  stageDraftImage: vi.fn<McodeTransport["stageDraftImage"]>(),
-  createWorkspace: vi.fn<McodeTransport["createWorkspace"]>(),
   listWorkspaces: vi.fn().mockResolvedValue([]),
   renameWorkspace: vi.fn().mockResolvedValue(createMockWorkspace()),
   resolveProjectIcons: vi.fn().mockResolvedValue([]),
-  setProjectIcon: vi.fn<McodeTransport["setProjectIcon"]>(),
   listProjectIconCandidates: vi.fn().mockResolvedValue({ files: [], total: 0 }),
   readWorkspaceEnvironment: vi.fn().mockResolvedValue({
     document: { version: "0.0.1", actions: [] },
@@ -40,12 +37,8 @@ export const mockTransport: McodeTransport = {
   }),
   approveWorkspaceEnvironmentCommand: vi.fn().mockResolvedValue(undefined),
   forgetWorkspaceEnvironmentApproval: vi.fn().mockResolvedValue(undefined),
-  continueAutomaticSetup: vi.fn(),
-  retryAutomaticSetup: vi.fn(),
   listWorkspaceActionRuns: vi.fn().mockResolvedValue([]),
-  startWorkspaceAction: vi.fn(),
   stopWorkspaceAction: vi.fn().mockResolvedValue(null),
-  restartWorkspaceAction: vi.fn(),
   getWorkspaceActionRun: vi.fn().mockResolvedValue(null),
   deleteWorkspace: vi.fn().mockResolvedValue(true),
   touchLastOpened: vi.fn().mockResolvedValue(undefined),
@@ -54,7 +47,6 @@ export const mockTransport: McodeTransport = {
   removeRecent: vi.fn().mockResolvedValue(undefined),
   enrichWorkspaces: vi.fn().mockResolvedValue({ items: [] }),
   filesystemBrowse: vi.fn().mockResolvedValue({ path: "/", parent: null, entries: [], requestedPath: "folder", isTooBroad: false }),
-  createThread: vi.fn(),
   listThreads: vi.fn().mockResolvedValue([]),
   listRecentThreads: vi.fn().mockResolvedValue([]),
   searchThreads: vi.fn().mockResolvedValue({ threads: [], workspaces: [] }),
@@ -71,9 +63,7 @@ export const mockTransport: McodeTransport = {
   createBranch: vi.fn().mockResolvedValue({ branch: "feat/test" }),
   listWorktrees: vi.fn().mockResolvedValue([]),
   sendMessage: vi.fn().mockResolvedValue(1),
-  steerTurn: vi.fn(),
   listHeldSteers: vi.fn().mockResolvedValue([]),
-  settleUnknownSteer: vi.fn(),
   retryErroredTurn: vi.fn().mockResolvedValue({ turnId: "turn-resume" }),
   scheduleTurnResume: vi.fn().mockImplementation(async ({ turnId, at }: { turnId: string; at: string }) => ({ turnId, at })),
   unscheduleTurnResume: vi.fn().mockResolvedValue(undefined),
@@ -81,9 +71,6 @@ export const mockTransport: McodeTransport = {
   retrySave: vi.fn().mockResolvedValue({ retried: false }),
   getThreadStartup: vi.fn().mockResolvedValue(null),
   listThreadStartups: vi.fn().mockResolvedValue({ records: [] }),
-  cancelThreadStartup: vi.fn(),
-  resolveThreadStartup: vi.fn(),
-  retryThreadStartupAgent: vi.fn(),
   continueWithoutSaving: vi.fn().mockResolvedValue(undefined),
   stopAgent: vi.fn().mockImplementation((threadId: string) => Promise.resolve({
     threadId,
@@ -114,7 +101,6 @@ export const mockTransport: McodeTransport = {
     reason: "unsupported-provider",
   }),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
-  loadConversationPage: vi.fn(),
   loadSubagentRoster: vi.fn().mockResolvedValue({
     owningParentThreadId: "thread-1",
     epoch: "test-boot",
@@ -127,9 +113,6 @@ export const mockTransport: McodeTransport = {
     childThreadId: "child-1",
     status: "interrupted",
   }),
-  loadOlderConversationPage: vi.fn(),
-  loadNewerConversationPage: vi.fn(),
-  createAndSendMessage: vi.fn(),
   updateThreadTitle: vi.fn().mockResolvedValue(true),
   updateThreadSettings: vi.fn().mockResolvedValue(true),
   listAttention: vi.fn().mockResolvedValue([]),
@@ -162,19 +145,6 @@ export const mockTransport: McodeTransport = {
   listOpenInApps: vi.fn().mockResolvedValue([]),
   openIn: vi.fn().mockResolvedValue(undefined),
   getBranchPr: vi.fn().mockResolvedValue(null),
-  getPullRequestCapabilities: vi.fn(),
-  listPullRequests: vi.fn(),
-  getPullRequestResource: vi.fn(),
-  getPullRequestTimeline: vi.fn(),
-  getPullRequestFiles: vi.fn(),
-  getPullRequestPatch: vi.fn(),
-  createPullRequestReviewTask: vi.fn(),
-  getPullRequestReviewLink: vi.fn(),
-  postPullRequestComment: vi.fn(),
-  submitPullRequestReview: vi.fn(),
-  setPullRequestReadiness: vi.fn(),
-  closePullRequest: vi.fn(),
-  mergePullRequest: vi.fn(),
   cancelPullRequestOperation: vi.fn().mockResolvedValue({ ok: true, cancelled: false }),
   checkStatus: vi.fn().mockResolvedValue({ aggregate: "no_checks", runs: [], fetchedAt: 0 }),
   getProviderCatalog: vi.fn().mockImplementation(async (request: ProviderCatalogRequest) => ({
@@ -231,7 +201,6 @@ export const mockTransport: McodeTransport = {
   terminalResume: vi.fn().mockResolvedValue(undefined),
   terminalSubscribe: vi.fn(() => () => {}),
   terminalDetachForSwitch: vi.fn().mockResolvedValue(undefined),
-  terminalNotifyReconnectGap: vi.fn(),
   terminalKillByThread: vi.fn().mockResolvedValue(undefined),
   terminalReattach: vi.fn().mockResolvedValue({ mode: "delta" }),
   terminalCheckpoint: vi.fn().mockResolvedValue({ accepted: true }),
@@ -255,20 +224,12 @@ export const mockTransport: McodeTransport = {
     counters: [],
     histograms: [],
   }),
-  ptySetLastSeq: vi.fn(),
-  ptyDeleteLastSeq: vi.fn(),
   listToolCallRecords: vi.fn().mockResolvedValue([]),
   listToolCallRecordsByParent: vi.fn().mockResolvedValue([]),
   listNarrative: vi.fn().mockResolvedValue({ tools: [], thoughts: [], hooks: [] }),
   loadTurn: vi.fn().mockResolvedValue([]),
   getThreadTasks: vi.fn().mockResolvedValue(null),
   getPlanSnapshot: vi.fn().mockResolvedValue({ versions: [], comments: [], phase: null, pendingQuestions: null, pendingImplement: null }),
-  createPlanComment: vi.fn(),
-  updatePlanComment: vi.fn(),
-  setPlanCommentStatus: vi.fn(),
-  deletePlanComment: vi.fn(),
-  savePlanVersion: vi.fn(),
-  implementPlan: vi.fn(),
   getSnapshotDiff: vi.fn().mockResolvedValue(""),
   getTurnDiffComparison: vi.fn().mockResolvedValue({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } }),
   listReviewTurns: vi.fn().mockResolvedValue([]),
@@ -305,7 +266,6 @@ export const mockTransport: McodeTransport = {
   listProviderModes: vi.fn().mockResolvedValue(null),
   listProviderAvailability: vi.fn().mockResolvedValue([]),
   listProviderStatus: vi.fn().mockResolvedValue([]),
-  updateProviderCli: vi.fn(),
   acknowledgeProviderModels: vi.fn().mockResolvedValue(undefined),
   setBackground: vi.fn().mockResolvedValue(undefined),
   getProviderUsage: vi.fn().mockResolvedValue({
@@ -315,6 +275,26 @@ export const mockTransport: McodeTransport = {
   generateRecap: vi.fn().mockResolvedValue({ text: "Mock recap" }),
   readLatestHandoff: vi.fn().mockResolvedValue(null),
 };
+
+const inspectionKeys = new Set([
+  "then", "toJSON", "asymmetricMatch", "$$typeof", "nodeType", "constructor",
+]);
+
+/** Shared transport fake with stable async spies for methods without explicit defaults. */
+export const mockTransport: McodeTransport = new Proxy(transportDefaults, {
+  get(target, key) {
+    if (typeof key !== "string" || inspectionKeys.has(key)) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(target, key)) {
+      Object.defineProperty(target, key, {
+        value: vi.fn(async () => undefined),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+    return Reflect.get(target, key);
+  },
+}) as McodeTransport;
 
 vi.mocked(mockTransport.loadConversationPage).mockImplementation(
   async (threadId: string, limit: number, before?: number) => {

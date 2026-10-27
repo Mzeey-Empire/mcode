@@ -5,6 +5,7 @@
  * 1. Unavailable state - when desktopBridge.preview is absent.
  * 2. Full panel state - when desktopBridge.preview is present (hooks mocked).
  */
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
@@ -21,7 +22,6 @@ const {
   mockCaptureCleanPage,
   mockSchedulePageSnapshot,
   mockCaptureSuccess,
-  mockGetProviderCatalog,
 } = vi.hoisted(() => ({
   mockUsePreviewBridge: vi.fn(),
   mockUsePreviewTabs: vi.fn<() => {
@@ -41,18 +41,10 @@ const {
   mockCaptureSuccess: {
     current: undefined as ((kind: "viewport" | "region" | "element") => void) | undefined,
   },
-  mockGetProviderCatalog: vi.fn().mockResolvedValue({
-    providerId: "claude",
-    context: { scope: "user" },
-    freshness: { status: "fresh", fetchedAt: "2026-07-20T12:00:00.000Z" },
-    diagnostics: [],
-    entries: [
-      { kind: "skill", identity: { providerId: "claude", kind: "skill", nativeId: "commit" }, name: "commit", description: "Create a git commit", source: "user" },
-      { kind: "skill", identity: { providerId: "claude", kind: "skill", nativeId: "review-pr" }, name: "review-pr", description: "Review a pull request", source: "user" },
-    ],
-    selectableAgents: [],
-  }),
+
 }));
+
+const mockGetProviderCatalog = vi.mocked(mockTransport.getProviderCatalog);
 
 // Mock hooks before importing the component under test.
 vi.mock("../../navigation/usePreviewSurfaceBridge", () => ({
@@ -64,11 +56,23 @@ vi.mock("../../navigation/usePreviewSurfaceBridge", () => ({
 // tests. The mock is shared across all describe blocks; individual tests that
 // need specific catalogs override mockGetProviderCatalog directly.
 vi.mock("@/transport", () => ({
-  getTransport: () => ({
-    getProviderCatalog: mockGetProviderCatalog,
-    refreshWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getProviderCatalog).mockReset().mockResolvedValue({
+    providerId: "claude",
+    context: { scope: "user" },
+    freshness: { status: "fresh", fetchedAt: "2026-07-20T12:00:00.000Z" },
+    diagnostics: [],
+    entries: [
+      { kind: "skill", identity: { providerId: "claude", kind: "skill", nativeId: "commit" }, name: "commit", description: "Create a git commit", source: "user" },
+      { kind: "skill", identity: { providerId: "claude", kind: "skill", nativeId: "review-pr" }, name: "review-pr", description: "Review a pull request", source: "user" },
+    ],
+    selectableAgents: [],
+  });
+  vi.mocked(mockTransport.refreshWorkspaceFiles).mockReset().mockResolvedValue(undefined);
+});
 
 vi.mock("../../tabs/usePreviewTabs", () => ({
   usePreviewTabs: mockUsePreviewTabs,

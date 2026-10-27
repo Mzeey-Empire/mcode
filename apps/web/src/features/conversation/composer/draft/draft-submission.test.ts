@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DraftBrowserNotePage, MessageMention } from "@mcode/contracts";
-import { getTransport } from "@/transport";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import {
   editDraftDiffComment,
@@ -27,7 +27,7 @@ import {
   type NextMessageDraft,
 } from "./draft-submission";
 
-vi.mock("@/transport", () => ({ getTransport: vi.fn() }));
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
 
 const MESSAGE_ID = "11111111-1111-4111-8111-111111111111";
 const target = { filePath: "src/state.ts", side: "right" as const, line: 11, lineContent: "const state = next;" };
@@ -197,7 +197,7 @@ describe("settling with an open editor", () => {
 
 describe("draft submission lifecycle", () => {
   const THREAD_ID = "thread-lifecycle";
-  const confirmMessage = vi.fn();
+  const confirmMessage = vi.mocked(mockTransport.confirmMessage);
 
   function pendingComments(): string[] {
     const draft = useComposerDraftStore.getState().drafts[THREAD_ID];
@@ -213,7 +213,6 @@ describe("draft submission lifecycle", () => {
   beforeEach(() => {
     useComposerDraftStore.setState({ drafts: {} });
     confirmMessage.mockReset();
-    vi.mocked(getTransport).mockReturnValue({ confirmMessage } as unknown as ReturnType<typeof getTransport>);
   });
 
   it("freezes a Send that carries only Files comments and deletes them once it succeeds", () => {

@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { render, screen, within } from "@testing-library/react";
 import { act, StrictMode } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -108,69 +109,21 @@ const term = {
 };
 
 const transport = {
-  terminalCapabilities: vi.fn(() => Promise.resolve({
-    contractVersion: 1,
-    backend: "modern",
-  })),
-  terminalCreate: vi.fn(() => Promise.resolve({ ptyId: "pty-replacement", shell: "pwsh" })),
-  terminalKill: vi.fn(() => Promise.resolve()),
-  terminalWrite: vi.fn(() => Promise.resolve()),
-  terminalResize: vi.fn(() => Promise.resolve()),
-  terminalPause: vi.fn(() => Promise.resolve()),
-  terminalResume: vi.fn(() => Promise.resolve()),
-  terminalSubscribe: vi.fn((ptyId: string, subscription: {
-    onData?: (event: { ptyId: string; payload: Uint8Array; seq: number }) => void;
-    onExit?: (event: {
-      ptyId: string;
-      code: number;
-      state: "exited" | "failed";
-      exit: { code: number | null; signal: number | null; reason: "natural" };
-    }) => void;
-    onReconnectGap?: () => void;
-  }) => {
-    const unsubs = [
-      subscription.onData ? onPtyData(ptyId, subscription.onData) : undefined,
-      subscription.onExit
-        ? onPtyExit(ptyId, (detail) => subscription.onExit?.({
-          ptyId: detail.ptyId,
-          code: detail.code,
-          state: "exited",
-          exit: { code: detail.code, signal: null, reason: "natural" },
-        }))
-        : undefined,
-      subscription.onReconnectGap ? onPtyReconnectGap(ptyId, subscription.onReconnectGap) : undefined,
-    ].filter((unsubscribe): unsubscribe is () => void => Boolean(unsubscribe));
-    return () => unsubs.forEach((unsubscribe) => unsubscribe());
-  }),
-  terminalDetachForSwitch: vi.fn(async (
-    ptyId: string,
-    checkpoint?: Promise<{ seq: number; data: string } | undefined>,
-  ) => {
-    const state = checkpoint ? await checkpoint : undefined;
-    if (state) {
-      await transport.terminalCheckpoint(ptyId, state.seq, state.data);
-    }
-  }),
-  terminalReattach: vi.fn<() => Promise<RestoreResult>>(() =>
-    Promise.resolve({ mode: "delta" }),
-  ),
-  terminalCheckpoint: vi.fn((_ptyId: string, _seq: number, _data: string) =>
-    Promise.resolve({ accepted: true })),
-  ptySetLastSeq: vi.fn(),
-  ptyDeleteLastSeq: vi.fn(),
-  listOpenInApps: vi.fn(() => Promise.resolve([{
-    id: "code",
-    label: "VS Code",
-    kind: "editor" as const,
-    iconKey: "code",
-    detected: true,
-  }])),
-  openIn: vi.fn(() => Promise.resolve()),
-  terminalDiagnostics: vi.fn(() => Promise.resolve({
-    contractVersion: 1,
-    backend: "modern",
-    redacted: true,
-  })),
+  terminalCreate: vi.mocked(mockTransport.terminalCreate),
+  terminalKill: vi.mocked(mockTransport.terminalKill),
+  terminalWrite: vi.mocked(mockTransport.terminalWrite),
+  terminalResize: vi.mocked(mockTransport.terminalResize),
+  terminalPause: vi.mocked(mockTransport.terminalPause),
+  terminalResume: vi.mocked(mockTransport.terminalResume),
+  terminalSubscribe: vi.mocked(mockTransport.terminalSubscribe),
+  terminalDetachForSwitch: vi.mocked(mockTransport.terminalDetachForSwitch),
+  terminalReattach: vi.mocked(mockTransport.terminalReattach),
+  terminalCheckpoint: vi.mocked(mockTransport.terminalCheckpoint),
+  ptySetLastSeq: vi.mocked(mockTransport.ptySetLastSeq),
+  ptyDeleteLastSeq: vi.mocked(mockTransport.ptyDeleteLastSeq),
+  listOpenInApps: vi.mocked(mockTransport.listOpenInApps),
+  openIn: vi.mocked(mockTransport.openIn),
+  terminalDiagnostics: vi.mocked(mockTransport.terminalDiagnostics),
 };
 
 vi.mock("@xterm/xterm", () => {
@@ -202,8 +155,64 @@ vi.mock("@/transport", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/transport")>();
   return {
     ...actual,
-    getTransport: () => transport,
+    getTransport: () => mockTransport,
   };
+});
+
+beforeEach(() => {
+  vi.mocked(mockTransport.terminalCreate).mockReset().mockImplementation(() => Promise.resolve({ ptyId: "pty-replacement", shell: "pwsh" }));
+  vi.mocked(mockTransport.terminalKill).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalWrite).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalResize).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalPause).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalResume).mockReset().mockImplementation(() => Promise.resolve());
+  vi.mocked(mockTransport.terminalSubscribe).mockReset().mockImplementation((ptyId: string, subscription: {
+    onData?: (event: { ptyId: string; payload: Uint8Array; seq: number }) => void;
+    onExit?: (event: {
+      ptyId: string;
+      code: number;
+      state: "exited" | "failed";
+      exit: { code: number | null; signal: number | null; reason: "natural" };
+    }) => void;
+    onReconnectGap?: () => void;
+  }) => {
+    const unsubs = [
+      subscription.onData ? onPtyData(ptyId, subscription.onData) : undefined,
+      subscription.onExit
+        ? onPtyExit(ptyId, (detail) => subscription.onExit?.({
+          ptyId: detail.ptyId,
+          code: detail.code,
+          state: "exited",
+          exit: { code: detail.code, signal: null, reason: "natural" },
+        }))
+        : undefined,
+      subscription.onReconnectGap ? onPtyReconnectGap(ptyId, subscription.onReconnectGap) : undefined,
+    ].filter((unsubscribe): unsubscribe is () => void => Boolean(unsubscribe));
+    return () => unsubs.forEach((unsubscribe) => unsubscribe());
+  });
+  vi.mocked(mockTransport.terminalDetachForSwitch).mockReset().mockImplementation(async (
+    ptyId: string,
+    checkpoint?: Promise<{ seq: number; data: string } | undefined>,
+  ) => {
+    const state = checkpoint ? await checkpoint : undefined;
+    if (state) {
+      await transport.terminalCheckpoint(ptyId, state.seq, state.data);
+    }
+  });
+  vi.mocked(mockTransport.terminalReattach).mockReset().mockImplementation(() =>
+    Promise.resolve({ mode: "delta" }));
+  vi.mocked(mockTransport.terminalCheckpoint).mockReset().mockImplementation((_ptyId: string, _seq: number, _data: string) =>
+    Promise.resolve({ accepted: true }));
+  vi.mocked(mockTransport.ptySetLastSeq).mockReset();
+  vi.mocked(mockTransport.ptyDeleteLastSeq).mockReset();
+  vi.mocked(mockTransport.listOpenInApps).mockReset().mockImplementation(() => Promise.resolve([{
+    id: "code",
+    label: "VS Code",
+    kind: "editor" as const,
+    iconKey: "code",
+    detected: true,
+  }]));
+  vi.mocked(mockTransport.openIn).mockReset().mockImplementation(() => Promise.resolve());
 });
 
 import { TerminalView } from "../TerminalView";
@@ -1118,7 +1127,25 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
     const originalClipboard = navigator.clipboard;
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard });
-    const safeBundle = { contractVersion: 1, backend: "modern", redacted: true };
+    const safeBundle: Awaited<ReturnType<typeof mockTransport.terminalDiagnostics>> & { redacted: boolean } = {
+      contractVersion: 1,
+      backend: "legacy",
+      redacted: true,
+      generatedAt: "2026-10-27T10:00:00.000Z",
+      health: {
+        contractVersion: 1,
+        state: "healthy",
+        hostGeneration: "0",
+        activeSessions: 0,
+        lastHeartbeatMsAgo: null,
+        queueBytes: 0,
+        eventLoopLagMs: 0,
+        hostRssBytes: "0",
+      },
+      events: [],
+      counters: [],
+      histograms: [],
+    };
     transport.terminalDiagnostics.mockResolvedValueOnce(safeBundle);
 
     render(

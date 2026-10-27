@@ -1,4 +1,5 @@
 import { act, render, waitFor } from "@testing-library/react";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import {
   BROWSER_AUTOMATION_CONTRACT_VERSION,
   type BrowserAutomationControllerState,
@@ -23,34 +24,38 @@ import { previewTabsScopeKey, usePreviewTabsStore } from "@/features/preview/sta
 import { browserTargetRegistry } from "../services/browserTargetRegistry";
 import { browserSurfacePresentationCoordinator } from "../../surfaces/BrowserSurfaceHostRoot";
 
-const harness = vi.hoisted(() => {
+const harnessEvents = vi.hoisted(() => {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   return {
     listeners,
-    transport: {
-      registerBrowserAutomationHost: vi.fn(),
-      updateBrowserAutomationHostTargets: vi.fn(),
-      respondToBrowserAutomationRequest: vi.fn(),
-      heartbeatBrowserAutomationHost: vi.fn(),
-      cancelBrowserAutomationRequest: vi.fn(),
-    },
     emit(channel: string, payload: unknown) {
       for (const listener of listeners.get(channel) ?? []) listener(payload);
     },
   };
 });
 
+const harness = {
+  ...harnessEvents,
+  transport: {
+    registerBrowserAutomationHost: vi.mocked(mockTransport.registerBrowserAutomationHost),
+    updateBrowserAutomationHostTargets: vi.mocked(mockTransport.updateBrowserAutomationHostTargets),
+    respondToBrowserAutomationRequest: vi.mocked(mockTransport.respondToBrowserAutomationRequest),
+    heartbeatBrowserAutomationHost: vi.mocked(mockTransport.heartbeatBrowserAutomationHost),
+    cancelBrowserAutomationRequest: vi.mocked(mockTransport.cancelBrowserAutomationRequest),
+  },
+};
+
 const webExecutor = vi.hoisted(() => ({
   executeWebBrowserDispatch: vi.fn(),
 }));
 
 vi.mock("@/transport", () => ({
-  getTransport: () => harness.transport,
+  getTransport: () => mockTransport,
   pushEmitter: {
     on: (channel: string, listener: (payload: unknown) => void) => {
-      const listeners = harness.listeners.get(channel) ?? new Set();
+      const listeners = harnessEvents.listeners.get(channel) ?? new Set();
       listeners.add(listener);
-      harness.listeners.set(channel, listeners);
+      harnessEvents.listeners.set(channel, listeners);
       return () => listeners.delete(listener);
     },
   },
@@ -169,6 +174,10 @@ function response(request: BrowserAutomationHostDispatch["request"]): BrowserAut
       retryable: true,
     },
   };
+}
+
+function requireSuccessfulResponse(response: BrowserAutomationResponse | undefined): asserts response is Extract<BrowserAutomationResponse, { ok: true }> {
+  if (!response?.ok) throw new Error("Expected a successful Browser response");
 }
 
 function successResponse(request: BrowserAutomationHostDispatch["request"]): BrowserAutomationResponse {
@@ -724,6 +733,8 @@ describe("BrowserAutomationHost", () => {
       expect.objectContaining({ tabId }),
     ));
     const firstResponse = harness.transport.respondToBrowserAutomationRequest.mock.calls[0]?.[2];
+    requireSuccessfulResponse(firstResponse);
+    if (firstResponse.result.operation !== "open") throw new Error("Expected an open response");
     expect(firstResponse.result.observationRef).toEqual(expect.any(String));
     if (iframe.contentDocument) {
       Object.defineProperty(iframe.contentDocument, "readyState", { configurable: true, value: "complete" });
@@ -778,6 +789,8 @@ describe("BrowserAutomationHost", () => {
     window.setTimeout(() => secondIframe.dispatchEvent(new Event("load")), 0);
     await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalledTimes(3));
     const secondResponse = harness.transport.respondToBrowserAutomationRequest.mock.calls[2]?.[2];
+    requireSuccessfulResponse(secondResponse);
+    if (secondResponse.result.operation !== "open") throw new Error("Expected an open response");
     expect(secondResponse.result.observationRef).not.toBe(firstResponse.result.observationRef);
     expect(harness.transport.respondToBrowserAutomationRequest.mock.calls[2]?.[3]).toMatchObject({
       tabId: secondTabId,
@@ -2793,6 +2806,8 @@ describe("BrowserAutomationHost", () => {
     act(() => harness.emit("browserAutomation.request", { hostId, generation: 1, dispatch: dispatch(1, 20) }));
     await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalled());
     const sent = harness.transport.respondToBrowserAutomationRequest.mock.calls.at(-1)?.[2];
+    requireSuccessfulResponse(sent);
+    if (sent.result.operation !== "status") throw new Error("Expected a status response");
     expect(sent.result.capabilities).toEqual(expect.arrayContaining([
       "open", "resize", "recordingStart", "recordingStop",
     ]));
@@ -2871,6 +2886,8 @@ describe("BrowserAutomationHost", () => {
     act(() => harness.emit("browserAutomation.request", { hostId, generation: 1, dispatch: dispatch(1, 20) }));
     await waitFor(() => expect(harness.transport.respondToBrowserAutomationRequest).toHaveBeenCalled());
     const sent = harness.transport.respondToBrowserAutomationRequest.mock.calls.at(-1)?.[2];
+    requireSuccessfulResponse(sent);
+    if (sent.result.operation !== "status") throw new Error("Expected a status response");
     expect(sent.result.url).toMatch(/^https:\/\/example\.com\//);
     expect(sent.result.url).not.toMatch(/user|password|eyJabcdefghijk|secret|fragment/);
     view.unmount();

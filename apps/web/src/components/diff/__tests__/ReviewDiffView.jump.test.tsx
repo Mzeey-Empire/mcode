@@ -1,3 +1,4 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forwardRef, useImperativeHandle } from "react";
@@ -19,8 +20,12 @@ vi.mock("@pierre/diffs/react", async (original) => ({
 
 vi.mock("@/transport", async (original) => ({
   ...(await original<object>()),
-  getTransport: () => ({ getWorkingTreeDiff: vi.fn().mockResolvedValue("") }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.getWorkingTreeDiff).mockReset().mockResolvedValue("");
+});
 
 const file = (path: string) => ({
   path,

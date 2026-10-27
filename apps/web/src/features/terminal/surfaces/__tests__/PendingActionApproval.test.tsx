@@ -1,19 +1,22 @@
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 
-const approveWorkspaceEnvironmentCommand = vi.fn();
-const startWorkspaceAction = vi.fn();
-const terminalKill = vi.fn();
+const approveWorkspaceEnvironmentCommand = vi.mocked(mockTransport.approveWorkspaceEnvironmentCommand);
+const startWorkspaceAction = vi.mocked(mockTransport.startWorkspaceAction);
+const terminalKill = vi.mocked(mockTransport.terminalKill);
 
 vi.mock("@/transport", () => ({
-  getTransport: () => ({
-    approveWorkspaceEnvironmentCommand,
-    startWorkspaceAction,
-    terminalKill,
-    terminalPause: vi.fn().mockResolvedValue(undefined),
-  }),
+  getTransport: () => mockTransport,
 }));
+
+beforeEach(() => {
+  vi.mocked(mockTransport.approveWorkspaceEnvironmentCommand).mockReset();
+  vi.mocked(mockTransport.startWorkspaceAction).mockReset();
+  vi.mocked(mockTransport.terminalKill).mockReset();
+  vi.mocked(mockTransport.terminalPause).mockReset().mockResolvedValue(undefined);
+});
 
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
