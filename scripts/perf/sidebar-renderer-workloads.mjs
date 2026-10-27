@@ -247,6 +247,9 @@ async function waitForStableThreadCount(page, workspaceIds) {
 async function prepareSidebar(page, fixture) {
   await page.waitForFunction(() => Boolean(window.__mcodeFrontendPerformanceModules), null, { timeout: 30_000 });
   const names = fixture.workspaces.map((workspace) => workspace.name);
+  // The view persists in the profile; a run that failed mid-flight can leave the flat list behind.
+  await page.getByTestId("sidebar-body").waitFor({ state: "attached", timeout: 30_000 });
+  await setSidebarView(page, "grouped");
   await page.getByRole("button", { name: `Open project ${names[0]}`, exact: true })
     .waitFor({ state: "attached", timeout: 30_000 });
   for (const name of [...names].reverse()) await expandProject(page, name);
