@@ -26,7 +26,7 @@ export interface SegmentedOption {
  */
 export type SegmentedControlSize = "compact" | "default" | "small";
 
-/** `tray` is the bordered picker control; `pill` is the borderless rounded strip Project settings uses. */
+/** `tray` is the tinted picker control; `pill` is the rounded strip Project settings uses. */
 export type SegmentedControlVariant = "tray" | "pill";
 
 interface SegmentedControlProps {
@@ -50,9 +50,9 @@ const TRAY_HEIGHT: Record<SegmentedControlSize, string> = {
 };
 
 const SEGMENT_HEIGHT: Record<SegmentedControlSize, string> = {
-  compact: "h-6",
-  default: "h-8",
-  small: "h-6",
+  compact: "h-7",
+  default: "h-9",
+  small: "h-7",
 };
 
 // Paper sizes the pill strip on its own scale; the 12px strip also drops to regular weight.
@@ -74,22 +74,25 @@ function trayClass(layout: Layout, size: SegmentedControlSize): string {
   // An icon strip sits in a picker's tab row, so it drops the tray and packs tight to fit every provider.
   if (layout === "icon") return "shrink-0 gap-0.5";
   if (layout === "pill") return cn("gap-0.5 rounded-full bg-selected p-0.5", PILL_TRAY[size]);
-  return cn("gap-2 rounded-control border border-control-border bg-panel p-[3px]", TRAY_HEIGHT[size]);
+  // Light --panel equals --background and light --field equals --page, so a solid fill vanishes on one
+  // of them. An ink tint stays one step off any surface; the 2px inset keeps the corners concentric.
+  return cn("gap-0.5 rounded-control bg-ink/[0.07] p-0.5", TRAY_HEIGHT[size]);
 }
 
-const INACTIVE_TRAY_SEGMENT = "text-muted enabled:hover:border-muted enabled:hover:bg-hover enabled:hover:text-ink";
+// Dark hover sits one step under selected, so a filled hover would read as a second choice.
+const INACTIVE_TRAY_SEGMENT = "text-muted enabled:hover:text-ink";
 
 const SEGMENT_BASE =
-  "inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap border border-transparent transition-colors duration-(--duration-fast) ease-(--ease-standard)";
+  "inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap transition-colors duration-(--duration-fast) ease-(--ease-standard)";
 
 function segmentClass(layout: Layout, size: SegmentedControlSize, isActive: boolean, fill: boolean): string {
   if (layout === "icon") {
     return cn(SEGMENT_BASE, "h-7 w-[3rem] shrink-0 rounded-sm text-body-small", isActive ? "bg-selected font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
   }
   if (layout === "pill") {
-    return cn(SEGMENT_BASE, "rounded-full border-0", fill ? "flex-1" : "shrink-0", PILL_SEGMENT[size], isActive ? "bg-border text-ink" : "text-muted enabled:hover:text-ink");
+    return cn(SEGMENT_BASE, "rounded-full", fill ? "flex-1" : "shrink-0", PILL_SEGMENT[size], isActive ? "bg-border text-ink" : "text-muted enabled:hover:text-ink");
   }
-  return cn(SEGMENT_BASE, "flex-1 rounded-sm px-2 text-body-small", SEGMENT_HEIGHT[size], isActive ? "bg-selected font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
+  return cn(SEGMENT_BASE, "flex-1 rounded-md px-3 text-body-small", SEGMENT_HEIGHT[size], isActive ? "bg-ink/[0.07] font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
 }
 
 /** Keeps a tooltip wrapper sized like the segment it holds. */
@@ -117,8 +120,8 @@ function nextEnabledIndex(options: readonly SegmentedOption[], from: number, key
 }
 
 /**
- * Paper's segmented control (AOT-0): a bordered tray of equal segments where the chosen one is
- * filled. The `pill` variant swaps the tray for Paper's borderless rounded strip. It is a radio
+ * Paper's segmented control (AOT-0): a borderless tinted tray of equal segments where the chosen
+ * one is filled. The `pill` variant swaps the tray for Paper's borderless rounded strip. It is a radio
  * group, so Tab enters it once and the arrow keys move the choice.
  */
 export function SegmentedControl({
