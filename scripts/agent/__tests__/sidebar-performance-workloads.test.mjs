@@ -122,7 +122,7 @@ NodeTest.describe("sidebar renderer workloads", () => {
 
   NodeTest.it("follows the turn with one activity push and one pull-request push for the target", () => {
     const pushes = buildSidebarSignalPushes("target", "2026-10-27T12:00:00.000Z", 1001);
-    assert.deepEqual(pushes.map((push) => push.channel), ["thread.activity", "thread.pullRequests"]);
+    assert.deepEqual(pushes.map((push) => push.channel), ["thread.activity", "thread.pullRequests", "local.checksById"]);
     assert.ok(pushes.every((push) => push.data.threadId === "target"));
     assert.equal(pushes[1].data.pullRequests[0].number, 1001);
   });
