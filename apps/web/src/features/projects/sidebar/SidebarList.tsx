@@ -31,6 +31,7 @@ import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import { freezeOrder, useSidebarUiStore } from "./sidebar-ui-store";
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
+import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 
 /** Provisional heights until the ResizeObserver measures; they only shape the first frame. */
 const PROVISIONAL_HEIGHT: Record<SidebarItem["kind"], number> = {
@@ -223,6 +224,7 @@ function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, it
     const viewport = controllerRef.current;
     if (!viewport) return;
     viewport.setRows(rows, { flip });
+    if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordCounter?.("sidebar.setRows");
     if (!riseRef.current) return;
     riseRef.current = false;
     viewport.moveTo({ kind: "target", key: OLDER_BAR_KEY, align: "start" }, !prefersReducedMotion(), { release: true });
