@@ -298,7 +298,6 @@ async function stopTrace(trace) {
   trace.session.off("Tracing.dataCollected", trace.onTraceData);
 }
 
-/** Runs one sample inside the optional Chrome trace and V8 CPU profile, then saves what was asked for. */
 async function runCaptured(session, options, operation) {
   const trace = await startTrace(session);
   const profiling = options.cpuProfileFile ? await startCpuProfile(session) : false;

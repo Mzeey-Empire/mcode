@@ -63,7 +63,6 @@ function markReachable(graph, excluded) {
   return reached;
 }
 
-/** Returns the node an object property edge named `name` points to from `node`, or null. */
 function propertyTarget(graph, node, name) {
   for (const edge of outgoingEdges(graph, node)) {
     if (edgeTypeName(graph, edge) === "property" && edgeName(graph, edge) === name) return edgeTarget(graph, edge);
