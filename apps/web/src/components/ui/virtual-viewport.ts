@@ -1,4 +1,5 @@
 import { createVList, type PluginContext, type VList } from "vlist";
+import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 /** A stable row identity and its provisional height. */
 export type VirtualRow = {
@@ -31,7 +32,25 @@ export interface VirtualViewportOptions {
   readonly ariaLabel: string;
   readonly initialPosition?: ViewportPosition;
   readonly positionOnScroll?: (anchor: ViewportPosition, atEnd: boolean) => ViewportPosition;
+  /**
+   * Row id rendered in normal flow between size-cache spacers instead of a recycled wrapper, so it
+   * can be sticky. Callers list it as an ordinary row and portal into {@link VirtualViewport.flowHost}.
+   */
+  readonly flowHostId?: string;
 }
+
+/** Options for {@link VirtualViewport.setRows}. */
+export interface SetRowsOptions {
+  /**
+   * Slide hosts that stay visible from their old offset to their new one. Hosts entering view do
+   * not animate, and reduced motion animates nothing.
+   */
+  readonly flip?: boolean;
+}
+
+// DESIGN.md motion tokens: standard duration and the one ease curve.
+const FLIP_DURATION_MS = 180;
+const FLIP_EASING = "cubic-bezier(0.2, 0, 0, 1)";
 
 /** Owns virtual rows, continuous measurement, and one explicit scroll position. */
 export class VirtualViewport {
@@ -51,6 +70,9 @@ export class VirtualViewport {
   private animating = false;
   private pinnedAnchor: { key: string; top: number } | undefined;
   private insets: ViewportInsets = { top: 0, bottom: 0 };
+  private flow: { prefix: HTMLDivElement; host: HTMLDivElement; suffix: HTMLDivElement } | undefined;
+  private readonly layoutListeners = new Set<() => void>();
+  private layoutFramePending = false;
 
   constructor(
     container: HTMLElement,
@@ -102,6 +124,7 @@ export class VirtualViewport {
     this.viewport.style.cssText = "height:100%;overflow:auto;overflow-anchor:none";
     this.context.dom.content.style.position = "relative";
     this.context.dom.liveRegion.style.display = "none";
+    if (options.flowHostId !== undefined) this.mountFlowHost(options.flowHostId);
     this.viewport.addEventListener("scroll", this.onScroll, { passive: true });
     this.viewport.addEventListener("wheel", this.onWheel, { passive: true });
     this.viewport.addEventListener("touchstart", this.interrupt, { passive: true });
@@ -120,6 +143,90 @@ export class VirtualViewport {
     return element;
   }
 
+  // vlist removes only wrappers it tracks and skips content children without data-index, so these
+  // three nodes survive recycling. The host's own index keeps an empty wrapper that reserves its slot.
+  private mountFlowHost(id: string): void {
+    const prefix = document.createElement("div");
+    const suffix = document.createElement("div");
+    const host = this.host(id);
+    host.style.position = "sticky";
+    host.style.bottom = "0";
+    // vlist appends absolute wrappers after the host, which would otherwise paint over it.
+    host.style.zIndex = "1";
+    this.context.dom.content.prepend(prefix, host, suffix);
+    this.flow = { prefix, host, suffix };
+  }
+
+  /** The persistent sticky host element, when `flowHostId` was configured. */
+  get flowHost(): HTMLDivElement | undefined {
+    return this.flow?.host;
+  }
+
+  /** Visible height of the scroller, for chrome that tracks a row. */
+  get clientHeight(): number {
+    return this.viewport.clientHeight;
+  }
+
+  // Resized in the same pass as the content size, so the host never shows a frame off its slot.
+  private layoutFlowHost(): void {
+    if (!this.flow || this.options.flowHostId === undefined) return;
+    const index = this.rowIndexes.get(this.options.flowHostId);
+    const { prefix, host, suffix } = this.flow;
+    const display = index === undefined ? "none" : "";
+    host.style.display = index === undefined ? "none" : "flow-root";
+    prefix.style.display = display;
+    suffix.style.display = display;
+    if (index === undefined) return;
+    const cache = this.context.sizeCache;
+    const offset = cache.getOffset(index);
+    const size = cache.getSize(index);
+    prefix.style.height = `${offset}px`;
+    suffix.style.height = `${Math.max(0, cache.getTotalSize() - offset - size)}px`;
+  }
+
+  /**
+   * Calls `listener` after commits, scroll frames and measured resizes, at most once per frame,
+   * so chrome can read `rowTop` and `rowBottom` without its own scroll listener. Returns an unsubscribe.
+   */
+  onLayout(listener: () => void): () => void {
+    this.layoutListeners.add(listener);
+    return () => this.layoutListeners.delete(listener);
+  }
+
+  private scheduleLayout(): void {
+    if (this.layoutListeners.size === 0 || this.layoutFramePending) return;
+    this.layoutFramePending = true;
+    requestAnimationFrame(() => {
+      this.layoutFramePending = false;
+      if (this.disposed) return;
+      for (const listener of this.layoutListeners) listener();
+    });
+  }
+
+  private publishedOffsets(): Map<string, number> {
+    const offsets = new Map<string, number>();
+    for (const { id } of this.publishedHosts) {
+      const index = this.rowIndexes.get(id);
+      if (index !== undefined) offsets.set(id, this.context.sizeCache.getOffset(index));
+    }
+    return offsets;
+  }
+
+  // Animates the React-owned host, never vlist's wrapper, whose transform vlist owns.
+  private playFlip(before: ReadonlyMap<string, number>): void {
+    for (const { id, element } of this.publishedHosts) {
+      const from = before.get(id);
+      const index = this.rowIndexes.get(id);
+      if (from === undefined || index === undefined || typeof element.animate !== "function") continue;
+      const delta = from - this.context.sizeCache.getOffset(index);
+      if (delta === 0) continue;
+      element.animate(
+        [{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }],
+        { duration: FLIP_DURATION_MS, easing: FLIP_EASING },
+      );
+    }
+  }
+
   private publishVisible(): void {
     const state = this.context.getState();
     const visible: VirtualHost[] = [];
@@ -127,13 +234,16 @@ export class VirtualViewport {
       const row = this.rows[state.visibleIndices[slot]];
       const wrapper = this.context.getRenderedElement(state.visibleIndices[slot]);
       if (!row || !wrapper) continue;
-      const element = this.host(row.id);
-      // Reconcile keyed hosts after vlist finishes recycling its index-based wrappers.
-      if (element.parentElement !== wrapper) wrapper.replaceChildren(element);
+      // The flow host's empty wrapper too: left in flow, it stacks below the prefix and suffix that
+      // already span the list, then its transform pushes it down again, doubling the scroll height.
       wrapper.style.position = "absolute";
       wrapper.style.top = "0";
       wrapper.style.left = "0";
       wrapper.style.width = "100%";
+      if (row.id === this.options.flowHostId) continue;
+      const element = this.host(row.id);
+      // Reconcile keyed hosts after vlist finishes recycling its index-based wrappers.
+      if (element.parentElement !== wrapper) wrapper.replaceChildren(element);
       visible.push({ id: row.id, element });
     }
     if (visible.length === this.publishedHosts.length && visible.every((host, index) =>
@@ -143,20 +253,26 @@ export class VirtualViewport {
   }
 
   /** Reconciles identities without replacing React content on streaming updates. */
-  setRows(rows: readonly VirtualRow[]): void {
+  setRows(rows: readonly VirtualRow[], options: SetRowsOptions = {}): void {
+    const before = options.flip && !prefersReducedMotion() ? this.publishedOffsets() : undefined;
     const focused = document.activeElement;
     const restoreFocus = focused instanceof HTMLElement && this.viewport.contains(focused);
+    this.reconcileRows(rows);
+    this.list.setItems([...this.rows]);
+    this.applyPosition(true);
+    if (before) this.playFlip(before);
+    if (restoreFocus && focused.isConnected && document.activeElement !== focused) {
+      focused.focus({ preventScroll: true });
+    }
+  }
+
+  private reconcileRows(rows: readonly VirtualRow[]): void {
     const previous = new Map(this.rows.map((row) => [row.id, row]));
     this.rows = rows.map((row) => previous.get(row.id) ?? row);
     this.rowIndexes.clear();
     this.rows.forEach((row, index) => this.rowIndexes.set(row.id, index));
     for (const key of this.heights.keys()) {
       if (!this.rowIndexes.has(key)) this.heights.delete(key);
-    }
-    this.list.setItems([...this.rows]);
-    this.applyPosition(true);
-    if (restoreFocus && focused.isConnected && document.activeElement !== focused) {
-      focused.focus({ preventScroll: true });
     }
   }
 
@@ -215,6 +331,8 @@ export class VirtualViewport {
     }
     this.expectedScrollTop = this.viewport.scrollTop;
     this.context.forceRender();
+    this.layoutFlowHost();
+    this.scheduleLayout();
     this.onPosition(this.position);
   }
 
@@ -286,6 +404,7 @@ export class VirtualViewport {
   };
 
   private readonly onScroll = (): void => {
+    this.scheduleLayout();
     const top = this.viewport.scrollTop;
     if (Math.abs(top - this.expectedScrollTop) < 1) return;
     const atEnd = this.viewport.scrollHeight - this.viewport.clientHeight - top <= 2;
@@ -313,7 +432,7 @@ export class VirtualViewport {
   moveTo(position: ViewportPosition, smooth = false): void {
     this.context.cancelScroll();
     this.position = position;
-    this.animating = smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    this.animating = smooth && !prefersReducedMotion();
     if (this.animating) {
       this.context.smoothScrollTo(() => Math.max(0, this.targetScrollTop()), 250, undefined, () => {
         this.animating = false;
@@ -365,6 +484,7 @@ export class VirtualViewport {
   /** Disconnects observers and input handlers before releasing the list. */
   destroy(): void {
     this.disposed = true;
+    this.layoutListeners.clear();
     this.observer.disconnect();
     this.viewport.removeEventListener("scroll", this.onScroll);
     this.viewport.removeEventListener("wheel", this.onWheel);
