@@ -140,6 +140,14 @@ NodeTest.describe("sidebar renderer workloads", () => {
     assert.deepEqual(validateSidebarCheck("sidebarOlderCrossing", { crossing: [1, 2] }, "production"), ["fewer than five Recent rows were on screen"]);
   });
 
+  NodeTest.it("rejects a scroll sample whose scroller is taller than the content vlist sized", () => {
+    const check = (listHeight) => ({ reachedBottom: true, scrollable: true, frames: { frameCount: 10 }, listHeight });
+    assert.deepEqual(validateSidebarCheck("sidebarScroll", check({ scrollHeightPx: 90_000, clientHeightPx: 800, contentHeightPx: 90_000 }), "production"), []);
+    assert.deepEqual(validateSidebarCheck("sidebarScroll", check({ scrollHeightPx: 800, clientHeightPx: 800, contentHeightPx: 300 }), "production"), []);
+    assert.deepEqual(validateSidebarCheck("sidebarScroll", check({ scrollHeightPx: 180_000, clientHeightPx: 800, contentHeightPx: 90_000 }), "production"), ["the list's scroll height differs from the content height vlist set"]);
+    assert.deepEqual(validateSidebarCheck("sidebarScroll", check(null), "production"), ["the list's scroll height differs from the content height vlist set"]);
+  });
+
   NodeTest.it("rejects an idle tick sample outside a profiling build or shorter than a minute", () => {
     assert.deepEqual(validateSidebarCheck("sidebarIdleTick", { profiling: true, elapsedMs: 61_000 }, "profiling"), []);
     assert.equal(validateSidebarCheck("sidebarIdleTick", { profiling: false, elapsedMs: 59_000 }, "production").length, 2);
