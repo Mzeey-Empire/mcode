@@ -7,6 +7,7 @@ import type { SettingsSection } from "@/components/settings/settings-nav";
 import { useUiStore } from "@/stores/uiStore";
 import { SidebarHeader } from "@/components/shell/SidebarHeader";
 import { cn } from "@/lib/utils";
+import { ReactPerformanceProfiler } from "@/performance/ReactPerformanceProfiler";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { SidebarFooter } from "./SidebarFooter";
 import { useSidebarWidthStore } from "./sidebarWidthStore";
@@ -56,7 +57,7 @@ function SidebarBody({ settingsOpen, settingsSection, onSettingsSection }: { set
   }
   return <>
     <SidebarGoZone />
-    <div data-testid="sidebar-body" className="flex min-h-0 flex-1 flex-col overflow-hidden px-1.5"><ProjectTree /></div>
+    <div data-testid="sidebar-body" className="flex min-h-0 flex-1 flex-col overflow-hidden px-1.5"><ReactPerformanceProfiler id="sidebar"><ProjectTree /></ReactPerformanceProfiler></div>
   </>;
 }
 
