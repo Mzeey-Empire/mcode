@@ -1076,7 +1076,7 @@ export function createWsTransport(
       ),
     deleteThread: (threadId, cleanupWorktree) =>
       rpc<boolean>("thread.delete", { threadId, cleanupWorktree }),
-    completeThread: (threadId) => rpc<ThreadCompletionResult>("thread.complete", { threadId }),
+    completeThread: (threadId, holdMs) => rpc<ThreadCompletionResult>("thread.complete", holdMs === undefined ? { threadId } : { threadId, holdMs }),
     reopenThread: (threadId) => rpc<Thread>("thread.reopen", { threadId }),
     countBlockedThreadCleanupCandidates: () =>
       rpc<{ count: number }>("thread.cleanupBlockedCount", {}),
