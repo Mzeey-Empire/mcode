@@ -63,6 +63,12 @@
       }
     },
     {
+      "files": ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx", "apps/web/src/**/__tests__/**"],
+      "rules": {
+        "mcode/no-inline-module-mock": ["error", { "modules": { "@/transport": { "name": "mockTransport", "from": "@/__tests__/mocks/transport" } } }]
+      }
+    },
+    {
       "files": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"],
       "rules": {
         "mcode/no-ellipsis-truncation": "error",

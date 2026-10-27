@@ -24,6 +24,7 @@ A test that restates a fact another module owns breaks when that module changes,
 - **Build contract objects with the shared builders.** Use `createMockThread()`, `createMockMessage()`, `createMockWorkspace()`, and `createMockApproval()` from `@mcode/contracts/testing`, and pass only the fields the test is about. Lint rejects a hand-written thread, message, workspace, or approval.
 - **Assert structure, not wording.** Check that an instruction section arrived by building the expected section with `buildMcodeInstructionSections`, not by searching the prompt for a tool name. Only the tests of the module that owns the copy should break when the copy changes.
 - **Assert what a migration changed, not the whole table.** Check the columns the migration adds or drops with `expectColumns`. A full column list breaks when a later migration changes the same table.
+- **Mock the transport through its shared fake.** Return `mockTransport` from `@/__tests__/mocks/transport` and set per-test behavior with `vi.mocked(mockTransport.<method>)`. The fake answers any method, so a new RPC needs no test edits. Lint rejects an inline `@/transport` mock.
 
 ## Keep tests cheap
 
