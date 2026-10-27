@@ -28,6 +28,7 @@ const { sendTurnMock, startCompactionMock, readConfigMock, appServers, startErro
   readConfigMock: vi.fn(),
   appServers: [] as Array<import("node:events").EventEmitter & {
     isAlive: boolean;
+    resumeFailed: boolean;
     options: CodexAppServerOptions;
     spawnedEnv?: Record<string, string>;
   }>,
@@ -677,7 +678,6 @@ describe("CodexProvider first turn on new session", () => {
     expect(appServers.at(-1)?.isAlive).toBe(false);
     expect(sendTurnMock).not.toHaveBeenCalled();
     expect(events).toEqual([
-      { event: { type: AgentEventType.System, threadId: "browser-spawn-failure", subtype: "provider.session.started", systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "session", sessionId: expect.stringMatching(/^[0-9a-f-]{36}$/) } } },
       {
         event: {
           type: AgentEventType.Error,
@@ -698,6 +698,7 @@ describe("CodexProvider first turn on new session", () => {
   });
 
   it("continues without Mcode tools and releases the Browser grant when the mcode attach fails", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
     const lease = new BrowserAutomationSessionLease();
     lease.configure({
       worktreeIdentity: "worktree-test",
@@ -705,7 +706,8 @@ describe("CodexProvider first turn on new session", () => {
     const events: ProviderRuntimeEvent[] = [];
     const provider = makeProvider(undefined, lease, {
       attach: vi.fn().mockRejectedValue(new Error("MCP config failed")),
-    });
+    }, { submit });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
 
     await provider.sendTurn({
@@ -731,7 +733,8 @@ describe("CodexProvider first turn on new session", () => {
     expect(appServers.at(-1)?.isAlive).toBe(true);
     expect(appServers.at(-1)?.options.configOverrides).toEqual([]);
     expect(appServers.at(-1)?.options.instructionSections?.map((section) => section.key)).not.toContain("mcode_browser");
-    const failure = events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.McpServerStartupStatus);
+    const failure = submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+      .filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.McpServerStartupStatus);
     expect(failure).toHaveLength(1);
     expect(failure[0]?.event).toMatchObject({
       threadId: "browser-config-failure",
@@ -1020,6 +1023,90 @@ describe("CodexProvider first turn on new session", () => {
     expect(sendTurnMock.mock.calls[0]?.[0]).toContainEqual({ type: "text", text: message });
     expect(startCompactionMock).not.toHaveBeenCalled();
     await provider.stopSession(sessionId);
+  });
+
+  it.each([false, true])("routes session events from a fresh spawn through the active canonical turn (resume failed: %s)", async (resumeFailed) => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    const startup = Promise.withResolvers<void>();
+    startGate.current = startup.promise;
+    const request: TurnRequest<"codex"> = {
+      turnId: "session-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "hello", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "supervised",
+      ...(resumeFailed ? { resumeFrom: "missing-native-thread" } : {}),
+    };
+    try {
+      const sending = provider.sendTurn(request);
+      await vi.waitFor(() => expect(appServers).toHaveLength(1));
+      appServers[0]!.resumeFailed = resumeFailed;
+      startup.resolve();
+      await sending;
+      await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(1));
+      await provider.waitForCanonicalTurnEvents({ threadId, turnId: request.turnId, executionId: schemaValidExecutionId, deliveryAttempt: 1 });
+
+      const sessionEvents = submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+        .filter(({ event }) => event.type === AgentEventType.System);
+      expect(sessionEvents.map(({ event }) => event)).toMatchObject([
+        { type: AgentEventType.System, threadId, subtype: "provider.session.started", turnExecutionId: schemaValidExecutionId },
+        ...(resumeFailed ? [{ type: AgentEventType.System, threadId, subtype: "context_lost", turnExecutionId: schemaValidExecutionId }] : []),
+        { type: AgentEventType.System, threadId, subtype: "sdk_session_id:sdk-thread-1", turnExecutionId: schemaValidExecutionId },
+      ]);
+      expect(legacy.filter(({ event }) => event.type === AgentEventType.System)).toEqual([]);
+    } finally {
+      startup.resolve();
+      await provider.shutdown();
+    }
+  });
+
+  it("routes session events from a reused server through the second turn and drops them after completion", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    const request: TurnRequest<"codex"> = {
+      turnId: "session-turn-1", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "hello", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "supervised",
+    };
+    const secondExecutionId = "00000000-0000-4000-8000-000000000002";
+    try {
+      await provider.sendTurn(request);
+      await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(1));
+      const server = appServers[0]!;
+      server.emit("notification", { method: "turn/completed", params: {
+        threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" },
+      } });
+      await vi.waitFor(() => expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)))
+        .toContainEqual(expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.Ended, turnExecutionId: schemaValidExecutionId }) })));
+      await provider.sendTurn({ ...request, turnId: "session-turn-2", turnExecutionId: secondExecutionId });
+      await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(2));
+      expect(appServers).toHaveLength(1);
+      server.emit("threadIdChanged", "sdk-thread-2");
+      const routing = { threadId, turnId: "session-turn-2", executionId: secondExecutionId, deliveryAttempt: 1 };
+      await provider.waitForCanonicalTurnEvents(routing);
+      const cursors = () => submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+        .filter(({ event }) => event.type === AgentEventType.System && event.subtype.startsWith("sdk_session_id:"));
+      expect(cursors().map(({ event }) => event)).toEqual([
+        { type: AgentEventType.System, threadId, subtype: "sdk_session_id:sdk-thread-1", turnExecutionId: schemaValidExecutionId },
+        { type: AgentEventType.System, threadId, subtype: "sdk_session_id:sdk-thread-2", turnExecutionId: secondExecutionId },
+      ]);
+      server.emit("notification", { method: "turn/completed", params: {
+        threadId: "sdk-thread-2", turn: { id: "turn-test-id", status: "completed" },
+      } });
+      await vi.waitFor(() => expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)))
+        .toContainEqual(expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.Ended, turnExecutionId: secondExecutionId }) })));
+      server.emit("threadIdChanged", "sdk-thread-idle");
+      await provider.waitForCanonicalTurnEvents(routing);
+      expect(cursors()).toHaveLength(2);
+      expect(legacy.filter(({ event }) => event.type === AgentEventType.System)).toEqual([]);
+    } finally {
+      await provider.shutdown();
+    }
   });
 
   it("submits an attempt-bound parent event through the canonical sink only when enabled", async () => {
@@ -1401,7 +1488,8 @@ describe("CodexProvider first turn on new session", () => {
         serverThreadId: "sdk-thread-1", name: "current-mcp", status: "ready" }),
     }));
     expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)).filter((event) =>
-      event.event.type === AgentEventType.System || event.event.type === AgentEventType.McpServerStartupStatus))
+      event.event.turnExecutionId === nextExecutionId
+      && (event.event.type === AgentEventType.System || event.event.type === AgentEventType.McpServerStartupStatus)))
       .toMatchObject([{ event: { type: AgentEventType.McpServerStartupStatus, name: "current-mcp" } }]);
     expect(legacy.slice(legacyBeforeStartup)).toEqual([]);
     await provider.shutdown();
@@ -1464,14 +1552,14 @@ describe("CodexProvider first turn on new session", () => {
       method: "item/agentMessage/delta",
       params: { threadId: "sdk-thread-1", turnId: "early-native-turn", delta: "Early" },
     });
-    await vi.waitFor(() => expect(submit).toHaveBeenCalled());
-    expect(submit.mock.calls[0]?.[0]).toMatchObject({
-      deliveryAttempt: 3,
-      events: [{ payload: { item: { payload: { runtimeEvent: {
-        deliveryAttempt: 3,
-        event: { type: AgentEventType.TextDelta, turnExecutionId: schemaValidExecutionId },
-      } } } } }],
+    await provider.waitForCanonicalTurnEvents({
+      threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 3,
     });
+    expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+      .filter(({ event }) => event.type === AgentEventType.TextDelta)).toMatchObject([{
+      deliveryAttempt: 3,
+      event: { type: AgentEventType.TextDelta, threadId, turnExecutionId: schemaValidExecutionId, delta: "Early" },
+    }]);
     expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(false);
 
     resolveNativeTurn("early-native-turn");
@@ -1507,7 +1595,10 @@ describe("CodexProvider first turn on new session", () => {
     emitText("After stop");
     await drained;
 
-    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+      .filter(({ event }) => event.type === AgentEventType.TextDelta).map(({ event }) => event)).toMatchObject([
+      { type: AgentEventType.TextDelta, threadId, turnExecutionId: schemaValidExecutionId, delta: "Before stop" },
+    ]);
     expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(false);
   });
 
@@ -2538,12 +2629,14 @@ describe("CodexProvider first turn on new session", () => {
   });
 
   it("closes the mcode session when the attach fails", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
     const close = vi.fn().mockResolvedValue(undefined);
     const events: ProviderRuntimeEvent[] = [];
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
       attach: vi.fn().mockRejectedValue(new Error("MCP setup failed")),
       close,
-    });
+    }, { submit });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
 
     await provider.sendTurn({
@@ -2565,7 +2658,8 @@ describe("CodexProvider first turn on new session", () => {
     expect((provider as unknown as { runtime: { get: (sessionId: string) => unknown } }).runtime.get("mcode-mcp-failure")).toBeDefined();
     expect(appServers.at(-1)?.isAlive).toBe(true);
     expect(sendTurnMock).toHaveBeenCalledTimes(1);
-    const failure = events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.McpServerStartupStatus);
+    const failure = submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+      .filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.McpServerStartupStatus);
     expect(failure).toHaveLength(1);
     expect(AgentEventSchema().parse(failure[0]?.event)).toEqual(failure[0]?.event);
     expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Error)).toBe(false);
@@ -2757,6 +2851,7 @@ describe("CodexProvider first turn on new session", () => {
     ["missing registration", { config: { mcp_servers: {} } }, "Codex app-server did not register mcode in effective configuration"],
     ["read failure", new Error("effective config unavailable"), "effective config unavailable"],
   ] as const)("continues when internal MCP effective config has a $0", async (_name, result, expectedError) => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
     if (result instanceof Error) {
       readConfigMock.mockRejectedValue(result);
     } else {
@@ -2766,7 +2861,8 @@ describe("CodexProvider first turn on new session", () => {
     const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
       attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true })),
       close,
-    });
+    }, { submit });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
     const events: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
 
@@ -2807,7 +2903,8 @@ describe("CodexProvider first turn on new session", () => {
     );
     expect(server.isAlive).toBe(true);
     expect(close).toHaveBeenCalledWith(sessionId);
-    const failures = events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.McpServerStartupStatus && runtimeEvent.event.status === "failed");
+    const failures = submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+      .filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.McpServerStartupStatus && runtimeEvent.event.status === "failed");
     expect(failures).toHaveLength(1);
     expect(failures[0]?.event).toMatchObject({
       threadId,
@@ -2865,11 +2962,13 @@ describe("CodexProvider first turn on new session", () => {
     vi.useFakeTimers();
     try {
       readConfigMock.mockImplementation(() => new Promise(() => undefined));
+      const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
       const close = vi.fn().mockResolvedValue(undefined);
       const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), {
         attach: vi.fn().mockResolvedValue(mcodeAttachment({ browser: false, threadControl: true, visuals: true })),
         close,
-      });
+      }, { submit });
+      provider.setCanonicalTurnEventDeliveryEnabled(true);
       const events: ProviderRuntimeEvent[] = [];
       provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
 
@@ -2899,7 +2998,8 @@ describe("CodexProvider first turn on new session", () => {
         { model: "gpt-5.4", approvalsReviewer: "user" },
       );
       expect(readConfigMock).not.toHaveBeenCalled();
-      const failures = events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.McpServerStartupStatus);
+      const failures = submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+        .filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.McpServerStartupStatus);
       expect(failures).toHaveLength(1);
       expect(failures[0]?.event).toMatchObject({
         threadId: "mcp-startup-timeout",

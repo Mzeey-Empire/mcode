@@ -605,6 +605,21 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     super.emit("event", runtimeEvent);
   }
 
+  private emitSessionRuntimeEvent(threadId: string, runtimeEvent: ProviderRuntimeEvent): void {
+    const state = this.canonicalTurnRoutingsByThread.get(threadId);
+    if (state?.kind !== "active") {
+      logger.debug("Codex session event dropped without active turn routing", {
+        threadId,
+        event: runtimeEvent.event.type === AgentEventType.System ? runtimeEvent.event.subtype : runtimeEvent.event.type,
+      });
+      return;
+    }
+    this.emitRuntimeEvent({
+      ...runtimeEvent,
+      event: { ...runtimeEvent.event, turnExecutionId: state.routing.executionId },
+    });
+  }
+
   private readonly canonicalEventPublisher: CodexCanonicalEventPublisher;
   private readonly planQuestions = new CodexPlanQuestions();
   /**
@@ -886,9 +901,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     threadId: string,
     serverThreadId: string,
     error: string,
-    turnExecutionId?: string,
   ): void {
-    this.emitRuntimeEvent(providerRuntimeEvent({
+    this.emitSessionRuntimeEvent(threadId, providerRuntimeEvent({
       type: AgentEventType.McpServerStartupStatus,
       threadId,
       providerId: this.id,
@@ -896,7 +910,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       name: "mcode",
       status: "failed",
       error,
-      ...(turnExecutionId ? { turnExecutionId } : {}),
     } satisfies AgentEvent));
   }
 
@@ -1574,7 +1587,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       } satisfies ProviderFileMutationStart);
     });
     mapper.setOutputTruncationMode(this.outputTruncationMode);
-    this.emitRuntimeEvent(mapper.sessionStartedEvent());
+    this.emitSessionRuntimeEvent(threadId, mapper.sessionStartedEvent());
     return mapper;
   }
 
@@ -1773,11 +1786,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     outcome: CodexMcodeStartupOutcome | undefined,
   ): void {
     if (context.mcodeSetupError) {
-      this.emitMcodeStartupFailure(context.threadId, server.threadId ?? context.threadId, context.mcodeSetupError, context.stagedExecutionId);
+      this.emitMcodeStartupFailure(context.threadId, server.threadId ?? context.threadId, context.mcodeSetupError);
       return;
     }
     if (outcome?.status === "timeout") {
-      this.emitMcodeStartupFailure(context.threadId, server.threadId ?? context.threadId, outcome.error, context.stagedExecutionId);
+      this.emitMcodeStartupFailure(context.threadId, server.threadId ?? context.threadId, outcome.error);
     }
   }
 
@@ -1794,7 +1807,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     } catch (error) {
       startup?.cancel();
       await context.closeMcode();
-      this.emitMcodeStartupFailure(context.threadId, server.threadId ?? context.threadId, error instanceof Error ? error.message : String(error), context.stagedExecutionId);
+      this.emitMcodeStartupFailure(context.threadId, server.threadId ?? context.threadId, error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1804,7 +1817,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     });
     if (server.resumeFailed) {
       logger.warn("Codex session context lost; resume failed, started fresh thread", { sessionId: context.sessionId });
-      this.emitRuntimeEvent(providerRuntimeEvent({ type: AgentEventType.System, threadId: context.threadId, subtype: "context_lost" } satisfies AgentEvent));
+      this.emitSessionRuntimeEvent(context.threadId, providerRuntimeEvent({ type: AgentEventType.System, threadId: context.threadId, subtype: "context_lost" } satisfies AgentEvent));
     }
     if (server.threadId) this.recordCodexThreadIdentity(context, mapper, server.threadId);
   }
@@ -1812,7 +1825,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private recordCodexThreadIdentity(context: CodexSpawnContext, mapper: CodexEventMapper, nativeThreadId: string): void {
     mapper.setMainCodexThreadId(nativeThreadId);
     this.sdkSessionIds.set(context.sessionId, nativeThreadId);
-    this.emitRuntimeEvent(providerRuntimeEvent({ type: AgentEventType.System, threadId: context.threadId, subtype: "sdk_session_id:" + nativeThreadId } satisfies AgentEvent));
+    this.emitSessionRuntimeEvent(context.threadId, providerRuntimeEvent({ type: AgentEventType.System, threadId: context.threadId, subtype: "sdk_session_id:" + nativeThreadId } satisfies AgentEvent));
   }
 
   private createCodexSessionState(context: CodexSpawnContext, server: CodexAppServer, mapper: CodexEventMapper): CodexSessionState {
