@@ -48,7 +48,7 @@ function useWorkspaceLoading(): void {
  * menus and dialogs its rows open.
  */
 export function ProjectSidebar() {
-  const { model } = useSidebarModel();
+  const { model, cause } = useSidebarModel();
   const { ctx, overlays } = useProjectTreeMenus();
   const hasProjects = useWorkspaceStore((s) => s.workspaces.length > 0);
   const error = useWorkspaceStore((s) => s.error);
@@ -61,6 +61,7 @@ export function ProjectSidebar() {
       <SidebarList
         items={model.items}
         ctx={ctx}
+        flip={cause === "push"}
         overlay={hasProjects ? null : <div className="absolute inset-x-1.5 inset-y-0"><ProjectDropWell /></div>}
       />
       {error && <p className="px-3 py-1 text-xs text-destructive">{error}</p>}

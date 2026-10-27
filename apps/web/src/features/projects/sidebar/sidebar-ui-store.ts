@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { FrozenOrder } from "./sidebar-model";
+import type { FrozenOrder, SidebarThreadFacts } from "./sidebar-model";
 
 /** Which lifecycle set the sidebar lists: active threads or completed ones. */
 export type SidebarScope = "active" | "completed";
@@ -116,6 +116,14 @@ export const useSidebarUiStore = create<SidebarUiState & SidebarUiActions>()(
  */
 export function effectiveSidebarScope(scope: SidebarScope, completedCount: number): SidebarScope {
   return completedCount === 0 ? "active" : scope;
+}
+
+/**
+ * Snapshots the clock and every thread's sort key, so rows hold still under the pointer. New
+ * threads, absent from the snapshot, still sort by their live activity.
+ */
+export function freezeOrder(facts: readonly SidebarThreadFacts[], at: number): FrozenOrder {
+  return { at, activityMs: new Map(facts.map((fact) => [fact.id, fact.activityMs])) };
 }
 
 /** Projects in `projectOrder` the user has not opened, which the model reads as collapsed. */
