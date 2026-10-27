@@ -16,7 +16,7 @@ interface ActionMenuItem {
   divider?: boolean;
 }
 
-/** A row drawn as a switch. Toggling it keeps the menu open so the new value stays in view. */
+/** A switch row whose toggles keep the menu open. */
 export interface SwitchMenuItem {
   kind: "switch";
   label: string;

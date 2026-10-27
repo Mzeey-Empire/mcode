@@ -85,8 +85,7 @@ function fromLingering(entry: CompletionEntry, event: CompletionEvent): Completi
   return unchanged(entry);
 }
 
-// A refusal names the thread's state when it was refused (running, approval pending, busy); the
-// next push for the thread means that state moved on, so the reason is stale and the row clears.
+// A refusal names the thread's state at refusal time, so any later push for the thread makes it stale.
 function refusalOutdated(entry: Extract<CompletionEntry, { phase: "failed" }>, event: CompletionEvent): boolean {
   return entry.failure.kind === "refused" && (event.type === "server-activity" || event.type === "server-lifecycle");
 }

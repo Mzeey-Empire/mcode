@@ -410,10 +410,6 @@ function WorkspaceRenameDialog({ dialog, value, isRenaming, onChange, onClose, o
   );
 }
 
-/**
- * The thread menu's "Complete when PRs merge" switch. It shows the effective value, the thread's
- * override or else the global setting, and keeps the reason when a toggle fails to save.
- */
 function useAutoCompleteSwitch(threadId: string | null): SwitchMenuItem | null {
   const thread = useWorkspaceStore((s) => (threadId === null ? undefined : s.threads.find((candidate) => candidate.id === threadId)));
   const globalValue = useSettingsStore((s) => s.settings.thread.completion.completeOnPrMerge);
