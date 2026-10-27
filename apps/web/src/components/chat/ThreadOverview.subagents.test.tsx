@@ -1,12 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import type { SubagentRosterEntry } from "@mcode/contracts";
 
-vi.mock("@/transport", async (importOriginal) =>
-  (await import("./__tests__/thread-overview-mocks")).mockTransportModule(
-    await importOriginal<typeof import("@/transport")>(),
-  ),
-);
+vi.mock("@/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/transport")>()),
+  getTransport: () => mockTransport,
+}));
 
 vi.mock("@/hooks/useBranchPr", () => ({
   useBranchPr: vi.fn().mockReturnValue(null),
