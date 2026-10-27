@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ArrowLeft } from "lucide-react";
 import { isLiveSubagentStatus, type SubagentDetail, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts";
 import { Button, IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
@@ -69,6 +70,9 @@ function DetailHeader({ threadId, entry }: { readonly threadId: string; readonly
       <PanelTitlePill headingLevel={2} icon={<ProviderIcon provider={entry.provider} size={16} />}>{entry.title}</PanelTitlePill>
     </PanelHeaderSlot>
     <PanelHeaderSlot slot="row2">
+      <IconButton shape="round" aria-label="Back to subagents" onClick={() => openSubagentsPanel()}>
+        <ArrowLeft size={16} aria-hidden />
+      </IconButton>
       <div data-testid="subagent-detail-meta" className="flex h-8 min-w-0 items-center gap-2 rounded-[18px] bg-selected px-3">
         {kind && <span className="text-fade min-w-0 text-xs text-muted">{kind}</span>}
         <span aria-hidden className={cn("size-[7px] shrink-0 rounded-full", running ? "bg-success" : "bg-muted")} />
