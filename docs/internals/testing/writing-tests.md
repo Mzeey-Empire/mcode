@@ -30,6 +30,6 @@ The web suite pays about 0.65 s of environment setup and imports per file before
 
 - **No real sleeps.** Use `vi.useFakeTimers()` and `vi.advanceTimersByTimeAsync`, or `vi.waitFor` for a condition. Lint rejects awaited `setTimeout` sleeps in web tests. Server tests that drive real processes, sockets, or file watchers may still wait on the clock.
 - **Inject production delays.** When code under test waits on purpose, as `CleanupWorker` does for Windows file handles, let the test pass a zero delay instead of paying it.
-- **Extend the unit's existing test file.** Do not start a new file for one more case.
+- **Add the case to the test file for the feature it covers.** Do not start a new file for one more case. When a component's test file already covers unrelated features, start a feature file next to it instead of growing the shared one.
 - **Use the node environment unless the test needs a DOM.** Web `*.test.ts` files run in node. Add `// @vitest-environment jsdom` at the top of a `.ts` test only when it touches `window` or `document`.
 - **Use the shared database fixtures.** They copy a migrated template database instead of re-running migrations, and they reuse a cleanly closed writer worker through `leaseWriterWorker`. A test that builds its own `ApplicationDatabaseWriter` should pass `leaseWriterWorker` too, unless it kills or replaces workers, as the writer lifecycle tests do.
