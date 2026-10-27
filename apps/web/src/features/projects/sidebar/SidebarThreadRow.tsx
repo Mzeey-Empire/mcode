@@ -516,7 +516,7 @@ function ThreadRowTitleLine({
   children,
 }: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "inlineEdit" | "presentation" | "onInlineEditChange" | "onInlineEditCommit" | "onInlineEditCancel"> & { children: React.ReactNode }) {
   return (
-    <div className="flex h-5 min-w-0 items-center gap-2">
+    <div data-title-line className="flex h-5 min-w-0 items-center gap-2">
       {/* A scaffold row dims what it is, never its status: the status is the part that is live. */}
       <div className={cn("flex min-w-0 flex-1 items-center gap-2", presentation.scaffoldDim)}>
         <ThreadRowProviderSlot provider={presentation.provider} providersUsed={thread.providers_used} isUserCompleted={presentation.isUserCompleted} />
