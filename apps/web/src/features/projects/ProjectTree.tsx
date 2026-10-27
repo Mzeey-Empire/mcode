@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/shallow";
-import { GitBranch } from "lucide-react";
-import { ContextMenu } from "@/components/ui/context-menu";
+import { GitBranch, GitMerge } from "lucide-react";
+import { effectiveAutoCompleteOnMerge } from "@mcode/contracts/models/thread";
+import { ContextMenu, type SwitchMenuItem } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useUiStore } from "@/stores/uiStore";
 import type { Thread, Workspace } from "@/transport/types";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
@@ -407,6 +409,32 @@ function WorkspaceRenameDialog({ dialog, value, isRenaming, onChange, onClose, o
   );
 }
 
+/**
+ * The thread menu's "Complete when PRs merge" switch. It shows the effective value, the thread's
+ * override or else the global setting, and keeps the reason when a toggle fails to save.
+ */
+function useAutoCompleteSwitch(threadId: string | null): SwitchMenuItem | null {
+  const thread = useWorkspaceStore((s) => (threadId === null ? undefined : s.threads.find((candidate) => candidate.id === threadId)));
+  const globalValue = useSettingsStore((s) => s.settings.thread.completion.completeOnPrMerge);
+  const setOverride = useWorkspaceStore((s) => s.setAutoCompleteOverride);
+  const [failure, setFailure] = useState<{ threadId: string; message: string } | null>(null);
+  if (!thread) return null;
+  return {
+    kind: "switch",
+    label: "Complete when PRs merge",
+    icon: <GitMerge />,
+    checked: effectiveAutoCompleteOnMerge(thread, globalValue),
+    disabledReason: thread.pull_requests.length === 0 ? "No linked PRs" : null,
+    description: failure?.threadId === thread.id ? failure.message : undefined,
+    onCheckedChange: (next) => {
+      setFailure(null);
+      setOverride(thread.id, next).catch((error: unknown) => {
+        setFailure({ threadId: thread.id, message: error instanceof Error ? error.message : String(error) });
+      });
+    },
+  };
+}
+
 function ThreadContextMenuOverlay({
   contextMenu,
   onClose,
@@ -418,6 +446,7 @@ function ThreadContextMenuOverlay({
   onStartRename: (state: InlineEditState) => void;
   onDeleteThread: (state: DeleteDialogState) => void;
 }) {
+  const autoComplete = useAutoCompleteSwitch(contextMenu?.threadId ?? null);
   if (!contextMenu) return null;
   return (
     <ContextMenu
@@ -444,6 +473,7 @@ function ThreadContextMenuOverlay({
           onClick: () => navigator.clipboard.writeText(contextMenu.threadId),
         },
         { label: "", onClick: () => {}, divider: true },
+        ...(autoComplete ? [autoComplete, { label: "", onClick: () => {}, divider: true }] : []),
         {
           label: "Delete",
           destructive: true,
