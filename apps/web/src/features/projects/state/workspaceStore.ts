@@ -714,8 +714,6 @@ interface WorkspaceState {
    */
   resolvePendingStartup: (ref: { threadId?: string; startupId?: string }) => void;
   deleteThread: (threadId: string, cleanupWorktree: boolean) => Promise<void>;
-  /** Complete an idle thread and release renderer-owned runtime resources. */
-  completeThread: (threadId: string) => Promise<void>;
   /** Reopen a completed thread and cancel its pending automatic deletion. */
   reopenThread: (threadId: string) => Promise<void>;
   /** Retry cleanup for a blocked completed thread and apply its returned lifecycle state. */
@@ -1662,18 +1660,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       useThreadStore.getState().clearThreadState(threadId);
     } catch (e) {
       restoreQueueDrainAfterFailedTeardown(previouslyEnabledQueueDrains);
-      set({ error: String(e) });
-      throw e;
-    }
-  },
-
-  completeThread: async (threadId) => {
-    set({ error: null });
-    try {
-      const completed = await getTransport().completeThread(threadId);
-      if (!completed.ok) throw new Error(completed.refusal);
-      get().applyThreadLifecycle(completed.thread);
-    } catch (e) {
       set({ error: String(e) });
       throw e;
     }

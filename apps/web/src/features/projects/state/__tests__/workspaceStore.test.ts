@@ -18,7 +18,6 @@ const {
   releaseBrowserScope: vi.fn(),
 }));
 
-const completeThread = vi.mocked(mockTransport.completeThread);
 const reopenThread = vi.mocked(mockTransport.reopenThread);
 const retryThreadCleanup = vi.mocked(mockTransport.retryThreadCleanup);
 
@@ -317,30 +316,27 @@ describe("workspaceStore completion lifecycle", () => {
     useWorkspaceStore.setState({ threads: [makeThread()], error: null });
   });
 
-  it("applies server completion before releasing renderer-owned resources", async () => {
+  it("releases renderer-owned resources when a completion is applied", async () => {
     const completed = makeThread({
       user_completed_at: "2026-08-12T08:00:00.000Z",
       scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
     });
-    completeThread.mockResolvedValue({ ok: true, thread: completed });
     const clearTerminal = vi.spyOn(useTerminalStore.getState(), "clearThread");
 
-    await useWorkspaceStore.getState().completeThread(completed.id);
+    useWorkspaceStore.getState().applyThreadLifecycle(completed);
 
-    expect(completeThread).toHaveBeenCalledWith(completed.id);
     expect(useWorkspaceStore.getState().threads[0]).toMatchObject(completed);
     expect(releaseBrowserScope).toHaveBeenCalledWith("workspace-1", completed.id);
     expect(clearScope).toHaveBeenCalledWith("workspace-1", completed.id);
-    expect(clearPreviewReferences).toHaveBeenCalledWith(completed.id);
+    await vi.waitFor(() => expect(clearPreviewReferences).toHaveBeenCalledWith(completed.id));
     expect(clearTerminal).toHaveBeenCalledWith(completed.id);
   });
 
-  it("closes every right-panel tab without changing the workspace fallback", async () => {
+  it("closes every right-panel tab without changing the workspace fallback", () => {
     const completed = makeThread({
       user_completed_at: "2026-08-12T08:00:00.000Z",
       scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
     });
-    completeThread.mockResolvedValue({ ok: true, thread: completed });
     const panelStore = useDiffStore.getState();
     panelStore.showRightPanel("workspace-1", null);
     panelStore.setRightPanelTab("workspace-1", null, "changes");
@@ -348,7 +344,7 @@ describe("workspaceStore completion lifecycle", () => {
     panelStore.setRightPanelTab("workspace-1", completed.id, "preview");
     panelStore.ensureRightPanelTab("workspace-1", completed.id, "terminal");
 
-    await useWorkspaceStore.getState().completeThread(completed.id);
+    useWorkspaceStore.getState().applyThreadLifecycle(completed);
 
     expect(useDiffStore.getState().getRightPanel("workspace-1", completed.id)).toMatchObject({
       visible: false,
@@ -399,35 +395,6 @@ describe("workspaceStore completion lifecycle", () => {
       tabInstances: [],
       activeTabId: null,
     });
-  });
-
-  it("keeps panel resources when the server rejects completion", async () => {
-    completeThread.mockRejectedValueOnce(new Error("completion rejected"));
-    const panelStore = useDiffStore.getState();
-    panelStore.showRightPanel("workspace-1", "thread-1");
-    panelStore.setRightPanelTab("workspace-1", "thread-1", "preview");
-
-    await expect(useWorkspaceStore.getState().completeThread("thread-1")).rejects.toThrow(
-      "completion rejected",
-    );
-
-    expect(useDiffStore.getState().getRightPanel("workspace-1", "thread-1")).toMatchObject({
-      visible: true,
-      openTabs: ["preview"],
-    });
-    expect(releaseBrowserScope).not.toHaveBeenCalled();
-    expect(clearScope).not.toHaveBeenCalled();
-  });
-
-  it("surfaces a typed refusal while keeping the active thread and its resources", async () => {
-    completeThread.mockResolvedValueOnce({ ok: false, refusal: "running" });
-
-    await expect(useWorkspaceStore.getState().completeThread("thread-1")).rejects.toThrow("running");
-
-    expect(useWorkspaceStore.getState().error).toBe("Error: running");
-    expect(useWorkspaceStore.getState().threads[0].user_completed_at).toBeNull();
-    expect(releaseBrowserScope).not.toHaveBeenCalled();
-    expect(clearScope).not.toHaveBeenCalled();
   });
 
   it("reopens without clearing preserved renderer state", async () => {
