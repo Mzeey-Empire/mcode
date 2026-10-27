@@ -205,10 +205,6 @@ NodeTest.describe("sidebar retained heap", () => {
   });
 });
 
-/**
- * Root 0 holds window 1. Window holds the probe 2, the store 3, a shared prototype 6, the facts
- * cache record 9, and a weak edge to thread 5. Thread 5 holds the shared prototype.
- */
 function buildSnapshot() {
   const sizes = [0, 0, 0, 0, 16, 32, 64, 128, 256, 512, 1024, 2048];
   const edges = {
@@ -246,7 +242,6 @@ function buildSnapshot() {
   };
 }
 
-/** A page whose evaluate runs in Node against a stub window, with rAF driven by the test. */
 function createFramePage() {
   const saved = { window: globalThis.window, requestAnimationFrame: globalThis.requestAnimationFrame, PerformanceObserver: globalThis.PerformanceObserver };
   let frameCallback = null;

@@ -68,7 +68,6 @@ function subscribeToMinute(listener: () => void): () => void {
 
 /** {@link relativeTime} that stays current, re-rendering on a shared minute ticker only when its text changes. */
 export function useRelativeTime(dateStr: string): string {
-  // The label is the snapshot, so a tick that leaves "3d" as "3d" skips the render.
   const label = useCallback(() => relativeTime(dateStr), [dateStr]);
   return useSyncExternalStore(subscribeToMinute, label, label);
 }

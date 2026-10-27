@@ -131,10 +131,7 @@ export function buildSidebarStreamEvents(capture, targetThreadId, sampleKey, exe
   ];
 }
 
-/**
- * Builds the single-thread pushes that follow the turn: an activity bump and a linked pull
- * request, each of which should re-render only the target row.
- */
+/** Builds activity, pull-request, and checks updates for the target thread. */
 export function buildSidebarSignalPushes(targetThreadId, atIso, prNumber) {
   return [
     { channel: "thread.activity", data: { threadId: targetThreadId, at: atIso } },
@@ -197,7 +194,6 @@ async function scrollSidebarByPage(page) {
   return moved;
 }
 
-/** Scrolls the virtual list a page at a time from the top until the titled row mounts. */
 async function revealThreadRow(page, title) {
   await scrollSidebarTo(page, "top");
   const row = threadRowLocator(page, title);
@@ -575,10 +571,7 @@ async function runRetainedHeapSample(context) {
   };
 }
 
-/**
- * Counts rAF intervals that end inside a window, against the frame budget. A flight's frames are
- * the intervals whose end falls from its first copy appearing to its last copy landing.
- */
+/** Summarizes rAF intervals ending in `(startMs, endMs]` against the frame budget. */
 export function summarizeFramesInWindow(frameTimes, startMs, endMs, budgetMs) {
   const intervals = [];
   for (let index = 1; index < frameTimes.length; index += 1) {
@@ -587,7 +580,6 @@ export function summarizeFramesInWindow(frameTimes, startMs, endMs, budgetMs) {
   return summarizeFrameIntervals(intervals, budgetMs);
 }
 
-/** Records when flying title copies join and leave the document body. */
 async function installFlightObserver(page) {
   await page.evaluate(() => {
     window.__mcodeSidebarFlights?.observer.disconnect();
@@ -630,7 +622,6 @@ async function setSidebarView(page, view) {
   await nextFrames(page, 30);
 }
 
-/** Lists thread rows whose box sits fully inside the sidebar scroller, top to bottom. */
 async function readVisibleThreadRows(page, excludeIds) {
   return page.evaluate((excluded) => {
     const body = document.querySelector('[data-testid="sidebar-body"]');
@@ -726,8 +717,6 @@ async function alignRowToTop(page, threadId) {
   return moved;
 }
 
-// Scrolls down a page at a time rather than jumping to the end, because the flat list's scroll
-// height overshoots its rows at 1,000+ threads and the end of the list renders blank.
 async function revealThreadIds(page, ids, excludeId) {
   await scrollSidebarTo(page, "top");
   for (let step = 0; step < MAX_WHEEL_STEPS; step += 1) {
@@ -767,7 +756,6 @@ async function readRowRenderTotal(page) {
     .reduce((total, [, count]) => total + count, 0), [ROW_RENDER_PREFIX, AGE_RENDER_PREFIX]);
 }
 
-/** Leaves the sidebar idle across at least one minute tick and counts thread row renders. */
 async function runIdleTickSample(context) {
   const { page, fixture } = context;
   await moveMouseOutOfSidebar(page);
@@ -833,10 +821,7 @@ const SIDEBAR_SAMPLE_RUNNERS = {
 
 const TRACED_SIDEBAR_WORKLOADS = new Set(["sidebarCompleteFlight", "sidebarOlderCrossing"]);
 
-/**
- * Saves a Chrome trace of the first measured sample beside the results: always for flight
- * workloads, and for every workload with a V8 CPU profile when the run asks for one.
- */
+/** Returns first-sample flight trace or requested CPU-profile options when a trace directory is set. */
 export function sampleMeasureOptions(context, workload, index) {
   const traced = TRACED_SIDEBAR_WORKLOADS.has(workload) || context.cpuProfile === true;
   if (!traced || index !== 0 || !context.traceDirectory) return {};
