@@ -347,6 +347,7 @@ export class TurnAdmissionDispatchCoordinator {
   /** Mark a committed turn active before its provider receives TurnStarted. */
   async markDispatchActive(threadId: string): Promise<void> {
     await this.threads.updateStatus(threadId, "active");
+    await this.threads.advanceActivity(threadId, new Date().toISOString());
   }
 
   /** Load the message already persisted by the automatic setup gate. */

@@ -142,6 +142,7 @@ export function buildPlaceholderWorkspaceThread(
     sdk_session_id: null,
     created_at: now,
     updated_at: now,
+    last_activity_at: now,
     ...resolveProviderFields(params),
     deleted_at: null,
     user_completed_at: null,

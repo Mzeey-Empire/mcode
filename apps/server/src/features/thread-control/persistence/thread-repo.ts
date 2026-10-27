@@ -50,6 +50,11 @@ export class ThreadRepo {
     return changed;
   }
 
+  /** Advance the turn clock through the shared writer and its post-commit notifier. */
+  advanceActivity(id: string, at: string): Promise<boolean> {
+    return this.writer.execute(threadWriteOperations.advanceActivity, [id, at]);
+  }
+
   complete(id: Parameters<ThreadStore["complete"]>[0], completedAt: Parameters<ThreadStore["complete"]>[1], scheduledDeletionAt: Parameters<ThreadStore["complete"]>[2]): Promise<ReturnType<ThreadStore["complete"]>> {
     return this.writer.execute(threadWriteOperations.complete, [id, completedAt, scheduledDeletionAt]);
   }
