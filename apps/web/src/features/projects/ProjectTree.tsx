@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useShallow } from "zustand/shallow";
 import { GitBranch, GitMerge } from "lucide-react";
 import { effectiveAutoCompleteOnMerge } from "@mcode/contracts/models/thread";
 import { ContextMenu, type SwitchMenuItem } from "@/components/ui/context-menu";
@@ -251,12 +250,11 @@ function normalizedPath(path: string): string {
 }
 
 function useRowFacts() {
-  const checksById = useWorkspaceStore(useShallow((s) => s.checksById));
   const worktreesLoadedFor = useWorkspaceStore((s) => s.worktreesLoadedForWorkspace);
   const worktrees = useWorkspaceStore((s) => s.worktrees);
   const availableProviders = useProviderAvailabilityStore((s) => s.providers);
   const validWorktreePaths = useMemo(() => new Set(worktrees.map((worktree) => normalizedPath(worktree.path))), [worktrees]);
-  return { checksById, worktreesLoadedFor, validWorktreePaths, availableProviders };
+  return { worktreesLoadedFor, validWorktreePaths, availableProviders };
 }
 
 function useThreadAndDraftActions() {
@@ -293,9 +291,8 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
   const retryThreadCleanup = useWorkspaceStore((s) => s.retryThreadCleanup);
   useLoadActiveWorkspaceWorktrees();
 
-  const { checksById, worktreesLoadedFor, validWorktreePaths, availableProviders } = facts;
+  const { worktreesLoadedFor, validWorktreePaths, availableProviders } = facts;
   const ctx = useMemo<SidebarRowContext>(() => ({
-    checksById,
     worktreesLoadedFor,
     validWorktreePaths,
     availableProviders,
@@ -318,7 +315,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
     onDiscardDraft: actions.discardDraft,
     onDraftContextMenu: menus.openDraftMenu,
   }), [
-    checksById, worktreesLoadedFor, validWorktreePaths, availableProviders,
+    worktreesLoadedFor, validWorktreePaths, availableProviders,
     rename.inlineEdit, rename.change, rename.commit, rename.cancel,
     toggleProject, toggleShowMore, actions.createThread, actions.openDraft, actions.discardDraft,
     projects.openDelete, projects.openRename, clicks.click, clicks.doubleClick, clicks.select,
