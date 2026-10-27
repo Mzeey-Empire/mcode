@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { VirtualRows } from "@/components/ui/VirtualRows";
 import { VirtualViewport, type VirtualHost, type VirtualRow, type ViewportPosition } from "@/components/ui/virtual-viewport";
 import { usePreparingRowEntrance } from "@/features/thread-startup";
+import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { selectThreadIndex } from "../state/thread-index";
 import type { SidebarItem } from "./sidebar-model";
@@ -28,6 +29,7 @@ import { ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProje
 import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import { useSidebarUiStore } from "./sidebar-ui-store";
+import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
 
 /** Provisional heights until the ResizeObserver measures; they only shape the first frame. */
 const PROVISIONAL_HEIGHT: Record<SidebarItem["kind"], number> = {
@@ -95,7 +97,7 @@ function useSidebarViewport(containerRef: React.RefObject<HTMLDivElement | null>
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const view = new VirtualViewport(container, setHosts, noopViewportPosition, { classPrefix: "project-tree", ariaLabel: "Projects" });
+    const view = new VirtualViewport(container, setHosts, noopViewportPosition, { classPrefix: "project-tree", ariaLabel: "Projects", flowHostId: OLDER_BAR_KEY });
     controllerRef.current = view;
     return () => {
       view.destroy();
@@ -184,16 +186,6 @@ function ShowMoreRow({ item }: { item: Extract<SidebarItem, { kind: "show-more" 
   );
 }
 
-function OlderBarRow({ item }: { item: Extract<SidebarItem, { kind: "older-bar" }> }) {
-  const toggleOlder = useSidebarUiStore((state) => state.toggleOlder);
-  return (
-    <Button variant="ghost" size="compact" aria-expanded={item.open} onClick={toggleOlder} className="h-8 w-full justify-between rounded-md px-2 text-caption font-normal text-muted">
-      <span>Older</span>
-      <span className="tabular-nums">{item.count}</span>
-    </Button>
-  );
-}
-
 const SidebarRow = memo(function SidebarRow({ item, ctx, dropEdge }: { item: SidebarItem; ctx: SidebarRowContext; dropEdge: DropEdge | null }) {
   switch (item.kind) {
     case "project":
@@ -204,17 +196,41 @@ const SidebarRow = memo(function SidebarRow({ item, ctx, dropEdge }: { item: Sid
       return <div data-testid="thread-item" data-thread-id={item.threadId}><SidebarThreadRow item={item} ctx={ctx} /></div>;
     case "show-more":
       return <ShowMoreRow item={item} />;
+    // The Older bar lives in the viewport's sticky flow host, never in a recycled row.
     case "older-bar":
-      return <OlderBarRow item={item} />;
-    case "end-spacer":
-      return <div aria-hidden className="h-3" />;
     case "empty":
       return null;
+    case "end-spacer":
+      return <div aria-hidden className="h-3" />;
   }
 });
 
 function toVirtualRows(items: readonly SidebarItem[]): VirtualRow[] {
   return items.map((item) => ({ id: item.key, height: PROVISIONAL_HEIGHT[item.kind] }));
+}
+
+/**
+ * Publishes the rows and owns the Older bar's open-and-rise: opening the section scrolls once the
+ * new rows land so the bar rises to the top with the Older threads below it.
+ */
+function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, items: readonly SidebarItem[], rows: readonly VirtualRow[]) {
+  const olderOpen = useSidebarUiStore((state) => state.olderOpen);
+  const toggleOlderSection = useSidebarUiStore((state) => state.toggleOlder);
+  const riseRef = useRef(false);
+  const olderBar = useMemo(() => items.find((item): item is Extract<SidebarItem, { kind: "older-bar" }> => item.kind === "older-bar"), [items]);
+  useLayoutEffect(() => {
+    const viewport = controllerRef.current;
+    if (!viewport) return;
+    viewport.setRows(rows);
+    if (!riseRef.current) return;
+    riseRef.current = false;
+    viewport.moveTo({ kind: "target", key: OLDER_BAR_KEY, align: "start" }, !prefersReducedMotion());
+  }, [controllerRef, rows]);
+  const toggleOlder = useCallback(() => {
+    riseRef.current = !olderOpen;
+    toggleOlderSection();
+  }, [olderOpen, toggleOlderSection]);
+  return { olderBar, toggleOlder };
 }
 
 /** Thread and draft row keys plus the preparing threads among them, for the first-send entrance. */
@@ -257,9 +273,7 @@ export function SidebarList({ items, ctx, overlay }: SidebarListProps) {
   const entrance = useEntranceKeys(items);
   usePreparingRowEntrance(containerRef, entrance.rowKeys, entrance.preparing);
 
-  useLayoutEffect(() => {
-    controllerRef.current?.setRows(rows);
-  }, [controllerRef, rows]);
+  const { olderBar, toggleOlder } = useOlderRise(controllerRef, items, rows);
 
   const { dropIndicator } = drag;
   const renderRow = useCallback((item: SidebarItem): ReactNode => {
@@ -289,6 +303,7 @@ export function SidebarList({ items, ctx, overlay }: SidebarListProps) {
           {dragged?.kind === "project" ? <div className="px-1.5"><ProjectHeader item={dragged} ctx={rowCtx} /></div> : null}
         </DragOverlay>
       </DndContext>
+      {olderBar && controllerRef.current && <OlderBar item={olderBar} viewport={controllerRef.current} onToggle={toggleOlder} />}
       {overlay}
     </div>
   );
