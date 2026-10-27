@@ -16,6 +16,7 @@ import type { ThreadRowState } from "@/features/thread-attention/thread-row-stat
 import { isPrable } from "@/lib/is-prable";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { useRelativeTime } from "@/lib/time";
+import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 import { cn } from "@/lib/utils";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
@@ -65,6 +66,7 @@ function useThreadRowHandlers(ctx: SidebarRowContext, workspaceId: string, works
 }
 
 function ThreadRow({ thread, workspace, depth, showProject, ctx }: { thread: WorkspaceThread; workspace: Workspace | undefined; depth: number; showProject: boolean; ctx: SidebarRowContext }) {
+  if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordRowRender(`sidebar-thread:${thread.id}`);
   const isEditing = ctx.inlineEdit?.threadId === thread.id;
   const handlers = useThreadRowHandlers(ctx, thread.workspace_id, workspace?.path ?? "");
   const isActive = useWorkspaceStore((s) => s.activeThreadId === thread.id);

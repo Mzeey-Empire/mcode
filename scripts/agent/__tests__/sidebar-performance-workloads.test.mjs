@@ -3,8 +3,10 @@ import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 import { normalizeFrontendRendererWorkloads } from "../../perf/frontend-renderer-fixture.mjs";
 import {
+  buildSidebarSignalPushes,
   buildSidebarStreamEvents,
   summarizeFrameIntervals,
+  summarizeFramesInWindow,
   summarizeSidebarStreamEvents,
   validateSidebarCheck,
 } from "../../perf/sidebar-renderer-workloads.mjs";
@@ -98,6 +100,44 @@ NodeTest.describe("sidebar renderer workloads", () => {
     assert.equal(summary.all.totalCommits, 4);
     assert.equal(summary.byChannel["thread.status"].commitDurationP95Ms, 6);
     assert.equal(summary.byChannel["agent.canonical"].commitDurationP50Ms, 0);
+  });
+
+  NodeTest.it("summarizes row renders and setRows calls per event, and leaves them empty in production", () => {
+    const summary = summarizeSidebarStreamEvents([
+      [{ channel: "thread.activity", commitCount: 1, commitDurationMs: 3, rowRenderCount: 1, rowsRendered: 1, setRowsCount: 1 }],
+      [{ channel: "thread.activity", commitCount: 2, commitDurationMs: 5, rowRenderCount: 4, rowsRendered: 3, setRowsCount: 0 }],
+    ]);
+    assert.equal(summary.byChannel["thread.activity"].rowRendersPerEventMax, 4);
+    assert.equal(summary.byChannel["thread.activity"].rowsRenderedPerEventMax, 3);
+    assert.equal(summary.byChannel["thread.activity"].setRowsPerEventMax, 1);
+    const production = summarizeSidebarStreamEvents([[{ channel: "thread.status", commitCount: null, commitDurationMs: null, rowRenderCount: null, rowsRendered: null, setRowsCount: null }]]);
+    assert.equal(production.all.rowRendersPerEventMax, null);
+    assert.equal(production.all.setRowsPerEventP50, null);
+  });
+
+  NodeTest.it("follows the turn with one activity push and one pull-request push for the target", () => {
+    const pushes = buildSidebarSignalPushes("target", "2026-10-27T12:00:00.000Z", 1001);
+    assert.deepEqual(pushes.map((push) => push.channel), ["thread.activity", "thread.pullRequests"]);
+    assert.ok(pushes.every((push) => push.data.threadId === "target"));
+    assert.equal(pushes[1].data.pullRequests[0].number, 1001);
+  });
+
+  NodeTest.it("counts only the frames that end inside a flight window", () => {
+    const frames = summarizeFramesInWindow([0, 16.7, 33.4, 66.8, 83.5, 150], 16.7, 83.5, 16.7);
+    assert.equal(frames.frameCount, 3);
+    assert.equal(frames.overBudgetFrames, 1);
+  });
+
+  NodeTest.it("rejects flight samples that had no row to fly or saw no flight", () => {
+    assert.deepEqual(validateSidebarCheck("sidebarCompleteFlight", { candidate: null }, "production"), ["no thread row besides the stream target was on screen"]);
+    assert.deepEqual(validateSidebarCheck("sidebarCompleteFlight", { candidate: { id: "a" }, flights: 0 }, "production"), ["the completed row did not fly"]);
+    assert.deepEqual(validateSidebarCheck("sidebarOlderCrossing", { crossing: [1, 2, 3, 4, 5], flights: 3 }, "production"), []);
+    assert.deepEqual(validateSidebarCheck("sidebarOlderCrossing", { crossing: [1, 2] }, "production"), ["fewer than five Recent rows were on screen"]);
+  });
+
+  NodeTest.it("rejects an idle tick sample outside a profiling build or shorter than a minute", () => {
+    assert.deepEqual(validateSidebarCheck("sidebarIdleTick", { profiling: true, elapsedMs: 61_000 }, "profiling"), []);
+    assert.equal(validateSidebarCheck("sidebarIdleTick", { profiling: false, elapsedMs: 59_000 }, "production").length, 2);
   });
 
   NodeTest.it("counts frames that miss at least half a vsync as over budget", () => {
