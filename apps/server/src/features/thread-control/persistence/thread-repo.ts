@@ -19,8 +19,15 @@ export class ThreadRepo {
     this.reader = new ThreadStore(db);
   }
 
-  create(workspaceId: Parameters<ThreadStore["create"]>[0], title: Parameters<ThreadStore["create"]>[1], mode: Parameters<ThreadStore["create"]>[2], branch: Parameters<ThreadStore["create"]>[3], worktreeManaged: Parameters<ThreadStore["create"]>[4] = true, provider: Parameters<ThreadStore["create"]>[5] = "claude", lineage?: Parameters<ThreadStore["create"]>[6], checkoutState: Parameters<ThreadStore["create"]>[7] = "named", baseBranch: Parameters<ThreadStore["create"]>[8] = null): Promise<ReturnType<ThreadStore["create"]>> {
-    return this.writer.execute(threadWriteOperations.create, [workspaceId, title, mode, branch, worktreeManaged, provider, lineage, checkoutState, baseBranch]);
+  async create(workspaceId: Parameters<ThreadStore["create"]>[0], title: Parameters<ThreadStore["create"]>[1], mode: Parameters<ThreadStore["create"]>[2], branch: Parameters<ThreadStore["create"]>[3], worktreeManaged: Parameters<ThreadStore["create"]>[4] = true, provider: Parameters<ThreadStore["create"]>[5] = "claude", lineage?: Parameters<ThreadStore["create"]>[6], checkoutState: Parameters<ThreadStore["create"]>[7] = "named", baseBranch: Parameters<ThreadStore["create"]>[8] = null): Promise<ReturnType<ThreadStore["create"]>> {
+    const thread = await this.writer.execute(threadWriteOperations.create, [workspaceId, title, mode, branch, worktreeManaged, provider, lineage, checkoutState, baseBranch]);
+    broadcast("thread.created", { thread });
+    return thread;
+  }
+
+  /** Read the complete sidebar index across workspaces without a row cap. */
+  listAll(): ReturnType<ThreadStore["listAll"]> {
+    return this.reader.listAll();
   }
 
   findById(id: Parameters<ThreadStore["findById"]>[0], options: Parameters<ThreadStore["findById"]>[1] = {}): ReturnType<ThreadStore["findById"]> {
