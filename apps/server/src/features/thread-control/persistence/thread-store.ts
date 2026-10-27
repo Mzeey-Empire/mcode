@@ -762,6 +762,7 @@ export class ThreadStore {
       const result = runChanges(tx.update(threads)
         .set({
           userCompletedAt: null,
+          autoCompletePausedAt: reopenedAt,
           scheduledDeletionAt: null,
           cleanupState: null,
           cleanupReason: null,
@@ -1196,6 +1197,7 @@ export class ThreadStore {
   /** Persist model, provider, and supplied composer settings in one atomic update. */
   updateSettings(id: string, settings: ThreadSettings): boolean {
     const set = buildSettingsSet(settings);
+    if (settings.auto_complete_on_merge !== undefined) set.autoCompletePausedAt = null;
     if (Object.keys(set).length === 0) return false;
     const sessionAfterProviderChange = settings.provider === undefined
       ? {}
