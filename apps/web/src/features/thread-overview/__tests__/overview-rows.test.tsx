@@ -1,4 +1,5 @@
-import { createMockThread, createMockWorkspace, mockTransport } from "@/__tests__/mocks/transport";
+import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { ThreadOverview } from "@/components/chat/ThreadOverview";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { resetThreadRecapRequestStateForTest } from "@/hooks/useThreadRecap";

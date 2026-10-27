@@ -11,6 +11,7 @@ import { noRawShadow } from "./rules/no-raw-shadow.ts";
 import { noRealTimerSleep } from "./rules/no-real-timer-sleep.ts";
 import { noSourceTextTest } from "./rules/no-source-text-test.ts";
 import { requireLazyNontrivialSchema } from "./rules/require-lazy-nontrivial-schema.ts";
+import { useTestBuilder } from "./rules/use-test-builder.ts";
 
 /** Mcode-specific code-quality rules for Oxlint. */
 export const mcodePlugin = definePlugin({
@@ -28,6 +29,7 @@ export const mcodePlugin = definePlugin({
     "no-real-timer-sleep": noRealTimerSleep,
     "no-source-text-test": noSourceTextTest,
     "require-lazy-nontrivial-schema": requireLazyNontrivialSchema,
+    "use-test-builder": useTestBuilder,
   },
 });
 

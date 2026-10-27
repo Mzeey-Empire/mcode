@@ -1,6 +1,7 @@
+import { createMockWorkspace } from "@mcode/contracts/testing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectIcon } from "@mcode/contracts";
-import { createMockWorkspace, mockTransport } from "@/__tests__/mocks/transport";
+import { mockTransport } from "@/__tests__/mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

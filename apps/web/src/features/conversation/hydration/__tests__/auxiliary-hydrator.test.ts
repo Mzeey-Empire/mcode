@@ -1,3 +1,4 @@
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { PendingPlanImplement, PlanComment, PlanQuestion, PlanSnapshot, PlanVersion } from "@mcode/contracts";
 import { HYDRATION_TTL_MS } from "..";
@@ -15,7 +16,7 @@ import {
   type ThreadRecord,
 } from "@/stores/thread-record";
 import type { ThreadHydratorWriteState } from "../types";
-import { mockTransport, createMockMessage, createMockThread } from "@/__tests__/mocks/transport";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { shallowEqualBy } from "@/lib/shallowEqualBy";
 import { coerceTaskStatus, type TaskItem } from "@/stores/taskStore";
 

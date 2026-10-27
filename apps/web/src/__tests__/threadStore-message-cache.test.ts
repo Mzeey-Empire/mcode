@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import type { AgentEvent, NarrativeEntry } from "@mcode/contracts";
 import type { ToolCallRecord } from "@/transport/types";
 import {
@@ -19,7 +20,7 @@ import {
   CONVERSATION_NARRATIVE_BYTES,
   measureConversationValue,
 } from "@/features/conversation/hydration/conversation-memory-policy";
-import { mockTransport, createMockMessage } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import {
   activateTestConversation,
   resetThreadStoreForTests,
@@ -11,7 +12,7 @@ import {
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import type { Message } from "@/transport/types";
-import { mockTransport, createMockMessage } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 

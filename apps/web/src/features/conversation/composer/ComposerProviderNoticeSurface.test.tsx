@@ -1,7 +1,8 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createMockMessage } from "@/__tests__/mocks/transport";
+
 import { createEmptyThreadRecord, patchThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";

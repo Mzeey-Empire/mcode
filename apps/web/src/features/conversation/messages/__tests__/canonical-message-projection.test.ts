@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { createAgentModelState, type AgentItem, type AgentTurn, type Message } from "@mcode/contracts";
 import { describe, expect, it } from "vitest";
 import { projectCanonicalMessageList } from "../canonical-message-projection";
@@ -9,20 +10,15 @@ const TURN_ID = "canonical-turn";
 const STARTED_AT = "2026-08-18T12:00:00.000Z";
 
 function message(overrides: Partial<Message> = {}): Message {
-  return {
+  return createMockMessage({
     id: "child-prompt",
     thread_id: THREAD_ID,
     role: "user",
     content: "Inspect README.md",
-    tool_calls: null,
-    files_changed: null,
-    cost_usd: null,
-    tokens_used: null,
     timestamp: STARTED_AT,
     sequence: 0,
-    attachments: null,
     ...overrides,
-  };
+  });
 }
 
 function turn(

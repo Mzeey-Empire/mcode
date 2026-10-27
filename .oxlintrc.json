@@ -50,6 +50,19 @@
   },
   "overrides": [
     {
+      "files": ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**"],
+      "rules": {
+        "mcode/use-test-builder": ["error", {
+          "shapes": [
+            { "type": "Thread", "builder": "createMockThread", "from": "@mcode/contracts/testing", "keys": ["title", "worktree_path", "checkout_state"] },
+            { "type": "Message", "builder": "createMockMessage", "from": "@mcode/contracts/testing", "keys": ["thread_id", "role", "tool_calls", "files_changed"] },
+            { "type": "Workspace", "builder": "createMockWorkspace", "from": "@mcode/contracts/testing", "keys": ["path", "provider_config", "is_git_repo"] },
+            { "type": "ApprovalRequest", "builder": "createMockApproval", "from": "@mcode/contracts/testing", "keys": ["requestId", "subject", "choices", "origin"] }
+          ]
+        }]
+      }
+    },
+    {
       "files": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"],
       "rules": {
         "mcode/no-ellipsis-truncation": "error",

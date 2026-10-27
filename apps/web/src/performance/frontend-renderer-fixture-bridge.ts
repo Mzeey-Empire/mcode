@@ -1,4 +1,5 @@
 import { useDiffStore } from "@/stores/diffStore";
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -33,6 +34,8 @@ declare global {
       readonly threadStore: typeof useThreadStore;
       readonly diffStore: typeof useDiffStore;
       readonly createEmptyThreadRecord: typeof createEmptyThreadRecord;
+      readonly createMockMessage: typeof createMockMessage;
+      readonly createMockThread: typeof createMockThread;
       readonly shikiPerformance: {
         readonly drain: typeof drainShikiPerformanceObservations;
         readonly reset: typeof resetShikiPerformanceObservations;
@@ -65,6 +68,8 @@ export function installFrontendRendererFixtureBridge(): void {
     threadStore: useThreadStore,
     diffStore: useDiffStore,
     createEmptyThreadRecord,
+    createMockMessage,
+    createMockThread,
     shikiPerformance: {
       drain: drainShikiPerformanceObservations,
       reset: resetShikiPerformanceObservations,

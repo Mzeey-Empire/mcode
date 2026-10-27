@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import type { AgentEvent } from "@mcode/contracts";
 import {
   resetThreadStoreForTests,
@@ -67,18 +68,12 @@ describe("message sliding window", () => {
   });
 
   it("caps messages at MESSAGE_WINDOW_SIZE when addMessage exceeds limit", () => {
-    const msgs = Array.from({ length: MESSAGE_WINDOW_SIZE }, (_, i) => ({
+    const msgs = Array.from({ length: MESSAGE_WINDOW_SIZE }, (_, i) => createMockMessage({
       id: `msg-${i}`,
       thread_id: "thread-1",
-      role: "user" as const,
+      role: "user",
       content: `Message ${i}`,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: i + 1,
-      attachments: null,
     }));
     useThreadStore.setState((s) => ({
       records: s.currentThreadId
@@ -86,19 +81,13 @@ describe("message sliding window", () => {
         : s.records,
     }));
 
-    useThreadStore.getState().addMessage({
+    useThreadStore.getState().addMessage(createMockMessage({
       id: `msg-${MESSAGE_WINDOW_SIZE}`,
       thread_id: "thread-1",
       role: "assistant",
       content: "New message",
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: MESSAGE_WINDOW_SIZE + 1,
-      attachments: null,
-    });
+    }));
 
     expect(getTestActiveMessages().length).toBe(MESSAGE_WINDOW_SIZE);
     expect(getTestActiveMessages()[0].id).toBe("msg-1");
@@ -106,55 +95,37 @@ describe("message sliding window", () => {
   });
 
   it("sets hasMoreMessages to true when messages are evicted", () => {
-    const msgs = Array.from({ length: MESSAGE_WINDOW_SIZE }, (_, i) => ({
+    const msgs = Array.from({ length: MESSAGE_WINDOW_SIZE }, (_, i) => createMockMessage({
       id: `msg-${i}`,
       thread_id: "thread-1",
-      role: "user" as const,
+      role: "user",
       content: `Message ${i}`,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: i + 1,
-      attachments: null,
     }));
     useThreadStore.setState((s) => ({
       currentThreadId: "thread-1",
       records: patchThreadRecord(s.records, "thread-1", { messages: msgs, hasMoreMessages: false }),
     }));
 
-    useThreadStore.getState().addMessage({
+    useThreadStore.getState().addMessage(createMockMessage({
       id: "msg-overflow",
       thread_id: "thread-1",
       role: "assistant",
       content: "Overflow",
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: MESSAGE_WINDOW_SIZE + 1,
-      attachments: null,
-    });
+    }));
 
     expect(getTestThreadHasMoreMessages("thread-1")).toBe(true);
   });
 
   it("session.message event respects the message cap", () => {
     vi.useFakeTimers();
-    const msgs = Array.from({ length: MESSAGE_WINDOW_SIZE }, (_, i) => ({
+    const msgs = Array.from({ length: MESSAGE_WINDOW_SIZE }, (_, i) => createMockMessage({
       id: `msg-${i}`,
       thread_id: "thread-1",
-      role: "user" as const,
+      role: "user",
       content: `Message ${i}`,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: i + 1,
-      attachments: null,
     }));
     useThreadStore.setState((s) => ({
       records: s.currentThreadId
@@ -184,18 +155,12 @@ describe("loadOlderMessages", () => {
 
   it("prepends older messages fetched from the server", async () => {
     // Current in-memory messages start at sequence 51
-    const currentMsgs = Array.from({ length: 50 }, (_, i) => ({
+    const currentMsgs = Array.from({ length: 50 }, (_, i) => createMockMessage({
       id: `msg-${i + 50}`,
       thread_id: "thread-1",
-      role: "user" as const,
+      role: "user",
       content: `Message ${i + 50}`,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: i + 51,
-      attachments: null,
     }));
     useThreadStore.setState((s) => ({
       currentThreadId: "thread-1",
@@ -203,18 +168,12 @@ describe("loadOlderMessages", () => {
     }));
 
     // Server returns 50 older messages (sequences 1-50)
-    const olderMsgs = Array.from({ length: 50 }, (_, i) => ({
+    const olderMsgs = Array.from({ length: 50 }, (_, i) => createMockMessage({
       id: `msg-${i}`,
       thread_id: "thread-1",
-      role: "user" as const,
+      role: "user",
       content: `Message ${i}`,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: i + 1,
-      attachments: null,
     }));
     vi.mocked(mockTransport.getMessages).mockResolvedValueOnce({ messages: olderMsgs, hasMore: true });
 
@@ -226,36 +185,24 @@ describe("loadOlderMessages", () => {
   });
 
   it("sets hasMoreMessages to false when server reports no more", async () => {
-    const currentMsgs = [{
+    const currentMsgs = [createMockMessage({
       id: "msg-10",
       thread_id: "thread-1",
-      role: "user" as const,
+      role: "user",
       content: "Message 10",
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: 10,
-      attachments: null,
-    }];
+    })];
     useThreadStore.setState((s) => ({
       currentThreadId: "thread-1",
       records: patchThreadRecord(s.records, "thread-1", { messages: currentMsgs, oldestLoadedSequence: 10 }),
     }));
 
-    const olderMsgs = Array.from({ length: 5 }, (_, i) => ({
+    const olderMsgs = Array.from({ length: 5 }, (_, i) => createMockMessage({
       id: `msg-${i}`,
       thread_id: "thread-1",
-      role: "user" as const,
+      role: "user",
       content: `Message ${i}`,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: i + 1,
-      attachments: null,
     }));
     vi.mocked(mockTransport.getMessages).mockResolvedValueOnce({ messages: olderMsgs, hasMore: false });
 
@@ -285,18 +232,12 @@ describe("loadOlderMessages", () => {
   });
 
   it("ignores results when thread switches during pagination", async () => {
-    const currentMsgs = Array.from({ length: 50 }, (_, i) => ({
+    const currentMsgs = Array.from({ length: 50 }, (_, i) => createMockMessage({
       id: `msg-${i + 50}`,
       thread_id: "thread-1",
-      role: "user" as const,
+      role: "user",
       content: `Message ${i + 50}`,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: i + 51,
-      attachments: null,
     }));
     useThreadStore.setState((s) => ({
       currentThreadId: "thread-1",
@@ -317,18 +258,12 @@ describe("loadOlderMessages", () => {
     }));
 
     resolveGetMessages({
-      messages: Array.from({ length: 50 }, (_, i) => ({
+      messages: Array.from({ length: 50 }, (_, i) => createMockMessage({
         id: `older-${i}`,
         thread_id: "thread-1",
         role: "user",
         content: `Older ${i}`,
-        tool_calls: null,
-        files_changed: null,
-        cost_usd: null,
-        tokens_used: null,
-        timestamp: new Date().toISOString(),
         sequence: i + 1,
-        attachments: null,
       })),
       hasMore: true,
     });
@@ -342,18 +277,12 @@ describe("loadOlderMessages", () => {
 
   it("repeated prepends accumulate messages correctly", async () => {
     // Start with 50 messages (seq 51-100)
-    const initial = Array.from({ length: 50 }, (_, i) => ({
+    const initial = Array.from({ length: 50 }, (_, i) => createMockMessage({
       id: `msg-${i}`,
       thread_id: "thread-1",
-      role: "user" as const,
+      role: "user",
       content: `Message ${i}`,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: 51 + i,
-      attachments: null,
     }));
     useThreadStore.setState((s) => ({
       currentThreadId: "thread-1",
@@ -361,18 +290,12 @@ describe("loadOlderMessages", () => {
     }));
 
     // First pagination: 50 older messages (seq 1-50)
-    const batch1 = Array.from({ length: 50 }, (_, i) => ({
+    const batch1 = Array.from({ length: 50 }, (_, i) => createMockMessage({
       id: `batch1-${i}`,
       thread_id: "thread-1",
-      role: "user" as const,
+      role: "user",
       content: `Batch1 ${i}`,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
       sequence: 1 + i,
-      attachments: null,
     }));
     vi.mocked(mockTransport.getMessages).mockResolvedValueOnce({ messages: batch1, hasMore: false });
     await useThreadStore.getState().loadOlderMessages("thread-1");

@@ -1,3 +1,4 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { MAX_THREAD_SUBSCRIPTIONS, WS_METHODS, type WsMethodName } from "../methods.js";
 
@@ -24,48 +25,19 @@ describe("thread switching WebSocket contracts", () => {
 
   it("requires an authoritative runtime snapshot for the first-turn result", () => {
     const method = WS_METHODS()["agent.createAndSend"];
-    const thread = {
+    const thread = createMockThread({
       id: "thread-1",
       workspace_id: "workspace-1",
       title: "First turn",
       status: "active",
       mode: "direct",
-      worktree_path: null,
       branch: "main",
       checkout_state: "named",
-      base_branch: null,
-      worktree_managed: false,
-      issue_number: null,
-      pr_number: null,
-      pr_status: null,
-      sdk_session_id: null,
       created_at: "2026-08-01T00:00:00.000Z",
       updated_at: "2026-08-01T00:00:00.000Z",
       model: "gpt-5.5",
       provider: "codex",
-      deleted_at: null,
-      user_completed_at: null,
-      scheduled_resume: null,
-      scheduled_deletion_at: null,
-      cleanup_state: null,
-      cleanup_reason: null,
-      last_context_tokens: null,
-      context_window: null,
-      reasoning_level: null,
-      interaction_mode: null,
-      orchestration_mode: null,
-      permission_mode: null,
-      context_window_mode: null,
-      thinking: null,
-      fast_mode: null,
-      devin_mode: null,
-      default_open_in_app: null,
-      parent_thread_id: null,
-      delegation_coordinator_thread_id: null,
-      forked_from_message_id: null,
-      last_compact_summary: null,
-      plan_phase: null,
-    };
+    });
 
     expect(method.result.safeParse(thread).success).toBe(false);
     expect(method.result.safeParse({

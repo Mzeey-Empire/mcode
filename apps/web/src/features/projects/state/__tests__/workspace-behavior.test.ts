@@ -1,3 +1,4 @@
+import { createMockWorkspace, createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import {
   resetThreadStoreForTests,
@@ -15,11 +16,7 @@ import { toComposerAttachmentMetas } from "@/features/conversation/composer/draf
 import { useDiffStore } from "@/stores/diffStore";
 import { usePreviewReferenceQueueStore } from "@/features/preview/state/previewReferenceQueueStore";
 import { previewTabsScopeKey, usePreviewTabsStore } from "@/features/preview/state/previewTabsStore";
-import {
-  mockTransport,
-  createMockWorkspace,
-  createMockThread,
-} from "../../../../__tests__/mocks/transport";
+import { mockTransport } from "../../../../__tests__/mocks/transport";
 import type { CreateAndSendResult, SelectedTextComment, ThreadStartup, TurnRuntimeSnapshot, WorkspaceCreateResult } from "@mcode/contracts";
 import { act, renderHook } from "@testing-library/react";
 import { useQueuedMessageDispatch } from "@/features/conversation/composer/queue/useQueuedMessageDispatch";

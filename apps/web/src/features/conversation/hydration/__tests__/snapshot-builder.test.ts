@@ -1,7 +1,8 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, it, expect } from "vitest";
 import type { TurnSnapshot } from "@mcode/contracts";
 import { SnapshotBuilder } from "../snapshot-builder";
-import { createMockMessage } from "@/__tests__/mocks/transport";
+
 
 describe("SnapshotBuilder", () => {
   const builder = new SnapshotBuilder();

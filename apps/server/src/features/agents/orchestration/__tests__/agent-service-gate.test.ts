@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { createMockThread } from "@mcode/contracts/testing";
 import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ApprovalReviewSupport, Thread, IProviderRegistry } from "@mcode/contracts";
@@ -52,29 +53,14 @@ type PersistedThread = Omit<Thread, "status"> & { status: PersistedThreadStatus 
 
 function makeThread(overrides: Partial<PersistedThread> = {}): Thread {
   return {
-    id: THREAD_ID,
-    workspace_id: "ws-1",
-    title: "Test thread",
+    ...createMockThread({
+      id: THREAD_ID,
+      workspace_id: "ws-1",
+      title: "Test thread",
+      model: "claude-sonnet-4-6",
+      provider: "codex",
+    }),
     status: "idle",
-    mode: "direct",
-    branch: "main",
-    worktree_path: null,
-    model: "claude-sonnet-4-6",
-    provider: "codex",
-    sdk_session_id: null,
-    last_context_tokens: null,
-    context_window: null,
-    reasoning_level: null,
-    interaction_mode: null,
-    permission_mode: null,
-    last_compact_summary: null,
-    parent_thread_id: null,
-    forked_from_message_id: null,
-    deleted_at: null,
-    user_completed_at: null,
-    scheduled_deletion_at: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
     ...overrides,
   } as Thread;
 }

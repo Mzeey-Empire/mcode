@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -59,7 +60,7 @@ vi.mock("@/components/chat/ImageAttachmentLightbox", () => ({
 }));
 
 function makeMessage(content: string): Message {
-  return {
+  return createMockMessage({
     id: "msg-1",
     thread_id: "thread-1",
     role: "user",
@@ -69,9 +70,7 @@ function makeMessage(content: string): Message {
     cost_usd: null,
     tokens_used: null,
     sequence: 1,
-    tool_calls: null,
-    files_changed: null,
-  };
+  });
 }
 
 describe("hidden plan messages", () => {
@@ -799,7 +798,7 @@ describe("MessageBubble provider notices", () => {
 });
 
 describe("MessageBubble assistant plan-questions suppression", () => {
-  const makeAssistantMessage = (content: string): Message => ({
+  const makeAssistantMessage = (content: string): Message => createMockMessage({
     id: "msg-asst",
     thread_id: "thread-1",
     role: "assistant",
@@ -809,8 +808,6 @@ describe("MessageBubble assistant plan-questions suppression", () => {
     cost_usd: null,
     tokens_used: null,
     sequence: 2,
-    tool_calls: null,
-    files_changed: null,
   });
 
   it("renders goal-cleared receipts once", () => {

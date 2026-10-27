@@ -1,7 +1,8 @@
+import { createMockApproval, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { selectDockApprovals, useApprovalStore } from "@/stores/approvalStore";
 import { act } from "@testing-library/react";
-import { createMockApproval } from "@/__tests__/mocks/transport";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThreadStartup } from "@mcode/contracts";
 import type { Thread } from "@/transport";
@@ -31,7 +32,7 @@ import { onPtyExit } from "@/features/terminal/adapters/pty-data-registry";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
-import { createMockWorkspace } from "@/__tests__/mocks/transport";
+
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
 import { resetThreadStoreForTests, getTestThreadToolCalls } from "@/stores/thread-store-test-utils";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
@@ -94,7 +95,7 @@ describe("workspace.iconChanged", () => {
 });
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
-  return {
+  return createMockThread({
     id: "thread-1",
     workspace_id: "ws-1",
     title: "Thread",
@@ -106,39 +107,16 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     base_branch: null,
     head_sha: null,
     worktree_managed: true,
-    issue_number: null,
     pr_number: 10,
     pr_status: "OPEN",
-    sdk_session_id: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
-    model: null,
     provider: "claude",
-    deleted_at: null,
     user_completed_at: null,
     scheduled_deletion_at: null,
     scheduled_resume: null,
-    cleanup_state: null,
-    cleanup_reason: null,
-    last_context_tokens: null,
-    context_window: null,
-    reasoning_level: null,
-    interaction_mode: null,
-    orchestration_mode: null,
-    permission_mode: null,
-    context_window_mode: null,
-    thinking: null,
-    fast_mode: null,
-    devin_mode: null,
-    default_open_in_app: null,
-    parent_thread_id: null,
-    delegation_coordinator_thread_id: null,
-    forked_from_message_id: null,
-    last_compact_summary: null,
-    plan_phase: null,
-    has_file_changes: false,
     ...overrides,
-  };
+  });
 }
 
 describe("ws-events thread.lifecycleChanged", () => {

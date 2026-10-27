@@ -1,3 +1,4 @@
+import { createMockWorkspace } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import * as NodeChildProcess from "node:child_process";
@@ -133,8 +134,13 @@ const targetRepo = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-pr-t
 afterAll(() => NodeFS.rmSync(targetRepo, { recursive: true, force: true }));
 
 describe("GithubService.listPullRequestTargets", () => {
-  const workspace = { id: "project", name: "project", path: targetRepo, provider_config: {}, is_git_repo: true,
-    created_at: "", updated_at: "", pinned: false, last_opened_at: null, sort_order: 0, deleted_at: null };
+  const workspace = createMockWorkspace({
+    id: "project",
+    name: "project",
+    path: targetRepo,
+    created_at: "",
+    updated_at: "",
+  });
   const repository = new GitRepositoryService({ findById: () => workspace }, new RealGitExecutor());
 
   it("returns remote_not_github for a real non-GitHub origin", async () => {

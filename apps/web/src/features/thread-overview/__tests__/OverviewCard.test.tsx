@@ -1,4 +1,5 @@
-import { createMockThread } from "@/__tests__/mocks/transport";
+import { createMockThread } from "@mcode/contracts/testing";
+
 import { render, screen } from "@testing-library/react";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";

@@ -1,6 +1,7 @@
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createMockMessage, createMockThread } from "@/__tests__/mocks/transport";
+
 import { MessageBubble } from "@/features/conversation/messages/MessageBubble";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";

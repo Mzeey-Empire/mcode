@@ -1,8 +1,9 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RevertFilePlan, TurnRevertPreview, TurnRevertResult } from "@mcode/contracts";
-import { createMockMessage } from "@/__tests__/mocks/transport";
+
 import { useThreadStore } from "@/stores/threadStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { TurnRevertBarConfirm } from "../TurnRevertBarConfirm";

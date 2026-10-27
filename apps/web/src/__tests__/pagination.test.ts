@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import {
   activateTestConversation,
   resetThreadStoreForTests,
@@ -25,7 +26,7 @@ import {
   projectConversationCacheState,
 } from "@/features/conversation/hydration/record-cache";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
-import { mockTransport, createMockMessage } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 import type { Message } from "@/transport";
 import { rememberScrollTop } from "@/components/chat/scrollPositionMemory";
 import {

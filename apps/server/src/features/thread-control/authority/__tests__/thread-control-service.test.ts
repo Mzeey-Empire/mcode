@@ -1,3 +1,4 @@
+import { createMockApproval } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import { ApprovalService } from "../../../agents/approvals/approval-service.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1208,12 +1209,15 @@ describe("ThreadControlService", () => {
 
     await expect(service.threadSend(authority, { threadId: target.id, message: "Needs approval." })).resolves.toMatchObject({ status: "pending_approval", approvalId: "approval-send" });
     expect(approvals.createSend).toHaveBeenCalledWith(expect.objectContaining({ message: "Needs approval.", sourceThreadId: authority.sourceThreadId }));
-    expect(mockBroadcast).toHaveBeenCalledWith("approval.requested", {
-      requestId: "approval-send", threadId: "thread-1", providerId: "claude", requestedAt: "2026-10-10T09:00:00Z",
+    expect(mockBroadcast).toHaveBeenCalledWith("approval.requested", createMockApproval({
+      requestId: "approval-send",
+      threadId: "thread-1",
+      providerId: "claude",
+      requestedAt: "2026-10-10T09:00:00Z",
       subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: "target-thread", message: "Needs approval." },
       choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
       origin: { kind: "agent" },
-    });
+    }));
     expect(service.listPendingApprovals("target-thread")).toEqual([]);
     const stored = approvals.listPending();
     approvals.listPending.mockReturnValue([...stored, { ...stored[0], approvalId: "stale", sourceProviderId: "removed-provider" }]);

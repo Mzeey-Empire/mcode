@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { HtmlVisualSchema, MessageSchema } from "../index.js";
 
@@ -36,11 +37,14 @@ describe("HtmlVisualSchema", () => {
   });
 
   it("travels on a message and rejects a malformed one", () => {
-    const message = {
-      id: "m1", thread_id: "t1", role: "system", content: "Visual: Latency by provider",
-      tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null,
-      timestamp: "2026-10-23T00:00:00.000Z", sequence: 2, attachments: null,
-    };
+    const message = createMockMessage({
+      id: "m1",
+      thread_id: "t1",
+      role: "system",
+      content: "Visual: Latency by provider",
+      timestamp: "2026-10-23T00:00:00.000Z",
+      sequence: 2,
+    });
     expect(MessageSchema().parse({ ...message, visual }).visual).toEqual(visual);
     expect(MessageSchema().safeParse({ ...message, visual: { ...visual, maxHeight: 0 } }).success).toBe(false);
   });

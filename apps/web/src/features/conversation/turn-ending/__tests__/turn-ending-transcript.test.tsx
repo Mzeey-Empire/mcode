@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAgentModelState, type AgentModelState, type AgentTurn, type AgentTurnEnding, type Message } from "@mcode/contracts";
@@ -13,10 +14,14 @@ const at = (second: number) => new Date(Date.UTC(2026, 9, 11, 12, 0, second)).to
 const FAILED: AgentTurnEnding = { outcome: "errored", failure: { kind: "fatal", provider: "codex", message: "boom" } };
 
 function message(id: string, role: "user" | "assistant", second: number): Message {
-  return {
-    id, thread_id: THREAD, role, content: id, tool_calls: null, files_changed: null, cost_usd: null,
-    tokens_used: null, timestamp: at(second), sequence: second, attachments: null,
-  };
+  return createMockMessage({
+    id,
+    thread_id: THREAD,
+    role,
+    content: id,
+    timestamp: at(second),
+    sequence: second,
+  });
 }
 
 function turn(id: string, second: number, fields: Partial<AgentTurn>): AgentTurn {

@@ -1,9 +1,10 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { ReviewTurn } from "@mcode/contracts";
 import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { refreshTurnSnapshotsAfterPersist } from "@/lib/turn-snapshot-refresh";
-import { mockTransport, createMockThread } from "@/__tests__/mocks/transport";
+import { mockTransport } from "@/__tests__/mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

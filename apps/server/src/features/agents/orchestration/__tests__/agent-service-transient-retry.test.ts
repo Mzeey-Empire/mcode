@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { createMockThread } from "@mcode/contracts/testing";
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import * as NodeEvents from "node:events";
 import type { Thread, IProviderRegistry, TurnRequest } from "@mcode/contracts";
@@ -43,29 +44,15 @@ const THREAD_ID = "thread-retry-test";
 /** Thread fixture that resumes a live SDK session, so the first attempt sends `resumeFrom`. */
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
-    id: THREAD_ID,
-    workspace_id: "ws-1",
-    title: "Test thread",
+    ...createMockThread({
+      id: THREAD_ID,
+      workspace_id: "ws-1",
+      title: "Test thread",
+      model: "claude-sonnet-4-6",
+      provider: "claude",
+      sdk_session_id: "sess-abc",
+    }),
     status: "idle",
-    mode: "direct",
-    branch: "main",
-    worktree_path: null,
-    model: "claude-sonnet-4-6",
-    provider: "claude",
-    sdk_session_id: "sess-abc",
-    last_context_tokens: null,
-    context_window: null,
-    reasoning_level: null,
-    interaction_mode: null,
-    permission_mode: null,
-    last_compact_summary: null,
-    parent_thread_id: null,
-    forked_from_message_id: null,
-    deleted_at: null,
-    user_completed_at: null,
-    scheduled_deletion_at: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
     ...overrides,
   } as Thread;
 }

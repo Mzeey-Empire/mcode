@@ -1,3 +1,4 @@
+import { createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import type { AgentEvent } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,7 +7,7 @@ import { useTaskStore } from "@/stores/taskStore";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
-import { createMockThread, mockTransport } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

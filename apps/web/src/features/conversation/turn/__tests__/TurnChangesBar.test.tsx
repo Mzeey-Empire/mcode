@@ -1,8 +1,9 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiffStats, FileEffect, TurnSnapshot } from "@mcode/contracts";
-import { createMockThread } from "@/__tests__/mocks/transport";
+
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useThreadStore } from "@/stores/threadStore";

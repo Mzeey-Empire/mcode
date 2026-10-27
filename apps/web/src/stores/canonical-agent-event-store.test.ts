@@ -1,6 +1,7 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { createAgentModelState, type AgentItem, type CanonicalAgentEventEnvelope, type Message } from "@mcode/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createMockMessage } from "@/__tests__/mocks/transport";
+
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import { projectCanonicalMessageList } from "@/features/conversation/messages/canonical-message-projection";
 import { resetThreadStoreForTests } from "./thread-store-test-utils";
@@ -69,19 +70,14 @@ function envelope(
 }
 
 function childAnswerItem(threadId: string, id: string, content: string, sequence = 1): AgentItem {
-  const answer: Message = {
+  const answer: Message = createMockMessage({
     id: "child-answer",
     thread_id: threadId,
     role: "assistant",
     content,
-    tool_calls: null,
-    files_changed: null,
-    cost_usd: null,
-    tokens_used: null,
     timestamp: NOW,
     sequence,
-    attachments: null,
-  };
+  });
   return {
     id,
     threadId,

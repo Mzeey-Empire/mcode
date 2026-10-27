@@ -1,8 +1,9 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserTabInfo, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
-import { createMockThread } from "@/__tests__/mocks/transport";
+
 
 const transport = vi.hoisted(() => ({
   listWorkspaceActionRuns: vi.fn(),

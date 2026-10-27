@@ -1,5 +1,6 @@
+import { createMockApproval } from "@mcode/contracts/testing";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createMockApproval } from "@/__tests__/mocks/transport";
+
 import { selectDockApprovals, useApprovalStore } from "../approvalStore";
 
 const requestA = createMockApproval({ requestId: "req-a", threadId: "thread-a" });

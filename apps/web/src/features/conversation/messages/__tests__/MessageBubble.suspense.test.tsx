@@ -1,6 +1,6 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import type { Message, StoredAttachment } from "@/transport";
 import { MessageBubble } from "../MessageBubble";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
@@ -24,32 +24,16 @@ afterEach(() => {
   cleanup();
 });
 
-function makeMessage(content: string, role: "user" | "assistant" = "user"): Message {
-  return {
-    id: "msg-1",
-    thread_id: "thread-1",
-    role,
-    content,
-    timestamp: new Date().toISOString(),
-    attachments: [] as StoredAttachment[],
-    cost_usd: null,
-    tokens_used: null,
-    sequence: 1,
-    tool_calls: null,
-    files_changed: null,
-  };
-}
-
 describe("MessageBubble while MarkdownContent is suspended", () => {
   it("keeps the user text visible in the bubble instead of rendering it empty", () => {
-    const { container } = render(<MessageBubble message={makeMessage("hello there")} />);
+    const { container } = render(<MessageBubble message={createMockMessage({ thread_id: "thread-1", role: "user", content: "hello there" })} />);
     const bubble = container.querySelector("[data-selected-text-content]");
     expect(bubble).not.toBeNull();
     expect(bubble?.textContent).toContain("hello there");
   });
 
   it("keeps the assistant text visible instead of rendering it empty", () => {
-    const { container } = render(<MessageBubble message={makeMessage("done.", "assistant")} />);
+    const { container } = render(<MessageBubble message={createMockMessage({ thread_id: "thread-1", role: "assistant", content: "done." })} />);
     const body = container.querySelector("[data-testid='assistant-response-text']");
     expect(body).not.toBeNull();
     expect(body?.textContent).toContain("done.");

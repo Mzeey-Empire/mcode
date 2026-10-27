@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { render, screen } from "@testing-library/react";
 import type { Message } from "@/transport";
 import { describe, expect, it, vi } from "vitest";
@@ -25,7 +26,7 @@ vi.mock("@/stores/thread-selectors", () => ({
 }));
 
 function createUserMessage(): Message {
-  return {
+  return createMockMessage({
     id: "message-1",
     thread_id: "thread-1",
     role: "user",
@@ -38,11 +39,11 @@ function createUserMessage(): Message {
       namespace: "skill",
       range: { start: 7, end: 14 },
     }],
-  } as Message;
+  });
 }
 
 function createPluginMessage(): Message {
-  return {
+  return createMockMessage({
     id: "message-plugin",
     thread_id: "thread-1",
     role: "user",
@@ -56,17 +57,7 @@ function createPluginMessage(): Message {
       path: "plugin://impeccable",
       range: { start: 0, end: 11 },
     }],
-  } as Message;
-}
-
-function createAssistantMessage(): Message {
-  return {
-    id: "message-assistant",
-    thread_id: "thread-1",
-    role: "assistant",
-    content: "```ts\nconst answer = 42;\n```",
-    timestamp: "2026-07-28T12:00:00.000Z",
-  } as Message;
+  });
 }
 
 describe("MessageBubble", () => {
@@ -91,7 +82,7 @@ describe("MessageBubble", () => {
 
     render(
       <MessageBubble
-        message={createAssistantMessage()}
+        message={createMockMessage({ role: "assistant", content: "```ts\nconst answer = 42;\n```" })}
         agentDisplayState={{ phase: "streaming" }}
       />,
     );

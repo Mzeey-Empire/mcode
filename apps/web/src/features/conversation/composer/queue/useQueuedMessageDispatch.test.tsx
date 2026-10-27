@@ -1,3 +1,4 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentEvent, AgentStopResult } from "@mcode/contracts";
@@ -7,7 +8,7 @@ import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { createEmptyThreadRecord, getThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { createMockThread, mockTransport } from "@/__tests__/mocks/transport";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { RpcError } from "@/transport";
 import { useQueuedMessageDispatch, useSendNowRoute } from "./useQueuedMessageDispatch";
 

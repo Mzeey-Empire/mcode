@@ -1,3 +1,4 @@
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import type { AgentEvent } from "@mcode/contracts";
 import {
@@ -19,7 +20,7 @@ import {
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
-import { mockTransport, createMockThread } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
@@ -450,18 +451,13 @@ await activateTestConversation(THREAD_A);
     });
 
     it("sets hasMoreMessages when compaction notice evicts an older message", () => {
-      const messages = Array.from({ length: 200 }, (_, index) => ({
+      const messages = Array.from({ length: 200 }, (_, index) => createMockMessage({
         id: `message-${index}`,
         thread_id: THREAD_B,
-        role: "user" as const,
+        role: "user",
         content: `message ${index}`,
-        tool_calls: null,
-        files_changed: null,
-        cost_usd: null,
-        tokens_used: null,
         timestamp: "",
         sequence: index + 1,
-        attachments: null,
       }));
       resetThreadStoreForTests({
         currentThreadId: THREAD_A,
@@ -647,7 +643,14 @@ await activateTestConversation(THREAD_A);
             THREAD_A,
             {
               ...createEmptyThreadRecord(),
-              messages: [{ id: "m1", thread_id: THREAD_A, role: "user", content: "hi", tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: "", sequence: 1, attachments: null }],
+              messages: [createMockMessage({
+                id: "m1",
+                thread_id: THREAD_A,
+                role: "user",
+                content: "hi",
+                timestamp: "",
+                sequence: 1,
+              })],
               persistedToolCallCounts: { m1: 2 },
               persistedFilesChanged: { m1: ["foo.ts"] },
               serverMessageIds: { m1: "server-m1" },
@@ -721,7 +724,14 @@ await activateTestConversation(THREAD_A);
             THREAD_A,
             {
               ...createEmptyThreadRecord(),
-              messages: [{ id: "m1", thread_id: THREAD_A, role: "user", content: "hi", tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: "", sequence: 1, attachments: null }],
+              messages: [createMockMessage({
+                id: "m1",
+                thread_id: THREAD_A,
+                role: "user",
+                content: "hi",
+                timestamp: "",
+                sequence: 1,
+              })],
               persistedToolCallCounts: { m1: 2 },
             },
           ],

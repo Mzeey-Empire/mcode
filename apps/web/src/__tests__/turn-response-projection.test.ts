@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import type { AgentEvent } from "@mcode/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
@@ -7,7 +8,7 @@ import {
   type ThreadRecord,
 } from "@/stores/thread-record";
 import { readThreadField, resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
-import { createMockMessage, mockTransport } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

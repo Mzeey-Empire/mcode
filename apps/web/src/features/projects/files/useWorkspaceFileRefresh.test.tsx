@@ -1,8 +1,9 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { createMockThread } from "@/__tests__/mocks/transport";
+
 
 const refreshWorkspaceFiles = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 

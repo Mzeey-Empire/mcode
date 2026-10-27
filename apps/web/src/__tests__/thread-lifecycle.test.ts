@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import {
   activateTestConversation,
   resetThreadStoreForTests,
@@ -15,7 +16,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { mockTransport, createMockMessage } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
 import type { AgentEvent, PreviewAnnotationBundle, SelectedTextComment } from "@mcode/contracts";
 

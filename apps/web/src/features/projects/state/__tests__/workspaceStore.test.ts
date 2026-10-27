@@ -1,3 +1,4 @@
+import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@mcode/contracts";
@@ -55,21 +56,15 @@ import * as conversationResidency from "@/features/conversation/residency/conver
 import type { ConversationResidency } from "@/features/conversation/residency/conversation-residency";
 
 function makeWs(overrides?: Partial<Workspace>): Workspace {
-  return {
+  return createMockWorkspace({
     id: "ws-1",
     name: "test",
     path: "/tmp/test",
-    provider_config: {},
-    is_git_repo: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
     pinned: false,
     last_opened_at: null,
     sort_order: 0,
-    deleted_at: null,
-    icon_path: null,
     ...overrides,
-  };
+  });
 }
 
 beforeEach(() => {
@@ -275,7 +270,7 @@ describe("workspaceStore new-thread panel transition", () => {
 
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
-  return {
+  return createMockThread({
     id: "thread-1",
     workspace_id: "workspace-1",
     title: "Lifecycle thread",
@@ -284,42 +279,18 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     worktree_path: null,
     branch: "main",
     checkout_state: "named",
-    base_branch: null,
-    head_sha: null,
-    worktree_managed: false,
-    issue_number: null,
     pr_number: null,
     pr_status: null,
-    has_file_changes: false,
-    sdk_session_id: null,
     created_at: "2026-08-12T08:00:00.000Z",
     updated_at: "2026-08-12T08:00:00.000Z",
-    model: null,
     provider: "claude",
-    deleted_at: null,
     user_completed_at: null,
     scheduled_deletion_at: null,
-    scheduled_resume: null,
     cleanup_state: null,
     cleanup_reason: null,
-    last_context_tokens: null,
-    context_window: null,
-    reasoning_level: null,
-    interaction_mode: null,
-    orchestration_mode: null,
-    permission_mode: null,
-    context_window_mode: null,
-    thinking: null,
-    fast_mode: null,
-    devin_mode: null,
-    default_open_in_app: null,
-    parent_thread_id: null,
     delegation_coordinator_thread_id: null,
-    forked_from_message_id: null,
-    last_compact_summary: null,
-    plan_phase: null,
     ...overrides,
-  };
+  });
 }
 
 describe("workspaceStore completion lifecycle", () => {

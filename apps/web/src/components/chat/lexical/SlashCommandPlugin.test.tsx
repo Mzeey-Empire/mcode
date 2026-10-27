@@ -1,3 +1,4 @@
+import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 /**
  * Keyboard-only coverage for `/plan` in the real Composer: the live Lexical
  * editor, slash plugin, slash command hook, tray, and Plan chip are all wired
@@ -16,7 +17,7 @@ import { Composer } from "@/features/conversation/composer/Composer";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
-import { mockTransport, createMockThread, createMockWorkspace } from "@/__tests__/mocks/transport";
+import { mockTransport } from "@/__tests__/mocks/transport";
 
 const capabilityGate = vi.hoisted(() => ({ planOffered: true }));
 

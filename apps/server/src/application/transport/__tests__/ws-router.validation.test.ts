@@ -1,3 +1,4 @@
+import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeEvents from "node:events";
@@ -1195,7 +1196,7 @@ describe("routeMessage git.createBranch", () => {
 
 describe("routeMessage thread.create", () => {
   it("creates new worktree threads as branchless", async () => {
-    const create = vi.fn().mockReturnValue({
+    const create = vi.fn().mockReturnValue(createMockThread({
       id: "thread-1",
       workspace_id: "ws-1",
       title: "New thread",
@@ -1206,29 +1207,14 @@ describe("routeMessage thread.create", () => {
       checkout_state: "branchless",
       base_branch: "main",
       worktree_managed: true,
-      issue_number: null,
       pr_number: null,
       pr_status: null,
-      sdk_session_id: null,
       model: null,
       provider: "claude",
       created_at: "2026-06-23T00:00:00.000Z",
       updated_at: "2026-06-23T00:00:00.000Z",
-      deleted_at: null,
-      last_context_tokens: null,
-      context_window: null,
-      reasoning_level: null,
-      interaction_mode: null,
-      permission_mode: null,
-      context_window_mode: null,
       thinking: null,
-      fast_mode: null,
-      default_open_in_app: null,
-      parent_thread_id: null,
-      forked_from_message_id: null,
-      last_compact_summary: null,
-      has_file_changes: false,
-    });
+    }));
     const deps = {
       threadService: { create },
     } as unknown as RouterDeps;
@@ -1264,19 +1250,14 @@ describe("routeMessage thread.create", () => {
 
 describe("routeMessage workspace.create", () => {
   it("initializes the workspace environment before starting its branch watcher", async () => {
-    const workspace = {
+    const workspace = createMockWorkspace({
       id: "ws-1",
       name: "Project",
       path: "C:/repo",
-      provider_config: {},
       is_git_repo: true,
       created_at: "2026-08-30T00:00:00.000Z",
       updated_at: "2026-08-30T00:00:00.000Z",
-      pinned: false,
-      last_opened_at: null,
-      sort_order: 0,
-      deleted_at: null,
-    };
+    });
     const environmentReadStarted = deferred<void>();
     const environmentRead = deferred<void>();
     const read = vi.fn(() => {

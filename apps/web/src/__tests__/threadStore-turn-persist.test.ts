@@ -1,6 +1,7 @@
+import { createMockApproval, createMockMessage, createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { useApprovalStore } from "@/stores/approvalStore";
-import { createMockApproval } from "./mocks/transport";
+
 import type { AgentEvent } from "@mcode/contracts";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
@@ -9,7 +10,7 @@ import {
   readThreadField,
   seedThreadRecord,
 } from "@/stores/thread-store-test-utils";
-import { mockTransport, createMockMessage, createMockThread } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 import { useTaskStore } from "@/stores/taskStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 

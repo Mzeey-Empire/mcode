@@ -1,7 +1,8 @@
+import { createMockWorkspace } from "@mcode/contracts/testing";
 import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { createMockWorkspace } from "@/__tests__/mocks/transport";
+
 import { NewThreadTargetRail } from "../NewThreadTargetRail";
 
 vi.mock("../ComposerTargetSelection", () => ({

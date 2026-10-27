@@ -1,3 +1,4 @@
+import { createMockWorkspace } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useToastStore } from "@/stores/toastStore";
@@ -28,11 +29,13 @@ describe("createTerminalForScope", () => {
 
   it("keeps a newly created record that hydration already included at the cap", async () => {
     const scopeId = "hydrated-workspace";
-    useWorkspaceStore.setState({ threads: [], workspaces: [{
-      id: scopeId, name: "Fixture", path: "/fixture", provider_config: {}, is_git_repo: true,
-      created_at: "2026-10-08T12:00:00.000Z", updated_at: "2026-10-08T12:00:00.000Z",
-      pinned: false, last_opened_at: null, sort_order: 0, deleted_at: null, icon_path: null,
-    }] });
+    useWorkspaceStore.setState({ threads: [], workspaces: [createMockWorkspace({
+      id: scopeId,
+      name: "Fixture",
+      path: "/fixture",
+      created_at: "2026-10-08T12:00:00.000Z",
+      updated_at: "2026-10-08T12:00:00.000Z",
+    })] });
     useDiffStore.getState().showRightPanel(scopeId);
     terminalCreate.mockImplementation(async () => {
       useTerminalStore.getState().reconcileActiveSessions(
@@ -48,10 +51,12 @@ describe("createTerminalForScope", () => {
   });
 
   it("reports the attached PTY only when its tab joined a visible panel", async () => {
-    const workspace = (id: string) => ({
-      id, name: "Fixture", path: "/fixture", provider_config: {}, is_git_repo: true,
-      created_at: "2026-10-08T12:00:00.000Z", updated_at: "2026-10-08T12:00:00.000Z",
-      pinned: false, last_opened_at: null, sort_order: 0, deleted_at: null, icon_path: null,
+    const workspace = (id: string) => createMockWorkspace({
+      id,
+      name: "Fixture",
+      path: "/fixture",
+      created_at: "2026-10-08T12:00:00.000Z",
+      updated_at: "2026-10-08T12:00:00.000Z",
     });
     useWorkspaceStore.setState({ threads: [], workspaces: [workspace("visible-ws"), workspace("hidden-ws")] });
     useDiffStore.getState().showRightPanel("visible-ws");

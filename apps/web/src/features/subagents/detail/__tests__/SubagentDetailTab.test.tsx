@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -45,10 +46,14 @@ function detail(overrides: Partial<SubagentDetail> = {}): SubagentDetail {
 /** A live child whose opening prompt exists only as a canonical item, as before history hydrates. */
 function seedLiveChild(prompt: string) {
   const timestamp = "2026-10-13T10:00:00.000Z";
-  const message: Message = {
-    id: "child-prompt", thread_id: "child-1", role: "user", content: prompt, tool_calls: null, files_changed: null,
-    cost_usd: null, tokens_used: null, timestamp, sequence: 1, attachments: null,
-  };
+  const message: Message = createMockMessage({
+    id: "child-prompt",
+    thread_id: "child-1",
+    role: "user",
+    content: prompt,
+    timestamp,
+    sequence: 1,
+  });
   const turn: AgentTurn = {
     id: "child-turn", threadId: "child-1", status: "Running",
     trigger: { kind: "child", sourceThreadId: "thread-1", sourceTurnId: "parent-turn" },

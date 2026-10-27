@@ -1,3 +1,4 @@
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { activateTestConversation, resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 /**
@@ -14,7 +15,7 @@ import {
   clearRecordCache,
   getCachedRecord,
 } from "@/features/conversation/hydration/record-cache";
-import { mockTransport, createMockMessage, createMockThread } from "./mocks/transport";
+import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

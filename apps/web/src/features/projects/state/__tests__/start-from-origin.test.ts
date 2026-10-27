@@ -1,8 +1,9 @@
+import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CreateAndSendInput } from "@mcode/contracts";
 import { useWorkspaceStore, __clearPendingThreadCreationsForTests } from "../workspaceStore";
-import { createMockThread, createMockWorkspace, mockTransport } from "../../../../__tests__/mocks/transport";
+import { mockTransport } from "../../../../__tests__/mocks/transport";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

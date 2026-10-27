@@ -1,3 +1,4 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import type { AgentEvent } from "@mcode/contracts";
 import {
   resetThreadStoreForTests,
@@ -8,7 +9,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { createMockThread } from "./mocks/transport";
+
 import type { GoalState } from "@mcode/contracts";
 
 describe("running-session signal", () => {

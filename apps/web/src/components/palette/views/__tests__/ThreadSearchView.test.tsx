@@ -1,3 +1,4 @@
+import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Command } from "@/components/ui/command";
@@ -6,7 +7,7 @@ import { useUiStore } from "@/stores/uiStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import type { ThreadStartup } from "@mcode/contracts";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
-import { createMockThread, createMockWorkspace } from "@/__tests__/mocks/transport";
+
 import type { RecentThread } from "@/transport/types";
 
 const hoisted = vi.hoisted(() => ({

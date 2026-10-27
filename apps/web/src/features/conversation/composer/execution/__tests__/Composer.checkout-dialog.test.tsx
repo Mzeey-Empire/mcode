@@ -1,3 +1,4 @@
+import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import React from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -23,7 +24,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useThreadDraftStore } from "@/stores/threadDraftStore";
-import { mockTransport, createMockThread, createMockWorkspace } from "@/__tests__/mocks/transport";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import { INTERACTION_MODES, PERMISSION_MODES } from "@/transport";
 import type { GitRef } from "@mcode/contracts";
 import type { BranchTarget } from "../targets/branch-target";

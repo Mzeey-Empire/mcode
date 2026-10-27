@@ -1,8 +1,9 @@
+import { createMockWorkspace } from "@mcode/contracts/testing";
 import { render, renderHook, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { createMockWorkspace } from "@/__tests__/mocks/transport";
+
 import type { ComposerMode } from "../composer-mode";
 import { targetLabelText } from "../new-thread-target-copy";
 import { StartFromOriginSwitch } from "../StartFromOriginSwitch";

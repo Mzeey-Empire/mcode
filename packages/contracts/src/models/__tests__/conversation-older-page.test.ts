@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import {
   CONVERSATION_OLDER_PAGE_MAX_BYTES,
@@ -46,19 +47,14 @@ describe("ConversationOlderPageRequestSchema", () => {
 
 describe("ConversationOlderPageSchema", () => {
   it("echoes request identity and advances with a stable sequence cursor", () => {
-    const message = {
+    const message = createMockMessage({
       id: "message-21",
       thread_id: "thread-1",
-      role: "assistant" as const,
+      role: "assistant",
       content: "done",
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
       timestamp: "2026-08-09T00:00:00.000Z",
       sequence: 21,
-      attachments: null,
-    };
+    });
     const result = ConversationOlderPageSchema().safeParse({
       identity,
       messages: [message],
@@ -71,19 +67,14 @@ describe("ConversationOlderPageSchema", () => {
   });
 
   it("rejects responses above the global count boundary", () => {
-    const message = {
+    const message = createMockMessage({
       id: "message",
       thread_id: "thread-1",
-      role: "assistant" as const,
+      role: "assistant",
       content: "done",
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
       timestamp: "2026-08-09T00:00:00.000Z",
       sequence: 1,
-      attachments: null,
-    };
+    });
     const result = ConversationOlderPageSchema().safeParse({
       identity,
       messages: Array.from(
@@ -99,19 +90,14 @@ describe("ConversationOlderPageSchema", () => {
   });
 
   it("rejects messages that are duplicated, out of order, or outside the cursor", () => {
-    const message = {
+    const message = createMockMessage({
       id: "message-1",
       thread_id: "thread-1",
-      role: "assistant" as const,
+      role: "assistant",
       content: "done",
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
       timestamp: "2026-08-09T00:00:00.000Z",
       sequence: 41,
-      attachments: null,
-    };
+    });
     const result = ConversationOlderPageSchema().safeParse({
       identity,
       messages: [message, { ...message }],

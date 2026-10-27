@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import type { AgentEvent } from "@mcode/contracts";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
@@ -38,19 +39,13 @@ function makeRecord(id: string): ThreadRecord {
   return {
     ...createEmptyThreadRecord(),
     messages: [
-      {
+      createMockMessage({
         id: `${id}-msg-1`,
         thread_id: id,
         role: "user",
         content: "hi",
-        tool_calls: null,
-        files_changed: null,
-        cost_usd: null,
-        tokens_used: null,
-        timestamp: new Date().toISOString(),
         sequence: 1,
-        attachments: null,
-      },
+      }),
     ],
     oldestLoadedSequence: 1,
   };

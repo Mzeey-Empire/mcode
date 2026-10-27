@@ -1,5 +1,6 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
-import { createMockThread } from "@/__tests__/mocks/transport";
+
 import {
   getComposerDock,
   getComposerSendButtonVisualState,

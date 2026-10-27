@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Database } from "bun:sqlite";
@@ -49,10 +50,14 @@ function fence(question = "Which auth strategy?", optionTitle = "OAuth"): string
 }
 
 function acceptedAssistant(content: string): Message {
-  return { id: "accepted-assistant", thread_id: "thread-1", role: "assistant", content,
-    timestamp: "2026-09-30T10:00:00.000Z", sequence: 2, attachments: null,
-    tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null,
-  };
+  return createMockMessage({
+    id: "accepted-assistant",
+    thread_id: "thread-1",
+    role: "assistant",
+    content,
+    timestamp: "2026-09-30T10:00:00.000Z",
+    sequence: 2,
+  });
 }
 
 afterEach(closeAgentStorageTestDatabases);

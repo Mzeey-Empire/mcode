@@ -1,3 +1,4 @@
+import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import type { Message } from "@/transport";
 import {
@@ -8,18 +9,13 @@ import {
 } from "../conversation-memory-policy";
 
 function makeMessages(count: number, contentBytes = 16_000): Message[] {
-  return Array.from({ length: count }, (_, index) => ({
+  return Array.from({ length: count }, (_, index) => createMockMessage({
     id: `message-${index + 1}`,
     thread_id: "thread-a",
     role: index % 2 === 0 ? "user" : "assistant",
     content: "x".repeat(contentBytes),
-    tool_calls: null,
-    files_changed: null,
-    cost_usd: null,
-    tokens_used: null,
     timestamp: "2026-08-10T00:00:00.000Z",
     sequence: index + 1,
-    attachments: null,
   }));
 }
 

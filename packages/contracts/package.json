@@ -6,7 +6,8 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
-    "./snapshot": "./src/snapshot.ts"
+    "./snapshot": "./src/snapshot.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -1,3 +1,4 @@
+import { createMockApproval } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -250,10 +251,15 @@ describe("thread attention through real SQLite and the serialized writer", () =>
   it("lists owner A's supervised send approval after reload, keeps it after ack, and drops deleted threads", async () => {
     const t = await fixture();
     t.settle(2); await t.threads.recordTurnOutcome(t.a.id, "completed", ENDED);
-    const request: ApprovalRequest = { requestId: "approval-send", threadId: t.a.id, providerId: "codex", requestedAt: BEFORE,
+    const request: ApprovalRequest = createMockApproval({
+      requestId: "approval-send",
+      threadId: t.a.id,
+      providerId: "codex",
+      requestedAt: BEFORE,
       subject: { kind: "thread_operation", operation: "thread_send", targetThreadId: t.b.id, message: "Continue" },
       choices: [{ id: "allow", intent: "allow_once", label: "Allow" }, { id: "deny", intent: "deny", label: "Deny" }],
-      origin: { kind: "agent" } };
+      origin: { kind: "agent" },
+    });
     t.requests.push({ ...request, requestId: "later", requestedAt: ENDED }, request);
     t.approvals.publish({ requestId: request.requestId, threadId: request.threadId, body: {
       requestedAt: request.requestedAt, subject: request.subject, choices: request.choices, origin: request.origin,

@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import type { GitRef, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
-import { createMockThread, mockTransport } from "@/__tests__/mocks/transport";
+import { createMockThread } from "@mcode/contracts/testing";
+import { mockTransport } from "@/__tests__/mocks/transport";
 import type { Thread } from "@/transport";
 import { useOverviewStore } from "@/stores/overviewStore";
 import { useBrowserAutomationStore } from "@/features/preview";

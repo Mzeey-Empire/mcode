@@ -1,5 +1,6 @@
+import { createMockThread } from "@mcode/contracts/testing";
 import { describe, it, expect, beforeEach } from "vitest";
-import { createMockThread } from "@/__tests__/mocks/transport";
+
 import { useSidebarSearchStore } from "@/stores/sidebarSearchStore";
 
 beforeEach(() => {
