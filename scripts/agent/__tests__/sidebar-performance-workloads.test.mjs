@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 import { createModeSignalCollector } from "../../perf/frontend-performance-collectors.mjs";
 import { normalizeFrontendRendererWorkloads } from "../../perf/frontend-renderer-fixture.mjs";
+import { measureSidebarRetained } from "../../perf/heap-snapshot-retained.mjs";
 import {
   buildSidebarSignalPushes,
   buildSidebarStreamEvents,
@@ -177,6 +178,59 @@ NodeTest.describe("sidebar renderer workloads", () => {
     page.restore();
   });
 });
+
+NodeTest.describe("sidebar retained heap", () => {
+  NodeTest.it("counts only what the threads and caches alone keep alive, and ignores weak edges", () => {
+    const retained = measureSidebarRetained(buildSnapshot(), "__probe");
+    assert.deepEqual(retained.found, { probe: true, threads: true, facts: true, factsById: true, index: true });
+    // Thread 5 is also held by the index, so the threads array alone keeps only itself.
+    assert.equal(retained.threadsExclusiveBytes, 16);
+    // Fact 11 is shared by the facts array and its id map, so only the caches together free it.
+    assert.equal(retained.cachesBytes, 128 + 1024 + 256 + 2048);
+    assert.equal(retained.threadsAndCachesBytes, 16 + 32 + 128 + 256 + 1024 + 2048);
+  });
+});
+
+/**
+ * Root 0 holds window 1. Window holds the probe 2, the store 3, a shared prototype 6, the facts
+ * cache record 9, and a weak edge to thread 5. Thread 5 holds the shared prototype.
+ */
+function buildSnapshot() {
+  const sizes = [0, 0, 0, 0, 16, 32, 64, 128, 256, 512, 1024, 2048];
+  const edges = {
+    0: [["property", "w", 1]],
+    1: [["property", "__probe", 2], ["property", "store", 3], ["property", "shared", 6], ["property", "cache", 9], ["weak", "t", 5]],
+    2: [["property", "threads", 4], ["property", "facts", 7], ["property", "index", 8]],
+    3: [["property", "threads", 4]],
+    4: [["element", 0, 5]],
+    5: [["property", "proto", 6]],
+    7: [["element", 0, 11]],
+    8: [["internal", "table", 5]],
+    9: [["property", "facts", 7], ["property", "byId", 10]],
+    10: [["internal", "table", 11]],
+  };
+  const edgeTypes = ["element", "property", "internal", "weak"];
+  const strings = [];
+  const stringIndex = (value) => {
+    if (!strings.includes(value)) strings.push(value);
+    return strings.indexOf(value);
+  };
+  const nodes = [];
+  const flatEdges = [];
+  sizes.forEach((size, node) => {
+    const own = edges[node] ?? [];
+    nodes.push(0, stringIndex(`n${node}`), node, size, own.length);
+    for (const [type, name, to] of own) {
+      flatEdges.push(edgeTypes.indexOf(type), type === "element" ? name : stringIndex(name), to * 5);
+    }
+  });
+  return {
+    snapshot: { meta: { node_fields: ["type", "name", "id", "self_size", "edge_count"], edge_fields: ["type", "name_or_index", "to_node"], edge_types: [edgeTypes] } },
+    nodes,
+    edges: flatEdges,
+    strings,
+  };
+}
 
 /** A page whose evaluate runs in Node against a stub window, with rAF driven by the test. */
 function createFramePage() {
