@@ -22,13 +22,13 @@ import { VirtualViewport, type VirtualHost, type VirtualRow, type ViewportPositi
 import { usePreparingRowEntrance } from "@/features/thread-startup";
 import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { selectThreadIndex } from "../state/thread-index";
+import { selectSidebarFacts, selectThreadIndex } from "../state/thread-index";
 import type { SidebarItem } from "./sidebar-model";
 import type { SidebarRowContext } from "./sidebar-row-context";
 import { ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProjectRow";
 import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
-import { useSidebarUiStore } from "./sidebar-ui-store";
+import { freezeOrder, useSidebarUiStore } from "./sidebar-ui-store";
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
 
 /**
@@ -221,7 +221,7 @@ function toVirtualRows(items: readonly SidebarItem[]): VirtualRow[] {
  * Publishes the rows and owns the Older bar's open-and-rise: opening the section scrolls once the
  * new rows land so the bar rises to the top with the Older threads below it.
  */
-function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, items: readonly SidebarItem[], rows: readonly VirtualRow[]) {
+function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, items: readonly SidebarItem[], rows: readonly VirtualRow[], flip: boolean) {
   const olderOpen = useSidebarUiStore((state) => state.olderOpen);
   const toggleOlderSection = useSidebarUiStore((state) => state.toggleOlder);
   const riseRef = useRef(false);
@@ -229,11 +229,11 @@ function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, it
   useLayoutEffect(() => {
     const viewport = controllerRef.current;
     if (!viewport) return;
-    viewport.setRows(rows);
+    viewport.setRows(rows, { flip });
     if (!riseRef.current) return;
     riseRef.current = false;
     viewport.moveTo({ kind: "target", key: OLDER_BAR_KEY, align: "start" }, !prefersReducedMotion(), { release: true });
-  }, [controllerRef, rows]);
+  }, [controllerRef, rows, flip]);
   const toggleOlder = useCallback(() => {
     riseRef.current = !olderOpen;
     toggleOlderSection();
@@ -263,14 +263,20 @@ interface SidebarListProps {
   readonly ctx: SidebarRowContext;
   /** Rendered over the list when it has nothing to show, such as the empty-projects drop well. */
   readonly overlay?: ReactNode;
+  /** Slide rows that moved. True only for live pushes, never for hydration or layout changes. */
+  readonly flip?: boolean;
 }
+
+// While the pointer is inside, order and the clock hold still; leaving applies what was deferred.
+const freezeOnEnter = () => useSidebarUiStore.getState().freeze(freezeOrder(selectSidebarFacts(useWorkspaceStore.getState().threads), Date.now()));
+const unfreezeOnLeave = () => useSidebarUiStore.getState().unfreeze();
 
 /**
  * Renders the derived sidebar items into one virtual list, one virtual row per item. It never
  * filters, sorts or caps: the model already did. Project headers in the recent list drag to
  * reorder projects.
  */
-export function SidebarList({ items, ctx, overlay }: SidebarListProps) {
+export function SidebarList({ items, ctx, overlay, flip = false }: SidebarListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { controllerRef, hosts } = useSidebarViewport(containerRef);
   const drag = useProjectDrag(controllerRef);
@@ -281,7 +287,7 @@ export function SidebarList({ items, ctx, overlay }: SidebarListProps) {
   const entrance = useEntranceKeys(items);
   usePreparingRowEntrance(containerRef, entrance.rowKeys, entrance.preparing);
 
-  const { olderBar, toggleOlder } = useOlderRise(controllerRef, items, rows);
+  const { olderBar, toggleOlder } = useOlderRise(controllerRef, items, rows, flip);
 
   const { dropIndicator } = drag;
   const renderRow = useCallback((item: SidebarItem): ReactNode => {
@@ -291,7 +297,7 @@ export function SidebarList({ items, ctx, overlay }: SidebarListProps) {
 
   const dragged = drag.activeDragId === null ? undefined : itemsByKey.get(`project:${drag.activeDragId}`);
   return (
-    <div className="relative isolate min-h-0 flex-1">
+    <div className="relative isolate min-h-0 flex-1" onPointerEnter={freezeOnEnter} onPointerLeave={unfreezeOnLeave}>
       <div ref={containerRef} data-testid="thread-list" className="h-full" />
       <DndContext
         sensors={drag.sensors}

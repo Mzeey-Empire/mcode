@@ -132,7 +132,25 @@ export function useSidebarModel(): { readonly model: SidebarModel; readonly caus
 
 function layoutChanged(prev: SidebarInputs, next: SidebarInputs): boolean {
   return prev.ui.scope !== next.ui.scope || prev.ui.view !== next.ui.view
-    || prev.ui.olderOpen !== next.ui.olderOpen || prev.olderAfterDays !== next.olderAfterDays;
+    || prev.ui.olderOpen !== next.ui.olderOpen || prev.olderAfterDays !== next.olderAfterDays
+    || sectionsResized(prev.ui, next.ui) || onlyProjectOrderChanged(prev, next);
+}
+
+// Expanding, collapsing and Show more insert or remove rows in place. A FLIP would slide the rows
+// below while the inserted rows already sit opaque at their final place, so they overlap.
+// `collapsedProjects` is rebuilt from project order, so only its contents can tell a real change.
+function sectionsResized(prev: SidebarModelUi, next: SidebarModelUi): boolean {
+  return prev.showMore !== next.showMore || prev.collapsedOlderProjects !== next.collapsedOlderProjects
+    || prev.collapsedProjects.size !== next.collapsedProjects.size || [...prev.collapsedProjects].some((id) => !next.collapsedProjects.has(id));
+}
+
+// A permuted project order is a reorder. After a drag the dropped row already sits where the
+// user dropped it; a FLIP from the old offsets would fly it back before it settles.
+function onlyProjectOrderChanged(prev: SidebarInputs, next: SidebarInputs): boolean {
+  if (prev.projectOrder === next.projectOrder || prev.projectOrder.length !== next.projectOrder.length) return false;
+  if (prev.facts !== next.facts || prev.draftsByWorkspace !== next.draftsByWorkspace || prev.ui.frozen !== next.ui.frozen || sectionsResized(prev.ui, next.ui)) return false;
+  const ids = new Set(prev.projectOrder);
+  return next.projectOrder.every((id) => ids.has(id));
 }
 
 function onlyClockChanged(prev: SidebarInputs, next: SidebarInputs): boolean {
@@ -143,8 +161,9 @@ function onlyClockChanged(prev: SidebarInputs, next: SidebarInputs): boolean {
 
 /**
  * Classifies a model change. The first model and any change carrying a new snapshot epoch
- * (hydration, reconnect) are `snapshot`, which never animates; scope, view, threshold and Older
- * open are `layout`; time alone is `clock`; everything else is a live `push`.
+ * (hydration, reconnect) are `snapshot`, which never animates; scope, view, threshold, Older
+ * open, a project or Older project expanding or collapsing, Show more, and a project reorder are
+ * `layout`, which places rows without sliding; time alone is `clock`; everything else is a live `push`.
  */
 export function classifyCause(prev: SidebarInputs | null, next: SidebarInputs): ModelCause {
   if (prev === null || prev.snapshotEpoch !== next.snapshotEpoch) return "snapshot";

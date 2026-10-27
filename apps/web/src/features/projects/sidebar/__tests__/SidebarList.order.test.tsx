@@ -189,3 +189,63 @@ describe("SidebarList Threads view", () => {
     expect(renderedThreadIds()).toEqual(["b-new", "a-new", "a-old", "b-old"]);
   });
 });
+
+describe("SidebarList frozen order", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW });
+    FakeVirtualViewport.published.length = 0;
+    FakeVirtualViewport.flips.length = 0;
+    useSidebarUiStore.setState({ view: "projects", scope: "active", expandedProjects: new Set(["ws-1"]), showMore: new Set(), frozen: null });
+    useWorkspaceStore.setState({
+      workspaces: [WORKSPACE],
+      threads: [threadAt("a", 1), threadAt("b", 5), threadAt("c", 10)],
+      activeWorkspaceId: "ws-1",
+      activeThreadId: null,
+      loadWorkspaces: vi.fn().mockResolvedValue(undefined),
+    });
+  });
+
+  afterEach(() => {
+    stopPushListeners();
+    vi.useRealTimers();
+    useSidebarUiStore.setState({ frozen: null });
+    useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
+  });
+
+  function list(): HTMLElement {
+    return screen.getByTestId("thread-list").parentElement!;
+  }
+
+  /** The FLIP flag of the `setRows` call that first published `order`. */
+  function flipWhenPublished(order: string[]): boolean | undefined {
+    const keys = order.map((id) => `thread:${id}`);
+    const index = FakeVirtualViewport.published.findIndex((ids) => ids.filter((id) => id.startsWith("thread:")).join() === keys.join());
+    return index < 0 ? undefined : FakeVirtualViewport.flips[index];
+  }
+
+  it("holds the order under the pointer and slides the rows on leave", () => {
+    render(<ProjectSidebar />);
+    startPushListeners();
+    fireEvent.pointerEnter(list());
+
+    act(() => pushEmitter.emit("thread.activity", { threadId: "c", at: new Date(NOW).toISOString() }));
+    expect(renderedThreadIds()).toEqual(["a", "b", "c"]);
+
+    fireEvent.pointerLeave(list());
+
+    expect(renderedThreadIds()).toEqual(["c", "a", "b"]);
+    expect(flipWhenPublished(["c", "a", "b"])).toBe(true);
+  });
+
+  it("reorders a reconnect hydration without a FLIP", () => {
+    render(<ProjectSidebar />);
+
+    act(() => useWorkspaceStore.setState((state) => ({
+      threads: state.threads.map((thread) => (thread.id === "c" ? { ...thread, last_activity_at: new Date(NOW).toISOString() } : thread)),
+      threadSnapshotEpoch: state.threadSnapshotEpoch + 1,
+    })));
+
+    expect(renderedThreadIds()).toEqual(["c", "a", "b"]);
+    expect(flipWhenPublished(["c", "a", "b"])).toBe(false);
+  });
+});

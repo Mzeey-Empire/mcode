@@ -244,4 +244,15 @@ describe("classifyCause", () => {
     expect(classifyCause(base, { ...base, ui: { ...base.ui, view: "threads" } })).toBe("layout");
     expect(classifyCause(base, { ...base, now: NOW + 1 })).toBe("clock");
   });
+
+  it("places expand, collapse and Show more without sliding, but slides a freeze change", () => {
+    const base = inputs({ facts: [fact("a")] });
+    const collapsed = { ...base, ui: { ...base.ui, collapsedProjects: new Set(["ws-1"]) } };
+
+    expect(classifyCause(collapsed, base)).toBe("layout");
+    expect(classifyCause(base, collapsed)).toBe("layout");
+    expect(classifyCause(base, { ...base, ui: { ...base.ui, showMore: new Set(["ws-1"]) } })).toBe("layout");
+    expect(classifyCause(base, { ...base, ui: { ...base.ui, collapsedOlderProjects: new Set(["ws-1"]) } })).toBe("layout");
+    expect(classifyCause(base, { ...base, ui: { ...base.ui, frozen: { at: NOW, activityMs: new Map() } } })).toBe("push");
+  });
 });
