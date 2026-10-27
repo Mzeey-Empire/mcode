@@ -102,7 +102,6 @@ describe("SidebarThreadRow", () => {
     });
     const chip = screen.getByRole("button", { name: "3 pull requests" });
     expect(chip).toHaveTextContent(/^\+2$/);
-    // The open PR outranks merged and closed, so the chip wears the open state.
     expect(chip.querySelector("svg")).toHaveClass("text-success");
   });
 

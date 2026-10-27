@@ -12,7 +12,6 @@ import { useSidebarModel } from "../use-sidebar-model";
 
 const NOW = Date.parse("2026-10-27T12:00:00.000Z");
 const DAY_MS = 86_400_000;
-// The default Older threshold.
 const OLDER_AFTER_MS = 14 * DAY_MS;
 
 describe("useSidebarModel boundary timer", () => {

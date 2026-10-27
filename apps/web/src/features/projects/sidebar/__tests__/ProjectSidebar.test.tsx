@@ -547,7 +547,6 @@ describe("ProjectSidebar thread interactions", () => {
 
     expect(screen.getByRole("button", { name: /^Provider, Claude First completed/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Provider, Claude Second active/i })).toBeNull();
-    // A project with nothing in the Completed scope drops out of that scope entirely.
     expect(screen.queryByTestId("project-row-ws-2")).toBeNull();
   });
 
