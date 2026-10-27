@@ -14,7 +14,7 @@ import {
   type SidebarModel,
   type SidebarModelUi,
 } from "./sidebar-model";
-import { useSidebarUiStore } from "./sidebar-ui-store";
+import { collapsedProjectsOf, useSidebarUiStore } from "./sidebar-ui-store";
 import { useCompletionStore } from "./completion-store";
 
 const NO_IDS: ReadonlySet<string> = new Set();
@@ -62,14 +62,15 @@ function useNeedsUserEndedAt(needsUserIds: ReadonlySet<string>): ReadonlyMap<str
   }, [needsUserIds]);
 }
 
-function useModelUi(): SidebarModelUi {
+function useModelUi(projectOrder: readonly string[]): SidebarModelUi {
   const scope = useSidebarUiStore((state) => state.scope);
   const view = useSidebarUiStore((state) => state.view);
   const olderOpen = useSidebarUiStore((state) => state.olderOpen);
-  const collapsedProjects = useSidebarUiStore((state) => state.collapsedProjects);
+  const expandedProjects = useSidebarUiStore((state) => state.expandedProjects);
   const collapsedOlderProjects = useSidebarUiStore((state) => state.collapsedOlderProjects);
   const showMore = useSidebarUiStore((state) => state.showMore);
   const frozen = useSidebarUiStore((state) => state.frozen);
+  const collapsedProjects = useMemo(() => collapsedProjectsOf(projectOrder, expandedProjects), [projectOrder, expandedProjects]);
   return useMemo(
     () => ({ scope, view, olderOpen, collapsedProjects, collapsedOlderProjects, showMore, frozen }),
     [scope, view, olderOpen, collapsedProjects, collapsedOlderProjects, showMore, frozen],
@@ -99,9 +100,9 @@ function useSidebarInputs(now: number): SidebarInputs {
   const completions = useCompletionStore((state) => state.entries);
   const needsUserIds = useNeedsUserIds();
   const needsUserEndedAt = useNeedsUserEndedAt(needsUserIds);
-  const ui = useModelUi();
-  const facts = selectSidebarFacts(threads);
   const projectOrder = useMemo(() => workspaces.map((workspace) => workspace.id), [workspaces]);
+  const ui = useModelUi(projectOrder);
+  const facts = selectSidebarFacts(threads);
   const draftsByWorkspace = useMemo(() => draftIdsByWorkspace(drafts), [drafts]);
   return useMemo(
     () => ({ facts, projectOrder, draftsByWorkspace, needsUserIds, needsUserEndedAt, completions, olderAfterDays, ui, selectedThreadId, now, snapshotEpoch }),

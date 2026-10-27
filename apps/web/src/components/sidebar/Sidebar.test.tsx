@@ -31,7 +31,7 @@ vi.mock("@/features/projects/state/workspaceStore", () => ({
 
 vi.mock("@/features/projects", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/projects")>()),
-  ProjectTree: () => <div data-testid="project-tree" />,
+  ProjectSidebar: () => <div data-testid="project-tree" />,
 }));
 
 vi.mock("./UpdateButton", () => ({
