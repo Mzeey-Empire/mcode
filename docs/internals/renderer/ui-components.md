@@ -101,7 +101,7 @@ Vitest and Testing Library protect component behavior and store logic. State, la
 
 Start with focused Vitest or Testing Library coverage when you touch:
 
-- **Interactive chat/sidebar components:** `Composer.tsx`, `MessageList.tsx`, `HeaderActions.tsx`, `RightPanel*`, `ProjectTree.tsx`, `ChatView.tsx`, `DiffToolbar.tsx`.
+- **Interactive chat/sidebar components:** `Composer.tsx`, `MessageList.tsx`, `HeaderActions.tsx`, `RightPanel*`, `features/projects/sidebar/*`, `ChatView.tsx`, `DiffToolbar.tsx`.
 - **Responsive layout:** anything that flips behaviour at a breakpoint or on container width, including consumers of `useElementWidth` / `useMediaQuery`, popover-vs-inline switches, and CSS `md:` / `lg:` branches.
 - **Accessibility semantics:** `role`, `aria-*`, focus traps, `dialog` wiring, keyboard shortcuts, command-registry entries.
 - **Theme or token surfaces:** `index.css`, OKLCH token values, `--page` / `--background` / font-stack changes.

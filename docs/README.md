@@ -32,6 +32,7 @@ Internal guides are grouped in topic subfolders. Use this index to find a guide.
 
 - [Project environments](internals/projects/environment.md): Setup admission, command approval, and Action lifecycle
 - [Completed-thread worktree cleanup](internals/projects/thread-cleanup.md)
+- [Sidebar threads](internals/projects/sidebar-threads.md): activity time, linked PRs, held completion, auto-complete, and the client-derived model
 
 ### Review
 
