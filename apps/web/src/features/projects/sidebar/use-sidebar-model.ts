@@ -91,7 +91,7 @@ function useClockTicks(nextBoundaryAt: number | null, setNow: (now: number) => v
 }
 
 function useSidebarInputs(now: number): SidebarInputs {
-  const threads = useWorkspaceStore((state) => state.threads);
+  const facts = useWorkspaceStore((state) => selectSidebarFacts(state.threads));
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   const selectedThreadId = useWorkspaceStore((state) => state.activeThreadId);
   const snapshotEpoch = useWorkspaceStore((state) => state.threadSnapshotEpoch);
@@ -102,7 +102,6 @@ function useSidebarInputs(now: number): SidebarInputs {
   const needsUserEndedAt = useNeedsUserEndedAt(needsUserIds);
   const projectOrder = useMemo(() => workspaces.map((workspace) => workspace.id), [workspaces]);
   const ui = useModelUi(projectOrder);
-  const facts = selectSidebarFacts(threads);
   const draftsByWorkspace = useMemo(() => draftIdsByWorkspace(drafts), [drafts]);
   return useMemo(
     () => ({ facts, projectOrder, draftsByWorkspace, needsUserIds, needsUserEndedAt, completions, olderAfterDays, ui, selectedThreadId, now, snapshotEpoch }),

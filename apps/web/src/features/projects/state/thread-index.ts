@@ -12,6 +12,20 @@ export function selectThreadIndex(threads: readonly WorkspaceThread[]): Readonly
   return index;
 }
 
+const NO_PREPARING: ReadonlySet<string> = new Set();
+let preparingCache: { threads: readonly WorkspaceThread[]; ids: ReadonlySet<string> } | null = null;
+
+/** Ids of threads still preparing their first send; the same set while membership is unchanged. */
+export function selectPreparingThreadIds(threads: readonly WorkspaceThread[]): ReadonlySet<string> {
+  if (preparingCache?.threads === threads) return preparingCache.ids;
+  const ids = new Set<string>();
+  for (const thread of threads) if (thread.clientPreparing === true) ids.add(thread.id);
+  const previous = preparingCache?.ids ?? NO_PREPARING;
+  const same = ids.size === previous.size && [...ids].every((id) => previous.has(id));
+  preparingCache = { threads, ids: same ? previous : ids };
+  return preparingCache.ids;
+}
+
 function parseTime(value: string | null | undefined): number | null {
   if (!value) return null;
   const ms = Date.parse(value);
@@ -49,13 +63,18 @@ export function selectSidebarFacts(threads: readonly WorkspaceThread[]): readonl
   const previous = factsCache;
   let changed = previous === null || previous.facts.length !== threads.length;
   const facts = threads.map((thread, index) => {
+    // Most pushes replace one thread; every other object is the one already parsed at this index.
+    if (previous && previous.threads[index] === thread) return previous.facts[index]!;
     const fresh = toFacts(thread);
     const old = previous?.byId.get(thread.id);
     const kept = old && sameFacts(old, fresh) ? old : fresh;
     if (kept !== previous?.facts[index]) changed = true;
     return kept;
   });
-  const result = changed || previous === null ? facts : previous.facts;
-  factsCache = { threads, facts: result, byId: new Map(result.map((fact) => [fact.id, fact])) };
-  return result;
+  if (previous && !changed) {
+    factsCache = { ...previous, threads };
+    return previous.facts;
+  }
+  factsCache = { threads, facts, byId: new Map(facts.map((fact) => [fact.id, fact])) };
+  return facts;
 }
