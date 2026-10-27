@@ -32,6 +32,7 @@ import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.
 import { transcriptMessageVisibility } from "../../agents/conversation/persistence/transcript-visibility.js";
 import { SequenceAheadError } from "../attention/sequence-ahead-error.js";
 import { ThreadProviderSessionStore } from "./thread-provider-session-store.js";
+import { advanceThreadActivity } from "./thread-activity.js";
 
 type ThreadRow = typeof threads.$inferSelect & {
   scheduledResume: typeof turnResumeSchedules.$inferSelect | null;
@@ -71,6 +72,14 @@ function parseStoredReasoningLevel(value: string | null): ReasoningLevel | null 
 
 const CLEANUP_STATES = new Set(["queued", "running", "retrying", "blocked"]);
 
+function lastActivityAt(row: ThreadRow): string {
+  let latest = row.createdAt;
+  for (const at of [row.lastActivityAt, row.lastTurnEndedAt]) {
+    if (at !== null && Date.parse(at) > Date.parse(latest)) latest = at;
+  }
+  return latest;
+}
+
 function parseCleanupState(value: string | null): Thread["cleanup_state"] {
   return CLEANUP_STATES.has(value ?? "")
     ? value as NonNullable<Thread["cleanup_state"]>
@@ -81,6 +90,7 @@ function rowToThread(row: ThreadRow): Thread {
   const schedule = row.scheduledResume;
   return {
     scheduled_resume: schedule ? ScheduledTurnResumeSchema().parse({ turnId: schedule.turnId, at: schedule.runAt }) : null,
+    last_activity_at: lastActivityAt(row),
     ...rowToThreadIdentity(row),
     ...rowToThreadLifecycle(row),
     ...rowToThreadPreferences(row),
@@ -227,6 +237,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     provider: input.provider,
     created_at: input.now,
     updated_at: input.now,
+    last_activity_at: input.now,
     deleted_at: null,
     user_completed_at: null,
     scheduled_deletion_at: null,
@@ -591,7 +602,8 @@ export class ThreadStore {
 
   /** Persist a terminal outcome at the newest visible message, including an unanswered prompt. */
   recordTurnOutcome(id: string, outcome: TurnOutcome, endedAt: string): boolean {
-    return this.db.transaction(() => runChanges(this.orm, sql`
+    return this.db.transaction(() => {
+      const changed = runChanges(this.orm, sql`
       UPDATE threads SET status = ${outcome === "cancelled" ? "interrupted" : outcome}, updated_at = ${endedAt}, last_turn_outcome = ${outcome},
         plan_phase = CASE WHEN plan_phase <> 'planning' OR plan_phase IS NULL THEN plan_phase
           WHEN EXISTS (SELECT 1 FROM plans WHERE thread_id = ${id} AND status IN ('draft', 'ready')) THEN 'ready'
@@ -601,7 +613,15 @@ export class ThreadStore {
           SELECT MAX(sequence) FROM messages WHERE thread_id = ${id} AND ${transcriptMessageVisibility}
         )
       WHERE id = ${id} AND (last_turn_ended_at IS NULL OR julianday(last_turn_ended_at) <= julianday(${endedAt}))
-    `).changes > 0)();
+      `).changes > 0;
+      if (changed) advanceThreadActivity(this.db, id, endedAt);
+      return changed;
+    })();
+  }
+
+  /** Record admission independently of lifecycle and preference writes. */
+  advanceActivity(id: string, at: string): boolean {
+    return advanceThreadActivity(this.db, id, at);
   }
 
   /** Compare and advance inside the writer transaction so concurrent clients cannot regress it. */

@@ -715,6 +715,13 @@
       "when": 1793192648724,
       "tag": "0100_chilly_the_renegades",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1793206655199,
+      "tag": "0101_mute_madelyne_pryor",
+      "breakpoints": true
     }
   ]
 }

@@ -58,6 +58,7 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
     sdk_session_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    last_activity_at: new Date().toISOString(),
     model: null,
     provider: "claude",
     deleted_at: null,

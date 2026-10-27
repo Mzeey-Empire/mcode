@@ -29,6 +29,7 @@ const threadByPair = (name: string) => databaseWriteOperation(name, pairInput, n
 
 /** Allowlisted complete thread lifecycle operations on the shared writer. */
 export const threadWriteOperations = {
+  advanceActivity: databaseWriteOperation("thread.advanceActivity", z.tuple([z.string(), z.string().datetime()]), z.boolean()),
   updatePlanPhase: databaseWriteOperation("thread.updatePlanPhase", z.tuple([z.string(), PlanPhaseSchema.nullable()]), z.boolean()),
   create: databaseWriteOperation("thread.create", z.tuple([
     z.string(), z.string(), ThreadModeSchema, z.string(), z.boolean().optional(), z.string().optional(),

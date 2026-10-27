@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { notifyCommittedThreadActivity } from "../../thread-control/persistence/thread-activity.js";
 import { gc } from "bun";
 import { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
@@ -316,6 +317,7 @@ async function handleAppendGroup(requests: Extract<CanonicalWriterRequest, { kin
 
 async function handleSingleRequest(request: CanonicalWriterRequest): Promise<void> {
   const response = await handle(request);
+  notifyActivity(request.requestId);
   globalThis.postMessage(response);
   if (requestQueue.length === 1 && response.kind === "semantic-transacted" && response.receipt.kind === "committed"
     && request.kind === "semantic-transact" && request.operation.mutation.kind === "finish-live-event") gc(true);
@@ -388,13 +390,22 @@ function handleOrdinaryWrite(request: Extract<ApplicationDatabaseWriterRequest, 
     if (!handler || !connection) throw new Error("Database operation is not registered");
     result = executeOwnedDatabaseCommand(connection, handler, parsed.input);
   } catch (error) {
+    notifyActivity(request.requestId);
     globalThis.postMessage({ kind: "ordinary-failed", requestId: request.requestId,
       name: request.name, failure: describeFailure(error) } satisfies ApplicationDatabaseWriterResponse);
     return;
   }
   // A lost reply after commit is uncertain. Only failures inside the transaction are rolled back.
+  notifyActivity(request.requestId);
   globalThis.postMessage({ kind: "ordinary-written", requestId: request.requestId,
     name: request.name, result } satisfies ApplicationDatabaseWriterResponse);
+}
+
+function notifyActivity(requestId: string): void {
+  if (!db) return;
+  notifyCommittedThreadActivity(db, (activity) => {
+    globalThis.postMessage({ kind: "thread-activity", requestId, ...activity } satisfies ApplicationDatabaseWriterResponse);
+  });
 }
 
 process.on("exit", () => db?.close(true));

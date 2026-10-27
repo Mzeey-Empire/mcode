@@ -21,6 +21,7 @@ export type ApplicationDatabaseWriterRequest = CanonicalWriterRequest | z.infer<
 
 /** Business failures roll back; policy failures and missing replies remain explicit. */
 export type ApplicationDatabaseWriterResponse = CanonicalWriterResponse
+  | { kind: "thread-activity"; requestId: string; threadId: string; at: string }
   | { kind: "ordinary-written"; requestId: string; name: string; result: unknown }
   | { kind: "ordinary-failed"; requestId: string; name: string;
       failure: WriterFailure };
