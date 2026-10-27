@@ -114,16 +114,19 @@ export class ThreadCompletionService {
       if (thread.user_completed_at !== null) return { ok: true, thread };
       const refusal = this.assertCompletable(threadId);
       if (refusal) return { ok: false, refusal };
-      // Keep admission closed until teardown settles, even after completion is visible.
       const completed = await this.persistCompletion(thread);
-      const { failures, barriers } = await this.releaseThreadResources(threadId);
-      try {
-        return { ok: true, thread: await this.reportCleanupFailures(completed, failures) };
-      } finally {
-        for (const release of barriers) release();
-      }
+      return { ok: true, thread: await this.releaseResourcesBeforeAdmissionReopens(completed) };
     } finally {
       this.mutationReservations.release(threadId, token);
+    }
+  }
+
+  private async releaseResourcesBeforeAdmissionReopens(completed: Thread): Promise<Thread> {
+    const { failures, barriers } = await this.releaseThreadResources(completed.id);
+    try {
+      return await this.reportCleanupFailures(completed, failures);
+    } finally {
+      for (const release of barriers) release();
     }
   }
 
