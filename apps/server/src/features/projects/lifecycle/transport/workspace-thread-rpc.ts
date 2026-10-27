@@ -348,13 +348,13 @@ async function syncWorkspacePullRequests(
     if (!current?.pull_requests.some((pr) => pr.number === snapshot.prNumber)) continue;
     await deps.pullRequestLinkFunnel.observe(current.id, [{
       number: snapshot.prNumber, state: snapshot.state, title: snapshot.title, url: snapshot.url,
-    }], "sync");
+    }]);
     deps.ciWatcherService.refresh(current.id, snapshot.prNumber, snapshot.checks);
   }
   await Promise.all(threads.map(async (thread) => {
     const prs = await deps.githubService.listBranchPrs(thread.branch, repoPath);
     if (!unchangedCheckout(deps, thread)) return;
-    await deps.pullRequestLinkFunnel.observe(thread.id, prs, "sync");
+    await deps.pullRequestLinkFunnel.observe(thread.id, prs);
   }));
 }
 

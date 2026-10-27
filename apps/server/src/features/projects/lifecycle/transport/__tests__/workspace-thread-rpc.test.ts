@@ -73,7 +73,7 @@ afterEach(() => _resetForTest());
 describe("global thread PR sync", () => {
   it("publishes a found merge to every client without an active workspace", async () => {
     const f = await fixture();
-    await f.funnel.observe(f.thread.id, [createMockThreadPullRequest()], "created");
+    await f.funnel.observe(f.thread.id, [createMockThreadPullRequest()]);
     f.github.getPullRequestWatchSnapshots.mockResolvedValue([{
       threadId: f.thread.id, prNumber: 42, state: "merged", title: "Merged feature", url: "https://github.com/o/r/pull/42", checks,
     }]);
@@ -112,7 +112,7 @@ describe("global thread PR sync", () => {
   it("ignores a snapshot for a checkout changed while GitHub was responding", async () => {
     const f = await fixture();
     try {
-      await f.funnel.observe(f.thread.id, [createMockThreadPullRequest()], "created");
+      await f.funnel.observe(f.thread.id, [createMockThreadPullRequest()]);
       f.github.getPullRequestWatchSnapshots.mockImplementation(async () => {
         await f.threads.updateCheckoutFromHead(f.thread.id, "other", "named", null, null);
         return [{ threadId: f.thread.id, prNumber: 42, state: "merged", title: "Merged feature", url: "https://github.com/o/r/pull/42", checks }];

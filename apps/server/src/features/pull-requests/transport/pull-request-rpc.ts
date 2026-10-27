@@ -294,7 +294,7 @@ async function routeCreatePr(
 
   await deps.pullRequestLinkFunnel.observe(params.threadId, [{
     number: result.number, state: params.isDraft ? "draft" : "open", title: params.title, url: result.url,
-  }], "created");
+  }]);
   deps.ciWatcherService.scheduleBumpAfterPush(params.threadId);
 
   return result;

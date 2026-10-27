@@ -1696,7 +1696,7 @@ describe("routeMessage github.createPr", () => {
     });
     expect(deps.pullRequestLinkFunnel.observe).toHaveBeenCalledWith("thread-1", [{
       number: 42, state: "open", title: "Add branchless worktrees", url: "https://github.com/Mzeey-Empire/mcode/pull/42",
-    }], "created");
+    }]);
   });
 });
 

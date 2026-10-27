@@ -7,9 +7,6 @@ import { databaseWriteHandler } from "../../../runtime/persistence/sqlite/databa
 import { threadPullRequests, threads } from "../../../runtime/persistence/sqlite/schema.js";
 import { threadPullRequestWriteOperations } from "./thread-pull-request-write-operations.js";
 
-/** Source of a PR observation, for callers' diagnostics. */
-export type ObservationSource = "created" | "turn-settled" | "watcher" | "sync" | "review-link";
-
 function mergeObservations(current: ThreadPullRequest[], observations: readonly ThreadPullRequest[]): ThreadPullRequest[] {
   const byNumber = new Map(current.map((pr) => [pr.number, pr]));
   for (const observation of observations) {
@@ -31,9 +28,11 @@ function writeLinks(db: Database, threadId: string, next: ThreadPullRequest[]): 
     const observedAt = new Date().toISOString();
     orm.insert(threadPullRequests).values(next.map((pr) => ({ ...pr, threadId, observedAt }))).run();
   }
-  const primary = next[0];
-  // Older builds share this database and still read the single-PR columns.
-  orm.update(threads).set({ prNumber: primary?.number ?? null, prStatus: primary?.state ?? null })
+  mirrorPrimaryIntoLegacyColumnsForOlderBuilds(db, threadId, next[0]);
+}
+
+function mirrorPrimaryIntoLegacyColumnsForOlderBuilds(db: Database, threadId: string, primary: ThreadPullRequest | undefined): void {
+  drizzle(db).update(threads).set({ prNumber: primary?.number ?? null, prStatus: primary?.state ?? null })
     .where(eq(threads.id, threadId)).run();
 }
 
@@ -84,7 +83,7 @@ export class PullRequestLinkFunnel {
   ) {}
 
   /** Retain existing numbers and merged states while applying a new observation. */
-  async observe(threadId: string, observations: readonly ThreadPullRequest[], _source: ObservationSource): Promise<void> {
+  async observe(threadId: string, observations: readonly ThreadPullRequest[]): Promise<void> {
     const changed = await this.writer.execute(threadPullRequestWriteOperations.observe, [threadId, [...observations]]);
     if (changed) this.publishCommitted(threadId, changed);
   }
