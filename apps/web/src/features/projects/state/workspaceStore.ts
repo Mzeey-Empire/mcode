@@ -706,6 +706,7 @@ interface WorkspaceState {
   retryThreadCleanup: (threadId: string) => Promise<void>;
   /** Apply a server-authoritative completion lifecycle push. */
   applyThreadLifecycle: (thread: Thread) => void;
+  applyThreadActivity: (threadId: string, at: string) => void;
   /** Remove a thread after server-authoritative automatic cleanup. */
   applyThreadDeleted: (threadId: string) => void;
   /** Record a thread's committed resume schedule, or its removal. */
@@ -1739,6 +1740,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       useTerminalStore.getState().clearThread(thread.id);
       useDiffStore.getState().clearRightPanel(thread.workspace_id, thread.id);
     }
+  },
+
+  applyThreadActivity: (threadId, at) => {
+    set((state) => {
+      const existing = state.threads.find((thread) => thread.id === threadId);
+      if (!existing || Date.parse(existing.last_activity_at) >= Date.parse(at)) return state;
+      return { threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, last_activity_at: at } : thread) };
+    });
   },
 
   applyScheduledResume: (threadId, resume) => {

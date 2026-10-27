@@ -106,6 +106,24 @@ describe("successful database migration recovery", () => {
     process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = NodePath.join(process.cwd(), "drizzle");
   });
 
+  it("adds nullable thread activity without a backfill", () => {
+    const current = NodePath.join(process.cwd(), "drizzle");
+    const previous = NodePath.join(directory, "drizzle-through-0099");
+    copyMigrationsThrough(current, previous, "0099_quiet_master_chief");
+    const db = new Database(databasePath, { strict: true });
+    try {
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(previous) });
+      db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run("ws", "Workspace", "/fixture");
+      db.prepare("INSERT INTO threads (id, workspace_id, title, branch) VALUES (?, ?, ?, ?)").run("thread", "ws", "Thread", "main");
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
+      expectColumns(db, "threads", { present: ["last_activity_at"] });
+      expect(db.prepare("SELECT last_activity_at FROM threads WHERE id = ?").get("thread"))
+        .toEqual({ last_activity_at: null });
+    } finally {
+      db.close(true);
+    }
+  });
+
   it("removes the obsolete Copilot selection without rebuilding or cascading thread history", () => {
     const current = NodePath.join(process.cwd(), "drizzle");
     const previous = NodePath.join(directory, "drizzle-through-0067");

@@ -7,6 +7,7 @@ import { threadWriteOperations } from "./thread-write-operations.js";
 export function buildThreadStoreWriteHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {
   const store = new ThreadStore(db);
   return new Map<string, (input: unknown) => unknown>([
+    [threadWriteOperations.advanceActivity.name, databaseWriteHandler(threadWriteOperations.advanceActivity, (input) => store.advanceActivity(...input))],
     [threadWriteOperations.create.name, databaseWriteHandler(threadWriteOperations.create, (input) => store.create(...input))],
     [threadWriteOperations.updateStatus.name, databaseWriteHandler(threadWriteOperations.updateStatus, (input) => store.updateStatus(...input))],
     [threadWriteOperations.recordTurnOutcome.name, databaseWriteHandler(threadWriteOperations.recordTurnOutcome, (input) => store.recordTurnOutcome(...input))],

@@ -125,6 +125,14 @@ describe("ws-events thread.lifecycleChanged", () => {
     vi.restoreAllMocks();
   });
 
+  it("advances activity pushes without allowing an older push to regress the clock", () => {
+    useWorkspaceStore.setState({ threads: [makeThread({ last_activity_at: "2026-01-01T00:00:00.000Z" })] });
+    startPushListeners();
+    pushEmitter.emit("thread.activity", { threadId: "thread-1", at: "2026-01-03T00:00:00.000Z" });
+    pushEmitter.emit("thread.activity", { threadId: "thread-1", at: "2026-01-02T00:00:00.000Z" });
+    expect(useWorkspaceStore.getState().threads[0].last_activity_at).toBe("2026-01-03T00:00:00.000Z");
+  });
+
   it("applies a server-authoritative completion push", () => {
     useWorkspaceStore.setState({ threads: [makeThread()] });
     startPushListeners();

@@ -95,6 +95,7 @@ function buildService(): {
   const threadRepo = {
     findById: vi.fn(() => thread),
     updateStatus: vi.fn(),
+    advanceActivity: vi.fn().mockResolvedValue(true),
     recordTurnOutcome: vi.fn().mockResolvedValue(true),
     updateModel: vi.fn(),
     updateProvider: vi.fn(),

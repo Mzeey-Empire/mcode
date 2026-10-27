@@ -1,6 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import * as NodeV8 from "node:v8";
+import { publishThreadActivity } from "../../../features/thread-control/persistence/thread-activity.js";
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { CanonicalWriterRequest, CanonicalWriterResponse } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
@@ -200,6 +201,10 @@ export class ApplicationDatabaseWriter {
   }
 
   private receive(response: ApplicationDatabaseWriterResponse): void {
+    if (response.kind === "thread-activity") {
+      publishThreadActivity({ threadId: response.threadId, at: response.at });
+      return;
+    }
     if (response.requestId === "writer:open") {
       this.receiveOpen(response);
       return;
@@ -291,7 +296,7 @@ function matchesResponse(request: ApplicationDatabaseWriterRequest, response: Ap
   if (request.kind === "ordinary-write" || request.kind === "query-only-policy") {
     return (response.kind === "ordinary-written" || response.kind === "ordinary-failed") && response.name === request.name;
   }
-  return response.kind !== "ordinary-written" && response.kind !== "ordinary-failed"
+  return response.kind !== "ordinary-written" && response.kind !== "ordinary-failed" && response.kind !== "thread-activity"
     && request.operationId === response.operationId && request.executionId === response.executionId;
 }
 
