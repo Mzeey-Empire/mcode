@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
+import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 /** Easing shared by every 04g track. */
 const EASING = "cubic-bezier(.2, 0, 0, 1)";
@@ -111,10 +112,6 @@ export function sidebarRowAnimations(reducedMotion: boolean): SidebarRowAnimatio
     entering: { keyframes: FADE_IN, options },
     shifted: (offset) => ({ keyframes: [{ transform: `translateY(${-offset}px)` }, { transform: "translateY(0)" }], options }),
   };
-}
-
-function prefersReducedMotion(): boolean {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 function play(element: Element | null | undefined, track: TrackAnimation | undefined): Animation | undefined {
