@@ -177,77 +177,11 @@ function setupStartup(threadId: string, setup: ThreadStartup["steps"][number]["s
 
 const SETUP_FAILED_BLOCK = { code: "SETUP_FAILED", message: "Setup failed", actions: ["retry", "continue"] } satisfies ThreadStartup["block"];
 
-// The virtual viewport requires a real scrollable element with measured sizes
-// (ResizeObserver, clientHeight). In jsdom none of that works, so we replace it
-// with a pass-through that publishes a host element for every row while
-// preserving the row identity the component supplies.
-const publishedRowIdHistory: string[][] = [];
-
-vi.mock("@/components/ui/virtual-viewport", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/components/ui/virtual-viewport")>();
-
-  class FakeVirtualViewport {
-    readonly viewport: HTMLElement;
-    private readonly hosts = new Map<string, HTMLDivElement>();
-
-    constructor(
-      container: HTMLElement,
-      private readonly publish: (
-        hosts: ReadonlyArray<{ id: string; element: HTMLDivElement }>,
-      ) => void,
-      _onPosition: (position: unknown) => void,
-      options: { classPrefix?: string },
-    ) {
-      this.viewport = document.createElement("div");
-      this.viewport.dataset.testid = `${options.classPrefix ?? "virtual"}-viewport`;
-      container.append(this.viewport);
-    }
-
-    setRows(rows: ReadonlyArray<{ id: string }>): void {
-      publishedRowIdHistory.push(rows.map((row) => row.id));
-      const live = new Set(rows.map((row) => row.id));
-      for (const [id, element] of this.hosts) {
-        if (!live.has(id)) {
-          element.remove();
-          this.hosts.delete(id);
-        }
-      }
-      this.publish(
-        rows.map((row) => {
-          let element = this.hosts.get(row.id);
-          if (!element) {
-            element = document.createElement("div");
-            this.viewport.append(element);
-            this.hosts.set(row.id, element);
-          }
-          return { id: row.id, element };
-        }),
-      );
-    }
-
-    releaseHosts(): void {}
-    getReadingAnchor(): undefined {
-      return undefined;
-    }
-    moveTo(): void {}
-    restoreOffset(top: number): void {
-      this.viewport.scrollTop = top;
-    }
-    rowTop(): undefined {
-      return undefined;
-    }
-    rowBottom(): undefined {
-      return undefined;
-    }
-    destroy(): void {
-      this.viewport.remove();
-      this.hosts.clear();
-    }
-  }
-
-  return { ...actual, VirtualViewport: FakeVirtualViewport };
-});
+// jsdom has no layout, so the viewport is the shared pass-through fake.
+vi.mock("@/components/ui/virtual-viewport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/ui/virtual-viewport")>()),
+  VirtualViewport: (await import("./fake-virtual-viewport")).FakeVirtualViewport,
+}));
 
 afterEach(() => {
   sortableMockState.transform = null;
@@ -263,6 +197,9 @@ import { ProjectSidebar } from "../ProjectSidebar";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { FakeVirtualViewport } from "./fake-virtual-viewport";
+
+const publishedRowIdHistory = FakeVirtualViewport.published;
 
 /** Build a minimal Thread fixture. */
 type TestWorkspaceThread = Thread & { clientPreparing?: boolean };
@@ -392,7 +329,7 @@ describe("ProjectSidebar thread interactions", () => {
   });
 
   afterEach(() => {
-    vi.runAllTimers();
+    vi.runOnlyPendingTimers();
     vi.useRealTimers();
     vi.clearAllMocks();
     localStorage.clear();
@@ -937,18 +874,18 @@ describe("ProjectSidebar thread interactions", () => {
     expect(screen.getByRole("button", { name: "Add project" })).toBeInTheDocument();
   });
 
-  it("leads the row with the status lane, then the provider and title", () => {
+  it("leads the row with the provider and title, and ends the title line with the status", () => {
     setupStoreMocks();
 
     render(<ProjectSidebar />);
 
     const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
-    const lane = within(row).getByTestId("thread-status-lane");
+    const status = within(row).getByTestId("thread-status");
     const title = within(row).getByTestId("thread-title");
 
-    expect(row.firstElementChild).toBe(lane);
-    expect(lane).toBeEmptyDOMElement();
     expect(title.previousElementSibling).toBe(screen.getByLabelText("Provider, Claude"));
+    expect(title.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(status).toBeEmptyDOMElement();
   });
 
   it("offers Explorer and rename actions from the project menu", () => {
@@ -1505,7 +1442,7 @@ describe("ProjectSidebar action-required indicator", () => {
   it("leaves the status lane empty for a thread with no attention facts", () => {
     render(<ProjectSidebar />);
 
-    expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("thread-status")).toBeEmptyDOMElement();
   });
 
   it("keeps the ring when the waiting thread is also running", () => {
@@ -1524,8 +1461,8 @@ describe("ProjectSidebar action-required indicator", () => {
     };
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("button", { name: /^Running Provider, Claude My Thread/i })).toBeInTheDocument();
-    expect(within(screen.getByTestId("thread-status-lane")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
+    expect(screen.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeInTheDocument();
+    expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
     expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
   });
 
@@ -1562,7 +1499,7 @@ describe("ProjectSidebar action-required indicator", () => {
     installWorkspaceMock();
     render(<ProjectSidebar />);
 
-    expect(within(screen.getByTestId("thread-status-lane")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
+    expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
   });
 
   it.each([
@@ -1582,7 +1519,7 @@ describe("ProjectSidebar action-required indicator", () => {
     applyAttention(attention("thread-pending", endedTurn("cancelled")));
     render(<ProjectSidebar />);
 
-    expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("thread-status")).toBeEmptyDOMElement();
   });
 
   it("clears Finished when another client marks the turn seen", () => {
@@ -1598,7 +1535,7 @@ describe("ProjectSidebar action-required indicator", () => {
       })));
 
       expect(screen.queryByRole("img", { name: "Finished" })).not.toBeInTheDocument();
-      expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
+      expect(screen.getByTestId("thread-status")).toBeEmptyDOMElement();
     } finally {
       stopPushListeners();
     }
@@ -1612,15 +1549,15 @@ describe("ProjectSidebar action-required indicator", () => {
 
     applyAttention(attention("thread-pending", endedTurn("completed")));
 
-    expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("thread-status")).toBeEmptyDOMElement();
   });
 
   it("shows the row's time on its branch line and the exact time in hover details", async () => {
     const updatedAt = new Date(Date.now() - 5 * 60_000).toISOString();
-    setupStoreMocks({ thread: makeThread({ id: "thread-updated", title: "Updated Thread", updated_at: updatedAt }) });
+    setupStoreMocks({ thread: makeThread({ id: "thread-updated", title: "Updated Thread", updated_at: updatedAt, last_activity_at: updatedAt }) });
     render(<ProjectSidebar />);
 
-    const row = screen.getByRole("button", { name: /^Provider, Claude Updated Thread Local mode Branch, main 5m$/i });
+    const row = screen.getByRole("button", { name: /^Provider, Claude Updated Thread.*Local mode Branch, main 5m$/i });
     const exactTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(updatedAt));
     row.focus();
     expect(await screen.findByTestId("thread-preview-thread-updated")).toHaveTextContent(`Updated ${exactTime}`);
@@ -1638,16 +1575,16 @@ describe("ProjectSidebar action-required indicator", () => {
       // The server keys a supervised thread_send wait on the sending thread, not its target.
       act(() => pushEmitter.emit("thread.attention", attention("thread-A", waitingOn("approval"))));
 
-      const ownerRow = screen.getByRole("button", { name: /^Approval required Provider, Claude Thread A/ });
+      const ownerRow = screen.getByRole("button", { name: /^Provider, Claude Thread A/ });
       const targetRow = screen.getByRole("button", { name: /^Provider, Claude Thread B/ });
       expect(within(ownerRow).getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
-      expect(within(targetRow).getByTestId("thread-status-lane")).toBeEmptyDOMElement();
+      expect(within(targetRow).getByTestId("thread-status")).toBeEmptyDOMElement();
     } finally {
       stopPushListeners();
     }
   });
 
-  it("names the wait instead of the PR line when a PR thread needs the user", () => {
+  it("names the wait on the title line and keeps the PR chip on the branch line", () => {
     currentThread = makeThread({ id: "thread-pending", status: "active", mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })] });
     currentChecks = {
       "thread-pending": { aggregate: "failing", runs: [{ name: "ci", status: "completed", conclusion: "failure" }] },
@@ -1656,8 +1593,8 @@ describe("ProjectSidebar action-required indicator", () => {
     applyAttention(attention("thread-pending", waitingOn("approval")));
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
-    expect(screen.queryByTestId("thread-pr-indicator-thread-pending")).toBeNull();
+    expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(screen.getByTestId("thread-pr-indicator-thread-pending")).toHaveAccessibleName("PR #42, open");
   });
 
   describe("collapsed project", () => {
@@ -1715,7 +1652,7 @@ describe("ProjectSidebar action-required indicator", () => {
       startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "running")] });
       installWorkspaceMock();
       render(<ProjectSidebar />);
-      expect(await within(screen.getByTestId("thread-status-lane")).findByRole("img", { name: "Running" })).toBeVisible();
+      expect(await within(screen.getByTestId("thread-status")).findByRole("img", { name: "Running" })).toBeVisible();
 
       fireEvent.click(screen.getByRole("button", { name: "Toggle threads for Test" }));
       act(() => useThreadStartupStore.getState().apply(setupStartup("thread-pending", "failed", SETUP_FAILED_BLOCK)));
@@ -1732,7 +1669,7 @@ describe("ProjectSidebar action-required indicator", () => {
     });
   });
 
-  it("dims only the content of a client scaffold row, not its status lane", () => {
+  it("dims only the content of a client scaffold row, not its status", () => {
     currentThread = {
       ...makeThread({ id: "thread-pending", mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })] }),
       clientPreparing: true,
@@ -1740,11 +1677,12 @@ describe("ProjectSidebar action-required indicator", () => {
     installWorkspaceMock();
     render(<ProjectSidebar />);
 
-    const row = screen.getByRole("button", { name: /^Running Provider, Claude My Thread/i });
-    const content = screen.getByTestId("thread-title").closest(".flex-col");
+    const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const dimmed = screen.getByTestId("thread-title").closest<HTMLElement>("[class*='opacity-[0.72]']");
     expect(row.className).not.toContain("opacity-[0.72]");
-    expect(content?.className).toContain("opacity-[0.72]");
-    expect(content).not.toContainElement(screen.getByTestId("thread-status-lane"));
+    expect(dimmed).not.toBeNull();
+    expect(dimmed).not.toContainElement(screen.getByTestId("thread-status"));
+    expect(screen.getByTestId("thread-status").closest("[class*='opacity-[0.72]']")).toBeNull();
   });
 });
 
@@ -1803,7 +1741,7 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
     expect(screen.queryByTitle(/PR #42/)).toBeNull();
   });
 
-  it("shows the PR number on the third line, under the title", () => {
+  it("shows the PR number on the branch line, under the title", () => {
     renderWithThread(
       makeThread({ mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })] }),
     );
@@ -1811,7 +1749,7 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
     const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
     const title = screen.getByTestId("thread-title");
     expect(indicator).toHaveAttribute("aria-label", "PR #42, open");
-    expect(indicator).toHaveTextContent("PR #42");
+    expect(indicator).toHaveTextContent(/^42$/);
     expect(
       title.compareDocumentPosition(indicator) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -1819,7 +1757,7 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
     expect(row).toContainElement(indicator);
   });
 
-  it("renders a merged PR as a violet number, and never words the CI state", () => {
+  it("renders a merged PR with the violet merge icon, and never words the CI state", () => {
     renderWithThread(
       makeThread({ mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "merged" })] }),
       {
@@ -1830,8 +1768,8 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
       },
     );
     const indicator = screen.getByLabelText("PR #42, merged");
-    expect(indicator).toHaveTextContent(/^PR #42$/);
-    expect(screen.getByText("PR #42")).toHaveClass("text-pr-merged");
+    expect(indicator).toHaveTextContent(/^42$/);
+    expect(indicator.querySelector("svg")).toHaveClass("text-pr-merged");
   });
 
   it("shows only the PR number on an open PR with failing checks", () => {
@@ -1844,14 +1782,14 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
         },
       },
     );
-    expect(screen.getByLabelText("PR #42, open")).toHaveTextContent(/^PR #42$/);
+    expect(screen.getByLabelText("PR #42, open")).toHaveTextContent(/^42$/);
   });
 
   it("renders no status mark or PR line for a quiet non-PR row", () => {
     renderWithThread(
       makeThread({ mode: "direct", pull_requests: [], status: "paused" }),
     );
-    expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("thread-status")).toBeEmptyDOMElement();
     expect(screen.queryByTestId("thread-pr-indicator-thread-1")).toBeNull();
   });
 
