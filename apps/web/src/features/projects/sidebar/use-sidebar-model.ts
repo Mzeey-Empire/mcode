@@ -42,7 +42,6 @@ function draftIdsByWorkspace(drafts: Readonly<Record<string, ThreadDraft>>): Rea
   return new Map([...grouped].map(([workspaceId, list]) => [workspaceId, list.sort((a, b) => b.updatedAt - a.updatedAt).map((draft) => draft.id)]));
 }
 
-/** The needs-user set, kept identical while its members are unchanged. */
 function useNeedsUserIds(): ReadonlySet<string> {
   const byThreadId = threadAttentionStore((state) => state.byThreadId);
   const previous = useRef<ReadonlySet<string>>(NO_IDS);
@@ -54,7 +53,6 @@ function useNeedsUserIds(): ReadonlySet<string> {
   }, [byThreadId]);
 }
 
-/** Session map of when each thread stopped needing the user, advanced as the set shrinks. */
 function useNeedsUserEndedAt(needsUserIds: ReadonlySet<string>): ReadonlyMap<string, number> {
   const tracked = useRef({ ids: NO_IDS, ends: NO_ENDS });
   return useMemo(() => {
@@ -78,7 +76,6 @@ function useModelUi(): SidebarModelUi {
   );
 }
 
-/** Advances the model's `now` at the next Older boundary and on window focus. */
 function useClockTicks(nextBoundaryAt: number | null, setNow: (now: number) => void): void {
   useEffect(() => {
     if (nextBoundaryAt === null) return;
@@ -113,9 +110,8 @@ function useSidebarInputs(now: number): SidebarInputs {
 }
 
 /**
- * Gathers the model's inputs from their owner stores, derives the sidebar, keeps item identity
- * across derivations, and reports what caused each change. One timeout serves the next Older
- * boundary; while frozen it still advances `now`, and the model applies the move on unfreeze.
+ * Returns the live sidebar model and change cause, preserving equal item identities and
+ * refreshing time at Older boundaries and on window focus.
  */
 export function useSidebarModel(): { readonly model: SidebarModel; readonly cause: ModelCause } {
   const [now, setNow] = useState(Date.now);

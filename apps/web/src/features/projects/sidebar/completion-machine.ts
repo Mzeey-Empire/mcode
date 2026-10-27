@@ -59,7 +59,6 @@ function fromIdle(event: CompletionEvent): CompletionTransition {
 }
 
 function refusedTransition(refusal: ThreadCompletionRefusal): CompletionTransition {
-  // The server cancels a hold when Undo, a reopen or a new turn reached it first; the thread is active.
   if (refusal === "cancelled") return unchanged(undefined);
   return { next: { phase: "failed", failure: { kind: "refused", refusal, message: REFUSAL_MESSAGES[refusal] } }, effects: [] };
 }
@@ -94,22 +93,8 @@ function fromFailed(entry: CompletionEntry, event: CompletionEvent): CompletionT
 }
 
 /**
- * Pure transition over the server-held completion. Unlisted pairs return the entry unchanged
- * with no effects, which makes double clicks, duplicate replies and stale attempts harmless.
- *
- *   idle      --complete-->              holding [send-complete]
- *   holding   --undo-->                  idle [send-reopen]   (the server cancels its hold)
- *   holding   --confirmed, pointer-->    lingering [apply-confirmed]
- *   holding   --confirmed-->             idle [apply-confirmed]
- *   holding   --refused cancelled-->     idle                 (silent: Undo or a send got there first)
- *   holding   --refused-->               failed{refused}
- *   holding   --connection-failed-->     failed{retryable}
- *   lingering --pointer-left-->          idle
- *   lingering --undo-->                  idle [send-reopen]
- *   lingering --server reopened-->       idle
- *   failed    --retry-->                 holding [send-complete]
- *   failed    --undo-->                  idle                 (dismiss; the thread is active)
- *   failed    --server completed-->      idle
+ * Returns the next completion state and effects. Unlisted state/event pairs and stale attempts
+ * leave the entry unchanged with no effects.
  */
 export function transitionCompletion(entry: CompletionEntry | undefined, event: CompletionEvent): CompletionTransition {
   if (!entry) return fromIdle(event);

@@ -1,9 +1,7 @@
 import type { SidebarScope, SidebarView } from "./sidebar-ui-store";
 
 /**
- * The slice of a thread the model may read, timestamps already parsed. Status, title, PRs and
- * the like are absent on purpose: a change to them must not re-sort or rebuild the list. Rows
- * read those by id.
+ * Thread identity, hierarchy and parsed timestamps used to derive sidebar order.
  */
 export interface SidebarThreadFacts {
   readonly id: string;
@@ -41,7 +39,7 @@ export interface SidebarModelUi {
   readonly frozen: FrozenOrder | null;
 }
 
-/** Everything the model reads. Each field has one owner store; the model merges them. */
+/** Inputs used to derive sidebar rows, scope and aging boundaries. */
 export interface SidebarInputs {
   readonly facts: readonly SidebarThreadFacts[];
   /** Workspace ids in the user's project order. */
@@ -90,11 +88,11 @@ export interface SidebarModel {
   readonly olderBar: { readonly count: number; readonly open: boolean } | null;
   /** Thread ids in Older, for the motion layer's clock-crossing diff. */
   readonly olderIds: ReadonlySet<string>;
-  /** Earliest future time an Active thread crosses into Older, or null. The shell sets one timer for it. */
+  /** Earliest future time an Active thread crosses into Older, or null. */
   readonly nextBoundaryAt: number | null;
 }
 
-/** Rows a project shows before Show more, unchanged from production (`THREAD_LIST_CAP`). Never splits a family. */
+/** Project row cap before Show more; a family crossing the cap remains whole. */
 export const PROJECT_ROW_CAP = 6;
 
 const DAY_MS = 86_400_000;
@@ -110,7 +108,6 @@ interface FamilyRow {
   readonly depth: number;
 }
 
-/** A root and its descendants in display order. Sorted as a unit by its newest member. */
 interface Family {
   readonly rows: readonly FamilyRow[];
   readonly key: number;
@@ -129,7 +126,6 @@ function activityKey(fact: SidebarThreadFacts, frozen: FrozenOrder | null): numb
   return frozen?.activityMs.get(fact.id) ?? fact.activityMs;
 }
 
-/** The moment a thread's Older clock started: its activity, or later when it stopped needing the user. */
 function olderSince(fact: SidebarThreadFacts, activity: number, inputs: SidebarInputs): number {
   return Math.max(activity, inputs.needsUserEndedAt.get(fact.id) ?? Number.NEGATIVE_INFINITY);
 }
@@ -153,10 +149,6 @@ function comparePlaced(a: Placed, b: Placed): number {
   return byKeyDesc({ key: a.key, id: a.fact.id }, { key: b.key, id: b.fact.id });
 }
 
-/**
- * Nests threads into families within one project and section. A thread whose parent is outside
- * the given set is a root, which is how a child of an Older parent stays in the recent list.
- */
 function buildFamilies(placed: readonly Placed[]): Family[] {
   const ids = new Set(placed.map((entry) => entry.fact.id));
   const children = new Map<string, Placed[]>();
@@ -243,7 +235,6 @@ interface SectionContext {
   readonly section: SidebarSection;
 }
 
-/** Families until the cap is reached, keeping the family that crosses it whole. */
 function capFamilies(families: readonly Family[]): { shown: Family[]; hiddenRows: number } {
   const shown: Family[] = [];
   let rows = 0;
@@ -370,7 +361,6 @@ function activeItems(parts: Partitioned, inputs: SidebarInputs): SidebarItem[] {
   return items.length === 0 ? [{ kind: "empty", key: "empty", scope: "active" }] : items;
 }
 
-/** Real-time boundary: the freeze only delays applying a crossing, so the timer must ignore it. */
 function nextBoundary(parts: Partitioned, inputs: SidebarInputs): number | null {
   if (inputs.olderAfterDays === null) return null;
   const span = inputs.olderAfterDays * DAY_MS;
@@ -384,28 +374,8 @@ function nextBoundary(parts: Partitioned, inputs: SidebarInputs): number | null 
 }
 
 /**
- * Derives the whole sidebar as a pure, total function. Rules:
- *
- * 1. A thread with a pending completion stays Active in place with `pending` set. Otherwise it is
- *    Completed when `completedMs` is set.
- * 2. The scope bar shows when at least one thread is Completed, with that count. The scope falls
- *    back to Active at zero.
- * 3. Active sorts by activity, newest first, with frozen keys winning over live ones. Completed
- *    sorts by completion time. Ties break by id.
- * 4. Older (Active only, threshold set): no needs-user, no pending completion, and the clock
- *    (frozen or now) minus `olderSince` reaches the threshold. `olderSince` is the later of the
- *    activity and the moment this session saw the thread stop needing the user.
- * 5. Families nest within one project and section, sort by their newest member, and a child whose
- *    parent is elsewhere becomes a root.
- * 6. Projects view: projects in user order. A project whose threads are all Older is omitted above
- *    the bar. Collapsed shows the header and the selected thread. Expanded shows drafts, then
- *    families up to the row cap (never splitting one), the selected thread when cut, then Show more.
- * 7. Threads view: drafts, then every recent thread flat.
- * 8. Older section, only when something is Older: the bar, then the Older rows when open, or only
- *    the selected thread when closed.
- * 9. Completed: no cap, no drafts, no Older, `empty` when nothing is completed.
- * 10. The list always ends with `end-spacer`.
- * 11. `nextBoundaryAt` is the earliest real-time crossing into Older.
+ * Derives sidebar rows, effective scope and aging boundaries without side effects.
+ * Pending completions stay Active; an empty Completed scope falls back to Active.
  */
 export function deriveSidebarModel(inputs: SidebarInputs): SidebarModel {
   const parts = partition(inputs);
@@ -424,8 +394,7 @@ export function deriveSidebarModel(inputs: SidebarInputs): SidebarModel {
 }
 
 /**
- * Records when threads stop needing the user, so the Older clock starts then and opening an idle
- * thread never drops it straight into Older. Returns `previous` itself when nothing ended.
+ * Records when threads stop needing the user. Returns `previous` itself when nothing ended.
  */
 export function trackNeedsUserEnds(
   previous: ReadonlyMap<string, number>,
@@ -451,8 +420,7 @@ function sameItem(a: SidebarItem, b: SidebarItem): boolean {
 }
 
 /**
- * Keeps item identity across derivations when an item is field-for-field equal, so the list can
- * skip `setRows` and memoized rows skip rendering. Returns `prev` itself when nothing changed.
+ * Reuses field-for-field equal items. Returns `prev` itself when nothing changed.
  */
 export function reconcileItems(prev: readonly SidebarItem[], next: readonly SidebarItem[]): readonly SidebarItem[] {
   const prevByKey = new Map(prev.map((item) => [item.key, item]));
