@@ -720,6 +720,11 @@ interface WorkspaceState {
   reopenThread: (threadId: string) => Promise<void>;
   /** Retry cleanup for a blocked completed thread and apply its returned lifecycle state. */
   retryThreadCleanup: (threadId: string) => Promise<void>;
+  /**
+   * Sets a thread's "complete when PRs merge" override, null to inherit the global setting. The
+   * value applies at once and is restored if the server does not save it; the error is rethrown.
+   */
+  setAutoCompleteOverride: (threadId: string, value: boolean | null) => Promise<void>;
   /** Apply a server-authoritative completion lifecycle push. */
   applyThreadLifecycle: (thread: Thread) => void;
   applyThreadActivity: (threadId: string, at: string) => void;
@@ -1682,6 +1687,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     } catch (e) {
       set({ error: String(e) });
       throw e;
+    }
+  },
+
+  setAutoCompleteOverride: async (threadId, value) => {
+    const previous = get().threads.find((thread) => thread.id === threadId)?.auto_complete_on_merge ?? null;
+    const write = (next: boolean | null) => set((state) => ({
+      threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, auto_complete_on_merge: next } : thread),
+    }));
+    write(value);
+    try {
+      const saved = await getTransport().updateThreadSettings(threadId, { autoCompleteOnMerge: value });
+      if (!saved) throw new Error("The setting was not saved");
+    } catch (error) {
+      write(previous);
+      throw error;
     }
   },
 
