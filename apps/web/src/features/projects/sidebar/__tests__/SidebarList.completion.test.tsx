@@ -23,6 +23,7 @@ import { useWorkspaceStore } from "../../state/workspaceStore";
 import { useCompletionStore } from "../completion-store";
 import { useSidebarUiStore } from "../sidebar-ui-store";
 import { ProjectSidebar } from "../ProjectSidebar";
+import { CLOSE_MS } from "../sidebar-motion";
 
 const NOW = Date.parse("2026-10-27T12:00:00.000Z");
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
@@ -45,6 +46,10 @@ function renderedThreadIds(): string[] {
 
 function targetRow(): HTMLElement {
   return within(document.querySelector<HTMLElement>("[data-thread-id='target']")!).getByRole("button", { name: /^Provider, Claude Title target/ });
+}
+
+function closingRow(): Element | null {
+  return document.querySelector("[data-thread-id='target']")?.closest(".sidebar-row-closing") ?? null;
 }
 
 function completedCount(): string | null {
@@ -123,6 +128,8 @@ describe("SidebarList completion", () => {
     expect(completedCount()).toBeNull();
 
     await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(closingRow()).not.toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(CLOSE_MS));
 
     expect(renderedThreadIds()).toEqual(["newer", "older"]);
     expect(completedCount()).toContain("1");
@@ -151,7 +158,11 @@ describe("SidebarList completion", () => {
     await act(() => vi.advanceTimersByTimeAsync(3000));
     expect(renderedThreadIds()).toEqual(["newer", "target", "older"]);
 
+    expect(closingRow()).toBeNull();
+
     fireEvent.mouseLeave(targetRow());
+    expect(closingRow()).not.toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(CLOSE_MS));
     expect(renderedThreadIds()).toEqual(["newer", "older"]);
   });
 

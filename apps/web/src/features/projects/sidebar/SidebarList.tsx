@@ -17,6 +17,7 @@ import {
 import { SortableContext, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { VirtualRows } from "@/components/ui/VirtualRows";
 import { VirtualViewport, type VirtualHost, type VirtualRow, type ViewportPosition } from "@/components/ui/virtual-viewport";
 import { usePreparingRowEntrance } from "@/features/thread-startup";
@@ -265,7 +266,11 @@ interface SidebarListProps {
   readonly overlay?: ReactNode;
   /** Slide rows that moved. True only for live pushes, never for hydration or layout changes. */
   readonly flip?: boolean;
+  /** Row keys folding away after they left the model. */
+  readonly closing?: ReadonlySet<string>;
 }
+
+const NO_KEYS: ReadonlySet<string> = new Set();
 
 // While the pointer is inside, order and the clock hold still; leaving applies what was deferred.
 const freezeOnEnter = () => useSidebarUiStore.getState().freeze(freezeOrder(selectSidebarFacts(useWorkspaceStore.getState().threads), Date.now()));
@@ -276,7 +281,7 @@ const unfreezeOnLeave = () => useSidebarUiStore.getState().unfreeze();
  * filters, sorts or caps: the model already did. Project headers in the recent list drag to
  * reorder projects.
  */
-export function SidebarList({ items, ctx, overlay, flip = false }: SidebarListProps) {
+export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KEYS }: SidebarListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { controllerRef, hosts } = useSidebarViewport(containerRef);
   const drag = useProjectDrag(controllerRef);
@@ -292,8 +297,13 @@ export function SidebarList({ items, ctx, overlay, flip = false }: SidebarListPr
   const { dropIndicator } = drag;
   const renderRow = useCallback((item: SidebarItem): ReactNode => {
     const dropEdge = item.kind === "project" && dropIndicator?.id === item.workspaceId ? dropIndicator.edge : null;
-    return <div className="px-1.5"><SidebarRow item={item} ctx={rowCtx} dropEdge={dropEdge} /></div>;
-  }, [rowCtx, dropIndicator]);
+    const isClosing = closing.has(item.key);
+    return (
+      <div className={cn("px-1.5", isClosing && "sidebar-row-closing")} inert={isClosing || undefined}>
+        <div className={cn(isClosing && "min-h-0 overflow-hidden")}><SidebarRow item={item} ctx={rowCtx} dropEdge={dropEdge} /></div>
+      </div>
+    );
+  }, [rowCtx, dropIndicator, closing]);
 
   const dragged = drag.activeDragId === null ? undefined : itemsByKey.get(`project:${drag.activeDragId}`);
   return (

@@ -508,6 +508,15 @@
     animation: none;
   }
 }
+/* A sidebar row that left the list folds away in place, so the rows below close the gap. */
+.sidebar-row-closing {
+  display: grid;
+  animation: sidebar-row-close var(--duration-overlay) var(--ease-standard) both;
+}
+@keyframes sidebar-row-close {
+  from { grid-template-rows: 1fr; opacity: 1; }
+  to { grid-template-rows: 0fr; opacity: 0; }
+}
 /* Toasts slide down from under the conversation header. Close and auto-hide
    play the same motion in reverse; reduced motion keeps only a short fade. */
 @keyframes toast-enter {
