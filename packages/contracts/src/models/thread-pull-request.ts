@@ -6,7 +6,6 @@ export const ThreadPullRequestStateSchema = z.enum(["open", "draft", "merged", "
 /** Lifecycle shown for a linked pull request. */
 export type ThreadPullRequestState = z.infer<typeof ThreadPullRequestStateSchema>;
 
-/** One pull request linked to a thread. */
 const threadPullRequestSchema = lazySchema(() => z.object({
   number: z.number().int().positive(),
   state: ThreadPullRequestStateSchema,
@@ -16,7 +15,7 @@ const threadPullRequestSchema = lazySchema(() => z.object({
 /** Persisted or legacy pull-request link exposed to clients. */
 export type ThreadPullRequest = z.infer<ReturnType<typeof threadPullRequestSchema>>;
 
-/** Bounded wire validator with a named type to keep enclosing protocol declarations small. */
+/** Validate a linked pull request for transport. */
 export const ThreadPullRequestSchema: () => z.ZodType<ThreadPullRequest> = threadPullRequestSchema;
 
 const STATE_RANK: Record<ThreadPullRequestState, number> = {

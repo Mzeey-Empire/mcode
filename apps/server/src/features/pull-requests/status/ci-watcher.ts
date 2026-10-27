@@ -143,7 +143,7 @@ export class CiWatcherService {
     await Promise.all(this.entriesForThread(threadId).map((entry) => this.fetchInitialChecks(entry)));
   }
 
-  /** Poll on the existing Actions registration curve after a push. */
+  /** Schedule PR check refreshes after a push. */
   scheduleBumpAfterPush(threadId: string): void {
     if (!this.isWatching(threadId)) return;
     this.clearBumpTimers(threadId);
