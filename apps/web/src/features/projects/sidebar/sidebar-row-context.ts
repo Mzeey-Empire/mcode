@@ -1,4 +1,3 @@
-import type { ChecksStatus } from "@mcode/contracts/github";
 import type { Thread, Workspace } from "@/transport/types";
 
 /** An inline thread rename in progress. */
@@ -20,7 +19,6 @@ export interface SidebarProviderAvailability {
  * across thread pushes, so a status change re-renders only the row it names.
  */
 export interface SidebarRowContext {
-  readonly checksById: Readonly<Record<string, ChecksStatus>>;
   readonly inlineEdit: InlineEditState | null;
   readonly worktreesLoadedFor: string | null;
   readonly validWorktreePaths: ReadonlySet<string>;
