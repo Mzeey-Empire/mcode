@@ -29,4 +29,19 @@ describe("useRelativeTime", () => {
     hooks[2]!.unmount();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("re-renders on a tick only the labels whose text changed", () => {
+    let dayRenders = 0;
+    let minuteRenders = 0;
+    const day = renderHook(() => { dayRenders += 1; return useRelativeTime(new Date(NOW - 3 * 86_400_000).toISOString()); });
+    const minute = renderHook(() => { minuteRenders += 1; return useRelativeTime(new Date(NOW - 2 * 60_000).toISOString()); });
+    const [dayBefore, minuteBefore] = [dayRenders, minuteRenders];
+
+    act(() => vi.advanceTimersByTime(60_000));
+
+    expect(day.result.current).toBe("3d");
+    expect(dayRenders).toBe(dayBefore);
+    expect(minute.result.current).toBe("3m");
+    expect(minuteRenders).toBe(minuteBefore + 1);
+  });
 });
