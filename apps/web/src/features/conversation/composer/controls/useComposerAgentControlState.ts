@@ -8,14 +8,10 @@ import {
 import { useThreadStore } from "@/stores/threadStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useToastStore } from "@/stores/toastStore";
-import {
-  INTERACTION_MODES,
-  ORCHESTRATION_MODES,
-  isGoalOpen,
-  type GoalState,
-  type ProviderId,
-  type ReasoningLevel,
-} from "@mcode/contracts";
+import { INTERACTION_MODES, ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
+import { isGoalOpen, type GoalState } from "@mcode/contracts/models/goal";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { type ReasoningLevel } from "@mcode/contracts/models/settings";
 import {
   resolveComposerCapabilities,
   supportsApprovalReview,

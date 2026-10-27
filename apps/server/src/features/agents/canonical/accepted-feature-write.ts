@@ -1,7 +1,9 @@
 import type { Database } from "bun:sqlite";
 import * as NodeUtil from "node:util";
-import { AgentThreadIdSchema, CanonicalTimestampSchema, MessageSchema, NativePlanFileRefSchema, PlanVersionSchema, lazySchema,
-  type PlanVersion } from "@mcode/contracts";
+import { AgentThreadIdSchema, CanonicalTimestampSchema } from "@mcode/contracts/compat/agent-model";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { NativePlanFileRefSchema, PlanVersionSchema, type PlanVersion } from "@mcode/contracts/models/plan";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
 import { z } from "zod";
 import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";

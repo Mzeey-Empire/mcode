@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
 import { ThreadStore } from "../../../../thread-control/persistence/thread-store.js";
 import { WorkspaceStore } from "../../../persistence/workspace-store.js";

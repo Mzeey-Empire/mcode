@@ -1,4 +1,4 @@
-import { SUBAGENT_REPORTING } from "@mcode/contracts";
+import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
 import * as NodeEvents from "node:events";
 import { approvalReceipt } from "../../approvals/approval-receipt.js";
 import * as NodeCrypto from "node:crypto";
@@ -7,10 +7,16 @@ import * as NodePath from "node:path";
 import { CopilotClient, approveAll } from "@github/copilot-sdk";
 import type { CopilotSession, SessionEvent, MCPServerConfig, ModelInfo, PermissionRequest as NativePermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
 import { z } from "zod";
-import type { AgentEvent, ChildThreadEvidence, IAgentProvider, ISessionEvictable, ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ProviderIdentity, ProviderModelInfo, TurnRequest, CompletionOptions } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ChildThreadEvidence } from "@mcode/contracts/events/provider-runtime-event";
+import type { IAgentProvider, ISessionEvictable, TurnRequest, CompletionOptions } from "@mcode/contracts/providers/interfaces";
+import type { ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
+import type { ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { copilotApprovalBody, copilotSessionScope } from "./copilot-approval.js";
-import { PLAN_MAX_CONTENT_CHARS, providerRuntimeEvent, type NativePlanFileOutcome } from "@mcode/contracts";
+import { PLAN_MAX_CONTENT_CHARS, type NativePlanFileOutcome } from "@mcode/contracts/models/plan";
+import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { logger } from "@mcode/shared";
 import { buildMcodeInstructionSections, NO_MCODE_TOOLKITS, renderMcodeInstructionSections } from "@mcode/thread-orchestration";
 import type { CopilotProviderPorts } from "../../factory-types.js";
@@ -483,7 +489,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     for (const [requestId, pending] of turn.pendingPermissions) {
       turn.pendingPermissions.delete(requestId);
       pending.resolve({ kind: "denied-interactively-by-user" });
-      const outcome = { status: "cancelled", reason: pending.unanswerable ? "unanswerable" : reason } satisfies import("@mcode/contracts").ApprovalOutcome;
+      const outcome = { status: "cancelled", reason: pending.unanswerable ? "unanswerable" : reason } satisfies import("@mcode/contracts/models/approval").ApprovalOutcome;
       this.publish(state, approvalReceipt(pending.request, outcome));
       this.emit("approval_resolved", { requestId, threadId: pending.request.threadId, outcome });
     }

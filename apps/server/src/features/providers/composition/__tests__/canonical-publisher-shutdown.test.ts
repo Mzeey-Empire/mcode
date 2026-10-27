@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderEventSinkPort, ProviderEventSubmissionReceipt } from "@mcode/providers";
 import { CanonicalLiveEventPublisher } from "../canonical-live-event-publisher.js";
 

@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
 /** Binds normalized renderer publication after server composition has started. */
 export class AgentEventPublicationRegistry {

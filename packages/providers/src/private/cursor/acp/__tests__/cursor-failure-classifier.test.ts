@@ -1,5 +1,5 @@
 import { RequestError } from "@agentclientprotocol/sdk";
-import type { TurnFailure } from "@mcode/contracts";
+import type { TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { describe, expect, it } from "vitest";
 import { SessionRecoveryFailedError } from "../../../protocols/acp/acp-session-runtime.js";
 import { classifyCursorEndTurnNotice, classifyCursorFailure } from "../cursor-failure-classifier.js";

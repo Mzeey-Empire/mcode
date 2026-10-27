@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Globe, MousePointer2 } from "lucide-react";
-import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts";
+import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { PanelTabStrip, type PanelTabStripItem } from "@/components/panels/shell/PanelTabStrip";
 import { useDiffStore } from "@/stores/diffStore";

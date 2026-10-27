@@ -1,4 +1,4 @@
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import type { ActionTerminal } from "../../terminal/backends/terminal-backend.js";
 
 /** Active terminal state owned by one Project Action slot. */

@@ -1,9 +1,4 @@
-import {
-  type PullRequestCapability,
-  type PullRequestDetail,
-  type PullRequestReviewDraftSubmission,
-  type PullRequestReviewSubmissionEvent,
-} from "@mcode/contracts";
+import { type PullRequestCapability, type PullRequestDetail, type PullRequestReviewDraftSubmission, type PullRequestReviewSubmissionEvent } from "@mcode/contracts/pull-requests";
 import { GitBranch, MessageSquareText } from "lucide-react";
 import { ErrorIcon } from "@/components/ui/icon-map";
 import { useEffect, useMemo, useState } from "react";

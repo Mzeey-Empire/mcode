@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import type { Thread, Workspace } from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
+import type { Workspace } from "@mcode/contracts/models/workspace";
 import { WorkspaceStore } from "../persistence/workspace-store.js";
 import { ThreadStore } from "../../thread-control/persistence/thread-store.js";
 import { CleanupJobStore } from "../../thread-control/cleanup/persistence/cleanup-job-store.js";

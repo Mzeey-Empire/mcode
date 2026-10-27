@@ -1,5 +1,5 @@
 import { CircleCheck, CircleX, CircleMinus, type LucideIcon } from "lucide-react";
-import type { ChecksStatus, CheckRun } from "@mcode/contracts";
+import type { ChecksStatus, CheckRun } from "@mcode/contracts/github";
 
 /** Visual properties for a CI aggregate state. */
 export interface CiVisual {

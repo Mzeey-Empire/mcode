@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { INTERACTION_MODES } from "@/transport";
-import { ORCHESTRATION_MODES } from "@mcode/contracts";
+import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
 import type { ComposerDraft } from "@/stores/composerDraftStore";
 import type { ThreadDraft } from "@/stores/threadDraftStore";
 import {

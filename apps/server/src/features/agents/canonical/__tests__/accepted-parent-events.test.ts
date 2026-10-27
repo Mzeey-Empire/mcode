@@ -1,17 +1,9 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import {
-  CanonicalAgentEventSchema,
-  CanonicalAgentSemanticEnvelopeSchema,
-  MessageSchema,
-  createAgentModelState,
-  encodeCanonicalSubagentDetailTarget,
-  reduceAgentEventBatch,
-  type AgentItem,
-  type AgentThread,
-  type AgentTurn,
-  type ParentNarrativeRecoveryItem,
-  type TurnOutcome,
-} from "@mcode/contracts";
+import { CanonicalAgentEventSchema, CanonicalAgentSemanticEnvelopeSchema, createAgentModelState, reduceAgentEventBatch, type AgentItem, type AgentThread, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { encodeCanonicalSubagentDetailTarget } from "@mcode/contracts/models/tool-call-record";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { describe, expect, it } from "vitest";
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";

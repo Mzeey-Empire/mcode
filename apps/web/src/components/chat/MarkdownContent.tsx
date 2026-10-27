@@ -4,11 +4,7 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markd
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { Globe } from "lucide-react";
-import {
-  isMcodeWorkspacePreviewUrl,
-  mcodeWorkspacePreviewHref,
-  looksLikeWorkspaceRelativeFileRef,
-} from "@mcode/contracts";
+import { isMcodeWorkspacePreviewUrl, mcodeWorkspacePreviewHref, looksLikeWorkspaceRelativeFileRef } from "@mcode/contracts/models/workspace-preview-uri";
 import { CodeBlock } from "./CodeBlock";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
 import { SiteFavicon } from "@/components/ui/favicon";

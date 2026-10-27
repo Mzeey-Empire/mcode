@@ -1,5 +1,5 @@
 import { Check } from "lucide-react";
-import { PlanQuestionSchema } from "@mcode/contracts";
+import { PlanQuestionSchema } from "@mcode/contracts/models/plan-questions";
 import { cn } from "@/lib/utils";
 import { useThreadStore } from "@/stores/threadStore";
 

@@ -1,5 +1,5 @@
 // Kept free of DI and database imports so WebSocket transports can load it without a reflect polyfill.
-import type { TurnSnapshot } from "@mcode/contracts";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { collectAttributedWorkspacePathGroups } from "./snapshot-attribution.js";
 
 /** A whole logical turn, including attempts whose snapshot was never written. */

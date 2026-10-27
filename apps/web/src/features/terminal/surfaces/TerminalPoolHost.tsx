@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { TerminalBackendCapabilities } from "@mcode/contracts";
+import type { TerminalBackendCapabilities } from "@mcode/contracts/models/terminal-backend";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";

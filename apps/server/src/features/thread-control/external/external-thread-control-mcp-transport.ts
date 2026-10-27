@@ -1,26 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeAsyncHooks from "node:async_hooks";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  ThreadCreateBatchInputSchema,
-  ThreadCreateBatchResultSchema,
-  ThreadGetInputSchema,
-  ThreadGetResultSchema,
-  ThreadSearchInputSchema,
-  ThreadSearchResultSchema,
-  ThreadSendInputSchema,
-  ThreadSendResultSchema,
-  ThreadStopInputSchema,
-  ThreadStopResultSchema,
-  ThreadWaitInputSchema,
-  ThreadWaitResultSchema,
-  WorkspaceSearchInputSchema,
-  WorkspaceSearchResultSchema,
-  WorktreeListInputSchema,
-  WorktreeListResultSchema,
-  ThreadTargetListInputSchema,
-  ThreadTargetListResultSchema,
-} from "@mcode/contracts";
+import { ThreadCreateBatchInputSchema, ThreadCreateBatchResultSchema, ThreadGetInputSchema, ThreadGetResultSchema, ThreadSearchInputSchema, ThreadSearchResultSchema, ThreadSendInputSchema, ThreadSendResultSchema, ThreadStopInputSchema, ThreadStopResultSchema, ThreadWaitInputSchema, ThreadWaitResultSchema, WorkspaceSearchInputSchema, WorkspaceSearchResultSchema, WorktreeListInputSchema, WorktreeListResultSchema, ThreadTargetListInputSchema, ThreadTargetListResultSchema } from "@mcode/contracts/thread-control";
 import type { ThreadControlService } from "../authority/thread-control-service.js";
 import {
   ExternalThreadControlPairingError,

@@ -9,7 +9,7 @@ import { WorkspaceEnvironmentConfigurationRepo } from "../../environment/persist
 import { WorkspaceEnvironmentAutomaticRepository } from "../../environment/workspace-environment-automatic-repository.js";
 import { ThreadStore } from "../../../thread-control/persistence/thread-store.js";
 import { ProjectActionRunRepo } from "../../environment/persistence/project-action-run-repo.js";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 
 describe("project and terminal database owner", () => {
   let owned: OwnedTestDatabase;

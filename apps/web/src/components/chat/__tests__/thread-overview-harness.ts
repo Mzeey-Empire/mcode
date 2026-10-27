@@ -1,5 +1,6 @@
 import { vi } from "vitest";
-import type { GitRef, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { GitRef } from "@mcode/contracts/git";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { createMockThread } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import type { Thread } from "@/transport";

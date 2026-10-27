@@ -4,10 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import { AttachmentService } from "../attachment-service.js";
-import {
-  MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
-  type AttachmentMeta,
-} from "@mcode/contracts";
+import { MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME, type AttachmentMeta } from "@mcode/contracts/models/attachment";
 
 describe("AttachmentService.persist virtual browser context", () => {
   it("records stored metadata without copying a file", async () => {

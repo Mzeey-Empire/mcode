@@ -1,7 +1,10 @@
 import "reflect-metadata";
 import * as NodeEvents from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { IAgentProvider, IProviderRegistry, PlanVersionStatus, ThreadAttention, TurnOutcome } from "@mcode/contracts";
+import type { IAgentProvider, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
+import type { PlanVersionStatus } from "@mcode/contracts/models/plan";
+import type { ThreadAttention } from "@mcode/contracts/models/thread-attention";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";

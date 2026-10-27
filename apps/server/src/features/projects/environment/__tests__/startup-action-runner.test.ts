@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { StartupActionRunner, type StartupActionTransition, type StartupProjectActions } from "../startup-action-runner.js";
 
 class FakeActions implements StartupProjectActions {

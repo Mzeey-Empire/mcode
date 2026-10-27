@@ -1,4 +1,4 @@
-import type { PullRequestSummary } from "@mcode/contracts";
+import type { PullRequestSummary } from "@mcode/contracts/pull-requests";
 import {
   fireEvent,
   render,

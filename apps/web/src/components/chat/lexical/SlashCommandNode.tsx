@@ -13,10 +13,7 @@ import {
   type NodeKey,
   type SerializedLexicalNode,
 } from "lexical";
-import {
-  ProviderCapabilityIdentitySchema,
-  type ProviderCapabilityIdentity,
-} from "@mcode/contracts";
+import { ProviderCapabilityIdentitySchema, type ProviderCapabilityIdentity } from "@mcode/contracts/providers/capability-catalog";
 import { EntityToken } from "../EntityToken";
 import { shortenPathPrefixedName } from "../command-name";
 

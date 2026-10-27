@@ -1,20 +1,8 @@
 import { describe, expect, it } from "vitest";
-import {
-  ComposerAnnotationPayloadSchema,
-  FileAnnotationPayloadSchema,
-  MAX_ATTACHMENTS,
-  MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS,
-  isPreviewAnnotationPayload,
-  PreviewAnnotationBundleSchema,
-  SendMessageSchema,
-  PreviewAnnotationPageSchema,
-  PreviewAnnotationPayloadV2Schema,
-  readPreviewAnnotationBundle,
-  toPreviewAnnotationBundleV2,
-  previewAnnotationPageSnapshotName,
-  clampPreviewPageLabel,
-  clampPreviewPageUrl,
-} from "../../index.js";
+import { ComposerAnnotationPayloadSchema, FileAnnotationPayloadSchema, isPreviewAnnotationPayload, PreviewAnnotationBundleSchema, PreviewAnnotationPageSchema, PreviewAnnotationPayloadV2Schema, readPreviewAnnotationBundle, toPreviewAnnotationBundleV2, previewAnnotationPageSnapshotName, clampPreviewPageLabel, clampPreviewPageUrl } from "@mcode/contracts/models/browser-preview";
+import { MAX_ATTACHMENTS } from "@mcode/contracts/models/file-types";
+import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "@mcode/contracts/models/selected-text-comment";
+import { SendMessageSchema } from "@mcode/contracts/ws/methods";
 
 const capture = {
   schemaVersion: 2 as const,

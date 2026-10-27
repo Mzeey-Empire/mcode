@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { WS_CHANNELS, type FileReadResult, type WorkspaceFileChanges, type WorkspaceFileList } from "@mcode/contracts";
+import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
+import { type FileReadResult, type WorkspaceFileChanges, type WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
 import { getTransport, pushEmitter } from "@/transport";
 import { refreshWorkspaceFiles, useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";
 

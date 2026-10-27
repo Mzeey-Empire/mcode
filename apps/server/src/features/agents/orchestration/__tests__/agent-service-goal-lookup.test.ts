@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import type { GoalLookupResult, GoalState, IAgentProvider, IGoalCapable } from "@mcode/contracts";
+import type { GoalLookupResult, GoalState } from "@mcode/contracts/models/goal";
+import type { IAgentProvider, IGoalCapable } from "@mcode/contracts/providers/interfaces";
 import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 
 const openGoal: GoalState = {

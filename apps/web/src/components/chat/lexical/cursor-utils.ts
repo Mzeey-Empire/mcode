@@ -1,5 +1,5 @@
 import { $getRoot, $isElementNode, type LexicalEditor } from "lexical";
-import type { MessageMention } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
 import { $isMentionNode } from "./MentionNode";
 import { $isSlashCommandNode } from "./SlashCommandNode";
 

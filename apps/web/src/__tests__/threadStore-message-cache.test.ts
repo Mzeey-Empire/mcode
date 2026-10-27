@@ -1,5 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import type { AgentEvent, NarrativeEntry } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
 import type { ToolCallRecord } from "@/transport/types";
 import {
   activateTestConversation,

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderAuth } from "@mcode/contracts";
+import type { ProviderAuth } from "@mcode/contracts/providers/provider-status";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useTerminalStore } from "@/features/terminal";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

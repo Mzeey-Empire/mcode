@@ -1,4 +1,4 @@
-import type { WsMethodName } from "@mcode/contracts";
+import type { WsMethodName } from "@mcode/contracts/ws/methods";
 import type {
   ExternalThreadControlMcpRuntime,
   ExternalThreadControlPairingService,

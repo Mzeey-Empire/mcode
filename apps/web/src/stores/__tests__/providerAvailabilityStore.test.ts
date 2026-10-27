@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { ProviderAvailability } from "@mcode/contracts";
+import type { ProviderAvailability } from "@mcode/contracts/providers/availability";
 import { useProviderAvailabilityStore } from "../providerAvailabilityStore";
 
 function row(partial: Partial<ProviderAvailability>): ProviderAvailability {

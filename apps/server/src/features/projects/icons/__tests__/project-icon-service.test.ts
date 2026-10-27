@@ -2,7 +2,7 @@ import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import type { Workspace } from "@mcode/contracts";
+import type { Workspace } from "@mcode/contracts/models/workspace";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import { RealGitExecutor } from "../../git/execution/index.js";

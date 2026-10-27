@@ -1,6 +1,6 @@
 import { Square } from "lucide-react";
 import { useId, useState } from "react";
-import type { CanonicalSubagentStopResult } from "@mcode/contracts";
+import type { CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";

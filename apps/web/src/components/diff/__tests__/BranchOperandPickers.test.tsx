@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BranchComparison, GitRef, GitRefsListParams, GitRefsListResult } from "@mcode/contracts";
+import type { BranchComparison, GitRef, GitRefsListParams, GitRefsListResult } from "@mcode/contracts/git";
 
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { installListboxLayout, LISTBOX_ROW_PX as ROW_PX, scrollListTo } from "@/__tests__/helpers/picker-layout";

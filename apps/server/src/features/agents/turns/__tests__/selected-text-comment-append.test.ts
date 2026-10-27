@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { SelectedTextComment, PlanComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
+import type { PlanComment } from "@mcode/contracts/models/plan";
 import {
   MCODE_SELECTED_TEXT_COMMENTS_FENCE_CLOSE,
   MCODE_SELECTED_TEXT_COMMENTS_FENCE_OPEN,

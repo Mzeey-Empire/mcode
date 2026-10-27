@@ -1,18 +1,10 @@
 import { logger } from "@mcode/shared";
 import * as NodePerfHooks from "node:perf_hooks";
-import {
-  AgentEventType,
-  isChildRoutedRuntimeEvent,
-  isTurnDiffSource,
-  ProviderIdSchema,
-  type AgentEvent,
-  type CanonicalAgentEventEnvelope,
-  type IProviderRegistry,
-  type ProviderFileMutationStart,
-  type ProviderTurnDiffUpdate,
-  type ProviderId,
-  type ProviderRuntimeEvent,
-} from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { isChildRoutedRuntimeEvent, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { isTurnDiffSource, type IProviderRegistry, type ProviderFileMutationStart, type ProviderTurnDiffUpdate, type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { inject, injectable } from "tsyringe";
 
 import {

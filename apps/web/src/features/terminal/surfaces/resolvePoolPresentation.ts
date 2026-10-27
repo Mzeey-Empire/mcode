@@ -1,4 +1,4 @@
-import { HOME_TERMINAL_SCOPE_ID } from "@mcode/contracts";
+import { HOME_TERMINAL_SCOPE_ID } from "@mcode/contracts/models/terminal";
 import type { TerminalPoolSurface } from "./TerminalPoolSlotContext";
 
 /** Inputs that decide which scope the single pooled terminal view presents. */

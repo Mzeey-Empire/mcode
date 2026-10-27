@@ -1,4 +1,5 @@
-import type { MessageMention, PreviewAnnotationBundle } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { collectBrowserCaptureSpillPaths, releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";

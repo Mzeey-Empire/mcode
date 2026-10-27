@@ -1,16 +1,8 @@
-import type {
-  IProviderRegistry,
-  ProviderCapabilityKind,
-  ProviderCatalogContext,
-  ProviderCatalogFreshness,
-  ProviderCatalogRequest,
-  ProviderCatalogSourceDiagnostic,
-  ProviderPluginCapability,
-  ProviderUsageInfo,
-  SelectableProviderAgent,
-  SkillInfo,
-  WsMethodName,
-} from "@mcode/contracts";
+import type { IProviderRegistry } from "@mcode/contracts/providers/interfaces";
+import type { ProviderCapabilityKind, ProviderCatalogContext, ProviderCatalogFreshness, ProviderCatalogRequest, ProviderCatalogSourceDiagnostic, ProviderPluginCapability, SelectableProviderAgent } from "@mcode/contracts/providers/capability-catalog";
+import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
+import type { SkillInfo } from "@mcode/contracts/skills";
+import type { WsMethodName } from "@mcode/contracts/ws/methods";
 import { logger } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type { ProviderAvailabilityService } from "../availability/provider-availability-service.js";

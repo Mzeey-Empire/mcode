@@ -1,4 +1,6 @@
-import type { AgentEvent, ProviderFileMutationStart, TurnOutcome } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ProviderFileMutationStart } from "@mcode/contracts/providers/interfaces";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 import type { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import type { PreparedTurnDiffEvidence, TurnDiffService } from "../turns/turn-diff-service.js";

@@ -1,4 +1,4 @@
-import type { ThreadStartup, ThreadStartupResolveInput } from "@mcode/contracts";
+import type { ThreadStartup, ThreadStartupResolveInput } from "@mcode/contracts/thread-startup";
 
 type FetchDecision = ThreadStartupResolveInput["action"] | "cancel";
 

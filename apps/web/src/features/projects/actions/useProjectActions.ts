@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { getTransport } from "@/transport";
 import { applyActionRun } from "@/features/terminal/state/applyActionRun";
 import { useProjectActionStore } from "../environment/state/project-action-store";

@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type { ProviderId } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { providerModelSightings } from "../../../runtime/persistence/sqlite/schema.js";
 
 // Large batches usually mean a fallback catalog switched to a live source, not simultaneous launches.

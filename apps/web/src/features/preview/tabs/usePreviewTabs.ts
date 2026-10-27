@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import type { BrowserTabSet } from "@mcode/contracts";
+import type { BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import {
   usePreviewDisplayTabSet,
   usePreviewTabsStore,

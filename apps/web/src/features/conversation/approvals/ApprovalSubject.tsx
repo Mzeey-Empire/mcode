@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { ApprovalSubject as ApprovalSubjectModel } from "@mcode/contracts";
+import type { ApprovalSubject as ApprovalSubjectModel } from "@mcode/contracts/models/approval";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { ApprovalPatchPreview } from "./ApprovalPatchPreview";
 

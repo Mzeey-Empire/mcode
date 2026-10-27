@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useShallow } from "zustand/shallow";
-import type { SubagentRoster } from "@mcode/contracts";
+import type { SubagentRoster } from "@mcode/contracts/models/subagent-roster";
 import { Button } from "@/components/ui/button";
 import { ProviderDiscStack } from "@/components/ui/provider-icon";
 import { openSubagentsPanel } from "@/features/subagents";

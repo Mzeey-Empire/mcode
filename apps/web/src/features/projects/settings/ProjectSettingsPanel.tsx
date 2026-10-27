@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, Settings } from "lucide-react";
-import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentStorageMode } from "@mcode/contracts";
+import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentStorageMode } from "@mcode/contracts/models/workspace-environment";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";

@@ -1,4 +1,6 @@
-import type { ReviewComparison, ReviewComparisonResult, ReviewFileDiffResult, ReviewFileChange, ReviewTurn, TurnSnapshot, WsMethodName, WS_METHODS } from "@mcode/contracts";
+import type { ReviewComparison, ReviewComparisonResult, ReviewFileDiffResult, ReviewFileChange, ReviewTurn } from "@mcode/contracts/models/review-comparison";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
+import type { WsMethodName, WS_METHODS } from "@mcode/contracts/ws/methods";
 import type { z } from "zod";
 import type { TurnDiffService } from "../../../agents/turns/turn-diff-service.js";
 import { parseTurnDiff } from "../../../agents/turns/turn-diff-patch.js";

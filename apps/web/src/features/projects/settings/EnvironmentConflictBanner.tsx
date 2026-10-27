@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import type { WorkspaceEnvironmentStorageMode } from "@mcode/contracts";
+import type { WorkspaceEnvironmentStorageMode } from "@mcode/contracts/models/workspace-environment";
 
 interface EnvironmentConflictBannerProps {
   readonly storageMode: WorkspaceEnvironmentStorageMode;

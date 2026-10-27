@@ -2,16 +2,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import which from "which";
-import {
-  TerminalCustomProfileSchema,
-  TerminalCustomProfileIdSchema,
-  TerminalProfileReferenceSchema,
-  TerminalResolvedProfileSchema,
-  type TerminalCustomProfile,
-  type TerminalPlatform,
-  type TerminalProfileReference,
-  type TerminalResolvedProfile,
-} from "@mcode/contracts";
+import { TerminalCustomProfileSchema, TerminalCustomProfileIdSchema, TerminalProfileReferenceSchema, TerminalResolvedProfileSchema, type TerminalCustomProfile, type TerminalPlatform, type TerminalProfileReference, type TerminalResolvedProfile } from "@mcode/contracts/models/terminal";
 import type { SettingsService } from "../../settings/settings-service.js";
 import type { WorkspaceTerminalPreferencesService } from "../preferences/workspace-terminal-preferences-service.js";
 import { terminalPlatform } from "../terminal-platform.js";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BROWSER_V2_CORE_OPERATIONS } from "@mcode/contracts";
+import { BROWSER_V2_CORE_OPERATIONS } from "@mcode/contracts/models/browser-automation";
 import {
   BrowserAutomationSessionLease,
   type BrowserAutomationSessionLeaseScope,

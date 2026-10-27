@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import type { AcceptedCanonicalAgentEventEnvelope, AgentEvent, CanonicalAgentEventEnvelope, CanonicalAgentProgressFrame } from "@mcode/contracts";
+import type { AcceptedCanonicalAgentEventEnvelope, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { CanonicalAgentProgressFrame } from "@mcode/contracts/models/canonical-agent-progress";
 import { useThreadStore } from "@/stores/threadStore";
 import {
   resetThreadStoreForTests,

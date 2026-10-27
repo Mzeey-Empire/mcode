@@ -2,10 +2,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  ATTACHMENT_IMAGE_AND_FALLBACK_MAX_BYTES,
-  getAttachmentMaxSizeForMime,
-} from "@mcode/contracts";
+import { ATTACHMENT_IMAGE_AND_FALLBACK_MAX_BYTES, getAttachmentMaxSizeForMime } from "@mcode/contracts/models/attachment-limits";
 import {
   CLIPBOARD_FILE_NAME_MAX_LENGTH,
   CLIPBOARD_MIME_TYPE_MAX_LENGTH,

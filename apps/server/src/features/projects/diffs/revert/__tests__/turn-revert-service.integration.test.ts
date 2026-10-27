@@ -60,7 +60,7 @@ describe("turn revert server operation", () => {
     const one = await f.turn("one", () => f.write("a.ts", "one\n"));
     const two = await f.turn("two", () => f.write("b.ts", "two\n"));
     const three = await f.turn("three", () => f.write("a.ts", "three\n"));
-    const scope = { kind: "file", path: "a.ts", fromMessageId: one.messageId } satisfies import("@mcode/contracts").TurnRevertScope;
+    const scope = { kind: "file", path: "a.ts", fromMessageId: one.messageId } satisfies import("@mcode/contracts/models/turn-revert").TurnRevertScope;
     const service = f.service(); f.write("a.ts", "hand\n");
     const req = await f.request(three.messageId, scope);
     expect(await service.preview(req)).toMatchObject({ files: [{ path: "a.ts", state: "changed_later", changedBy: "outside" }] });
@@ -83,7 +83,7 @@ describe("turn revert server operation", () => {
     const last = kind === "turns" || kind === "attempts" ? await f.turn("three", () => f.rename("b.ts", "c.ts"),
       { effects: [renamed("b.ts", "c.ts")], ...(kind === "attempts" ? { attemptOf: "one" } : {}) }) : one;
     for (const endpoint of ["a.ts", "c.ts"]) {
-      const scope = { kind: "file", path: endpoint, ...(kind === "turns" ? { fromMessageId: one.messageId } : {}) } satisfies import("@mcode/contracts").TurnRevertScope;
+      const scope = { kind: "file", path: endpoint, ...(kind === "turns" ? { fromMessageId: one.messageId } : {}) } satisfies import("@mcode/contracts/models/turn-revert").TurnRevertScope;
       const service = f.service(), req = await f.request(last.messageId, scope);
       expect(await service.preview(req)).toMatchObject({ files: expect.arrayContaining([
         expect.objectContaining({ path: "a.ts", action: "recreate" }), expect.objectContaining({ path: "c.ts", action: "delete", previousPath: "a.ts" }),
@@ -105,7 +105,7 @@ describe("turn revert server operation", () => {
     const one = await f.turn("one", () => f.write("a", "one"), { ageDays: 31 });
     const two = await f.turn("two", () => f.write("a", "two"), { attemptOf: "one" });
     await f.snapshotRepo.deleteExpired(30);
-    for (const scope of [{ kind: "turn" }, { kind: "file", path: "a" }, { kind: "file", path: "a", fromMessageId: one.messageId }] satisfies import("@mcode/contracts").TurnRevertScope[]) {
+    for (const scope of [{ kind: "turn" }, { kind: "file", path: "a" }, { kind: "file", path: "a", fromMessageId: one.messageId }] satisfies import("@mcode/contracts/models/turn-revert").TurnRevertScope[]) {
       expect(await f.service().preview({ threadId: "thread", messageId: two.messageId, scope })).toEqual({ status: "unavailable", reason: "snapshot_missing" });
       expect(await f.service().apply({ threadId: "thread", messageId: two.messageId, scope, previewToken: "expired", requestId: NodeCrypto.randomUUID() }))
         .toEqual({ status: "unavailable", reason: "snapshot_missing" });

@@ -1,9 +1,5 @@
-import {
-  decodeTerminalFrame,
-  encodeTerminalFrame,
-  TERMINAL_MAX_EXECUTABLE_TRACE_STEPS,
-  type TerminalBinaryFrame,
-} from "@mcode/contracts";
+import { decodeTerminalFrame, encodeTerminalFrame, type TerminalBinaryFrame } from "@mcode/contracts/ws/terminal-binary";
+import { TERMINAL_MAX_EXECUTABLE_TRACE_STEPS } from "@mcode/contracts/models/terminal-lifecycle";
 import {
   InMemoryPtyHostProtocol,
   type PtyHostEvent,

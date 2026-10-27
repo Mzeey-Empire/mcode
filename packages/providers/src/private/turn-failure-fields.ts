@@ -1,4 +1,5 @@
-import type { TurnFailure, TurnFailureKind } from "@mcode/contracts";
+import type { TurnFailure } from "@mcode/contracts/models/turn-failure";
+import type { TurnFailureKind } from "@mcode/contracts/compat/agent-model";
 
 /** Longest wait `TurnFailure.retryAfterMs` accepts on the wire. */
 const MAX_RETRY_AFTER_MS = 31 * 24 * 3_600_000;

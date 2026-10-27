@@ -7,11 +7,8 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { asc, eq, lt, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import {
-  TurnFileEffectSummarySchema,
-  type TurnFileEffectSummary,
-  type TurnSnapshot,
-} from "@mcode/contracts";
+import { TurnFileEffectSummarySchema, type TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
+import { type TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
 import { messages, turnSnapshots } from "../../../../runtime/persistence/sqlite/schema.js";
 

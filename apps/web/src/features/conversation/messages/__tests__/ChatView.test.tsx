@@ -5,7 +5,8 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { describe, it, expect, beforeEach, onTestFinished, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 import type { ReactNode } from "react";
-import type { ThreadStartup, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
+import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts/models/workspace-environment";
 
 // Store mocks must be declared before importing the component under test.
 

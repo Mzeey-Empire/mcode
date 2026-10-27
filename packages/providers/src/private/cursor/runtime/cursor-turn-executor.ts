@@ -1,7 +1,9 @@
 import type { ClientSideConnection } from "@agentclientprotocol/sdk";
 import { logger } from "@mcode/shared";
-import { AgentEventType } from "@mcode/contracts";
-import type { AgentEvent, AttachmentMeta, MessageMention } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { AttachmentMeta } from "@mcode/contracts/models/attachment";
+import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { CursorProviderPorts } from "../../../factory-types.js";
 import { buildCursorAcpPromptBlocks } from "../instructions/cursor-acp-prompt.js";
 import {

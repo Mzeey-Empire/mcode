@@ -19,7 +19,7 @@ import {
   useDiffCommentEditorAnchor,
   useNumberedDiffComments,
 } from "@/features/conversation/composer/draft/draft-diff-comments";
-import type { ReviewFileChange } from "@mcode/contracts";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import { getTransport } from "@/transport";
 import { loadFileDiff } from "@/lib/load-file-diff";
 import { FileDiffCache } from "@/lib/file-diff-cache";

@@ -51,8 +51,9 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
 });
 
 import { CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
-import { AgentEventType } from "@mcode/contracts";
-import type { ProviderFileMutationStart, ProviderRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { ProviderFileMutationStart } from "@mcode/contracts/providers/interfaces";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 
 interface PoolEntry {
   pendingTurnId: string | null;

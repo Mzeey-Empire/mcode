@@ -1,4 +1,4 @@
-import type { ToolCallRecord } from "@mcode/contracts";
+import type { ToolCallRecord } from "@mcode/contracts/models/tool-call-record";
 import { describe, expect, it } from "vitest";
 import { settledLateToolRecord } from "../late-tool-result-events.js";
 

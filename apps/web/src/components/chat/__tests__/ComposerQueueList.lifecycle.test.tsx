@@ -2,7 +2,7 @@ import { createMockThread } from "@mcode/contracts/testing";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useQueuedMessageDispatch } from "@/features/conversation/composer/queue/useQueuedMessageDispatch";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

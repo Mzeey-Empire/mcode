@@ -1,13 +1,5 @@
-import {
-  isDiffAnnotationPayload,
-  isFileAnnotationPayload,
-  type DiffAnnotationPayload,
-  type DraftBrowserNotePage,
-  type DraftDiffComment,
-  type DraftFileComment,
-  type FileAnnotationPayload,
-  type PreviewAnnotationBundle,
-} from "@mcode/contracts";
+import { isDiffAnnotationPayload, isFileAnnotationPayload, type DiffAnnotationPayload, type FileAnnotationPayload, type PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import { type DraftBrowserNotePage, type DraftDiffComment, type DraftFileComment } from "@mcode/contracts/models/next-message-draft";
 import type { QueuedMessage } from "@/stores/queueStore";
 import {
   browserPagesToBundle,

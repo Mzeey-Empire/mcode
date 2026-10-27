@@ -1,4 +1,4 @@
-import type { ProviderModelInfo } from "@mcode/contracts";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 import { describe, expect, it } from "vitest";
 import { reconcileSwitchOptions } from "../provider-switch-options.js";
 

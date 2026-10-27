@@ -2,7 +2,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { z } from "zod";
 import { createTextPatch } from "@mcode/shared";
-import type { ApprovalSubject } from "@mcode/contracts";
+import type { ApprovalSubject } from "@mcode/contracts/models/approval";
 import { approvalPatch } from "../../approval-patch.js";
 
 const EditSchema = z.object({ old_string: z.string(), new_string: z.string(), replace_all: z.boolean().optional() });

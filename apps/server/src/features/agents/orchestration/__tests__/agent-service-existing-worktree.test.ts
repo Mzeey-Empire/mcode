@@ -14,7 +14,7 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { createAgentServiceForTest, goalLifecycleForAgentServiceTest } from "./agent-service-test-harness.js";
 import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
-import type { IAgentProvider } from "@mcode/contracts";
+import type { IAgentProvider } from "@mcode/contracts/providers/interfaces";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
 import { FakeGitExecutor } from "../../../projects/git/execution/fake-git-executor.js";

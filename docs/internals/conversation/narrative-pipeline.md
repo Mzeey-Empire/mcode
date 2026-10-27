@@ -36,7 +36,7 @@ the row meta, never as red rows or badges.
 Task-list tools (`TodoWrite`, `TaskCreate`, `TaskUpdate`, `update_plan`) feed the
 task panel and never become narrative rows or steps. The server reducer, the
 thread store, and both timeline builders read the one name list in
-`@mcode/contracts`, so a new task tool needs adding only there.
+`@mcode/contracts/models/task-list-tools`, so a new task tool needs adding only there.
 
 Shell cards show the call status at the bottom right, outside the output viewport.
 Hover over the command or output to copy that section. Keyboard focus also reveals

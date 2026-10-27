@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { inject, injectable } from "tsyringe";
-import type { ProviderId } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ModelSightingsStore } from "./model-sightings-store.js";
 import { modelSightingsWriteOperations } from "./model-sightings-write-operations.js";

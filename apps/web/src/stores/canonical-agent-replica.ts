@@ -1,12 +1,5 @@
-import {
-  createAgentModelState,
-  reduceAgentEventBatch,
-  type AgentModelState,
-  type AcceptedCanonicalAgentEventEnvelope,
-  type CanonicalAgentEventEnvelope,
-  type CanonicalAgentReconnectRecovery,
-  type CanonicalAgentRevision,
-} from "@mcode/contracts";
+import { createAgentModelState, reduceAgentEventBatch, type AgentModelState, type AcceptedCanonicalAgentEventEnvelope, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { type CanonicalAgentReconnectRecovery, type CanonicalAgentRevision } from "@mcode/contracts/models/canonical-agent-reconnect";
 
 /** Renderer-owned replica of one thread's saved state and accepted progress. */
 export interface CanonicalAgentReplica {

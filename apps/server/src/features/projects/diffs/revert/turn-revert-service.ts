@@ -1,5 +1,5 @@
 import * as NodeCrypto from "node:crypto";
-import type { TurnRevertResult, TurnRevertPreview } from "@mcode/contracts";
+import type { TurnRevertResult, TurnRevertPreview } from "@mcode/contracts/models/turn-revert";
 import type { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { TurnRevertStore, type StoredRevert } from "../../../agents/turns/persistence/turn-revert-store.js";
 import { prepareTurnRevert, settleTurnRevert } from "../../../agents/turns/persistence/turn-revert-write-operations.js";

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Pencil, SquareTerminal } from "lucide-react";
-import type { ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 

@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { AgentItemIdSchema, AgentThreadActivityStateSchema, AgentThreadIdSchema, AgentTurnStatusSchema, CanonicalTimestampSchema, ProviderIdentitySchema, ProviderIdSchema, lazySchema, CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN, CANONICAL_SUBAGENT_LINEAGE_MAX_DEPTH, CANONICAL_SUBAGENT_TASK_MAX_LENGTH, CanonicalSubagentTerminalOutcomeSchema } from "@mcode/contracts";
+import { AgentItemIdSchema, AgentThreadActivityStateSchema, AgentThreadIdSchema, AgentTurnStatusSchema, CanonicalTimestampSchema, ProviderIdentitySchema } from "@mcode/contracts/compat/agent-model";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
+import { CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN, CANONICAL_SUBAGENT_LINEAGE_MAX_DEPTH, CANONICAL_SUBAGENT_TASK_MAX_LENGTH, CanonicalSubagentTerminalOutcomeSchema } from "@mcode/contracts/models/canonical-subagent-roster";
 
 /** Bounded request for the canonical descendants of one owning parent. */
 export const CanonicalChildRosterRequestSchema = lazySchema(() =>

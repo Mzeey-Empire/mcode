@@ -1,7 +1,7 @@
 import { FileText, X } from "lucide-react";
 import { useMemo, useRef, useState, type ReactElement } from "react";
-import type { McodeBrowserCapture } from "@mcode/contracts";
-import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
+import type { McodeBrowserCapture } from "@mcode/contracts/models/browser-preview";
+import { isVirtualBrowserContextAttachment } from "@mcode/contracts/models/attachment";
 import { cn } from "@/lib/utils";
 import { ATTACHMENT_REMOVE_HIT_AREA } from "@/lib/ui-hit-target";
 import { useHorizontalScrollEdges } from "@/hooks/useHorizontalScrollEdges";

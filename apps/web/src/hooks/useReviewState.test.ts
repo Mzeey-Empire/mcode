@@ -2,7 +2,7 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReviewState } from "@mcode/contracts";
+import type { ReviewState } from "@mcode/contracts/models/review-comparison";
 import { reviewViewAvailability } from "@/lib/review-views";
 import { useDiffStore } from "@/stores/diffStore";
 import { useReviewState } from "./useReviewState";

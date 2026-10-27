@@ -1,4 +1,5 @@
-import { isSubagentLaunchToolName, isTaskListToolName } from "@mcode/contracts";
+import { isSubagentLaunchToolName } from "@mcode/contracts/models/subagent-roster";
+import { isTaskListToolName } from "@mcode/contracts/models/task-list-tools";
 import type { HookExecution, ToolCall } from "@/transport/types";
 import {
   collapseSubagentCalls,

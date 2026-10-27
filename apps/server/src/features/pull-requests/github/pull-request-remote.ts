@@ -1,25 +1,4 @@
-import type {
-  PullRequestActor,
-  PullRequestBoundedDataMarker,
-  PullRequestCheck,
-  PullRequestConversationItem,
-  PullRequestDetail,
-  PullRequestIdentity,
-  PullRequestFileChangeType,
-  PullRequestFilePatchStatus,
-  PullRequestRelationship,
-  PullRequestState,
-  PullRequestSummary,
-  PullRequestTimelineItem,
-  PullRequestTimelineLane,
-  PullRequestMergeMethod,
-  PullRequestMergeability,
-  PullRequestMutationExpected,
-  PullRequestReadiness,
-  PullRequestReviewDraftSubmission,
-  PullRequestReviewState,
-  PullRequestReviewSubmissionEvent,
-} from "@mcode/contracts";
+import type { PullRequestActor, PullRequestBoundedDataMarker, PullRequestCheck, PullRequestConversationItem, PullRequestDetail, PullRequestIdentity, PullRequestFileChangeType, PullRequestFilePatchStatus, PullRequestRelationship, PullRequestState, PullRequestSummary, PullRequestTimelineItem, PullRequestTimelineLane, PullRequestMergeMethod, PullRequestMergeability, PullRequestMutationExpected, PullRequestReadiness, PullRequestReviewDraftSubmission, PullRequestReviewState, PullRequestReviewSubmissionEvent } from "@mcode/contracts/pull-requests";
 
 /** Fixed remote query buckets used to load all inbox relationships without per-item requests. */
 export type PullRequestRemoteBucket = "authored" | "reviewRequested" | "reviewed";

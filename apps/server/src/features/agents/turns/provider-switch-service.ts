@@ -1,12 +1,8 @@
 import { inject, injectable } from "tsyringe";
-import {
-  type CanonicalAgentEventEnvelope,
-  type IAgentProvider,
-  type IProviderRegistry,
-  type ProviderId,
-  type ProviderModelInfo,
-  type Thread,
-} from "@mcode/contracts";
+import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { type IAgentProvider, type IProviderRegistry, type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { type ProviderModelInfo } from "@mcode/contracts/providers/models";
+import { type Thread } from "@mcode/contracts/models/thread";
 import { ProviderTurnError, SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
 import { logger, newHandoffUlid } from "@mcode/shared";
 import { broadcast } from "../../../application/transport/push.js";

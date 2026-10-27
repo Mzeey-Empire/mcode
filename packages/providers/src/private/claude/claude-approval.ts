@@ -1,4 +1,4 @@
-import type { ApprovalChoice, ApprovalRequestBody, ApprovalSubject } from "@mcode/contracts";
+import type { ApprovalChoice, ApprovalRequestBody, ApprovalSubject } from "@mcode/contracts/models/approval";
 import type { PermissionRuleValue, PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { claudeFilePatch } from "./claude-approval-patch.js";

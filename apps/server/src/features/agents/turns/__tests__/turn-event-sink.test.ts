@@ -1,6 +1,6 @@
 import * as NodeEvents from "node:events";
 import { describe, expect, it } from "vitest";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { createTurnEventSink } from "../turn-event-sink.js";
 
 describe("turn event sink", () => {

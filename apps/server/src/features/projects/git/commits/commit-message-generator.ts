@@ -3,7 +3,7 @@
  * reported as a reason; there is never fallback message text.
  */
 import { inject, injectable } from "tsyringe";
-import type { GitGenerateCommitMessageResult } from "@mcode/contracts";
+import type { GitGenerateCommitMessageResult } from "@mcode/contracts/git-commit";
 import { ModelCacheService } from "../../../providers/models/model-cache-service.js";
 import { isProviderAvailabilityError } from "../../../providers/availability/provider-availability-errors.js";
 import {

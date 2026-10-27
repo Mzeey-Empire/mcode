@@ -1,4 +1,4 @@
-import type { WorkspaceEnvironmentActionPort } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionPort } from "@mcode/contracts/models/workspace-environment";
 import { TerminalPlainTextDecoder } from "../../terminal/output/terminal-plain-text.js";
 
 /** A loopback URL from command output, awaiting a TCP probe. */

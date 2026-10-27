@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { pageStatusReducer, initialPageStatus } from "../page-status.js";
-import type { PreviewPageError } from "@mcode/contracts";
+import type { PreviewPageError } from "@mcode/contracts/models/preview-page-status";
 
 const ERR: PreviewPageError = { kind: "file-not-found", message: "Page not found" };
 

@@ -1,4 +1,4 @@
-import type { McodeBrowserCaptureV2 } from "@mcode/contracts";
+import type { McodeBrowserCaptureV2 } from "@mcode/contracts/models/browser-preview";
 
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 const LONG_DIGIT_RUN_RE = /\b\d{13,}\b/g;

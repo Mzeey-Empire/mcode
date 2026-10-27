@@ -1,7 +1,8 @@
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PLAN_MAX_CONTENT_CHARS, type NativePlanFileRef } from "@mcode/contracts";
+import { PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts/models/plan";
+import { type NativePlanFileRef } from "@mcode/contracts/providers/interfaces";
 import { captureClaudePlanFileRef, isWritableClaudePlanPath, syncClaudePlanFile } from "../claude-plan-file.js";
 
 let directory: string;

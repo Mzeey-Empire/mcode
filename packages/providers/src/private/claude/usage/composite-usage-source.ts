@@ -1,4 +1,4 @@
-import type { QuotaCategory } from "@mcode/contracts";
+import type { QuotaCategory } from "@mcode/contracts/providers/usage";
 import type { IUsageSource } from "@mcode/shared/usage";
 
 const CACHE_TTL_MS = 90_000;

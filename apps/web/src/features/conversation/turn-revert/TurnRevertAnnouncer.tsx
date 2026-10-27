@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { create } from "zustand";
-import type { Message } from "@mcode/contracts";
+import type { Message } from "@mcode/contracts/models/message";
 
 interface Announcement {
   readonly threadId: string;

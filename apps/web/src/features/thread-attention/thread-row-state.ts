@@ -1,4 +1,5 @@
-import type { ThreadAttention, TurnOutcome } from "@mcode/contracts";
+import type { ThreadAttention } from "@mcode/contracts/models/thread-attention";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 /** Third-line label for a thread that is blocked on the user. */
 export type NeedsYouLabel =

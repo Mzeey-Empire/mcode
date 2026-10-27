@@ -8,7 +8,7 @@
  * numeric fields, no histograms, mutated in-place inside the main process.
  */
 
-import type { BrowserPerfCounters } from "@mcode/contracts";
+import type { BrowserPerfCounters } from "@mcode/contracts/models/browser-tab";
 export type { BrowserPerfCounters };
 
 function newCounters(): BrowserPerfCounters {

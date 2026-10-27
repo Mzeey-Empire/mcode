@@ -1,6 +1,7 @@
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import type { CompletedThreadRetentionDays, Settings, Thread } from "@mcode/contracts";
+import type { CompletedThreadRetentionDays, Settings } from "@mcode/contracts/models/settings";
+import type { Thread } from "@mcode/contracts/models/thread";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { AgentService } from "../../agents/index.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";

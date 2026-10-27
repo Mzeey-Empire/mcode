@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { inject, injectable } from "tsyringe";
-import type { TurnSnapshot } from "@mcode/contracts";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { canonicalAgentItems, canonicalAgentTurns, messages } from "../../../../runtime/persistence/sqlite/schema.js";
 import { TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-snapshot-repo.js";
 import { deriveTurnAssistantMessageId } from "../../../agents/turns/turn-assistant-message-id.js";

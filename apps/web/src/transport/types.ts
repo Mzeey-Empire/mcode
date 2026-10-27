@@ -1,204 +1,85 @@
 /** A rendered message keeps server sequence provenance separate from live ordering guesses. */
-export type Message = import("@mcode/contracts").Message & { serverSequence?: number };
+export type Message = import("@mcode/contracts/models/message").Message & { serverSequence?: number };
 
 /** What `plan.snapshot` returns: every plan version of a thread and its comments. */
 export interface PlanSnapshot {
-  readonly versions: import("@mcode/contracts").PlanVersion[];
-  readonly comments: import("@mcode/contracts").PlanComment[];
+  readonly versions: import("@mcode/contracts/models/plan").PlanVersion[];
+  readonly comments: import("@mcode/contracts/models/plan").PlanComment[];
 }
 
 // Import shared types for local use in the McodeTransport interface.
-import type {
-  DiffStats,
-  HandoffAuditMetadata,
-  ProjectIcon,
-  TurnSteerParams,
-  TurnSteerResult,
-  ListHeldSteersResult,
-  SettleUnknownSteerParams,
-  SettleUnknownSteerResult,
-  TurnRetryParams,
-  TurnResumeScheduleParams,
-  ScheduledTurnResume,
-  TurnRetryResult,
-  TurnResumeParams,
-  TurnResumeResult,
-  WorkspaceFileList,
-  WorkspaceFileChanges,
-  FileReadResult,
-  FilesystemBrowseResult,
-  ReviewComparisonResult,
-  ReviewFileDiffResult,
-  ReviewTurn,
-  Workspace,
-  WorkspaceCreateResult,
-  WorkspaceEnrichment,
-  WorkspaceEnvironmentDocument,
-  WorkspaceEnvironmentReadResult,
-  WorkspaceEnvironmentStorageMode,
-  WorkspaceEnvironmentCommandTarget,
-  WorkspaceEnvironmentAutomaticSetupSnapshot,
-  WorkspaceEnvironmentActionRun,
-  Thread,
-  RecentThread,
-  PaginatedMessages,
-  AttachmentMeta,
-  GitRefsListParams,
-  GitRefsListResult,
-  PullRequestTargetsListParams,
-  PullRequestTargetsListResult,
-  BranchComparison,
-  WorktreeInfo,
-  PrInfo,
-  ProviderCatalogRequest,
-  ProviderCatalogSnapshot,
-  PermissionMode,
-  ReasoningLevel,
-  ContextWindowMode,
-  ToolCallRecord,
-  ThoughtSegmentRecord,
-  HookExecutionRecord,
-  TurnSnapshot,
-  TurnRevertPreview,
-  TurnRevertResult,
-  TurnRevertScope,
-  Settings,
-  PartialSettings,
-  GitCommit,
-  PlanAnswer,
-  InteractionMode,
-  OrchestrationMode,
-  ProviderModelInfo,
-  ProviderUsageInfo,
-  ProviderAvailability,
-  ProviderId,
-  ProviderStatus,
-  PrDraft,
-  CreatePrResult,
-  ChecksStatus,
-  DevinMode,
-  GitRemoteUrl,
-  ApprovalResponse,
-  ApprovalRespondResult,
-  ApprovalRequest,
-  CreateAndSendResult,
-  ThreadStartup,
-  ThreadStartupResolveInput,
-  ThreadStartupListResult,
-  ConversationPage,
-  ConversationNewerPage,
-  ConversationNewerPageRequest,
-  ConversationOlderPage,
-  ConversationOlderPageRequest,
-  ConversationTail,
-  SubagentRoster,
-  SubagentDetail,
-  CanonicalSubagentStopResult,
-  SetThreadSubscriptionsInput,
-  SetThreadSubscriptionsResult,
-  GoalLookupResult,
-  BrowserAutomationHostRegistration,
-  BrowserAutomationHostDispatchTarget,
-  BrowserAutomationResponse,
-  PullRequestCapabilitiesRequest,
-  PullRequestCapabilitiesResult,
-  PullRequestListRequest,
-  PullRequestListResult,
-  PullRequestGetRequest,
-  PullRequestGetResult,
-  PullRequestTimelineRequest,
-  PullRequestTimelineResult,
-  PullRequestFilesRequest,
-  PullRequestFilesResult,
-  PullRequestPatchRequest,
-  PullRequestPatchResult,
-  PullRequestCancelRequest,
-  PullRequestCancelResult,
-  PullRequestCreateReviewTaskRequest,
-  PullRequestCreateReviewTaskResult,
-  PullRequestReviewLinkRequest,
-  PullRequestReviewLinkResult,
-  PullRequestPostCommentRequest,
-  PullRequestPostCommentResult,
-  PullRequestSubmitReviewRequest,
-  PullRequestSubmitReviewResult,
-  PullRequestSetReadinessRequest,
-  PullRequestSetReadinessResult,
-  PullRequestCloseRequest,
-  PullRequestCloseResult,
-  PullRequestMergeRequest,
-  PullRequestMergeResult,
-  SendMessageInput,
-  CreateAndSendInput,
-  AgentStopResult,
-  TerminalBackendCapabilities,
-  TerminalCustomProfile,
-  TerminalPreferencesUpdate,
-  TerminalProfileReference,
-  TerminalResolvedProfile,
-  TerminalProfileRecovery,
-} from "@mcode/contracts";
+import type { DiffStats } from "@mcode/contracts/models/diff-stats";
+import type { HandoffAuditMetadata } from "@mcode/contracts/handoff";
+import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
+import type { TurnSteerParams, TurnSteerResult, ListHeldSteersResult, SettleUnknownSteerParams, SettleUnknownSteerResult } from "@mcode/contracts/models/turn-steer";
+import type { TurnRetryParams, TurnResumeScheduleParams, ScheduledTurnResume, TurnRetryResult, TurnResumeParams, TurnResumeResult } from "@mcode/contracts/models/turn-recovery";
+import type { WorkspaceFileList, WorkspaceFileChanges, FileReadResult } from "@mcode/contracts/models/workspace-file";
+import type { FilesystemBrowseResult, WorkspaceCreateResult, CreateAndSendResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, SendMessageInput, CreateAndSendInput } from "@mcode/contracts/ws/methods";
+import type { ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
+import type { Workspace, WorkspaceEnrichment } from "@mcode/contracts/models/workspace";
+import type { WorkspaceEnvironmentDocument, WorkspaceEnvironmentReadResult, WorkspaceEnvironmentStorageMode, WorkspaceEnvironmentCommandTarget, WorkspaceEnvironmentAutomaticSetupSnapshot, WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
+import type { Thread, RecentThread } from "@mcode/contracts/models/thread";
+import type { PaginatedMessages } from "@mcode/contracts/models/message";
+import type { AttachmentMeta } from "@mcode/contracts/models/attachment";
+import type { GitRefsListParams, GitRefsListResult, BranchComparison, WorktreeInfo, GitRemoteUrl } from "@mcode/contracts/git";
+import type { PullRequestTargetsListParams, PullRequestTargetsListResult, PrInfo, PrDraft, CreatePrResult, ChecksStatus } from "@mcode/contracts/github";
+import type { ProviderCatalogRequest, ProviderCatalogSnapshot } from "@mcode/contracts/providers/capability-catalog";
+import type { PermissionMode, InteractionMode, OrchestrationMode, DevinMode } from "@mcode/contracts/models/enums";
+import type { ReasoningLevel, ContextWindowMode, Settings, PartialSettings } from "@mcode/contracts/models/settings";
+import type { ToolCallRecord } from "@mcode/contracts/models/tool-call-record";
+import type { ThoughtSegmentRecord } from "@mcode/contracts/models/thought-segment";
+import type { HookExecutionRecord } from "@mcode/contracts/models/hook-execution";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
+import type { TurnRevertPreview, TurnRevertResult, TurnRevertScope } from "@mcode/contracts/models/turn-revert";
+import type { GitCommit } from "@mcode/contracts/models/git-commit";
+import type { PlanAnswer } from "@mcode/contracts/models/plan-questions";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
+import type { ProviderAvailability } from "@mcode/contracts/providers/availability";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { ProviderStatus } from "@mcode/contracts/providers/provider-status";
+import type { ApprovalResponse, ApprovalRespondResult, ApprovalRequest } from "@mcode/contracts/models/approval";
+import type { ThreadStartup, ThreadStartupResolveInput, ThreadStartupListResult } from "@mcode/contracts/thread-startup";
+import type { ConversationPage } from "@mcode/contracts/models/conversation-page";
+import type { ConversationNewerPage, ConversationNewerPageRequest } from "@mcode/contracts/models/conversation-newer-page";
+import type { ConversationOlderPage, ConversationOlderPageRequest } from "@mcode/contracts/models/conversation-older-page";
+import type { ConversationTail } from "@mcode/contracts/models/conversation-tail";
+import type { SubagentRoster, SubagentDetail } from "@mcode/contracts/models/subagent-roster";
+import type { CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
+import type { GoalLookupResult } from "@mcode/contracts/models/goal";
+import type { BrowserAutomationHostRegistration, BrowserAutomationHostDispatchTarget, BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
+import type { PullRequestCapabilitiesRequest, PullRequestCapabilitiesResult, PullRequestListRequest, PullRequestListResult, PullRequestGetRequest, PullRequestGetResult, PullRequestTimelineRequest, PullRequestTimelineResult, PullRequestFilesRequest, PullRequestFilesResult, PullRequestPatchRequest, PullRequestPatchResult, PullRequestCancelRequest, PullRequestCancelResult, PullRequestCreateReviewTaskRequest, PullRequestCreateReviewTaskResult, PullRequestReviewLinkRequest, PullRequestReviewLinkResult, PullRequestPostCommentRequest, PullRequestPostCommentResult, PullRequestSubmitReviewRequest, PullRequestSubmitReviewResult, PullRequestSetReadinessRequest, PullRequestSetReadinessResult, PullRequestCloseRequest, PullRequestCloseResult, PullRequestMergeRequest, PullRequestMergeResult } from "@mcode/contracts/pull-requests";
+import type { AgentStopResult } from "@mcode/contracts/models/turn-runtime";
+import type { TerminalBackendCapabilities } from "@mcode/contracts/models/terminal-backend";
+import type { TerminalCustomProfile, TerminalProfileReference, TerminalResolvedProfile } from "@mcode/contracts/models/terminal";
+import type { TerminalPreferencesUpdate, TerminalProfileRecovery } from "@mcode/contracts/models/terminal-settings";
 
 // Re-export shared types from the contracts package (single source of truth).
-export type {
-  GitRefsListResult,
-  PullRequestTargetsListResult,
-  Workspace,
-  WorkspaceEnrichment,
-  WorkspaceEnvironmentDocument,
-  WorkspaceEnvironmentReadResult,
-  WorkspaceEnvironmentAutomaticSetupSnapshot,
-  WorkspaceEnvironmentActionRun,
-  Thread,
-  RecentThread,
-  AttachmentMeta,
-  StoredAttachment,
-  GitBranch,
-  BranchComparison,
-  GitRemoteUrl,
-  WorktreeInfo,
-  PrInfo,
-  ProviderCatalogRequest,
-  ProviderCatalogSnapshot,
-  PermissionMode,
-  InteractionMode,
-  ContextWindowMode,
-  Settings,
-  PartialSettings,
-  GitCommit,
-  PlanAnswer,
-  ProviderModelInfo,
-  MessageMention,
-  PullRequestCapabilities,
-  PullRequestCapabilityLimitation,
-  PullRequestError,
-  PullRequestIdentity,
-  PullRequestRelationship,
-  PullRequestState,
-  PullRequestSummary,
-  PullRequestBoundedDataMarker,
-  PullRequestCheck,
-  PullRequestConversationItem,
-  PullRequestDetail,
-  PullRequestGetResource,
-  PullRequestTimelineItem,
-  PullRequestTimelineKind,
-  PullRequestTimelineLane,
-  PullRequestFile,
-  PullRequestFileChangeType,
-  PullRequestFilePatchStatus,
-  PullRequestPatchResult,
-  SendMessageInput,
-  CreateAndSendInput,
-  TurnSteerParams,
-  TurnSteerResult,
-  ListHeldSteersResult,
-  SettleUnknownSteerParams,
-  SettleUnknownSteerResult,
-} from "@mcode/contracts";
+export type { GitRefsListResult, GitBranch, BranchComparison, GitRemoteUrl, WorktreeInfo } from "@mcode/contracts/git";
+export type { PullRequestTargetsListResult, PrInfo } from "@mcode/contracts/github";
+export type { Workspace, WorkspaceEnrichment } from "@mcode/contracts/models/workspace";
+export type { WorkspaceEnvironmentDocument, WorkspaceEnvironmentReadResult, WorkspaceEnvironmentAutomaticSetupSnapshot, WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
+export type { Thread, RecentThread } from "@mcode/contracts/models/thread";
+export type { AttachmentMeta, StoredAttachment } from "@mcode/contracts/models/attachment";
+export type { ProviderCatalogRequest, ProviderCatalogSnapshot } from "@mcode/contracts/providers/capability-catalog";
+export type { PermissionMode, InteractionMode } from "@mcode/contracts/models/enums";
+export type { ContextWindowMode, Settings, PartialSettings } from "@mcode/contracts/models/settings";
+export type { GitCommit } from "@mcode/contracts/models/git-commit";
+export type { PlanAnswer } from "@mcode/contracts/models/plan-questions";
+export type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+export type { MessageMention } from "@mcode/contracts/models/mention";
+export type { PullRequestCapabilities, PullRequestCapabilityLimitation, PullRequestError, PullRequestIdentity, PullRequestRelationship, PullRequestState, PullRequestSummary, PullRequestBoundedDataMarker, PullRequestCheck, PullRequestConversationItem, PullRequestDetail, PullRequestGetResource, PullRequestTimelineItem, PullRequestTimelineKind, PullRequestTimelineLane, PullRequestFile, PullRequestFileChangeType, PullRequestFilePatchStatus, PullRequestPatchResult } from "@mcode/contracts/pull-requests";
+export type { SendMessageInput, CreateAndSendInput } from "@mcode/contracts/ws/methods";
+export type { TurnSteerParams, TurnSteerResult, ListHeldSteersResult, SettleUnknownSteerParams, SettleUnknownSteerResult } from "@mcode/contracts/models/turn-steer";
 
-import type { BuildStage } from "@mcode/contracts";
-export type { PaginatedMessages, ConversationPage, ConversationTail, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord, TurnSnapshot } from "@mcode/contracts";
+import type { BuildStage } from "@mcode/contracts/build-stage";
+export type { PaginatedMessages } from "@mcode/contracts/models/message";
+export type { ConversationPage } from "@mcode/contracts/models/conversation-page";
+export type { ConversationTail } from "@mcode/contracts/models/conversation-tail";
+export type { ToolCallRecord } from "@mcode/contracts/models/tool-call-record";
+export type { ThoughtSegmentRecord } from "@mcode/contracts/models/thought-segment";
+export type { HookExecutionRecord } from "@mcode/contracts/models/hook-execution";
+export type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 
 /** Server response containing detected certified and persisted custom profiles. */
 export interface TerminalProfileList {
@@ -216,13 +97,13 @@ export interface TerminalWorkspacePreference {
 /** Result returned after a live Terminal preference update. */
 export interface TerminalPreferencesResult {
   readonly terminal: {
-    readonly presentation: import("@mcode/contracts").TerminalSettings["presentation"];
-    readonly behavior: import("@mcode/contracts").TerminalSettings["behavior"];
-    readonly accessibility: import("@mcode/contracts").TerminalSettings["accessibility"];
+    readonly presentation: import("@mcode/contracts/models/terminal-settings").TerminalSettings["presentation"];
+    readonly behavior: import("@mcode/contracts/models/terminal-settings").TerminalSettings["behavior"];
+    readonly accessibility: import("@mcode/contracts/models/terminal-settings").TerminalSettings["accessibility"];
   };
 }
 
-export { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
+export { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts/models/enums";
 
 /** In-progress tool call tracked by the frontend streaming layer. */
 export interface ToolCall {
@@ -230,7 +111,7 @@ export interface ToolCall {
   toolName: string;
   toolInput: Record<string, unknown>;
   /** Provider-neutral presentation consumed by sub-agent surfaces. */
-  subagentPresentation?: import("@mcode/contracts").SubagentPresentation;
+  subagentPresentation?: import("@mcode/contracts/models/tool-call-record").SubagentPresentation;
   output: string | null;
   isError: boolean;
   isComplete: boolean;
@@ -499,13 +380,13 @@ export interface McodeTransport {
   /** Save a clipboard file blob to disk via the server. Returns attachment metadata. */
   saveClipboardFile(data: ArrayBuffer, mimeType: string, fileName: string): Promise<AttachmentMeta | null>;
   /** Copies a saved image into the thread's durable draft storage and returns its staging reference. */
-  stageDraftImage(threadId: string, attachment: AttachmentMeta): Promise<import("@mcode/contracts").StagedDraftImage>;
+  stageDraftImage(threadId: string, attachment: AttachmentMeta): Promise<import("@mcode/contracts/models/next-message-draft").StagedDraftImage>;
   getActiveAgentCount(): Promise<number>;
   /**
    * Returns runtime snapshots for live sessions, used to reconcile optimistic
    * running state after reload, reconnect, or a new tab.
    */
-  listRunning(): Promise<import("@mcode/contracts").TurnRuntimeSnapshot[]>;
+  listRunning(): Promise<import("@mcode/contracts/models/turn-runtime").TurnRuntimeSnapshot[]>;
   /** Subscribe this client connection to push events for the active thread. */
   subscribeThread(threadId: string): Promise<void>;
   /** Remove this client connection's push subscription for a thread. */
@@ -540,9 +421,9 @@ export interface McodeTransport {
     },
   ): Promise<boolean>;
   /** Return live waits and unseen settled outcomes across all threads. */
-  listAttention(): Promise<import("@mcode/contracts").ThreadAttention[]>;
+  listAttention(): Promise<import("@mcode/contracts/models/thread-attention").ThreadAttention[]>;
   /** Acknowledge a rendered server sequence up to a settled turn boundary. */
-  acknowledgeSeen(threadId: string, throughSequence: number): Promise<import("@mcode/contracts").AcknowledgeSeenResult>;
+  acknowledgeSeen(threadId: string, throughSequence: number): Promise<import("@mcode/contracts/models/thread-attention").AcknowledgeSeenResult>;
   /** Scan threads for stale or missing PR data and refresh their state. Returns updated PR state
    * for all affected threads. A null prNumber/prStatus signals the PR was cleared (stale data removed). */
   syncThreadPrs(workspaceId: string): Promise<Array<{ threadId: string; prNumber: number | null; prStatus: string | null }>>;
@@ -693,11 +574,11 @@ export interface McodeTransport {
   /** Report the Terminal backend and version selected for the current server boot. */
   terminalCapabilities(): Promise<TerminalBackendCapabilities>;
   /** Retrieve bounded, content-free Terminal diagnostics for recovery support. */
-  terminalDiagnosticsGetBundle?: () => Promise<import("@mcode/contracts").TerminalDiagnosticsBundle>;
+  terminalDiagnosticsGetBundle?: () => Promise<import("@mcode/contracts/models/terminal-diagnostics").TerminalDiagnosticsBundle>;
   /** Fetch the bounded, content-free diagnostics bundle through the selected client. */
-  terminalDiagnostics(): Promise<import("@mcode/contracts").TerminalDiagnosticsBundle>;
+  terminalDiagnostics(): Promise<import("@mcode/contracts/models/terminal-diagnostics").TerminalDiagnosticsBundle>;
   /** Create a PTY, optionally closing an exited or failed record before starting its replacement. */
-  terminalCreate(threadId: string, replacesSessionId?: string): Promise<import("@mcode/contracts").LegacyTerminalCreateResult>;
+  terminalCreate(threadId: string, replacesSessionId?: string): Promise<import("@mcode/contracts/ws/terminal-legacy").LegacyTerminalCreateResult>;
   /** Write data (keystrokes) to a PTY. */
   terminalWrite(ptyId: string, data: string): Promise<void>;
   /** Resize a PTY to the given dimensions. */
@@ -750,7 +631,7 @@ export interface McodeTransport {
     data: string,
   ): Promise<{ accepted: boolean }>;
   /** List retained terminal records, including exited processes, during client hydration. */
-  terminalListActive(): Promise<import("@mcode/contracts").LegacyTerminalRecord[]>;
+  terminalListActive(): Promise<import("@mcode/contracts/ws/terminal-legacy").LegacyTerminalRecord[]>;
   /** Check whether a PTY has non-shell child processes running. */
   terminalHasChildren(ptyId: string): Promise<{ hasChildren: boolean }>;
   /** Track the last seq number received for a PTY, used during reconnect reattach. */
@@ -768,31 +649,31 @@ export interface McodeTransport {
     tools: ToolCallRecord[];
     thoughts: ThoughtSegmentRecord[];
     hooks: HookExecutionRecord[];
-    approvals: import("@mcode/contracts").ApprovalReceiptRecord[];
+    approvals: import("@mcode/contracts/models/approval-receipt").ApprovalReceiptRecord[];
   }>;
   /** Fetch one bounded, server-ordered narrative window. */
   loadTurn(
     threadId: string,
-    range?: import("@mcode/contracts").TurnRange,
-  ): Promise<import("@mcode/contracts").NarrativeEntry[]>;
+    range?: import("@mcode/contracts/models/narrative-entry").TurnRange,
+  ): Promise<import("@mcode/contracts/models/narrative-entry").NarrativeEntry[]>;
 
   /** Fetch persisted task list for a thread (TodoWrite / Task* tool family). */
   getThreadTasks(threadId: string): Promise<Array<{ id?: string; content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; activeForm?: string; group?: string }> | null>;
 
   /** Fetch persisted plans for a thread (hydration on page load). */
-  getPlanSnapshot(threadId: string): Promise<import("@mcode/contracts").PlanSnapshot>;
+  getPlanSnapshot(threadId: string): Promise<import("@mcode/contracts/models/plan").PlanSnapshot>;
   /** Save a plan comment; the client-chosen id makes a retried create return the same comment. */
-  createPlanComment(payload: import("@mcode/contracts").PlanCommentCreate): Promise<import("@mcode/contracts").PlanComment>;
+  createPlanComment(payload: import("@mcode/contracts/models/plan").PlanCommentCreate): Promise<import("@mcode/contracts/models/plan").PlanComment>;
   /** Replace a saved comment's note. */
-  updatePlanComment(payload: import("@mcode/contracts").PlanCommentUpdate): Promise<import("@mcode/contracts").PlanComment>;
+  updatePlanComment(payload: import("@mcode/contracts/models/plan").PlanCommentUpdate): Promise<import("@mcode/contracts/models/plan").PlanComment>;
   /** Resolve or reopen a saved comment. */
-  setPlanCommentStatus(payload: import("@mcode/contracts").PlanCommentSetStatus): Promise<import("@mcode/contracts").PlanComment>;
+  setPlanCommentStatus(payload: import("@mcode/contracts/models/plan").PlanCommentSetStatus): Promise<import("@mcode/contracts/models/plan").PlanComment>;
   /** Delete a saved comment. Deleting a missing comment succeeds. */
-  deletePlanComment(payload: import("@mcode/contracts").PlanCommentDelete): Promise<void>;
+  deletePlanComment(payload: import("@mcode/contracts/models/plan").PlanCommentDelete): Promise<void>;
   /** Fork the latest plan version into a draft, or save into an existing draft at its revision. */
-  savePlanVersion(payload: import("@mcode/contracts").PlanSaveVersion): Promise<import("@mcode/contracts").PlanVersion>;
+  savePlanVersion(payload: import("@mcode/contracts/models/plan").PlanSaveVersion): Promise<import("@mcode/contracts/models/plan").PlanVersion>;
   /** Admit a durable request to implement a plan version in its own thread. Replays with the same requestId return the stored outcome. */
-  implementPlan(payload: import("@mcode/contracts").PlanImplement): Promise<import("@mcode/contracts").PlanImplementReceipt>;
+  implementPlan(payload: import("@mcode/contracts/models/plan").PlanImplement): Promise<import("@mcode/contracts/models/plan").PlanImplementReceipt>;
 
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */
@@ -844,11 +725,11 @@ export interface McodeTransport {
   /** Resolve qualified default operands in the thread's checkout. */
   getBranchComparison(workspaceId: string, threadId?: string): Promise<BranchComparison>;
   /** Search and page the Commit view's range: the commits since the checkout forked from its base. */
-  searchCommits(params: import("@mcode/contracts").GitSearchCommitsParams): Promise<import("@mcode/contracts").GitSearchCommitsResult>;
+  searchCommits(params: import("@mcode/contracts/git").GitSearchCommitsParams): Promise<import("@mcode/contracts/git").GitSearchCommitsResult>;
   /** Resolve a workspace or thread checkout's origin remote into a normalized web URL and repository label. */
   getRemoteUrl(workspaceId: string, threadId?: string): Promise<GitRemoteUrl>;
   /** Probe dirty state and available Review comparisons. */
-  getReviewState(workspaceId: string, threadId?: string): Promise<import("@mcode/contracts").ReviewState>;
+  getReviewState(workspaceId: string, threadId?: string): Promise<import("@mcode/contracts/models/review-comparison").ReviewState>;
   /** Resolve file metadata and totals for one Review comparison in one request. */
   getReviewComparison(params: {
     workspaceId: string;
@@ -858,14 +739,14 @@ export interface McodeTransport {
     sha?: string;
     threadId?: string;
     ignoreWhitespace?: boolean;
-  }): Promise<import("@mcode/contracts").ReviewComparisonResult>;
+  }): Promise<import("@mcode/contracts/models/review-comparison").ReviewComparisonResult>;
 
   /** Draft a commit subject and body for the selected paths with the utility model. */
   generateCommitMessage(
-    params: import("@mcode/contracts").GitGenerateCommitMessageParams,
-  ): Promise<import("@mcode/contracts").GitGenerateCommitMessageResult>;
+    params: import("@mcode/contracts/git-commit").GitGenerateCommitMessageParams,
+  ): Promise<import("@mcode/contracts/git-commit").GitGenerateCommitMessageResult>;
   /** Commit the selected files once per `requestId`, then optionally push. Replaying a `requestId` returns the stored outcome. */
-  commitChanges(params: import("@mcode/contracts").GitCommitParams): Promise<import("@mcode/contracts").GitCommitResult>;
+  commitChanges(params: import("@mcode/contracts/git-commit").GitCommitParams): Promise<import("@mcode/contracts/git-commit").GitCommitResult>;
 
   // GitHub PR (advanced)
   /** Push a branch to the remote. */

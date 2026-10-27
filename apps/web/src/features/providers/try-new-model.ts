@@ -1,4 +1,4 @@
-import type { ProviderId } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { useWorkspaceStore } from "@/features/projects";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useUiStore } from "@/stores/uiStore";

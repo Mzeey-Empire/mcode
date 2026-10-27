@@ -1,11 +1,5 @@
-import type {
-  ThreadStartupCancelInput,
-  ThreadStartupGetInput,
-  ThreadStartupListInput,
-  ThreadStartupResolveInput,
-  ThreadStartupRetryAgentInput,
-  WsMethodName,
-} from "@mcode/contracts";
+import type { ThreadStartupCancelInput, ThreadStartupGetInput, ThreadStartupListInput, ThreadStartupResolveInput, ThreadStartupRetryAgentInput } from "@mcode/contracts/thread-startup";
+import type { WsMethodName } from "@mcode/contracts/ws/methods";
 import type { AgentService } from "../../agents/orchestration/agent-service.js";
 import type { WorkspaceEnvironmentService } from "../../projects/environment/workspace-environment-service.js";
 import type { ThreadStartupService } from "../thread-startup-service.js";

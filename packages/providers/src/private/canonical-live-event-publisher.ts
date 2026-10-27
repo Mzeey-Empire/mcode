@@ -1,12 +1,9 @@
 import { logger } from "@mcode/shared";
 import * as NodeCrypto from "node:crypto";
-import {
-  AgentEventType,
-  isChildRoutedRuntimeEvent,
-  type ProviderIdentity,
-  type ProviderId,
-  type ProviderRuntimeEvent,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { isChildRoutedRuntimeEvent, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { volatileIngestClass, type ProviderEventBatch, type ProviderEventSinkPort } from "../host-ports.js";
 
 const MAX_PENDING_EVENTS_PER_EXECUTION = 1_024;

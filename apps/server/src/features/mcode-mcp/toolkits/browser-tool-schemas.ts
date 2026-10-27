@@ -1,4 +1,4 @@
-import type { BrowserAutomationPublicOperation } from "@mcode/contracts";
+import type { BrowserAutomationPublicOperation } from "@mcode/contracts/models/browser-automation";
 import type { JsonSchemaObject } from "../mcode-toolkit.js";
 
 /** One browser_act action, mirroring the internal act step operations. */

@@ -1,10 +1,7 @@
 import "reflect-metadata";
 import { describe, expect, it } from "vitest";
 import { openMemoryDatabase } from "../../../runtime/persistence/sqlite/database.js";
-import {
-  THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES,
-  type ThreadStartupStartInput,
-} from "@mcode/contracts";
+import { THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES, type ThreadStartupStartInput } from "@mcode/contracts/thread-startup";
 import { ThreadStartupStore } from "../persistence/thread-startup-store.js";
 import { ThreadStartupConflictError, ThreadStartupStateStore } from "../thread-startup-state-store.js";
 

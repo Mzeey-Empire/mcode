@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createAgentModelState, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState,
-  type CanonicalAgentProgressFrame, type CanonicalAgentProgressRecovery, type TurnSavingStatus } from "@mcode/contracts";
+import { createAgentModelState, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState } from "@mcode/contracts/compat/agent-model";
+import { type CanonicalAgentProgressFrame, type CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
+import { type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import { createCanonicalAgentReplica } from "@/stores/canonical-agent-replica";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { readThreadField, resetThreadStoreForTests, seedThreadRecord } from "@/stores/thread-store-test-utils";

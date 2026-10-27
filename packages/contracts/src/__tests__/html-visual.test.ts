@@ -1,6 +1,7 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
-import { HtmlVisualSchema, MessageSchema } from "../index.js";
+import { HtmlVisualSchema } from "@mcode/contracts/models/html-visual";
+import { MessageSchema } from "@mcode/contracts/models/message";
 
 const visual = { title: "Latency by provider", html: "<p>chart</p>", maxHeight: 480 };
 

@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import { getDefaultSettings, type IAgentProvider, type IProviderRegistry } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { type IAgentProvider, type IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import { DelegationTargetResolver } from "../delegation-target-resolver.js";
 
 function provider(id: "claude" | "codex"): IAgentProvider {

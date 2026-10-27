@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { GithubService } from "../../github/github-service.js";
-import type { ChecksStatus } from "@mcode/contracts";
+import type { ChecksStatus } from "@mcode/contracts/github";
 
 vi.mock("@mcode/shared", () => ({
   getMcodeDir: () => "/mock/mcode",

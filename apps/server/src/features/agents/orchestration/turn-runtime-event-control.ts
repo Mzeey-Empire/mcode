@@ -1,4 +1,5 @@
-import type { AgentEvent, TurnRuntimeSnapshot } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
 
 import type { TurnOutcome } from "../turns/turn-outcome.js";
 import type { ProviderFailureTerminal, TurnEndingCause } from "../canonical/turn-ending.js";

@@ -5,13 +5,9 @@
  */
 import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
-import {
-  MessageMentionsSchema,
-  SystemNoticeMetadataSchema,
-  TurnSteerErrorCodeSchema,
-  type HeldSteer,
-  type TurnSteerErrorCode,
-} from "@mcode/contracts";
+import { MessageMentionsSchema } from "@mcode/contracts/models/mention";
+import { SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
+import { TurnSteerErrorCodeSchema, type HeldSteer, type TurnSteerErrorCode } from "@mcode/contracts/models/turn-steer";
 
 /** Settled rows are kept this long for replays, then deleted at startup. Held rows never expire. */
 export const TURN_STEER_RETENTION_DAYS = 30;

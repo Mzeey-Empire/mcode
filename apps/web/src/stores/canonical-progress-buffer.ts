@@ -1,4 +1,4 @@
-import { CANONICAL_AGENT_PROGRESS_RECOVERY_MAX, type CanonicalAgentProgressFrame } from "@mcode/contracts";
+import { CANONICAL_AGENT_PROGRESS_RECOVERY_MAX, type CanonicalAgentProgressFrame } from "@mcode/contracts/models/canonical-agent-progress";
 
 type BufferedRecovery = { token: symbol; frames: CanonicalAgentProgressFrame[]; events: number; bytes: number; overflowed: boolean };
 

@@ -1,5 +1,8 @@
 import * as NodeCrypto from "node:crypto";
-import type { ProviderTurnDiffUpdate, ReviewComparison, TurnFileEffectSummary, TurnOutcome } from "@mcode/contracts";
+import type { ProviderTurnDiffUpdate } from "@mcode/contracts/providers/interfaces";
+import type { ReviewComparison } from "@mcode/contracts/models/review-comparison";
+import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { parseTurnDiff, type ParsedTurnDiff } from "./turn-diff-patch.js";
 import type { TurnDiffRepo, StoredTurnDiff } from "./persistence/turn-diff-repo.js";
 

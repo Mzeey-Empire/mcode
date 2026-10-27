@@ -1,9 +1,4 @@
-import type {
-  PullRequestCreateReviewTaskRequest,
-  PullRequestCreateReviewTaskResult,
-  PullRequestReviewLinkRequest,
-  PullRequestReviewLinkResult,
-} from "@mcode/contracts";
+import type { PullRequestCreateReviewTaskRequest, PullRequestCreateReviewTaskResult, PullRequestReviewLinkRequest, PullRequestReviewLinkResult } from "@mcode/contracts/pull-requests";
 import { getTransport } from "./index";
 
 /** Narrow transport used only by local pull request Review-task workflows. */

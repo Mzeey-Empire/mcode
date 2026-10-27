@@ -1,15 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
-import {
-  PULL_REQUEST_FILE_LOCATOR_MAX_LENGTH,
-  PULL_REQUEST_FILE_MAX_COUNT,
-  PULL_REQUEST_FILE_PATH_MAX_LENGTH,
-  PULL_REQUEST_PATCH_MAX_BYTES,
-  PULL_REQUEST_PATCH_MAX_LINE_LENGTH,
-  PULL_REQUEST_PATCH_MAX_LINES,
-  type PullRequestFileChangeType,
-  type PullRequestFilePatchStatus,
-} from "@mcode/contracts";
+import { PULL_REQUEST_FILE_LOCATOR_MAX_LENGTH, PULL_REQUEST_FILE_MAX_COUNT, PULL_REQUEST_FILE_PATH_MAX_LENGTH, PULL_REQUEST_PATCH_MAX_BYTES, PULL_REQUEST_PATCH_MAX_LINE_LENGTH, PULL_REQUEST_PATCH_MAX_LINES, type PullRequestFileChangeType, type PullRequestFilePatchStatus } from "@mcode/contracts/pull-requests";
 import type { PullRequestRemoteFile } from "./pull-request-remote.js";
 
 const GIT_ATTRIBUTES_MAX_BYTES = 64 * 1_024;

@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
-import type { ProviderCatalogSnapshot } from "@mcode/contracts";
+import type { ProviderCatalogSnapshot } from "@mcode/contracts/providers/capability-catalog";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
 import { ProviderCatalogSnapshotStore } from "../provider-catalog-snapshot-store.js";
 

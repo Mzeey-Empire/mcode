@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type { WorkspaceEnvironmentStorageMode } from "@mcode/contracts";
+import type { WorkspaceEnvironmentStorageMode } from "@mcode/contracts/models/workspace-environment";
 import {
   workspaceEnvironmentCommandApprovals,
   workspaceEnvironmentStorageSettings,

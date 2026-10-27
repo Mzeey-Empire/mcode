@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GIT_COMMIT_MAX_PATHS, WS_METHODS } from "../index.js";
+import { GIT_COMMIT_MAX_PATHS } from "@mcode/contracts/git-commit";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 
 const commit = WS_METHODS()["git.commit"];
 const generate = WS_METHODS()["git.generateCommitMessage"];

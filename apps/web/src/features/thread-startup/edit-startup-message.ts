@@ -1,4 +1,4 @@
-import type { ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import { createDefaultComposerAgentSelection } from "@/features/conversation/composer/draft/composer-selection-state";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { WorkspaceThread } from "@/lib/workspace-thread";

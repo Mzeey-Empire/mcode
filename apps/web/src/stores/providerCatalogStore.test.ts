@@ -1,7 +1,7 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderCatalogRequest, ProviderCatalogSnapshot } from "@/transport";
-import type { ProviderCatalogChange } from "@mcode/contracts";
+import type { ProviderCatalogChange } from "@mcode/contracts/providers/capability-catalog";
 import { providerCatalogCacheKey, useProviderCatalogStore } from "./providerCatalogStore";
 
 const REQUEST: ProviderCatalogRequest = {

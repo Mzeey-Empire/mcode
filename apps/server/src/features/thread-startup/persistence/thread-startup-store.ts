@@ -2,10 +2,7 @@ import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { logger } from "@mcode/shared";
-import {
-  ThreadStartupSchema,
-  type ThreadStartup,
-} from "@mcode/contracts";
+import { ThreadStartupSchema, type ThreadStartup } from "@mcode/contracts/thread-startup";
 import { threadStartups } from "../../../runtime/persistence/sqlite/schema.js";
 
 type ThreadStartupRow = typeof threadStartups.$inferSelect;

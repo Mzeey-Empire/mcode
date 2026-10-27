@@ -1,4 +1,5 @@
-import { previewAnnotationPageSnapshotName, type DraftBrowserNotePage } from "@mcode/contracts";
+import { previewAnnotationPageSnapshotName } from "@mcode/contracts/models/browser-preview";
+import { type DraftBrowserNotePage } from "@mcode/contracts/models/next-message-draft";
 import { setDraftBrowserPageSnapshot } from "@/features/conversation/composer/draft/draft-browser-notes";
 import { visibleBrowserNotePages } from "@/features/conversation/composer/draft/draft-submission";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";

@@ -1,4 +1,6 @@
-import type { CanonicalAgentEventEnvelope, ProviderId, TurnResumeMode } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { TurnResumeMode } from "@mcode/contracts/models/turn-recovery";
 import { SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
 import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
 

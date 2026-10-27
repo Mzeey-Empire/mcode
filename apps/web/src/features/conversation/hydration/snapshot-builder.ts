@@ -1,5 +1,5 @@
 import type { Message } from "@/transport";
-import type { TurnSnapshot } from "@mcode/contracts";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { providerNoticeSessionId, type ThreadRecord } from "@/stores/thread-record";
 
 /** Raw RPC inputs used to assemble a canonical thread-record patch. */

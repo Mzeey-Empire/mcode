@@ -11,11 +11,9 @@ import {
   readThreadField,
 } from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type {
-  ConversationNewerPage,
-  ConversationOlderPage,
-  TurnSnapshot,
-} from "@mcode/contracts";
+import type { ConversationNewerPage } from "@mcode/contracts/models/conversation-newer-page";
+import type { ConversationOlderPage } from "@mcode/contracts/models/conversation-older-page";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { useThreadStore } from "@/stores/threadStore";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import {

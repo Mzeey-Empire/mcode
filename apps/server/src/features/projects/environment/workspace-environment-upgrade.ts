@@ -1,11 +1,5 @@
 import { z } from "zod";
-import {
-  WORKSPACE_ENVIRONMENT_LEGACY_VERSION,
-  WORKSPACE_ENVIRONMENT_VERSION,
-  WorkspaceEnvironmentCommandSchema,
-  WorkspaceEnvironmentDocumentSchema,
-  type WorkspaceEnvironmentDocument,
-} from "@mcode/contracts";
+import { WORKSPACE_ENVIRONMENT_LEGACY_VERSION, WORKSPACE_ENVIRONMENT_VERSION, WorkspaceEnvironmentCommandSchema, WorkspaceEnvironmentDocumentSchema, type WorkspaceEnvironmentDocument } from "@mcode/contracts/models/workspace-environment";
 
 const legacyDocument = z.object({
   version: z.literal(WORKSPACE_ENVIRONMENT_LEGACY_VERSION),

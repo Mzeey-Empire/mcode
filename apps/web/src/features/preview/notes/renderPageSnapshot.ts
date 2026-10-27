@@ -1,4 +1,4 @@
-import type { BrowserPreviewBounds } from "@mcode/contracts";
+import type { BrowserPreviewBounds } from "@mcode/contracts/models/browser-preview";
 import type { PreviewCleanCapture } from "../state/previewAnnotationStore";
 import { ANNOTATION_MARKER_TAIL_TIP } from "@/components/ui/annotation-marker";
 

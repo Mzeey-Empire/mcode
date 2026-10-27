@@ -1,4 +1,4 @@
-import type { WorkspaceFileChanges } from "@mcode/contracts";
+import type { WorkspaceFileChanges } from "@mcode/contracts/models/workspace-file";
 import { buildFileTree, type TreeNode } from "@/lib/file-tree";
 
 export type FileChangeMark = WorkspaceFileChanges["entries"][number]["mark"];

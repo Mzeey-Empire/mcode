@@ -1,7 +1,7 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { FileReadResult } from "@mcode/contracts";
+import type { FileReadResult } from "@mcode/contracts/models/workspace-file";
 import { FilesTool } from "../FilesTool";
 import { useFilesTabsStore } from "../filesTabsStore";
 

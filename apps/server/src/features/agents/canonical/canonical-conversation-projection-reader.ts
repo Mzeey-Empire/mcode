@@ -2,14 +2,12 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, gt, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import {
-  ApprovalReceiptRecordSchema,
-  CONVERSATION_HISTORY_PAGE_MAX_MESSAGES,
-  ThoughtSegmentRecordSchema,
-  ToolCallRecordSchema,
-  type ConversationNarrativeBatch,
-  type Message,
-} from "@mcode/contracts";
+import { ApprovalReceiptRecordSchema } from "@mcode/contracts/models/approval-receipt";
+import { CONVERSATION_HISTORY_PAGE_MAX_MESSAGES } from "@mcode/contracts/models/conversation-history-page";
+import { ThoughtSegmentRecordSchema } from "@mcode/contracts/models/thought-segment";
+import { ToolCallRecordSchema } from "@mcode/contracts/models/tool-call-record";
+import { type ConversationNarrativeBatch } from "@mcode/contracts/models/conversation-page";
+import { type Message } from "@mcode/contracts/models/message";
 import {
   canonicalAgentItems,
 } from "../../../runtime/persistence/sqlite/schema.js";

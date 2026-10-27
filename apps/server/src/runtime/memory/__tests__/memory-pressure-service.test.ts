@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { gc } from "bun";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { MemoryPressureService } from "../memory-pressure-service.js";
 import type { Database } from "bun:sqlite";
 import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../features/projects/testing/owned-test-database.js";

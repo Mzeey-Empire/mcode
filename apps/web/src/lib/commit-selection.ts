@@ -1,4 +1,5 @@
-import type { GitCommitFile, ReviewFileChange } from "@mcode/contracts";
+import type { GitCommitFile } from "@mcode/contracts/git-commit";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import type { CheckboxChecked } from "@/components/ui/checkbox";
 import { orderReviewFiles } from "./review-file-order";
 

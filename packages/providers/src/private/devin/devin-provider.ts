@@ -1,34 +1,22 @@
-import { SUBAGENT_REPORTING } from "@mcode/contracts";
+import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
 import * as NodeEvents from "node:events";
 import { approvalReceipt } from "../../approvals/approval-receipt.js";
-import type { ApprovalOutcome } from "@mcode/contracts";
+import type { ApprovalOutcome } from "@mcode/contracts/models/approval";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import which from "which";
 import type { Provider, ProviderIdentity } from "@mcode/agent-model";
-import {
-  AgentEventType,
-  DEVIN_STATIC_MODEL_FALLBACK,
-  DevinModeSchema,
-  getCatalogEntry,
-  groupDevinModelFamilies,
-  providerRuntimeEvent,
-  resolveDevinModelId,
-  type AgentEvent,
-  type DevinMode,
-  type IAgentProvider,
-  type ISessionEvictable,
-  type ApprovalResponse,
-  type ApprovalRespondResult,
-  type ApprovalRequestEnvelope,
-  type ApprovalRequestBody,
-  type DevinModelFamily,
-  type ProviderModelInfo,
-  type Settings,
-  type TurnFailure,
-  type TurnRequest,
-} from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { DEVIN_STATIC_MODEL_FALLBACK, groupDevinModelFamilies, resolveDevinModelId, type DevinModelFamily } from "@mcode/contracts/providers/devin-models";
+import { DevinModeSchema, type DevinMode } from "@mcode/contracts/models/enums";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { type IAgentProvider, type ISessionEvictable, type TurnRequest } from "@mcode/contracts/providers/interfaces";
+import { type ApprovalResponse, type ApprovalRespondResult, type ApprovalRequestEnvelope, type ApprovalRequestBody } from "@mcode/contracts/models/approval";
+import { type ProviderModelInfo } from "@mcode/contracts/providers/models";
+import { type Settings } from "@mcode/contracts/models/settings";
+import { type TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { logger } from "@mcode/shared";
 import { acpApprovalChoices, approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import type { ProviderHostPorts } from "../../host-ports.js";

@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import * as NodeCrypto from "node:crypto";
-import type { WorkspaceEnvironmentActionRun, WorkspaceEnvironmentActionSlotInput } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun, WorkspaceEnvironmentActionSlotInput } from "@mcode/contracts/models/workspace-environment";
 import { WorkspaceEnvironmentService, type WorkspaceEnvironmentServiceOptions } from "../workspace-environment-service.js";
 import type { StartupProjectActions } from "../startup-action-runner.js";
 import type { PreparedTerminalCommand, TerminalCommandCompletion } from "../../../terminal/commands/terminal-command-service.js";

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { IAgentProvider, Settings } from "@mcode/contracts";
+import type { IAgentProvider } from "@mcode/contracts/providers/interfaces";
+import type { Settings } from "@mcode/contracts/models/settings";
 import type { ProviderFactoryInput, ProviderHostPorts } from "@mcode/providers";
 import { registerClaudeProvider } from "../claude-provider-registration.js";
 import { registerCodexProvider } from "../codex-provider-registration.js";

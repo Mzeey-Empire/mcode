@@ -1,5 +1,6 @@
 import { ChevronRight } from "lucide-react";
-import { delegatedTaskRosterEntryId, type DelegatedTaskNotice, type DelegatedTaskNoticeStatus } from "@mcode/contracts";
+import { delegatedTaskRosterEntryId } from "@mcode/contracts/models/subagent-roster";
+import { type DelegatedTaskNotice, type DelegatedTaskNoticeStatus } from "@mcode/contracts/models/message";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { openSubagentDetail } from "@/features/subagents/detail/open-subagent-detail";

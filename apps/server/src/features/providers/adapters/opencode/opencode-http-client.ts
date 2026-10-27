@@ -1,4 +1,4 @@
-import type { ProviderModelInfo } from "@mcode/contracts";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 
 /** Upstream API generation that owns an ask and its reply endpoint. */
 export type OpenCodeRequestVersion = "legacy" | "v2";

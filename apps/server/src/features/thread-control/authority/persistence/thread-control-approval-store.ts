@@ -2,14 +2,8 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import {
-  ResolvedExecutionSchema,
-  DelegateTaskApprovalSubjectSchema,
-  ThreadPlacementSchema,
-  type ResolvedExecution,
-  type ThreadPlacement,
-  type ApprovalSubject,
-} from "@mcode/contracts";
+import { ResolvedExecutionSchema, ThreadPlacementSchema, type ResolvedExecution, type ThreadPlacement } from "@mcode/contracts/thread-control";
+import { DelegateTaskApprovalSubjectSchema, type ApprovalSubject } from "@mcode/contracts/models/approval";
 import { logger } from "@mcode/shared";
 import { threadControlApprovals } from "../../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";

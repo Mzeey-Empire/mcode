@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentEventSchema } from "@mcode/contracts";
+import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
 
 function map(mapper: CodexEventMapper, method: string, params: Record<string, unknown>) {

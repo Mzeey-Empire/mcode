@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { ReviewFileChange } from "@mcode/contracts";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
 import { cn } from "@/lib/utils";
 

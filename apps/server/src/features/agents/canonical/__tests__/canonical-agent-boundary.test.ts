@@ -4,26 +4,17 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  CANONICAL_AGENT_EVENT_BATCH_MAX,
-  CANONICAL_SUBAGENT_TASK_MAX_LENGTH,
-  CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN,
-  MessageSchema,
-  SUBAGENT_DISPLAY_NAME_MAX_LENGTH,
-  SUBAGENT_METADATA_MAX_LENGTH,
-  ThoughtSegmentRecordSchema,
-  ToolCallRecordSchema,
-  AgentEventType,
-  AcceptedCanonicalAgentEventEnvelopeSchema,
-  CanonicalAgentReconnectRecoverySchema,
-  createAgentModelState,
-  reduceAgentEventBatch,
-  type ParentNarrativeRecoveryItem,
-  type CanonicalAgentEventEnvelope,
-  MAX_TURN_RECOVERIES,
-  type ProviderIdentity,
-  type ProviderRuntimeExtension,
-} from "@mcode/contracts";
+import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts/ws/channels";
+import { CANONICAL_SUBAGENT_TASK_MAX_LENGTH, CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN } from "@mcode/contracts/models/canonical-subagent-roster";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { SUBAGENT_DISPLAY_NAME_MAX_LENGTH, SUBAGENT_METADATA_MAX_LENGTH, ToolCallRecordSchema } from "@mcode/contracts/models/tool-call-record";
+import { ThoughtSegmentRecordSchema } from "@mcode/contracts/models/thought-segment";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { AcceptedCanonicalAgentEventEnvelopeSchema, createAgentModelState, reduceAgentEventBatch, type CanonicalAgentEventEnvelope, type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import { CanonicalAgentReconnectRecoverySchema } from "@mcode/contracts/models/canonical-agent-reconnect";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { MAX_TURN_RECOVERIES } from "@mcode/contracts/models/turn-recovery";
+import { type ProviderRuntimeExtension } from "@mcode/contracts/events/provider-runtime-event";
 import { openDatabase, openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
 import { ThreadStore as ThreadRepo } from "../../../thread-control/persistence/thread-store.js";

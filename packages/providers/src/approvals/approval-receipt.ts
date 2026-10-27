@@ -1,4 +1,5 @@
-import { AgentEventType, ApprovalRequestBodySchema, type AgentEvent, type ApprovalOutcome, type ApprovalRequestEnvelope, type ApprovalSubject } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { ApprovalRequestBodySchema, type ApprovalOutcome, type ApprovalRequestEnvelope, type ApprovalSubject } from "@mcode/contracts/models/approval";
 
 /** Build a bounded receipt without exposing unreadable request data. */
 export function approvalReceipt(request: ApprovalRequestEnvelope, outcome: ApprovalOutcome): Extract<AgentEvent, { type: "approvalDecided" }> {

@@ -1,16 +1,4 @@
-import {
-  WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES,
-  WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES,
-  WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES,
-  WorkspaceEnvironmentActionSchema,
-  WorkspaceEnvironmentDocumentSchema,
-  workspaceEnvironmentValidationIssues,
-  type WorkspaceEnvironmentAction,
-  type WorkspaceEnvironmentCommand,
-  type WorkspaceEnvironmentDocument,
-  type WorkspaceEnvironmentValidationIssue,
-  type WorkspaceEnvironmentValidationReason,
-} from "@mcode/contracts";
+import { WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES, WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES, WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES, WorkspaceEnvironmentActionSchema, WorkspaceEnvironmentDocumentSchema, workspaceEnvironmentValidationIssues, type WorkspaceEnvironmentAction, type WorkspaceEnvironmentCommand, type WorkspaceEnvironmentDocument, type WorkspaceEnvironmentValidationIssue, type WorkspaceEnvironmentValidationReason } from "@mcode/contracts/models/workspace-environment";
 
 /** The platform tabs of an action's command editor. `default` runs wherever no override matches. */
 export type CommandPlatform = keyof WorkspaceEnvironmentCommand;

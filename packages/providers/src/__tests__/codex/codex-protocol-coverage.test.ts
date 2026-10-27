@@ -10,7 +10,8 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { describe, it, expect } from "vitest";
-import { AgentEventType, type AgentEvent, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
 import type { CodexNotification } from "../../private/codex/codex-types.js";
 

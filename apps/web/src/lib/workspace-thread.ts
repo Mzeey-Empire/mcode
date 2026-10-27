@@ -1,5 +1,6 @@
 import type { Thread } from "@/transport";
-import type { ContextWindowMode, OrchestrationMode, ReasoningLevel } from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { OrchestrationMode } from "@mcode/contracts/models/enums";
 
 /**
  * Thread row in the workspace store may include client-only fields while the

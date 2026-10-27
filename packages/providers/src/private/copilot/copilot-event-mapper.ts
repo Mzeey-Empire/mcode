@@ -1,5 +1,8 @@
 import type { SessionEvent } from "@github/copilot-sdk";
-import { createSubagentPresentation, type AgentEvent, type ChildThreadEvidence, type TurnFailure } from "@mcode/contracts";
+import { createSubagentPresentation } from "@mcode/contracts/models/tool-call-record";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type ChildThreadEvidence } from "@mcode/contracts/events/provider-runtime-event";
+import { type TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { z } from "zod";
 import { normalizeQuotaSnapshots } from "./copilot-helpers.js";
 
@@ -20,7 +23,7 @@ export interface CopilotTurnState {
   contextWindow?: number;
   tools: Map<string, { name: string; startedAt: number; input?: Record<string, unknown>; parentToolCallId?: string; failed?: boolean }>;
   invocations: Map<string, { parentToolCallId?: string; state: "open" | "closed" }>;
-  pendingPermissions: Map<string, { request: import("@mcode/contracts").ApprovalRequestEnvelope & { body: import("@mcode/contracts").ApprovalRequestBody }; sessionGrantKeys: string[]; unanswerable?: boolean; resolve: (result: import("@github/copilot-sdk").PermissionRequestResult) => void }>;
+  pendingPermissions: Map<string, { request: import("@mcode/contracts/models/approval").ApprovalRequestEnvelope & { body: import("@mcode/contracts/models/approval").ApprovalRequestBody }; sessionGrantKeys: string[]; unanswerable?: boolean; resolve: (result: import("@github/copilot-sdk").PermissionRequestResult) => void }>;
   settle: (outcome: "completed" | "cancelled" | "failed", error?: Error) => void;
   completed: Promise<void>;
   abortTask?: Promise<void>;

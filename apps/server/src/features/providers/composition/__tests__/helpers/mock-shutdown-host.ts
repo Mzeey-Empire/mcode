@@ -1,5 +1,5 @@
 import type { ProviderHostPorts } from "@mcode/providers";
-import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 
 /** Supplies the complete provider host contract without external processes or credentials. */
 export function mockShutdownHost(onEvent: (event: ProviderRuntimeEvent) => void): ProviderHostPorts {

@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";

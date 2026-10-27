@@ -1,4 +1,4 @@
-import type { PlanComment, PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanVersion } from "@mcode/contracts/models/plan";
 import { carriedOriginalIds, usePlanStore } from "@/stores/planStore";
 
 /**

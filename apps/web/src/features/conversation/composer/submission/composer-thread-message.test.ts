@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SelectedTextComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import { createDefaultComposerAgentSelection } from "../draft/composer-selection-state";
 
 const threadActions = vi.hoisted(() => ({

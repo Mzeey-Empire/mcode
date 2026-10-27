@@ -2,7 +2,8 @@ import { app } from "electron";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir } from "@mcode/shared";
-import { isNightlyVersion, SettingsSchema as BundledSettingsSchema } from "@mcode/contracts";
+import { isNightlyVersion } from "@mcode/contracts/build-stage";
+import { SettingsSchema as BundledSettingsSchema } from "@mcode/contracts/models/settings";
 
 /** Use the snapshot-provided schema when V8 has already initialized contracts. */
 const SettingsSchema =

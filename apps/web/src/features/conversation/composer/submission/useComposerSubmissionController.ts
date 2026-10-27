@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { Thread } from "@/transport";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
-import type { PreviewAnnotationBundle } from "@mcode/contracts";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { useToastStore } from "@/stores/toastStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

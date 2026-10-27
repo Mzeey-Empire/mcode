@@ -1,11 +1,9 @@
 import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
-import {
-  MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS,
-  type DiffAnnotationPayload,
-  type DraftDiffComment,
-  type MessageMention,
-} from "@mcode/contracts";
+import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "@mcode/contracts/models/selected-text-comment";
+import { type DiffAnnotationPayload } from "@mcode/contracts/models/browser-preview";
+import { type DraftDiffComment } from "@mcode/contracts/models/next-message-draft";
+import { type MessageMention } from "@mcode/contracts/models/mention";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { canSaveSelectedTextComment } from "@/features/conversation/messages/selection/comment-editor-model";
 import {

@@ -1,5 +1,5 @@
-import type { PlanQuestion } from "@mcode/contracts";
-import { PlanQuestionBatchSchema } from "@mcode/contracts";
+import type { PlanQuestion } from "@mcode/contracts/models/plan-questions";
+import { PlanQuestionBatchSchema } from "@mcode/contracts/models/plan-questions";
 import * as NodeUtil from "node:util";
 
 import type {

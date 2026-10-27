@@ -20,8 +20,9 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { inject, injectable } from "tsyringe";
 import { parseDocument } from "yaml";
-import type { ProviderCatalogSourceDiagnostic, SkillInfo } from "@mcode/contracts";
-import { PROVIDER_CATALOG_PATH_MAX_CHARS } from "@mcode/contracts";
+import type { ProviderCatalogSourceDiagnostic } from "@mcode/contracts/providers/capability-catalog";
+import type { SkillInfo } from "@mcode/contracts/skills";
+import { PROVIDER_CATALOG_PATH_MAX_CHARS } from "@mcode/contracts/providers/capability-catalog";
 import { EnvService } from "../../../runtime/environment/env-service.js";
 
 /** Environment variable whose value is Codex's effective configuration root. */

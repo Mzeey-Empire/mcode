@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { EditorView } from "@codemirror/view";
-import type { PlanComment, PlanCommentEditorDraft, PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanCommentEditorDraft, PlanVersion } from "@mcode/contracts/models/plan";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { carriedOriginalIds, usePlanStore } from "@/stores/planStore";
 import { PlanCommentEditor } from "./PlanCommentEditor";

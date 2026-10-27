@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { ProviderId } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { Spinner } from "@/components/ui/spinner";

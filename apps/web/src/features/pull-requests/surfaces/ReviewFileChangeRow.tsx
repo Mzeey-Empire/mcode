@@ -1,4 +1,4 @@
-import type { ReviewFileChange } from "@mcode/contracts";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import type { KeyboardEvent, Ref } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

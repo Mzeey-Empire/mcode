@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { ProviderIdSchema, type CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { ProviderEventBatch } from "@mcode/providers";
 
 import {

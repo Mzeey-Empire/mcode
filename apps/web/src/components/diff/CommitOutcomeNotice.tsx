@@ -1,4 +1,4 @@
-import type { GitCommitRejection } from "@mcode/contracts";
+import type { GitCommitRejection } from "@mcode/contracts/git-commit";
 import { Notice, type NoticeProps } from "@/components/ui/notice";
 import type { CommitSubmission } from "@/hooks/useCommitSheet";
 

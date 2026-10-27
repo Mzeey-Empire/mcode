@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { parsePatchFiles } from "@pierre/diffs";
 import { CodeView } from "@pierre/diffs/react";
-import type { ReviewFileChange } from "@mcode/contracts";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReviewDiffView } from "@/components/diff/ReviewDiffView";
 import { useDiffStore } from "@/stores/diffStore";

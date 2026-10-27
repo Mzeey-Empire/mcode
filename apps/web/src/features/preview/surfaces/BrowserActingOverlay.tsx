@@ -1,4 +1,4 @@
-import type { BrowserAutomationPointerEvent } from "@mcode/contracts";
+import type { BrowserAutomationPointerEvent } from "@mcode/contracts/models/browser-automation";
 import { MousePointer2 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { browserAutomationTargetKey, useBrowserAutomationStore } from "../automation/browserAutomationStore";

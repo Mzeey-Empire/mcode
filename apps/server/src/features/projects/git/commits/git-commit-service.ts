@@ -8,7 +8,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import type { GitCommitFile, GitCommitRejection, GitCommitResult } from "@mcode/contracts";
+import type { GitCommitFile, GitCommitRejection, GitCommitResult } from "@mcode/contracts/git-commit";
 import { gitExitCode, gitFailureOutput, gitWasKilled } from "../execution/git-failure.js";
 import type { GitExecutor } from "../execution/types.js";
 import { GitPushService } from "../git-push-service.js";

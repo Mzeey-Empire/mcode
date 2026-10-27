@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import type { TurnOutcome } from "@mcode/contracts";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { formatDuration } from "@/lib/time";
 import { cn } from "@/lib/utils";
 

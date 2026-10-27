@@ -1,16 +1,9 @@
 import { inject, injectable } from "tsyringe";
-import {
-  SubagentRosterSchema, ProviderIdSchema, SUBAGENT_REPORTING,
-  isChildTurnCancellable, isDelegateTaskToolName,
-  type SubagentRoster, type SubagentRosterEntry, type SubagentDetail, type SubagentDetailRequest,
-  type SubagentRosterRequest,
-  type CanonicalSubagentStopRequest,
-  type CanonicalSubagentStopResult,
-  type IAgentProvider,
-  type IProviderRegistry,
-  type ProviderId,
-  type CanonicalAgentEventEnvelope,
-} from "@mcode/contracts";
+import { SubagentRosterSchema, isDelegateTaskToolName, type SubagentRoster, type SubagentRosterEntry, type SubagentDetail, type SubagentDetailRequest, type SubagentRosterRequest } from "@mcode/contracts/models/subagent-roster";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { SUBAGENT_REPORTING, isChildTurnCancellable, type IAgentProvider, type IProviderRegistry, type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { type CanonicalSubagentStopRequest, type CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
+import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { logger } from "@mcode/shared";
 import {
   SUBAGENT_LIFECYCLE_DURABILITY,

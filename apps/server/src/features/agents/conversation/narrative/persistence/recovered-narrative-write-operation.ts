@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ParentNarrativeRecoveryItemSchema } from "@mcode/contracts";
+import { ParentNarrativeRecoveryItemSchema } from "@mcode/contracts/models/narrative-recovery";
 import { databaseWriteOperation } from "../../../../../runtime/persistence/sqlite/database-write-operation.js";
 
 /** Recovered message details commit together, including all three narrative record tables. */

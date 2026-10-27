@@ -5,11 +5,13 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
 import { z } from "zod";
-import { AgentEventSchema, NativePlanFileRefSchema, ProviderRuntimeEventSchema } from "@mcode/contracts";
+import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
+import { NativePlanFileRefSchema } from "@mcode/contracts/models/plan";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
 import { OpenCodeProvider, toOpenCodeModelRef } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import { defaultOpenCodeHttpClient, type OpenCodeHttpClient } from "../opencode-http-client.js";
-import type { TurnRequest } from "@mcode/contracts";
+import type { TurnRequest } from "@mcode/contracts/providers/interfaces";
 
 function testProvider(http: OpenCodeHttpClient | undefined, pool: OpenCodeServerPool) {
   const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };

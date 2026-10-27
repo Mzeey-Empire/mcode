@@ -10,13 +10,11 @@ import { useShallow } from "zustand/shallow";
 import type { LexicalEditor } from "lexical";
 import type { AttachmentMeta, Thread } from "@/transport";
 import { INTERACTION_MODES } from "@/transport";
-import type {
-  ContextWindowMode,
-  DevinMode,
-  MessageMention,
-  SelectedTextComment,
-} from "@mcode/contracts";
-import { ORCHESTRATION_MODES } from "@mcode/contracts";
+import type { ContextWindowMode } from "@mcode/contracts/models/settings";
+import type { DevinMode } from "@mcode/contracts/models/enums";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
+import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
 import {
   getDefaultModelId,
   normalizeReasoningLevel,

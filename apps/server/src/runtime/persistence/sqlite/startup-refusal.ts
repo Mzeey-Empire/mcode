@@ -1,4 +1,4 @@
-import { describeRefusal, type StartupRefusal } from "@mcode/contracts";
+import { describeRefusal, type StartupRefusal } from "@mcode/contracts/startup-failure";
 
 /** A refusal raised as an error. Its message is `describeRefusal`; `refusal` keeps the data. */
 export class DatabaseStartupRefusal extends Error {

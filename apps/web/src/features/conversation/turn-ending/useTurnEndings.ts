@@ -1,5 +1,5 @@
 import { useMemo, useRef } from "react";
-import type { AgentModelState } from "@mcode/contracts";
+import type { AgentModelState } from "@mcode/contracts/compat/agent-model";
 import { useProviderStatusStore } from "@/stores/providerStatusStore";
 import { projectTurnEndings, reuseTurnEndings, type TurnEndingsProjection } from "./turn-endings-projection";
 

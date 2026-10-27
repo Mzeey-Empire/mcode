@@ -1,5 +1,6 @@
 import { logger } from "@mcode/shared";
-import type { AgentEvent, ProviderFileMutationStart } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ProviderFileMutationStart } from "@mcode/contracts/providers/interfaces";
 
 import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import type { GitWorktreeService } from "../../projects/git/git-worktree-service.js";

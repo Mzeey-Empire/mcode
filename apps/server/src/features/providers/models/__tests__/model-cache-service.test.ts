@@ -16,7 +16,9 @@ import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projec
 import { ModelCacheRepo } from "../persistence/model-cache-repo.js";
 import { ModelSightingsRepo } from "../../status/model-sightings-repo.js";
 import { ModelCacheService, startupModelProviderIds } from "../model-cache-service.js";
-import type { ProviderAvailability, ProviderId, ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
+import type { ProviderAvailability } from "@mcode/contracts/providers/availability";
+import type { ProviderId, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 
 function availableProvider(id: ProviderId, enabled: boolean): ProviderAvailability {
   return {

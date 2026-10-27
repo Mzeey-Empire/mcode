@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import { AgentEventType, type AgentEvent } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { startAgentOrchestration } from "../start-agent-orchestration.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 import { createOwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";

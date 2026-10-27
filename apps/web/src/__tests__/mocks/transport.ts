@@ -3,7 +3,7 @@ import type {
   McodeTransport,
   ProviderCatalogRequest,
 } from "@/transport/types";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { vi } from "vitest";
 
 const transportDefaults: Partial<McodeTransport> = {

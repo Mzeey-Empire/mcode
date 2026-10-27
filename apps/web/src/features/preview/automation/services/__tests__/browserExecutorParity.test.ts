@@ -2,11 +2,7 @@
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import {
-  BrowserAutomationResponseSchema,
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  type BrowserAutomationHostDispatch,
-} from "@mcode/contracts";
+import { BrowserAutomationResponseSchema, BROWSER_AUTOMATION_CONTRACT_VERSION, type BrowserAutomationHostDispatch } from "@mcode/contracts/models/browser-automation";
 import {
   createBrowserConformanceResourceSnapshot,
   normalizeBrowserConformanceRun,

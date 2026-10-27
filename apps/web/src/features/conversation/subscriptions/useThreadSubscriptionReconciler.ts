@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import type { CanonicalAgentProgressRecovery, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult } from "@mcode/contracts";
+import type { CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
+import type { SetThreadSubscriptionsInput, SetThreadSubscriptionsResult } from "@mcode/contracts/ws/methods";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { recordSubscriptionSkipped } from "@/lib/thread-switch-telemetry";
 import { useThreadStore } from "@/stores/threadStore";

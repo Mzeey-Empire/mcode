@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
 const STORAGE_PREFIX = "mcode-agent-publication-v2:";
 const MAX_SEQUENCE_BYTES = 16;

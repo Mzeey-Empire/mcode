@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import {
   acpPlanEntriesToTodos,
   buildTodoWriteEvents,

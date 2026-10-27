@@ -17,7 +17,7 @@ import { SentBrowserNotesTile } from "@/features/preview/notes/SentBrowserNotesT
 import { readSentNotes } from "@/features/preview/notes/sentBrowserNotes";
 import { useThreadRecord } from "../state";
 import { AnsweredSummary } from "@/components/chat/plan-questions/AnsweredSummary";
-import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts/models/plan-questions";
 import { DeltaBlock } from "../narrative/DeltaBlock";
 import { TURN_PROSE_CLASS } from "../narrative/narrative-layout";
 import { PersistedTurnHooks } from "../narrative/PersistedTurnHooks";

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { IAgentProvider } from "@mcode/contracts";
+import type { IAgentProvider } from "@mcode/contracts/providers/interfaces";
 import * as NodeEvents from "node:events";
 import { CommandRouter } from "../command-router.js";
 import type { CommandContext, CommandOutcome, McodeCommand } from "../command-router.js";

@@ -44,7 +44,7 @@ The packages separate the shared domain model from application services and exte
 | Area | Ownership |
 |---|---|
 | [`packages/agent-model`](packages/agent-model/src/index.ts) | Provider-neutral identities, capabilities, events, records, and reducers. |
-| [`packages/contracts`](packages/contracts/src/index.ts) | Runtime schemas, RPC and push contracts, provider interfaces, and shared application types. |
+| [`packages/contracts`](packages/contracts/src) | Runtime schemas, RPC and push contracts, provider interfaces, and shared application types, imported from their defining module (for example, `@mcode/contracts/models/thread`). |
 | [`packages/shared`](packages/shared/package.json) | Shared utilities with separate browser-safe and Node entry points. |
 | [`packages/thread-orchestration`](packages/thread-orchestration/src/index.ts) | Pure thread-control authorities, scopes, lineage, and instruction planning. |
 | [`packages/providers`](packages/providers/src/index.ts) | Provider factories, private transports, protocol mapping, and injected host ports. |

@@ -1,4 +1,5 @@
-import type { AgentEvent, ProviderId } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { GoalLifecycleService } from "../goals/goal-lifecycle-service.js";
 import { PlanTurnService } from "../planning/plan-turn-service.js";
 import { SubagentRosterService } from "../collaboration/subagent-roster-service.js";

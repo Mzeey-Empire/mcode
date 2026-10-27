@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { ProviderId, ProviderStatus } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { ProviderStatus } from "@mcode/contracts/providers/provider-status";
 import { getTransport } from "@/transport";
 
 /** Zustand state shape for the provider status store. */

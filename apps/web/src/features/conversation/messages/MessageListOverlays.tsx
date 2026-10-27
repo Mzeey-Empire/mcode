@@ -1,6 +1,6 @@
 import { Spinner } from "@/components/ui/spinner";
 import { StickyUserMessage } from "@/components/chat/StickyUserMessage";
-import type { SelectedTextComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import { useEffect, useMemo, useState, type RefObject } from "react";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import type { Message } from "@/transport/types";

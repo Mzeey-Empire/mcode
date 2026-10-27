@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { getDefaultSettings, SettingsSchema, type Settings, type PartialSettings, type TerminalSettings } from "@mcode/contracts";
+import { getDefaultSettings, SettingsSchema, type Settings, type PartialSettings } from "@mcode/contracts/models/settings";
+import { type TerminalSettings } from "@mcode/contracts/models/terminal-settings";
 import { getTransport } from "@/transport";
 
 /**

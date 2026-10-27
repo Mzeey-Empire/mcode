@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { ActionApprovalCard } from "@/features/projects/actions/ActionApprovalCard";
 import { approveAndStartAction } from "@/features/projects/actions/approveAndStartAction";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";

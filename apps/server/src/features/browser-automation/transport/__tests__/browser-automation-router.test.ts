@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, expect, it } from "vitest";
 import type { WebSocket } from "ws";
-import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_OPERATIONS } from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_OPERATIONS } from "@mcode/contracts/models/browser-automation";
 import { BrowserAutomationBroker } from "../../index.js";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
 

@@ -1,13 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  MAX_ATTACHMENTS,
-  type DraftBrowserNotePage,
-  type DraftDiffComment,
-  type DraftFileComment,
-  type McodeBrowserCapture,
-  type MessageMention,
-} from "@mcode/contracts";
+import { MAX_ATTACHMENTS } from "@mcode/contracts/models/file-types";
+import { type DraftBrowserNotePage, type DraftDiffComment, type DraftFileComment } from "@mcode/contracts/models/next-message-draft";
+import { type McodeBrowserCapture } from "@mcode/contracts/models/browser-preview";
+import { type MessageMention } from "@mcode/contracts/models/mention";
 import { draftHasNoSendableContent, useComposerDraftStore, type ComposerDraft } from "@/stores/composerDraftStore";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import {

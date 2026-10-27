@@ -1,5 +1,6 @@
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import type { MessageMention, PreviewAnnotationBundle } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { collectBrowserCaptureSpillPaths } from "@/features/preview/capture/browser-capture-spill";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import type { QueuedMessage } from "@/stores/queueStore";

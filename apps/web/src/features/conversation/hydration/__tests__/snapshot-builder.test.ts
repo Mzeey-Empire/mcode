@@ -1,6 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, it, expect } from "vitest";
-import type { TurnSnapshot } from "@mcode/contracts";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { SnapshotBuilder } from "../snapshot-builder";
 
 

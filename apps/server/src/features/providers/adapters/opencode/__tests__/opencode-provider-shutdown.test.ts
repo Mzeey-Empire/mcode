@@ -1,6 +1,8 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import { AgentEventType, getDefaultSettings, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import { mockShutdownHost } from "../../../composition/__tests__/helpers/mock-shutdown-host.js";

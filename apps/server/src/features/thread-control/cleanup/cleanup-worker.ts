@@ -8,7 +8,7 @@
 import { injectable, inject } from "tsyringe";
 import { logger } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
-import type { Thread } from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
 import { CleanupJobRepo } from "./persistence/cleanup-job-repo.js";
 import type { CleanupJob } from "./persistence/cleanup-job-repo.js";
 import { ThreadRepo } from "../persistence/thread-repo.js";

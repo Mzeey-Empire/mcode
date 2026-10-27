@@ -182,12 +182,8 @@ import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeNet from "node:net";
-import {
-  describeRefusal,
-  SERVER_HEAP_DEFAULT_MB,
-  SERVER_HEAP_LEGACY_DEFAULT_MB,
-  type StartupRefusal,
-} from "@mcode/contracts";
+import { describeRefusal, type StartupRefusal } from "@mcode/contracts/startup-failure";
+import { SERVER_HEAP_DEFAULT_MB, SERVER_HEAP_LEGACY_DEFAULT_MB } from "@mcode/contracts/models/settings";
 
 // ---------------------------------------------------------------------------
 // Tests

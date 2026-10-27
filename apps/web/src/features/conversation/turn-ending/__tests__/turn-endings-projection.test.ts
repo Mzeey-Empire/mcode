@@ -1,4 +1,4 @@
-import { createAgentModelState, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn } from "@mcode/contracts";
+import { createAgentModelState, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn } from "@mcode/contracts/compat/agent-model";
 import { describe, expect, it } from "vitest";
 import { projectTurnEndings, reuseTurnEndings } from "../turn-endings-projection";
 

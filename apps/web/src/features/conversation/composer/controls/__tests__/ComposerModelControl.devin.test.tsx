@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { ReasoningLevel } from "@mcode/contracts";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { ComposerModelControl } from "../ComposerModelControl";
 import type { ComposerAgentSelection } from "../../draft/useComposerFormController";
 

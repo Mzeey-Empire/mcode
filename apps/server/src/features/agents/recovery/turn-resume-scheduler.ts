@@ -1,4 +1,4 @@
-import type { ScheduledTurnResume, TurnResumeScheduleParams } from "@mcode/contracts";
+import type { ScheduledTurnResume, TurnResumeScheduleParams } from "@mcode/contracts/models/turn-recovery";
 import { logger } from "@mcode/shared";
 import type { TurnRecoveryService } from "./turn-recovery-service.js";
 import { TurnRecoveryError } from "./turn-recovery-error.js";

@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { HtmlVisualSchema, HTML_VISUAL_DEFAULT_HEIGHT, HTML_VISUAL_MAX_HEIGHT, HTML_VISUAL_MIN_HEIGHT,
-  HTML_VISUAL_MAX_HTML_BYTES, HTML_VISUAL_MAX_TITLE_LENGTH, HTML_VISUAL_THEME_TOKENS } from "@mcode/contracts";
+import { HtmlVisualSchema, HTML_VISUAL_DEFAULT_HEIGHT, HTML_VISUAL_MAX_HEIGHT, HTML_VISUAL_MIN_HEIGHT, HTML_VISUAL_MAX_HTML_BYTES, HTML_VISUAL_MAX_TITLE_LENGTH, HTML_VISUAL_THEME_TOKENS } from "@mcode/contracts/models/html-visual";
 import { FeatureRetentionLimitError } from "../../agents/canonical/accepted-feature-observations.js";
 import { TurnVisualRejectedError, type CanonicalAcceptedProgress } from "../../agents/canonical/canonical-accepted-progress.js";
 import { McodeThreadControlDeniedError, type McodeSessionAuthority, type McodeSession } from "../mcode-session-authority.js";

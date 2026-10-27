@@ -1,6 +1,6 @@
 import { ipcMain } from "electron";
 import type { IpcMain, Session, WebContents } from "electron";
-import { BROWSER_TAB_INFO_STRING_MAX } from "@mcode/contracts";
+import { BROWSER_TAB_INFO_STRING_MAX } from "@mcode/contracts/models/browser-tab";
 import { registerPreviewClipboardPermissionHandlers } from "./clipboard-trust.js";
 import type { PreviewPopupRequest, PreviewPopupSurfaceRef } from "../contracts/popup.js";
 import { registerWebRequestInterceptor } from "../capture/handlers.js";

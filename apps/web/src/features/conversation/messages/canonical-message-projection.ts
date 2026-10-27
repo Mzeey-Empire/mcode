@@ -1,4 +1,8 @@
-import { ToolCallRecordSchema, isTaskListToolName, type AgentItem, type AgentModelState, type AgentTurn, type Message, type TurnOutcome } from "@mcode/contracts";
+import { ToolCallRecordSchema } from "@mcode/contracts/models/tool-call-record";
+import { isTaskListToolName } from "@mcode/contracts/models/task-list-tools";
+import { type AgentItem, type AgentModelState, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { type Message } from "@mcode/contracts/models/message";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { ToolCall } from "@/transport/types";
 import { recordToToolCall } from "../narrative/build-persisted-narrative";
 import { isSubagentLaunchCall } from "../narrative/narrative-builder-helpers";

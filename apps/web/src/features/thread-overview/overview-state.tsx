@@ -4,7 +4,7 @@ import { useThreadGitActions } from "@/hooks/useThreadGitActions";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
 import { type Thread } from "@/transport";
-import type { ChecksStatus } from "@mcode/contracts";
+import type { ChecksStatus } from "@mcode/contracts/github";
 import { createContext, useCallback, useContext, useMemo } from "react";
 import {
   canStartBranchlessCreatePr,

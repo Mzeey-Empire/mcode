@@ -1,6 +1,6 @@
 import { Search } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
-import type { ReviewFileChange } from "@mcode/contracts";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import { PullRequestFileTree } from "@/features/pull-requests";
 import { Input } from "@/components/ui/input";
 

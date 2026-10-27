@@ -1,4 +1,4 @@
-import type { PreviewAnnotationBundle } from "@mcode/contracts";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { materializeStagedSnapshots } from "@/features/preview/notes/stagedDraftImages";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
 import { browserNoteElements, removeTakenBrowserNotePages } from "../draft/draft-browser-notes";

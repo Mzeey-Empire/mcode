@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  PROVIDER_CATALOG_MAX_ENTRIES,
-  PROVIDER_CATALOG_MAX_SELECTABLE_AGENTS,
-  type SelectableProviderAgent,
-  type SkillInfo,
-} from "@mcode/contracts";
+import { PROVIDER_CATALOG_MAX_ENTRIES, PROVIDER_CATALOG_MAX_SELECTABLE_AGENTS, type SelectableProviderAgent } from "@mcode/contracts/providers/capability-catalog";
+import { type SkillInfo } from "@mcode/contracts/skills";
 import { buildProviderCatalogSnapshot } from "../provider-catalog.js";
 
 function skill(index: number): SkillInfo {

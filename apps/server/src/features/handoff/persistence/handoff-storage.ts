@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { injectable } from "tsyringe";
 import { parseDocument } from "yaml";
-import { HandoffAuditMetadataSchema, type HandoffAuditMetadata } from "@mcode/contracts";
+import { HandoffAuditMetadataSchema, type HandoffAuditMetadata } from "@mcode/contracts/handoff";
 import {
   getMcodeDir,
   resolveHandoffDir,

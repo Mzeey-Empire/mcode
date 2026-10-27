@@ -1,4 +1,4 @@
-import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts/models/plan-questions";
 import { stripInjectedFiles } from "@/lib/file-tags";
 import { stripInlineMarkdown } from "@/lib/inline-markdown";
 import type { Message } from "@/transport";

@@ -1,7 +1,4 @@
-import type {
-  WorkspaceEnvironmentAction,
-  WorkspaceEnvironmentActionLaunchSnapshot,
-} from "@mcode/contracts";
+import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionLaunchSnapshot } from "@mcode/contracts/models/workspace-environment";
 import { WorkspaceEnvironmentServiceError } from "./workspace-environment-errors.js";
 import type {
   WorkspaceEnvironmentCommandResolution,

@@ -1,6 +1,6 @@
 import { useId, useMemo, useState, useSyncExternalStore } from "react";
 import { MousePointer2 } from "lucide-react";
-import type { PreviewAnnotationBundle } from "@mcode/contracts";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { ImageAttachmentLightbox } from "@/components/chat/ImageAttachmentLightbox";
 import { useRetriableAttachmentImage } from "@/components/chat/useRetriableAttachmentImage";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";

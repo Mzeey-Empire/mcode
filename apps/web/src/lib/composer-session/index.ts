@@ -4,15 +4,10 @@ import {
   type ComposerDraft,
   type SelectedTextCommentEditorDraft,
 } from "@/stores/composerDraftStore";
-import type {
-  ApprovalReviewMode,
-  ContextWindowMode,
-  DevinMode,
-  MessageMention,
-  OrchestrationMode,
-  ReasoningLevel,
-  SelectedTextComment,
-} from "@mcode/contracts";
+import type { ApprovalReviewMode, DevinMode, OrchestrationMode } from "@mcode/contracts/models/enums";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { PermissionMode } from "@/transport";
 import { INTERACTION_MODES, type InteractionMode } from "@/transport";
 import type { WorkspaceThread } from "@/lib/workspace-thread";

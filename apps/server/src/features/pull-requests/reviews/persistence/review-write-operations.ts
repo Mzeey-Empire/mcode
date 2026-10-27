@@ -1,8 +1,8 @@
 import { z } from "zod";
-import {
-  ContextWindowModeSchema, InteractionModeSchema, PermissionModeSchema, ProviderIdSchema,
-  PullRequestIdentitySchema, PullRequestReviewLinkSchema, ReasoningLevelSchema, ThreadSchema,
-} from "@mcode/contracts";
+import { ContextWindowModeSchema, ProviderIdSchema, ReasoningLevelSchema } from "@mcode/contracts/models/settings";
+import { InteractionModeSchema, PermissionModeSchema } from "@mcode/contracts/models/enums";
+import { PullRequestIdentitySchema, PullRequestReviewLinkSchema } from "@mcode/contracts/pull-requests";
+import { ThreadSchema } from "@mcode/contracts/models/thread";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 
 const identity = z.object({ provider: z.string(), repositoryNodeId: z.string(), pullRequestNumber: z.number().int().positive() }).strict();

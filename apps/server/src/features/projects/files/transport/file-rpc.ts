@@ -1,4 +1,4 @@
-import { WS_METHODS, type WsMethodName } from "@mcode/contracts";
+import { WS_METHODS, type WsMethodName } from "@mcode/contracts/ws/methods";
 import type { z } from "zod";
 import type { FileService } from "../file-service.js";
 import { broadcast } from "../../../../application/transport/push.js";

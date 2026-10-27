@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
-import { WS_CHANNELS } from "@mcode/contracts";
+import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
+import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
 import { getTransport, pushEmitter } from "@/transport";
 import { useConnectionStore } from "@/stores/connectionStore";
 

@@ -1,16 +1,7 @@
 import { inject, injectable } from "tsyringe";
-import {
-  AgentEventType,
-  isGoalCapable,
-  isGoalOpen,
-  type AgentEvent,
-  type GoalLookupResult,
-  type GoalState,
-  type IGoalCapable,
-  type IAgentProvider,
-  type IProviderRegistry,
-  type ProviderId,
-} from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { isGoalCapable, type IGoalCapable, type IAgentProvider, type IProviderRegistry, type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { isGoalOpen, type GoalLookupResult, type GoalState } from "@mcode/contracts/models/goal";
 import { logger } from "@mcode/shared";
 import { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import { publishSynthesizedAgentEvents } from "../canonical/synthesized-agent-event-publication.js";

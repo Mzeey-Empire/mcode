@@ -1,4 +1,4 @@
-import type { TerminalPlatform } from "@mcode/contracts";
+import type { TerminalPlatform } from "@mcode/contracts/models/terminal";
 import * as NodeBuffer from "node:buffer";
 import * as NodeCrypto from "node:crypto";
 import { killProcessTree } from "../../../runtime/process/containment/process-kill.js";

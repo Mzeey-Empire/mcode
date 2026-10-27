@@ -1,6 +1,6 @@
 import { createMockThread } from "@mcode/contracts/testing";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { ReviewTurn } from "@mcode/contracts";
+import type { ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { refreshTurnSnapshotsAfterPersist } from "@/lib/turn-snapshot-refresh";

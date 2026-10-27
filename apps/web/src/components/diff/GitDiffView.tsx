@@ -1,4 +1,4 @@
-import type { ReviewComparison } from "@mcode/contracts";
+import type { ReviewComparison } from "@mcode/contracts/models/review-comparison";
 import type { DiffSource } from "@/stores/diffStore";
 import { FileList } from "./FileList";
 

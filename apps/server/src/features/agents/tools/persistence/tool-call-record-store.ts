@@ -8,7 +8,7 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type { ToolCallRecord, ToolCallStatus } from "@mcode/contracts";
+import type { ToolCallRecord, ToolCallStatus } from "@mcode/contracts/models/tool-call-record";
 import {
   type WriteBatchLimits,
   type WriteBatchResult,

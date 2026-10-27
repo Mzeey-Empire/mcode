@@ -7,7 +7,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
-import { getAttachmentMaxSizeForMime } from "@mcode/contracts";
+import { getAttachmentMaxSizeForMime } from "@mcode/contracts/models/attachment-limits";
 import { getMcodeDir } from "@mcode/shared";
 
 /** Metadata accompanying a binary upload frame. */

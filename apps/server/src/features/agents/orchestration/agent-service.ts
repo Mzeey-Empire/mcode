@@ -1,5 +1,7 @@
 import { inject, injectable } from "tsyringe";
-import type { AgentStopResult, Thread, TurnRuntimeSnapshot, TurnStopCause } from "@mcode/contracts";
+import type { AgentStopResult, TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
+import type { Thread } from "@mcode/contracts/models/thread";
+import type { TurnStopCause } from "@mcode/contracts/compat/agent-model";
 
 import type { WorkspaceEnvironmentAutomaticSetupDispatch } from "../../projects/environment/workspace-environment-service.js";
 import type { WorkspaceEnvironmentQueuedTurnSubmission } from "../turns/turn-admission-dispatch-coordinator.js";

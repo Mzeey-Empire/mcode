@@ -11,7 +11,10 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { getCatalogEntry, PartialSettingsSchema, type ProviderAvailability, type ProviderId } from "@mcode/contracts";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { PartialSettingsSchema } from "@mcode/contracts/models/settings";
+import { type ProviderAvailability } from "@mcode/contracts/providers/availability";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { ConfirmDisableDialog } from "./ConfirmDisableDialog";
 
 /** Provider IDs that expose a CLI path input field. */

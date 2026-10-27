@@ -1,6 +1,6 @@
 import { useCallback, useId, useState } from "react";
 import { Undo } from "lucide-react";
-import type { Message } from "@mcode/contracts";
+import type { Message } from "@mcode/contracts/models/message";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useThreadRecord } from "@/stores/thread-selectors";

@@ -1,9 +1,4 @@
-import type {
-  PullRequestBoundedDataMarker,
-  PullRequestFile,
-  PullRequestIdentity,
-  PullRequestReviewThread,
-} from "@mcode/contracts";
+import type { PullRequestBoundedDataMarker, PullRequestFile, PullRequestIdentity, PullRequestReviewThread } from "@mcode/contracts/pull-requests";
 import { MessageSquare } from "lucide-react";
 import { ErrorIcon } from "@/components/ui/icon-map";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

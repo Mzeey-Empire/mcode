@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { PlanComment, PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanVersion } from "@mcode/contracts/models/plan";
 import { usePlanStore } from "@/stores/planStore";
 import { planCommentThreadFor, readPlanCommentIdsForSend, sendablePlanComments } from "./sendable-plan-comments";
 

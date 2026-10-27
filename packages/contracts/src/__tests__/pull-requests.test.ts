@@ -20,56 +20,8 @@ describe("github.pullRequestTargets.list", () => {
     expect(WS_METHODS()["github.pullRequestTargets.list"].result.parse(failure)).toEqual(failure);
   });
 });
-import {
-  PULL_REQUEST_CURSOR_COMPONENT_MAX_LENGTH,
-  PULL_REQUEST_CURSOR_MAX_LENGTH,
-  PULL_REQUEST_DETAIL_PAGE_DEFAULT_LIMIT,
-  PULL_REQUEST_DETAIL_PAGE_MAX_LIMIT,
-  PULL_REQUEST_DETAIL_TEXT_MAX_LENGTH,
-  PULL_REQUEST_FILE_PAGE_DEFAULT_LIMIT,
-  PULL_REQUEST_FILE_PAGE_MAX_LIMIT,
-  PULL_REQUEST_PATCH_MAX_BYTES,
-  PULL_REQUEST_PATCH_MAX_LINE_LENGTH,
-  PULL_REQUEST_PATCH_MAX_LINES,
-  PULL_REQUEST_LIST_DEFAULT_LIMIT,
-  PULL_REQUEST_LIST_MAX_LIMIT,
-  PULL_REQUEST_REVIEWERS_MAX,
-  PULL_REQUEST_REVIEW_THREAD_COMMENTS_MAX,
-  PULL_REQUEST_REVIEW_INTENT_MAX_LENGTH,
-  PULL_REQUEST_MUTATION_BODY_MAX_BYTES,
-  PULL_REQUEST_REVIEW_DRAFT_MAX_COUNT,
-  PULL_REQUEST_SEARCH_MAX_LENGTH,
-  PullRequestBoundedDataMarkerSchema,
-  PullRequestActorSchema,
-  PullRequestCheckSchema,
-  PullRequestDetailSchema,
-  PullRequestGetRequestSchema,
-  PullRequestGetResultSchema,
-  PullRequestFilesRequestSchema,
-  PullRequestFilesResultSchema,
-  PullRequestListRequestSchema,
-  PullRequestListResultSchema,
-  PullRequestPatchRequestSchema,
-  PullRequestPatchResultSchema,
-  PullRequestIssueCommentSchema,
-  PullRequestReviewCommentSchema,
-  PullRequestReviewThreadSchema,
-  PullRequestCreateReviewTaskRequestSchema,
-  PullRequestCreateReviewTaskResultSchema,
-  PullRequestReviewLinkResultSchema,
-  PullRequestPostCommentRequestSchema,
-  PullRequestSubmitReviewRequestSchema,
-  PullRequestSubmitReviewResultSchema,
-  PullRequestSetReadinessRequestSchema,
-  PullRequestCloseRequestSchema,
-  PullRequestMergeRequestSchema,
-  PullRequestMutationErrorSchema,
-  PullRequestSummarySchema,
-  PullRequestTimelineItemSchema,
-  PullRequestTimelineRequestSchema,
-  PullRequestTimelineResultSchema,
-  WS_METHODS,
-} from "../index.js";
+import { PULL_REQUEST_CURSOR_COMPONENT_MAX_LENGTH, PULL_REQUEST_CURSOR_MAX_LENGTH, PULL_REQUEST_DETAIL_PAGE_DEFAULT_LIMIT, PULL_REQUEST_DETAIL_PAGE_MAX_LIMIT, PULL_REQUEST_DETAIL_TEXT_MAX_LENGTH, PULL_REQUEST_FILE_PAGE_DEFAULT_LIMIT, PULL_REQUEST_FILE_PAGE_MAX_LIMIT, PULL_REQUEST_PATCH_MAX_BYTES, PULL_REQUEST_PATCH_MAX_LINE_LENGTH, PULL_REQUEST_PATCH_MAX_LINES, PULL_REQUEST_LIST_DEFAULT_LIMIT, PULL_REQUEST_LIST_MAX_LIMIT, PULL_REQUEST_REVIEWERS_MAX, PULL_REQUEST_REVIEW_THREAD_COMMENTS_MAX, PULL_REQUEST_REVIEW_INTENT_MAX_LENGTH, PULL_REQUEST_MUTATION_BODY_MAX_BYTES, PULL_REQUEST_REVIEW_DRAFT_MAX_COUNT, PULL_REQUEST_SEARCH_MAX_LENGTH, PullRequestBoundedDataMarkerSchema, PullRequestActorSchema, PullRequestCheckSchema, PullRequestDetailSchema, PullRequestGetRequestSchema, PullRequestGetResultSchema, PullRequestFilesRequestSchema, PullRequestFilesResultSchema, PullRequestListRequestSchema, PullRequestListResultSchema, PullRequestPatchRequestSchema, PullRequestPatchResultSchema, PullRequestIssueCommentSchema, PullRequestReviewCommentSchema, PullRequestReviewThreadSchema, PullRequestCreateReviewTaskRequestSchema, PullRequestCreateReviewTaskResultSchema, PullRequestReviewLinkResultSchema, PullRequestPostCommentRequestSchema, PullRequestSubmitReviewRequestSchema, PullRequestSubmitReviewResultSchema, PullRequestSetReadinessRequestSchema, PullRequestCloseRequestSchema, PullRequestMergeRequestSchema, PullRequestMutationErrorSchema, PullRequestSummarySchema, PullRequestTimelineItemSchema, PullRequestTimelineRequestSchema, PullRequestTimelineResultSchema } from "@mcode/contracts/pull-requests";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 
 function summary(number = 1) {
   return {

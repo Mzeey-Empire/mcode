@@ -1,11 +1,8 @@
 import type { AttachmentMeta } from "@/transport";
-import type {
-  DevinMode,
-  MessageMention,
-  OrchestrationMode,
-  PreviewAnnotationBundle,
-  SelectedTextComment,
-} from "@mcode/contracts";
+import type { DevinMode, OrchestrationMode } from "@mcode/contracts/models/enums";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import { useThreadStore } from "@/stores/threadStore";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import type { PreparedComposerSubmission } from "./composer-submission-types";

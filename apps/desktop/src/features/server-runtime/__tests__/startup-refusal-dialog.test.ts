@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { describeRefusal, type StartupRefusal } from "@mcode/contracts";
+import { describeRefusal, type StartupRefusal } from "@mcode/contracts/startup-failure";
 import { showStartupRefusalDialog, startupRefusalTitle } from "../startup-refusal-dialog.js";
 
 const QUIT = 0;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PermissionOption } from "@agentclientprotocol/sdk";
-import { ApprovalRequestBodySchema } from "@mcode/contracts";
+import { ApprovalRequestBodySchema } from "@mcode/contracts/models/approval";
 import { CursorAcpClientBridge } from "../cursor-acp-client-bridge.js";
 import { mapResponseToAcpOutcome, pickFullAccessAllowOption } from "../cursor-acp-permission-mapper.js";
 

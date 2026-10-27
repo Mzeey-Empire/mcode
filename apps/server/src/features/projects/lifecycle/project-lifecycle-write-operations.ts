@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Database } from "bun:sqlite";
-import { ThreadSchema, WorkspaceSchema } from "@mcode/contracts";
+import { ThreadSchema } from "@mcode/contracts/models/thread";
+import { WorkspaceSchema } from "@mcode/contracts/models/workspace";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { ProjectLifecycleStore } from "./project-lifecycle-store.js";
 

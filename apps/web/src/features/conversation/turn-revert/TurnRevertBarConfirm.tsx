@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { TurnSnapshot } from "@mcode/contracts";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { RevertConfirm } from "./RevertConfirm";

@@ -1,7 +1,7 @@
 import { injectable, inject } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { isCompletionCapable } from "@mcode/contracts";
-import type { CompletionOptions, IProviderRegistry, ProviderId } from "@mcode/contracts";
+import { isCompletionCapable } from "@mcode/contracts/providers/interfaces";
+import type { CompletionOptions, IProviderRegistry, ProviderId } from "@mcode/contracts/providers/interfaces";
 import { SettingsService } from "../../features/settings/settings-service.js";
 import { ProviderAvailabilityService } from "../../features/providers/availability/provider-availability-service.js";
 

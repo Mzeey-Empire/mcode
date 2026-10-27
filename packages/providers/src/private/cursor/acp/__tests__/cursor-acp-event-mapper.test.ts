@@ -3,7 +3,8 @@ import * as NodeURL from "node:url";
 import type * as NodeChildProcess from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import type { Client, ClientSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
-import { AgentEventType, ApprovalRequestBodySchema, type AgentEvent } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { ApprovalRequestBodySchema } from "@mcode/contracts/models/approval";
 import { AcpSessionRuntime } from "../../../protocols/acp/acp-session-runtime.js";
 import { CursorAcpClientBridge } from "../cursor-acp-client-bridge.js";
 import {

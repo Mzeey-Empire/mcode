@@ -1,4 +1,4 @@
-import type { ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import { describe, expect, it } from "vitest";
 import { startupRetryTarget } from "../edit-startup-message";
 

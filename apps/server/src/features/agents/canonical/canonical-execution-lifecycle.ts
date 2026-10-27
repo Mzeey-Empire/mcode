@@ -1,4 +1,4 @@
-import type { TurnOutcome } from "@mcode/contracts";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 /** Durable lifecycle evidence for one exact execution. */
 export interface CanonicalExecutionLifecycleState {

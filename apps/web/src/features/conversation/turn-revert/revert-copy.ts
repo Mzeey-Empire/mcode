@@ -1,4 +1,4 @@
-import type { RevertFilePlan, TurnRevertPreview, TurnRevertResult } from "@mcode/contracts";
+import type { RevertFilePlan, TurnRevertPreview, TurnRevertResult } from "@mcode/contracts/models/turn-revert";
 import { basename } from "@/lib/path";
 
 type ReadyPreview = Extract<TurnRevertPreview, { status: "ready" }>;

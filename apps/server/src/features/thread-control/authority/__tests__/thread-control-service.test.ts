@@ -3,7 +3,7 @@ import "reflect-metadata";
 import { ApprovalService } from "../../../agents/approvals/approval-service.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PendingThreadCreateApproval, PendingThreadSendApproval, PendingThreadStopApproval } from "../persistence/thread-control-approval-repo.js";
-import { THREAD_GET_TRANSCRIPT_MAX_BYTES } from "@mcode/contracts";
+import { THREAD_GET_TRANSCRIPT_MAX_BYTES } from "@mcode/contracts/thread-control";
 
 const { mockBroadcast } = vi.hoisted(() => ({ mockBroadcast: vi.fn() }));
 

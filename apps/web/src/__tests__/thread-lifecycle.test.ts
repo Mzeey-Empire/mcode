@@ -18,7 +18,9 @@ import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { mockTransport } from "./mocks/transport";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
-import type { AgentEvent, PreviewAnnotationBundle, SelectedTextComment } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

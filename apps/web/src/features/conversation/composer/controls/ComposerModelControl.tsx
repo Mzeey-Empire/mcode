@@ -6,7 +6,7 @@ import {
   type ComposerModelPreferenceDefaults,
 } from "./ComposerModelPreferences";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
-import type { ReasoningLevel } from "@mcode/contracts";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { findProviderModel } from "@/lib/model-registry";
 
 /** Props for the Composer's model control. */

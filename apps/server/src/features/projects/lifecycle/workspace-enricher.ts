@@ -9,7 +9,7 @@ import { logger } from "@mcode/shared";
 import { GitRepositoryService } from "../git/git-repository-service.js";
 import { WorktreeSafetyService } from "../git/worktree-safety-service.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import type { WorkspaceEnrichment } from "@mcode/contracts";
+import type { WorkspaceEnrichment } from "@mcode/contracts/models/workspace";
 
 /** Enriches workspace records with git + thread metadata for the project selector. */
 @injectable()

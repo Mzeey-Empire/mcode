@@ -1,5 +1,6 @@
 import { useMemo, type ReactElement } from "react";
-import { TERMINAL_MAX_PER_SCOPE, type WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts/models/terminal";
+import { type WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { PanelTabStrip, type PanelTabStripItem } from "@/components/panels/shell/PanelTabStrip";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";

@@ -3,14 +3,11 @@ import { PlanImplementStore } from "../planning/persistence/plan-implement-store
 import { PlanCommentStore } from "../planning/persistence/plan-comment-store.js";
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
-import {
-  ParentNarrativeRecoveryItemSchema,
-  TurnFileEffectSummarySchema,
-  type InterruptionCause,
-  type ParentNarrativeRecoveryItem,
-  type StoredAttachment,
-  type TurnOutcome,
-} from "@mcode/contracts";
+import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { TurnFileEffectSummarySchema } from "@mcode/contracts/models/file-effect";
+import { type InterruptionCause } from "@mcode/contracts/compat/agent-model";
+import { type StoredAttachment } from "@mcode/contracts/models/attachment";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { z } from "zod";
 
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { WS_METHODS } from "@mcode/contracts";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 
 describe("agent.listRunning contract", () => {
   it("is registered in WS_METHODS with runtime snapshot result", () => {

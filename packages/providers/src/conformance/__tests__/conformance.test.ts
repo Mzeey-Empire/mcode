@@ -1,6 +1,7 @@
 import { assert, describe, expect, it, vi } from "vitest";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import { AgentEventSchema, type AgentEvent, type PlanCapture } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type PlanCapture } from "@mcode/contracts/providers/interfaces";
 import { createClaudeProvider } from "../../factories.js";
 import { fixtureHost } from "../../private/claude/__tests__/helpers/provider-fixture.js";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";

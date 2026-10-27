@@ -1,4 +1,4 @@
-import type { PlanAnswer, PlanQuestion } from "@mcode/contracts";
+import type { PlanAnswer, PlanQuestion } from "@mcode/contracts/models/plan-questions";
 
 /** Starting answers for a fresh batch: each question's recommended option, so Enter takes it. */
 export function recommendedPlanAnswers(questions: readonly PlanQuestion[]): Map<string, PlanAnswer> {

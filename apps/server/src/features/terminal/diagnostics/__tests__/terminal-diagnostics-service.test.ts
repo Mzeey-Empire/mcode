@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TerminalDiagnosticEvent, TerminalHealthSnapshot } from "@mcode/contracts";
+import type { TerminalDiagnosticEvent, TerminalHealthSnapshot } from "@mcode/contracts/models/terminal-diagnostics";
 import { TerminalDiagnosticsService } from "../terminal-diagnostics-service.js";
 
 const HEALTH: TerminalHealthSnapshot = {

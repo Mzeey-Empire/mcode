@@ -1,6 +1,7 @@
 import * as NodeEvents from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import { getDefaultSettings, type TerminalResolvedProfile } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { type TerminalResolvedProfile } from "@mcode/contracts/models/terminal";
 import {
   TerminalCommandService,
   noninteractiveLaunch,

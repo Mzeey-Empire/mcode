@@ -1,11 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import type {
-  BrowserAutomationHostDispatch,
-  BrowserAutomationHostDispatchTarget,
-  BrowserAutomationResponse,
-} from "@mcode/contracts";
-import { BrowserAutomationResponseSchema } from "@mcode/contracts";
+import type { BrowserAutomationHostDispatch, BrowserAutomationHostDispatchTarget, BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
+import { BrowserAutomationResponseSchema } from "@mcode/contracts/models/browser-automation";
 import {
   BrowserSessionDriver,
   ElectronBrowserSessionAdapter,

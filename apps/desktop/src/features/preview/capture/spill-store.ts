@@ -7,10 +7,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import { BrowserWindow, ipcMain } from "electron";
-import {
-  isBrowserCaptureSpillAppDataPath,
-  type McodeBrowserCaptureV2,
-} from "@mcode/contracts";
+import { isBrowserCaptureSpillAppDataPath, type McodeBrowserCaptureV2 } from "@mcode/contracts/models/browser-preview";
 import { getMcodeDir, spillWorkspaceDirSegment } from "@mcode/shared";
 
 /** Delete spill files older than this under `browser-capture-spill/` in the Mcode app data dir. */

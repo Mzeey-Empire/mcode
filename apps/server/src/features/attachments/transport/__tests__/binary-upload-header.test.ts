@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BinaryUploadHeaderSchema } from "@mcode/contracts";
+import { BinaryUploadHeaderSchema } from "@mcode/contracts/ws/protocol";
 
 describe("BinaryUploadHeader parsing", () => {
   it("parses a valid binary upload header", () => {

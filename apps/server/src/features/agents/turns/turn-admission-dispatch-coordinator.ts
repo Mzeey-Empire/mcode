@@ -1,29 +1,18 @@
 import * as NodeFS from "node:fs";
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
-import {
-  AgentEventType,
-  previewAnnotationPageSnapshotName,
-  toPreviewAnnotationBundleV2,
-  isDiffAnnotationPayload,
-  isFileAnnotationPayload,
-  type AttachmentMeta,
-  type ContextWindowMode,
-  type DevinMode,
-  type IAgentProvider,
-  type IProviderRegistry,
-  type InteractionMode,
-  type MessageMention,
-  type PermissionMode,
-  type ProviderId,
-  type ProviderModelInfo,
-  type SendMessageInput,
-  type StoredAttachment,
-  type SystemNoticeMetadata,
-  type Thread,
-  type TurnRequest,
-  type TurnRuntimeSnapshot,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { previewAnnotationPageSnapshotName, toPreviewAnnotationBundleV2, isDiffAnnotationPayload, isFileAnnotationPayload } from "@mcode/contracts/models/browser-preview";
+import { type AttachmentMeta, type StoredAttachment } from "@mcode/contracts/models/attachment";
+import { type ContextWindowMode } from "@mcode/contracts/models/settings";
+import { type DevinMode, type InteractionMode, type PermissionMode } from "@mcode/contracts/models/enums";
+import { type IAgentProvider, type IProviderRegistry, type ProviderId, type TurnRequest } from "@mcode/contracts/providers/interfaces";
+import { type MessageMention } from "@mcode/contracts/models/mention";
+import { type ProviderModelInfo } from "@mcode/contracts/providers/models";
+import { type SendMessageInput } from "@mcode/contracts/ws/methods";
+import { type SystemNoticeMetadata } from "@mcode/contracts/models/message";
+import { type Thread } from "@mcode/contracts/models/thread";
+import { type TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
 import { logger, validateBranchName } from "@mcode/shared";
 import { broadcast } from "../../../application/transport/push.js";
 import { publishSynthesizedAgentEvents } from "../canonical/synthesized-agent-event-publication.js";
@@ -106,7 +95,7 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   /** Request whose plan acceptance commits with canonical parent start. */
   planImplement?: { requestId: string };
   setupSkip?: {
-    reason: Extract<import("@mcode/contracts").ThreadStartupStepDetail, { phase: "setup" }>["skipReason"] & ("plan-implement" | "delegation");
+    reason: Extract<import("@mcode/contracts/thread-startup").ThreadStartupStepDetail, { phase: "setup" }>["skipReason"] & ("plan-implement" | "delegation");
     sourceThreadId: string;
   };
   /** Resolves the authoritative first-turn handshake before provider I/O continues. */

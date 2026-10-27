@@ -1,8 +1,5 @@
 import * as NodeCrypto from "node:crypto";
-import {
-  BROWSER_AUTOMATION_OPERATIONS,
-  type BrowserAutomationPublicOperation,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_OPERATIONS, type BrowserAutomationPublicOperation } from "@mcode/contracts/models/browser-automation";
 
 const DEFAULT_IDLE_TTL_MS = 30 * 60_000;
 const DEFAULT_ABSOLUTE_TTL_MS = 8 * 60 * 60_000;

@@ -1,4 +1,6 @@
-import { WS_METHODS, type Thread, type Workspace, type WorkspaceCreateResult, type WsMethodName } from "@mcode/contracts";
+import { WS_METHODS, type WorkspaceCreateResult, type WsMethodName } from "@mcode/contracts/ws/methods";
+import { type Thread } from "@mcode/contracts/models/thread";
+import { type Workspace } from "@mcode/contracts/models/workspace";
 import { logger } from "@mcode/shared";
 import * as NodePerfHooks from "node:perf_hooks";
 import type { z } from "zod";

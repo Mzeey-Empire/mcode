@@ -1,4 +1,4 @@
-import { ApprovalChoiceSchema, type ApprovalChoice, type ApprovalOutcome, type ApprovalRequestBody, type ApprovalResponse } from "@mcode/contracts";
+import { ApprovalChoiceSchema, type ApprovalChoice, type ApprovalOutcome, type ApprovalRequestBody, type ApprovalResponse } from "@mcode/contracts/models/approval";
 
 /** Resolve a response against the choices the adapter actually advertised. */
 export function approvalChoice(body: ApprovalRequestBody, response: ApprovalResponse): ApprovalChoice | undefined {

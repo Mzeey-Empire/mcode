@@ -2,7 +2,7 @@ import { createMockWorkspace } from "@mcode/contracts/testing";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProjectIcon } from "@mcode/contracts";
+import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
 import { mockTransport } from "@/__tests__/mocks/transport";
 
 vi.mock("@/transport", async () => ({

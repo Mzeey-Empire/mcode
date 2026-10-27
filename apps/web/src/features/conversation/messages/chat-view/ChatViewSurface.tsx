@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type Ref, type RefObject } from "react";
 import { GitFork } from "lucide-react";
-import type { Message, SelectedTextComment, ThreadStartup, ThreadStartupKind } from "@mcode/contracts";
+import type { Message } from "@mcode/contracts/models/message";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
+import type { ThreadStartup, ThreadStartupKind } from "@mcode/contracts/thread-startup";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/ui/copy-button";

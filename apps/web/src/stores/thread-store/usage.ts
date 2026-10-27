@@ -1,4 +1,4 @@
-import type { ProviderUsageInfo } from "@mcode/contracts";
+import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
 
 const USAGE_STALE_TTL_MS = 24 * 60 * 60 * 1000;
 

@@ -1,10 +1,8 @@
 import * as NodeCrypto from "node:crypto";
-import {
-  DelegateTaskInputSchema, TaskStatusInputSchema, delegatedTaskRosterEntryId, isLiveSubagentStatus, TaskCancelInputSchema, ProviderIdSchema,
-  type DelegateTaskInput, type DelegateTaskResult, type TaskStatusInput, type TaskStatusResult,
-  type TaskCancelInput, type TaskCancelResult, type ThreadControlError, type TaskState, type Thread,
-  type SubagentRosterEntry, type SubagentStatus,
-} from "@mcode/contracts";
+import { DelegateTaskInputSchema, TaskStatusInputSchema, TaskCancelInputSchema, type DelegateTaskInput, type DelegateTaskResult, type TaskStatusInput, type TaskStatusResult, type TaskCancelInput, type TaskCancelResult, type ThreadControlError, type TaskState } from "@mcode/contracts/thread-control";
+import { delegatedTaskRosterEntryId, isLiveSubagentStatus, type SubagentRosterEntry, type SubagentStatus } from "@mcode/contracts/models/subagent-roster";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { type Thread } from "@mcode/contracts/models/thread";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import type { ThreadRepo } from "../persistence/thread-repo.js";
 import type { ThreadControlService } from "../authority/thread-control-service.js";

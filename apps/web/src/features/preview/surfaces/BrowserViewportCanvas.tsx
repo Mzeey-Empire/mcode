@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
-import { BROWSER_AUTOMATION_VIEWPORT_CANVAS_PADDING_PX } from "@mcode/contracts";
+import { BROWSER_AUTOMATION_VIEWPORT_CANVAS_PADDING_PX } from "@mcode/contracts/models/browser-automation";
 import { cn } from "@/lib/utils";
 import { useViewportDragStore, type ViewportDragEdge } from "../state/viewportDragStore";
 import {

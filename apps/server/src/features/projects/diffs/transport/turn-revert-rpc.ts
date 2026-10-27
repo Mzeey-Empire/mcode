@@ -1,4 +1,4 @@
-import { WS_METHODS, type WsMethodName } from "@mcode/contracts";
+import { WS_METHODS, type WsMethodName } from "@mcode/contracts/ws/methods";
 import type { TurnRevertService } from "../revert/turn-revert-service.js";
 
 type RevertMethod = "turn.revert.preview" | "turn.revert.apply" | "turn.revert.undo";

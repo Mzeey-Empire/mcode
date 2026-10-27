@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type {
-  WorkspaceEnvironmentDocument,
-  WorkspaceEnvironmentReadResult,
-  WorkspaceEnvironmentStorageMode,
-  WorkspaceEnvironmentValidationIssue,
-} from "@mcode/contracts";
+import type { WorkspaceEnvironmentDocument, WorkspaceEnvironmentReadResult, WorkspaceEnvironmentStorageMode, WorkspaceEnvironmentValidationIssue } from "@mcode/contracts/models/workspace-environment";
 import { getTransport, RpcError } from "@/transport";
 import { useToastStore } from "@/stores/toastStore";
 import { useProjectActionStore } from "../environment/state/project-action-store";

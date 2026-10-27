@@ -7,7 +7,7 @@
 import type { Database } from "bun:sqlite";
 import { eq, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type { ProviderModelInfo } from "@mcode/contracts";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 import { providerModelCache } from "../../../../runtime/persistence/sqlite/schema.js";
 
 /** A cached model list row from `provider_model_cache`. */

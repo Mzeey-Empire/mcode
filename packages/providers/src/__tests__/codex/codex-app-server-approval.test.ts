@@ -14,7 +14,7 @@ import type { CodexApprovalRequest } from "../../private/codex/codex-app-server.
 import { routeCodexServerRequest } from "../../private/codex/codex-app-server.js";
 import { CodexPlanQuestions } from "../../private/codex/codex-plan-questions.js";
 import { logger } from "@mcode/shared";
-import type { NativePlanQuestionBatch, PlanQuestionSettlement } from "@mcode/contracts";
+import type { NativePlanQuestionBatch, PlanQuestionSettlement } from "@mcode/contracts/models/plan-questions";
 
 const questionParams = {
   threadId: "native-thread", turnId: "native-turn", itemId: "item",

@@ -2,7 +2,8 @@ import { createMockThread } from "@mcode/contracts/testing";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BrowserTabInfo, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { BrowserTabInfo } from "@mcode/contracts/models/browser-tab";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { mockTransport } from "@/__tests__/mocks/transport";
 
 const transport = {

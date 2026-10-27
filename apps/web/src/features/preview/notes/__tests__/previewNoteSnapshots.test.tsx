@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { StagedDraftImage } from "@mcode/contracts";
+import type { StagedDraftImage } from "@mcode/contracts/models/next-message-draft";
 import { freezeDraftSubmission, readSendableDraftContent } from "@/features/conversation/composer/draft/draft-submission";
 import {
   browserPagesToBundle,

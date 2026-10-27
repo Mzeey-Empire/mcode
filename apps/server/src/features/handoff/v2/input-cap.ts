@@ -1,4 +1,4 @@
-import type { IAgentProvider } from "@mcode/contracts";
+import type { IAgentProvider } from "@mcode/contracts/providers/interfaces";
 
 /** Largest first-turn input Codex accepts inline, so seeded Codex prompts must fit inside it. */
 export const CODEX_INLINE_INPUT_MAX_CHARS = 14_000;

@@ -1,6 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BrowserAutomationControllerState, BrowserAutomationPointerEvent } from "@mcode/contracts";
+import type { BrowserAutomationControllerState, BrowserAutomationPointerEvent } from "@mcode/contracts/models/browser-automation";
 import { browserAutomationTargetKey, useBrowserAutomationStore } from "../../automation/browserAutomationStore";
 import { AGENT_CURSOR_ACTIVE_MS, BrowserActingOverlay, mapAgentCursorPoint } from "../BrowserActingOverlay";
 

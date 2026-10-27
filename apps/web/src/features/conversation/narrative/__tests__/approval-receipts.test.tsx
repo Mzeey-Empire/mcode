@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { ApprovalReceiptRecord } from "@mcode/contracts";
+import type { ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
 import type { ToolCall, ToolCallRecord } from "@/transport/types";
 import { ApprovalReceiptRow, approvalReceiptCopy } from "../ApprovalReceiptRow";
 import { buildNarrativeItems } from "../build-narrative";

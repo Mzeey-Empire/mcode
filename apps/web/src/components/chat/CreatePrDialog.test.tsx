@@ -2,7 +2,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement, ReactNode } from "react";
-import type { GitRef } from "@mcode/contracts";
+import type { GitRef } from "@mcode/contracts/git";
 
 import { installListboxLayout } from "@/__tests__/helpers/picker-layout";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";

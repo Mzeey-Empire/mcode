@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { WorkspaceEnvironmentDocument, WorkspaceEnvironmentReadResult } from "@mcode/contracts";
+import type { WorkspaceEnvironmentDocument, WorkspaceEnvironmentReadResult } from "@mcode/contracts/models/workspace-environment";
 import { jsonEqual, type SettingsIssue } from "./settings-model";
 
 /** One Project's unsaved edit session: what the disk held, what the user changed it to, and what is open. */

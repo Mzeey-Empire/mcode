@@ -4,7 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { logger } from "@mcode/shared";
-import type { WorkspaceEnvironmentAction } from "@mcode/contracts";
+import type { WorkspaceEnvironmentAction } from "@mcode/contracts/models/workspace-environment";
 import { WorkspaceEnvironmentService } from "../../../projects/index.js";
 import type { WorkspaceEnvironmentTerminalCommandExecutor } from "../../../projects/environment/workspace-environment-service.js";
 import type { TerminalCommandCompletion } from "../../../terminal/commands/terminal-command-service.js";

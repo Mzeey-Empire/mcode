@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import type { SelectedTextComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import { AnnotationMarker } from "@/components/ui/annotation-marker";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";

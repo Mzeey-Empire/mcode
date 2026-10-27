@@ -1,6 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
-import type { Message } from "@mcode/contracts";
+import type { Message } from "@mcode/contracts/models/message";
 import { expandTranscriptNarrative, expandTranscriptToolGroups } from "../transcript-narrative-items";
 import { createTranscriptItemProjector, type ChatVirtualItem, type PersistedNarrativeRecords, type TranscriptProjectionInput } from "../virtual-items";
 

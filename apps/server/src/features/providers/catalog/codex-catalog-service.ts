@@ -1,21 +1,9 @@
 import * as NodePath from "node:path";
 import { inject, injectable } from "tsyringe";
-import type {
-  ProviderCatalogDiagnosticSourceKind,
-  ProviderCatalogSourceDiagnostic,
-  ProviderCatalogFreshness,
-  ProviderPluginCapability,
-  SelectableProviderAgent,
-  SkillInfo,
-} from "@mcode/contracts";
-import {
-  PROVIDER_CATALOG_MAX_ENTRIES,
-  ProviderPluginCapabilitySchema,
-  PROVIDER_CATALOG_MAX_DIAGNOSTICS,
-  PROVIDER_CATALOG_MAX_SELECTABLE_AGENTS,
-  SelectableProviderAgentSchema,
-  SkillInfoSchema,
-} from "@mcode/contracts";
+import type { ProviderCatalogDiagnosticSourceKind, ProviderCatalogSourceDiagnostic, ProviderCatalogFreshness, ProviderPluginCapability, SelectableProviderAgent } from "@mcode/contracts/providers/capability-catalog";
+import type { SkillInfo } from "@mcode/contracts/skills";
+import { PROVIDER_CATALOG_MAX_ENTRIES, ProviderPluginCapabilitySchema, PROVIDER_CATALOG_MAX_DIAGNOSTICS, PROVIDER_CATALOG_MAX_SELECTABLE_AGENTS, SelectableProviderAgentSchema } from "@mcode/contracts/providers/capability-catalog";
+import { SkillInfoSchema } from "@mcode/contracts/skills";
 import { logger } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import {
@@ -686,7 +674,7 @@ export class CodexCatalogService {
   }
 
   /** Reads live models through the shared catalog connection. */
-  async listModels(): Promise<import("@mcode/contracts").ProviderModelInfo[]> {
+  async listModels(): Promise<import("@mcode/contracts/providers/models").ProviderModelInfo[]> {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     try {
       const { client } = await this.acquireClient();

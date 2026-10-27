@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { CODEX_STATIC_MODELS, type ProviderModelInfo } from "@mcode/contracts";
+import { CODEX_STATIC_MODELS } from "@mcode/contracts/providers/codex-static-fallback";
+import { type ProviderModelInfo } from "@mcode/contracts/providers/models";
 import type { CodexRpcClient } from "./codex-rpc-client.js";
 
 const effort = z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);

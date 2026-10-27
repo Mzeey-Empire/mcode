@@ -1,4 +1,6 @@
-import { ToolCallRecordSchema, type AgentEvent, type AgentItem, type ToolCallRecord } from "@mcode/contracts";
+import { ToolCallRecordSchema, type ToolCallRecord } from "@mcode/contracts/models/tool-call-record";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type AgentItem } from "@mcode/contracts/compat/agent-model";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import type { CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
 import { stepsSettledWith } from "../tools/background-held-tools.js";

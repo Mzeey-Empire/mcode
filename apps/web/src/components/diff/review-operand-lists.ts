@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { DetachedWorktreeTarget, GitListError, GitRef, GitRefSide, GitSearchCommitsResult } from "@mcode/contracts";
+import type { DetachedWorktreeTarget, GitListError, GitRef, GitRefSide, GitSearchCommitsResult } from "@mcode/contracts/git";
 
 import { getTransport } from "@/transport";
 import type { PickerStatus } from "@/components/ui/picker";

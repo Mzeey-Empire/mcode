@@ -1,8 +1,4 @@
-import type {
-  PullRequestBoundedDataMarker,
-  PullRequestReviewerTarget,
-  PullRequestTimelineItem,
-} from "@mcode/contracts";
+import type { PullRequestBoundedDataMarker, PullRequestReviewerTarget, PullRequestTimelineItem } from "@mcode/contracts/pull-requests";
 import { type Virtualizer, useVirtualizer } from "@tanstack/react-virtual";
 import {
   CircleCheck,

@@ -1,6 +1,8 @@
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import { AgentEventType, ProviderRuntimeEventSchema, type ProviderRuntimeEvent, type TurnRequest } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { type TurnRequest } from "@mcode/contracts/providers/interfaces";
 import { createClaudeProvider, type ClaudeProviderBoundary, type ProviderFactoryInput, type ProviderEventDraft, type ProviderMcodeAttachment } from "../index.js";
 import { DeterministicCanonicalSink } from "../conformance/deterministic-sink.js";
 import { fixtureHost } from "../private/claude/__tests__/helpers/provider-fixture.js";
@@ -8,9 +10,10 @@ import { BrowserAutomationSessionLease } from "../private/claude/__tests__/helpe
 import * as NodeURL from "node:url";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
-import { PLAN_MAX_CONTENT_CHARS, type PlanCapture } from "@mcode/contracts";
+import { PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts/models/plan";
+import { type PlanCapture } from "@mcode/contracts/providers/interfaces";
 import { loadProviderFixtureManifest, validateProviderFixtureManifest } from "../conformance/fixture-safety.js";
-import { ProviderParentEvidenceSchema } from "@mcode/contracts";
+import { ProviderParentEvidenceSchema } from "@mcode/contracts/events/provider-runtime-event";
 import { queryMethodStubs } from "../private/claude/__tests__/helpers/mock-sdk-query.js";
 import { NO_MCODE_TOOLKITS } from "@mcode/thread-orchestration";
 import { expectInstructionSections } from "./mcode-instruction-sections.js";

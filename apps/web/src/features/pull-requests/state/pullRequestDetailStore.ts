@@ -1,13 +1,4 @@
-import type {
-  PullRequestBoundedDataMarker,
-  PullRequestCheck,
-  PullRequestConversationItem,
-  PullRequestDetail,
-  PullRequestError,
-  PullRequestGetResource,
-  PullRequestIdentity,
-  PullRequestTimelineItem,
-} from "@mcode/contracts";
+import type { PullRequestBoundedDataMarker, PullRequestCheck, PullRequestConversationItem, PullRequestDetail, PullRequestError, PullRequestGetResource, PullRequestIdentity, PullRequestTimelineItem } from "@mcode/contracts/pull-requests";
 import { create } from "zustand";
 import {
   getPullRequestTransport,

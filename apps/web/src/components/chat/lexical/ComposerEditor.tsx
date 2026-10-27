@@ -7,7 +7,7 @@ import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type EditorState, type LexicalEditor } from "lexical";
-import type { MessageMention } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
 import { MentionNode } from "./MentionNode";
 import { SlashCommandNode } from "./SlashCommandNode";
 import { MentionPlugin } from "./MentionPlugin";

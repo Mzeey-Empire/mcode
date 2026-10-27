@@ -1,8 +1,11 @@
 import "reflect-metadata";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAgentModelState, MessageSchema, ProviderRuntimeEventSchema, providerRuntimeEvent, SUBAGENT_REPORTING,
-  type AgentEvent, type AgentThread, type AgentTurn, type ChildThreadEvidence } from "@mcode/contracts";
+import { createAgentModelState, type AgentThread, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { ProviderRuntimeEventSchema, providerRuntimeEvent, type ChildThreadEvidence } from "@mcode/contracts/events/provider-runtime-event";
+import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { loadProviderFixtureManifest } from "../../../../../../../packages/providers/src/conformance/fixture-safety.js";
 import { mapCopilotEvent, type CopilotMappedEvent, type CopilotTurnState } from "../../../../../../../packages/providers/src/private/copilot/copilot-event-mapper.js";
 import { AcceptedCodexCollaboration } from "../accepted-codex-collaboration.js";

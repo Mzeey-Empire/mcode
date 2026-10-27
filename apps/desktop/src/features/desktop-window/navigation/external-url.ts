@@ -1,5 +1,5 @@
 import { ipcMain, shell } from "electron";
-import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts";
+import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts/models/workspace-preview-uri";
 
 const EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
 

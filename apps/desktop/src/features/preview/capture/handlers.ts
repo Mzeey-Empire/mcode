@@ -7,12 +7,8 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { BrowserWindow, app, ipcMain, type WebContents } from "electron";
-import {
-  clampMcodeBrowserCaptureV2,
-  MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
-  type AttachmentMeta,
-  type McodeBrowserCaptureV2,
-} from "@mcode/contracts";
+import { clampMcodeBrowserCaptureV2, MCODE_BROWSER_CAPTURE_V2_STRING_MAX, type McodeBrowserCaptureV2 } from "@mcode/contracts/models/browser-preview";
+import { type AttachmentMeta } from "@mcode/contracts/models/attachment";
 import { redactMcodeBrowserCaptureV2 } from "@mcode/shared";
 import { type Bounds, type PreviewSession, type CaptureFinishResult, sessions, getSession } from "../state/window-session.js";
 import { persistBrowserCaptureSpill } from "./spill-store.js";

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { ReasoningLevel } from "@mcode/contracts";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import {
   isXhighEffortModel,
   isMaxEffortModel,

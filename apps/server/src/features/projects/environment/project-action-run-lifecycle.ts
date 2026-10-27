@@ -1,5 +1,5 @@
 import { logger } from "@mcode/shared";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import type { ProjectActionRunRepo } from "./persistence/project-action-run-repo.js";
 import type { ProjectActionRunPublisher } from "./project-action-run-publisher.js";
 import type { ActiveProjectAction, ProjectActionSlotState } from "./project-action-types.js";

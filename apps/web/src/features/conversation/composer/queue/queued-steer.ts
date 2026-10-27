@@ -1,4 +1,4 @@
-import type { HeldSteer, SettleUnknownSteerResult, TurnSteerResult } from "@mcode/contracts";
+import type { HeldSteer, SettleUnknownSteerResult, TurnSteerResult } from "@mcode/contracts/models/turn-steer";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useQueueStore, type QueuedMessage, type QueuedSteer } from "@/stores/queueStore";
 import { scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";

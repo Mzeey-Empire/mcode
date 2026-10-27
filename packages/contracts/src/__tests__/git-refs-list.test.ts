@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WS_METHODS } from "../index.js";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 
 const method = WS_METHODS()["git.refs.list"];
 

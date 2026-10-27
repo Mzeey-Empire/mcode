@@ -1,13 +1,10 @@
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
-import {
-  MessageSchema,
-  type HookExecutionRecord,
-  type Message,
-  type ProviderIdentity,
-  type ThoughtSegmentRecord,
-  type ToolCallRecord,
-} from "@mcode/contracts";
+import { MessageSchema, type Message } from "@mcode/contracts/models/message";
+import { type HookExecutionRecord } from "@mcode/contracts/models/hook-execution";
+import { type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import { type ThoughtSegmentRecord } from "@mcode/contracts/models/thought-segment";
+import { type ToolCallRecord } from "@mcode/contracts/models/tool-call-record";
 
 /** Current shape of the legacy parent-conversation migration. */
 export const LEGACY_CONVERSATION_MIGRATION_VERSION = 1;

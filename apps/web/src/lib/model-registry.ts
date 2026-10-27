@@ -1,6 +1,10 @@
 import { useSettingsStore } from "@/stores/settingsStore";
-import { CLAUDE_STATIC_MODELS, CODEX_STATIC_MODELS, CURSOR_STATIC_MODEL_FALLBACK, DEVIN_STATIC_MODEL_FALLBACK, groupDevinModelFamilies } from "@mcode/contracts";
-import type { ContextWindowMode, ModelLifecycle, ProviderModelInfo, ReasoningLevel } from "@mcode/contracts";
+import { CLAUDE_STATIC_MODELS } from "@mcode/contracts/providers/claude-static-fallback";
+import { CODEX_STATIC_MODELS } from "@mcode/contracts/providers/codex-static-fallback";
+import { CURSOR_STATIC_MODEL_FALLBACK } from "@mcode/contracts/providers/cursor-static-fallback";
+import { DEVIN_STATIC_MODEL_FALLBACK, groupDevinModelFamilies } from "@mcode/contracts/providers/devin-models";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ModelLifecycle, ProviderModelInfo } from "@mcode/contracts/providers/models";
 import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
   getModelContextWindow as sharedGetModelContextWindow,

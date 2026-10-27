@@ -1,10 +1,6 @@
 import type { AttachmentMeta } from "@/transport";
-import type {
-  DraftBrowserNotePage,
-  DraftDiffComment,
-  DraftFileComment,
-  PreviewAnnotationBundle,
-} from "@mcode/contracts";
+import type { DraftBrowserNotePage, DraftDiffComment, DraftFileComment } from "@mcode/contracts/models/next-message-draft";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import type { ComposerFormSubmission } from "../draft/useComposerFormController";
 import type { ComposerSubmission } from "./composer-submission";
 

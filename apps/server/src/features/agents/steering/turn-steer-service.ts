@@ -6,15 +6,8 @@
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import {
-  MAX_HELD_STEERS,
-  type ListHeldSteersResult,
-  type SettleUnknownSteerParams,
-  type SettleUnknownSteerResult,
-  type TurnSteerParams,
-  type TurnSteerResult,
-  type SystemNoticeMetadata,
-} from "@mcode/contracts";
+import { MAX_HELD_STEERS, type ListHeldSteersResult, type SettleUnknownSteerParams, type SettleUnknownSteerResult, type TurnSteerParams, type TurnSteerResult } from "@mcode/contracts/models/turn-steer";
+import { type SystemNoticeMetadata } from "@mcode/contracts/models/message";
 import { FileService } from "../../projects/files/file-service.js";
 import { injectMentionFileContents, validateMessageMentions, type MentionFiles } from "../turns/message-mentions.js";
 import { TurnSteerRepo } from "./persistence/turn-steer-repo.js";

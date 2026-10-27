@@ -1,12 +1,13 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
 import { logger } from "@mcode/shared";
-import {
-  createSubagentPresentation, mergeSubagentPresentation, resolveBrowserNarrativeTool,
-  resolveSubagentDuration, resolveSubagentMetadata, resolveSubagentPrompt,
-  encodeCanonicalSubagentDetailTarget, encodeSubagentAliasDetailTarget, isDelegateTaskToolName,
-  type ParentNarrativeRecoveryItem, type SubagentPresentation, type AgentEvent, type ThoughtSegmentKind, type ProviderId,
-} from "@mcode/contracts";
+import { createSubagentPresentation, mergeSubagentPresentation, resolveSubagentDuration, resolveSubagentMetadata, resolveSubagentPrompt, encodeCanonicalSubagentDetailTarget, encodeSubagentAliasDetailTarget, type SubagentPresentation } from "@mcode/contracts/models/tool-call-record";
+import { resolveBrowserNarrativeTool } from "@mcode/contracts/models/browser-narrative";
+import { isDelegateTaskToolName } from "@mcode/contracts/models/subagent-roster";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type ThoughtSegmentKind } from "@mcode/contracts/models/thought-segment";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { CreateToolCallRecordInput } from "../../tools/persistence/tool-call-record-repo.js";
 import type { CreateThoughtSegmentInput } from "./persistence/thought-segment-repo.js";
 import type { CreateHookExecutionInput } from "../../events/persistence/hook-execution-repo.js";

@@ -1,5 +1,7 @@
 import { inject, injectable } from "tsyringe";
-import { HOME_TERMINAL_SCOPE_ID, type LegacyTerminalRecord, type LegacyTerminalCreateResult, type TerminalBackendCapabilities } from "@mcode/contracts";
+import { HOME_TERMINAL_SCOPE_ID } from "@mcode/contracts/models/terminal";
+import { type LegacyTerminalRecord, type LegacyTerminalCreateResult } from "@mcode/contracts/ws/terminal-legacy";
+import { type TerminalBackendCapabilities } from "@mcode/contracts/models/terminal-backend";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import {
   TerminalBackend,

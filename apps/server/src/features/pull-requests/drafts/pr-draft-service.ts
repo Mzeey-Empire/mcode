@@ -14,7 +14,7 @@ import { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
 import type { MessageRepo } from "../../agents/conversation/persistence/message-repo.js";
 import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import type { PrDraft } from "@mcode/contracts";
+import type { PrDraft } from "@mcode/contracts/github";
 import { UtilityCompletionService } from "../../../shared/completion/utility-completion-service.js";
 import { parseCompletionDraft } from "./pr-draft-parser.js";
 

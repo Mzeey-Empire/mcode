@@ -11,11 +11,7 @@ import { NarrativeTurnState } from "../narrative-turn-state.js";
 import { ApprovalReceiptStore } from "../../../approvals/approval-receipt-store.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../../../turns/parent-assistant-text-checkpoint-service.js";
-import {
-  createCanonicalSubagentPresentation,
-  encodeCanonicalSubagentDetailTarget,
-  encodeSubagentAliasDetailTarget,
-} from "@mcode/contracts";
+import { createCanonicalSubagentPresentation, encodeCanonicalSubagentDetailTarget, encodeSubagentAliasDetailTarget } from "@mcode/contracts/models/tool-call-record";
 
 /** Seed a workspace + thread so message/record foreign keys are satisfied. */
 function seedThread(db: Database): string {

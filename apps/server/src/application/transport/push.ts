@@ -4,7 +4,8 @@
  */
 
 import type { WebSocket } from "ws";
-import { WS_CHANNELS, type WsChannelName, encodeTerminalDataFrame } from "@mcode/contracts";
+import { WS_CHANNELS, type WsChannelName } from "@mcode/contracts/ws/channels";
+import { encodeTerminalDataFrame } from "@mcode/contracts/ws/terminal-legacy-binary";
 import { logger } from "@mcode/shared";
 import { getTransportPayloadValidator } from "./payload-validation.js";
 

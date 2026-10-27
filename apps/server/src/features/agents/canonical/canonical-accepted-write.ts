@@ -2,9 +2,9 @@ import type { Database } from "bun:sqlite";
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
-import {
-  AcceptedCanonicalAgentEventEnvelopeSchema, CanonicalAgentEventEnvelopeSchema, AgentProgressPositionSchema, TurnOutcomeSchema, MessageSchema,
-} from "@mcode/contracts";
+import { AcceptedCanonicalAgentEventEnvelopeSchema, CanonicalAgentEventEnvelopeSchema, AgentProgressPositionSchema } from "@mcode/contracts/compat/agent-model";
+import { TurnOutcomeSchema } from "@mcode/contracts/models/turn-outcome";
+import { MessageSchema } from "@mcode/contracts/models/message";
 import { canonicalAgentEvents } from "../../../runtime/persistence/sqlite/schema.js";
 import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
 import type { CanonicalAcceptedWriteReceipt } from "./canonical-agent-writer-protocol.js";

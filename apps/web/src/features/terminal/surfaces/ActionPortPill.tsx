@@ -1,5 +1,5 @@
 import { Globe } from "lucide-react";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToastStore } from "@/stores/toastStore";
 import { cn } from "@/lib/utils";

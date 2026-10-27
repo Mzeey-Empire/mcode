@@ -1,6 +1,9 @@
 import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentStopResult, CanonicalAgentEventEnvelope, ThreadStartup, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
+import type { AgentStopResult } from "@mcode/contracts/models/turn-runtime";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
+import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts/models/workspace-environment";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
 import { createOwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 import { ThreadStartupRepo } from "../../persistence/thread-startup-repo.js";

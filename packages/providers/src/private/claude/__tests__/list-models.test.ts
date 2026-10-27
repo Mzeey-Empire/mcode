@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { CLAUDE_STATIC_MODELS, type ProviderModelInfo } from "@mcode/contracts";
+import { CLAUDE_STATIC_MODELS } from "@mcode/contracts/providers/claude-static-fallback";
+import { type ProviderModelInfo } from "@mcode/contracts/providers/models";
 import { listClaudeModels, resetModelCache } from "../list-models.js";
 
 // Minimal shape matching the Anthropic Models API response.

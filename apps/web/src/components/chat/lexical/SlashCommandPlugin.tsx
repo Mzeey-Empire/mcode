@@ -20,7 +20,7 @@ import {
   createMentionId,
   type MentionNodeData,
 } from "./MentionNode";
-import type { ProviderCapabilityIdentity } from "@mcode/contracts";
+import type { ProviderCapabilityIdentity } from "@mcode/contracts/providers/capability-catalog";
 import { SLASH_TRIGGER_RE, type Command } from "../useSlashCommand";
 
 /** Props for the SlashCommandPlugin that detects /-triggers in the editor. */

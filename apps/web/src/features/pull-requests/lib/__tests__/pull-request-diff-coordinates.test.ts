@@ -1,4 +1,4 @@
-import type { PullRequestReviewThread } from "@mcode/contracts";
+import type { PullRequestReviewThread } from "@mcode/contracts/pull-requests";
 import { describe, expect, it } from "vitest";
 import {
   getPullRequestCoordinateKey,

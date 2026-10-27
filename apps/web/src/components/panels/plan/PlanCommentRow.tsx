@@ -1,5 +1,5 @@
 import { Check, MessageCircle, Pencil } from "lucide-react";
-import type { PlanComment } from "@mcode/contracts";
+import type { PlanComment } from "@mcode/contracts/models/plan";
 import { Button } from "@/components/ui/button";
 
 /** Props for {@link PlanCommentRow}. */

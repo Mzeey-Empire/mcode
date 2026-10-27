@@ -1,4 +1,4 @@
-import type { ApprovalSubject } from "@mcode/contracts";
+import type { ApprovalSubject } from "@mcode/contracts/models/approval";
 import { resolveToolName, toolDisplayLabel } from "@/components/chat/tool-renderers/constants";
 import type { ToolCall } from "@/transport/types";
 

@@ -4,11 +4,7 @@
  */
 
 import { injectable, injectAll } from "tsyringe";
-import type {
-  IAgentProvider,
-  IProviderRegistry,
-  ProviderId,
-} from "@mcode/contracts";
+import type { IAgentProvider, IProviderRegistry, ProviderId } from "@mcode/contracts/providers/interfaces";
 
 /** Resolves registered provider instances by their ProviderId. */
 @injectable()

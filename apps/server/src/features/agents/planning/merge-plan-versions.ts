@@ -1,4 +1,4 @@
-import type { PlanVersion, PlanVersionStatus } from "@mcode/contracts";
+import type { PlanVersion, PlanVersionStatus } from "@mcode/contracts/models/plan";
 
 const statusOrder: Record<PlanVersionStatus, number> = { draft: 0, ready: 0, superseded: 1, accepted: 2 };
 

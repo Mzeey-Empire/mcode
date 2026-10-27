@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import * as NodeEvents from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApprovalRequestEnvelope, ApprovalResponse, ApprovalRespondResult, ApprovalRequestBody } from "@mcode/contracts";
+import type { ApprovalRequestEnvelope, ApprovalResponse, ApprovalRespondResult, ApprovalRequestBody } from "@mcode/contracts/models/approval";
 import { logger } from "@mcode/shared";
 import { ApprovalService } from "../approval-service.js";
 

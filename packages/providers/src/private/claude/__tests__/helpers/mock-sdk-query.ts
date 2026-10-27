@@ -6,7 +6,7 @@
  */
 
 import { vi } from "vitest";
-import type { ProviderRuntimeEvent } from "@mcode/contracts";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type {
   ProviderEventSubmissionReceipt,
   ProviderHostPorts,

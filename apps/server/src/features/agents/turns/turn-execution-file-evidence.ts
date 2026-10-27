@@ -1,4 +1,5 @@
-import type { TurnFileEffectSummary, TurnOutcome } from "@mcode/contracts";
+import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 import type { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import type { CreateTurnSnapshotInput } from "./persistence/turn-snapshot-repo.js";

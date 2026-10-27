@@ -10,7 +10,7 @@ import { createWsServer } from "../transport/ws-server.js";
 import { broadcast, broadcastTerminalData, maxBufferedAmount, onSessionChange, sessionCount } from "../transport/push.js";
 import { PortPush } from "../transport/port-push.js";
 import { resolveServerBuildStage } from "../transport/application-rpc.js";
-import { appDisplayName } from "@mcode/contracts";
+import { appDisplayName } from "@mcode/contracts/build-stage";
 import { IpcPushServer, generateIpcPath } from "../transport/ipc-push-server.js";
 import { logger, getMcodeDir } from "@mcode/shared";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";

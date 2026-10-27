@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ProviderCliUpdate, ProviderStatus } from "@mcode/contracts";
+import type { ProviderCliUpdate, ProviderStatus } from "@mcode/contracts/providers/provider-status";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { deriveProviderBellRows, type ProviderBellRow } from "@/features/providers/provider-bell-rows";

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BROWSER_AUTOMATION_MAX_PENDING_REQUESTS } from "@mcode/contracts";
+import { BROWSER_AUTOMATION_MAX_PENDING_REQUESTS } from "@mcode/contracts/models/browser-automation";
 import {
   browserAutomationLifecycleKey,
   browserAutomationRequestKey,

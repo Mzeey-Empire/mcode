@@ -1,4 +1,4 @@
-import { AgentEventSchema, type AgentEvent } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { describe, expect, it } from "vitest";
 
 import { OtherProviderLiveEventEffects } from "../provider-live-event-effects.js";

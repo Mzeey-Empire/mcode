@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Ellipsis, Trash2, Undo2 } from "lucide-react";
-import type { WorkspaceEnvironmentAction } from "@mcode/contracts";
+import type { WorkspaceEnvironmentAction } from "@mcode/contracts/models/workspace-environment";
 import { IconButton } from "@/components/ui/button";
 import {
   DropdownMenu,

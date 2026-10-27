@@ -1,5 +1,6 @@
 import { logger } from "@mcode/shared";
-import type { ProviderIdentity, TurnOutcome } from "@mcode/contracts";
+import type { ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { ExecutionTerminalPersistenceReceipt } from "../execution/execution-worker-handler.js";
 import type { ThreadProviderSessionRepo } from "../../thread-control/persistence/thread-provider-session-repo.js";
 

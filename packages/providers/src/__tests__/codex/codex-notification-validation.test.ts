@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ProviderRuntimeEventSchema } from "@mcode/contracts";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
 import { logger } from "@mcode/shared";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
 import { parseCodexNotification } from "../../private/codex/codex-notification-validation.js";

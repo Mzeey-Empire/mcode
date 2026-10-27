@@ -6,7 +6,8 @@
  * This prevents the SDK from receiving unsupported effort values at runtime.
  */
 
-import { CODEX_STATIC_MODELS, type ReasoningLevel } from "@mcode/contracts";
+import { CODEX_STATIC_MODELS } from "@mcode/contracts/providers/codex-static-fallback";
+import { type ReasoningLevel } from "@mcode/contracts/models/settings";
 
 // Ordered lowest to highest. Walking DOWN from a disallowed tier finds the best
 // supported level without silently escalating effort.

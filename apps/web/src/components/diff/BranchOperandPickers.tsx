@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import type { BranchComparison, GitRef, GitRefSide } from "@mcode/contracts";
+import type { BranchComparison, GitRef, GitRefSide } from "@mcode/contracts/git";
 import { Button } from "@/components/ui/button";
 import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerTab } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";

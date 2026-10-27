@@ -1,5 +1,5 @@
 import { ReviewWorktreeMissingError, assertReviewWorktree, reviewComparisonFailure } from "../review-comparison-errors.js";
-import { WS_METHODS, type WsMethodName } from "@mcode/contracts";
+import { WS_METHODS, type WsMethodName } from "@mcode/contracts/ws/methods";
 import type { z } from "zod";
 import type { HandoffCheckoutService } from "../../../handoff/checkout/handoff-checkout-service.js";
 import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";

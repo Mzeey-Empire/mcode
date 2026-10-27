@@ -26,7 +26,8 @@ beforeEach(() => {
   vi.mocked(mockTransport.stopWorkspaceAction).mockReset();
 });
 
-import { TERMINAL_MAX_PER_SCOPE, type WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts/models/terminal";
+import { type WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useDiffStore } from "@/stores/diffStore";
 import { useSettingsStore } from "@/stores/settingsStore";

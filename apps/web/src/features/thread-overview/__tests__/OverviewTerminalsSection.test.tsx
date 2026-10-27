@@ -2,7 +2,7 @@ import { createMockThread } from "@mcode/contracts/testing";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";

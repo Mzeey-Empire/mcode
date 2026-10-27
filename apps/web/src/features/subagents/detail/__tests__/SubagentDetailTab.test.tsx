@@ -3,9 +3,9 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import {
-  createAgentModelState, type AgentItem, type AgentTurn, type Message, type SubagentDetail, type SubagentRoster, type SubagentRosterEntry,
-} from "@mcode/contracts";
+import { createAgentModelState, type AgentItem, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { type Message } from "@mcode/contracts/models/message";
+import { type SubagentDetail, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { useDiffStore } from "@/stores/diffStore";
 import { useThreadStore } from "@/stores/threadStore";

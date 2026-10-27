@@ -3,11 +3,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BrowserAutomationResponseSchema,
-  type BrowserAutomationHostDispatch,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BrowserAutomationResponseSchema, type BrowserAutomationHostDispatch } from "@mcode/contracts/models/browser-automation";
 import {
   BROWSER_CONFORMANCE_RACE_CATALOGUE,
   createBrowserConformanceScenario,

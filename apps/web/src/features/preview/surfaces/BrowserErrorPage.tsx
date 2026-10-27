@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { FileX, OctagonAlert, ShieldAlert, WifiOff, type LucideIcon } from "lucide-react";
-import type { BrowserCertificateFailure, PreviewPageError } from "@mcode/contracts";
+import type { BrowserCertificateFailure } from "@mcode/contracts/models/browser-certificate";
+import type { PreviewPageError } from "@mcode/contracts/models/preview-page-status";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoalState } from "@mcode/contracts";
+import type { GoalState } from "@mcode/contracts/models/goal";
 import { useThreadStore } from "@/stores/threadStore";
 import {
   resetThreadStoreForTests,

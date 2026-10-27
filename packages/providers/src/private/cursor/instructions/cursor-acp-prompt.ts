@@ -5,8 +5,8 @@
  */
 
 import * as NodeFS from "node:fs";
-import type { AttachmentMeta } from "@mcode/contracts";
-import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
+import type { AttachmentMeta } from "@mcode/contracts/models/attachment";
+import { isVirtualBrowserContextAttachment } from "@mcode/contracts/models/attachment";
 import type { ContentBlock } from "@agentclientprotocol/sdk";
 import {
   buildCursorPrompt,

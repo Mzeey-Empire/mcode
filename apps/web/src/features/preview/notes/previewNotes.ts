@@ -1,4 +1,4 @@
-import { clampPreviewPageLabel, clampPreviewPageUrl } from "@mcode/contracts";
+import { clampPreviewPageLabel, clampPreviewPageUrl } from "@mcode/contracts/models/browser-preview";
 import {
   deleteDraftBrowserNote,
   saveDraftBrowserNote,

@@ -1,9 +1,4 @@
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BROWSER_AUTOMATION_MAX_RECORDING_BYTES,
-  type BrowserAutomationHostDispatch,
-  type BrowserAutomationResponse,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_MAX_RECORDING_BYTES, type BrowserAutomationHostDispatch, type BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
 import type { PreviewAutomationBridge } from "@/transport/desktop-bridge";
 import { browserAutomationRequestKey, browserAutomationTargetKey } from "./browserAutomationStore";
 

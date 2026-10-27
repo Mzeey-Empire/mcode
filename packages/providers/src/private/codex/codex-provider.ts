@@ -1,4 +1,5 @@
-import { SUBAGENT_REPORTING, codexCollaborationExtension } from "@mcode/contracts";
+import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
+import { codexCollaborationExtension } from "@mcode/contracts/events/provider-runtime-event";
 /**
  * Codex provider adapter using the persistent `codex app-server` subprocess.
  *
@@ -12,7 +13,8 @@ import { SUBAGENT_REPORTING, codexCollaborationExtension } from "@mcode/contract
 
 import * as NodeEvents from "node:events";
 import { approvalReceipt } from "../../approvals/approval-receipt.js";
-import type { ApprovalOutcome, ApprovalChoice, TurnFailure } from "@mcode/contracts";
+import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts/models/approval";
+import type { TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { classifyCodexLocalFailure } from "./codex-failure-classifier.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
@@ -28,38 +30,21 @@ import {
 import type { CodexProviderPorts } from "../../factory-types.js";
 import { SessionRuntime } from "../session-runtime.js";
 import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../session-runtime.js";
-import type {
-  IAgentProvider,
-  IApprovalReviewCapable,
-  ApprovalReviewSupport,
-  IGoalCapable,
-  ISessionEvictable,
-  TurnRequest,
-  AgentEvent,
-  GoalState,
-  GoalLookupResult,
-  ApprovalResponse,
-  ApprovalRespondResult,
-  ApprovalRequestBody,
-  ApprovalRequestEnvelope,
-  ProviderModelInfo,
-  ProviderUsageInfo,
-  ProviderRuntimeEvent,
-  ProviderFileMutationStart,
-  ProviderTurnDiffUpdate,
-  ProviderCapabilityName,
-  TurnSteerInput,
-  TurnSteerOutcome,
-} from "@mcode/contracts";
-import {
-  AgentEventType,
-  isGoalOpen,
-  providerRuntimeEvent,
-} from "@mcode/contracts";
+import type { IAgentProvider, IApprovalReviewCapable, ApprovalReviewSupport, IGoalCapable, ISessionEvictable, TurnRequest, ProviderFileMutationStart, ProviderTurnDiffUpdate, TurnSteerInput, TurnSteerOutcome } from "@mcode/contracts/providers/interfaces";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { GoalState, GoalLookupResult } from "@mcode/contracts/models/goal";
+import type { ApprovalResponse, ApprovalRespondResult, ApprovalRequestBody, ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import type { ProviderCapabilityName } from "@mcode/contracts/compat/agent-model";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { isGoalOpen } from "@mcode/contracts/models/goal";
+import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { checkCodexVersion, currentCodexVersion, clearVersionCache } from "./codex-version.js";
 import { meetsMinVersion } from "../../version-policy.js";
 import { CodexPlanQuestions } from "./codex-plan-questions.js";
-import type { PlanAnswer, PlanQuestionHandler } from "@mcode/contracts";
+import type { PlanAnswer, PlanQuestionHandler } from "@mcode/contracts/models/plan-questions";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";

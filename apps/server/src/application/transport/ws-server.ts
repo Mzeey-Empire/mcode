@@ -10,13 +10,8 @@ import { logger } from "@mcode/shared";
 import {
   type DisconnectedTerminalCreate,
 } from "../../features/terminal/backends/terminal-backend.js";
-import {
-  BinaryUploadHeaderSchema,
-  WebSocketRequestSchema,
-  WS_METHODS,
-  type BinaryUploadHeader,
-  type WebSocketResponse,
-} from "@mcode/contracts";
+import { BinaryUploadHeaderSchema, WebSocketRequestSchema, type BinaryUploadHeader, type WebSocketResponse } from "@mcode/contracts/ws/protocol";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 import { routeMessage, type RouterDeps } from "./ws-router.js";
 import { addClient, removeClient } from "./push.js";
 import { handleBinaryUpload } from "../../features/attachments/transport/binary-upload.js";

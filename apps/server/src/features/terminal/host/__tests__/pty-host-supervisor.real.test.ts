@@ -1,4 +1,4 @@
-import type { TerminalPlatform } from "@mcode/contracts";
+import type { TerminalPlatform } from "@mcode/contracts/models/terminal";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeModule from "node:module";

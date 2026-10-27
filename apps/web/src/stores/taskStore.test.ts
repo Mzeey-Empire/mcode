@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 import { selectTaskProgress, useTaskStore, type TaskItem } from "./taskStore";
 
 const THREAD = "thread-task-bubble";

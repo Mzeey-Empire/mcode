@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { NarrativeTurnState } from "../../conversation/narrative/narrative-turn-state.js";
 import { NarrativeRecoveryDelta, type PreparedNarrativeRecoveryDelta } from "../narrative-recovery-delta.js";
 import { ACTIVE_TURN_RECOVERY_RETAINED_LIMITS } from "../active-turn-recovery-retention-policy.js";

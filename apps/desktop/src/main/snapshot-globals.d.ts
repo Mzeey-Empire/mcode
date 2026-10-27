@@ -7,10 +7,8 @@
  * on globalThis.__v8Snapshot so the main process can skip re-initialization.
  */
 
-import type {
-  SettingsSchema as SettingsSchemaType,
-  getExtension as GetExtensionType,
-} from "@mcode/contracts";
+import type { SettingsSchema as SettingsSchemaType } from "@mcode/contracts/models/settings";
+import type { getExtension as GetExtensionType } from "@mcode/contracts/models/file-types";
 
 interface V8Snapshot {
   readonly contracts: {

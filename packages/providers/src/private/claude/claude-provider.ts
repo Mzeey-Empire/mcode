@@ -1,4 +1,4 @@
-import { SUBAGENT_REPORTING } from "@mcode/contracts";
+import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
 /**
  * Claude Agent SDK provider adapter.
  * Implements IAgentProvider using the v1 query() API with a prompt queue pattern.
@@ -7,7 +7,7 @@ import { SUBAGENT_REPORTING } from "@mcode/contracts";
 
 import * as NodeEvents from "node:events";
 import { approvalReceipt } from "../../approvals/approval-receipt.js";
-import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts";
+import type { ApprovalOutcome, ApprovalChoice } from "@mcode/contracts/models/approval";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
 import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
 import { claudeApprovalBody } from "./claude-approval.js";
@@ -30,38 +30,20 @@ import type {
   CanUseTool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { logger } from "@mcode/shared";
-import {
-  AgentEventType,
-  PLAN_MAX_CONTENT_CHARS,
-  isVirtualBrowserContextAttachment,
-  providerRuntimeEvent,
-} from "@mcode/contracts";
-import type {
-  IAgentProvider,
-  IGoalCapable,
-  ISessionEvictable,
-  TurnRequest,
-  ReasoningLevel,
-  OrchestrationMode,
-  ContextWindowMode,
-  AgentEvent,
-  AttachmentMeta,
-  GoalState,
-  GoalLookupResult,
-  ProviderModelInfo,
-  ProviderBillingMode,
-  ProviderUsageInfo,
-  QuotaCategory,
-  ApprovalResponse,
-  ApprovalRespondResult,
-  ApprovalRequestEnvelope,
-  ApprovalRequestBody,
-  CompletionOptions,
-  TurnSteerInput,
-  TurnSteerOutcome,
-  NativePlanFileRef,
-  NativePlanFileOutcome,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts/models/plan";
+import { isVirtualBrowserContextAttachment } from "@mcode/contracts/models/attachment";
+import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import type { IAgentProvider, IGoalCapable, ISessionEvictable, TurnRequest, CompletionOptions, TurnSteerInput, TurnSteerOutcome, NativePlanFileRef } from "@mcode/contracts/providers/interfaces";
+import type { ReasoningLevel, ContextWindowMode } from "@mcode/contracts/models/settings";
+import type { OrchestrationMode } from "@mcode/contracts/models/enums";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { AttachmentMeta } from "@mcode/contracts/models/attachment";
+import type { GoalState, GoalLookupResult } from "@mcode/contracts/models/goal";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { ProviderBillingMode, ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
+import type { ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ApprovalRequestBody } from "@mcode/contracts/models/approval";
+import type { NativePlanFileOutcome } from "@mcode/contracts/models/plan";
 import { buildReasoningOptions } from "./build-reasoning-options.js";
 import { listClaudeModels } from "./list-models.js";
 import { resolveSdkModelSlug } from "./resolve-slug.js";
@@ -92,7 +74,7 @@ import {
   type ProviderBrowserLeaseHandle as BrowserAutomationSessionLeaseStage,
 } from "../../host-ports.js";
 import type { ProviderBackgroundToolSettlement, ProviderHostPorts, ProviderMcodeAttachment, ProviderTurnOpening, ProviderTurnRouting } from "../../host-ports.js";
-import type { ProviderIdentity } from "@mcode/contracts";
+import type { ProviderIdentity } from "@mcode/contracts/compat/agent-model";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
 import {
   collectCompletionText,

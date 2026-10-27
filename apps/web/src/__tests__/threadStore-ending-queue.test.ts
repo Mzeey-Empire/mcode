@@ -1,5 +1,6 @@
 import { createMockThread } from "@mcode/contracts/testing";
-import { createAgentModelState, type AgentEvent } from "@mcode/contracts";
+import { createAgentModelState } from "@mcode/contracts/compat/agent-model";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useQueueStore } from "@/stores/queueStore";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";

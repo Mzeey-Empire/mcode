@@ -1,4 +1,4 @@
-import { WS_METHODS, type WsMethodName } from "@mcode/contracts";
+import { WS_METHODS, type WsMethodName } from "@mcode/contracts/ws/methods";
 import type { z } from "zod";
 import type { MemoryPressureService } from "../memory-pressure-service.js";
 

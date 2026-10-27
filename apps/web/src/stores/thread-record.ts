@@ -1,20 +1,15 @@
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode } from "@/transport";
 import type { ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
-import type {
-  ApprovalReceiptRecord,
-  ContextWindowMode,
-  ReasoningLevel,
-  OrchestrationMode,
-  PlanQuestion,
-  PlanAnswer,
-  ProviderUsageInfo,
-  GoalState,
-  TurnFileEffectSummary,
-  TurnRuntimePhase,
-  TurnSavingStatus,
-} from "@mcode/contracts";
-import type { DevinMode } from "@mcode/contracts";
-import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
+import type { ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { OrchestrationMode } from "@mcode/contracts/models/enums";
+import type { PlanQuestion, PlanAnswer } from "@mcode/contracts/models/plan-questions";
+import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
+import type { GoalState } from "@mcode/contracts/models/goal";
+import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
+import type { TurnRuntimePhase, TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
+import type { DevinMode } from "@mcode/contracts/models/enums";
+import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts/models/enums";
 import type { ApprovalReceipt, ThoughtSegment } from "@/features/conversation/narrative/types";
 import type { ProviderRetry } from "@/features/conversation/turn-ending/provider-retry";
 import {

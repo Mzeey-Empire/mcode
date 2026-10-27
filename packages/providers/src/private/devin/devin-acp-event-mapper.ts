@@ -19,8 +19,8 @@
  */
 
 import type { SessionNotification } from "@agentclientprotocol/sdk";
-import { AgentEventType } from "@mcode/contracts";
-import type { AgentEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { acpPlanEntriesToTodos, buildTodoWriteEvents } from "../protocols/acp/acp-plan-todo-write.js";
 
 const INFERENCE_TOOL_NAME_META = "cognition.ai/inferenceToolName";

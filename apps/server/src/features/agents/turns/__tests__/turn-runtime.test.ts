@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { TurnRuntimeRegistry } from "../turn-runtime.js";
 
 describe("TurnRuntimeRegistry", () => {

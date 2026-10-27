@@ -1,9 +1,4 @@
-import type {
-  PullRequestCapability,
-  PullRequestDetail,
-  PullRequestMutationError as MutationError,
-  PullRequestMutationExpected,
-} from "@mcode/contracts";
+import type { PullRequestCapability, PullRequestDetail, PullRequestMutationError as MutationError, PullRequestMutationExpected } from "@mcode/contracts/pull-requests";
 import { ErrorIcon } from "@/components/ui/icon-map";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";

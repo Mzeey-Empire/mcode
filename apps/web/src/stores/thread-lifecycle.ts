@@ -1,4 +1,6 @@
-import { MessageSchema, type AgentTurn, type AgentTurnStatus, type TurnRuntimePhase } from "@mcode/contracts";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { type AgentTurn, type AgentTurnStatus } from "@mcode/contracts/compat/agent-model";
+import { type TurnRuntimePhase } from "@mcode/contracts/models/turn-runtime";
 import type { ThreadRecord } from "./thread-record";
 
 function latestCanonicalTurn(threadId: string, record: ThreadRecord): AgentTurn | undefined {

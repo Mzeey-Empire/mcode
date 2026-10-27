@@ -2,7 +2,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { render, screen, within } from "@testing-library/react";
 import { act, StrictMode } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";

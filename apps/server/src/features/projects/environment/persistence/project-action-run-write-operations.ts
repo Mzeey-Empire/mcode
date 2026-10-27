@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Database } from "bun:sqlite";
-import { WorkspaceEnvironmentActionRunSchema } from "@mcode/contracts";
+import { WorkspaceEnvironmentActionRunSchema } from "@mcode/contracts/models/workspace-environment";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 import { ProjectActionRunStore } from "./project-action-run-store.js";
 

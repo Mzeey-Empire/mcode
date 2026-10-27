@@ -2,7 +2,7 @@ import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing"
 // @vitest-environment jsdom
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Thread } from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
 
 const {
   clearScope,

@@ -2,13 +2,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  ATTACHMENT_DOCUMENT_MAX_BYTES,
-  ATTACHMENT_IMAGE_AND_FALLBACK_MAX_BYTES,
-  ATTACHMENT_PDF_MAX_BYTES,
-  ATTACHMENT_TEXT_MAX_BYTES,
-  getAttachmentMaxSizeForMime,
-} from "@mcode/contracts";
+import { ATTACHMENT_DOCUMENT_MAX_BYTES, ATTACHMENT_IMAGE_AND_FALLBACK_MAX_BYTES, ATTACHMENT_PDF_MAX_BYTES, ATTACHMENT_TEXT_MAX_BYTES, getAttachmentMaxSizeForMime } from "@mcode/contracts/models/attachment-limits";
 import {
   createTempAttachmentStore,
   TEMP_ATTACHMENT_DIRECTORY_NAME,

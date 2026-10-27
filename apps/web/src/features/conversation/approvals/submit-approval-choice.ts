@@ -1,4 +1,4 @@
-import type { ApprovalRequest } from "@mcode/contracts";
+import type { ApprovalRequest } from "@mcode/contracts/models/approval";
 import { getTransport } from "@/transport";
 import { useApprovalStore, type ApprovalUserResponse } from "@/stores/approvalStore";
 import { useThreadStore } from "@/stores/threadStore";

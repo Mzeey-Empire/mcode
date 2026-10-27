@@ -1,4 +1,4 @@
-import { TurnFileEffectSummarySchema, type TurnFileEffectSummary } from "@mcode/contracts";
+import { TurnFileEffectSummarySchema, type TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
 
 /** Minimal persisted snapshot fields needed to scope historical Git calculations. */
 export interface SnapshotAttributionInput {

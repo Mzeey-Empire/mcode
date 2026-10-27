@@ -1,11 +1,6 @@
-import type {
-  IProviderRegistry,
-  IAgentProvider,
-  ProviderId,
-  ThreadCreateInput,
-  ThreadTargetListResult,
-} from "@mcode/contracts";
-import { getCatalogEntry } from "@mcode/contracts";
+import type { IProviderRegistry, IAgentProvider, ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { ThreadCreateInput, ThreadTargetListResult } from "@mcode/contracts/thread-control";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
 import { inject, injectable } from "tsyringe";
 import { ModelCacheService } from "../../providers/models/model-cache-service.js";
 import { ProviderAvailabilityService } from "../../providers/availability/provider-availability-service.js";

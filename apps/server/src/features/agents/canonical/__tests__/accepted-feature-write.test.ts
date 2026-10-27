@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import type { Database } from "bun:sqlite";
-import { type PlanVersion } from "@mcode/contracts";
+import { type PlanVersion } from "@mcode/contracts/models/plan";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ThreadStore as ThreadRepo } from "../../../thread-control/persistence/thread-store.js";

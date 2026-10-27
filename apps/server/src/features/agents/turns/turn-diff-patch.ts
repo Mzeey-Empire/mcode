@@ -1,4 +1,4 @@
-import type { ReviewComparison, ReviewFileChange } from "@mcode/contracts";
+import type { ReviewComparison, ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 
 /** Maximum UTF-8 bytes accepted from a provider-native turn diff. */
 export const TURN_DIFF_MAX_BYTES = 2_097_152;

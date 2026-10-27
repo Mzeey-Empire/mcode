@@ -1,4 +1,4 @@
-import { BROWSER_TAB_INFO_STRING_MAX } from "@mcode/contracts";
+import { BROWSER_TAB_INFO_STRING_MAX } from "@mcode/contracts/models/browser-tab";
 import { normalizeBrowserSurfaceAddress } from "./browserSurfaceAddress";
 
 /** Complete identity of one Browser surface in a renderer window. */

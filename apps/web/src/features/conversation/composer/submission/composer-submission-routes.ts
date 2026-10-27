@@ -1,6 +1,6 @@
 import type { Thread } from "@/transport";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
-import type { SelectedTextComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { ComposerDraft } from "@/stores/composerDraftStore";
 import { snapshotComposerDraft } from "@/lib/composer-session";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";

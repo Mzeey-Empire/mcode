@@ -1,10 +1,6 @@
-import {
-  LegacyTerminalRecordSchema,
-  WS_METHODS,
-  type LegacyTerminalCreateResult,
-  TerminalDiagnosticsBundleSchema,
-  type TerminalDiagnosticsBundle,
-} from "@mcode/contracts";
+import { LegacyTerminalRecordSchema, type LegacyTerminalCreateResult } from "@mcode/contracts/ws/terminal-legacy";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
+import { TerminalDiagnosticsBundleSchema, type TerminalDiagnosticsBundle } from "@mcode/contracts/models/terminal-diagnostics";
 import { withTerminalTimeout } from "../terminal-client";
 import type {
   TerminalClient,

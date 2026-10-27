@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { openDatabase } from "../database.js";
-import type { StartupRefusal } from "@mcode/contracts";
+import type { StartupRefusal } from "@mcode/contracts/startup-failure";
 import { DatabaseStartupRefusal } from "../startup-refusal.js";
 
 const journalSchema = z.object({

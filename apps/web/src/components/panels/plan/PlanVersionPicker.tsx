@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

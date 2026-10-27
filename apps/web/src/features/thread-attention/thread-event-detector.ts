@@ -1,4 +1,4 @@
-import type { ThreadAttention, ThreadWaitingKind } from "@mcode/contracts";
+import type { ThreadAttention, ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import type { WorkspaceThread } from "@/lib/workspace-thread";

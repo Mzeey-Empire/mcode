@@ -1,5 +1,5 @@
-import { isGoalOpen } from "@mcode/contracts";
-import type { GoalLookupResult, GoalState } from "@mcode/contracts";
+import { isGoalOpen } from "@mcode/contracts/models/goal";
+import type { GoalLookupResult, GoalState } from "@mcode/contracts/models/goal";
 
 /** Resolves a goal lookup result against the currently cached open goal. */
 export function resolveGoalLookupGoal(

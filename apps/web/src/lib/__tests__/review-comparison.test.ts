@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { FileEffect, TurnSnapshot } from "@mcode/contracts";
+import type { FileEffect } from "@mcode/contracts/models/file-effect";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { cumulativeReviewFiles } from "../review-comparison";
 
 function snapshot(id: string, effects: FileEffect[]): TurnSnapshot {

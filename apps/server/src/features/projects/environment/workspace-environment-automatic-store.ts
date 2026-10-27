@@ -1,25 +1,18 @@
 import { ThreadStartupStore } from "../../thread-startup/persistence/thread-startup-store.js";
-import { ThreadStartupSchema, type ThreadStartup } from "@mcode/contracts";
+import { ThreadStartupSchema, type ThreadStartup } from "@mcode/contracts/thread-startup";
 import type { StartupActionTransition } from "./startup-action-runner.js";
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type {
-  MessageMention,
-  PreviewAnnotationBundle,
-  StoredAttachment,
-  WorkspaceEnvironmentAutomaticSetupAttempt,
-  WorkspaceEnvironmentAutomaticSetupReason,
-  WorkspaceEnvironmentAutomaticSetupSnapshot,
-  WorkspaceEnvironmentQueuedTurn,
-} from "@mcode/contracts";
-import {
-  MessageMentionsSchema,
-  SelectedTextCommentsSchema,
-  SendMessageSchema,
-  StoredAttachmentSchema,
-} from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import type { StoredAttachment } from "@mcode/contracts/models/attachment";
+import type { WorkspaceEnvironmentAutomaticSetupAttempt, WorkspaceEnvironmentAutomaticSetupReason, WorkspaceEnvironmentAutomaticSetupSnapshot, WorkspaceEnvironmentQueuedTurn } from "@mcode/contracts/models/workspace-environment";
+import { MessageMentionsSchema } from "@mcode/contracts/models/mention";
+import { SelectedTextCommentsSchema } from "@mcode/contracts/models/selected-text-comment";
+import { SendMessageSchema } from "@mcode/contracts/ws/methods";
+import { StoredAttachmentSchema } from "@mcode/contracts/models/attachment";
 import { z } from "zod";
 import {
   messages,

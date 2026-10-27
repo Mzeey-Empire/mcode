@@ -1,4 +1,4 @@
-import { isLiveSubagentStatus, type SubagentRosterEntry, type SubagentStatus } from "@mcode/contracts";
+import { isLiveSubagentStatus, type SubagentRosterEntry, type SubagentStatus } from "@mcode/contracts/models/subagent-roster";
 
 const LIST_WORDS: Record<SubagentStatus, string> = {
   running: "Running", waiting: "Waiting", done: "Done", failed: "Failed", stopped: "Stopped",

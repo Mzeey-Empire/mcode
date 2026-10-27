@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 import { registerCommand } from "@/lib/command-registry";
 import { setContext } from "@/lib/context-tracker";
 import { usePlanStore } from "@/stores/planStore";

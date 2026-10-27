@@ -8,7 +8,7 @@ import {
   releaseBrowserAutomationThreadScope,
   useBrowserAutomationStore,
 } from "../../automation/browserAutomationStore";
-import type { PreviewPageStatus } from "@mcode/contracts";
+import type { PreviewPageStatus } from "@mcode/contracts/models/preview-page-status";
 import { PreviewWebview, type PreviewWebviewHandle } from "../PreviewWebview";
 import {
   browserSurfaceHost,

@@ -1,16 +1,8 @@
 import * as NodeCrypto from "node:crypto";
-import {
-  AgentEventType,
-  createCanonicalSubagentPresentation,
-  codexCollaborationExtension,
-  type CodexChildEvidence,
-  type CodexCollaborationEvidence,
-  type CodexContinuationEvidence,
-  type AgentEvent,
-  type CollaborationActionKind,
-  type CodexCollaborationExtension,
-  type SubagentPresentation,
-} from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { createCanonicalSubagentPresentation, type SubagentPresentation } from "@mcode/contracts/models/tool-call-record";
+import { codexCollaborationExtension, type CodexChildEvidence, type CodexCollaborationEvidence, type CodexContinuationEvidence, type CodexCollaborationExtension } from "@mcode/contracts/events/provider-runtime-event";
+import { type CollaborationActionKind } from "@mcode/contracts/compat/agent-model";
 import { logger } from "@mcode/shared";
 
 import {
@@ -233,7 +225,7 @@ export class CodexCollaborationEventAdapter implements ProviderEventAdapter {
   private delegationContext(
     event: CodexToolEvent,
     parent: { threadId: string; turnId: string; executionId: string; itemId: string } | undefined,
-  ): { parentThreadId: string; parentTurnId: string; parentExecutionId: string; providerIdentities: readonly import("@mcode/contracts").ProviderIdentity[] } | null {
+  ): { parentThreadId: string; parentTurnId: string; parentExecutionId: string; providerIdentities: readonly import("@mcode/contracts/compat/agent-model").ProviderIdentity[] } | null {
     const executionId = parent?.executionId ?? event.turnExecutionId;
     if (!executionId) return null;
     const parentTurn = parent ? this.durability.loadTurn(parent.turnId) : this.durability.loadTurnByExecution(executionId);

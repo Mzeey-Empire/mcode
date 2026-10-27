@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
-import type { DraftFileComment, FileAnnotationPayload, MessageMention } from "@mcode/contracts";
+import type { DraftFileComment } from "@mcode/contracts/models/next-message-draft";
+import type { FileAnnotationPayload } from "@mcode/contracts/models/browser-preview";
+import type { MessageMention } from "@mcode/contracts/models/mention";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import {
   useComposerDraftStore,

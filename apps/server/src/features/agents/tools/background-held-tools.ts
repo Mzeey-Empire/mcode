@@ -1,4 +1,4 @@
-import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 
 /** The links that decide whether a tool call outlives the turn that started it. */
 export interface ToolCallLink {

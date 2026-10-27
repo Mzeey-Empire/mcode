@@ -14,13 +14,7 @@
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { parse } from "smol-toml";
-import {
-  PROVIDER_CATALOG_MAX_CODEX_AGENT_FILE_BYTES,
-  PROVIDER_CATALOG_MAX_CODEX_AGENT_FILES,
-  SelectableProviderAgentSchema,
-  type SelectableProviderAgent,
-  type ProviderCatalogSourceDiagnostic,
-} from "@mcode/contracts";
+import { PROVIDER_CATALOG_MAX_CODEX_AGENT_FILE_BYTES, PROVIDER_CATALOG_MAX_CODEX_AGENT_FILES, SelectableProviderAgentSchema, type SelectableProviderAgent, type ProviderCatalogSourceDiagnostic } from "@mcode/contracts/providers/capability-catalog";
 
 /** Global directory name under the effective Codex home. */
 export const CODEX_GLOBAL_AGENT_DIRECTORY = "agents";

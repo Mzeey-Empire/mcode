@@ -1,14 +1,8 @@
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { actionSchedule, terminalCapMessage } from "@mcode/contracts";
-import type {
-  WorkspaceEnvironmentActionRun,
-  WorkspaceEnvironmentActionPort,
-  WorkspaceEnvironmentActionLaunchSnapshot,
-  WorkspaceEnvironmentActionSlotInput,
-  WorkspaceEnvironmentActionStartInput,
-} from "@mcode/contracts";
+import { actionSchedule, terminalCapMessage } from "@mcode/contracts/models/workspace-environment";
+import type { WorkspaceEnvironmentActionRun, WorkspaceEnvironmentActionPort, WorkspaceEnvironmentActionLaunchSnapshot, WorkspaceEnvironmentActionSlotInput, WorkspaceEnvironmentActionStartInput } from "@mcode/contracts/models/workspace-environment";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import {
   TERMINAL_BACKEND_TOKEN,

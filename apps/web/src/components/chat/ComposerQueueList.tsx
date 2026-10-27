@@ -1,5 +1,5 @@
 import { ArrowUp, CornerDownRight, Paperclip, Pencil, X } from "lucide-react";
-import { ProviderIdSchema } from "@mcode/contracts";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { Button, IconButton } from "@/components/ui/button";
 import {
   isSteerable,

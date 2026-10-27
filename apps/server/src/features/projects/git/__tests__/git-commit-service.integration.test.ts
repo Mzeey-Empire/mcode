@@ -6,7 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GitCommitFile } from "@mcode/contracts";
+import type { GitCommitFile } from "@mcode/contracts/git-commit";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";

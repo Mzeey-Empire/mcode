@@ -1,19 +1,4 @@
-import type {
-  PullRequestCapabilitiesRequest,
-  PullRequestCapabilitiesResult,
-  PullRequestCancelRequest,
-  PullRequestCancelResult,
-  PullRequestListRequest,
-  PullRequestListResult,
-  PullRequestGetRequest,
-  PullRequestGetResult,
-  PullRequestTimelineRequest,
-  PullRequestTimelineResult,
-  PullRequestFilesRequest,
-  PullRequestFilesResult,
-  PullRequestPatchRequest,
-  PullRequestPatchResult,
-} from "@mcode/contracts";
+import type { PullRequestCapabilitiesRequest, PullRequestCapabilitiesResult, PullRequestCancelRequest, PullRequestCancelResult, PullRequestListRequest, PullRequestListResult, PullRequestGetRequest, PullRequestGetResult, PullRequestTimelineRequest, PullRequestTimelineResult, PullRequestFilesRequest, PullRequestFilesResult, PullRequestPatchRequest, PullRequestPatchResult } from "@mcode/contracts/pull-requests";
 import { getTransport } from "./index";
 
 /** Pull request RPC subset consumed by the inbox store. */

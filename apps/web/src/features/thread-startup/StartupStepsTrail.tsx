@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronRight, CircleAlert, CircleX, Minus } from "lucide-react";
-import type { ThreadStartup, ThreadStartupKind, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { ThreadStartup, ThreadStartupKind } from "@mcode/contracts/thread-startup";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";

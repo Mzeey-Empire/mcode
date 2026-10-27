@@ -2,8 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { NativePlanFileOutcomeSchema, NativePlanFileRefSchema, PLAN_MAX_CONTENT_CHARS, type PlanImplement,
-  type PlanImplementError, type PlanVersion, type NativePlanFileOutcome } from "@mcode/contracts";
+import { NativePlanFileOutcomeSchema, NativePlanFileRefSchema, PLAN_MAX_CONTENT_CHARS, type PlanImplement, type PlanImplementError, type PlanVersion, type NativePlanFileOutcome } from "@mcode/contracts/models/plan";
 import { planImplementRequests, plans, threads } from "../../../../runtime/persistence/sqlite/schema.js";
 import { PlanStore } from "./plan-store.js";
 import { PlanImplementRequestSchema, type PlanImplementPrepareResult, type PlanImplementRequest } from "./plan-implement-write-operations.js";

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 
 interface ProjectActionHydration {
   readonly generation: number;

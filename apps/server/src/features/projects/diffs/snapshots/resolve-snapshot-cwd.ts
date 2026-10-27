@@ -1,4 +1,4 @@
-import type { TurnSnapshot } from "@mcode/contracts";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import type { SnapshotRouterDeps } from "../transport/snapshot-rpc.js";
 import { ReviewWorktreeMissingError } from "../../git/review-comparison-errors.js";
 

@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 
 // @base-ui/react (used by Switch) does not work in jsdom; stub it with a native button.
 vi.mock("@/components/ui/switch", () => ({

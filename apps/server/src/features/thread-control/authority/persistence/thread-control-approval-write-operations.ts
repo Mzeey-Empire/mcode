@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { DelegateTaskApprovalSubjectSchema, ResolvedExecutionSchema, ThreadPlacementSchema } from "@mcode/contracts";
+import { DelegateTaskApprovalSubjectSchema } from "@mcode/contracts/models/approval";
+import { ResolvedExecutionSchema, ThreadPlacementSchema } from "@mcode/contracts/thread-control";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 
 const identity = z.object({ threadId: z.string(), workspaceId: z.string(), execution: ResolvedExecutionSchema(), turnId: z.string(), callerId: z.string(), sourceThreadId: z.string().optional() });

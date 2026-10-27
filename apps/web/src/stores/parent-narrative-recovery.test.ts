@@ -1,5 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import { createAgentModelState, type AgentModelState, type AgentTurn, type Message } from "@mcode/contracts";
+import { createAgentModelState, type AgentModelState, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { type Message } from "@mcode/contracts/models/message";
 import { describe, expect, it } from "vitest";
 import { recoverParentNarrative, steeredUserMessages } from "./parent-narrative-recovery";
 import { createEmptyThreadRecord, type ThreadRecord } from "./thread-record";

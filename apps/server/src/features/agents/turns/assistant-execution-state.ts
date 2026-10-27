@@ -1,4 +1,4 @@
-import type { StoredAttachment } from "@mcode/contracts";
+import type { StoredAttachment } from "@mcode/contracts/models/attachment";
 
 /** Data needed to decide which assistant body a completed execution persists. */
 export interface AssistantMaterializationInput {

@@ -4,7 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { container } from "tsyringe";
-import { StartupFailureFileSchema } from "@mcode/contracts";
+import { StartupFailureFileSchema } from "@mcode/contracts/startup-failure";
 import { logger } from "@mcode/shared";
 import { setupContainer } from "../../composition/container.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";

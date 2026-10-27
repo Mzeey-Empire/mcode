@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
-import { lazySchema, type StartupRefusal } from "@mcode/contracts";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
+import { type StartupRefusal } from "@mcode/contracts/startup-failure";
 import { z } from "zod";
 import {
   reconcileSubagentIdentityMigration,

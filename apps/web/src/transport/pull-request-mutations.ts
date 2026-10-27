@@ -1,15 +1,4 @@
-import type {
-  PullRequestCloseRequest,
-  PullRequestCloseResult,
-  PullRequestMergeRequest,
-  PullRequestMergeResult,
-  PullRequestPostCommentRequest,
-  PullRequestPostCommentResult,
-  PullRequestSetReadinessRequest,
-  PullRequestSetReadinessResult,
-  PullRequestSubmitReviewRequest,
-  PullRequestSubmitReviewResult,
-} from "@mcode/contracts";
+import type { PullRequestCloseRequest, PullRequestCloseResult, PullRequestMergeRequest, PullRequestMergeResult, PullRequestPostCommentRequest, PullRequestPostCommentResult, PullRequestSetReadinessRequest, PullRequestSetReadinessResult, PullRequestSubmitReviewRequest, PullRequestSubmitReviewResult } from "@mcode/contracts/pull-requests";
 import { getTransport } from "./index";
 
 /** Explicit, non-cancellable remote pull request mutation transport. */

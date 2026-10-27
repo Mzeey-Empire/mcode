@@ -1,4 +1,4 @@
-import type { TurnFailure } from "@mcode/contracts";
+import type { TurnFailure } from "@mcode/contracts/models/turn-failure";
 
 /**
  * Error an adapter throws when it already knows how a turn failed.

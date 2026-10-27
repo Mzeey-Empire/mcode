@@ -1,16 +1,7 @@
 import { inject, injectable } from "tsyringe";
-import { AgentEventType } from "@mcode/contracts";
-import type {
-  IAgentProvider,
-  ProviderAuth,
-  ProviderId,
-  ProviderNewModel,
-  ProviderStatus,
-  ProviderStatusFacts,
-  ProviderCliFacts,
-  ProviderCliStatus,
-  ProviderCliUpdate,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { IAgentProvider, ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { ProviderAuth, ProviderNewModel, ProviderStatus, ProviderStatusFacts, ProviderCliFacts, ProviderCliStatus, ProviderCliUpdate } from "@mcode/contracts/providers/provider-status";
 import { logger } from "@mcode/shared";
 import { isNewer } from "@mcode/providers";
 import { broadcast } from "../../../application/transport/push.js";

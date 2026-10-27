@@ -9,17 +9,11 @@ import type { TurnResumeScheduler } from "../../features/agents/recovery/turn-re
 import * as NodeHTTP from "node:http";
 import type { z } from "zod";
 
-import {
-  TERMINAL_V1_METHODS,
-  WS_METHODS,
-  TERMINAL_RPC_MAX_BYTES,
-  WebSocketRequestSchema,
-  type WebSocketRequest,
-  type WebSocketResponse,
-  type WsMethodName,
-  type IProviderRegistry,
-  workspaceEnvironmentValidationIssues,
-} from "@mcode/contracts";
+import { TERMINAL_V1_METHODS, TERMINAL_RPC_MAX_BYTES } from "@mcode/contracts/ws/terminal";
+import { WS_METHODS, type WsMethodName } from "@mcode/contracts/ws/methods";
+import { WebSocketRequestSchema, type WebSocketRequest, type WebSocketResponse } from "@mcode/contracts/ws/protocol";
+import { type IProviderRegistry } from "@mcode/contracts/providers/interfaces";
+import { workspaceEnvironmentValidationIssues } from "@mcode/contracts/models/workspace-environment";
 import { logger } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type {

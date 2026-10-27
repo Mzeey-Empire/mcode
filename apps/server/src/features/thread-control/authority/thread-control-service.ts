@@ -1,48 +1,9 @@
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
-import {
-  type IProviderRegistry,
-  type ApprovalResponse,
-  type ApprovalRespondResult,
-  ProviderIdSchema,
-  type ApprovalRequest,
-  type ProviderId,
-  type ResolvedExecution,
-  type ResolvedPlacement,
-  type ThreadCreateBatchInput,
-  type ThreadCreateBatchResult,
-  type ThreadCreateInput,
-  type ThreadCreateItemResult,
-  type ThreadControlError,
-  type ThreadGetInput,
-  type ThreadGetResult,
-  type ThreadSendInput,
-  type ThreadSendResult,
-  type ThreadStopInput,
-  type ThreadStopResult,
-  type ThreadObservedState,
-  type ThreadReadMessage,
-  type ThreadSearchInput,
-  type ThreadSearchResult,
-  type ThreadWaitInput,
-  type ThreadWaitResult,
-  type ThreadWaitItem,
-  type WorkspaceSearchInput,
-  type WorkspaceSearchResult,
-  type WorktreeListInput,
-  type WorktreeListResult,
-  type ThreadTargetListResult,
-  ThreadCreateBatchInputSchema,
-  ThreadGetInputSchema,
-  ThreadSendInputSchema,
-  ThreadStopInputSchema,
-  ThreadSearchInputSchema,
-  ThreadWaitInputSchema,
-  ThreadTargetListResultSchema,
-  THREAD_GET_TRANSCRIPT_MAX_BYTES,
-  THREAD_CREATE_TITLE_MAX_LENGTH,
-  WORKSPACE_SEARCH_QUERY_MAX_LENGTH,
-} from "@mcode/contracts";
+import { type IProviderRegistry, type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { type ApprovalResponse, type ApprovalRespondResult, type ApprovalRequest } from "@mcode/contracts/models/approval";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { type ResolvedExecution, type ResolvedPlacement, type ThreadCreateBatchInput, type ThreadCreateBatchResult, type ThreadCreateInput, type ThreadCreateItemResult, type ThreadControlError, type ThreadGetInput, type ThreadGetResult, type ThreadSendInput, type ThreadSendResult, type ThreadStopInput, type ThreadStopResult, type ThreadObservedState, type ThreadReadMessage, type ThreadSearchInput, type ThreadSearchResult, type ThreadWaitInput, type ThreadWaitResult, type ThreadWaitItem, type WorkspaceSearchInput, type WorkspaceSearchResult, type WorktreeListInput, type WorktreeListResult, type ThreadTargetListResult, ThreadCreateBatchInputSchema, ThreadGetInputSchema, ThreadSendInputSchema, ThreadStopInputSchema, ThreadSearchInputSchema, ThreadWaitInputSchema, ThreadTargetListResultSchema, THREAD_GET_TRANSCRIPT_MAX_BYTES, THREAD_CREATE_TITLE_MAX_LENGTH, WORKSPACE_SEARCH_QUERY_MAX_LENGTH } from "@mcode/contracts/thread-control";
 import type {
   ExternalThreadControlAuthority,
   ThreadControlAuthority,

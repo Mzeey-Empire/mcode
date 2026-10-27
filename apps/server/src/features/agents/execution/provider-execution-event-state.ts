@@ -1,4 +1,5 @@
-import { ProviderRuntimeEventSchema, isChildRoutedRuntimeEvent, type AgentEvent, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { ProviderRuntimeEventSchema, isChildRoutedRuntimeEvent, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { ProviderEventDraft } from "@mcode/providers";
 import { processProviderEventWorkerTask } from "../../providers/composition/provider-event-worker-protocol.js";
 import { CodexLiveEventReducer, type CodexPlanFeature, type SyntheticTerminalInput } from "./codex-live-event-reducer.js";

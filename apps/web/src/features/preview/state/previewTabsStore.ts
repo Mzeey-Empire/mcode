@@ -1,11 +1,7 @@
 import { useMemo } from "react";
 import { create } from "zustand";
-import {
-  BROWSER_TAB_INFO_STRING_MAX,
-  type BrowserTabInfo,
-  type BrowserTabSet,
-  type PreviewPageError,
-} from "@mcode/contracts";
+import { BROWSER_TAB_INFO_STRING_MAX, type BrowserTabInfo, type BrowserTabSet } from "@mcode/contracts/models/browser-tab";
+import { type PreviewPageError } from "@mcode/contracts/models/preview-page-status";
 import { usePreviewFocusStore } from "./previewFocusStore";
 import { browserAutomationScopeKey, useBrowserAutomationStore } from "../automation/browserAutomationStore";
 

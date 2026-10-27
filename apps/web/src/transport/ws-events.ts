@@ -1,11 +1,9 @@
-import {
-  ProviderCatalogChangeSchema,
-  WS_CHANNELS,
-  type ProviderAvailability,
-  type Settings,
-  type ThreadProviderSwitchedEvent,
-  type TurnFileEffectSummary,
-} from "@mcode/contracts";
+import { ProviderCatalogChangeSchema } from "@mcode/contracts/providers/capability-catalog";
+import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
+import { type ProviderAvailability } from "@mcode/contracts/providers/availability";
+import { type Settings } from "@mcode/contracts/models/settings";
+import { type ThreadProviderSwitchedEvent } from "@mcode/contracts/models/message";
+import { type TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
 import { useApprovalStore } from "@/stores/approvalStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { startThreadAttentionTracking } from "@/features/thread-attention/thread-attention-tracking";
@@ -325,7 +323,7 @@ export function startPushListeners(): void {
     pushEmitter.on("thread.checksUpdated", (data) => {
       const { threadId, checks } = data as {
         threadId: string;
-        checks: import("@mcode/contracts").ChecksStatus;
+        checks: import("@mcode/contracts/github").ChecksStatus;
       };
       useWorkspaceStore.setState((ws) => ({
         checksById: { ...ws.checksById, [threadId]: checks },
@@ -585,7 +583,7 @@ export function startPushListeners(): void {
     pushEmitter.on("plan.questions", (data) => {
       const { threadId, questions } = data as {
         threadId: string;
-        questions: import("@mcode/contracts").PlanQuestion[];
+        questions: import("@mcode/contracts/models/plan-questions").PlanQuestion[];
       };
       if (!threadId || !Array.isArray(questions)) return;
       useThreadStore.getState().setPlanQuestions(threadId, questions);

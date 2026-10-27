@@ -1,5 +1,6 @@
 import type { SDKAssistantMessageError } from "@anthropic-ai/claude-agent-sdk";
-import type { TurnFailure, TurnFailureKind } from "@mcode/contracts";
+import type { TurnFailure } from "@mcode/contracts/models/turn-failure";
+import type { TurnFailureKind } from "@mcode/contracts/compat/agent-model";
 import { failureCode, failureRetries, httpStatus, kindByHttpStatus, retryAfterMsUntil, turnFailure } from "../turn-failure-fields.js";
 
 /** The last `rate_limit_event.rate_limit_info` the turn saw. */

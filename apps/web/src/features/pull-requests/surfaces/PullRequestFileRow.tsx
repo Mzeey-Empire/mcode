@@ -1,4 +1,4 @@
-import type { PullRequestFile } from "@mcode/contracts";
+import type { PullRequestFile } from "@mcode/contracts/pull-requests";
 import type { KeyboardEvent, Ref } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

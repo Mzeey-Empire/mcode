@@ -1,7 +1,7 @@
 import { createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TurnRuntimeSnapshot, TurnSavingStatus } from "@mcode/contracts";
+import type { TurnRuntimeSnapshot, TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";

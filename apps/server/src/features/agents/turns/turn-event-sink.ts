@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
 /** Minimal event emitter contract shared by provider turn binders. */
 export interface TurnEventEmitter {

@@ -1,4 +1,5 @@
-import type { MessageMention, ProviderId } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { FileService } from "../../projects/files/file-service.js";
 
 const FILE_INJECTION_SEPARATOR = "\n\n---\n";

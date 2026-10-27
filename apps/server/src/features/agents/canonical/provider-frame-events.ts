@@ -1,4 +1,4 @@
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 
 /**
  * Provider event types that prove the provider has answered a turn. The first accepted event of one of these types marks

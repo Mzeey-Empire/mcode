@@ -7,7 +7,7 @@ import type {
 } from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Layers, MousePointer2, Plus, X } from "lucide-react";
-import type { SubagentRosterEntry } from "@mcode/contracts";
+import type { SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";

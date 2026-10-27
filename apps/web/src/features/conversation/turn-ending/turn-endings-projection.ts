@@ -1,4 +1,8 @@
-import { ProviderIdSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ProviderId, type TurnOutcome } from "@mcode/contracts";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { type AgentItem, type AgentModelState, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { type Message } from "@mcode/contracts/models/message";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { MODEL_PROVIDERS } from "@/lib/model-registry";
 import { sameTurnEndNotice, turnEndingView, type TurnEndingView } from "./turn-ending-notice";
 

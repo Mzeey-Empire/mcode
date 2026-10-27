@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ReviewComparison } from "@mcode/contracts";
+import type { ReviewComparison } from "@mcode/contracts/models/review-comparison";
 import { reviewBody, type ReviewBodyContext } from "../review-body";
 
 const EMPTY: ReviewComparison = { files: [], additions: 0, deletions: 0 };

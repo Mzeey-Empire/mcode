@@ -1,11 +1,8 @@
-import type {
-  InterruptionCause,
-  Message,
-  NarrativeEntry,
-  ParentNarrativeRecoveryItem,
-  ProviderIdentity,
-  TurnOutcome,
-} from "@mcode/contracts";
+import type { InterruptionCause, ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import type { Message } from "@mcode/contracts/models/message";
+import type { NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import type { TurnEndingCause } from "../canonical/turn-ending.js";
 

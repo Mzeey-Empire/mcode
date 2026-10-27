@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import type { SubagentRosterEntry } from "@mcode/contracts";
+import type { SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 
 vi.mock("@/transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/transport")>()),

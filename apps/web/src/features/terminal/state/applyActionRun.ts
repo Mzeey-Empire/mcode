@@ -1,4 +1,4 @@
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useTerminalStore } from "./terminalStore";
 

@@ -1,4 +1,4 @@
-import type { PlanCommentAnchor } from "@mcode/contracts";
+import type { PlanCommentAnchor } from "@mcode/contracts/models/plan";
 
 /** The contract rejects a quote longer than this, so a longer selection cannot be commented. */
 export const PLAN_COMMENT_MAX_QUOTE_CHARS = 2000;

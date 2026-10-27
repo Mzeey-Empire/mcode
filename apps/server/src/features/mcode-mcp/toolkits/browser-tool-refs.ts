@@ -1,14 +1,5 @@
 import * as NodeCrypto from "node:crypto";
-import type {
-  BrowserAutomationActResult,
-  BrowserAutomationActStep,
-  BrowserAutomationError,
-  BrowserAutomationEvaluateResult,
-  BrowserAutomationPublicOperation,
-  BrowserAutomationRequest,
-  BrowserAutomationResponse,
-  BrowserAutomationResult,
-} from "@mcode/contracts";
+import type { BrowserAutomationActResult, BrowserAutomationActStep, BrowserAutomationError, BrowserAutomationEvaluateResult, BrowserAutomationPublicOperation, BrowserAutomationRequest, BrowserAutomationResponse, BrowserAutomationResult } from "@mcode/contracts/models/browser-automation";
 import { browserInputSchema } from "./browser-tool-schemas.js";
 
 /** The act and evaluate budget the model no longer chooses. */

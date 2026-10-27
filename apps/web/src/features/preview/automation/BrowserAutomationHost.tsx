@@ -1,17 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BROWSER_AUTOMATION_MAX_PENDING_REQUESTS,
-  BrowserAutomationHostDispatchSchema,
-  BrowserAutomationPointerEventSchema,
-  type BrowserAutomationHostDispatch,
-  type BrowserAutomationHostDispatchTarget,
-  type BrowserAutomationErrorCode,
-  type BrowserAutomationOperation,
-  type BrowserAutomationResponse,
-  type BrowserAutomationRequest,
-  type BrowserAutomationTargetIdentity,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_MAX_PENDING_REQUESTS, BrowserAutomationHostDispatchSchema, BrowserAutomationPointerEventSchema, type BrowserAutomationHostDispatch, type BrowserAutomationHostDispatchTarget, type BrowserAutomationErrorCode, type BrowserAutomationOperation, type BrowserAutomationResponse, type BrowserAutomationRequest, type BrowserAutomationTargetIdentity } from "@mcode/contracts/models/browser-automation";
 import { getTransport, pushEmitter } from "@/transport";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useThreadStore } from "@/stores/threadStore";

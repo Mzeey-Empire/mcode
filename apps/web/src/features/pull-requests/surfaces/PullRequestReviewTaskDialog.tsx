@@ -1,14 +1,4 @@
-import {
-  PULL_REQUEST_REVIEW_INTENT_MAX_LENGTH,
-  PULL_REQUEST_REVIEW_WORKTREE_NAME_MAX_LENGTH,
-  type PullRequestCreateReviewTaskResult,
-  type PullRequestError,
-  type PullRequestIdentity,
-  type PullRequestReviewLink,
-  type PullRequestReviewSource,
-  type PullRequestReviewWorktreeCandidate,
-  type PullRequestWorkspaceCandidate,
-} from "@mcode/contracts";
+import { PULL_REQUEST_REVIEW_INTENT_MAX_LENGTH, PULL_REQUEST_REVIEW_WORKTREE_NAME_MAX_LENGTH, type PullRequestCreateReviewTaskResult, type PullRequestError, type PullRequestIdentity, type PullRequestReviewLink, type PullRequestReviewSource, type PullRequestReviewWorktreeCandidate, type PullRequestWorkspaceCandidate } from "@mcode/contracts/pull-requests";
 import { GitBranch, GitPullRequest, MapPin } from "lucide-react";
 import { ErrorIcon } from "@/components/ui/icon-map";
 import {

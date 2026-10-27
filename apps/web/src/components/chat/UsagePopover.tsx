@@ -3,7 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { useThreadStore } from "../../stores/threadStore";
 import { useThreadRecord } from "../../stores/thread-selectors";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts";
+import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
 import type { ThreadContextUsage } from "@/stores/thread-record";
 import { useEffect, useRef, type ReactNode } from "react";
 import { formatUsageResetText } from "@/lib/usage-reset-format";

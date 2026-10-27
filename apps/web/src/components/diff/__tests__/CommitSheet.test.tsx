@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { GitCommitParams, GitCommitResult, ReviewFileChange } from "@mcode/contracts";
+import type { GitCommitParams, GitCommitResult } from "@mcode/contracts/git-commit";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 
 import { RpcError } from "@/transport/ws-transport";
 import { mockTransport } from "@/__tests__/mocks/transport";

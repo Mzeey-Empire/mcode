@@ -4,7 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { GitRefsListResultSchema, type GitRefsListParams } from "@mcode/contracts";
+import { GitRefsListResultSchema, type GitRefsListParams } from "@mcode/contracts/git";
 import { RealGitExecutor } from "../execution/real-git-executor.js";
 import { GitRepositoryService } from "../git-repository-service.js";
 import { GitComparisonService } from "../git-comparison-service.js";

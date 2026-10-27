@@ -2,7 +2,7 @@ import * as NodeUtil from "node:util";
 import type { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { asc, eq, inArray } from "drizzle-orm";
-import { ApprovalReceiptRecordSchema, type ApprovalReceiptRecord } from "@mcode/contracts";
+import { ApprovalReceiptRecordSchema, type ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
 import { logger } from "@mcode/shared";
 import { approvalReceipts, messages } from "../../../runtime/persistence/sqlite/schema.js";
 

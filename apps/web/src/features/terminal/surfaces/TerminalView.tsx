@@ -2,11 +2,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import type { Terminal, IDisposable } from "@xterm/xterm";
 import type { SerializeAddon } from "@xterm/addon-serialize";
 import type { SearchAddon } from "@xterm/addon-search";
-import type {
-  TerminalExitMetadata,
-  TerminalSessionState,
-  TerminalSettings,
-} from "@mcode/contracts";
+import type { TerminalExitMetadata, TerminalSessionState } from "@mcode/contracts/models/terminal";
+import type { TerminalSettings } from "@mcode/contracts/models/terminal-settings";
 import { getTransport } from "@/transport";
 import { Button } from "@/components/ui/button";
 import { useSettingsStore } from "@/stores/settingsStore";

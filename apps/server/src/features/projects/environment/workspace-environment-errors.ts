@@ -1,4 +1,4 @@
-import type { WorkspaceEnvironmentValidationIssue } from "@mcode/contracts";
+import type { WorkspaceEnvironmentValidationIssue } from "@mcode/contracts/models/workspace-environment";
 
 /** Structured lifecycle error returned by the workspace environment boundary. */
 export class WorkspaceEnvironmentServiceError extends Error {

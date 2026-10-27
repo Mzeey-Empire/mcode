@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useDiffStore } from "@/stores/diffStore";
 import { pathsToReviewFiles } from "@/lib/review-comparison";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import type { ReviewFileChange } from "@mcode/contracts";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import { FileList } from "../FileList";
 import { ReviewHeader } from "../ReviewHeader";
 

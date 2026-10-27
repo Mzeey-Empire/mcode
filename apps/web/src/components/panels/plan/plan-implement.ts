@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PlanVersionSchema, type PlanImplement, type PlanVersion } from "@mcode/contracts";
+import { PlanVersionSchema, type PlanImplement, type PlanVersion } from "@mcode/contracts/models/plan";
 import { getTransport, INTERACTION_MODES } from "@/transport";
 import { RpcError } from "@/transport/ws-transport";
 import { useConnectionStore } from "@/stores/connectionStore";

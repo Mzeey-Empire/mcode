@@ -1,10 +1,6 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import {
-  STARTUP_FAILURE_EXIT_CODE,
-  STARTUP_FAILURE_FILE_NAME,
-  type StartupFailureFile,
-} from "@mcode/contracts";
+import { STARTUP_FAILURE_EXIT_CODE, STARTUP_FAILURE_FILE_NAME, type StartupFailureFile } from "@mcode/contracts/startup-failure";
 import { logger } from "@mcode/shared";
 import { DatabaseStartupRefusal, rootCauseMessage } from "../../runtime/persistence/sqlite/startup-refusal.js";
 

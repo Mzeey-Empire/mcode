@@ -15,7 +15,8 @@ import { ClaudeProvider } from "./helpers/provider-fixture.js";
 import { stubEnvService } from "./helpers/provider-fixture.js";
 import { stubJobObject } from "./helpers/provider-fixture.js";
 import { mockProviderHost, queryMethodStubs } from "./helpers/mock-sdk-query.js";
-import { AgentEventType, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 
 /** Build a minimal mock Query that yields one non-result message (so sessionInitialized=true), then the requested result. */
 function mockSdkStream(results: Array<Record<string, unknown>>) {

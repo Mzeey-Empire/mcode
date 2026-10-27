@@ -1,7 +1,9 @@
 import * as NodeEvents from "node:events";
 import type * as NodeChildProcess from "node:child_process";
 import { RequestError, type ClientSideConnection, type SessionNotification } from "@agentclientprotocol/sdk";
-import { AgentEventType, getDefaultSettings, type TurnRequest } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { type TurnRequest } from "@mcode/contracts/providers/interfaces";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderHostPorts } from "../../../host-ports.js";
 import { AcpSessionRuntime, SessionRecoveryFailedError } from "../../protocols/acp/acp-session-runtime.js";

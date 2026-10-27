@@ -1,5 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import { createAgentModelState, type AgentItem, type AgentTurn, type Message } from "@mcode/contracts";
+import { createAgentModelState, type AgentItem, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { type Message } from "@mcode/contracts/models/message";
 import { describe, expect, it } from "vitest";
 import { projectCanonicalMessageList } from "../canonical-message-projection";
 import { createTranscriptItemProjector } from "../virtual-items";

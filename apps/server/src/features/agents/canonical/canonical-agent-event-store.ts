@@ -2,16 +2,8 @@ import type { Database } from "bun:sqlite";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { eq } from "drizzle-orm";
 import { canonicalAgentEvents } from "../../../runtime/persistence/sqlite/schema.js";
-import {
-  CanonicalAgentEventEnvelopeSchema,
-  AcceptedCanonicalAgentEventEnvelopeSchema,
-  reduceAgentEventBatch,
-  type AgentModelState,
-  type AgentThread,
-  type CanonicalAgentEventEnvelope,
-  type AcceptedCanonicalAgentEventEnvelope,
-  type TurnOutcome,
-} from "@mcode/contracts";
+import { CanonicalAgentEventEnvelopeSchema, AcceptedCanonicalAgentEventEnvelopeSchema, reduceAgentEventBatch, type AgentModelState, type AgentThread, type CanonicalAgentEventEnvelope, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type {
   CanonicalAgentCommitResult,
   CanonicalAgentEventDraft,

@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type MutableRefObject } from "react";
 import type { LexicalEditor } from "lexical";
-import type { MessageMention, SelectedTextComment } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import type { SelectedTextCommentSource } from "../selected-text-projection";
 import {

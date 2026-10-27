@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type {
-  TerminalCustomProfile,
-  TerminalPreferencesUpdate,
-  TerminalProfileReference,
-  TerminalProfileRecovery,
-  TerminalResolvedProfile,
-  TerminalSettings,
-} from "@mcode/contracts";
+import type { TerminalCustomProfile, TerminalProfileReference, TerminalResolvedProfile } from "@mcode/contracts/models/terminal";
+import type { TerminalPreferencesUpdate, TerminalProfileRecovery, TerminalSettings } from "@mcode/contracts/models/terminal-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";

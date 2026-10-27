@@ -1,4 +1,4 @@
-import { HTML_VISUAL_THEME_TOKENS } from "@mcode/contracts";
+import { HTML_VISUAL_THEME_TOKENS } from "@mcode/contracts/models/html-visual";
 import type { Appearance } from "@/hooks/useTheme";
 
 /** Message type a visual's page posts with its content height. */

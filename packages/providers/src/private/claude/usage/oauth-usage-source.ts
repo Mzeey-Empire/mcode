@@ -1,4 +1,4 @@
-import type { QuotaCategory } from "@mcode/contracts";
+import type { QuotaCategory } from "@mcode/contracts/providers/usage";
 import type { AnthropicOauthToken, IUsageSource } from "@mcode/shared/usage";
 
 const ENDPOINT = "https://api.anthropic.com/api/oauth/usage";

@@ -56,11 +56,20 @@ vi.mock("@mcode/shared", () => ({
   logger: { info: loggerInfo, warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock("@mcode/contracts", () => ({
+vi.mock("@mcode/contracts/build-stage", () => ({
   appDisplayName: vi.fn().mockReturnValue("Mcode"),
   resolveBuildStage: vi.fn().mockReturnValue("stable"),
+}));
+
+vi.mock("@mcode/contracts/models/file-types", () => ({
   getExtension: vi.fn().mockReturnValue(""),
+}));
+
+vi.mock("@mcode/contracts/models/workspace-preview-uri", () => ({
   isMcodeWorkspacePreviewUrl: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock("@mcode/contracts/models/settings", () => ({
   SettingsSchema: vi.fn(() => ({
     safeParse: vi.fn(() => ({ success: false })),
   })),

@@ -1,19 +1,16 @@
 import { type CanonicalChildRosterRequest } from "./canonical-child-roster.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
-import {
-  AcceptedCanonicalAgentEventEnvelopeSchema, reduceAgentEventBatch,
-  type AcceptedCanonicalAgentEventEnvelope, type AgentModelState, type AgentProgressPosition,
-  type CanonicalAgentProgressRecovery, type CanonicalAgentRevision, type TurnSavingStatus,
-  type CanonicalAgentEventEnvelope,
-  type Message, type CanonicalAgentProgressFrame,
-  type AgentEvent,
-  type CanonicalSubagentStopRequest, type CollaborationObservationChange,
-  AgentEventSchema,
-  MessageSchema, HookExecutionRecordSchema,
-  type PlanVersion,
-  type HtmlVisual, HtmlVisualSchema, HTML_VISUAL_SYSTEM_SUBTYPE, htmlVisualContent,
-} from "@mcode/contracts";
+import { AcceptedCanonicalAgentEventEnvelopeSchema, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState, type AgentProgressPosition, type CanonicalAgentEventEnvelope, type CollaborationObservationChange } from "@mcode/contracts/compat/agent-model";
+import { type CanonicalAgentProgressRecovery, type CanonicalAgentProgressFrame } from "@mcode/contracts/models/canonical-agent-progress";
+import { type CanonicalAgentRevision } from "@mcode/contracts/models/canonical-agent-reconnect";
+import { type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
+import { type Message, MessageSchema } from "@mcode/contracts/models/message";
+import { type AgentEvent, AgentEventSchema } from "@mcode/contracts/events/agent-event";
+import { type CanonicalSubagentStopRequest } from "@mcode/contracts/models/canonical-subagent-roster";
+import { HookExecutionRecordSchema } from "@mcode/contracts/models/hook-execution";
+import { type PlanVersion } from "@mcode/contracts/models/plan";
+import { type HtmlVisual, HtmlVisualSchema, HTML_VISUAL_SYSTEM_SUBTYPE, htmlVisualContent } from "@mcode/contracts/models/html-visual";
 import { broadcast, subscribedThreadIds } from "../../../application/transport/push.js";
 import { BoundedProgressRetention } from "../execution/progress-retention-budget.js";
 import { ThreadProgressOwner } from "../execution/thread-progress-owner.js";
@@ -1228,7 +1225,7 @@ function observedControlChange(change: import("./accepted-codex-collaboration.js
   return change;
 }
 
-function nativeIdentityValue(identities: readonly import("@mcode/contracts").ProviderIdentity[], providerId: string,
+function nativeIdentityValue(identities: readonly import("@mcode/contracts/compat/agent-model").ProviderIdentity[], providerId: string,
   scope: "thread" | "turn"): string | null {
   return identities.find((identity) => identity.providerId === providerId && identity.scope === scope
     && identity.provenance === "native")?.value ?? null;

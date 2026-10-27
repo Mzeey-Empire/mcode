@@ -3,7 +3,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { ProviderFileMutationStart } from "@mcode/contracts";
+import type { ProviderFileMutationStart } from "@mcode/contracts/providers/interfaces";
 
 import { TurnFileTracker } from "../../turns/turn-file-tracker.js";
 import { ExecutionFileEvidenceCoordinator } from "../execution-file-evidence-coordinator.js";

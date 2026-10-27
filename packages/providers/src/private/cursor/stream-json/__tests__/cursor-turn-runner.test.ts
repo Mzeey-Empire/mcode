@@ -26,7 +26,7 @@ import {
   type SpawnLike,
 } from "../cursor-turn-runner.js";
 import { createCursorTodoSnapshot } from "../../events/cursor-todo-snapshot.js";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type * as NodeChildProcess from "node:child_process";
 
 type CursorTurnArgsInput = Parameters<typeof buildCursorTurnArgsForPlatform>[0];

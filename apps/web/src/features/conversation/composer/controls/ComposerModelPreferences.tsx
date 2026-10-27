@@ -4,7 +4,7 @@ import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
 import { SteppedSlider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
 import { findProviderModel, supportsThinkingToggle } from "@/lib/model-registry";
 import { formatReasoningLabel } from "@/lib/format-model-label";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { INTERACTION_MODES, PERMISSION_MODES } from "@/transport";
-import { ORCHESTRATION_MODES } from "@mcode/contracts";
+import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
 import type { ComposerDraft } from "@/stores/composerDraftStore";
 import {
   useThreadDraftStore,

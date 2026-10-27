@@ -1,4 +1,4 @@
-import { createAgentModelState, type AgentModelState, type AgentTurn } from "@mcode/contracts";
+import { createAgentModelState, type AgentModelState, type AgentTurn } from "@mcode/contracts/compat/agent-model";
 import { describe, expect, it } from "vitest";
 import { timeUntil } from "../../turn-ending/usage-limit";
 import { latestUsageLimitStop, usageLimitTrayState, type UsageLimitStop } from "../usage-limit-tray";

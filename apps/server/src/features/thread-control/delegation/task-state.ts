@@ -1,4 +1,6 @@
-import type { AgentTurn, TaskState, ThreadStartup } from "@mcode/contracts";
+import type { AgentTurn } from "@mcode/contracts/compat/agent-model";
+import type { TaskState } from "@mcode/contracts/thread-control";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 
 /** Mutable lifecycle facts read for the latest delegated attempt. */
 export interface TaskFacts {

@@ -5,7 +5,8 @@ import * as NodePath from "node:path";
 import type * as NodeChildProcess from "node:child_process";
 import { RequestError, type ClientSideConnection } from "@agentclientprotocol/sdk";
 import which from "which";
-import { getDefaultSettings, type TurnRequest } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { type TurnRequest } from "@mcode/contracts/providers/interfaces";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { ProviderHostPorts } from "../../../host-ports.js";
 import { AcpSessionRuntime, SessionRecoveryFailedError } from "../../protocols/acp/acp-session-runtime.js";
@@ -1179,4 +1180,4 @@ describe("DevinProvider", () => {
     expect(events.some((event) => event.type === "message" && event.content === "historical reply")).toBe(false);
   });
 });
-import { ApprovalRequestBodySchema, type ApprovalRequestEnvelope } from "@mcode/contracts";
+import { ApprovalRequestBodySchema, type ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";

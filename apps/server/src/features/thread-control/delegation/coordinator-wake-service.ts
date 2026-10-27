@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
-import type { Thread } from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
 import type { DelegatedTaskService } from "./delegated-task-service.js";
 import type { ThreadRepo } from "../persistence/thread-repo.js";
 import type { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-boundary.js";

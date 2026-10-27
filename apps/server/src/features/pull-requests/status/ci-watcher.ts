@@ -1,6 +1,6 @@
 import { logger } from "@mcode/shared";
 import type { GithubService, PullRequestWatchSnapshot } from "../github/github-service.js";
-import type { ChecksStatus } from "@mcode/contracts";
+import type { ChecksStatus } from "@mcode/contracts/github";
 
 /** Internal tracking entry for a watched thread. */
 export interface WatchEntry {

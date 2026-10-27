@@ -1,4 +1,4 @@
-import { BROWSER_TAB_INFO_STRING_MAX } from "@mcode/contracts";
+import { BROWSER_TAB_INFO_STRING_MAX } from "@mcode/contracts/models/browser-tab";
 import { browserPartitionFor } from "@mcode/shared/browser-partition";
 import type {
   PreviewSurfaceBridge,

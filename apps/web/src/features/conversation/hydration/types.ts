@@ -1,7 +1,15 @@
 import type { Message, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
-import type { TurnSnapshot, ApprovalReceiptRecord, PendingPlanImplement, PlanComment, PlanSnapshot, PlanVersion, NarrativeEntry, TurnRange, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationPage, ConversationTail, GoalLookupResult } from "@mcode/contracts";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
+import type { ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
+import type { PendingPlanImplement, PlanComment, PlanSnapshot, PlanVersion } from "@mcode/contracts/models/plan";
+import type { NarrativeEntry, TurnRange } from "@mcode/contracts/models/narrative-entry";
+import type { ConversationNewerPage, ConversationNewerPageRequest } from "@mcode/contracts/models/conversation-newer-page";
+import type { ConversationOlderPage, ConversationOlderPageRequest } from "@mcode/contracts/models/conversation-older-page";
+import type { ConversationPage } from "@mcode/contracts/models/conversation-page";
+import type { ConversationTail } from "@mcode/contracts/models/conversation-tail";
+import type { GoalLookupResult } from "@mcode/contracts/models/goal";
 import type { TaskItem } from "@/stores/taskStore";
-import type { PlanQuestion } from "@mcode/contracts";
+import type { PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import type { ThreadRecord } from "@/stores/thread-record";
 
 /** How a hydrate call commits its result. */

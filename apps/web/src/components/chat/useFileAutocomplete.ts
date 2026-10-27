@@ -5,11 +5,7 @@ import {
   providerCatalogCacheKey,
   useProviderCatalogStore,
 } from "@/stores/providerCatalogStore";
-import type {
-  ProviderCatalogRequest,
-  ProviderPluginCapability,
-  SelectableProviderAgent,
-} from "@mcode/contracts";
+import type { ProviderCatalogRequest, ProviderPluginCapability, SelectableProviderAgent } from "@mcode/contracts/providers/capability-catalog";
 
 interface UseFileAutocompleteOptions {
   workspaceId?: string;

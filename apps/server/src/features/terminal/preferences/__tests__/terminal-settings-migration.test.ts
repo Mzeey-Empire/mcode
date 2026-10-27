@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getDefaultSettings, TERMINAL_DEFAULT_FONT_FAMILY } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { TERMINAL_DEFAULT_FONT_FAMILY } from "@mcode/contracts/models/terminal-settings";
 import {
   migrateTerminalSettingsDocument,
   type TerminalSettingsMigrationResult,

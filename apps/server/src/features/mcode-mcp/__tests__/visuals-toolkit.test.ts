@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { HTML_VISUAL_MAX_HTML_BYTES } from "@mcode/contracts";
+import { HTML_VISUAL_MAX_HTML_BYTES } from "@mcode/contracts/models/html-visual";
 import { FeatureRetentionLimitError } from "../../agents/canonical/accepted-feature-observations.js";
 import { TurnVisualRejectedError, type CanonicalAcceptedProgress } from "../../agents/canonical/canonical-accepted-progress.js";
 import { McodeSessionAuthority, type McodeSession } from "../mcode-session-authority.js";

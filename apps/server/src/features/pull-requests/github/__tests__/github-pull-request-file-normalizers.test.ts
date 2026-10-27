@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  PULL_REQUEST_PATCH_MAX_LINE_LENGTH,
-  PULL_REQUEST_PATCH_MAX_LINES,
-} from "@mcode/contracts";
+import { PULL_REQUEST_PATCH_MAX_LINE_LENGTH, PULL_REQUEST_PATCH_MAX_LINES } from "@mcode/contracts/pull-requests";
 import {
   createPullRequestFileLocator,
   decodePullRequestFileLocator,

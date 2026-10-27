@@ -1,5 +1,5 @@
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import type { AttachedBrowserCapture, PreviewAnnotationBundle } from "@mcode/contracts";
+import type { AttachedBrowserCapture, PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { appendBrowserCaptureFence } from "@/features/preview/capture/browser-capture-append";
 import { appendPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 

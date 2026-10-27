@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { createAgentModelState, type AgentModelState, type ProviderAuth, type ProviderStatus } from "@mcode/contracts";
+import { createAgentModelState, type AgentModelState } from "@mcode/contracts/compat/agent-model";
+import { type ProviderAuth, type ProviderStatus } from "@mcode/contracts/providers/provider-status";
 import { useProviderStatusStore } from "@/stores/providerStatusStore";
 import { useTurnEndings } from "../useTurnEndings";
 

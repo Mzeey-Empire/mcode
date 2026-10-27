@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { GitListError, PullRequestError } from "@mcode/contracts";
+import type { GitListError } from "@mcode/contracts/git";
+import type { PullRequestError } from "@mcode/contracts/pull-requests";
 
 import { Picker, type PickerRow, type PickerStatus, type PickerTab } from "@/components/ui/picker";
 import { normalizeWorktreePath } from "@/lib/worktree";

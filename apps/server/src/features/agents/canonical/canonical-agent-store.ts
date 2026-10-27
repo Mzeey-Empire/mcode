@@ -5,41 +5,16 @@ import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
 import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
 import { and, asc, between, desc, eq, getTableColumns, inArray, isNotNull, isNull, or, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import {
-  AgentItemSchema,
-  AgentThreadSchema,
-  AgentTurnSchema,
-  CanonicalAgentEventEnvelopeSchema,
-  CollaborationActionSchema,
-  canonicalSubagentTerminalOutcome,
-  type CanonicalSubagentStopRequest,
-  CANONICAL_SUBAGENT_LINEAGE_MAX_DEPTH,
-  CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN,
-  MAX_TURN_RECOVERIES,
-  ProviderIdentitySchema,
-  ProviderIdSchema,
-  CANONICAL_AGENT_EVENT_BATCH_MAX,
-  createAgentModelState,
-  reduceAgentEvent,
-  reduceAgentEventBatch,
-  type AgentItem,
-  type AgentModelState,
-  type AgentThread,
-  type AgentTurn,
-  type CanonicalAgentEvent,
-  type CanonicalAgentEventEnvelope,
-  type AcceptedCanonicalAgentEventEnvelope,
-  type CanonicalAgentReconnectRecovery,
-  type CanonicalAgentRevision,
-  type CollaborationAction,
-  type InterruptionCause,
-  type Message,
-  type NarrativeEntry,
-  ParentNarrativeRecoveryItemSchema,
-  type ProviderIdentity,
-  type ParentNarrativeRecoveryItem,
-  type TurnOutcome,
-} from "@mcode/contracts";
+import { AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CanonicalAgentEventEnvelopeSchema, CollaborationActionSchema, ProviderIdentitySchema, createAgentModelState, reduceAgentEvent, reduceAgentEventBatch, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn, type CanonicalAgentEvent, type CanonicalAgentEventEnvelope, type AcceptedCanonicalAgentEventEnvelope, type CollaborationAction, type InterruptionCause, type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import { canonicalSubagentTerminalOutcome, type CanonicalSubagentStopRequest, CANONICAL_SUBAGENT_LINEAGE_MAX_DEPTH, CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN } from "@mcode/contracts/models/canonical-subagent-roster";
+import { MAX_TURN_RECOVERIES } from "@mcode/contracts/models/turn-recovery";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts/ws/channels";
+import { type CanonicalAgentReconnectRecovery, type CanonicalAgentRevision } from "@mcode/contracts/models/canonical-agent-reconnect";
+import { type Message } from "@mcode/contracts/models/message";
+import { type NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
+import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { broadcast } from "../../../application/transport/push.js";
 import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 import {
@@ -3306,7 +3281,7 @@ export class CanonicalAgentStore {
     }
   }
 
-  private persistObservedRecord(state: AgentModelState, change: import("@mcode/contracts").CollaborationObservationChange): void {
+  private persistObservedRecord(state: AgentModelState, change: import("@mcode/contracts/compat/agent-model").CollaborationObservationChange): void {
     switch (change.kind) {
       case "thread-recorded": this.persistObservedThread(requiredObservedRecord(state.threads[change.thread.id])); break;
       case "thread-bound": this.persistObservedThread(requiredObservedRecord(state.threads[change.childThread.id])); break;
@@ -3341,7 +3316,7 @@ export class CanonicalAgentStore {
       .all().map((row) => row.id);
   }
 
-  private observedItemIds(change: import("@mcode/contracts").CollaborationObservationChange): string[] {
+  private observedItemIds(change: import("@mcode/contracts/compat/agent-model").CollaborationObservationChange): string[] {
     if (change.kind === "item-recorded" || change.kind === "diagnostic") return [change.item.id];
     if (change.kind !== "turn-terminal") return [];
     return this.assistantItemIds({ threadId: change.turn.threadId, turnId: change.turn.id });

@@ -1,4 +1,5 @@
-import { PlanVersionSchema, lazySchema, type PlanVersion } from "@mcode/contracts";
+import { PlanVersionSchema, type PlanVersion } from "@mcode/contracts/models/plan";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
 import { z } from "zod";
 
 const legacyPlanSchema = lazySchema(() => z.object({

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanSaveVersion, PlanVersion } from "@mcode/contracts";
+import type { PlanSaveVersion, PlanVersion } from "@mcode/contracts/models/plan";
 import { RpcError, RpcTimeoutError } from "@/transport/ws-transport";
 import { PlanSaveScheduler } from "./plan-save-scheduler";
 

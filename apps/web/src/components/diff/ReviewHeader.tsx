@@ -1,4 +1,4 @@
-import type { ReviewComparison, ReviewState } from "@mcode/contracts";
+import type { ReviewComparison, ReviewState } from "@mcode/contracts/models/review-comparison";
 import { Fragment, useContext, useEffect, useId, useMemo, useState } from "react";
 import {
   ChevronDown,

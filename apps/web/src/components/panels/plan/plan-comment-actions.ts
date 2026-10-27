@@ -1,4 +1,4 @@
-import type { PlanComment, PlanCommentAnchor, PlanCommentEditorDraft } from "@mcode/contracts";
+import type { PlanComment, PlanCommentAnchor, PlanCommentEditorDraft } from "@mcode/contracts/models/plan";
 import { getTransport } from "@/transport";
 import { RpcError } from "@/transport/ws-transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";

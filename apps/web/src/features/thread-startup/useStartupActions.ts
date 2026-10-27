@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AgentModelState, ThreadStartup, ThreadStartupAction, ThreadStartupResolveInput, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { AgentModelState } from "@mcode/contracts/compat/agent-model";
+import type { ThreadStartup, ThreadStartupAction, ThreadStartupResolveInput } from "@mcode/contracts/thread-startup";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { approveAndStartAction } from "@/features/projects/actions/approveAndStartAction";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useTerminalStore } from "@/features/terminal";

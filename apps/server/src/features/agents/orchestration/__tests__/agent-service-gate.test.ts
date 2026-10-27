@@ -1,8 +1,9 @@
 import "reflect-metadata";
 import { createMockThread } from "@mcode/contracts/testing";
-import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts";
+import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts/models/canonical-agent-progress";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ApprovalReviewSupport, Thread, IProviderRegistry } from "@mcode/contracts";
+import type { ApprovalReviewSupport, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
+import type { Thread } from "@mcode/contracts/models/thread";
 import { supportsInternalThreadControl } from "../../turns/turn-admission-dispatch-coordinator.js";
 import { createAgentServiceForTest, drainAgentServicePersistenceForTest } from "./agent-service-test-harness.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";

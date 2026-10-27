@@ -1,4 +1,4 @@
-import type { ProviderId } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 
 /** Thrown when a caller requests a provider whose enabled flag is false (or comingSoon). */
 export class ProviderDisabledError extends Error {

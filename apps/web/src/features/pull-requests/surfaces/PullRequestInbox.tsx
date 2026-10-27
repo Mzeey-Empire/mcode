@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Key, KeyboardEvent, ReactNode, RefObject, MutableRefObject } from "react";
-import type { PullRequestError, PullRequestState } from "@mcode/contracts";
+import type { PullRequestError, PullRequestState } from "@mcode/contracts/pull-requests";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { RefreshCw } from "lucide-react";
 import { ErrorIcon } from "@/components/ui/icon-map";

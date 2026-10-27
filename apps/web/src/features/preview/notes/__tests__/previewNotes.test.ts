@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PreviewAnnotationBundleSchema } from "@mcode/contracts";
+import { PreviewAnnotationBundleSchema } from "@mcode/contracts/models/browser-preview";
 import { browserPagesToBundle, readVisibleBrowserNotePages } from "@/features/conversation/composer/draft/draft-browser-notes";
 import { usePreviewAnnotationStore } from "../../state/previewAnnotationStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";

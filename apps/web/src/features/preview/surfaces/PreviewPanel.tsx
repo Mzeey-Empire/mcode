@@ -3,7 +3,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Globe } from "lucide-react";
-import type { PreviewPageError, PreviewPageStatus } from "@mcode/contracts";
+import type { PreviewPageError, PreviewPageStatus } from "@mcode/contracts/models/preview-page-status";
 import { isEmptyPreviewTabUrl } from "../navigation/open-url-in-preview";
 import { cn } from "@/lib/utils";
 import { usePreviewTabsStore, type PendingNavError, type PreviewLiveChrome } from "../state/previewTabsStore";

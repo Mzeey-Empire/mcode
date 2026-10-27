@@ -1,4 +1,5 @@
-import type { PullRequestFile, ReviewFileChange } from "@mcode/contracts";
+import type { PullRequestFile } from "@mcode/contracts/pull-requests";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useEffect,

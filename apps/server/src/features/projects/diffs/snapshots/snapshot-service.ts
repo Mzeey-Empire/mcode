@@ -9,7 +9,7 @@ import { truncateUnifiedDiff } from "@mcode/shared";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
-import type { DiffStats } from "@mcode/contracts";
+import type { DiffStats } from "@mcode/contracts/models/diff-stats";
 import type { GitExecutor } from "../../git/execution/index.js";
 import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";

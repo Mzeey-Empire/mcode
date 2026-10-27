@@ -3,7 +3,8 @@ import type {
   CanonicalAgentEvent,
   ProviderIdentity,
 } from "@mcode/agent-model";
-import { AgentEventType, type AgentEvent, type InteractionMode } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type InteractionMode } from "@mcode/contracts/models/enums";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type { McodeAttachedToolkits } from "@mcode/thread-orchestration";
 

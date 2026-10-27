@@ -1,4 +1,4 @@
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import type { ProjectActionRunRepo } from "./persistence/project-action-run-repo.js";
 
 /** Durable Project Action update delivered to connected Thread views. */

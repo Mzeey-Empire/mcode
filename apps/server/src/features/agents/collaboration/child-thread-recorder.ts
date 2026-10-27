@@ -1,4 +1,5 @@
-import type { AgentItem, AgentTurn, ProviderId } from "@mcode/contracts";
+import type { AgentItem, AgentTurn } from "@mcode/contracts/compat/agent-model";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { CodexChildRoutingDiagnosticInput, CodexCollaborationDurability } from "./codex-collaboration-durability.js";
 
 /** Recorder-owned brand for resolved delegations. */

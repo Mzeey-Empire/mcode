@@ -1,8 +1,4 @@
-import {
-  AttachedBrowserCaptureSchema,
-  clampAttachedBrowserCaptureForOutbound,
-  type AttachedBrowserCapture,
-} from "@mcode/contracts";
+import { AttachedBrowserCaptureSchema, clampAttachedBrowserCaptureForOutbound, type AttachedBrowserCapture } from "@mcode/contracts/models/browser-preview";
 
 /** Opens the machine-readable fenced block appended to outbound user prompts. */
 export const MCODE_BROWSER_CAPTURE_FENCE_OPEN = "<!-- mcode-browser-capture-v2 -->";

@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { describe, expect, it, vi } from "vitest";
-import type { ApprovalRequest } from "@mcode/contracts";
+import type { ApprovalRequest } from "@mcode/contracts/models/approval";
 import { broadcast } from "../../../../application/transport/push.js";
 import { ApprovalService } from "../../../agents/approvals/approval-service.js";
 import { AgentService } from "../../../agents/orchestration/agent-service.js";

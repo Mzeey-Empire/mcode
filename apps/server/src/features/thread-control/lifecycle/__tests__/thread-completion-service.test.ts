@@ -6,7 +6,7 @@ let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
-import { getDefaultSettings, type CompletedThreadRetentionDays, type Settings } from "@mcode/contracts";
+import { getDefaultSettings, type CompletedThreadRetentionDays, type Settings } from "@mcode/contracts/models/settings";
 import type { AgentService } from "../../../agents/index.js";
 import type { ApprovalService } from "../../../agents/approvals/approval-service.js";
 import type { SettingsService } from "../../../settings/settings-service.js";

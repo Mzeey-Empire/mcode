@@ -1,4 +1,6 @@
-import { PLAN_MAX_CONTENT_CHARS, type PlanCapture, type PlanQuestion } from "@mcode/contracts";
+import { PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts/models/plan";
+import { type PlanCapture } from "@mcode/contracts/providers/interfaces";
+import { type PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import type { z } from "zod";
 import { PlanPersistenceReadySchema } from "./plan-capture-schema.js";
 import { planTitle } from "./plan-title.js";

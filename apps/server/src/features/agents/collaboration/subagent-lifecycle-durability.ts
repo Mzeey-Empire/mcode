@@ -1,7 +1,5 @@
 import { type CanonicalChildRoster, type CanonicalChildRosterRequest } from "../canonical/canonical-child-roster.js";
-import type {
-  CanonicalSubagentStopRequest,
-} from "@mcode/contracts";
+import type { CanonicalSubagentStopRequest } from "@mcode/contracts/models/canonical-subagent-roster";
 
 /** Injection token for durable sub-agent lifecycle state. */
 export const SUBAGENT_LIFECYCLE_DURABILITY = Symbol("SubagentLifecycleDurability");

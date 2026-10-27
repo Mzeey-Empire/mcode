@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
-import { ReviewComparisonResultSchema } from "@mcode/contracts";
+import { ReviewComparisonResultSchema } from "@mcode/contracts/models/review-comparison";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ThoughtSegmentRepo } from "../../conversation/narrative/persistence/thought-segment-repo.js";

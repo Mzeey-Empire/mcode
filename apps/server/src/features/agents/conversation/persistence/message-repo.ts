@@ -1,4 +1,5 @@
-import { THREAD_GET_TRANSCRIPT_MAX_BYTES, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import { THREAD_GET_TRANSCRIPT_MAX_BYTES } from "@mcode/contracts/thread-control";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { recoveredNarrativeWriteOperation } from "../narrative/persistence/recovered-narrative-write-operation.js";
 import { inject, injectable } from "tsyringe";
 import type { Database } from "bun:sqlite";

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BROWSER_AUTOMATION_CONTRACT_VERSION, type BrowserAutomationHostDispatch } from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, type BrowserAutomationHostDispatch } from "@mcode/contracts/models/browser-automation";
 import type { PreviewAutomationBridge } from "@/transport/desktop-bridge";
 import { BrowserAutomationRecorder } from "../browserAutomationRecorder";
 

@@ -1,4 +1,5 @@
-import { resolveBuildStage, type BuildStage, type WsMethodName } from "@mcode/contracts";
+import { resolveBuildStage, type BuildStage } from "@mcode/contracts/build-stage";
+import { type WsMethodName } from "@mcode/contracts/ws/methods";
 
 type ApplicationRpcMethod = "app.version" | "app.stage";
 

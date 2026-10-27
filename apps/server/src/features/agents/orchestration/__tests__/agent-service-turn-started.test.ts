@@ -2,13 +2,9 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
-import { AgentEventType } from "@mcode/contracts";
-import type {
-  IAgentProvider,
-  IProviderRegistry,
-  ProviderId,
-  ProviderRuntimeEvent,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { IAgentProvider, IProviderRegistry, ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";

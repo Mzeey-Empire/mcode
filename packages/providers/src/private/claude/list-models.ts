@@ -13,8 +13,8 @@ import {
   supports1MContextWindow,
   supportsEffortParameter,
 } from "@mcode/shared/model-effort";
-import { CLAUDE_STATIC_MODELS, withClaudeLifecycle } from "@mcode/contracts";
-import type { ProviderModelInfo } from "@mcode/contracts";
+import { CLAUDE_STATIC_MODELS, withClaudeLifecycle } from "@mcode/contracts/providers/claude-static-fallback";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 
 /** Cache TTL: 5 minutes, matching the design spec. */
 const CACHE_TTL_MS = 5 * 60 * 1000;

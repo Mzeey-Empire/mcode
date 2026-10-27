@@ -2,7 +2,8 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BrowserHistory, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { BrowserHistory } from "@mcode/contracts/models/browser-preview";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 
 const transport = {
   listWorkspaceActionRuns: vi.mocked(mockTransport.listWorkspaceActionRuns),

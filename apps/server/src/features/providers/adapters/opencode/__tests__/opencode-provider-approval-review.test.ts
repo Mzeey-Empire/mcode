@@ -2,7 +2,8 @@ import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
-import type { ApprovalRequestEnvelope, TurnRequest } from "@mcode/contracts";
+import type { ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
+import type { TurnRequest } from "@mcode/contracts/providers/interfaces";
 
 function testPool(): OpenCodeServerPool {
   return new OpenCodeServerPool({

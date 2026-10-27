@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  executeTerminalTransitionTrace,
-  TERMINAL_BOOT_TRANSITIONS,
-  TERMINAL_SESSION_TRANSITIONS,
-  type TerminalBinaryFrame,
-} from "@mcode/contracts";
+import { executeTerminalTransitionTrace, TERMINAL_BOOT_TRANSITIONS, TERMINAL_SESSION_TRANSITIONS } from "@mcode/contracts/models/terminal-lifecycle";
+import { type TerminalBinaryFrame } from "@mcode/contracts/ws/terminal-binary";
 import { executeTerminalV1ProtocolTrace } from "../terminal-v1-protocol-trace.js";
 
 const SESSION = "abcdef12-abcd-4abc-8abc-abcdefabcdef";

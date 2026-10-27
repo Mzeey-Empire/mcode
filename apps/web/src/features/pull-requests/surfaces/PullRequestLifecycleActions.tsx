@@ -1,10 +1,4 @@
-import type {
-  PullRequestCapabilities,
-  PullRequestCapability,
-  PullRequestDetail,
-  PullRequestMergeMethod,
-  PullRequestReadiness,
-} from "@mcode/contracts";
+import type { PullRequestCapabilities, PullRequestCapability, PullRequestDetail, PullRequestMergeMethod, PullRequestReadiness } from "@mcode/contracts/pull-requests";
 import {
   CircleDot,
   GitFork,

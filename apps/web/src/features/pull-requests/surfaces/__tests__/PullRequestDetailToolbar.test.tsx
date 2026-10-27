@@ -1,4 +1,4 @@
-import type { PullRequestDetail } from "@mcode/contracts";
+import type { PullRequestDetail } from "@mcode/contracts/pull-requests";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";

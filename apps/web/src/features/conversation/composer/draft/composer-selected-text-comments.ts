@@ -1,4 +1,4 @@
-import type { SelectedTextComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 
 /** Renumbers saved comments after a direct or aggregate draft transition. */
 export function renumberSelectedTextComments(

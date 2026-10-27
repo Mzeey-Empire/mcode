@@ -1,20 +1,13 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import type {
-  ContextWindowMode,
-  DevinMode,
-  DraftBrowserNotePage,
-  DraftDiffComment,
-  DraftFileComment,
-  DraftSubmission,
-  MessageMention,
-  PlanCommentEditorDraft,
-  ProviderId,
-  ReasoningLevel,
-  SelectedTextComment,
-  SelectedTextCommentSource,
-} from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { DevinMode } from "@mcode/contracts/models/enums";
+import type { DraftBrowserNotePage, DraftDiffComment, DraftFileComment, DraftSubmission } from "@mcode/contracts/models/next-message-draft";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { PlanCommentEditorDraft } from "@mcode/contracts/models/plan";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { SelectedTextComment, SelectedTextCommentSource } from "@mcode/contracts/models/selected-text-comment";
 import type { DiffCommentTarget, FileCommentTarget } from "@/features/conversation/composer/draft/draft-submission";
 import {
   collectSpillPathsFromPendingAttachments,

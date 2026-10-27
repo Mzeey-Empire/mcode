@@ -2,7 +2,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentReadResult } from "@mcode/contracts";
+import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentReadResult } from "@mcode/contracts/models/workspace-environment";
 
 const { MockRpcError, applyActionRun } = vi.hoisted(() => {
   class MockRpcError extends Error {

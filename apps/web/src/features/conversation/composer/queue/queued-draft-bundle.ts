@@ -1,4 +1,4 @@
-import type { PreviewAnnotationBundle } from "@mcode/contracts";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { browserNoteElements, readVisibleBrowserNotePages, removeTakenBrowserNotePages } from "../draft/draft-browser-notes";
 import { readVisibleDiffComments, removeTakenDiffComments } from "../draft/draft-diff-comments";
 import { readVisibleFileComments, removeTakenFileComments } from "../draft/draft-file-comments";

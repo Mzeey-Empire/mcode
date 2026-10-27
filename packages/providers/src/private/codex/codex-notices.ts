@@ -1,7 +1,8 @@
 import * as NodeCrypto from "node:crypto";
 import type { z } from "zod";
 import type { codexNoticeSchemas } from "./codex-notification-validation.js";
-import { AgentEventType, type AgentEvent, type SystemNoticeMetadata } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type SystemNoticeMetadata } from "@mcode/contracts/models/message";
 import type { CodexNotification } from "./codex-types.js";
 
 type NoticeEvent = Extract<AgentEvent, { type: "system" }>;

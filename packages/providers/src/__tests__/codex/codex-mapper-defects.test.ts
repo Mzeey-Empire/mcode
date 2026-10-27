@@ -6,7 +6,7 @@ vi.mock("@mcode/shared", () => ({
 }));
 
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import type { CompletedItem } from "../../private/codex/codex-types.js";
 
 /**

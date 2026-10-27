@@ -1,4 +1,5 @@
-import type { AgentEvent, ProviderFileMutationStart, ProviderTurnDiffUpdate } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ProviderFileMutationStart, ProviderTurnDiffUpdate } from "@mcode/contracts/providers/interfaces";
 import type { TurnDiffService } from "./turn-diff-service.js";
 import * as NodePerfHooks from "node:perf_hooks";
 import { serverWorkTrace } from "../diagnostics/server-work-trace.js";

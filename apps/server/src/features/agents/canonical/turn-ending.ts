@@ -1,12 +1,6 @@
-import type {
-  AgentEvent,
-  CanonicalAgentEvent,
-  InterruptionCause,
-  PersistedTurnFailure,
-  TurnFailure,
-  TurnStopCause,
-  TurnUsageLimit,
-} from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { CanonicalAgentEvent, InterruptionCause, PersistedTurnFailure, TurnStopCause, TurnUsageLimit } from "@mcode/contracts/compat/agent-model";
+import type { TurnFailure } from "@mcode/contracts/models/turn-failure";
 
 const PERSISTED_FAILURE_MESSAGE_MAX = 8_000;
 const FALLBACK_FAILURE_MESSAGE = "Provider turn failed";

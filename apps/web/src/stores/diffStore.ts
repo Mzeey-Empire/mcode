@@ -1,5 +1,7 @@
 import { create } from "zustand";
-import type { TurnSnapshot, BranchComparison, ReviewTurn } from "@mcode/contracts";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
+import type { BranchComparison } from "@mcode/contracts/git";
+import type { ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import { defaultReviewView, type ReviewChangeState, type ReviewViewAvailabilityMap } from "@/lib/review-views";
 
 export type { BranchComparison };

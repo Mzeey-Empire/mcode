@@ -2,7 +2,7 @@
 
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
 import * as NodeCrypto from "node:crypto";
-import { BROWSER_TAB_INFO_STRING_MAX, type BrowserTabSet } from "@mcode/contracts";
+import { BROWSER_TAB_INFO_STRING_MAX, type BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import { logger } from "@mcode/shared";
 import {
   ensureThreadTabSet,

@@ -1,4 +1,11 @@
-import { ProviderRuntimeEventSchema, type AgentEvent, type AgentProgressPosition, type ParentNarrativeRecoveryItem, type PlanQuestion, type PlanVersion, type TurnFileEffectSummary, type TurnOutcome } from "@mcode/contracts";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type AgentProgressPosition } from "@mcode/contracts/compat/agent-model";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { type PlanQuestion } from "@mcode/contracts/models/plan-questions";
+import { type PlanVersion } from "@mcode/contracts/models/plan";
+import { type TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { ProviderEventDraft } from "@mcode/providers";
 
 import type {

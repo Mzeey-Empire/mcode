@@ -11,10 +11,7 @@ import {
 import type { AttachmentMeta } from "@/transport";
 import { getTransport } from "@/transport";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import {
-  isFileSupported,
-  MAX_ATTACHMENTS,
-} from "@mcode/contracts";
+import { isFileSupported, MAX_ATTACHMENTS } from "@mcode/contracts/models/file-types";
 import { useToastStore } from "@/stores/toastStore";
 import {
   collectSpillPathsFromPendingAttachments,

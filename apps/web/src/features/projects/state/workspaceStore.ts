@@ -6,17 +6,14 @@ import {
   type ClientPreparingContext,
   titleFromMessageContent,
 } from "@/lib/workspace-thread";
-import {
-  ProviderIdSchema,
-  isDelegatedSubagent,
-  type ChecksStatus,
-  type CreateAndSendResult,
-  type WorkspaceCreateResult,
-  type MessageMention,
-  type PreviewAnnotationBundle,
-  type SelectedTextComment,
-  type ThreadStartup,
-} from "@mcode/contracts";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { isDelegatedSubagent } from "@mcode/contracts/models/thread";
+import { type ChecksStatus } from "@mcode/contracts/github";
+import { type CreateAndSendResult, type WorkspaceCreateResult } from "@mcode/contracts/ws/methods";
+import { type MessageMention } from "@mcode/contracts/models/mention";
+import { type PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import { type SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
+import { type ThreadStartup } from "@mcode/contracts/thread-startup";
 import { getTransport } from "@/transport";
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
@@ -38,7 +35,11 @@ import {
   releaseBrowserAutomationThreadScope,
   releaseBrowserAutomationWorkspaceScopes,
 } from "@/features/preview/automation/browserAutomationStore";
-import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode, ScheduledTurnResume, TurnRuntimeSnapshot, Message } from "@mcode/contracts";
+import type { ApprovalReviewMode, DevinMode, InteractionMode, OrchestrationMode } from "@mcode/contracts/models/enums";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ScheduledTurnResume } from "@mcode/contracts/models/turn-recovery";
+import type { TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
+import type { Message } from "@mcode/contracts/models/message";
 import { isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from "@/lib/worktree";
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
 import { readRememberedStartFromOrigin, rememberStartFromOrigin } from "@/lib/start-from-origin-preference";

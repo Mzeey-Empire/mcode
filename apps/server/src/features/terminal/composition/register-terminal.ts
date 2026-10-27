@@ -1,4 +1,4 @@
-import { TERMINAL_MAX_SESSIONS } from "@mcode/contracts";
+import { TERMINAL_MAX_SESSIONS } from "@mcode/contracts/models/terminal";
 import { Lifecycle, type DependencyContainer } from "tsyringe";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
-import type { ApprovalSubject } from "@mcode/contracts";
+import type { ApprovalSubject } from "@mcode/contracts/models/approval";
 import { areThemesAttached, getHighlighterIfLoaded, getHighlighterOptions, preloadHighlighter } from "@pierre/diffs";
 import { PatchDiff } from "@pierre/diffs/react";
 import { Button } from "@/components/ui/button";

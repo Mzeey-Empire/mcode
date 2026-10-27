@@ -1,4 +1,5 @@
-import type { ReviewState, ReviewTurn, TurnSnapshot } from "@mcode/contracts";
+import type { ReviewState, ReviewTurn } from "@mcode/contracts/models/review-comparison";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import type { PanelScope } from "@/lib/panel-tabs";
 import type { DiffViewMode } from "@/stores/diffStore";
 

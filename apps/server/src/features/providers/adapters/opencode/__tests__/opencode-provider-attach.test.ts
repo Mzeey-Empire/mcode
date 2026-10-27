@@ -1,6 +1,8 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import { AgentEventType, type ProviderRuntimeEvent, type TurnRequest } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { type TurnRequest } from "@mcode/contracts/providers/interfaces";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import type { OpenCodeEndpoint } from "../opencode-http-client.js";

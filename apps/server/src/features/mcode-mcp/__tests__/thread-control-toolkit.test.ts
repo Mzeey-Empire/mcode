@@ -1,14 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  DelegateTaskResultSchema,
-  ThreadGetResultSchema,
-  ThreadSearchResultSchema,
-  ThreadSendResultSchema,
-  ThreadStopResultSchema,
-  ThreadWaitResultSchema,
-  WorkspaceSearchResultSchema,
-  WorktreeListResultSchema,
-} from "@mcode/contracts";
+import { DelegateTaskResultSchema, ThreadGetResultSchema, ThreadSearchResultSchema, ThreadSendResultSchema, ThreadStopResultSchema, ThreadWaitResultSchema, WorkspaceSearchResultSchema, WorktreeListResultSchema } from "@mcode/contracts/thread-control";
 import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { McodeSessionAuthority, type McodeSession } from "../mcode-session-authority.js";

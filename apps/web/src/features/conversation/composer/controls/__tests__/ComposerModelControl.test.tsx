@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderId, ReasoningLevel } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { registerProviderModels } from "@/lib/model-registry";
 import { useThreadStore } from "@/stores/threadStore";
 import { ComposerModelControl } from "../ComposerModelControl";

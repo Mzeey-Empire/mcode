@@ -6,8 +6,8 @@
  */
 
 import { logger } from "@mcode/shared";
-import { AgentEventType } from "@mcode/contracts";
-import type { AgentEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
 const TRUTHY = new Set(["1", "true", "yes"]);
 

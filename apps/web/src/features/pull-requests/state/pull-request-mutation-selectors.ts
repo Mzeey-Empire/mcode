@@ -1,4 +1,4 @@
-import type { PullRequestIdentity } from "@mcode/contracts";
+import type { PullRequestIdentity } from "@mcode/contracts/pull-requests";
 import {
   getPullRequestMutationIdentityKey,
   getPullRequestMutationLaneKey,

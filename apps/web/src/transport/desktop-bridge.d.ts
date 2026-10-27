@@ -1,16 +1,9 @@
 import type { AttachmentMeta, OpenInApp } from "./types";
-import type {
-  BrowserAutomationControllerState,
-  BrowserHistory,
-  BrowserCertificateState,
-  BrowserAutomationHostDispatch,
-  BrowserAutomationHostDispatchTarget,
-  BrowserAutomationResponse,
-  BrowserPerfCounters,
-  BrowserTabSet,
-  McodeBrowserCapture,
-  PreviewPageStatus,
-} from "@mcode/contracts";
+import type { BrowserAutomationControllerState, BrowserAutomationHostDispatch, BrowserAutomationHostDispatchTarget, BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
+import type { BrowserHistory, McodeBrowserCapture } from "@mcode/contracts/models/browser-preview";
+import type { BrowserCertificateState } from "@mcode/contracts/models/browser-certificate";
+import type { BrowserPerfCounters, BrowserTabSet } from "@mcode/contracts/models/browser-tab";
+import type { PreviewPageStatus } from "@mcode/contracts/models/preview-page-status";
 
 /** Discriminated union describing the auto-updater lifecycle state. */
 export type UpdateStatus =

@@ -1,5 +1,5 @@
 import { useThreadStore } from "@/stores/threadStore";
-import type { Message } from "@mcode/contracts";
+import type { Message } from "@mcode/contracts/models/message";
 
 /** Stable empty messages reference so the closed Overview never re-renders on new messages. */
 const EMPTY_MESSAGES: Message[] = [];

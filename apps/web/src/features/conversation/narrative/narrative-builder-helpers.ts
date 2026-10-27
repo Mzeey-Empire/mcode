@@ -1,9 +1,5 @@
-import {
-  createSubagentPresentation,
-  isDelegateTaskToolName,
-  isSubagentLaunchToolName,
-  type SubagentPresentation,
-} from "@mcode/contracts";
+import { createSubagentPresentation, type SubagentPresentation } from "@mcode/contracts/models/tool-call-record";
+import { isDelegateTaskToolName, isSubagentLaunchToolName } from "@mcode/contracts/models/subagent-roster";
 import type { ToolCall, ToolCallRecord } from "@/transport/types";
 import type { NarrativeItem, NarrativeCounts, SubagentActivity } from "./types";
 

@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport } from "./mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),

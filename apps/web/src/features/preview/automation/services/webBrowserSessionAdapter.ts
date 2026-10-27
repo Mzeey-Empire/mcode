@@ -1,7 +1,4 @@
-import type {
-  BrowserAutomationHostDispatch,
-  BrowserAutomationResponse,
-} from "@mcode/contracts";
+import type { BrowserAutomationHostDispatch, BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
 import {
   executeWebInteraction,
   observeWebHumanInput,

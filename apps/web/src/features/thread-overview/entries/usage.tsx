@@ -5,7 +5,7 @@ import { formatUsageResetShort, formatUsageResetText } from "@/lib/usage-reset-f
 import { cn } from "@/lib/utils";
 import { useThreadStore } from "@/stores/threadStore";
 import { type Thread } from "@/transport";
-import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts";
+import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
 import { useEffect } from "react";
 import { ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 import {

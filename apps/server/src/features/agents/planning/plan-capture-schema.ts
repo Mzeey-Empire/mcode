@@ -1,4 +1,5 @@
-import { NativePlanFileRefSchema, PLAN_MAX_CONTENT_CHARS, lazySchema } from "@mcode/contracts";
+import { NativePlanFileRefSchema, PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts/models/plan";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
 import { z } from "zod";
 
 /** Bounded capture input shared by live acceptance and its durable writer. */

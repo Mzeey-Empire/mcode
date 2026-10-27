@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import type { ReviewComparison, ReviewFileChange, ReviewTurn } from "@mcode/contracts";
+import type { ReviewComparison, ReviewFileChange, ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { sinceLookedBaseline, threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";

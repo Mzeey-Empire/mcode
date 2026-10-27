@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentEventType, type AgentEvent } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { BrowserNarrativeEventSanitizer } from "../browser-narrative-event-sanitizer.js";
 
 describe("BrowserNarrativeEventSanitizer", () => {

@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  ATTACHMENT_DOCUMENT_MAX_BYTES,
-  ATTACHMENT_IMAGE_AND_FALLBACK_MAX_BYTES,
-  ATTACHMENT_PDF_MAX_BYTES,
-  ATTACHMENT_TEXT_MAX_BYTES,
-  getAttachmentMaxSizeForMime,
-} from "../index.js";
+import { ATTACHMENT_DOCUMENT_MAX_BYTES, ATTACHMENT_IMAGE_AND_FALLBACK_MAX_BYTES, ATTACHMENT_PDF_MAX_BYTES, ATTACHMENT_TEXT_MAX_BYTES, getAttachmentMaxSizeForMime } from "@mcode/contracts/models/attachment-limits";
 
 describe("attachment MIME size policy", () => {
   it.each([

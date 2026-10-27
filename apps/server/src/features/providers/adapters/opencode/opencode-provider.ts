@@ -1,35 +1,21 @@
-import { SUBAGENT_REPORTING } from "@mcode/contracts";
+import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
 import * as NodeEvents from "node:events";
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import { inject, injectable } from "tsyringe";
 import { z } from "zod";
 import { logger } from "@mcode/shared";
-import type {
-  ProviderStatusFacts,
-  AgentEvent,
-  ApprovalReviewSupport,
-  IAgentProvider,
-  IApprovalReviewCapable,
-  ISessionEvictable,
-  ApprovalResponse,
-  ApprovalRespondResult,
-  ApprovalOutcome,
-  ApprovalOrigin,
-  ApprovalRequestBody,
-  ApprovalQuestion,
-  ApprovalRequestEnvelope,
-  ApprovalAnswers,
-  ProviderId,
-  ProviderModelInfo,
-  ProviderIdentity,
-  ProviderTurnDiffUpdate,
-  TurnRequest,
-  TurnFailure,
-  NativePlanFileOutcome,
-  NativePlanFileRef,
-} from "@mcode/contracts";
-import { AgentEventType, lazySchema, providerRuntimeEvent } from "@mcode/contracts";
+import type { ProviderStatusFacts } from "@mcode/contracts/providers/provider-status";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ApprovalReviewSupport, IAgentProvider, IApprovalReviewCapable, ISessionEvictable, ProviderId, ProviderTurnDiffUpdate, TurnRequest, NativePlanFileRef } from "@mcode/contracts/providers/interfaces";
+import type { ApprovalResponse, ApprovalRespondResult, ApprovalOutcome, ApprovalOrigin, ApprovalRequestBody, ApprovalQuestion, ApprovalRequestEnvelope, ApprovalAnswers } from "@mcode/contracts/models/approval";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import type { TurnFailure } from "@mcode/contracts/models/turn-failure";
+import type { NativePlanFileOutcome } from "@mcode/contracts/models/plan";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
+import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderHostPorts } from "@mcode/providers";
 import {
   OpenCodeNativeTurnDiff,

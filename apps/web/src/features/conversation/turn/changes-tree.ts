@@ -1,4 +1,6 @@
-import type { DiffStats, FileEffect, TurnSnapshot } from "@mcode/contracts";
+import type { DiffStats } from "@mcode/contracts/models/diff-stats";
+import type { FileEffect } from "@mcode/contracts/models/file-effect";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 
 /** How one changed file's line counts are known. */
 export type FileCounts =

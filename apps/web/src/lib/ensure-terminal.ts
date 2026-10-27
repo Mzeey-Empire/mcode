@@ -1,4 +1,4 @@
-import { HOME_TERMINAL_SCOPE_ID, TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
+import { HOME_TERMINAL_SCOPE_ID, TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts/models/terminal";
 import { useDiffStore } from "@/stores/diffStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useTerminalStore } from "@/features/terminal";

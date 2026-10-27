@@ -2,7 +2,7 @@
  * Pure rules that decide what a commit request did. Ownership of a commit is proved only by
  * what this process saw `git commit` do; parent, subject and time are never treated as proof.
  */
-import type { GitCommitRejection } from "@mcode/contracts";
+import type { GitCommitRejection } from "@mcode/contracts/git-commit";
 
 /** Seconds a `git commit` may run before Mcode kills it. Hooks can run linters. */
 export const COMMIT_TIMEOUT_SECONDS = 300;

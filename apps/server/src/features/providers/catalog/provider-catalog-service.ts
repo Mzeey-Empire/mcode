@@ -1,13 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import type {
-  ProviderCapabilityEntry,
-  ProviderCatalogChange,
-  ProviderCatalogContext,
-  ProviderCatalogRequest,
-  ProviderCatalogSnapshot,
-  ProviderCapabilityKind,
-  SelectableProviderAgent,
-} from "@mcode/contracts";
+import type { ProviderCapabilityEntry, ProviderCatalogChange, ProviderCatalogContext, ProviderCatalogRequest, ProviderCatalogSnapshot, ProviderCapabilityKind, SelectableProviderAgent } from "@mcode/contracts/providers/capability-catalog";
 import { logger } from "@mcode/shared";
 import { ProviderCatalogSnapshotRepo } from "./persistence/provider-catalog-snapshot-repo.js";
 

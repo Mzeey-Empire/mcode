@@ -1,8 +1,4 @@
-import {
-  PreviewAnnotationBundleSchema,
-  toPreviewAnnotationBundleV2,
-  type PreviewAnnotationBundle,
-} from "@mcode/contracts";
+import { PreviewAnnotationBundleSchema, toPreviewAnnotationBundleV2, type PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 
 /** Start marker for the hidden Preview Annotation bundle fence. */
 export const ANNOTATION_FENCE_START = "<!-- mcode-preview-annotations:v2";

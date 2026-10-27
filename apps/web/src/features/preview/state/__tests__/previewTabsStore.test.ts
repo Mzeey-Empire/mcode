@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts";
+import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import {
   overlayDisplaySet,
   previewTabsScopeKey,

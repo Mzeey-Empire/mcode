@@ -1,4 +1,4 @@
-import type { ApprovalOutcome } from "@mcode/contracts";
+import type { ApprovalOutcome } from "@mcode/contracts/models/approval";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ApprovalReceipt } from "./types";
 

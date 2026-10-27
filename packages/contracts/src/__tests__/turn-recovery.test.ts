@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ScheduledTurnResumeSchema, ThreadSchema, WS_CHANNELS, WS_METHODS } from "../index.js";
+import { ScheduledTurnResumeSchema } from "@mcode/contracts/models/turn-recovery";
+import { ThreadSchema } from "@mcode/contracts/models/thread";
+import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 
 describe("turn recovery contracts", () => {
   const scheduled = { turnId: "turn-1", at: "2026-10-11T16:00:00+01:00" };

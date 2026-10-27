@@ -1,6 +1,7 @@
 import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { PendingPlanImplement, PlanComment, PlanQuestion, PlanSnapshot, PlanVersion } from "@mcode/contracts";
+import type { PendingPlanImplement, PlanComment, PlanSnapshot, PlanVersion } from "@mcode/contracts/models/plan";
+import type { PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import { HYDRATION_TTL_MS } from "..";
 import { AuxiliaryHydrator } from "../auxiliary-hydrator";
 import {

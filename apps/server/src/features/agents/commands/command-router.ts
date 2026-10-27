@@ -1,4 +1,4 @@
-import type { IAgentProvider } from "@mcode/contracts";
+import type { IAgentProvider } from "@mcode/contracts/providers/interfaces";
 
 /**
  * Per-send context handed to a matched {@link McodeCommand}. The provider is

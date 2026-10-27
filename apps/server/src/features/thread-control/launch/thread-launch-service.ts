@@ -1,8 +1,7 @@
 import * as NodeCrypto from "node:crypto";
-import {
-  ThreadLaunchInputSchema, ProviderIdSchema,
-  type ThreadLaunchInput, type ThreadLaunchResult, type ThreadLaunchWorkspace, type ThreadControlError, type Thread,
-} from "@mcode/contracts";
+import { ThreadLaunchInputSchema, type ThreadLaunchInput, type ThreadLaunchResult, type ThreadLaunchWorkspace, type ThreadControlError } from "@mcode/contracts/thread-control";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { type Thread } from "@mcode/contracts/models/thread";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import type { ThreadRepo } from "../persistence/thread-repo.js";
 import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";

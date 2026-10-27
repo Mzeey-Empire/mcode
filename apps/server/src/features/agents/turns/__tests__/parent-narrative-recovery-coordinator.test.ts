@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  AgentEventType,
-  type AgentEvent,
-  type ParentNarrativeRecoveryItem,
-} from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { ParentNarrativeRecoveryCoordinator } from "../parent-narrative-recovery-coordinator.js";
 import type { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import type { ParentTurnDurability } from "../parent-turn-durability.js";

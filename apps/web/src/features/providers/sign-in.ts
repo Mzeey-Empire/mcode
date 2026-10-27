@@ -1,4 +1,5 @@
-import { HOME_TERMINAL_SCOPE_ID, type ProviderId } from "@mcode/contracts";
+import { HOME_TERMINAL_SCOPE_ID } from "@mcode/contracts/models/terminal";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { useTerminalStore } from "@/features/terminal";
 import { createTerminalForScope } from "@/lib/ensure-terminal";
 import { useProviderStatusStore } from "@/stores/providerStatusStore";

@@ -22,7 +22,7 @@ import { PlanFileWriter } from "../../planning/plan-file-writer.js";
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
 import { TurnSteerConflictError, TurnSteerError, TurnSteerMentionError } from "../../steering/turn-steer.js";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 import type { SendMessageCommand } from "../../turns/turn-admission-dispatch-coordinator.js";
 
 function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMessage"]): {

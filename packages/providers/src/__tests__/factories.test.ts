@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Settings } from "@mcode/contracts";
+import type { Settings } from "@mcode/contracts/models/settings";
 import {
   createClaudeProvider,
   createCodexProvider,

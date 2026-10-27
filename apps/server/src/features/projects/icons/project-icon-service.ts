@@ -7,10 +7,9 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import {
-  PROJECT_ICON_CANDIDATES_DEFAULT_LIMIT, PROJECT_ICON_CANDIDATES_MAX_LIMIT, PROJECT_ICON_PATH_MAX_CHARS,
-  WORKSPACE_IMAGE_MAX_BYTES, type ProjectIcon, type Workspace,
-} from "@mcode/contracts";
+import { PROJECT_ICON_CANDIDATES_DEFAULT_LIMIT, PROJECT_ICON_CANDIDATES_MAX_LIMIT, PROJECT_ICON_PATH_MAX_CHARS, type ProjectIcon } from "@mcode/contracts/models/project-icon";
+import { WORKSPACE_IMAGE_MAX_BYTES } from "@mcode/contracts/models/workspace-file";
+import { type Workspace } from "@mcode/contracts/models/workspace";
 import type { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import type { GitExecutor } from "../git/execution/index.js";
 import { listWorkspaceFiles } from "../files/file-service.js";

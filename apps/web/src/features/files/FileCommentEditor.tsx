@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import type { LexicalEditor } from "lexical";
 import { Check, Trash2 } from "lucide-react";
-import type { DraftFileComment, MessageMention } from "@mcode/contracts";
+import type { DraftFileComment } from "@mcode/contracts/models/next-message-draft";
+import type { MessageMention } from "@mcode/contracts/models/mention";
 import {
   CommentEditorComposer,
   useCommentDismissal,

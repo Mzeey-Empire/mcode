@@ -4,7 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { ProviderFileMutationStart } from "@mcode/contracts";
+import type { ProviderFileMutationStart } from "@mcode/contracts/providers/interfaces";
 
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useReducer, useRef } from "react";
 import { ChevronRight, Folder } from "lucide-react";
-import type { FilesystemBrowseResult, WorkspaceCreateErrorCode } from "@mcode/contracts";
+import type { FilesystemBrowseResult, WorkspaceCreateErrorCode } from "@mcode/contracts/ws/methods";
 import { CommandGroup, CommandItem, CommandList, CommandEmpty } from "@/components/ui/command";
 import { Button } from "@/components/ui/button";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";

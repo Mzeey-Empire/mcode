@@ -1,8 +1,6 @@
-import {
-  ApprovalRequestBodySchema, ApprovalRequestSchema, ApprovalResponseSchema,
-  type ApprovalOutcome, type ApprovalRequest, type ApprovalRequestEnvelope,
-  type ApprovalRespondResult, type ApprovalResponse, type IAgentProvider, type ProviderId, type TurnStopCause,
-} from "@mcode/contracts";
+import { ApprovalRequestBodySchema, ApprovalRequestSchema, ApprovalResponseSchema, type ApprovalOutcome, type ApprovalRequest, type ApprovalRequestEnvelope, type ApprovalRespondResult, type ApprovalResponse } from "@mcode/contracts/models/approval";
+import { type IAgentProvider, type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { type TurnStopCause } from "@mcode/contracts/compat/agent-model";
 import { logger } from "@mcode/shared";
 import { inject, injectable } from "tsyringe";
 

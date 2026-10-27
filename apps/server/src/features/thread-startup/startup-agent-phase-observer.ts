@@ -1,4 +1,5 @@
-import type { CanonicalAgentEvent, CanonicalAgentEventEnvelope, ThreadStartup } from "@mcode/contracts";
+import type { CanonicalAgentEvent, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import { logger } from "@mcode/shared";
 import { subscribeCommittedCanonicalEvents } from "../agents/canonical/committed-canonical-events.js";
 import type { ThreadStartupService } from "./thread-startup-service.js";

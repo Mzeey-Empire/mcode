@@ -1,5 +1,5 @@
 import * as NodeHTTP from "node:http";
-import { WORKSPACE_IMAGE_MAX_BYTES } from "@mcode/contracts";
+import { WORKSPACE_IMAGE_MAX_BYTES } from "@mcode/contracts/models/workspace-file";
 import { extractToken, matchesAuthToken } from "../../../../application/transport/auth.js";
 import type { FileService } from "../file-service.js";
 import { readWorkspaceFileBytes, workspaceImageMime } from "../workspace-file-access.js";

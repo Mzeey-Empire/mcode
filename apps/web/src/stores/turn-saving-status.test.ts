@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TurnRuntimeSnapshot, TurnSavingStatus } from "@mcode/contracts";
+import type { TurnRuntimeSnapshot, TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import { createEmptyThreadRecord } from "./thread-record";
 import { mergeTurnSavingStatus, savingSnapshotPatch } from "./turn-saving-status";
 

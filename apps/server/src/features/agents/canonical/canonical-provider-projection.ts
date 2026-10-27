@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
-import { AgentEventSchema, CanonicalAgentEventEnvelopeSchema, ProviderIdSchema, type CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
+import { CanonicalAgentEventEnvelopeSchema, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { z } from "zod";
 import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
 import { CanonicalAgentStore } from "./canonical-agent-store.js";

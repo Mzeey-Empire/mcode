@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PullRequestTargetSchema, type PullRequestTargetsListParams } from "@mcode/contracts";
+import { PullRequestTargetSchema, type PullRequestTargetsListParams } from "@mcode/contracts/github";
 
 /** Repository identity and paging arguments for the GitHub target query. */
 export type RepositoryPullRequestTargetsRequest = Omit<PullRequestTargetsListParams, "workspaceId"> & {

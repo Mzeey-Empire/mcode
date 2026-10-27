@@ -1,7 +1,4 @@
-import type {
-  PullRequestDiffSide,
-  PullRequestReviewThread,
-} from "@mcode/contracts";
+import type { PullRequestDiffSide, PullRequestReviewThread } from "@mcode/contracts/pull-requests";
 
 /** A snapshot-qualified review coordinate used to place remote threads and local drafts. */
 export interface PullRequestDiffCoordinate {

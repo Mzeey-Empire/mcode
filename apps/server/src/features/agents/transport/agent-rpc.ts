@@ -1,9 +1,8 @@
-import type {
-  SubagentRosterRequest,
-  CanonicalSubagentStopRequest,
-  WsMethodName,
-} from "@mcode/contracts";
-import { toPreviewAnnotationBundleV2, WS_METHODS } from "@mcode/contracts";
+import type { SubagentRosterRequest } from "@mcode/contracts/models/subagent-roster";
+import type { CanonicalSubagentStopRequest } from "@mcode/contracts/models/canonical-subagent-roster";
+import type { WsMethodName } from "@mcode/contracts/ws/methods";
+import { toPreviewAnnotationBundleV2 } from "@mcode/contracts/models/browser-preview";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 import { logger } from "@mcode/shared";
 import * as NodePerfHooks from "node:perf_hooks";
 import type { z } from "zod";

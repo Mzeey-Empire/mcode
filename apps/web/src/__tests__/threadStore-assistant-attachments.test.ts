@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getTestThreadMessages,

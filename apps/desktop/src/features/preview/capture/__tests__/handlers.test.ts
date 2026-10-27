@@ -1,6 +1,6 @@
 import { JSDOM } from "jsdom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MCODE_BROWSER_CAPTURE_V2_STRING_MAX } from "@mcode/contracts";
+import { MCODE_BROWSER_CAPTURE_V2_STRING_MAX } from "@mcode/contracts/models/browser-preview";
 
 const captureTest = vi.hoisted(() => {
   let bridge: { preview: { captureAnnotationSnapshot(): Promise<unknown> } } | undefined;

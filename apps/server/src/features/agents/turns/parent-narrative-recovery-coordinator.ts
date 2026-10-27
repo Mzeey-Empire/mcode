@@ -1,8 +1,5 @@
-import {
-  AgentEventType,
-  type AgentEvent,
-  type ParentNarrativeRecoveryItem,
-} from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import type { ParentTurnDurability, ParentNarrativeRecoveryCommit } from "./parent-turn-durability.js";
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import { serverWorkTrace } from "../diagnostics/server-work-trace.js";

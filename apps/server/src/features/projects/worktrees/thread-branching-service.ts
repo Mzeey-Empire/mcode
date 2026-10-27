@@ -1,19 +1,12 @@
 import { inject, injectable } from "tsyringe";
 import { newHandoffUlid, validateBranchName } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
-import type {
-  ContextWindowMode,
-  CreateAndSendInput,
-  DevinMode,
-  IAgentProvider,
-  InteractionMode,
-  Message,
-  OrchestrationMode,
-  PermissionMode,
-  ProviderId,
-  ReasoningLevel,
-  Thread,
-} from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { CreateAndSendInput } from "@mcode/contracts/ws/methods";
+import type { DevinMode, InteractionMode, OrchestrationMode, PermissionMode } from "@mcode/contracts/models/enums";
+import type { IAgentProvider, ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { Message } from "@mcode/contracts/models/message";
+import type { Thread } from "@mcode/contracts/models/thread";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { ThreadService } from "../../thread-control/index.js";
 import { MessageRepo } from "../../agents/conversation/persistence/message-repo.js";

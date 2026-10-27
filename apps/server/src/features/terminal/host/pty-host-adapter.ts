@@ -1,4 +1,4 @@
-import type { TerminalLaunchSnapshot } from "@mcode/contracts";
+import type { TerminalLaunchSnapshot } from "@mcode/contracts/models/terminal";
 import type { PtyHostEvent } from "./pty-host-protocol.js";
 
 /** Host health returned when a PTY host starts. */

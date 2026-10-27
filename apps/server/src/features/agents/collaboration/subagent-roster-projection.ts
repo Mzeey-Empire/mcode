@@ -1,7 +1,6 @@
-import {
-  createSubagentPresentation, formatSubagentDisplayName, type ProviderId, type SubagentDetail, type SubagentRosterEntry,
-  type SubagentStatus, type SubagentPresentation, type ToolCallRecord,
-} from "@mcode/contracts";
+import { createSubagentPresentation, formatSubagentDisplayName, type SubagentPresentation, type ToolCallRecord } from "@mcode/contracts/models/tool-call-record";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { type SubagentDetail, type SubagentRosterEntry, type SubagentStatus } from "@mcode/contracts/models/subagent-roster";
 import type { CreateToolCallRecordInput } from "../tools/persistence/tool-call-record-store.js";
 
 /** Narrative evidence, retaining the provider and outcome of its owning message. */

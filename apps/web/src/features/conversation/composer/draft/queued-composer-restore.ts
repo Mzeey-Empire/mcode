@@ -1,5 +1,5 @@
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
+import { isVirtualBrowserContextAttachment } from "@mcode/contracts/models/attachment";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import type { QueuedMessage } from "@/stores/queueStore";
 import type { ComposerAgentSelection } from "./composer-selection-state";

@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import type { SettingsProviderId } from "@mcode/contracts";
+import type { SettingsProviderId } from "@mcode/contracts/models/settings";
 import {
   ClaudeIcon,
   CodexIcon,

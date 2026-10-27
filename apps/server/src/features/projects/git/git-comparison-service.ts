@@ -3,16 +3,9 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { logger, truncateUnifiedDiff } from "@mcode/shared";
-import type {
-  BranchComparison,
-  GitCommit,
-  GitSearchCommitsParams,
-  GitSearchCommitsResult,
-  ReviewComparison,
-  ReviewComparisonResult,
-  ReviewFileChange,
-  ReviewState,
-} from "@mcode/contracts";
+import type { BranchComparison, GitSearchCommitsParams, GitSearchCommitsResult } from "@mcode/contracts/git";
+import type { GitCommit } from "@mcode/contracts/models/git-commit";
+import type { ReviewComparison, ReviewComparisonResult, ReviewFileChange, ReviewState } from "@mcode/contracts/models/review-comparison";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import type { GitExecutor } from "./execution/index.js";
 import { GitRepositoryService } from "./git-repository-service.js";

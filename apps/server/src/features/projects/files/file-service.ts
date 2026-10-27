@@ -6,7 +6,7 @@
 
 import { injectable, inject, delay } from "tsyringe";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
-import { FILE_LIST_MAX_PATHS, FILE_VIEW_TEXT_MAX_BYTES, FILE_CHANGES_MAX_ENTRIES, WORKSPACE_IMAGE_MAX_BYTES, type WorkspaceFileList, type WorkspaceFileChanges, type FileReadResult } from "@mcode/contracts";
+import { FILE_LIST_MAX_PATHS, FILE_VIEW_TEXT_MAX_BYTES, FILE_CHANGES_MAX_ENTRIES, WORKSPACE_IMAGE_MAX_BYTES, type WorkspaceFileList, type WorkspaceFileChanges, type FileReadResult } from "@mcode/contracts/models/workspace-file";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";

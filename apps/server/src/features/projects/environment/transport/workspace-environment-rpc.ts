@@ -1,16 +1,5 @@
-import type {
-  WorkspaceEnvironmentActionListInput,
-  WorkspaceEnvironmentActionSlotInput,
-  WorkspaceEnvironmentActionStartInput,
-  WorkspaceEnvironmentAutomaticSetupContinueInput,
-  WorkspaceEnvironmentAutomaticSetupRetryInput,
-  WorkspaceEnvironmentCommandForgetInput,
-  WorkspaceEnvironmentCommandApproveInput,
-  WorkspaceEnvironmentReadInput,
-  WorkspaceEnvironmentSaveInput,
-  WorkspaceEnvironmentStorageSetInput,
-  WsMethodName,
-} from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionListInput, WorkspaceEnvironmentActionSlotInput, WorkspaceEnvironmentActionStartInput, WorkspaceEnvironmentAutomaticSetupContinueInput, WorkspaceEnvironmentAutomaticSetupRetryInput, WorkspaceEnvironmentCommandForgetInput, WorkspaceEnvironmentCommandApproveInput, WorkspaceEnvironmentReadInput, WorkspaceEnvironmentSaveInput, WorkspaceEnvironmentStorageSetInput } from "@mcode/contracts/models/workspace-environment";
+import type { WsMethodName } from "@mcode/contracts/ws/methods";
 import type { WorkspaceService } from "../../lifecycle/workspace-service.js";
 import type { ProjectActionService } from "../project-action-service.js";
 import { WorkspaceEnvironmentServiceError } from "../workspace-environment-errors.js";

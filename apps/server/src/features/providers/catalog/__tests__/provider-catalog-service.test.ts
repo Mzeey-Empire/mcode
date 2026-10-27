@@ -6,11 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Database } from "bun:sqlite";
-import type {
-  ProviderCatalogChange,
-  ProviderCatalogRequest,
-  ProviderCatalogSnapshot,
-} from "@mcode/contracts";
+import type { ProviderCatalogChange, ProviderCatalogRequest, ProviderCatalogSnapshot } from "@mcode/contracts/providers/capability-catalog";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ProviderCatalogSnapshotRepo } from "../persistence/provider-catalog-snapshot-repo.js";
 import {

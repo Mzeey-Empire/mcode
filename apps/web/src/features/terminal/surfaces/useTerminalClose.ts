@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useSettingsStore } from "@/stores/settingsStore";

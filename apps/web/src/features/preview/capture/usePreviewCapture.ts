@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToastStore } from "@/stores/toastStore";
 import { usePreviewReferenceQueueStore } from "../state/previewReferenceQueueStore";
-import type { McodeBrowserCaptureV2 } from "@mcode/contracts";
+import type { McodeBrowserCaptureV2 } from "@mcode/contracts/models/browser-preview";
 import type { PreviewPictureReferenceResult } from "@/transport/desktop-bridge";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import { usePreviewAnnotationStore, type PreviewCleanCapture } from "../state/previewAnnotationStore";

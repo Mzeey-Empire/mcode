@@ -1,4 +1,4 @@
-import type { PlanCommentAnchor } from "@mcode/contracts";
+import type { PlanCommentAnchor } from "@mcode/contracts/models/plan";
 
 /** Preserve a quote's source range or fall back to its surviving heading. */
 export function reanchorPlanComment(anchor: PlanCommentAnchor, newContent: string): PlanCommentAnchor {

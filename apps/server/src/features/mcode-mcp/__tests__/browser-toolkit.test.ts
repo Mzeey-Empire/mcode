@@ -1,16 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BROWSER_AUTOMATION_MAX_RESULT_BYTES,
-  BROWSER_AUTOMATION_OPERATIONS,
-  BrowserAutomationRequestSchema,
-  type BrowserAutomationActStep,
-  type BrowserAutomationError,
-  type BrowserAutomationPublicOperation,
-  type BrowserAutomationRequest,
-  type BrowserAutomationResponse,
-  type BrowserAutomationResult,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_MAX_RESULT_BYTES, BROWSER_AUTOMATION_OPERATIONS, BrowserAutomationRequestSchema, type BrowserAutomationActStep, type BrowserAutomationError, type BrowserAutomationPublicOperation, type BrowserAutomationRequest, type BrowserAutomationResponse, type BrowserAutomationResult } from "@mcode/contracts/models/browser-automation";
 import {
   createBrowserThreadControl,
   reduceBrowserControl,

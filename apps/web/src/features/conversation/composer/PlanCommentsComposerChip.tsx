@@ -1,5 +1,5 @@
 import { MessageCircle, X } from "lucide-react";
-import type { PlanComment } from "@mcode/contracts";
+import type { PlanComment } from "@mcode/contracts/models/plan";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
