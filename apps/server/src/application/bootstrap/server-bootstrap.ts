@@ -44,6 +44,7 @@ import {
 } from "../../features/handoff";
 import {
   GithubService,
+  PullRequestLinkFunnel,
   CiWatcherService,
   PrDraftService,
   PullRequestMutationService,
@@ -181,6 +182,7 @@ import { resolveWebAutomationFlag } from "../../runtime/startup/startup-policy.j
 import { listenWithPortRetry } from "../../runtime/http/http-listener.js";
 import { createReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
 import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
+import { normalizeThreadPullRequestState } from "../../features/pull-requests/github/github-pull-request-normalizers.js";
 import { TurnSteerService } from "../../features/agents/steering/turn-steer-service.js";
 
 function createPlanService(writer: ApplicationDatabaseWriter, runtime: WorkerOwnedTurnRuntime,
@@ -574,13 +576,21 @@ const ciWatcherService = new CiWatcherService(githubService, (channel, data) => 
   broadcast(channel as Parameters<typeof broadcast>[0], data as Parameters<typeof broadcast>[1]);
   portPush.send(channel as Parameters<typeof portPush.send>[0], data as Parameters<typeof portPush.send>[1]);
 }, ({ threadId, prNumber, state }) => {
-  const thread = threadRepo.findById(threadId);
-  if (thread?.pr_number !== prNumber) return;
-  threadService.linkPr(threadId, prNumber, state);
-  const payload = { threadId, prNumber, prStatus: state };
-  broadcast("thread.prLinked", payload);
-  portPush.send("thread.prLinked", payload);
+  void pullRequestLinkFunnel.observe(threadId, [{
+    number: prNumber, state: normalizeThreadPullRequestState(state), title: null, url: null,
+  }], "watcher").catch((error: unknown) => logger.warn("PR observation failed", { threadId, error: String(error) }));
 });
+const pullRequestLinkFunnel = new PullRequestLinkFunnel(databaseWriter, (threadId, pullRequests) => {
+  broadcast("thread.pullRequests", { threadId, pullRequests });
+  portPush.send("thread.pullRequests", { threadId, pullRequests });
+}, (threadId, numbers) => {
+  ciWatcherService.unwatch(threadId);
+  const thread = threadRepo.findById(threadId);
+  const workspace = thread ? workspaceRepo.findById(thread.workspace_id) : null;
+  if (!thread || !workspace || thread.user_completed_at !== null) return;
+  for (const number of numbers) ciWatcherService.watch(threadId, number, thread.branch, workspace.path);
+});
+container.registerInstance(PullRequestLinkFunnel, pullRequestLinkFunnel);
 container.registerInstance(CiWatcherService, ciWatcherService);
 const gitPush = container.resolve(GitPushService);
 const gitCommit = container.resolve(GitCommitService);
@@ -594,13 +604,8 @@ const threadCompletionService = container.resolve(ThreadCompletionService);
 const pullRequestCompletionEffect = new TurnPullRequestCompletionEffect(
   threadRepo,
   workspaceRepo,
-  threadService,
   githubService,
-  ciWatcherService,
-  (payload) => {
-    broadcast("thread.prLinked", payload);
-    portPush.send("thread.prLinked", payload);
-  },
+  pullRequestLinkFunnel,
 );
 threadCompletionService.registerResourceOwner("ci-watcher", (threadId) =>
   ciWatcherService.teardownThread(threadId),
@@ -901,6 +906,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   pullRequestReviews,
   githubService,
   pullRequestService,
+  pullRequestLinkFunnel,
   pullRequestMutationService,
   reviewWorktreeService,
   fileService,

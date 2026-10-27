@@ -117,6 +117,7 @@ describe("successful database migration recovery", () => {
       db.prepare("INSERT INTO threads (id, workspace_id, title, branch) VALUES (?, ?, ?, ?)").run("thread", "ws", "Thread", "main");
       migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
       expectColumns(db, "threads", { present: ["last_activity_at"] });
+      expectColumns(db, "thread_pull_requests", { present: ["thread_id", "number", "state", "title", "url", "observed_at"] });
       expect(db.prepare("SELECT last_activity_at FROM threads WHERE id = ?").get("thread"))
         .toEqual({ last_activity_at: null });
     } finally {

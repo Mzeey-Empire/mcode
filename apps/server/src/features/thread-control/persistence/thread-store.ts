@@ -5,6 +5,7 @@
 
 import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
+import { rankPullRequests, ThreadPullRequestSchema } from "@mcode/contracts/models/thread-pull-request";
 import { PROVIDER_CATALOG } from "@mcode/contracts/providers/catalog";
 import { MessageStore } from "../../agents/conversation/persistence/message-store.js";
 import type { Database } from "bun:sqlite";
@@ -36,9 +37,23 @@ import { advanceThreadActivity } from "./thread-activity.js";
 
 type ThreadRow = typeof threads.$inferSelect & {
   scheduledResume: typeof turnResumeSchedules.$inferSelect | null;
+  pullRequests: string;
 };
 
-const threadSelection = { ...getTableColumns(threads), scheduledResume: turnResumeSchedules };
+const threadSelection = {
+  ...getTableColumns(threads), scheduledResume: turnResumeSchedules,
+  pullRequests: sql<string>`(SELECT json_group_array(json_object(
+    'number', number, 'state', state, 'title', title, 'url', url
+  )) FROM thread_pull_requests WHERE thread_id = threads.id)`,
+};
+
+const linkedPrsSchema = z.array(ThreadPullRequestSchema());
+
+function linkedPullRequests(row: ThreadRow): Thread["pull_requests"] {
+  const prs = linkedPrsSchema.parse(JSON.parse(row.pullRequests));
+  if (prs.length > 0 || row.prNumber === null) return rankPullRequests(prs);
+  return [{ number: row.prNumber, state: "unresolved", title: null, url: null }];
+}
 
 function providerDisplayName(providerId: string): string {
   const provider = PROVIDER_CATALOG.find((entry) => entry.id === providerId);
@@ -91,6 +106,7 @@ function rowToThread(row: ThreadRow): Thread {
   return {
     scheduled_resume: schedule ? ScheduledTurnResumeSchema().parse({ turnId: schedule.turnId, at: schedule.runAt }) : null,
     last_activity_at: lastActivityAt(row),
+    pull_requests: linkedPullRequests(row),
     ...rowToThreadIdentity(row),
     ...rowToThreadLifecycle(row),
     ...rowToThreadPreferences(row),
@@ -232,6 +248,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     issue_number: null,
     pr_number: null,
     pr_status: null,
+    pull_requests: [],
     sdk_session_id: null,
     model: null,
     provider: input.provider,

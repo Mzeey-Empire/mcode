@@ -50,6 +50,16 @@
   },
   "overrides": [
     {
+      "files": ["**/*.ts", "**/*.tsx"],
+      "excludeFiles": ["apps/server/src/features/pull-requests/links/pull-request-link-funnel.ts"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "paths": [{ "name": "@phosphor-icons/react", "message": "Product icons are Lucide." }],
+          "patterns": [{ "group": ["**/thread-pull-request-write-operations*"], "message": "Only PullRequestLinkFunnel admits PR link writes." }]
+        }]
+      }
+    },
+    {
       "files": ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**"],
       "rules": {
         "mcode/use-test-builder": ["error", {

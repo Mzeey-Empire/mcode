@@ -63,6 +63,7 @@ import type {
   PullRequestService,
   ReviewWorktreeService,
   CiWatcherService,
+  PullRequestLinkFunnel,
 } from "../../features/pull-requests/index.js";
 import {
   isPullRequestRpcMethod,
@@ -327,6 +328,8 @@ export interface RouterDeps {
   handoffCheckoutService: HandoffCheckoutService;
   /** CI check watcher for adaptive polling and manual refresh. */
   ciWatcherService: CiWatcherService;
+  /** Single writer of committed linked pull-request state. */
+  pullRequestLinkFunnel: PullRequestLinkFunnel;
   /** Thread repository for resolving worktree paths in git operations. */
   threadRepo: ThreadRepo;
   threadAttentionService: ThreadAttentionService;
