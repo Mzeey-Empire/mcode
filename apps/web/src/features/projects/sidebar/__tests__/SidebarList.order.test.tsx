@@ -41,13 +41,16 @@ import { useProjectTreeMenus } from "../../ProjectTree";
 import { SidebarList } from "../SidebarList";
 import { useSidebarModel } from "../use-sidebar-model";
 import { PROJECT_ROW_CAP } from "../sidebar-model";
+import { ProjectSidebar } from "../ProjectSidebar";
+import { FakeVirtualViewport } from "./fake-virtual-viewport";
 
 const NOW = Date.parse("2026-10-27T12:00:00.000Z");
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
+const SECOND_WORKSPACE = createMockWorkspace({ id: "ws-2", name: "Beta", path: "/beta" });
 
 function threadAt(id: string, minutesAgo: number, overrides: Partial<Thread> = {}): Thread {
   const at = new Date(NOW - minutesAgo * 60_000).toISOString();
-  return createMockThread({ id, workspace_id: "ws-1", title: `Title ${id}`, provider: "claude", last_activity_at: at, created_at: at, updated_at: at, ...overrides });
+  return createMockThread({ id, workspace_id: overrides.workspace_id ?? "ws-1", title: `Title ${id}`, provider: "claude", last_activity_at: at, created_at: at, updated_at: at, ...overrides });
 }
 
 function Harness() {
@@ -131,5 +134,58 @@ describe("SidebarList order", () => {
 
     expect(checkoutLabelCalls.get("second")).toBeGreaterThan(before.get("second") ?? 0);
     expect(checkoutLabelCalls.get("first")).toBe(before.get("first"));
+  });
+});
+
+describe("SidebarList Threads view", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW });
+    localStorage.clear();
+    FakeVirtualViewport.published.length = 0;
+    FakeVirtualViewport.flips.length = 0;
+    useSidebarUiStore.setState({ view: "projects", scope: "active", expandedProjects: new Set(["ws-1", "ws-2"]), showMore: new Set() });
+    useWorkspaceStore.setState({
+      workspaces: [WORKSPACE, SECOND_WORKSPACE],
+      threads: [threadAt("a-old", 50), threadAt("b-new", 1, { workspace_id: "ws-2" }), threadAt("a-new", 5), threadAt("b-old", 70, { workspace_id: "ws-2" })],
+      activeWorkspaceId: "ws-1",
+      activeThreadId: null,
+      // The list under test is fed from the seeded store; a real load would replace it.
+      loadWorkspaces: vi.fn().mockResolvedValue(undefined),
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    localStorage.clear();
+    useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
+  });
+
+  it("shows one flat list across projects in activity order without a FLIP", () => {
+    render(<ProjectSidebar />);
+    expect(renderedThreadIds()).toEqual(["a-new", "a-old", "b-new", "b-old"]);
+    const flipsBefore = FakeVirtualViewport.flips.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Show as one list" }));
+
+    expect(renderedThreadIds()).toEqual(["b-new", "a-new", "a-old", "b-old"]);
+    expect(screen.queryByTestId("project-row-ws-1")).toBeNull();
+    expect(within(document.querySelector<HTMLElement>("[data-thread-id='b-new']")!).getByText("Beta")).toBeVisible();
+    expect(FakeVirtualViewport.flips.slice(flipsBefore)).not.toContain(true);
+  });
+
+  it("keeps the Threads view across a remount from persisted state", async () => {
+    const first = render(<ProjectSidebar />);
+    fireEvent.click(screen.getByRole("button", { name: "Show as one list" }));
+    first.unmount();
+    const stored = localStorage.getItem("mcode-sidebar-ui");
+
+    // A fresh window starts from defaults and reads only what was written to storage.
+    useSidebarUiStore.setState({ view: "projects" });
+    localStorage.setItem("mcode-sidebar-ui", stored ?? "");
+    await act(() => useSidebarUiStore.persist.rehydrate());
+    render(<ProjectSidebar />);
+
+    expect(screen.getByRole("button", { name: "Group by project" })).toBeVisible();
+    expect(renderedThreadIds()).toEqual(["b-new", "a-new", "a-old", "b-old"]);
   });
 });

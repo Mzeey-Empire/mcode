@@ -5,6 +5,8 @@
 export class FakeVirtualViewport {
   /** Every id list passed to `setRows`, oldest first. */
   static readonly published: string[][] = [];
+  /** Whether each `setRows` call asked for a FLIP, parallel to `published`. */
+  static readonly flips: boolean[] = [];
   readonly viewport: HTMLElement;
   readonly flowHost = null;
   private readonly hosts = new Map<string, HTMLDivElement>();
@@ -20,15 +22,19 @@ export class FakeVirtualViewport {
     container.append(this.viewport);
   }
 
-  setRows(rows: ReadonlyArray<{ id: string }>): void {
+  setRows(rows: ReadonlyArray<{ id: string }>, options?: { flip?: boolean }): void {
     FakeVirtualViewport.published.push(rows.map((row) => row.id));
+    FakeVirtualViewport.flips.push(options?.flip === true);
     const live = new Set(rows.map((row) => row.id));
     for (const [id, element] of this.hosts) {
       if (live.has(id)) continue;
       element.remove();
       this.hosts.delete(id);
     }
-    this.publish(rows.map((row) => ({ id: row.id, element: this.hostFor(row.id) })));
+    const hosts = rows.map((row) => ({ id: row.id, element: this.hostFor(row.id) }));
+    // DOM order stands in for the real viewport's offsets, so a reorder must move the hosts.
+    this.viewport.append(...hosts.map((host) => host.element));
+    this.publish(hosts);
   }
 
   private hostFor(id: string): HTMLDivElement {
