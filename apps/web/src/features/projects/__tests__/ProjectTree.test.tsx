@@ -54,7 +54,7 @@ vi.mock("../state/workspaceStore", async (importOriginal) => {
     activeThreadId: null,
     threads: [],
     loadWorkspaces: vi.fn(),
-    loadThreads: vi.fn(),
+    hydrateThreads: vi.fn(),
     setActiveWorkspace: vi.fn(),
     renameWorkspace: vi.fn(),
     setActiveThread: vi.fn(),
@@ -344,7 +344,7 @@ function createProjectTreeStoreMock(options: ProjectTreeStoreMockOptions) {
     activeThreadId: null,
     pendingStartupByThreadId: {},
     loadWorkspaces: vi.fn(),
-    loadThreads: vi.fn(),
+    hydrateThreads: vi.fn(),
     renameWorkspace: vi.fn(),
     createWorkspace: vi.fn(),
     deleteWorkspace: vi.fn(),
@@ -413,7 +413,7 @@ describe("ProjectTree thread interactions", () => {
 
     expect(beginNewThread).toHaveBeenCalledWith("ws-1");
     expect(useUiStore.getState().primarySurface).toBe("chat");
-    expect(state.loadThreads).not.toHaveBeenCalled();
+    expect(state.hydrateThreads).not.toHaveBeenCalled();
   });
 
   it("expands a project from its folder without opening a new composer", () => {
@@ -430,7 +430,8 @@ describe("ProjectTree thread interactions", () => {
     );
 
     expect(beginNewThread).not.toHaveBeenCalled();
-    expect(state.loadThreads).toHaveBeenCalledWith("ws-1");
+    expect(screen.getByRole("button", { name: "Toggle threads for Test Project" })).toHaveAttribute("aria-expanded", "true");
+    expect(state.hydrateThreads).not.toHaveBeenCalled();
   });
 
   it("keeps thread disclosure separate from project selection", () => {
@@ -447,7 +448,8 @@ describe("ProjectTree thread interactions", () => {
     );
 
     expect(beginNewThread).not.toHaveBeenCalled();
-    expect(state.loadThreads).toHaveBeenCalledWith("ws-1");
+    expect(screen.getByRole("button", { name: "Toggle threads for Test Project" })).toHaveAttribute("aria-expanded", "true");
+    expect(state.hydrateThreads).not.toHaveBeenCalled();
   });
 
   it("keeps the group row stable and rekeys thread items as a thread is replaced", () => {
@@ -1253,7 +1255,7 @@ describe("ProjectTree thread interactions", () => {
     expect(setActiveThread).toHaveBeenCalledTimes(1);
   });
 
-  it("loads threads once when a collapsed project expands under StrictMode", () => {
+  it("expands hydrated threads under StrictMode without fetching the index", () => {
     localStorage.setItem(
       "mcode-expanded-projects",
       JSON.stringify({ "ws-1": false }),
@@ -1269,10 +1271,8 @@ describe("ProjectTree thread interactions", () => {
       screen.getByRole("button", { name: "Toggle threads for Test Project" }),
     );
 
-    // StrictMode double-invokes state updaters; a load fired from inside the
-    // updater would run twice.
-    expect(state.loadThreads).toHaveBeenCalledTimes(1);
-    expect(state.loadThreads).toHaveBeenCalledWith("ws-1");
+    expect(screen.getByRole("button", { name: "Toggle threads for Test Project" })).toHaveAttribute("aria-expanded", "true");
+    expect(state.hydrateThreads).not.toHaveBeenCalled();
   });
 
   it("puts the sortable affordance on the focusable project row", () => {
@@ -1452,7 +1452,7 @@ describe("ProjectTree action-required indicator", () => {
       threads: [currentThread],
       checksById: currentChecks,
       loadWorkspaces: vi.fn(),
-      loadThreads: vi.fn(),
+      hydrateThreads: vi.fn(),
       setActiveWorkspace: vi.fn(),
       setActiveThread: vi.fn(),
       createWorkspace: vi.fn(),
@@ -1505,7 +1505,7 @@ describe("ProjectTree action-required indicator", () => {
         activeThreadId: null,
         threads: [],
         loadWorkspaces: vi.fn(),
-        loadThreads: vi.fn(),
+        hydrateThreads: vi.fn(),
         setActiveWorkspace: vi.fn(),
         setActiveThread: vi.fn(),
         createWorkspace: vi.fn(),
@@ -1808,7 +1808,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
       threads: [thread],
       checksById: checks,
       loadWorkspaces: vi.fn(),
-      loadThreads: vi.fn(),
+      hydrateThreads: vi.fn(),
       setActiveWorkspace: vi.fn(),
       setActiveThread: vi.fn(),
       createWorkspace: vi.fn(),

@@ -32,7 +32,7 @@ beforeEach(() => {
   vi.mocked(mockTransport.getReviewState).mockReset();
   vi.mocked(mockTransport.updateThreadSettings).mockReset().mockImplementation(async () => true);
   vi.mocked(mockTransport.touchLastOpened).mockReset().mockImplementation(async () => undefined);
-  vi.mocked(mockTransport.listThreads).mockReset().mockImplementation(async () => useWorkspaceStore.getState().threads);
+  vi.mocked(mockTransport.listAllThreads).mockReset().mockImplementation(async () => useWorkspaceStore.getState().threads);
 });
 
 const THREAD = "thread-plan";

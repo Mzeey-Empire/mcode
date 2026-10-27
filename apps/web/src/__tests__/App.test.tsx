@@ -34,7 +34,7 @@ vi.mock("@/transport", async () => ({
 
 beforeEach(() => {
   vi.mocked(mockTransport.listWorkspaces).mockReset().mockResolvedValue([]);
-  vi.mocked(mockTransport.listThreads).mockReset().mockResolvedValue([]);
+  vi.mocked(mockTransport.listAllThreads).mockReset().mockResolvedValue([]);
   vi.mocked(mockTransport.getMessages).mockReset().mockResolvedValue({ messages: [], hasMore: false });
   vi.mocked(mockTransport.sendMessage).mockReset().mockResolvedValue(undefined);
   vi.mocked(mockTransport.createAndSendMessage).mockReset()

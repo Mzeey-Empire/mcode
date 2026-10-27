@@ -172,8 +172,8 @@ describe("workspaceStore new-thread panel transition", () => {
     const touch = vi.fn().mockResolvedValue(undefined) as unknown as WorkspaceRpcCall;
     useWorkspaceStore.setState({ activeWorkspaceId: null, activeThreadId: null });
 
-    useWorkspaceStore.getState().setActiveWorkspace("ws-1", touch, false);
-    useWorkspaceStore.getState().setActiveWorkspace(null, touch, false);
+    useWorkspaceStore.getState().setActiveWorkspace("ws-1", touch);
+    useWorkspaceStore.getState().setActiveWorkspace(null, touch);
 
     expect(activate).not.toHaveBeenCalled();
     await Promise.resolve();
@@ -196,13 +196,13 @@ describe("workspaceStore new-thread panel transition", () => {
       ],
     });
 
-    useWorkspaceStore.getState().setActiveWorkspace("ws-1", touch, false);
+    useWorkspaceStore.getState().setActiveWorkspace("ws-1", touch);
     useWorkspaceStore.getState().setActiveThread("thread-b");
 
     expect(activate).toHaveBeenCalledOnce();
     expect(activate).toHaveBeenLastCalledWith("thread-b", expect.any(Array));
 
-    useWorkspaceStore.getState().setActiveWorkspace(null, touch, false);
+    useWorkspaceStore.getState().setActiveWorkspace(null, touch);
     await Promise.resolve();
 
     expect(activate).toHaveBeenCalledTimes(2);
@@ -578,6 +578,17 @@ describe("workspaceStore whole thread hydration", () => {
     await useWorkspaceStore.getState().hydrateThreads();
     expect(useWorkspaceStore.getState().threads.map((thread) => [thread.id, thread.workspace_id]))
       .toEqual([["unopened", "never-expanded"]]);
+  });
+
+  it("does not duplicate a creation pushed before its RPC response", async () => {
+    const thread = createMockThread({ id: "created", workspace_id: "ws-1" });
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-1" });
+    vi.mocked(mockTransport.createThread).mockImplementationOnce(async () => {
+      useWorkspaceStore.getState().applyThreadCreated(thread);
+      return thread;
+    });
+    await useWorkspaceStore.getState().createThread("Created", "direct", "main");
+    expect(useWorkspaceStore.getState().threads.map((candidate) => candidate.id)).toEqual(["created"]);
   });
 
   it("retains a newer lifecycle push when an earlier snapshot arrives", async () => {
