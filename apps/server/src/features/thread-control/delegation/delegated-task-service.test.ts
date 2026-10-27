@@ -39,6 +39,7 @@ import { AgentService } from "../../agents/orchestration/agent-service.js";
 import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../../agents/orchestration/agent-turn-command-port.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
 import { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-boundary.js";
+import { CanonicalAgentStore } from "../../agents/canonical/canonical-agent-store.js";
 import { CanonicalAgentWriterClient } from "../../agents/canonical/canonical-agent-writer-client.js";
 import { notifyCommittedCanonicalEvents, subscribeCommittedCanonicalEvents } from "../../agents/canonical/committed-canonical-events.js";
 import { notifyTasksOnSettledTurns } from "../attention/thread-attention-service.js";
@@ -110,6 +111,7 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
   const targets = new DelegationTargetResolver(providers, models, settings);
   const approvals = new ThreadControlApprovalRepo(runtime.reader, runtime.writer);
   const canonical = new CanonicalAgentBoundary(runtime.reader, runtime.writer, new CanonicalAgentWriterClient(runtime.writer), notifyCommittedCanonicalEvents);
+  const canonicalStore = new CanonicalAgentStore(runtime.database, notifyCommittedCanonicalEvents);
   const attachments = new AttachmentService();
   const commands = new AgentRuntimeCommandPort();
   const plans = new PlanTurnService(threads, providers, new PlanQuestionService(messages, new PlanQuestionAnswersRepo(runtime.reader, runtime.writer)),
@@ -151,9 +153,9 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
   const stopSession = async (threadId: string): Promise<AgentStopResult> => {
     const turn = canonical.loadLatestTurn(threadId);
     if (turn?.status === "Running" && turn.executionId) {
-      await canonical.finishParentTurnBatched({
+      await canonicalStore.finishParentTurnBatched({
         threadId, turnId: turn.id, executionId: turn.executionId, providerId: "codex", providerIdentities: [],
-        outcome: "interrupted", projection: { message: null, narrative: [] },
+        outcome: "interrupted", projectTurn: () => ({ message: null, narrative: [] }),
       });
     }
     active.delete(threadId);
@@ -211,7 +213,7 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
   disposables.push(roster.bindDelegatedTasks(service));
   disposables.push(startups.subscribe((startup) => service.taskChanged(startup.startupId)));
   disposables.push(roster.observeCommittedEvents());
-  return { ...fixture, service, tasks, threads, threadService, roster, startups, approvals, control, canonical, messages, environment, audit,
+  return { ...fixture, service, tasks, threads, threadService, roster, startups, approvals, control, canonical, canonicalStore, messages, environment, audit,
     coordinator, source, input, dispatch, active, admission, authority, resumes, pendingApprovals };
 }
 
@@ -240,8 +242,8 @@ async function finish(f: Fixture, threadId: string, turnId: string, outcome: "co
   const turn = f.canonical.loadTurn(turnId);
   if (!turn?.executionId) throw new Error("Expected turn");
   const message = outcome === "completed" ? await f.messages.create(threadId, "assistant", summary, 2) : null;
-  await f.canonical.finishParentTurnBatched({ threadId, turnId, executionId: turn.executionId, providerId: "codex",
-    providerIdentities: [], outcome, projection: { message, narrative: [] },
+  await f.canonicalStore.finishParentTurnBatched({ threadId, turnId, executionId: turn.executionId, providerId: "codex",
+    providerIdentities: [], outcome, projectTurn: () => ({ message, narrative: [] }),
     ...(outcome === "cancelled" ? { ending: { stop } } : {}),
     ...(outcome === "interrupted" ? { ending: { cause: "app_closed" } } : {}),
   });
@@ -403,10 +405,10 @@ describe("Coordinator task notices", { timeout: 30_000 }, () => {
     const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
     const turn = f.canonical.loadTurn(task.taskId);
     if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted child");
-    await f.canonical.finishParentTurnBatched({ threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
+    await f.canonicalStore.finishParentTurnBatched({ threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
       providerId: "codex", providerIdentities: [], outcome: "interrupted",
       ending: { cause: "usage_limit", usageLimit: { resetsAt: "2030-01-01T00:00:00.000Z" } },
-      projection: { message: null, narrative: [] } });
+      projectTurn: () => ({ message: null, narrative: [] }) });
     await f.resumes.upsert({ threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
       runAt: "2030-01-01T00:00:00.000Z", createdAt: new Date().toISOString() });
     w.wake.nudge(f.coordinator.id);
@@ -632,9 +634,9 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     expect([...f.service.coordinatorsWithUnfinishedTasks("another-coordinator")]).toEqual([]);
     const turn = f.canonical.loadTurn(task.taskId);
     if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted task turn");
-    await f.canonical.finishParentTurnBatched({
+    await f.canonicalStore.finishParentTurnBatched({
       threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId, providerId: "codex",
-      providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+      providerIdentities: [], outcome: "completed", projectTurn: () => ({ message: null, narrative: [] }),
     });
     expect([...f.service.coordinatorsWithUnfinishedTasks()]).toEqual([]);
   });
@@ -668,9 +670,9 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     }));
     const turn = f.canonical.loadTurn(task.taskId);
     if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted task turn");
-    await f.canonical.finishParentTurnBatched({
+    await f.canonicalStore.finishParentTurnBatched({
       threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId, providerId: "codex",
-      providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+      providerIdentities: [], outcome: "completed", projectTurn: () => ({ message: null, narrative: [] }),
     });
     expect(changed).toEqual([task.taskId]);
     expect(statuses).toEqual([["done"]]);
@@ -727,18 +729,18 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     const running = requireTask(await f.service.delegate(f.source, { ...f.input, clientRequestId: "running", isolation: "shared" }));
     const turn = f.canonical.loadTurn(finished.taskId);
     if (!finished.threadId || !turn?.executionId) throw new Error("Expected admitted child");
-    await f.canonical.finishParentTurnBatched({
+    await f.canonicalStore.finishParentTurnBatched({
       threadId: finished.threadId, turnId: finished.taskId, executionId: turn.executionId,
-      providerId: "codex", providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+      providerId: "codex", providerIdentities: [], outcome: "completed", projectTurn: () => ({ message: null, narrative: [] }),
     });
     f.runtime.database.exec("ALTER TABLE delegated_tasks DROP COLUMN notice_delivered; ALTER TABLE delegated_tasks DROP COLUMN notice_claim;");
     f.runtime.database.exec(NodeFS.readFileSync(new URL("../../../../drizzle/0097_parallel_madelyne_pryor.sql", import.meta.url), "utf8"));
     expect(await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID())).toBeNull();
     const active = f.canonical.loadTurn(running.taskId);
     if (!running.threadId || !active?.executionId) throw new Error("Expected running child");
-    await f.canonical.finishParentTurnBatched({
+    await f.canonicalStore.finishParentTurnBatched({
       threadId: running.threadId, turnId: running.taskId, executionId: active.executionId,
-      providerId: "codex", providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+      providerId: "codex", providerIdentities: [], outcome: "completed", projectTurn: () => ({ message: null, narrative: [] }),
     });
     const batch = await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID());
     expect(batch?.systemNotice.delegatedTasks?.map((notice) => notice.taskId)).toEqual([running.taskId]);
@@ -749,9 +751,9 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
     const turn = f.canonical.loadTurn(task.taskId);
     if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted child");
-    await f.canonical.finishParentTurnBatched({
+    await f.canonicalStore.finishParentTurnBatched({
       threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
-      providerId: "codex", providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+      providerId: "codex", providerIdentities: [], outcome: "completed", projectTurn: () => ({ message: null, narrative: [] }),
     });
     f.service.rosterEntries(f.coordinator.id);
     const batch = await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID());
@@ -784,9 +786,9 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
     const turn = f.canonical.loadTurn(task.taskId);
     if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted child");
-    await f.canonical.finishParentTurnBatched({
+    await f.canonicalStore.finishParentTurnBatched({
       threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
-      providerId: "codex", providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+      providerId: "codex", providerIdentities: [], outcome: "completed", projectTurn: () => ({ message: null, narrative: [] }),
     });
     const batch = await f.service.claimNotices(f.coordinator.id, NodeCrypto.randomUUID());
     expect(batch?.systemNotice.delegatedTasks?.map((notice) => notice.status)).toEqual(["completed"]);
@@ -802,9 +804,9 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
     const original = f.canonical.loadTurn(task.taskId);
     if (!task.threadId || !original?.executionId) throw new Error("Expected admitted child");
-    await f.canonical.finishParentTurnBatched({
+    await f.canonicalStore.finishParentTurnBatched({
       threadId: task.threadId, turnId: task.taskId, executionId: original.executionId,
-      providerId: "codex", providerIdentities: [], outcome: "interrupted", projection: { message: null, narrative: [] },
+      providerId: "codex", providerIdentities: [], outcome: "interrupted", projectTurn: () => ({ message: null, narrative: [] }),
     });
     const attemptId = NodeCrypto.randomUUID();
     await f.canonical.startParentTurn({
@@ -938,9 +940,9 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     const turn = f.canonical.loadTurn(task.taskId);
     if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted task turn");
     const message = await f.messages.create(task.threadId, "assistant", "Review complete", 2);
-    await f.canonical.finishParentTurnBatched({
+    await f.canonicalStore.finishParentTurnBatched({
       threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
-      providerId: "codex", providerIdentities: [], outcome: "completed", projection: { message, narrative: [] },
+      providerId: "codex", providerIdentities: [], outcome: "completed", projectTurn: () => ({ message, narrative: [] }),
     });
     const laterTurnId = NodeCrypto.randomUUID();
     await f.canonical.startParentTurn({
@@ -982,9 +984,9 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
       sourceToolCallId: null, sourceMessageId: null, parentEntryId: null,
     }]);
     const before = f.roster.loadRoster(request).revision;
-    await f.canonical.finishParentTurnBatched({
+    await f.canonicalStore.finishParentTurnBatched({
       threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId, providerId: "codex",
-      providerIdentities: [], outcome, projection: { message: null, narrative: [] },
+      providerIdentities: [], outcome, projectTurn: () => ({ message: null, narrative: [] }),
     });
     expect(f.roster.loadRoster(request).entries.map((entry) => [entry.status, entry.canStop]))
       .toEqual([[expected, false]]);
@@ -1044,9 +1046,9 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     if (!active.threadId || !inactive.threadId) throw new Error("Expected bound children");
     const finished = f.canonical.loadTurn(inactive.taskId);
     if (!finished?.executionId) throw new Error("Expected admitted task turn");
-    await f.canonical.finishParentTurnBatched({
+    await f.canonicalStore.finishParentTurnBatched({
       threadId: inactive.threadId, turnId: inactive.taskId, executionId: finished.executionId,
-      providerId: "codex", providerIdentities: [], outcome: "completed", projection: { message: null, narrative: [] },
+      providerId: "codex", providerIdentities: [], outcome: "completed", projectTurn: () => ({ message: null, narrative: [] }),
     });
     expect(await f.threadService.delete(f.coordinator.id, false)).toBe(true);
     expect(f.threads.findById(inactive.threadId)).toBeNull();

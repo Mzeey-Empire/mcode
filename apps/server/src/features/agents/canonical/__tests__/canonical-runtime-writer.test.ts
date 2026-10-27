@@ -10,6 +10,7 @@ import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlit
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { CanonicalAgentBoundary } from "../canonical-agent-boundary.js";
+import { CanonicalAgentStore } from "../canonical-agent-store.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -99,23 +100,28 @@ describe("main canonical operations through the sole writer", () => {
         text: `Thought ${index}`, started_at: NOW, ended_at: NOW, sort_order: index },
     }));
     const input = { threadId, turnId, executionId, providerId: "codex", providerIdentities: [],
-      outcome: "completed" as const, projection: { message, narrative } };
+      outcome: "completed" as const, projectTurn: () => ({ message, narrative }) };
     let failPublication = true;
-    canonical = new CanonicalAgentBoundary(reader, writer, new CanonicalAgentWriterClient(writer), (events) => {
-      published.push([...events]);
-      if (failPublication) { failPublication = false; throw new Error("Publication failed after commit"); }
-    });
-    await expect(canonical.finishParentTurnBatched(input)).rejects.toThrow("Publication failed after commit");
-    const partial = canonical.loadCheckpoint(executionId);
-    expect(partial?.lastDurableSequence).toBeGreaterThan(4);
-    expect(partial?.terminalOutcome).toBeNull();
-    const result = await canonical.finishParentTurnBatched(input);
-    expect(result.outcome).toBe("committed");
-    expect(result.writeBatches.batches).toBeGreaterThan(1);
-    expect(canonical.loadCheckpoint(executionId)?.terminalOutcome).toBe("completed");
-    expect(reader.query("SELECT DISTINCT durable_revision FROM canonical_agent_events WHERE accepted_sequence > 4").all())
-      .toEqual([{ durable_revision: 2 }]);
-    expect(await canonical.finishParentTurnBatched(input)).toMatchObject({ outcome: "terminal-outcome-confirmed" });
+    const storeDb = new Database(path);
+    try {
+      const store = new CanonicalAgentStore(storeDb, (events) => {
+        published.push([...events]);
+        if (failPublication) { failPublication = false; throw new Error("Publication failed after commit"); }
+      });
+      await expect(store.finishParentTurnBatched(input)).rejects.toThrow("Publication failed after commit");
+      const partial = canonical.loadCheckpoint(executionId);
+      expect(partial?.lastDurableSequence).toBeGreaterThan(4);
+      expect(partial?.terminalOutcome).toBeNull();
+      const result = await store.finishParentTurnBatched(input);
+      expect(result.outcome).toBe("committed");
+      expect(result.writeBatches.batches).toBeGreaterThan(1);
+      expect(canonical.loadCheckpoint(executionId)?.terminalOutcome).toBe("completed");
+      expect(reader.query("SELECT DISTINCT durable_revision FROM canonical_agent_events WHERE accepted_sequence > 4").all())
+        .toEqual([{ durable_revision: 2 }]);
+      expect(await store.finishParentTurnBatched(input)).toMatchObject({ outcome: "terminal-outcome-confirmed" });
+    } finally {
+      storeDb.close(true);
+    }
   });
 
   it("keeps a fsynced recovery journal until its import commits", async () => {

@@ -1,23 +1,12 @@
 import { z } from "zod";
-import { AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CanonicalAgentEventEnvelopeSchema, CollaborationActionSchema, ProviderIdentitySchema, InterruptionCauseSchema, PersistedTurnFailureSchema, TurnStopCauseSchema, TurnUsageLimitSchema } from "@mcode/contracts/compat/agent-model";
+import { AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CanonicalAgentEventEnvelopeSchema, CollaborationActionSchema, ProviderIdentitySchema, InterruptionCauseSchema } from "@mcode/contracts/compat/agent-model";
 import { MessageMentionSchema } from "@mcode/contracts/models/mention";
 import { PreviewAnnotationBundleSchema } from "@mcode/contracts/models/browser-preview";
 import { SelectedTextCommentsSchema } from "@mcode/contracts/models/selected-text-comment";
 import { StoredAttachmentSchema } from "@mcode/contracts/models/attachment";
-import { SystemNoticeMetadataSchema, MessageSchema } from "@mcode/contracts/models/message";
+import { SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
 import { TurnOutcomeSchema } from "@mcode/contracts/models/turn-outcome";
-import { NarrativeEntrySchema } from "@mcode/contracts/models/narrative-entry";
-import { TurnFileEffectSummarySchema } from "@mcode/contracts/models/file-effect";
-import type { TurnEndingCause } from "./turn-ending.js";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
-
-/** Mirrors `TurnEndingCause`: one cause per ending, with a usage limit only beside its own cause. */
-const TurnEndingCauseSchema: z.ZodType<TurnEndingCause, z.ZodTypeDef, unknown> = z.union([
-  z.object({ stop: TurnStopCauseSchema }).strict(),
-  z.object({ cause: InterruptionCauseSchema.exclude(["usage_limit"]) }).strict(),
-  z.object({ cause: z.literal("usage_limit"), usageLimit: TurnUsageLimitSchema }).strict(),
-  z.object({ failure: PersistedTurnFailureSchema }).strict(),
-]);
 
 const committedPublications = z.object({ events: z.array(CanonicalAgentEventEnvelopeSchema) });
 function runtimeOperation<Input, Output>(name: string, input: z.ZodType<Input, z.ZodTypeDef, unknown>,
@@ -72,34 +61,8 @@ export const CanonicalRuntimeParentStartSchema = z.object({
   ]),
 });
 
-const selectedDiff = z.object({ thread_id: identity, source: z.enum(["native", "tracked", "git"]),
-  patch: z.string().nullable(), revision: z.number().int().nonnegative() });
-const fileEvidence = z.object({ threadId: identity, turnId: identity, executionId: identity,
-  deliveryAttempt: z.number().int().positive(), fileEffects: TurnFileEffectSummarySchema(),
-  filesChanged: z.array(z.string()), selectedTurnDiff: selectedDiff.nullable(),
-  snapshot: z.object({ threadId: identity, executionId: identity, refBefore: z.string(), refAfter: z.string(),
-    filesChanged: z.array(z.string()), fileEffects: TurnFileEffectSummarySchema().optional(),
-    worktreePath: z.string().nullable() }).nullable() });
-
-/** Terminal values retained across bounded commands, with compatibility rows projected inside the writer. */
-export const CanonicalRuntimeParentFinishSchema = z.object({ threadId: identity, turnId: identity,
-  executionId: identity, providerId: identity, providerIdentities: z.array(ProviderIdentitySchema),
-  outcome: TurnOutcomeSchema, error: z.string().optional(), deliveryAttempt: z.number().int().positive().optional(),
-  ending: TurnEndingCauseSchema.optional(),
-  selectedTurnDiff: selectedDiff.optional(), fileEvidence: fileEvidence.optional(),
-  projection: z.union([z.object({ kind: z.literal("writer-staged"), messageId: identity.optional() }),
-    z.object({ message: MessageSchema().nullable(), narrative: z.array(NarrativeEntrySchema()) })]) });
-
-const batchedCommit = CanonicalRuntimeCommitResultSchema.extend({
-  outcome: z.enum(["committed", "duplicate", "conflict", "terminal-outcome-confirmed"]),
-  writeBatches: z.object({ batches: z.number().int().nonnegative(), rows: z.number().int().nonnegative(),
-    bytes: z.number().int().nonnegative() }) });
-
 /** Main runtime mutations whose complete transaction executes on the writer connection. */
 export const canonicalRuntimeWriteOperations = {
-  parentFinishBatch: runtimeOperation("canonical.parentFinishBatch", z.object({ input: CanonicalRuntimeParentFinishSchema,
-    endedAt: z.string().datetime(), cursor: z.number().int().nonnegative() }), z.object({
-    cursor: z.number().int().nonnegative(), completed: z.boolean(), result: batchedCommit })),
   parentStart: runtimeOperation("canonical.parentStart", CanonicalRuntimeParentStartSchema, CanonicalRuntimeCommitResultSchema),
   interruptLostExecution: runtimeOperation("canonical.interruptLostExecution", z.object({
     threadId: identity, turnId: identity, executionId: identity, reason: z.string(), cause: InterruptionCauseSchema,

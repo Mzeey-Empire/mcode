@@ -9,7 +9,7 @@ import { CanonicalAgentStore, publishCanonicalAgentEvents, type CanonicalAgentEv
 import { canonicalRuntimeWriteOperations } from "./canonical-runtime-write-operations.js";
 import { ConversationDisplayMaterializer } from "../conversation/migrations/conversation-display-materializer.js";
 import type { CanonicalProviderWriteInput } from "./canonical-agent-writer-protocol.js";
-import type { DataOnlyParentTurnStartInput, DataOnlyParentTurnFinishInput, LostParentExecutionInput } from "./canonical-parent-turn-write.js";
+import type { DataOnlyParentTurnStartInput, LostParentExecutionInput } from "./canonical-parent-turn-write.js";
 
 export * from "./canonical-agent-store.js";
 
@@ -64,24 +64,6 @@ export class CanonicalAgentBoundary {
   /** Commit user-message and lifecycle data together without caller callbacks. */
   async startParentTurn(input: DataOnlyParentTurnStartInput) {
     return this.mutate(canonicalRuntimeWriteOperations.parentStart, input);
-  }
-
-  /** Confirm each bounded terminal checkpoint before submitting the next one. */
-  async finishParentTurnBatched(input: DataOnlyParentTurnFinishInput) {
-    const endedAt = new Date().toISOString();
-    let cursor = 0;
-    const writeBatches = { batches: 0, rows: 0, bytes: 0 };
-    const events: import("@mcode/contracts/compat/agent-model").CanonicalAgentEventEnvelope[] = [];
-    while (true) {
-      const batch = await this.mutate(canonicalRuntimeWriteOperations.parentFinishBatch, { input, endedAt, cursor });
-      writeBatches.batches += batch.result.writeBatches.batches;
-      writeBatches.rows += batch.result.writeBatches.rows;
-      writeBatches.bytes += batch.result.writeBatches.bytes;
-      events.push(...batch.result.events);
-      if (batch.completed) return { ...batch.result, events, writeBatches };
-      if (batch.cursor <= cursor) throw new Error("Canonical terminal checkpoint did not advance");
-      cursor = batch.cursor;
-    }
   }
 
   /** Reconstruct and terminalize one lost execution on the writer's connection. */

@@ -21,7 +21,6 @@ export function canonicalRuntimeWriteHandlers(db: Database): ReadonlyMap<string,
     })];
   }
   return new Map([
-    entry(operations.parentFinishBatch, ({ input, endedAt, cursor }) => parents.finishBatch(input, endedAt, cursor)),
     entry(operations.parentStart, (input) => parents.start(input)),
     entry(operations.interruptLostExecution, (input) => parents.interruptLostExecution(input)),
     entry(operations.reopenUnmaterializedTerminalCheckpoint, (input) => canonical.reopenUnmaterializedTerminalCheckpoint(...input)),

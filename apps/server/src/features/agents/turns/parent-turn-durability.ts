@@ -84,7 +84,7 @@ export interface ParentTurnInterruptionInput {
 
 /** Durable parent-turn operations that orchestration can receive by construction. */
 export type ParentTurnDurability = Pick<CanonicalAgentBoundary,
-  "startParentTurn" | "finishParentTurnBatched" | "interruptUnfinishedExecution"
+  "startParentTurn" | "interruptUnfinishedExecution"
   | "loadTurnByExecution" | "loadParentTurnUserMessage" | "loadThread" | "loadCheckpoint" | "loadTerminalProjection"
   | "recordNativeCursor" | "recordParentNarrativeRecovery" | "classifyParentNarrativeRecovery" | "recordProviderDiagnostic"
   | "recordSynthesizedPublications">;

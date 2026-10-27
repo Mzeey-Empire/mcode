@@ -30,7 +30,6 @@ import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.
 import {
   ACTIVE_TURN_WRITE_BATCH_LIMITS,
   runBoundedWriteBatches,
-  runBoundedWriteBatch,
   runBoundedWriteBatchesSync,
   type RunBoundedWriteBatchesInput,
   type WriteBatchResult,
@@ -2136,34 +2135,6 @@ export class CanonicalAgentStore {
       return this.confirmedParentTerminalBatch(checkpoint, input.threadId);
     }
     return this.writeParentTerminalBatches(input, checkpoint, onBatchWrite);
-  }
-
-  /** Apply one stable terminal checkpoint inside the application's synchronous writer command. */
-  finishParentTurnBatch(input: CanonicalParentTurnFinishInput, endedAt: string, cursor: number): {
-    cursor: number; completed: boolean; result: CanonicalAgentBatchedCommitResult;
-  } {
-    const checkpoint = this.loadCheckpoint(input.executionId);
-    if (checkpoint?.terminalOutcome) {
-      return { cursor, completed: true, result: this.confirmedParentTerminalBatch(checkpoint, input.threadId) };
-    }
-    const allDrafts = this.parentTurnTerminalEvents(input, input.projectTurn(), endedAt);
-    const identityRevision = this.orm.select({ durableRevision: canonicalAgentEvents.durableRevision })
-      .from(canonicalAgentEvents).where(eq(canonicalAgentEvents.eventId, `${input.executionId}:thread-identity`)).get();
-    const terminalRevision = identityRevision?.durableRevision ?? this.parentTerminalRevision(input.threadId, allDrafts);
-    const drafts = allDrafts.filter((draft) => !this.parentTerminalBatchContains(draft));
-    const state = this.newParentTerminalBatchState();
-    const batch = runBoundedWriteBatch({
-      db: this.db, items: drafts, limits: ACTIVE_TURN_WRITE_BATCH_LIMITS,
-      batchOverheadRows: 3, batchOverheadBytes: this.parentTerminalBatchOverhead(input, checkpoint),
-      rowCount: (draft) => draft.payload.type === "item.recorded" || draft.payload.type === "collaboration-action.recorded" ? 2 : 1,
-      byteLength: (draft) => Buffer.byteLength(JSON.stringify(draft), "utf8"),
-      onBatchStarted: () => this.startParentTerminalBatch(state, input),
-      write: (draft) => this.writeParentTerminalBatchDraft(state, input, draft, terminalRevision, `${input.executionId}:turn.${input.outcome}`),
-      onBatchFinishing: () => this.finishParentTerminalBatch(state, input, terminalRevision),
-      onBatchCommitted: () => this.publishParentTerminalBatch(state),
-    }, 0);
-    return { cursor: cursor + batch.cursor, completed: batch.cursor === drafts.length,
-      result: this.parentTerminalBatchResult(state, batch.writeBatches) };
   }
 
   private confirmedParentTerminalBatch(

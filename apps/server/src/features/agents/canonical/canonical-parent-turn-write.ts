@@ -495,20 +495,6 @@ export class CanonicalParentTurnWrite {
     }, onBatchWrite);
   }
 
-  /** Commit one bounded terminal checkpoint without crossing the worker transaction with a callback. */
-  finishBatch(input: DataOnlyParentTurnFinishInput, endedAt: string, cursor: number) {
-    const checkpoint = this.canonical.loadCheckpoint(input.executionId);
-    if (!checkpoint || checkpoint.threadId !== input.threadId || checkpoint.turnId !== input.turnId) {
-      throw new Error(`Canonical parent execution not found: ${input.executionId}`);
-    }
-    if (checkpoint.terminalOutcome) {
-      return this.canonical.finishParentTurnBatch({ ...input, projectTurn: () => ({ message: null, narrative: [] }) }, endedAt, cursor);
-    }
-    const projection = this.terminalProjection(input);
-    return this.canonical.finishParentTurnBatch({ ...input, projectTurn: () => projection,
-      finalizeCompatibility: () => this.finalizeProjectionCompatibility(input, projection) }, endedAt, cursor);
-  }
-
   private terminalProjection(input: DataOnlyParentTurnFinishInput): ParentTurnProjection {
     const staged = "kind" in input.projection
       ? this.loadStagedTerminalProjection(input.threadId, input.executionId, input.projection.messageId)
