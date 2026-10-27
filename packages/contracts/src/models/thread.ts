@@ -54,6 +54,10 @@ export const ThreadSchema = lazySchema(() =>
   deleted_at: z.string().nullable(),
   /** Server timestamp for explicit user completion. Independent from runtime status. */
   user_completed_at: z.string().nullable(),
+  /** Merge completion preference, or null to inherit the global setting. */
+  auto_complete_on_merge: z.boolean().nullable(),
+  /** Reopen pause, cleared when new work or PR state arrives. */
+  auto_complete_paused_at: z.string().nullable(),
   /** Server timestamp after which automatic deletion can begin. */
   scheduled_deletion_at: z.string().nullable(),
   /** Explicit resume restored from the persisted thread schedule. */
@@ -111,6 +115,11 @@ export const ThreadSchema = lazySchema(() =>
 );
 /** Thread record from the database. */
 export type Thread = z.infer<ReturnType<typeof ThreadSchema>>;
+
+/** Resolve a thread's merge completion preference against the global default. */
+export function effectiveAutoCompleteOnMerge(thread: Pick<Thread, "auto_complete_on_merge">, globalValue: boolean): boolean {
+  return thread.auto_complete_on_merge ?? globalValue;
+}
 
 /** True when the thread is a Delegated sub-agent, reached through its Coordinator rather than thread lists. */
 export function isDelegatedSubagent(thread: Pick<Thread, "delegation_coordinator_thread_id">): boolean {

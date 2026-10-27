@@ -1096,6 +1096,7 @@ export function createWsTransport(
         fastMode: settings.fastMode,
         devinMode: settings.devinMode,
         defaultOpenInApp: settings.defaultOpenInApp,
+        autoCompleteOnMerge: settings.autoCompleteOnMerge,
       }),
     listAttention: () => rpc<import("@mcode/contracts/models/thread-attention").ThreadAttention[]>("thread.listAttention", {}),
     acknowledgeSeen: (threadId, throughSequence) => rpc<import("@mcode/contracts/models/thread-attention").AcknowledgeSeenResult>("thread.acknowledgeSeen", { threadId, throughSequence }),
