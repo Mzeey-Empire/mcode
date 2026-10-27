@@ -24,10 +24,14 @@ function isSidebarScope(value: string): value is SidebarScope {
   return value === "active" || value === "completed";
 }
 
+interface ScopeBarProps {
+  /** The count to show, which may trail the model while a completed row is still on its way. */
+  readonly completedCount: number;
+  readonly scope: SidebarScope;
+}
+
 /** Shows Active / Completed while completed threads exist; resets to Active when none remain. */
-export function ScopeBar() {
-  const completedCount = useCompletedThreadCount();
-  const scope = useSidebarScope();
+export function ScopeBar({ completedCount, scope }: ScopeBarProps) {
   const setScope = useSidebarUiStore((state) => state.setScope);
 
   useEffect(() => {

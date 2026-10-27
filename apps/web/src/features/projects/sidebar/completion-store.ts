@@ -7,6 +7,8 @@ import { HOLD_MS, transitionCompletion, type CompletionEntry, type CompletionEve
 interface CompletionStoreState {
   readonly entries: ReadonlyMap<string, CompletionEntry>;
   readonly hoveredThreadId: string | null;
+  /** The thread this client last completed, offered for Undo under the scope bar. */
+  readonly undoLineThreadId: string | null;
 }
 
 interface CompletionStoreActions {
@@ -16,6 +18,9 @@ interface CompletionStoreActions {
   pointerEntered(threadId: string): void;
   pointerLeft(threadId: string): void;
   observeServerLifecycle(threadId: string, completed: boolean): void;
+  /** Reopens the Undo line's thread; the completion already committed, so this is `thread.reopen`. */
+  undoFromLine(): void;
+  hideUndoLine(): void;
 }
 
 type CompletionStore = CompletionStoreState & CompletionStoreActions;
@@ -26,6 +31,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// A confirmed completion leaves Active when its row is released: at once, or when the pointer
+// that kept it lingering leaves. Either way that is when the Undo line takes over from the row.
+function leftActive(previous: CompletionEntry | undefined, next: CompletionEntry | undefined, event: CompletionEvent): boolean {
+  if (next !== undefined) return false;
+  if (event.type === "confirmed") return true;
+  return event.type === "pointer-left" && previous?.phase === "lingering";
+}
+
 /**
  * Holds optimistic completions across row unmounts. Undo cancels the server hold; confirmed
  * completions apply the server lifecycle and release resources.
@@ -34,12 +47,13 @@ export const useCompletionStore = create<CompletionStore>((set, get) => {
   const confirmedThreads = new Map<string, Thread>();
 
   const dispatch = (threadId: string, event: CompletionEvent): void => {
-    const { next, effects } = transitionCompletion(get().entries.get(threadId), event);
-    if (next !== get().entries.get(threadId)) {
+    const previous = get().entries.get(threadId);
+    const { next, effects } = transitionCompletion(previous, event);
+    if (next !== previous) {
       const entries = new Map(get().entries);
       if (next) entries.set(threadId, next);
       else entries.delete(threadId);
-      set({ entries });
+      set({ entries, ...(leftActive(previous, next, event) ? { undoLineThreadId: threadId } : {}) });
     }
     for (const effect of effects) {
       if (effect.type === "send-complete") sendComplete(threadId, effect.attempt);
@@ -72,6 +86,7 @@ export const useCompletionStore = create<CompletionStore>((set, get) => {
   return {
     entries: new Map(),
     hoveredThreadId: null,
+    undoLineThreadId: null,
     complete: (threadId) => dispatch(threadId, { type: "complete", attempt: ++nextAttempt }),
     undo: (threadId) => dispatch(threadId, { type: "undo" }),
     retry: (threadId) => dispatch(threadId, { type: "retry", attempt: ++nextAttempt }),
@@ -80,6 +95,16 @@ export const useCompletionStore = create<CompletionStore>((set, get) => {
       if (get().hoveredThreadId === threadId) set({ hoveredThreadId: null });
       dispatch(threadId, { type: "pointer-left" });
     },
-    observeServerLifecycle: (threadId, completed) => dispatch(threadId, { type: "server-lifecycle", completed }),
+    observeServerLifecycle: (threadId, completed) => {
+      if (!completed && get().undoLineThreadId === threadId) set({ undoLineThreadId: null });
+      dispatch(threadId, { type: "server-lifecycle", completed });
+    },
+    undoFromLine: () => {
+      const threadId = get().undoLineThreadId;
+      if (threadId === null) return;
+      set({ undoLineThreadId: null });
+      void useWorkspaceStore.getState().reopenThread(threadId).catch(() => undefined);
+    },
+    hideUndoLine: () => set({ undoLineThreadId: null }),
   };
 });
