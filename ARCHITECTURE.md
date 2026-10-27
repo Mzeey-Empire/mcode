@@ -98,9 +98,7 @@ Turn admission and provider observation have different owners.
 
 The [admission coordinator](apps/server/src/features/agents/turns/turn-admission-dispatch-coordinator.ts) checks the thread, provider, checkout, permissions, attachments, and command effects. It records the parent turn and user input before provider dispatch, with an exact thread, turn, and execution identity.
 
-User-dispatched executions use [`WorkerOwnedTurnRuntime`](apps/server/src/features/agents/execution/worker-owned-turn-runtime.ts) when the worker owner is bound. This path applies across providers. The runtime assigns an execution lease and mailbox to a worker in a bounded pool. Ownership checks prevent a stale worker or late observation from acting on a replacement execution.
-
-Provider-originated continuation can still enter the legacy provider ingress and turn pipeline. The worker-owned path must not be assumed to cover every adapter callback or recovery route.
+Every admitted execution, user-dispatched or provider-originated, uses [`WorkerOwnedTurnRuntime`](apps/server/src/features/agents/execution/worker-owned-turn-runtime.ts) for every provider. The runtime assigns an execution lease and mailbox to a worker in a bounded pool. Ownership checks prevent a stale worker or late observation from acting on a replacement execution. The host rejects a provider event batch whose execution has no worker owner.
 
 ```mermaid
 flowchart TD

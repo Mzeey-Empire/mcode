@@ -126,31 +126,24 @@ Accepted progress publishes before its retained save completes, so a blocked
 SQLite save does not block live narration or provider completion. The shared
 application database writer commits the event, turn state, and publication
 receipt together. The server advances saved progress after that receipt and
-does not apply the event again through `ProviderTurnEventApplication`. Stop,
+only publishes the committed event through `TurnEventPipeline`. Stop,
 terminalization, and late events use the same execution fence. The mailbox has
-bounded capacity and schedules tasks fairly when they share a worker.
-User-dispatched turns use this ownership route whenever the parent-start owner
-is bound, regardless of provider. Provider-originated resumes can still use
-the legacy route.
+bounded capacity and schedules tasks fairly when they share a worker. Every
+admitted execution uses this route, whichever provider runs it and whether the
+user or the provider started it. A batch for an execution with no worker owner
+is rejected.
 
-Executions without a worker owner still use provider ingress, cloneable event
-preprocessing, the provider adapter, and `TurnEventPipeline`. That route
-preserves the existing canonical receipt and finalization fence. A provider
-adapter may forward a generic event, consume private native evidence, or
-reject malformed evidence with a diagnostic. Only a forwarded `AgentEvent`
-reaches the renderer.
+A provider adapter may forward a generic event, consume private native
+evidence, or reject malformed evidence with a diagnostic. Only a forwarded
+`AgentEvent` reaches the renderer.
 
 Codex collaboration evidence uses a Codex adapter. Claude, Cursor, and Copilot
 send generic runtime events and do not invoke that adapter. A new provider adds
 an adapter only when it has private native evidence that requires server-side
 projection.
 
-Canonical commits on the legacy route project native collaboration evidence
-inside the database writer. Raw events, child state, and the receipt commit
-together. Their provider-neutral events then enter legacy ingress for parent
-finalization. A worker-owned receipt instead covers the parent event and its
-turn effects together. Neither receipt alone proves the renderer displayed the
-event.
+The worker-owned receipt covers the parent event and its turn effects
+together. It does not prove the renderer displayed the event.
 
 `AgentService` owns provider selection and narrow parent-turn durability. It
 does not import a concrete provider, a provider adapter, or a canonical

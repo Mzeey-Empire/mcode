@@ -348,8 +348,9 @@ Their unparented tools remain top-level even while an Agent is running.
 
 - `claude-provider.ts` reads `anyMsg.parent_tool_use_id` and forwards it as
   `parentToolCallId` on the `ToolUse` event.
-- `ProviderTurnEventApplication` passes the ingress provider identity to
-  `narrativeStore.bufferToolCall` and uses the attributed parent for task state.
+- `codex-live-event-reducer.ts` buffers Codex tool calls through
+  `bufferToolCall` without a provider identity, so the stack fallback stays
+  enabled for Codex.
 - `narrative-turn-state.ts bufferToolCall` prefers the explicit provider parent.
   Non-Agent calls can use `getCurrentParentToolCallId` as a fallback unless the
   provider is in `PROVIDERS_WITH_EXPLICIT_TOOL_PARENTS`. An omitted provider
