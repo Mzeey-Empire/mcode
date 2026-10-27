@@ -6,7 +6,6 @@ import { HOLD_MS, transitionCompletion, type CompletionEntry, type CompletionEve
 
 interface CompletionStoreState {
   readonly entries: ReadonlyMap<string, CompletionEntry>;
-  /** The row under the pointer, read when a hold ends to decide whether the row lingers. */
   readonly hoveredThreadId: string | null;
 }
 
@@ -16,7 +15,6 @@ interface CompletionStoreActions {
   retry(threadId: string): void;
   pointerEntered(threadId: string): void;
   pointerLeft(threadId: string): void;
-  /** Called from ws-events after `workspaceStore` applied a server lifecycle change. */
   observeServerLifecycle(threadId: string, completed: boolean): void;
 }
 
@@ -29,10 +27,8 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Optimistic completion against the server's hold. It lives outside React so a virtualized row
- * unmounting never drops a hold. `thread.complete{holdMs}` goes out at click and resolves when
- * the hold ends; Undo sends `thread.reopen`, which cancels the hold. Resources are released by
- * `workspaceStore.applyThreadLifecycle` only once the server confirms.
+ * Holds optimistic completions across row unmounts. Undo cancels the server hold; confirmed
+ * completions apply the server lifecycle and release resources.
  */
 export const useCompletionStore = create<CompletionStore>((set, get) => {
   const confirmedThreads = new Map<string, Thread>();

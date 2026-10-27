@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 const QUERY = "(prefers-reduced-motion: reduce)";
 
-/** Whether the user asked for reduced motion right now. For imperative code: event handlers, timers, classes. */
+/** Whether the user currently prefers reduced motion. */
 export function prefersReducedMotion(): boolean {
   return window.matchMedia(QUERY).matches;
 }
