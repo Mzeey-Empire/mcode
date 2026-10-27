@@ -2,7 +2,7 @@ import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { MessageSchema } from "../message.js";
 
-const legacyMessage = createMockMessage({
+const { outcome: _outcome, outcomeExecutionId: _outcomeExecutionId, ...legacyMessage } = createMockMessage({
   id: "message-1",
   thread_id: "thread-1",
   role: "assistant",

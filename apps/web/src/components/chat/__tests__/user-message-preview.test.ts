@@ -43,7 +43,7 @@ describe("resolveUserMessagePreview", () => {
   it("returns null for suppressed plan answer payloads", () => {
     expect(
       resolveUserMessagePreview(
-        createMockMessage({ content: `${PLAN_ANSWER_MESSAGE_PREFIX} hidden payload` }),
+        createMockMessage({ content: `${PLAN_ANSWER_MESSAGE_PREFIX} hidden payload`, attachments: null }),
       ),
     ).toBeNull();
   });
