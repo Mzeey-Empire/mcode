@@ -43,8 +43,8 @@ vi.mock("@dnd-kit/sortable", async (importOriginal) => {
 // through the exported ProjectTree. Stores and the virtual viewport are mocked
 // so the list renders items in the jsdom environment.
 
-vi.mock("../state/workspaceStore", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../state/workspaceStore")>();
+vi.mock("../../state/workspaceStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../state/workspaceStore")>();
   // The store state object must be built once: ProjectTree memoizes its row
   // list on slice references, so a fresh literal per selector call would loop
   // the render -> setRows -> publish cycle forever.
@@ -255,11 +255,11 @@ afterEach(() => {
 });
 
 // Import after mocks are registered.
-import { useWorkspaceStore } from "../state/workspaceStore";
-import { useSidebarUiStore } from "../sidebar/sidebar-ui-store";
+import { useWorkspaceStore } from "../../state/workspaceStore";
+import { useSidebarUiStore } from "../sidebar-ui-store";
 import { useUiStore } from "@/stores/uiStore";
 import { prefetchOnPointerDown } from "@/features/conversation";
-import { ProjectTree } from "../ProjectTree";
+import { ProjectSidebar } from "../ProjectSidebar";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -382,13 +382,10 @@ function projectTreeMockActions(options: ProjectTreeStoreMockOptions) {
   };
 }
 
-describe("ProjectTree thread interactions", () => {
+describe("ProjectSidebar thread interactions", () => {
   beforeEach(() => {
     // Pre-expand the workspace so the thread list is visible immediately.
-    localStorage.setItem(
-      "mcode-expanded-projects",
-      JSON.stringify({ "ws-1": true }),
-    );
+    useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1"]) });
     useSidebarUiStore.setState({ scope: "active" });
     publishedRowIdHistory.length = 0;
     vi.useFakeTimers();
@@ -402,15 +399,12 @@ describe("ProjectTree thread interactions", () => {
   });
 
   it("starts a new thread from the project row without expanding it", () => {
-    localStorage.setItem(
-      "mcode-expanded-projects",
-      JSON.stringify({ "ws-1": false }),
-    );
+    useSidebarUiStore.setState({ expandedProjects: new Set([]) });
     const beginNewThread = vi.fn();
     const state = setupStoreMocks({ beginNewThread });
     useUiStore.setState({ primarySurface: "pullRequests" });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     fireEvent.click(
       screen.getByRole("button", { name: "New thread in Test Project" }),
     );
@@ -421,14 +415,11 @@ describe("ProjectTree thread interactions", () => {
   });
 
   it("expands a project from its folder without opening a new composer", () => {
-    localStorage.setItem(
-      "mcode-expanded-projects",
-      JSON.stringify({ "ws-1": false }),
-    );
+    useSidebarUiStore.setState({ expandedProjects: new Set([]) });
     const beginNewThread = vi.fn();
     const state = setupStoreMocks({ beginNewThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     fireEvent.click(
       screen.getByRole("button", { name: "Open project Test Project" }),
     );
@@ -439,14 +430,11 @@ describe("ProjectTree thread interactions", () => {
   });
 
   it("keeps thread disclosure separate from project selection", () => {
-    localStorage.setItem(
-      "mcode-expanded-projects",
-      JSON.stringify({ "ws-1": false }),
-    );
+    useSidebarUiStore.setState({ expandedProjects: new Set([]) });
     const beginNewThread = vi.fn();
     const state = setupStoreMocks({ beginNewThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     fireEvent.click(
       screen.getByRole("button", { name: "Toggle threads for Test Project" }),
     );
@@ -456,14 +444,14 @@ describe("ProjectTree thread interactions", () => {
     expect(state.hydrateThreads).not.toHaveBeenCalled();
   });
 
-  it("keeps the group row stable and rekeys thread items as a thread is replaced", () => {
+  it("keys rows per thread and keeps unchanged rows stable as a placeholder is replaced", () => {
     const oldThreads = [
       makeThread({ id: "old-thread-1", title: "Old thread 1" }),
       makeThread({ id: "old-thread-2", title: "Old thread 2" }),
     ];
     const state = setupStoreMocks({ threads: oldThreads });
-    const view = render(<ProjectTree />);
-    expect(publishedRowIdHistory.at(-1)).toEqual(["ws:ws-1"]);
+    const view = render(<ProjectSidebar />);
+    expect(publishedRowIdHistory.at(-1)).toEqual(["project:ws-1", "thread:old-thread-1", "thread:old-thread-2", "end-spacer"]);
     const stableThread = view.container.querySelector(
       '[data-thread-id="old-thread-1"]',
     );
@@ -477,8 +465,8 @@ describe("ProjectTree thread interactions", () => {
       }),
       ...oldThreads,
     ];
-    act(() => view.rerender(<ProjectTree />));
-    expect(publishedRowIdHistory.at(-1)).toEqual(["ws:ws-1"]);
+    act(() => view.rerender(<ProjectSidebar />));
+    expect(publishedRowIdHistory.at(-1)).toContain("thread:placeholder-thread");
     expect(
       view.container.querySelector('[data-thread-id="placeholder-thread"]'),
     ).not.toBeNull();
@@ -488,8 +476,9 @@ describe("ProjectTree thread interactions", () => {
       makeThread({ id: "server-thread", title: "New thread" }),
       ...oldThreads,
     ];
-    act(() => view.rerender(<ProjectTree />));
-    expect(publishedRowIdHistory.at(-1)).toEqual(["ws:ws-1"]);
+    act(() => view.rerender(<ProjectSidebar />));
+    expect(publishedRowIdHistory.at(-1)).toContain("thread:server-thread");
+    expect(publishedRowIdHistory.at(-1)).not.toContain("thread:placeholder-thread");
     expect(
       view.container.querySelector('[data-thread-id="server-thread"]'),
     ).not.toBeNull();
@@ -502,7 +491,7 @@ describe("ProjectTree thread interactions", () => {
     const completeThread = vi.fn().mockResolvedValue(undefined);
     setupStoreMocks({ completeThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     const action = screen.getByRole("button", { name: "Complete My Thread" });
     const actions = action.parentElement;
     expect(within(actions as HTMLElement).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
@@ -526,7 +515,7 @@ describe("ProjectTree thread interactions", () => {
     );
     setupStoreMocks({ completeThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     const action = screen.getByRole("button", { name: "Complete My Thread" });
     fireEvent.click(action);
 
@@ -545,7 +534,7 @@ describe("ProjectTree thread interactions", () => {
     );
     setupStoreMocks({ completeThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     const action = screen.getByRole("button", { name: "Complete My Thread" });
     fireEvent.click(action);
 
@@ -565,7 +554,7 @@ describe("ProjectTree thread interactions", () => {
       }),
       reopenThread,
     });
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     const completedScope = screen.getByRole("radio", { name: /^Completed/ });
     expect(completedScope).toHaveAttribute("aria-checked", "false");
     completedScope.focus();
@@ -589,7 +578,7 @@ describe("ProjectTree thread interactions", () => {
     });
     setupStoreMocks({ threads: [activeThread, completedThread] });
 
-    const firstRender = render(<ProjectTree />);
+    const firstRender = render(<ProjectSidebar />);
     expect(screen.getByRole("button", { name: /^Provider, Claude Active work/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Provider, Claude Completed work/i })).toBeNull();
     expect(
@@ -601,13 +590,13 @@ describe("ProjectTree thread interactions", () => {
     expect(screen.getByRole("button", { name: /^Provider, Claude Completed work/i })).toBeVisible();
 
     firstRender.unmount();
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     expect(screen.getByRole("button", { name: /^Provider, Claude Completed work/i })).toBeVisible();
   });
 
   it("applies the scope to every project at once", () => {
     const secondWorkspace = { ...WORKSPACE, id: "ws-2", name: "Second Project", path: "/second" };
-    localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": true, "ws-2": true }));
+    useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1", "ws-2"]) });
     setupStoreMocks({
       workspaces: [WORKSPACE, secondWorkspace],
       threads: [
@@ -616,18 +605,19 @@ describe("ProjectTree thread interactions", () => {
       ],
     });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     expect(screen.getByRole("button", { name: /^Provider, Claude Second active/i })).toBeVisible();
     selectCompletedScope();
 
     expect(screen.getByRole("button", { name: /^Provider, Claude First completed/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Provider, Claude Second active/i })).toBeNull();
-    expect(screen.getByTestId("project-empty-ws-2")).toHaveTextContent("No completed threads");
+    // A project with nothing in the Completed scope drops out of that scope entirely.
+    expect(screen.queryByTestId("project-row-ws-2")).toBeNull();
   });
 
   it("hides the scope bar while no thread is completed", () => {
     setupStoreMocks({ threads: [makeThread({ id: "thread-active", title: "Active work" })] });
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.queryByTestId("sidebar-scope-bar")).toBeNull();
     expect(screen.queryByRole("radiogroup", { name: "Thread scope" })).toBeNull();
@@ -635,14 +625,14 @@ describe("ProjectTree thread interactions", () => {
 
   it("shows the scope bar with the completed count once a thread is completed", () => {
     setupStoreMocks({ threads: [makeThread({ id: "thread-active", title: "Active work" })] });
-    const view = render(<ProjectTree />);
+    const view = render(<ProjectSidebar />);
     setupStoreMocks({
       threads: [
         makeThread({ id: "thread-active", title: "Active work" }),
         makeThread({ id: "thread-done", title: "Done work", user_completed_at: "2026-08-12T08:00:00.000Z" }),
       ],
     });
-    view.rerender(<ProjectTree />);
+    view.rerender(<ProjectSidebar />);
 
     const bar = screen.getByRole("radiogroup", { name: "Thread scope" });
     expect(within(bar).getByRole("radio", { name: "Active" })).toHaveAttribute("aria-checked", "true");
@@ -654,12 +644,12 @@ describe("ProjectTree thread interactions", () => {
     setupStoreMocks({
       threads: [activeThread, makeThread({ id: "thread-done", title: "Done work", user_completed_at: "2026-08-12T08:00:00.000Z" })],
     });
-    const view = render(<ProjectTree />);
+    const view = render(<ProjectSidebar />);
     selectCompletedScope();
     expect(screen.queryByRole("button", { name: /^Provider, Claude Active work/i })).toBeNull();
 
     setupStoreMocks({ threads: [activeThread] });
-    view.rerender(<ProjectTree />);
+    view.rerender(<ProjectSidebar />);
 
     expect(screen.queryByTestId("sidebar-scope-bar")).toBeNull();
     expect(screen.getByRole("button", { name: /^Provider, Claude Active work/i })).toBeVisible();
@@ -674,7 +664,7 @@ describe("ProjectTree thread interactions", () => {
         makeThread({ id: "never", title: "Never", provider: "claude", providers_used: null }),
       ],
     });
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     expect(screen.getByRole("button", { name: /^Providers, Codex, Claude Switched/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /^Provider, Claude Single/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /^Provider, Claude Never/ })).toBeVisible();
@@ -694,7 +684,7 @@ describe("ProjectTree thread interactions", () => {
       }),
     });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     selectCompletedScope();
 
     expect(screen.getByRole("button", { name: "Reopen Completed work" })).toBeInTheDocument();
@@ -719,7 +709,7 @@ describe("ProjectTree thread interactions", () => {
       }),
     });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     selectCompletedScope();
     screen.getByRole("button", { name: /^Provider, Claude Kept work/i }).focus();
 
@@ -741,7 +731,7 @@ describe("ProjectTree thread interactions", () => {
       }),
     });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     selectCompletedScope();
     screen.getByRole("button", { name: /^Provider, Claude Dirty work/i }).focus();
 
@@ -768,7 +758,7 @@ describe("ProjectTree thread interactions", () => {
       reopenThread,
     });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     selectCompletedScope();
 
     expect(
@@ -800,7 +790,7 @@ describe("ProjectTree thread interactions", () => {
         retryThreadCleanup,
       });
 
-      render(<ProjectTree />);
+      render(<ProjectSidebar />);
       selectCompletedScope();
       fireEvent.click(screen.getByRole("button", { name: "Retry cleanup for Blocked work" }));
 
@@ -811,13 +801,10 @@ describe("ProjectTree thread interactions", () => {
   });
 
   it("keeps expanded threads mounted when a project drag starts", () => {
-    localStorage.setItem(
-      "mcode-expanded-projects",
-      JSON.stringify({ "ws-1": true }),
-    );
+    useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1"]) });
     setupStoreMocks();
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     expect(screen.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeVisible();
     const projectRow = screen.getByTestId("project-row-ws-1");
     projectRow.focus();
@@ -835,7 +822,7 @@ describe("ProjectTree thread interactions", () => {
 
     // The sensor's drop listener attaches in a macrotask after activation.
     act(() => {
-      vi.runAllTimers();
+      vi.advanceTimersByTime(1_000);
     });
     fireEvent.keyDown(document, { code: "Space" });
     expect(document.body).not.toHaveStyle({ cursor: "grabbing" });
@@ -846,7 +833,7 @@ describe("ProjectTree thread interactions", () => {
     sortableMockState.isDragging = true;
 
     setupStoreMocks();
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const shell = screen.getByTestId("project-row-ws-1").parentElement;
     expect(shell).not.toBeNull();
@@ -854,12 +841,9 @@ describe("ProjectTree thread interactions", () => {
   });
 
   it("restores the project viewport across repeated disclosure cycles", () => {
-    localStorage.setItem(
-      "mcode-expanded-projects",
-      JSON.stringify({ "ws-1": false }),
-    );
+    useSidebarUiStore.setState({ expandedProjects: new Set([]) });
     setupStoreMocks();
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const viewport = document.querySelector<HTMLElement>(
       '[data-testid="project-tree-viewport"]',
@@ -883,7 +867,7 @@ describe("ProjectTree thread interactions", () => {
   it("keeps the thread count trailing and swaps it for an overlaid action group", () => {
     setupStoreMocks();
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const projectRow = screen.getByTestId("project-row-ws-1");
     const threadCount = within(projectRow).getByTestId(
@@ -911,14 +895,14 @@ describe("ProjectTree thread interactions", () => {
       workspaces: [{ ...WORKSPACE, name: projectName }],
     });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const projectButton = screen.getByRole("button", {
       name: `Open project ${projectName}`,
     });
     act(() => {
       projectButton.focus();
-      vi.runAllTimers();
+      vi.advanceTimersByTime(1_000);
     });
 
     expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent(
@@ -929,12 +913,12 @@ describe("ProjectTree thread interactions", () => {
   it("shows the Add project tooltip on the header control", () => {
     setupStoreMocks();
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const addButton = screen.getByRole("button", { name: "Add project" });
     act(() => {
       addButton.focus();
-      vi.runAllTimers();
+      vi.advanceTimersByTime(1_000);
     });
 
     expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent(
@@ -945,7 +929,7 @@ describe("ProjectTree thread interactions", () => {
   it("shows the drop well instead of the old empty text when there are no projects", () => {
     setupStoreMocks({ workspaces: [] });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getByTestId("project-drop-well")).toHaveTextContent("No projects");
     expect(screen.getByText("Use + to add a project.")).toBeInTheDocument();
@@ -956,7 +940,7 @@ describe("ProjectTree thread interactions", () => {
   it("leads the row with the status lane, then the provider and title", () => {
     setupStoreMocks();
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
     const lane = within(row).getByTestId("thread-status-lane");
@@ -970,7 +954,7 @@ describe("ProjectTree thread interactions", () => {
   it("offers Explorer and rename actions from the project menu", () => {
     setupStoreMocks();
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     fireEvent.click(
       screen.getByRole("button", { name: "Project options for Test Project" }),
     );
@@ -986,7 +970,7 @@ describe("ProjectTree thread interactions", () => {
   it("labels an expanded project with no threads", () => {
     setupStoreMocks({ thread: null });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getByText("No active threads", { exact: true })).toBeVisible();
   });
@@ -1000,7 +984,7 @@ describe("ProjectTree thread interactions", () => {
     });
     setupStoreMocks({ threads: [coordinator, delegated] });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const rows = screen.getAllByTestId("thread-item");
     expect(rows.map(rowIndent)).toEqual(["4px", "4px"]);
@@ -1012,7 +996,7 @@ describe("ProjectTree thread interactions", () => {
     );
     setupStoreMocks({ threads });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getAllByTestId("thread-item")).toHaveLength(6);
     const showMore = screen.getByRole("button", { name: "Show more (2)" });
@@ -1028,7 +1012,7 @@ describe("ProjectTree thread interactions", () => {
     const setActiveThread = vi.fn();
     setupStoreMocks({ setActiveThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
     fireEvent.click(threadButton);
@@ -1042,7 +1026,7 @@ describe("ProjectTree thread interactions", () => {
     const setActiveThread = vi.fn();
     setupStoreMocks({ setActiveThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
     fireEvent.pointerDown(threadButton);
@@ -1056,7 +1040,7 @@ describe("ProjectTree thread interactions", () => {
     const setActiveThread = vi.fn();
     setupStoreMocks({ setActiveThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
 
@@ -1079,7 +1063,7 @@ describe("ProjectTree thread interactions", () => {
   it("prefills a double-click rename with the current thread title", () => {
     setupStoreMocks();
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadRow = screen.getByRole("button", {
       name: /^Provider, Claude My Thread/i,
@@ -1097,7 +1081,7 @@ describe("ProjectTree thread interactions", () => {
     const updateThreadTitle = vi.fn().mockResolvedValue(undefined);
     setupStoreMocks({ updateThreadTitle });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadRow = screen.getByRole("button", {
       name: /^Provider, Claude My Thread/i,
@@ -1123,7 +1107,7 @@ describe("ProjectTree thread interactions", () => {
     const updateThreadTitle = vi.fn().mockResolvedValue(undefined);
     setupStoreMocks({ updateThreadTitle });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadRow = screen.getByRole("button", {
       name: /^Provider, Claude My Thread/i,
@@ -1149,7 +1133,7 @@ describe("ProjectTree thread interactions", () => {
     const updateThreadTitle = vi.fn().mockResolvedValue(undefined);
     setupStoreMocks({ updateThreadTitle });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadRow = screen.getByRole("button", {
       name: /^Provider, Claude My Thread/i,
@@ -1180,7 +1164,7 @@ describe("ProjectTree thread interactions", () => {
     const setActiveThread = vi.fn();
     setupStoreMocks({ setActiveThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
 
@@ -1199,7 +1183,7 @@ describe("ProjectTree thread interactions", () => {
     const updateThreadTitle = vi.fn().mockResolvedValue(undefined);
     setupStoreMocks({ setActiveThread, updateThreadTitle });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
 
@@ -1225,7 +1209,7 @@ describe("ProjectTree thread interactions", () => {
     const setActiveThread = vi.fn();
     setupStoreMocks({ setActiveThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
 
@@ -1239,15 +1223,12 @@ describe("ProjectTree thread interactions", () => {
   });
 
   it("expands hydrated threads under StrictMode without fetching the index", () => {
-    localStorage.setItem(
-      "mcode-expanded-projects",
-      JSON.stringify({ "ws-1": false }),
-    );
+    useSidebarUiStore.setState({ expandedProjects: new Set([]) });
     const state = setupStoreMocks();
 
     render(
       <StrictMode>
-        <ProjectTree />
+        <ProjectSidebar />
       </StrictMode>,
     );
     fireEvent.click(
@@ -1260,7 +1241,7 @@ describe("ProjectTree thread interactions", () => {
 
   it("puts the sortable affordance on the focusable project row", () => {
     setupStoreMocks();
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const row = screen.getByTestId("project-row-ws-1");
     expect(row).toHaveAttribute("role", "group");
@@ -1281,7 +1262,7 @@ describe("ProjectTree thread interactions", () => {
     );
     setupStoreMocks({ completeThread });
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     fireEvent.click(screen.getByRole("button", { name: "Complete My Thread" }));
     await vi.waitFor(() =>
       expect(completeThread).toHaveBeenCalledWith("thread-1"),
@@ -1320,7 +1301,7 @@ describe("ProjectTree thread interactions", () => {
         retryThreadCleanup,
       });
 
-      render(<ProjectTree />);
+      render(<ProjectSidebar />);
       selectCompletedScope();
       fireEvent.click(
         screen.getByRole("button", { name: "Retry cleanup for Blocked work" }),
@@ -1344,7 +1325,7 @@ describe("ProjectTree thread interactions", () => {
   it("cancels an in-progress rename when the thread row unmounts", () => {
     const updateThreadTitle = vi.fn().mockResolvedValue(undefined);
     setupStoreMocks({ updateThreadTitle });
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const threadRow = screen.getByRole("button", {
       name: /^Provider, Claude My Thread/i,
@@ -1370,7 +1351,7 @@ describe("ProjectTree thread interactions", () => {
 
   it("swallows the click that fires when a drag ends", () => {
     setupStoreMocks();
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     const projectRow = screen.getByTestId("project-row-ws-1");
     // The drop-animation overlay clone lingers, so queries scope to the tree.
     const threadRow = () =>
@@ -1383,7 +1364,7 @@ describe("ProjectTree thread interactions", () => {
     fireEvent.keyDown(projectRow, { code: "Space" });
     expect(document.body).toHaveStyle({ cursor: "grabbing" });
     act(() => {
-      vi.runAllTimers();
+      vi.advanceTimersByTime(1_000);
     });
     fireEvent.keyDown(document, { code: "Space" });
     expect(document.body).not.toHaveStyle({ cursor: "grabbing" });
@@ -1400,7 +1381,7 @@ describe("ProjectTree thread interactions", () => {
   });
 });
 
-describe("ProjectTree action-required indicator", () => {
+describe("ProjectSidebar action-required indicator", () => {
   let currentThread: TestWorkspaceThread;
   // Shape matches ChecksStatus just enough for sidebar CI aggregation,
   // while keeping the action-required ring tests focused on row state.
@@ -1464,10 +1445,7 @@ describe("ProjectTree action-required indicator", () => {
     useConnectionStore.setState({ status: "connected" });
     installWorkspaceMock();
     // Pre-expand the workspace so its threads render.
-    window.localStorage.setItem(
-      "mcode-expanded-projects",
-      JSON.stringify({ "ws-1": true }),
-    );
+    useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1"]) });
   });
 
   afterEach(() => {
@@ -1518,14 +1496,14 @@ describe("ProjectTree action-required indicator", () => {
 
   it("rings Approval required and names it on the third line", () => {
     applyAttention(attention("thread-pending", waitingOn("approval")));
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
     expect(screen.getByText("Approval required")).toBeInTheDocument();
   });
 
   it("leaves the status lane empty for a thread with no attention facts", () => {
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
   });
@@ -1533,7 +1511,7 @@ describe("ProjectTree action-required indicator", () => {
   it("keeps the ring when the waiting thread is also running", () => {
     applyAttention(attention("thread-pending", waitingOn("approval")));
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
     expect(screen.queryByRole("img", { name: "Running" })).toBeNull();
@@ -1544,7 +1522,7 @@ describe("ProjectTree action-required indicator", () => {
     threadStoreOverrides.runtimeByThread = {
       "thread-pending": { runtimePhase: "running", turnExecutionId: "turn-1" },
     };
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getByRole("button", { name: /^Running Provider, Claude My Thread/i })).toBeInTheDocument();
     expect(within(screen.getByTestId("thread-status-lane")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
@@ -1553,7 +1531,7 @@ describe("ProjectTree action-required indicator", () => {
 
   it("blocks completion while a permission is waiting", () => {
     applyAttention(attention("thread-pending", waitingOn("approval")));
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
   });
@@ -1563,7 +1541,7 @@ describe("ProjectTree action-required indicator", () => {
     startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "running")] });
     installWorkspaceMock();
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(await screen.findByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
   });
@@ -1573,7 +1551,7 @@ describe("ProjectTree action-required indicator", () => {
     startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "failed", SETUP_FAILED_BLOCK)] });
     installWorkspaceMock();
 
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(await screen.findByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
     expect(screen.queryByRole("img", { name: "Running" })).not.toBeInTheDocument();
@@ -1582,7 +1560,7 @@ describe("ProjectTree action-required indicator", () => {
   it("shows a row whose first turn is still starting as running", () => {
     currentPendingStartup = { "thread-pending": true };
     installWorkspaceMock();
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(within(screen.getByTestId("thread-status-lane")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
   });
@@ -1593,7 +1571,7 @@ describe("ProjectTree action-required indicator", () => {
     ["interrupted", "Interrupted", "attention"],
   ] as const)("marks an unseen %s turn as %s", (outcome, label, markState) => {
     applyAttention(attention("thread-pending", endedTurn(outcome)));
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getByRole("img", { name: label })).toHaveAttribute("data-status-mark", markState);
     expect(screen.getByText(label)).toBeVisible();
@@ -1602,14 +1580,14 @@ describe("ProjectTree action-required indicator", () => {
 
   it("shows nothing for an unseen cancelled turn", () => {
     applyAttention(attention("thread-pending", endedTurn("cancelled")));
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
   });
 
   it("clears Finished when another client marks the turn seen", () => {
     applyAttention(attention("thread-pending", endedTurn("completed", 7)));
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     expect(screen.getByRole("img", { name: "Finished" })).toBeVisible();
 
     startPushListeners();
@@ -1629,7 +1607,7 @@ describe("ProjectTree action-required indicator", () => {
   it("keeps Approval required on screen but quiets an on-screen outcome", () => {
     applyAttention(attention("thread-pending", { ...waitingOn("approval"), ...endedTurn("completed") }));
     act(() => threadAttentionStore.setState({ onScreenThreadId: "thread-pending" }));
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     expect(screen.getByRole("img", { name: "Approval required" })).toBeVisible();
 
     applyAttention(attention("thread-pending", endedTurn("completed")));
@@ -1640,7 +1618,7 @@ describe("ProjectTree action-required indicator", () => {
   it("shows the row's time on its branch line and the exact time in hover details", async () => {
     const updatedAt = new Date(Date.now() - 5 * 60_000).toISOString();
     setupStoreMocks({ thread: makeThread({ id: "thread-updated", title: "Updated Thread", updated_at: updatedAt }) });
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const row = screen.getByRole("button", { name: /^Provider, Claude Updated Thread Local mode Branch, main 5m$/i });
     const exactTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(updatedAt));
@@ -1653,7 +1631,7 @@ describe("ProjectTree action-required indicator", () => {
       makeThread({ id: "thread-A", title: "Thread A" }),
       makeThread({ id: "thread-B", title: "Thread B" }),
     ] });
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
     expect(screen.queryByRole("img", { name: "Approval required" })).not.toBeInTheDocument();
     startPushListeners();
     try {
@@ -1676,7 +1654,7 @@ describe("ProjectTree action-required indicator", () => {
     };
     installWorkspaceMock();
     applyAttention(attention("thread-pending", waitingOn("approval")));
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
     expect(screen.queryByTestId("thread-pr-indicator-thread-pending")).toBeNull();
@@ -1684,7 +1662,7 @@ describe("ProjectTree action-required indicator", () => {
 
   describe("collapsed project", () => {
     beforeEach(() => {
-      window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": false }));
+      useSidebarUiStore.setState({ expandedProjects: new Set([]) });
     });
 
     it("shows the highest-priority mark among its threads", () => {
@@ -1693,10 +1671,10 @@ describe("ProjectTree action-required indicator", () => {
         makeThread({ id: "thread-run", title: "Run" }),
         makeThread({ id: "thread-wait", title: "Wait" }),
       ] });
-      window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": false }));
+      useSidebarUiStore.setState({ expandedProjects: new Set([]) });
       applyAttention(attention("thread-done", endedTurn("completed")));
       threadStoreOverrides.runningThreadIds = new Set(["thread-run"]);
-      render(<ProjectTree />);
+      render(<ProjectSidebar />);
       const projectRow = screen.getByTestId("project-row-ws-1");
       expect(within(projectRow).getByRole("img", { name: "Running" })).toBeVisible();
 
@@ -1709,7 +1687,7 @@ describe("ProjectTree action-required indicator", () => {
     it("keeps showing activity while Stop is pending", () => {
       threadStoreOverrides.pendingStopCounts = { "thread-pending": 1 };
       installWorkspaceMock();
-      render(<ProjectTree />);
+      render(<ProjectSidebar />);
 
       expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Running" })).toBeVisible();
     });
@@ -1717,7 +1695,7 @@ describe("ProjectTree action-required indicator", () => {
     it("shows activity while a thread is being created", () => {
       currentThread = { ...currentThread, clientPreparing: true };
       installWorkspaceMock();
-      render(<ProjectTree />);
+      render(<ProjectSidebar />);
 
       expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Running" })).toBeVisible();
     });
@@ -1726,17 +1704,17 @@ describe("ProjectTree action-required indicator", () => {
       currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
       startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "failed", SETUP_FAILED_BLOCK)] });
       installWorkspaceMock();
-      render(<ProjectTree />);
+      render(<ProjectSidebar />);
 
       expect(await within(screen.getByTestId("project-row-ws-1")).findByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
     });
 
     it("keeps a setup that settles after its project collapses current", async () => {
-      window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": true }));
+      useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1"]) });
       currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
       startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "running")] });
       installWorkspaceMock();
-      render(<ProjectTree />);
+      render(<ProjectSidebar />);
       expect(await within(screen.getByTestId("thread-status-lane")).findByRole("img", { name: "Running" })).toBeVisible();
 
       fireEvent.click(screen.getByRole("button", { name: "Toggle threads for Test" }));
@@ -1746,9 +1724,9 @@ describe("ProjectTree action-required indicator", () => {
     });
 
     it("leaves the mark to the rows once expanded", () => {
-      window.localStorage.setItem("mcode-expanded-projects", JSON.stringify({ "ws-1": true }));
+      useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1"]) });
       applyAttention(attention("thread-pending", waitingOn("approval")));
-      render(<ProjectTree />);
+      render(<ProjectSidebar />);
 
       expect(within(screen.getByTestId("project-row-ws-1")).queryByRole("img", { name: "Approval required" })).toBeNull();
     });
@@ -1760,7 +1738,7 @@ describe("ProjectTree action-required indicator", () => {
       clientPreparing: true,
     } as Thread;
     installWorkspaceMock();
-    render(<ProjectTree />);
+    render(<ProjectSidebar />);
 
     const row = screen.getByRole("button", { name: /^Running Provider, Claude My Thread/i });
     const content = screen.getByTestId("thread-title").closest(".flex-col");
@@ -1770,7 +1748,7 @@ describe("ProjectTree action-required indicator", () => {
   });
 });
 
-describe("ProjectTree PR-ability gating by mode", () => {
+describe("ProjectSidebar PR-ability gating by mode", () => {
   function renderWithThread(
     thread: Thread,
     checks: Record<string, { aggregate: string; runs: unknown[] }> = {},
@@ -1804,16 +1782,13 @@ describe("ProjectTree PR-ability gating by mode", () => {
       selector: (s: unknown) => unknown,
     ) => selector(state)) as never);
     Object.assign(useWorkspaceStore, { getState: () => state });
-    return render(<ProjectTree />);
+    return render(<ProjectSidebar />);
   }
 
   beforeEach(() => {
     threadStoreOverrides.runningThreadIds = undefined;
     threadStoreOverrides.runtimeByThread = undefined;
-    window.localStorage.setItem(
-      "mcode-expanded-projects",
-      JSON.stringify({ "ws-1": true }),
-    );
+    useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1"]) });
   });
 
   afterEach(() => {
