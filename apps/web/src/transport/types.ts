@@ -419,6 +419,7 @@ export interface McodeTransport {
       fastMode?: boolean | null;
       devinMode?: DevinMode | null;
       defaultOpenInApp?: string | null;
+      autoCompleteOnMerge?: boolean | null;
     },
   ): Promise<boolean>;
   /** Return live waits and unseen settled outcomes across all threads. */

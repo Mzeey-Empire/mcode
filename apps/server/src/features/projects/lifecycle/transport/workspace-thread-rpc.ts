@@ -282,6 +282,7 @@ function updateThreadSettings(
     thinking?: boolean | null;
     fastMode?: boolean | null;
     defaultOpenInApp?: string | null;
+    autoCompleteOnMerge?: boolean | null;
   },
 ): Promise<boolean> {
   return deps.threadService.updateSettings(params.threadId, {
@@ -293,6 +294,7 @@ function updateThreadSettings(
     thinking: params.thinking,
     fast_mode: params.fastMode,
     default_open_in_app: params.defaultOpenInApp,
+    auto_complete_on_merge: params.autoCompleteOnMerge,
   });
 }
 

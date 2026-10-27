@@ -15,6 +15,7 @@ import { CleanupJobRepo } from "../../cleanup/persistence/cleanup-job-repo.js";
 import { ThreadRepo } from "../../persistence/thread-repo.js";
 import type { ThreadDeletionTeardownService } from "../thread-deletion-teardown-service.js";
 import { ThreadService } from "../thread-service.js";
+import { effectiveAutoCompleteOnMerge } from "@mcode/contracts/models/thread";
 
 describe("ThreadService.delete", () => {
   let database: Database;
@@ -51,6 +52,19 @@ describe("ThreadService.delete", () => {
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
       { teardownThread, deletePersistentData, bindAcceptedProgress: vi.fn() } as unknown as ThreadDeletionTeardownService,
     );
+  });
+
+  it("persists and clears the merge override, inheriting the global preference", async () => {
+    const workspace = await workspaces.create("Project", "/fixture");
+    const thread = await threads.create(workspace.id, "Thread", "direct", "main");
+    await threadService.updateSettings(thread.id, { auto_complete_on_merge: true });
+    expect(threads.findById(thread.id)?.auto_complete_on_merge).toBe(true);
+    await threadService.updateSettings(thread.id, { auto_complete_on_merge: null });
+    const inherited = threads.findById(thread.id);
+    expect(inherited?.auto_complete_on_merge).toBeNull();
+    if (!inherited) throw new Error("Thread missing");
+    expect(effectiveAutoCompleteOnMerge(inherited, false)).toBe(false);
+    expect(effectiveAutoCompleteOnMerge(inherited, true)).toBe(true);
   });
 
   function addWorktreeThread(
