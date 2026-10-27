@@ -29,10 +29,18 @@ import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import { useSidebarUiStore } from "./sidebar-ui-store";
 
-/** Provisional heights until the ResizeObserver measures; they only shape the first frame. */
-const PROVISIONAL_HEIGHT: Record<SidebarItem["kind"], number> = {
-  project: 32, draft: 32, thread: 64, "show-more": 28, "older-bar": 32, empty: 0, "end-spacer": 12,
+/**
+ * Provisional heights until the ResizeObserver measures; they shape the first frame, so they match
+ * measured heights. A short guess overlaps rows until the measurement lands a frame later.
+ */
+const PROVISIONAL_HEIGHT: Record<Exclude<SidebarItem["kind"], "thread">, number> = {
+  project: 32, draft: 32, "show-more": 32, "older-bar": 32, empty: 0, "end-spacer": 12,
 };
+const PROVISIONAL_THREAD_HEIGHT: Record<Extract<SidebarItem, { kind: "thread" }>["layout"], number> = { grouped: 64, flat: 84 };
+
+function provisionalHeight(item: SidebarItem): number {
+  return item.kind === "thread" ? PROVISIONAL_THREAD_HEIGHT[item.layout] : PROVISIONAL_HEIGHT[item.kind];
+}
 
 const PROJECT_DND_MODIFIERS = [restrictToVerticalAxis];
 // The virtual list mounts project droppables only near the viewport, so they must be measured as
@@ -214,7 +222,7 @@ const SidebarRow = memo(function SidebarRow({ item, ctx, dropEdge }: { item: Sid
 });
 
 function toVirtualRows(items: readonly SidebarItem[]): VirtualRow[] {
-  return items.map((item) => ({ id: item.key, height: PROVISIONAL_HEIGHT[item.kind] }));
+  return items.map((item) => ({ id: item.key, height: provisionalHeight(item) }));
 }
 
 /** Thread and draft row keys plus the preparing threads among them, for the first-send entrance. */

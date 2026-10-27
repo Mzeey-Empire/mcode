@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import { Plus } from "lucide-react";
+import { List, ListTree, Plus } from "lucide-react";
 import { IconButton } from "@/components/ui/button";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStartupRecovery } from "@/features/thread-startup/state/thread-startup-store";
@@ -9,14 +9,21 @@ import { useWorkspaceStore } from "../state/workspaceStore";
 import { ScopeBar } from "./ScopeBar";
 import { SidebarList } from "./SidebarList";
 import { useRowLifecycleStore } from "./row-lifecycle-store";
+import { useSidebarUiStore } from "./sidebar-ui-store";
 import { useSidebarModel } from "./use-sidebar-model";
 
 function SidebarProjectsHeader() {
   // The palette's folder-browse view works across Electron and standalone web without the desktop bridge.
   const openFolder = useCallback(() => useCommandPaletteStore.getState().open({ intent: "addProject" }), []);
+  const view = useSidebarUiStore((s) => s.view);
+  const toggleView = useSidebarUiStore((s) => s.toggleView);
+  const ViewIcon = view === "projects" ? List : ListTree;
   return (
     <div className="mx-1.5 flex h-8 shrink-0 items-center gap-1 pl-2">
-      <span className="min-w-0 flex-1 text-label text-muted">Projects</span>
+      <span className="min-w-0 flex-1 text-label text-muted">{view === "projects" ? "Projects" : "Threads"}</span>
+      <IconButton aria-label={view === "projects" ? "Show as one list" : "Group by project"} onClick={toggleView}>
+        <ViewIcon aria-hidden />
+      </IconButton>
       <IconButton aria-label="Add project" onClick={openFolder}>
         <Plus aria-hidden />
       </IconButton>
