@@ -1,6 +1,9 @@
 /** Provides GitHub pull-request lifecycle operations used by server composition. */
 export { GithubService } from "./github/github-service.js";
 
+/** Owns committed thread PR links and their watch sets. */
+export { PullRequestLinkFunnel } from "./links/pull-request-link-funnel.js";
+
 /** Identifies a linked thread whose pull-request state should be refreshed. */
 export type { PullRequestWatchTarget, PullRequestWatchSnapshot } from "./github/github-service.js";
 

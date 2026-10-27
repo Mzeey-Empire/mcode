@@ -9,6 +9,19 @@ import { type AnySQLiteColumn, check, index, integer, primaryKey, real, sqliteTa
 
 const timestampDefault = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
+/** Linked PR observations, owned by the pull-request link funnel. */
+export const threadPullRequests = sqliteTable("thread_pull_requests", {
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  number: integer("number").notNull(),
+  state: text("state", { enum: ["open", "draft", "merged", "closed", "unresolved"] }).notNull(),
+  title: text("title"),
+  url: text("url"),
+  observedAt: text("observed_at").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.threadId, table.number] }),
+  index("idx_thread_pull_requests_state").on(table.state, table.threadId),
+]);
+
 export const workspaces = sqliteTable(
   "workspaces",
   {

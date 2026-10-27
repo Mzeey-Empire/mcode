@@ -11,7 +11,7 @@ import type { WorkspaceService } from "../../projects/lifecycle/workspace-servic
 import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import type { ThreadService } from "../../thread-control/lifecycle/thread-service.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import { broadcast } from "../../../application/transport/push.js";
+import type { PullRequestLinkFunnel } from "../links/pull-request-link-funnel.js";
 import type { PrDraftService } from "../drafts/pr-draft-service.js";
 import type { GithubService } from "../github/github-service.js";
 import type { PullRequestMutationService } from "../mutations/pull-request-mutation-service.js";
@@ -135,6 +135,7 @@ const pullRequestOperationHandlers = {
 
 /** Defines the services required to route validated pull-request RPC calls. */
 export interface PullRequestRouterDeps {
+  pullRequestLinkFunnel: PullRequestLinkFunnel;
   githubService: GithubService;
   pullRequestService: PullRequestService;
   pullRequestMutationService: PullRequestMutationService;
@@ -287,14 +288,9 @@ async function routeCreatePr(
     isDraft: params.isDraft,
   });
 
-  deps.threadService.linkPr(params.threadId, result.number, "OPEN");
-  broadcast("thread.prLinked", {
-    threadId: params.threadId,
-    prNumber: result.number,
-    prStatus: "OPEN",
-  });
-  deps.ciWatcherService.unwatch(params.threadId);
-  deps.ciWatcherService.watch(params.threadId, result.number, branch, repoPath);
+  await deps.pullRequestLinkFunnel.observe(params.threadId, [{
+    number: result.number, state: params.isDraft ? "draft" : "open", title: params.title, url: result.url,
+  }], "created");
   deps.ciWatcherService.scheduleBumpAfterPush(params.threadId);
 
   return result;

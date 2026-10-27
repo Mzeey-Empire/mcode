@@ -1,4 +1,4 @@
-import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockThread, createMockThreadPullRequest, createMockWorkspace } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -80,6 +80,19 @@ beforeEach(() => {
 });
 
 describe("workspaceStore pin/remove/touch", () => {
+  it("applies PR pushes to a thread outside the active workspace without moving its activity clock", () => {
+    const thread = createMockThread({ id: "other-thread", workspace_id: "other-workspace" });
+    useWorkspaceStore.setState({ threads: [thread], activeWorkspaceId: "ws-1" });
+    useWorkspaceStore.getState().applyThreadPullRequests(thread.id, [
+      createMockThreadPullRequest({ number: 10, state: "merged" }),
+      createMockThreadPullRequest({ number: 20, state: "open" }),
+    ]);
+    const updated = useWorkspaceStore.getState().threads[0];
+    expect(updated.pull_requests.map((pr) => pr.number)).toEqual([10, 20]);
+    expect(updated.pr_number).toBe(20);
+    expect(updated.last_activity_at).toBe(thread.last_activity_at);
+  });
+
   it("setActiveWorkspace calls touchLastOpened RPC", async () => {
     const call = vi.fn().mockResolvedValue({ ok: true });
     await useWorkspaceStore.getState().setActiveWorkspace("ws-1", call as unknown as WorkspaceRpcCall);

@@ -138,6 +138,7 @@ export function buildPlaceholderWorkspaceThread(
     issue_number: null,
     pr_number: null,
     pr_status: null,
+    pull_requests: [],
     has_file_changes: false,
     sdk_session_id: null,
     created_at: now,

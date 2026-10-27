@@ -1,4 +1,16 @@
 import { z } from "zod";
+import type { ThreadPullRequestState } from "@mcode/contracts/models/thread-pull-request";
+
+/** Normalize legacy and GitHub lifecycle observations at the provider boundary. */
+export function normalizeThreadPullRequestState(state: string, isDraft = false): ThreadPullRequestState {
+  switch (state.toLowerCase()) {
+    case "open": return isDraft ? "draft" : "open";
+    case "draft": return "draft";
+    case "merged": return "merged";
+    case "closed": return "closed";
+    default: return "unresolved";
+  }
+}
 import type { PullRequestRelationship, PullRequestState, PullRequestSummary } from "@mcode/contracts/pull-requests";
 
 const githubActorSchema = z.object({

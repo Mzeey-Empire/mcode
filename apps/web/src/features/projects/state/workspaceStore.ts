@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { rankPullRequests, type ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
 import type { Workspace, Thread, PermissionMode, WorktreeInfo, AttachmentMeta } from "@/transport";
 import {
   type WorkspaceThread,
@@ -729,6 +730,7 @@ interface WorkspaceState {
   /** Apply a server-authoritative completion lifecycle push. */
   applyThreadLifecycle: (thread: Thread) => void;
   applyThreadActivity: (threadId: string, at: string) => void;
+  applyThreadPullRequests: (threadId: string, prs: ThreadPullRequest[]) => void;
   /** Remove a thread after server-authoritative automatic cleanup. */
   applyThreadDeleted: (threadId: string) => void;
   /** Record a thread's committed resume schedule, or its removal. */
@@ -1718,6 +1720,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       useTerminalStore.getState().clearThread(thread.id);
       useDiffStore.getState().clearRightPanel(thread.workspace_id, thread.id);
     }
+  },
+
+  applyThreadPullRequests: (threadId, prs) => {
+    set((state) => ({
+      threads: state.threads.map((thread) => {
+        if (thread.id !== threadId) return thread;
+        const primary = rankPullRequests(prs)[0];
+        return { ...thread, pull_requests: prs, pr_number: primary?.number ?? null, pr_status: primary?.state ?? null };
+      }),
+    }));
   },
 
   applyThreadActivity: (threadId, at) => {

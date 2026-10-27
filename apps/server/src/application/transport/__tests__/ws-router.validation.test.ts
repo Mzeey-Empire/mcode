@@ -1620,6 +1620,7 @@ describe("routeMessage github.createPr", () => {
       },
       gitRepository: { getCurrentBranchAt, push },
       gitWorktrees: { resolveWorkingDir },
+      pullRequestLinkFunnel: { observe: vi.fn().mockResolvedValue(undefined) },
       githubService: {
         createPr,
       },
@@ -1698,7 +1699,9 @@ describe("routeMessage github.createPr", () => {
       baseBranch: "main",
       isDraft: false,
     });
-    expect(deps.threadService.linkPr).toHaveBeenCalledWith("thread-1", 42, "OPEN");
+    expect(deps.pullRequestLinkFunnel.observe).toHaveBeenCalledWith("thread-1", [{
+      number: 42, state: "open", title: "Add branchless worktrees", url: "https://github.com/Mzeey-Empire/mcode/pull/42",
+    }], "created");
   });
 });
 
