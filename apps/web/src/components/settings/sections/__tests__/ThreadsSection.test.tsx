@@ -66,7 +66,8 @@ describe("ThreadsSection", () => {
       settings: {
         ...settings,
         thread: {
-          completion: { retentionDays: null },
+          ...settings.thread,
+          completion: { ...settings.thread.completion, retentionDays: null },
         },
       },
     });
@@ -82,5 +83,14 @@ describe("ThreadsSection", () => {
       screen.getByRole("spinbutton", { name: "Completed thread retention days" }),
     ).toBeDisabled();
     expect(screen.queryByText("Unsafe worktree cleanup")).not.toBeInTheDocument();
+  });
+
+  it("shows a failed merge setting write beside the switch", async () => {
+    update.mockResolvedValueOnce("Settings file is read-only");
+    render(<ThreadsSection />);
+    const control = screen.getByRole("switch", { name: "Complete threads when their PRs merge" });
+    fireEvent.click(control);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Settings file is read-only");
+    expect(control).toBeChecked();
   });
 });

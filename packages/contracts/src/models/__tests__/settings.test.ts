@@ -55,6 +55,20 @@ describe("thread.completion.retentionDays", () => {
 });
 
 describe("thread.completion", () => {
+  it.each([null, 7, 14, 30])("round-trips merge completion and Older threshold %s", (olderAfterDays) => {
+    const patch = PartialSettingsSchema().parse({
+      thread: { completion: { completeOnPrMerge: false }, olderAfterDays },
+    });
+    const settings = SettingsSchema().parse(patch);
+    expect(settings.thread.completion.completeOnPrMerge).toBe(false);
+    expect(settings.thread.olderAfterDays).toBe(olderAfterDays);
+  });
+
+  it.each([0, 8, "14", 14.5])("rejects unsupported Older threshold %j", (olderAfterDays) => {
+    const input = { thread: { olderAfterDays } };
+    expect(PartialSettingsSchema().safeParse(input).success).toBe(false);
+    expect(SettingsSchema().safeParse(input).success).toBe(false);
+  });
   it("does not expose the retired unsafe-worktree policy", () => {
     const legacy = { thread: { completion: { unsafeWorktreePolicy: "delete" } } };
 

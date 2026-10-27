@@ -257,8 +257,12 @@ export const SettingsSchema = lazySchema(() =>
           .object({
             /** Days before a completed thread becomes eligible for deletion. */
             retentionDays: CompletedThreadRetentionDaysSchema.default(3),
+            /** Complete idle threads after all linked pull requests merge. */
+            completeOnPrMerge: z.boolean().default(true),
           })
           .default({}),
+        /** Inactivity threshold for Older; null disables it. */
+        olderAfterDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).nullable().default(14),
       })
       .default({}),
 
@@ -562,8 +566,10 @@ export const PartialSettingsSchema = lazySchema(() =>
         completion: z
           .object({
             retentionDays: CompletedThreadRetentionDaysSchema.optional(),
+            completeOnPrMerge: z.boolean().optional(),
           })
           .optional(),
+        olderAfterDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).nullable().optional(),
       })
       .optional(),
     worktree: z

@@ -199,7 +199,7 @@ describe("SettingsService rendering-engine migration", () => {
 
     const settings = new SettingsService().get();
 
-    expect(settings.thread.completion).toEqual({ retentionDays: 7 });
+    expect(settings.thread.completion).toEqual({ retentionDays: 7, completeOnPrMerge: true });
     const persisted = JSON.parse(
       vi.mocked(NodeFS.writeFileSync).mock.calls[0]![1] as string,
     ) as Record<string, unknown>;
