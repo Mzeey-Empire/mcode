@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Command } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
-import { useUiStore } from "@/stores/uiStore";
+import { useSidebarUiStore } from "@/features/projects/sidebar/sidebar-ui-store";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
@@ -112,9 +112,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   act(() => {
-    useUiStore.setState({
-      projectThreadViews: { "another-project": "active" },
-    });
+    useSidebarUiStore.setState({ scope: "active" });
     useCommandPaletteStore.getState().open({ intent: "threadSearch" });
     useCommandPaletteStore.getState().setQuery("quiet-lantern");
     threadAttentionStore.setState({ byThreadId: {}, onScreenThreadId: null });
@@ -170,7 +168,7 @@ describe("ThreadSearchView", () => {
     expect(screen.getByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
   });
 
-  it("opens the selected thread inside its project", () => {
+  it("opens the selected thread inside its project and switches the global scope to its lifecycle", () => {
     render(
       <Command shouldFilter={false}>
         <ThreadSearchView />
@@ -181,10 +179,7 @@ describe("ThreadSearchView", () => {
 
     expect(hoisted.setActiveWorkspace).toHaveBeenCalledWith("ws-search");
     expect(hoisted.setActiveThread).toHaveBeenCalledWith("thread-search");
-    expect(useUiStore.getState().projectThreadViews).toEqual({
-      "another-project": "active",
-      "ws-search": "completed",
-    });
+    expect(useSidebarUiStore.getState().scope).toBe("completed");
     expect(useCommandPaletteStore.getState().isOpen).toBe(false);
   });
 

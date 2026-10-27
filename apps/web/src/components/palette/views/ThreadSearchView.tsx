@@ -20,7 +20,7 @@ import {
 } from "@/stores/sidebarSearchStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { PALETTE_LIST_HINTS, PaletteFooterHints } from "../PaletteFooterHints";
-import { useUiStore } from "@/stores/uiStore";
+import { useSidebarUiStore } from "@/features/projects/sidebar/sidebar-ui-store";
 import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -157,9 +157,7 @@ export function ThreadSearchView() {
     (state) => state.setActiveWorkspace,
   );
   const setActiveThread = useWorkspaceStore((state) => state.setActiveThread);
-  const setProjectThreadView = useUiStore(
-    (state) => state.setProjectThreadView,
-  );
+  const setSidebarScope = useSidebarUiStore((state) => state.setScope);
 
   useEffect(() => {
     void fetchRecent(20);
@@ -224,10 +222,7 @@ export function ThreadSearchView() {
   );
 
   const handleSelect = (thread: Thread | RecentThread) => {
-    setProjectThreadView(
-      thread.workspace_id,
-      thread.user_completed_at === null ? "active" : "completed",
-    );
+    setSidebarScope(thread.user_completed_at === null ? "active" : "completed");
     setActiveWorkspace(thread.workspace_id);
     setActiveThread(thread.id);
     close();

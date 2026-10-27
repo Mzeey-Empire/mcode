@@ -7,7 +7,6 @@ describe("uiStore primary surface", () => {
       primarySurface: "chat",
       rightPanelMaximized: false,
       rightPanelMaximizedByLayout: false,
-      projectThreadViews: {},
     });
   });
 
@@ -23,23 +22,6 @@ describe("uiStore primary surface", () => {
       primarySurface: "pullRequests",
       rightPanelMaximized: false,
       rightPanelMaximizedByLayout: false,
-    });
-  });
-
-  it("keeps independent Project thread views for the app session", () => {
-    useUiStore.getState().setProjectThreadView("project-a", "completed");
-    useUiStore.getState().toggleProjectThreadView("project-b");
-
-    expect(useUiStore.getState().projectThreadViews).toEqual({
-      "project-a": "completed",
-      "project-b": "completed",
-    });
-
-    useUiStore.getState().toggleProjectThreadView("project-a");
-
-    expect(useUiStore.getState().projectThreadViews).toEqual({
-      "project-a": "active",
-      "project-b": "completed",
     });
   });
 });
