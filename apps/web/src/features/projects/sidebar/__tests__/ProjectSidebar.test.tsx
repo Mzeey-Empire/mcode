@@ -148,6 +148,7 @@ vi.mock("@/transport", () => ({
 }));
 
 beforeEach(() => {
+  useCompletionStore.setState({ entries: new Map(), hoveredThreadId: null, undoLineThreadId: null });
   vi.mocked(mockTransport.listThreadStartups).mockReset();
   vi.mocked(mockTransport.getThreadStartup).mockReset();
 });
@@ -191,6 +192,7 @@ afterEach(() => {
 // Import after mocks are registered.
 import { useWorkspaceStore } from "../../state/workspaceStore";
 import { useSidebarUiStore } from "../sidebar-ui-store";
+import { useCompletionStore } from "../completion-store";
 import { useUiStore } from "@/stores/uiStore";
 import { prefetchOnPointerDown } from "@/features/conversation";
 import { ProjectSidebar } from "../ProjectSidebar";
@@ -257,7 +259,6 @@ interface ProjectTreeStoreMockOptions {
   readonly setActiveWorkspace?: ReturnType<typeof vi.fn>;
   readonly beginNewThread?: ReturnType<typeof vi.fn>;
   readonly updateThreadTitle?: ReturnType<typeof vi.fn>;
-  readonly completeThread?: ReturnType<typeof vi.fn>;
   readonly reopenThread?: ReturnType<typeof vi.fn>;
   readonly retryThreadCleanup?: ReturnType<typeof vi.fn>;
 }
@@ -313,7 +314,6 @@ function projectTreeMockActions(options: ProjectTreeStoreMockOptions) {
     setActiveWorkspace: options.setActiveWorkspace ?? vi.fn(),
     beginNewThread: options.beginNewThread ?? vi.fn(),
     updateThreadTitle: options.updateThreadTitle ?? vi.fn(),
-    completeThread: options.completeThread ?? vi.fn().mockResolvedValue(undefined),
     reopenThread: options.reopenThread ?? vi.fn().mockResolvedValue(undefined),
     retryThreadCleanup: options.retryThreadCleanup ?? vi.fn().mockResolvedValue(undefined),
   };
@@ -422,64 +422,6 @@ describe("ProjectSidebar thread interactions", () => {
     expect(view.container.querySelector('[data-thread-id="old-thread-1"]')).toBe(
       stableThread,
     );
-  });
-
-  it("completes an idle thread from its hover action", async () => {
-    const completeThread = vi.fn().mockResolvedValue(undefined);
-    setupStoreMocks({ completeThread });
-
-    render(<ProjectSidebar />);
-    const action = screen.getByRole("button", { name: "Complete My Thread" });
-    const actions = action.parentElement;
-    expect(within(actions as HTMLElement).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
-      "Complete My Thread",
-      "Thread options for My Thread",
-    ]);
-
-    fireEvent.mouseEnter(action.closest('[role="button"]') ?? action);
-    fireEvent.click(action);
-
-    await vi.waitFor(() => expect(completeThread).toHaveBeenCalledWith("thread-1"));
-  });
-
-  it("keeps the lifecycle spinner in the completion control while completion is pending", async () => {
-    let resolveComplete!: () => void;
-    const completeThread = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveComplete = resolve;
-        }),
-    );
-    setupStoreMocks({ completeThread });
-
-    render(<ProjectSidebar />);
-    const action = screen.getByRole("button", { name: "Complete My Thread" });
-    fireEvent.click(action);
-
-    await vi.waitFor(() => expect(completeThread).toHaveBeenCalledWith("thread-1"));
-    expect(action).toBeDisabled();
-    expect(action.querySelector(".status-spin")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Running")).toBeNull();
-    await act(async () => {
-      resolveComplete();
-    });
-  });
-
-  it("clears the lifecycle pending state when completion rejects", async () => {
-    const completeThread = vi.fn().mockRejectedValue(
-      new Error("Thread has a pending mutation: thread-1"),
-    );
-    setupStoreMocks({ completeThread });
-
-    render(<ProjectSidebar />);
-    const action = screen.getByRole("button", { name: "Complete My Thread" });
-    fireEvent.click(action);
-
-    await vi.waitFor(() => expect(completeThread).toHaveBeenCalledWith("thread-1"));
-    await act(async () => {});
-    // The rejection is swallowed by the row handler (the store surfaces it via
-    // `error`); the control must leave its pending state instead of sticking.
-    await vi.waitFor(() => expect(action).not.toBeDisabled());
   });
 
   it("switches to completed threads and reopens one by keyboard", async () => {
@@ -1186,39 +1128,6 @@ describe("ProjectSidebar thread interactions", () => {
     expect(row.getAttribute("aria-describedby")).toMatch(/^DndDescribedBy-/);
     // The positioning wrapper must not be a second tab stop.
     expect(row.parentElement).not.toHaveAttribute("tabindex", "0");
-  });
-
-  it("keeps the lifecycle spinner across a collapse while completion is pending", async () => {
-    let resolveComplete!: () => void;
-    const completeThread = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveComplete = resolve;
-        }),
-    );
-    setupStoreMocks({ completeThread });
-
-    render(<ProjectSidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "Complete My Thread" }));
-    await vi.waitFor(() =>
-      expect(completeThread).toHaveBeenCalledWith("thread-1"),
-    );
-
-    // Collapsing unmounts the virtualized thread row; the pending flag must
-    // outlive it.
-    const projectRow = screen.getByTestId("project-row-ws-1");
-    fireEvent.click(projectRow);
-    expect(
-      screen.queryByRole("button", { name: "Complete My Thread" }),
-    ).toBeNull();
-    fireEvent.click(projectRow);
-
-    const remounted = screen.getByRole("button", { name: "Complete My Thread" });
-    expect(remounted).toBeDisabled();
-    expect(remounted.querySelector(".status-spin")).toBeInTheDocument();
-    await act(async () => {
-      resolveComplete();
-    });
   });
 
   it("keeps a cleanup retry error across collapse and expand", async () => {
