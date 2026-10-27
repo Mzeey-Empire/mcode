@@ -25,7 +25,6 @@ import {
   GitBranch,
   GitBranchMinus,
   ChevronRight,
-  FolderCheck,
   FolderOpen,
   Pencil,
   Plus,
@@ -122,6 +121,8 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { ScopeBar, useSidebarScope } from "./sidebar/ScopeBar";
+import type { SidebarScope } from "./sidebar/sidebar-ui-store";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 
 // Persist expand/collapse in localStorage
@@ -530,8 +531,7 @@ export function ProjectTree() {
   const [threadListExpanded, setThreadListExpandedState] = useState<
     Record<string, boolean>
   >(getThreadListExpanded);
-  const lifecycleViews = useUiStore((s) => s.projectThreadViews);
-  const toggleLifecycleView = useUiStore((s) => s.toggleProjectThreadView);
+  const lifecycleView = useSidebarScope();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [draftContextMenu, setDraftContextMenu] =
     useState<DraftContextMenuState | null>(null);
@@ -920,7 +920,7 @@ export function ProjectTree() {
         activeDraftId,
         expanded,
         threadListExpanded,
-        lifecycleViews,
+        lifecycleView,
         activeThreadId,
         activeWorkspaceId,
         runningThreadIds,
@@ -936,7 +936,7 @@ export function ProjectTree() {
       activeDraftId,
       expanded,
       threadListExpanded,
-      lifecycleViews,
+      lifecycleView,
       activeThreadId,
       activeWorkspaceId,
       runningThreadIds,
@@ -989,7 +989,6 @@ export function ProjectTree() {
       validWorktreePaths,
       availableProviders,
       onToggle: toggleExpand,
-      onToggleLifecycleView: toggleLifecycleView,
       onCreateThread: handleCreateThread,
       onDelete: handleDeleteWorkspace,
       onRename: handleRenameWorkspace,
@@ -1016,7 +1015,6 @@ export function ProjectTree() {
       validWorktreePaths,
       availableProviders,
       toggleExpand,
-      toggleLifecycleView,
       handleCreateThread,
       handleDeleteWorkspace,
       handleRenameWorkspace,
@@ -1055,6 +1053,7 @@ export function ProjectTree() {
           <Plus aria-hidden />
         </IconButton>
       </div>
+      <ScopeBar />
 
       <div className="relative isolate min-h-0 flex-1">
         <div
@@ -1218,9 +1217,6 @@ export function ProjectTree() {
 
 // --- Flattened virtual rows: a workspace header plus its expanded children ---
 
-/** The project sidebar groups threads by completion state per workspace. */
-type ProjectLifecycleView = "active" | "completed";
-
 /** One row in the flattened sidebar list rendered by the shared vlist viewport. */
 /** One virtual row: a whole project group (header plus expanded thread section). */
 interface ProjectTreeRowData {
@@ -1228,7 +1224,7 @@ interface ProjectTreeRowData {
   readonly threadList: ThreadListSummary;
   readonly drafts: readonly ThreadDraft[];
   readonly activeDraftId: string | null;
-  readonly lifecycleView: ProjectLifecycleView;
+  readonly lifecycleView: SidebarScope;
   readonly isExpanded: boolean;
   readonly isThreadListExpanded: boolean;
   readonly isActive: boolean;
@@ -1249,7 +1245,7 @@ interface ProjectTreeRowsInput {
   readonly activeDraftId: string | null;
   readonly expanded: Record<string, boolean>;
   readonly threadListExpanded: Record<string, boolean>;
-  readonly lifecycleViews: Record<string, ProjectLifecycleView>;
+  readonly lifecycleView: SidebarScope;
   readonly activeThreadId: string | null;
   readonly activeWorkspaceId: string | null;
   readonly runningThreadIds: ReadonlySet<string>;
@@ -1267,7 +1263,7 @@ function buildProjectTreeRows(
   return input.workspaces.map((workspace) => {
     const wsThreads =
       input.threadsByWorkspace.get(workspace.id) ?? EMPTY_THREADS;
-    const lifecycleView = input.lifecycleViews[workspace.id] ?? "active";
+    const lifecycleView = input.lifecycleView;
     const isExpanded = input.expanded[workspace.id] ?? false;
     const isThreadListExpanded =
       input.threadListExpanded[workspace.id] ?? false;
@@ -2262,7 +2258,7 @@ interface ThreadListSummary {
 /** Computes the thread list summary; tree items are only built when expanded. */
 function computeThreadListSummary(
   threads: WorkspaceThread[],
-  lifecycleView: ProjectLifecycleView,
+  lifecycleView: SidebarScope,
   isThreadListExpanded: boolean,
   activeThreadId: string | null,
   isWorkspaceExpanded: boolean,
@@ -2291,7 +2287,7 @@ function computeThreadListSummary(
 
 function isVisibleInLifecycleView(
   thread: WorkspaceThread,
-  lifecycleView: ProjectLifecycleView,
+  lifecycleView: SidebarScope,
 ): boolean {
   return lifecycleView === "completed"
     ? thread.user_completed_at !== null
@@ -2313,12 +2309,10 @@ interface ProjectWorkspaceRowProps {
   isProjectDragging: boolean;
   sortableListeners: DraggableSyntheticListeners | undefined;
   sortableAttributes: SortableAttributes | undefined;
-  lifecycleView: ProjectLifecycleView;
   checksById: Record<string, ChecksStatus>;
   collapsedStatus: ThreadRowState;
   threadList: ThreadListSummary;
   onToggle: (wsId: string) => void;
-  onToggleLifecycleView: (workspaceId: string) => void;
   onCreateThread: (wsId: string) => void;
   onDelete: (wsId: string) => void;
   onRename: (workspace: Workspace) => void;
@@ -2331,22 +2325,15 @@ function ProjectWorkspaceRow({
   isProjectDragging,
   sortableListeners,
   sortableAttributes,
-  lifecycleView,
   checksById,
   collapsedStatus,
   threadList,
   onToggle,
-  onToggleLifecycleView,
   onCreateThread,
   onDelete,
   onRename,
 }: ProjectWorkspaceRowProps) {
-  const lifecycle = projectLifecycleSummary(workspace, lifecycleView, threadList);
   const toggle = useCallback(() => onToggle(workspace.id), [onToggle, workspace.id]);
-  const selectLifecycleView = useCallback((event: React.MouseEvent) => {
-    event.stopPropagation();
-    onToggleLifecycleView(workspace.id);
-  }, [onToggleLifecycleView, workspace.id]);
   const createThread = useCallback((event: React.MouseEvent) => {
     event.stopPropagation();
     onCreateThread(workspace.id);
@@ -2379,7 +2366,7 @@ function ProjectWorkspaceRow({
       {...groupRowSortableAttributes(sortableAttributes)}
       role="group"
       tabIndex={sortableAttributes ? 0 : -1}
-      aria-label={lifecycle.projectLabel}
+      aria-label={projectGroupLabel(workspace, threadList)}
       data-testid={`project-row-${workspace.id}`}
       onClick={toggle}
       className={cn(
@@ -2389,7 +2376,7 @@ function ProjectWorkspaceRow({
       )}
       {...sortableListeners}
     >
-      <ProjectLifecycleToggle workspace={workspace} lifecycle={lifecycle} lifecycleView={lifecycleView} onClick={selectLifecycleView} />
+      <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} className="shrink-0" />
       <ProjectTitle workspace={workspace} onClick={toggle} />
       <ProjectGitStatus isGitRepository={workspace.is_git_repo} />
       <WorkspaceCiRollupChip threads={threadList.visibleThreads} checksById={checksById} />
@@ -2408,58 +2395,8 @@ function ProjectWorkspaceRow({
   );
 }
 
-function projectLifecycleSummary(
-  workspace: Workspace,
-  lifecycleView: ProjectLifecycleView,
-  threadList: ThreadListSummary,
-) {
-  const destination = lifecycleView === "active" ? "completed" : "active";
-  const destinationCount = destination === "completed"
-    ? threadList.completedThreadCount
-    : threadList.activeThreadCount;
-  return {
-    label: `View ${threadCountLabel(destinationCount, destination)} for ${workspace.name}`,
-    projectLabel: `${workspace.name} project, ${lifecycleView} view, ${threadCountLabel(threadList.activeThreadCount, "active")}, ${threadCountLabel(threadList.completedThreadCount, "completed")}`,
-  };
-}
-
-function ProjectLifecycleToggle({
-  workspace,
-  lifecycle,
-  lifecycleView,
-  onClick,
-}: { workspace: Workspace; lifecycle: ReturnType<typeof projectLifecycleSummary>; lifecycleView: ProjectLifecycleView; onClick: (event: React.MouseEvent) => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger render={
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-compact"
-          aria-label={lifecycle.label}
-          aria-pressed={lifecycleView === "completed"}
-          data-view={lifecycleView}
-          onKeyDown={(event) => event.stopPropagation()}
-          onClick={onClick}
-          className="relative -m-1.5 mr-0 size-8 shrink-0 rounded-sm text-muted shadow-none hover:bg-transparent hover:text-ink dark:hover:bg-transparent"
-        >
-          <ProjectLifecycleIcons workspace={workspace} lifecycleView={lifecycleView} />
-        </Button>
-      } />
-      <TooltipContent side="right" className="text-xs">{lifecycle.label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-/** Rests on the project icon; hover and focus reveal the lifecycle view a click switches to. */
-function ProjectLifecycleIcons({ workspace, lifecycleView }: { workspace: Workspace; lifecycleView: ProjectLifecycleView }) {
-  const Destination = lifecycleView === "completed" ? FolderOpen : FolderCheck;
-  return (
-    <>
-      <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} className="transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none" />
-      <Destination size={14} className="absolute opacity-0 transition-opacity duration-150 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 motion-reduce:transition-none" aria-hidden />
-    </>
-  );
+function projectGroupLabel(workspace: Workspace, threadList: ThreadListSummary): string {
+  return `${workspace.name} project, ${threadCountLabel(threadList.activeThreadCount, "active")}, ${threadCountLabel(threadList.completedThreadCount, "completed")}`;
 }
 
 function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: () => void }) {
@@ -2553,7 +2490,6 @@ interface ProjectTreeRowContext {
     cli: { status: string };
   }>;
   onToggle: (wsId: string) => void;
-  onToggleLifecycleView: (wsId: string) => void;
   onCreateThread: (wsId: string) => void;
   onDelete: (wsId: string) => void;
   onRename: (workspace: Workspace) => void;
@@ -2696,12 +2632,10 @@ function WorkspaceGroup({
         isProjectDragging={isDragging}
         sortableListeners={sortableListeners}
         sortableAttributes={sortableAttributes}
-        lifecycleView={row.lifecycleView}
         threadList={row.threadList}
         checksById={ctx.checksById}
         collapsedStatus={row.collapsedStatus}
         onToggle={ctx.onToggle}
-        onToggleLifecycleView={ctx.onToggleLifecycleView}
         onCreateThread={ctx.onCreateThread}
         onDelete={ctx.onDelete}
         onRename={ctx.onRename}

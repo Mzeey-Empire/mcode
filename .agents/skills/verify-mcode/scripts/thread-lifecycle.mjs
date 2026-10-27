@@ -641,7 +641,7 @@ async function completeThreadInDesktop(page, workspaceName, title, screenshotPat
   await complete.waitFor({ state: "visible", timeout: WORKFLOW_TIMEOUT_MS });
   await activateControl(complete);
 
-  const completedView = page.getByRole("button", { name: `View 1 completed thread for ${workspaceName}` });
+  const completedView = page.getByRole("radiogroup", { name: "Thread scope" }).getByRole("radio", { name: /^Completed/ });
   await completedView.waitFor({ state: "visible", timeout: WORKFLOW_TIMEOUT_MS });
   await activateControl(completedView);
   const reopen = page.getByRole("button", { exact: true, name: `Reopen ${title}` });
