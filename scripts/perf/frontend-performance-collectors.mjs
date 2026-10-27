@@ -131,6 +131,17 @@ async function installAttributionRuntime(page) {
       longTaskTimestampsSupported: PerformanceObserver.supportedEntryTypes?.includes("longtask") === true,
       rowRenders: {},
       counters: {},
+      droppedFrames: 0,
+      keepFramesFrom: 0,
+      /** Returns the absolute index of the next frame and keeps every frame from it in the buffer. */
+      markFrames() {
+        state.keepFramesFrom = state.droppedFrames + state.frameTimes.length;
+        return state.keepFramesFrom;
+      },
+      /** Returns the frame times recorded since an absolute index from `markFrames`. */
+      framesSince(index) {
+        return state.frameTimes.slice(Math.max(0, index - state.droppedFrames));
+      },
     };
     window.__mcodePerformanceAttribution = state;
     window.__mcodeReactPerformanceSink = {
@@ -154,7 +165,13 @@ async function installAttributionRuntime(page) {
     }
     const recordFrame = (timestamp) => {
       state.frameTimes.push(timestamp);
-      if (state.frameTimes.length > 10_000) state.frameTimes.splice(0, 5_000);
+      // Trimming shifts array positions, so readers hold absolute indexes and the trim never
+      // drops a frame at or after the newest mark; a long sample grows the buffer instead.
+      const removable = Math.min(5_000, state.keepFramesFrom - state.droppedFrames);
+      if (state.frameTimes.length > 10_000 && removable > 0) {
+        state.frameTimes.splice(0, removable);
+        state.droppedFrames += removable;
+      }
       requestAnimationFrame(recordFrame);
     };
     requestAnimationFrame(recordFrame);
@@ -169,7 +186,7 @@ async function resetAttributionRuntime(page) {
     state.rowRenders = {};
     state.counters = {};
     return {
-      frameIndex: state.frameTimes.length,
+      frameIndex: state.markFrames(),
       longTaskIndex: state.longTasks.length,
     };
   });
@@ -181,7 +198,7 @@ async function readAttributionRuntime(page, indexes) {
     if (!state) throw new Error("Performance attribution runtime is not installed");
     return {
       commits: [...state.commits],
-      frameTimes: state.frameTimes.slice(frameIndex),
+      frameTimes: state.framesSince(frameIndex),
       longTasks: state.longTasks.slice(longTaskIndex),
       longTaskTimestampsSupported: state.longTaskTimestampsSupported,
       rowRenders: { ...state.rowRenders },

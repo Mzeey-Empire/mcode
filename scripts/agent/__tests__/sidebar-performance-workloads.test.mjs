@@ -1,10 +1,13 @@
 import * as NodeAssertStrict from "node:assert/strict";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
+import { createModeSignalCollector } from "../../perf/frontend-performance-collectors.mjs";
 import { normalizeFrontendRendererWorkloads } from "../../perf/frontend-renderer-fixture.mjs";
 import {
   buildSidebarSignalPushes,
   buildSidebarStreamEvents,
+  readFrameIndex,
+  readFrameIntervals,
   summarizeFrameIntervals,
   summarizeFramesInWindow,
   summarizeSidebarStreamEvents,
@@ -151,4 +154,34 @@ NodeTest.describe("sidebar renderer workloads", () => {
     assert.deepEqual(validateSidebarCheck("sidebarHydration", check, "profiling"), ["the sidebar Profiler recorded no commits"]);
     assert.deepEqual(validateSidebarCheck("sidebarHydration", check, "production"), []);
   });
+
+  NodeTest.it("keeps a sample's frames when the rAF buffer trims past ten thousand frames", async () => {
+    const page = createFramePage();
+    await createModeSignalCollector(page, "profiling");
+    page.tickFrames(9_990, 16);
+    const index = await readFrameIndex(page);
+    page.tickFrames(20, 8);
+    assert.deepEqual(await readFrameIntervals(page, index), Array(19).fill(8));
+    page.restore();
+  });
 });
+
+/** A page whose evaluate runs in Node against a stub window, with rAF driven by the test. */
+function createFramePage() {
+  const saved = { window: globalThis.window, requestAnimationFrame: globalThis.requestAnimationFrame, PerformanceObserver: globalThis.PerformanceObserver };
+  let frameCallback = null;
+  let now = 0;
+  globalThis.window = {};
+  globalThis.requestAnimationFrame = (callback) => { frameCallback = callback; };
+  globalThis.PerformanceObserver = class { static supportedEntryTypes = []; observe() {} };
+  return {
+    async evaluate(callback, argument) { return callback(argument); },
+    tickFrames(count, stepMs) {
+      for (let frame = 0; frame < count; frame += 1) {
+        now += stepMs;
+        frameCallback(now);
+      }
+    },
+    restore() { Object.assign(globalThis, saved); },
+  };
+}

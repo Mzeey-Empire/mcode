@@ -328,13 +328,15 @@ async function runStreamSample(context, sampleKey, sampleIndex) {
   };
 }
 
-async function readFrameIndex(page) {
-  return page.evaluate(() => window.__mcodePerformanceAttribution?.frameTimes.length ?? 0);
+/** Marks the rAF buffer and returns the absolute index of the next frame. */
+export async function readFrameIndex(page) {
+  return page.evaluate(() => window.__mcodePerformanceAttribution?.markFrames() ?? 0);
 }
 
-async function readFrameIntervals(page, fromIndex) {
+/** Returns the rAF intervals recorded since an index from `readFrameIndex`. */
+export async function readFrameIntervals(page, fromIndex) {
   return page.evaluate((index) => {
-    const times = window.__mcodePerformanceAttribution?.frameTimes.slice(index) ?? [];
+    const times = window.__mcodePerformanceAttribution?.framesSince(index) ?? [];
     return times.slice(1).map((time, offset) => time - times[offset]);
   }, fromIndex);
 }
