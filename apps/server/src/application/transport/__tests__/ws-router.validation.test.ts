@@ -1416,8 +1416,6 @@ describe("routeMessage thread completion lifecycle", () => {
   it("broadcasts persisted completion to every client", async () => {
     const firstClient: Array<{ buf: Buffer; binary: boolean }> = [];
     const secondClient: Array<{ buf: Buffer; binary: boolean }> = [];
-    addClient(fakeOpenSocket(firstClient));
-    addClient(fakeOpenSocket(secondClient));
     const fixture = routerStorageFixture();
     const db = fixture.reader;
     const workspaceRepo = new WorkspaceRepo(db, fixture.writer);
@@ -1429,12 +1427,13 @@ describe("routeMessage thread completion lifecycle", () => {
       "direct",
       "main",
     );
-    const completed = await threadRepo.complete(
+    addClient(fakeOpenSocket(firstClient));
+    addClient(fakeOpenSocket(secondClient));
+    const complete = async () => ({ ok: true, thread: await threadRepo.complete(
       thread.id,
       "2026-08-12T08:00:00.000Z",
       "2026-08-15T08:00:00.000Z",
-    )!;
-    const complete = vi.fn().mockResolvedValue(completed);
+    ) });
     const deps = {
       threadCompletionService: { complete },
       threadRepo,
@@ -1446,7 +1445,8 @@ describe("routeMessage thread completion lifecycle", () => {
       params: { threadId: thread.id },
     }), deps);
 
-    expect(response.result).toEqual(completed);
+    const completed = threadRepo.findById(thread.id);
+    expect(response.result).toEqual({ ok: true, thread: completed });
     await vi.waitFor(() => {
       expect(firstClient).toHaveLength(1);
       expect(secondClient).toHaveLength(1);

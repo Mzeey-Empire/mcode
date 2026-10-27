@@ -14,6 +14,10 @@ import type { ThreadTeardownService } from "../thread-teardown-service.js";
 import { ThreadControlMutationReservationService } from "../../authority/thread-control-mutation-reservation-service.js";
 import { ThreadCompletionService } from "../thread-completion-service.js";
 import { CleanupJobRepo } from "../../cleanup/persistence/cleanup-job-repo.js";
+import { createMockApproval } from "@mcode/contracts/testing";
+import { broadcast } from "../../../../application/transport/push.js";
+
+vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 
 
 
@@ -31,8 +35,10 @@ describe("ThreadCompletionService", () => {
   let settings: Settings;
   let settingsListener: ((settings: Settings) => void) | null;
   let activeThreadIds: ReturnType<typeof vi.fn<() => string[]>>;
+  let mutationReservations: ThreadControlMutationReservationService;
 
   beforeEach(async () => {
+    vi.mocked(broadcast).mockClear();
     db = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
     const workspaceRepo = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     threadRepo = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
@@ -65,12 +71,13 @@ describe("ThreadCompletionService", () => {
         };
       }),
     } as unknown as SettingsService;
+    mutationReservations = new ThreadControlMutationReservationService();
     service = new ThreadCompletionService(
       threadRepo,
       agentService,
       permissions,
       teardownService,
-      new ThreadControlMutationReservationService(),
+      mutationReservations,
       settingsService,
       () => now,
       cleanupJobRepo,
@@ -97,10 +104,15 @@ describe("ThreadCompletionService", () => {
   it("persists completion separately from runtime status and releases resources", async () => {
     const completed = await service.complete(threadId);
 
-    expect(completed.status).toBe("active");
-    expect(completed.user_completed_at).toBe("2026-08-12T08:00:00.000Z");
-    expect(completed.scheduled_deletion_at).toBe("2026-08-15T08:00:00.000Z");
-    expect(threadRepo.findById(threadId)).toEqual(completed);
+    expect(completed).toMatchObject({
+      ok: true,
+      thread: {
+        status: "active",
+        user_completed_at: "2026-08-12T08:00:00.000Z",
+        scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
+      },
+    });
+    expect(completed).toEqual({ ok: true, thread: threadRepo.findById(threadId) });
     expect(teardownService.teardownThread).toHaveBeenCalledWith(threadId);
   });
 
@@ -108,8 +120,9 @@ describe("ThreadCompletionService", () => {
     const first = await service.complete(threadId);
     const second = await service.complete(threadId);
 
-    expect(second.user_completed_at).toBe(first.user_completed_at);
-    expect(second.scheduled_deletion_at).toBe(first.scheduled_deletion_at);
+    expect(second).toEqual(first);
+    expect(second).toMatchObject({ ok: true, thread: { user_completed_at: "2026-08-12T08:00:00.000Z" } });
+    expect(vi.mocked(broadcast).mock.calls.filter(([channel]) => channel === "thread.lifecycleChanged")).toHaveLength(1);
     expect(teardownService.teardownThread).toHaveBeenCalledTimes(1);
   });
 
@@ -118,7 +131,7 @@ describe("ThreadCompletionService", () => {
 
     const completed = await service.complete(threadId);
 
-    expect(completed.scheduled_deletion_at).toBeNull();
+    expect(completed).toMatchObject({ ok: true, thread: { scheduled_deletion_at: null } });
   });
 
   it("recalculates existing deadlines from their original completion timestamps", async () => {
@@ -328,21 +341,17 @@ describe("ThreadCompletionService", () => {
   it("rejects completion while the thread is running", async () => {
     activeThreadIds.mockReturnValue([threadId]);
 
-    await expect(service.complete(threadId)).rejects.toThrow(
-      "Thread cannot be completed while it is running",
-    );
+    await expect(service.complete(threadId)).resolves.toEqual({ ok: false, refusal: "running" });
     expect(threadRepo.findById(threadId)?.user_completed_at).toBeNull();
     expect(teardownService.teardownThread).not.toHaveBeenCalled();
   });
 
   it("rejects completion while permission is pending", async () => {
     vi.mocked(permissions.listPendingApprovals).mockReturnValue([
-      { requestId: "permission-1" },
-    ] as never);
+      createMockApproval({ requestId: "permission-1", threadId }),
+    ]);
 
-    await expect(service.complete(threadId)).rejects.toThrow(
-      "Thread cannot be completed while permission is pending",
-    );
+    await expect(service.complete(threadId)).resolves.toEqual({ ok: false, refusal: "approval-pending" });
     expect(threadRepo.findById(threadId)?.user_completed_at).toBeNull();
   });
 
@@ -504,7 +513,17 @@ describe("ThreadCompletionService", () => {
       service.complete(threadId),
     ]);
 
-    expect([first.status, second.status].sort()).toEqual(["fulfilled", "rejected"]);
-    expect(threadRepo.findById(threadId)?.user_completed_at).not.toBeNull();
+    expect(first).toMatchObject({ status: "fulfilled", value: { ok: true } });
+    expect(second).toEqual({ status: "fulfilled", value: { ok: false, refusal: "busy" } });
+    expect(threadRepo.findById(threadId)?.user_completed_at).toBe("2026-08-12T08:00:00.000Z");
+  });
+
+  it("refuses a thread with an existing mutation reservation", async () => {
+    mutationReservations.reserve(threadId, "reopening");
+
+    await expect(service.complete(threadId)).resolves.toEqual({ ok: false, refusal: "busy" });
+
+    expect(threadRepo.findById(threadId)?.user_completed_at).toBeNull();
+    expect(teardownService.teardownThread).not.toHaveBeenCalled();
   });
 });

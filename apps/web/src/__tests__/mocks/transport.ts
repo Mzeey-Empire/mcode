@@ -51,7 +51,7 @@ const transportDefaults: Partial<McodeTransport> = {
   listRecentThreads: vi.fn().mockResolvedValue([]),
   searchThreads: vi.fn().mockResolvedValue({ threads: [], workspaces: [] }),
   deleteThread: vi.fn().mockResolvedValue(true),
-  completeThread: vi.fn().mockResolvedValue(createMockThread()),
+  completeThread: vi.fn().mockResolvedValue({ ok: true, thread: createMockThread() }),
   reopenThread: vi.fn().mockResolvedValue(createMockThread()),
   countBlockedThreadCleanupCandidates: vi.fn().mockResolvedValue({ count: 0 }),
   retryThreadCleanup: vi.fn().mockResolvedValue(createMockThread()),

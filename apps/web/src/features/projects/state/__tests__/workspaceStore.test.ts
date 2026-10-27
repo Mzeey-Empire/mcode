@@ -311,7 +311,7 @@ describe("workspaceStore completion lifecycle", () => {
       user_completed_at: "2026-08-12T08:00:00.000Z",
       scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
     });
-    completeThread.mockResolvedValue(completed);
+    completeThread.mockResolvedValue({ ok: true, thread: completed });
     const clearTerminal = vi.spyOn(useTerminalStore.getState(), "clearThread");
 
     await useWorkspaceStore.getState().completeThread(completed.id);
@@ -329,7 +329,7 @@ describe("workspaceStore completion lifecycle", () => {
       user_completed_at: "2026-08-12T08:00:00.000Z",
       scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
     });
-    completeThread.mockResolvedValue(completed);
+    completeThread.mockResolvedValue({ ok: true, thread: completed });
     const panelStore = useDiffStore.getState();
     panelStore.showRightPanel("workspace-1", null);
     panelStore.setRightPanelTab("workspace-1", null, "changes");
@@ -404,6 +404,17 @@ describe("workspaceStore completion lifecycle", () => {
       visible: true,
       openTabs: ["preview"],
     });
+    expect(releaseBrowserScope).not.toHaveBeenCalled();
+    expect(clearScope).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a typed refusal while keeping the active thread and its resources", async () => {
+    completeThread.mockResolvedValueOnce({ ok: false, refusal: "running" });
+
+    await expect(useWorkspaceStore.getState().completeThread("thread-1")).rejects.toThrow("running");
+
+    expect(useWorkspaceStore.getState().error).toBe("Error: running");
+    expect(useWorkspaceStore.getState().threads[0].user_completed_at).toBeNull();
     expect(releaseBrowserScope).not.toHaveBeenCalled();
     expect(clearScope).not.toHaveBeenCalled();
   });

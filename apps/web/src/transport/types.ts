@@ -14,7 +14,7 @@ import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
 import type { TurnSteerParams, TurnSteerResult, ListHeldSteersResult, SettleUnknownSteerParams, SettleUnknownSteerResult } from "@mcode/contracts/models/turn-steer";
 import type { TurnRetryParams, TurnResumeScheduleParams, ScheduledTurnResume, TurnRetryResult, TurnResumeParams, TurnResumeResult } from "@mcode/contracts/models/turn-recovery";
 import type { WorkspaceFileList, WorkspaceFileChanges, FileReadResult } from "@mcode/contracts/models/workspace-file";
-import type { FilesystemBrowseResult, WorkspaceCreateResult, CreateAndSendResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, SendMessageInput, CreateAndSendInput } from "@mcode/contracts/ws/methods";
+import type { FilesystemBrowseResult, WorkspaceCreateResult, CreateAndSendResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, SendMessageInput, CreateAndSendInput, ThreadCompletionResult } from "@mcode/contracts/ws/methods";
 import type { ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import type { Workspace, WorkspaceEnrichment } from "@mcode/contracts/models/workspace";
 import type { WorkspaceEnvironmentDocument, WorkspaceEnvironmentReadResult, WorkspaceEnvironmentStorageMode, WorkspaceEnvironmentCommandTarget, WorkspaceEnvironmentAutomaticSetupSnapshot, WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
@@ -305,7 +305,7 @@ export interface McodeTransport {
   }): Promise<{ threads: Thread[]; workspaces: { id: string; name: string; path: string }[] }>;
   deleteThread(threadId: string, cleanupWorktree: boolean): Promise<boolean>;
   /** Persist explicit user completion after server-side lifecycle guards pass. */
-  completeThread(threadId: string): Promise<Thread>;
+  completeThread(threadId: string): Promise<ThreadCompletionResult>;
   /** Reopen a completed thread and cancel its pending automatic deletion. */
   reopenThread(threadId: string): Promise<Thread>;
   /** Count completed threads that are blocked by the unsafe-worktree policy. */
