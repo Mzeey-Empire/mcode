@@ -105,6 +105,9 @@ export const WS_CHANNELS = {
   "thread.lifecycleChanged": z.object({
     thread: ThreadSchema(),
   }),
+  "thread.created": z.object({
+    thread: ThreadSchema(),
+  }),
   "thread.activity": z.object({
     threadId: z.string(),
     at: z.string().datetime(),

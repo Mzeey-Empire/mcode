@@ -783,6 +783,10 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ workspaceId: z.string() }),
     result: z.array(ThreadSchema()),
   },
+  "thread.listAll": {
+    params: z.object({}),
+    result: z.array(ThreadSchema()),
+  },
   /**
    * List the most recently active threads across ALL workspaces. Joined with
    * workspace name + path so the landing can render project context per row

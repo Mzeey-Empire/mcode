@@ -509,6 +509,15 @@ export class ThreadStore {
     return row ? rowToThread(row) : null;
   }
 
+  /** List every non-deleted independent thread across workspaces without a cap. */
+  listAll(): Thread[] {
+    const rows = this.orm.select(threadSelection).from(threads)
+      .leftJoin(turnResumeSchedules, eq(turnResumeSchedules.threadId, threads.id))
+      .where(and(isNull(threads.deletedAt), subagentVisibility, sql.raw(independentThreadClause("threads"))))
+      .orderBy(desc(threads.createdAt)).all();
+    return rows.map(rowToThread);
+  }
+
   /** List non-deleted threads for a workspace, most recent first. */
   listByWorkspace(workspaceId: string, limit = 100): Thread[] {
     const clampedLimit = Math.max(1, Math.min(1000, limit));

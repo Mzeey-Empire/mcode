@@ -54,6 +54,27 @@ function unboundStartupResolution(state: ThreadStartup["state"]): "unbound" | "t
 const SYNC_THROTTLE_MS = 30_000;
 /** Tracks the last syncThreadPrs request time per workspace. */
 const lastSyncTime = new Map<string, number>();
+let hydrationRequest = 0;
+
+function mergeThreadSnapshot(incoming: Thread[], before: ReadonlyMap<string, WorkspaceThread>, current: WorkspaceThread[]): WorkspaceThread[] {
+  const currentById = new Map(current.map((thread) => [thread.id, thread]));
+  const merged = new Map<string, WorkspaceThread>();
+  for (const thread of incoming) {
+    const existing = currentById.get(thread.id);
+    const atStart = before.get(thread.id);
+    if (existing !== atStart) {
+      if (existing) merged.set(thread.id, existing);
+    } else {
+      merged.set(thread.id, thread);
+    }
+  }
+  for (const thread of current) {
+    if (thread.clientPreparing || thread.clientError != null || thread !== before.get(thread.id)) {
+      merged.set(thread.id, thread);
+    }
+  }
+  return [...merged.values()].filter((thread) => !isDelegatedSubagent(thread));
+}
 
 async function clearPreviewResources(workspaceId: string, threadId: string): Promise<void> {
   await usePreviewTabsStore.getState().clearScope(workspaceId, threadId);
@@ -649,6 +670,10 @@ interface WorkspaceState {
 
   // Thread actions
   loadThreads: (workspaceId: string) => Promise<void>;
+  /** Hydrate the whole index while retaining mutations received during the request. */
+  hydrateThreads: () => Promise<void>;
+  /** Add a server-created thread even when its project has never been opened. */
+  applyThreadCreated: (thread: Thread) => void;
   /** Revalidate the selected conversation after reconnect. */
   refreshActiveConversation: () => Promise<void>;
   createThread: (
@@ -1382,6 +1407,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       set({ workspaces: prev, error: String(err) });
       throw err;
     }
+  },
+
+  hydrateThreads: async () => {
+    const request = ++hydrationRequest;
+    const before = new Map(get().threads.map((thread) => [thread.id, thread]));
+    try {
+      const incoming = await getTransport().listAllThreads();
+      if (request !== hydrationRequest) return;
+      set((state) => ({ threads: mergeThreadSnapshot(incoming, before, state.threads), loading: false, error: null }));
+    } catch (error) {
+      if (request === hydrationRequest) set({ error: String(error), loading: false });
+    }
+  },
+
+  applyThreadCreated: (thread) => {
+    if (isDelegatedSubagent(thread)) return;
+    set((state) => {
+      if (state.threads.some((existing) => existing.id === thread.id)) return state;
+      return { threads: [thread, ...state.threads] };
+    });
   },
 
   loadThreads: async (workspaceId) => {
