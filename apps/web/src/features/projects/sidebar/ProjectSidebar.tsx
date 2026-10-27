@@ -50,7 +50,8 @@ function useWorkspaceLoading(): void {
  */
 export function ProjectSidebar() {
   const { model, cause } = useSidebarModel();
-  const shown = useSidebarMotion(model, cause);
+  const selectedThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const shown = useSidebarMotion(model, cause, selectedThreadId);
   const { ctx, overlays } = useProjectTreeMenus();
   const hasProjects = useWorkspaceStore((s) => s.workspaces.length > 0);
   const error = useWorkspaceStore((s) => s.error);
@@ -63,6 +64,7 @@ export function ProjectSidebar() {
       <SidebarList
         items={shown.items}
         closing={shown.closing}
+        arriving={shown.arriving}
         ctx={ctx}
         flip={cause === "push"}
         overlay={hasProjects ? null : <div className="absolute inset-x-1.5 inset-y-0"><ProjectDropWell /></div>}
