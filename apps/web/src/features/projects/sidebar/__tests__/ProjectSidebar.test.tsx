@@ -61,7 +61,6 @@ vi.mock("../../state/workspaceStore", async (importOriginal) => {
     createWorkspace: vi.fn(),
     deleteWorkspace: vi.fn(),
     deleteThread: vi.fn(),
-    completeThread: vi.fn(),
     reopenThread: vi.fn(),
     beginNewThread: vi.fn(),
     updateThreadTitle: vi.fn(),
