@@ -496,15 +496,14 @@ async function readHeapAfterGc(page) {
 
 async function readBootProbe(page) {
   return page.evaluate(() => {
-    const boot = window.__mcodeSidebarBoot;
-    const commits = boot?.sidebarCommits ?? [];
-    const socketMs = boot?.firstSocketMs ?? null;
-    const since = (time) => (socketMs === null || time == null ? null : time - socketMs);
+    const { sidebarCommits: commits = [], firstThreadRowMs = null, firstSocketMs = null } = window.__mcodeSidebarBoot ?? {};
+    const firstSidebarCommitMs = commits[0]?.commitTimeMs ?? null;
+    const since = (time) => (firstSocketMs === null || time === null ? null : time - firstSocketMs);
     return {
-      firstThreadRowMs: boot?.firstThreadRowMs ?? null,
-      socketToFirstRowMs: since(boot?.firstThreadRowMs),
-      socketToFirstSidebarCommitMs: since(commits[0]?.commitTimeMs),
-      firstSidebarCommitMs: commits[0]?.commitTimeMs ?? null,
+      firstThreadRowMs,
+      socketToFirstRowMs: since(firstThreadRowMs),
+      socketToFirstSidebarCommitMs: since(firstSidebarCommitMs),
+      firstSidebarCommitMs,
       sidebarCommitsBeforeSettle: commits.length,
       sidebarCommitDurationMs: commits.reduce((total, commit) => total + commit.actualDurationMs, 0),
     };
