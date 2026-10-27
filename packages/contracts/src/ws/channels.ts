@@ -105,6 +105,8 @@ export const WS_CHANNELS = {
   /** Synchronizes durable user completion or reopen changes across clients. */
   "thread.lifecycleChanged": z.object({
     thread: ThreadSchema(),
+    /** Present only when automatic completion on PR merge completed the thread. */
+    completedBy: z.literal("auto").optional(),
   }),
   "thread.created": z.object({
     thread: ThreadSchema(),

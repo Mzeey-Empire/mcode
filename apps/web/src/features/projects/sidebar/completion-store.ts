@@ -7,7 +7,7 @@ import { HOLD_MS, transitionCompletion, type CompletionEntry, type CompletionEve
 interface CompletionStoreState {
   readonly entries: ReadonlyMap<string, CompletionEntry>;
   readonly hoveredThreadId: string | null;
-  /** The thread this client last completed, offered for Undo under the scope bar. */
+  /** The thread this client or auto-completion last completed, offered for Undo under the scope bar. */
   readonly undoLineThreadId: string | null;
 }
 
@@ -17,7 +17,8 @@ interface CompletionStoreActions {
   retry(threadId: string): void;
   pointerEntered(threadId: string): void;
   pointerLeft(threadId: string): void;
-  observeServerLifecycle(threadId: string, completed: boolean): void;
+  /** Applies a lifecycle push; an automatic completion offers the Undo line like a local one. */
+  observeServerLifecycle(threadId: string, completed: boolean, completedAutomatically?: boolean): void;
   /** Reopens the Undo line's thread; the completion already committed, so this is `thread.reopen`. */
   undoFromLine(): void;
   hideUndoLine(): void;
@@ -95,8 +96,9 @@ export const useCompletionStore = create<CompletionStore>((set, get) => {
       if (get().hoveredThreadId === threadId) set({ hoveredThreadId: null });
       dispatch(threadId, { type: "pointer-left" });
     },
-    observeServerLifecycle: (threadId, completed) => {
+    observeServerLifecycle: (threadId, completed, completedAutomatically = false) => {
       if (!completed && get().undoLineThreadId === threadId) set({ undoLineThreadId: null });
+      if (completed && completedAutomatically) set({ undoLineThreadId: threadId });
       dispatch(threadId, { type: "server-lifecycle", completed });
     },
     undoFromLine: () => {
