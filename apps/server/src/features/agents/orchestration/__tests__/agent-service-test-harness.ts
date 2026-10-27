@@ -51,11 +51,8 @@ import { ParentTurnDurability } from "../../turns/parent-turn-durability.js";
 import { PARENT_TURN_DURABILITY } from "../../turns/parent-turn-durability.js";
 import { ThreadCreationCoordinator } from "../../turns/thread-creation-coordinator.js";
 import { TurnAdmissionDispatchCoordinator } from "../../turns/turn-admission-dispatch-coordinator.js";
-import { TurnConversationProjectionService } from "../../turns/turn-conversation-projection-service.js";
 import { TurnFileTracker } from "../../turns/turn-file-tracker.js";
-import { TurnFinalizer } from "../../turns/turn-finalizer.js";
 import { ThreadRuntimePersistence, TURN_RUNTIME_PERSISTENCE } from "../../turns/turn-runtime-persistence.js";
-import { TURN_FINALIZER } from "../../turns/turn-finalizer.js";
 import { TURN_ADMISSION_DISPATCH_COORDINATOR } from "../../turns/turn-admission-dispatch-coordinator.js";
 import { TURN_FEATURE_EFFECTS } from "../../turns/turn-feature-effects.js";
 import { McodeSessionAuthority } from "../../../mcode-mcp/index.js";
@@ -68,11 +65,9 @@ import { PlanQuestionService } from "../../planning/plan-question-service.js";
 import { PlanRepo } from "../../planning/persistence/plan-repo.js";
 import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
-import { AgentReliabilityPort } from "../agent-runtime-internal-ports.js";
 import { TurnFeatureEffects } from "../../turns/turn-feature-effects.js";
-import { AgentEventPublicationRuntimePort, AgentTurnContinuationPort } from "../agent-runtime-internal-ports.js";
+import { AgentEventPublicationRuntimePort } from "../agent-runtime-internal-ports.js";
 import { TurnRuntimeController } from "../turn-runtime-controller.js";
-import { ProviderTurnEventApplication } from "../../turns/provider-turn-event-application.js";
 import { TURN_RUNTIME_EVENT_CONTROL, type TurnRuntimeEventControl } from "../turn-runtime-event-control.js";
 
 const testPublicationObservers = new WeakMap<AgentService, (event: AgentEvent) => void>();
@@ -82,14 +77,11 @@ const testProviderDrains = new WeakMap<AgentService, () => Promise<void>>();
 const providerRuntimePublishers = new WeakMap<NodeEvents.EventEmitter, (event: unknown) => void>();
 
 const testEventPublications = new WeakMap<AgentService, AgentEventPublicationRegistry>();
-const testReliabilityPorts = new WeakMap<AgentService, AgentReliabilityPort>();
-const testContinuations = new WeakMap<AgentService, AgentTurnContinuationPort>();
 const testProviderTurnStarts = new WeakMap<AgentService, (threadId: string) => Promise<string>>();
 const testMessageRepos = new WeakMap<AgentService, MessageRepo>();
 const testTrackers = new WeakMap<AgentService, TurnFileTracker>();
 const testTurnDiffs = new WeakMap<AgentService, TurnDiffService>();
 const testProviderEventIngresses = new WeakMap<AgentService, ProviderEventIngress>();
-const testProviderApplications = new WeakMap<AgentService, ProviderTurnEventApplication>();
 const testPersistenceDrains = new WeakMap<AgentService, Promise<void>>();
 
 /** Read the real native evidence service wired through the test runtime and ingress. */
@@ -149,8 +141,7 @@ export function drainAgentServicePersistenceForTest(service: AgentService): Prom
   const existing = testPersistenceDrains.get(service);
   if (existing) return existing;
   const ingress = testProviderEventIngresses.get(service);
-  const application = testProviderApplications.get(service);
-  if (!ingress || !application) throw new Error("Agent service was not created by this harness");
+  if (!ingress) throw new Error("Agent service was not created by this harness");
   const drain = (async () => {
     try {
       await testProviderDrains.get(service)?.();
@@ -158,7 +149,6 @@ export function drainAgentServicePersistenceForTest(service: AgentService): Prom
       try {
         await service.stopAll();
         await ingress.stopAdmissionAndDrain();
-        await application.drainPersistence();
       } finally {
         try {
           await testWorkers.get(service)?.close();
@@ -170,23 +160,6 @@ export function drainAgentServicePersistenceForTest(service: AgentService): Prom
   })();
   testPersistenceDrains.set(service, drain);
   return drain;
-}
-
-/** Stream deterministic assistant text through the test-owned reliability port. */
-export function streamAgentReliabilityTextForTest(
-  service: AgentService,
-  threadId: string,
-): Promise<{ threadId: string; executionId: string; text: string }> {
-  const reliability = testReliabilityPorts.get(service);
-  if (!reliability) throw new Error("AgentService test reliability port is unavailable");
-  return reliability.streamAssistantText(threadId);
-}
-
-/** Continue an active turn through the existing runtime port. */
-export function continueAgentTurnWithoutSavingForTest(service: AgentService, executionId: string): void {
-  const continuation = testContinuations.get(service);
-  if (!continuation) throw new Error("AgentService test continuation is unavailable");
-  continuation.continueWithoutSaving(executionId);
 }
 
 export async function startProviderTurnForTest(service: AgentService, threadId: string): Promise<string> {
@@ -257,7 +230,6 @@ export function createAgentServiceForTest(
     () => undefined,
     "win32",
   );
-  const finalizer = new TurnFinalizer();
   const runtimeCommands = new AgentRuntimeCommandPort();
   const { plans: resolvedPlans, goals: resolvedGoals, effects: featureEffects } = createTestFeatureEffects({
     db, messageRepo, threadRepo, providerRegistry, writer, runtimeCommands, parentDurability, planTurns, goals, subagents,
@@ -285,13 +257,6 @@ export function createAgentServiceForTest(
     undefined,
     providerSwitch,
   );
-  const conversationProjection = new TurnConversationProjectionService(
-    threadRepo,
-    messageRepo,
-    parentDurability,
-  );
-  const reliability = new AgentReliabilityPort();
-  const continuation = new AgentTurnContinuationPort();
   const runtimePersistence = new ThreadRuntimePersistence(threadRepo);
   const eventIngress = providerEventIngress ?? new ProviderEventIngress();
   const testThreadControl = threadControlMcp ?? {
@@ -301,13 +266,11 @@ export function createAgentServiceForTest(
   const testContainer = container.createChildContainer();
   const gitRepository = new GitRepositoryService(workspaceRepo, new FakeGitExecutor());
   testContainer.registerInstance(TURN_RUNTIME_PERSISTENCE, runtimePersistence);
-  testContainer.registerInstance(TURN_FINALIZER, finalizer);
   testContainer.registerInstance("TurnFileTracker", tracker);
   testContainer.registerInstance("WorkerOwnedTurnRuntime", workers);
   testContainer.registerInstance("ExecutionFileEvidenceCoordinator", new ExecutionFileEvidenceCoordinator(tracker, turnDiffs));
   testContainer.registerInstance("WorkerTurnSnapshotService", snapshotService);
   testContainer.registerInstance(TURN_ADMISSION_DISPATCH_COORDINATOR, admissions);
-  testContainer.registerInstance(TurnConversationProjectionService, conversationProjection);
   testContainer.registerInstance(ThreadCreationCoordinator, new ThreadCreationCoordinator(
     threadRepo,
     () => threadService,
@@ -332,8 +295,6 @@ export function createAgentServiceForTest(
   testContainer.registerInstance(TURN_FEATURE_EFFECTS, featureEffects);
   testContainer.registerInstance(AgentRuntimeCommandPort, runtimeCommands);
   testContainer.registerInstance(AgentEventPublicationRuntimePort, new AgentEventPublicationRuntimePort());
-  testContainer.registerInstance(AgentTurnContinuationPort, continuation);
-  testContainer.registerInstance(AgentReliabilityPort, reliability);
   testContainer.registerInstance(AgentEventPublicationRegistry, publication);
   testContainer.registerInstance(PARENT_TURN_DURABILITY, parentDurability);
   testContainer.registerInstance(NarrativeStore, narrativeStore);
@@ -344,7 +305,6 @@ export function createAgentServiceForTest(
   testContainer.register<TurnRuntimeEventControl>(TURN_RUNTIME_EVENT_CONTROL, {
     useFactory: (c) => c.resolve(TurnRuntimeController),
   });
-  testContainer.register(ProviderTurnEventApplication, { useClass: ProviderTurnEventApplication }, { lifecycle: Lifecycle.Singleton });
   testContainer.register(TurnRuntimeController, { useClass: TurnRuntimeController }, { lifecycle: Lifecycle.Singleton });
   testContainer.register(AgentService, { useClass: AgentService }, { lifecycle: Lifecycle.Singleton });
   const service = testContainer.resolve(AgentService);
@@ -355,8 +315,6 @@ export function createAgentServiceForTest(
   const runtimeController = testContainer.resolve(TurnRuntimeController);
   testMessageRepos.set(service, messageRepo);
   testEventPublications.set(service, publication);
-  testReliabilityPorts.set(service, reliability);
-  testContinuations.set(service, continuation);
   testProviderTurnStarts.set(service, async (threadId) => {
     await workers.whenReady();
     const thread = threadRepo.findById(threadId);
@@ -433,7 +391,6 @@ export function createAgentServiceForTest(
   testTrackers.set(service, tracker);
   testTurnDiffs.set(service, turnDiffs);
   testProviderEventIngresses.set(service, eventIngress);
-  testProviderApplications.set(service, testContainer.resolve(ProviderTurnEventApplication));
   testGoalLifecycles.set(service, resolvedGoals);
   registerAgentStorageTestProducer(db, () => drainAgentServicePersistenceForTest(service));
   return service;

@@ -43,7 +43,6 @@ import { SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pin
 import type { DataOnlyParentTurnFinishInput } from "../canonical/canonical-parent-turn-write.js";
 import { observedProviderRetries, persistTurnFailure, providerFailureTerminal, type ObservedProviderRetries, type TurnEndingCause } from "../canonical/turn-ending.js";
 import { TurnEventPipeline, type TurnLifecycleControl } from "../turns/turn-event-pipeline.js";
-import { ProviderTurnEventApplication } from "../turns/provider-turn-event-application.js";
 import { TurnDiffService } from "../turns/turn-diff-service.js";
 import { ProviderSwitchService } from "../turns/provider-switch-service.js";
 import { TURN_FEATURE_EFFECTS, TurnFeatureEffects } from "../turns/turn-feature-effects.js";
@@ -70,8 +69,6 @@ import { AgentRuntimeCommandPort } from "./agent-turn-command-port.js";
 import { AgentEventPublicationRegistry } from "./agent-event-publication-registry.js";
 import {
   AgentEventPublicationRuntimePort,
-  AgentReliabilityPort,
-  AgentTurnContinuationPort,
 } from "./agent-runtime-internal-ports.js";
 import { idleRuntime, isActiveRuntimeExecution, isRunningRuntime, ownsStoppedExecution, stopDispatchState } from "./agent-service-helpers.js";
 import type { TurnRuntimeEventControl } from "./turn-runtime-event-control.js";
@@ -238,14 +235,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     runtimeCommands: AgentRuntimeCommandPort,
     @inject(AgentEventPublicationRuntimePort)
     publicationRuntime: AgentEventPublicationRuntimePort,
-    @inject(AgentTurnContinuationPort)
-    continuation: AgentTurnContinuationPort,
-    @inject(AgentReliabilityPort)
-    reliability: AgentReliabilityPort,
     @inject(AgentEventPublicationRegistry)
     private readonly eventPublication: AgentEventPublicationRegistry,
-    @inject(delay(() => ProviderTurnEventApplication))
-    private readonly eventApplication: ProviderTurnEventApplication,
     @inject(TurnDiffService) turnDiffs: TurnDiffService,
     @inject(TurnSteerRuntimePort) steering: TurnSteerRuntimePort,
     @inject(ProviderSwitchService) providerSwitch: ProviderSwitchService,
@@ -259,7 +250,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     @inject("TurnRuntimeSnapshotRefPins", { isOptional: true })
     private readonly pins?: SnapshotRefPins,
   ) {
-    this.turnEventPipeline = new TurnEventPipeline(this, eventApplication, turnDiffs,
+    this.turnEventPipeline = new TurnEventPipeline(this, {
+      publishCommitted: (event) => this.eventPublication.publish(event),
+    }, turnDiffs,
       workerRuntime && workerFiles ? {
         ownsFileMutation: (event) => Boolean(workerRuntime.owner.current(event.threadId)?.started),
         capture: (event) => workerFiles.capture(event),
@@ -278,8 +271,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         this.shouldSuppressTransientTurnError(threadId, errorMessage)
       ),
     });
-    continuation.bind((executionId) => eventApplication.continueWithoutSaving(executionId));
-    reliability.bind((threadId) => eventApplication.streamReliabilityAssistantText(threadId));
     steering.bind({
       runningTurn: (threadId) => this.steerableTurn(threadId),
       recordDelivered: (message) => {
@@ -388,20 +379,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
     this.disarmTurnRetryWindow(event.threadId);
   }
-
-  /** Reserve a runtime identity for the restart-reliability harness. */
-  beginReliabilityTurn(threadId: string): string {
-    if (!this.reserveTurn(threadId)) throw new Error(`Thread ${threadId} already has an active agent session`);
-    return this.turnRuntime.start(threadId).turnExecutionId!;
-  }
-
-  /** Release a restart-reliability reservation after its durable prefix fails. */
-  releaseReliabilityTurn(threadId: string): void {
-    if (this.activeSessionIds.delete(threadId)) this.memoryPressureService.markIdle(threadId);
-  }
-
-  /** Expose AgentService's runtime state without giving admission independent lifecycle authority. */
-
 
   /** Stop a provider stream that the runtime cannot admit. */
   private stopUnadmittedTurn(threadId: string, providerId: ProviderId | undefined, reason: string): void {
@@ -1458,7 +1435,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private runtimeSnapshots(): TurnRuntimeSnapshot[] {
     return this.turnRuntime.snapshots().map((snapshot) => ({
       ...snapshot,
-      savingStatus: this.eventApplication.savingStatus(snapshot.turnExecutionId),
       savingStatuses: [...this.workerRuntime?.progress?.savingStatuses(snapshot.threadId) ?? []],
     }));
   }

@@ -329,7 +329,7 @@ describe("canonical runtime reconciliation", () => {
     seedRuntime("idle", null, false);
     useThreadStore.setState({ currentThreadId: THREAD_ID });
     const olderPrompt = await sendOptimisticPrompt("Repeated prompt");
-    useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId: THREAD_ID, phase: "completed", turnExecutionId: EXECUTION_ID, savingStatus: null });
+    useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId: THREAD_ID, phase: "completed", turnExecutionId: EXECUTION_ID });
     const newerPrompt = await sendOptimisticPrompt("Repeated prompt");
     expect(newerPrompt.id).not.toBe(olderPrompt.id);
     useThreadStore.getState().handleAgentEvent({ type: "textDelta", threadId: THREAD_ID, delta: "Newer in flight", isFinalResponse: true });
@@ -374,7 +374,7 @@ describe("canonical runtime reconciliation", () => {
     let rejectOlder: ((reason: Error) => void) | undefined;
     vi.mocked(mockTransport.sendMessage).mockImplementationOnce(() => new Promise((_, reject) => { rejectOlder = reject; }));
     const olderSend = useThreadStore.getState().sendMessage(THREAD_ID, "Older request");
-    useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId: THREAD_ID, phase: "completed", turnExecutionId: EXECUTION_ID, savingStatus: null });
+    useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId: THREAD_ID, phase: "completed", turnExecutionId: EXECUTION_ID });
     const newerPrompt = await sendOptimisticPrompt("Newer request");
     const responseKey = readThreadField(THREAD_ID, (record) => record.currentTurnResponseKey);
     useThreadStore.setState({ currentThreadId: "other-thread" });
@@ -639,7 +639,7 @@ describe("canonical runtime reconciliation", () => {
       durable: { mode: "delta", threadId: THREAD_ID, from: { conversationRevision: 0, rosterRevision: 0 },
         through: { conversationRevision: 4, rosterRevision: 0 }, events } }]);
     useThreadStore.getState().hydrateThreadRuntimes([{ threadId: THREAD_ID, phase: "completed", turnExecutionId: EXECUTION_ID,
-      savingStatuses: [], savingStatus: null }]);
+      savingStatuses: [] }]);
 
     expect(readThreadField(THREAD_ID, (record) => record.savingStatuses)).toEqual([]);
     expect(readThreadField(THREAD_ID, (record) => record.savingStatus)).toBeNull();
@@ -659,42 +659,13 @@ describe("canonical runtime reconciliation", () => {
       acceptedThrough: 0, savedThrough: 0, retained: [], loss: "none",
       durable: { mode: "snapshot", threadId: THREAD_ID, snapshot: { revision: { conversationRevision: 4, rosterRevision: 0 }, state } } }]);
     useThreadStore.getState().hydrateThreadRuntimes([{ threadId: THREAD_ID, phase: "completed", turnExecutionId: EXECUTION_ID,
-      savingStatus: null, savingStatuses: [] }]);
+      savingStatuses: [] }]);
 
     expect(readThreadField(THREAD_ID, (record) => record.savingStatuses)).toEqual([]);
     expect(readThreadField(THREAD_ID, (record) => record.savingStatus)).toBeNull();
     expect(readThreadField(THREAD_ID, (record) => record.canonicalAgent.progress?.epoch)).toBe("runtime-2");
     expect(readThreadField(THREAD_ID, (record) => record.canonicalAgent.lostProgress)).toBe(false);
     expect(readThreadField(THREAD_ID, (record) => record.runtimePhase)).toBe("completed");
-  });
-
-  it.each([null, "durable"] as const)("preserves newer pending saves after a delayed empty snapshot with legacy status %s", (savingStatus) => {
-    seedRuntime("running", EXECUTION_ID, true);
-    useThreadStore.setState({ currentThreadId: THREAD_ID });
-    const events = [...turnEvents(EXECUTION_ID),
-      envelope("publication-tool", 4, EXECUTION_ID, { type: "publication.recorded", publicationId: "4",
-        event: { type: "toolUse", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, toolCallId: "call-1", toolName: "Read", toolInput: {} } }),
-      envelope("publication-text", 5, EXECUTION_ID, { type: "publication.recorded", publicationId: "5",
-        event: { type: "textDelta", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, delta: "Newer pending reply", isFinalResponse: true } }),
-    ].map((event) => ({ ...event, progressPosition: { epoch: "runtime-1", sequence: event.acceptedSequence } }));
-    useThreadStore.getState().handleCanonicalProgress({ phase: "saved", threadId: THREAD_ID, epoch: "runtime-1", through: 3,
-      revision: { conversationRevision: 3, rosterRevision: 0 }, events: events.slice(0, 3) });
-    useThreadStore.getState().handleCanonicalProgress({ phase: "accepted", threadId: THREAD_ID, epoch: "runtime-1", from: 0, through: 5,
-      events: events.map(({ durableRevision: _durableRevision, ...event }) => event) });
-    const pending = pendingSave(5, 3);
-    useThreadStore.getState().setTurnSavingStatus(pending);
-
-    useThreadStore.getState().applyCanonicalReconnectRecoveries([{ phase: "recovery", threadId: THREAD_ID, epoch: "runtime-1",
-      acceptedThrough: 3, savedThrough: 3, retained: [], loss: "none",
-      durable: { mode: "delta", threadId: THREAD_ID, from: { conversationRevision: 3, rosterRevision: 0 },
-        through: { conversationRevision: 3, rosterRevision: 0 }, events: [] } }]);
-    useThreadStore.getState().hydrateThreadRuntimes([{ threadId: THREAD_ID, phase: "running", turnExecutionId: EXECUTION_ID,
-      savingStatuses: [], savingStatus }]);
-
-    expect(readThreadField(THREAD_ID, (record) => record.savingStatuses)).toEqual([pending]);
-    expect(readThreadField(THREAD_ID, (record) => record.savingStatus)).toEqual(pending);
-    expect(readThreadField(THREAD_ID, (record) => record.canonicalAgent.progress?.acceptedThrough)).toBe(5);
-    expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("Newer pending reply");
   });
 
   it.each([false, true])("removes an assigned-ID response after restart only when unsaved, acknowledged=%s", (acknowledged) => {

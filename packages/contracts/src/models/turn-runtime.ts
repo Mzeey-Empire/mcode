@@ -21,7 +21,7 @@ export const TurnRuntimePhaseSchema = z.enum([
 export type TurnRuntimePhase = z.infer<typeof TurnRuntimePhaseSchema>;
 
 /** Saving mode is independent of the current execution's lifecycle phase. */
-export const TurnSavingModeSchema = z.enum(["durable", "saving", "save-retrying", "saving-failed", "saving-delayed", "unsaved", "stopping"]);
+export const TurnSavingModeSchema = z.enum(["durable", "saving", "save-retrying", "saving-failed"]);
 const savingIdentity = {
   threadId: z.string().min(1).max(256),
   executionId: TurnExecutionIdSchema,
@@ -43,9 +43,6 @@ const savingFailure = z.object({
 /** Pending and failed saves remain visible after their provider execution completes. */
 export const TurnSavingStatusSchema = lazySchema(() => z.discriminatedUnion("mode", [
   z.object({ ...savingIdentity, mode: z.literal("durable") }).strict(),
-  z.object({ ...savingIdentity, mode: z.literal("saving-delayed") }).strict(),
-  z.object({ ...savingIdentity, mode: z.literal("unsaved") }).strict(),
-  z.object({ ...savingIdentity, mode: z.literal("stopping") }).strict(),
   z.object({ ...savingIdentity, mode: z.literal("saving"), ...pendingProgress }).strict(),
   z.object({ ...savingIdentity, mode: z.literal("save-retrying"), ...pendingProgress, failure: savingFailure }).strict(),
   z.object({ ...savingIdentity, mode: z.literal("saving-failed"), ...pendingProgress, failure: savingFailure }).strict(),
@@ -58,7 +55,6 @@ export const TurnRuntimeSnapshotSchema = lazySchema(() => z.object({
   threadId: z.string().min(1),
   turnExecutionId: TurnExecutionIdSchema.nullable(),
   phase: TurnRuntimePhaseSchema,
-  savingStatus: TurnSavingModeSchema.nullable().optional(),
   /** Completed executions may still have retained saving work. */
   savingStatuses: z.array(TurnSavingStatusSchema()).max(128).optional(),
 }));

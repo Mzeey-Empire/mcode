@@ -1088,11 +1088,6 @@ export const WS_METHODS = lazySchema(() => ({
     params: TurnResumeParamsSchema(),
     result: TurnResumeResultSchema(),
   },
-  /** Continue one active response after the user accepts an unsaved text stream. */
-  "agent.continueWithoutSaving": {
-    params: z.object({ executionId: z.string().uuid() }).strict(),
-    result: z.void(),
-  },
   "agent.createAndSend": {
     params: CreateAndSendSchema(),
     result: CreateAndSendResultSchema(),

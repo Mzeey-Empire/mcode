@@ -71,7 +71,6 @@ const transportDefaults: Partial<McodeTransport> = {
   retrySave: vi.fn().mockResolvedValue({ retried: false }),
   getThreadStartup: vi.fn().mockResolvedValue(null),
   listThreadStartups: vi.fn().mockResolvedValue({ records: [] }),
-  continueWithoutSaving: vi.fn().mockResolvedValue(undefined),
   stopAgent: vi.fn().mockImplementation((threadId: string) => Promise.resolve({
     threadId,
     turnExecutionId: null,

@@ -130,7 +130,6 @@ import type { TerminalProfileService } from "../../features/terminal/profiles/te
 import type { WorkspaceTerminalPreferencesService } from "../../features/terminal/preferences/workspace-terminal-preferences-service.js";
 import { isTerminalRpcMethod, routeTerminalRpc } from "../../features/terminal/transport/terminal-rpc.js";
 import type { SettingsService } from "../../features/settings/settings-service.js";
-import type { AgentTurnContinuationPort } from "../../features/agents/orchestration/agent-runtime-internal-ports.js";
 import type { MessageRepo } from "../../features/agents/conversation/persistence/message-repo.js";
 import type { ToolCallRecordRepo } from "../../features/agents/tools/persistence/tool-call-record-repo.js";
 import type { NarrativeStore } from "../../features/agents/conversation/narrative/narrative-store.js";
@@ -235,8 +234,6 @@ export interface RouterDeps {
   projectActionService: ProjectActionService;
   threadService: ThreadService;
   agentService: AgentService;
-  /** Continues an active turn without exposing AgentService lifecycle internals. */
-  agentContinuation?: AgentTurnContinuationPort;
   /** Routes provider permission decisions through the Agents feature boundary. */
   approvalService: ApprovalService;
   /** Owns plan question submission and plan output lifecycle. */

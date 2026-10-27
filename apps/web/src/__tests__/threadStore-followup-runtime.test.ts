@@ -58,7 +58,7 @@ describe("follow-up runtime ownership", () => {
       failure: { kind: "permanent", name: "WriteError", message: "Unable to save accepted progress" } };
     const previous = { ...failed, executionId: "00000000-0000-4000-8000-000000000001" };
     const snapshot: TurnRuntimeSnapshot = { threadId: THREAD_ID, phase, turnExecutionId: failed.executionId,
-      savingStatus: "durable", savingStatuses: [failed, previous] };
+      savingStatuses: [failed, previous] };
     useThreadStore.getState().applyThreadRuntimeSnapshot(snapshot);
     expect(record()?.savingStatus).toEqual(failed);
     expect(record()?.savingStatuses).toEqual([failed, previous]);

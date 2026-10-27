@@ -124,7 +124,6 @@
   "src/features/agents/turns/__tests__/turn-event-pipeline.test.ts": 481,
   "src/features/agents/turns/__tests__/turn-event-sink.test.ts": 313,
   "src/features/agents/turns/__tests__/turn-file-tracker.test.ts": 1997,
-  "src/features/agents/turns/__tests__/turn-finalizer.test.ts": 4205,
   "src/features/agents/turns/__tests__/turn-runtime.test.ts": 180,
   "src/features/agents/turns/persistence/__tests__/turn-snapshot-repo.test.ts": 600,
   "src/features/attachments/storage/__tests__/attachment-service-draft-staging.test.ts": 361,

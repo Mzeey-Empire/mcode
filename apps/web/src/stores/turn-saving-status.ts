@@ -64,16 +64,10 @@ export function reconcileSavedTurnStatuses(record: ThreadRecord, drainedEpoch?: 
   return next;
 }
 
-/** Scalar snapshots only reconstruct legacy statuses; pending modes require their correlated metrics. */
+/** Merges a snapshot's correlated saving statuses, then drops any its saved cut already covers. */
 export function savingSnapshotPatch(record: ThreadRecord, snapshot: TurnRuntimeSnapshot): SavingPatch {
   let next = currentSavingPatch(record);
   const statuses = snapshot.savingStatuses ?? [];
   for (const status of statuses) next = mergeTurnSavingStatus({ ...record, ...next, turnExecutionId: snapshot.turnExecutionId }, status);
-  const mode = snapshot.savingStatus;
-  const hasCorrelatedStatus = statuses.some((status) => status.executionId === snapshot.turnExecutionId)
-    || next.savingStatuses.some((status) => status.executionId === snapshot.turnExecutionId && "accepted" in status);
-  if (snapshot.turnExecutionId && !hasCorrelatedStatus && (mode === "durable" || mode === "saving-delayed" || mode === "unsaved" || mode === "stopping")) {
-    next = mergeTurnSavingStatus({ ...record, ...next, turnExecutionId: snapshot.turnExecutionId }, { threadId: snapshot.threadId, executionId: snapshot.turnExecutionId, mode });
-  }
   return reconcileSavedTurnStatuses({ ...record, ...next });
 }

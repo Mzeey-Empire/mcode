@@ -7,8 +7,4 @@ export const TURN_RUNTIME_EVENT_CONTROL = "TurnRuntimeEventControl";
 export interface TurnRuntimeEventControl {
   /** Stop the active provider after a durability or queue failure. */
   stopForEventApplicationFailure(event: AgentEvent, reason: string): void;
-  /** Reserve an execution for restart-reliability verification. */
-  beginReliabilityTurn(threadId: string): string;
-  /** Release a failed restart-reliability reservation. */
-  releaseReliabilityTurn(threadId: string): void;
 }

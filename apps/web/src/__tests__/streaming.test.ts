@@ -183,7 +183,7 @@ describe("Agent Message Flow", () => {
         runtimePhase: "running",
         turnExecutionId: "exec-1",
         agentStartTime: 100,
-        savingStatus: { threadId, executionId: "exec-1", mode: "saving-delayed" },
+        savingStatus: { threadId, executionId: "exec-1", mode: "durable" },
         streaming: "partial content",
         streamingPreview: "partial content",
       }]]),

@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useThreadStore } from "@/stores/threadStore";
 import {
   useComposerDraftStore,
   type SelectedTextCommentEditorDraft,
 } from "@/stores/composerDraftStore";
-import { getTransport } from "@/transport";
 import type { SubagentRosterTarget } from "../narrative";
 import { readThreadRecord } from "../state";
 import { useThreadSubscriptionReconciler } from "../subscriptions/useThreadSubscriptionReconciler";
@@ -278,12 +276,6 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
     });
   }, [setForkMode]);
 
-  const handleStopSafely = useCallback(async () => {
-    if (state.activeThreadId) await useThreadStore.getState().stopAgent(state.activeThreadId);
-  }, [state.activeThreadId]);
-  const handleContinueWithoutSaving = useCallback(async () => {
-    if (state.savingStatus?.mode === "saving-delayed") await getTransport().continueWithoutSaving(state.savingStatus.executionId);
-  }, [state.savingStatus]);
   const handleDismissCliError = useCallback(() => {
     setDismissedErrorState({ error: state.sessionError, threadEpoch });
   }, [state.sessionError, threadEpoch]);
@@ -300,20 +292,16 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
   const interactions = useMemo<ChatViewInteractions>(() => ({
     onBranch: handleBranch,
     ...selectedTextComments.interactions,
-    onStopSafely: handleStopSafely,
-    onContinueWithoutSaving: handleContinueWithoutSaving,
     onDismissCliError: handleDismissCliError,
     onOpenSettings: handleOpenSettings,
     onSaveTitle: handleSaveTitle,
     onExitForkMode: handleExitForkMode,
   }), [
     handleBranch,
-    handleContinueWithoutSaving,
     handleDismissCliError,
     handleExitForkMode,
     handleOpenSettings,
     handleSaveTitle,
-    handleStopSafely,
     selectedTextComments.interactions,
   ]);
   // No `key` here: a remount would discard the virtualizer state owned by MessageList.

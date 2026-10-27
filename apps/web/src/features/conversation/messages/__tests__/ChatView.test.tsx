@@ -363,7 +363,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewTransportMock.unsubscribeThread.mockResolvedValue(undefined);
     chatViewTransportMock.subscribeThread.mockClear();
     chatViewTransportMock.unsubscribeThread.mockClear();
-    chatViewTransportMock.continueWithoutSaving.mockClear();
     chatViewTransportMock.retryAutomaticSetup.mockReset();
     chatViewTransportMock.getThreadStartup.mockReset();
     chatViewTransportMock.listThreadStartups.mockReset();
@@ -420,39 +419,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByTestId("composer")).toBeInTheDocument();
     expect(screen.queryByText("no messages yet")).not.toBeInTheDocument();
     expect(screen.queryByText("Start agent in new worktree")).not.toBeInTheDocument();
-  });
-
-  it("requires the user to choose before it continues without saving", async () => {
-    const executionId = "00000000-0000-4000-8000-000000000043";
-    const activeRecord = createEmptyThreadRecord();
-    activeRecord.savingStatus = { threadId: "thread-1", executionId, mode: "saving-delayed" };
-    chatViewThreadMockRef.current = defaultThreadState({ activeRecord });
-    const user = userEvent.setup();
-
-    render(<ChatView />);
-
-    expect(screen.getByText(/a restart can lose it/i)).toBeInTheDocument();
-    expect(chatViewTransportMock.continueWithoutSaving).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: /continue without saving/i }));
-
-    expect(chatViewTransportMock.continueWithoutSaving).toHaveBeenCalledWith(executionId);
-  });
-
-  it("stops the active agent when the user chooses Stop safely", async () => {
-    const activeRecord = createEmptyThreadRecord();
-    activeRecord.savingStatus = {
-      threadId: "thread-1",
-      executionId: "00000000-0000-4000-8000-000000000044",
-      mode: "saving-delayed",
-    };
-    chatViewThreadMockRef.current = defaultThreadState({ activeRecord });
-    const user = userEvent.setup();
-
-    render(<ChatView />);
-    await user.click(screen.getByRole("button", { name: /stop safely/i }));
-
-    expect(chatViewStopAgentMock).toHaveBeenCalledWith("thread-1");
-    expect(chatViewTransportMock.continueWithoutSaving).not.toHaveBeenCalled();
   });
 
   it("keeps the preparing shell and setup recovery actions while Setup is blocked", async () => {

@@ -35,23 +35,17 @@ describe("correlated turn saving status", () => {
     expect(patch.savingStatuses).toEqual([saving(PREVIOUS)]);
   });
 
-  it.each<TurnRuntimeSnapshot["phase"]>(["running", "completed"])("keeps explicit failed saves over legacy durable during %s reconnect", (phase) => {
+  it.each<TurnRuntimeSnapshot["phase"]>(["running", "completed"])("keeps explicit failed saves during %s reconnect", (phase) => {
     const record = { ...createEmptyThreadRecord(), turnExecutionId: CURRENT };
     const failed: TurnSavingStatus = { ...saving(), mode: "saving-failed",
       failure: { kind: "permanent", name: "WriteError", message: "Unable to save accepted progress" } };
     const previous = { ...failed, executionId: PREVIOUS };
     const snapshot: TurnRuntimeSnapshot = { threadId: "thread-1", phase, turnExecutionId: CURRENT,
-      savingStatus: "durable", savingStatuses: [failed, previous] };
+      savingStatuses: [failed, previous] };
     const hydrated = savingSnapshotPatch(record, snapshot);
     const reconnected = savingSnapshotPatch({ ...record, ...hydrated }, snapshot);
     expect(hydrated.savingStatus).toEqual(failed);
     expect(hydrated.savingStatuses).toEqual([failed, previous]);
     expect(reconnected).toEqual(hydrated);
-  });
-
-  it("does not invent metrics from a scalar pending mode", () => {
-    const patch = savingSnapshotPatch(createEmptyThreadRecord(), { threadId: "thread-1", phase: "completed", turnExecutionId: CURRENT, savingStatus: "save-retrying" });
-    expect(patch.savingStatus).toBeNull();
-    expect(patch.savingStatuses).toEqual([]);
   });
 });

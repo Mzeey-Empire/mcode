@@ -208,7 +208,7 @@ describe("turn saving notice", () => {
     store.handleCanonicalProgress({ phase: "accepted", threadId: pending.threadId, epoch: "new-epoch", from: 0, through: 1, events: fixture.recovery.retained });
     if (delivery === "push") store.setTurnSavingStatus(fixture.failed);
     else store.hydrateThreadRuntimes([{ threadId: pending.threadId, turnExecutionId: pending.executionId, phase: "completed",
-      savingStatus: "durable", savingStatuses: [fixture.failed] }]);
+      savingStatuses: [fixture.failed] }]);
     render(<ConnectedSavingNotice />);
     expect(screen.queryByTestId("turn-save-recovery")).toBeNull();
     act(() => { store.applyCanonicalReconnectRecoveries([fixture.recovery]); store.finishCanonicalRecovery(token); });

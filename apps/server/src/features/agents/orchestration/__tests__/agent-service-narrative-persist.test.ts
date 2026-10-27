@@ -1,11 +1,9 @@
 import "reflect-metadata";
-import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { container } from "tsyringe";
 import { openWorkerTurnFixture } from "./worker-turn-fixture.js";
 import { TaskRepo } from "../persistence/task-repo.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
-import { AgentReliabilityPort } from "../agent-runtime-internal-ports.js";
 
 describe("AgentService narrative persistence through worker admission", () => {
   let fixture: Awaited<ReturnType<typeof openWorkerTurnFixture>>;
@@ -124,16 +122,5 @@ describe("AgentService narrative persistence through worker admission", () => {
     expect(fixture.messages.listByThread(fixture.thread.id, 100).messages.map((message) => message.content))
       .not.toContain("private child answer");
     expect(fixture.published.filter((event) => event.type === "textDelta" && event.delta === "private child answer")).toEqual([]);
-  });
-
-  it("commits and publishes the private unfinished reliability prefix", async () => {
-    await fixture.finish();
-    const result = await container.resolve(AgentReliabilityPort).streamAssistantText(fixture.thread.id);
-    expect(result.text).toBe("Durable assistant prefix for restart recovery.");
-    expect(fixture.published).toContainEqual(expect.objectContaining({
-      type: "textDelta", threadId: fixture.thread.id, turnExecutionId: result.executionId,
-      delta: "Durable assistant prefix for restart recovery.",
-    }));
-    expect(container.resolve(ParentAssistantTextCheckpointService).restore(result.executionId)).toBe("Durable assistant prefix for restart recovery.");
   });
 });

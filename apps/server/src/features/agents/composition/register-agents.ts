@@ -49,8 +49,6 @@ import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution/e
 import { WorkerOwnedTurnRuntime } from "../execution/worker-owned-turn-runtime.js";
 import {
   AgentEventPublicationRuntimePort,
-  AgentReliabilityPort,
-  AgentTurnContinuationPort,
 } from "../orchestration/agent-runtime-internal-ports.js";
 import { TURN_FEATURE_EFFECTS, TurnFeatureEffects } from "../turns/turn-feature-effects.js";
 import { ThreadBranchingService } from "../../projects/worktrees/thread-branching-service.js";
@@ -71,7 +69,6 @@ import { ModelCacheService } from "../../providers/models/model-cache-service.js
 import { PROVIDER_TURN_PORT } from "../../providers/composition/provider-host-ports.js";
 import type { ProviderTurnPort } from "@mcode/providers";
 import { SettingsService } from "../../settings/settings-service.js";
-import { TURN_FINALIZER, TurnFinalizer } from "../turns/turn-finalizer.js";
 import { TURN_FILE_TRACKER, TurnFileTracker } from "../turns/turn-file-tracker.js";
 import {
   TURN_ADMISSION_DISPATCH_COORDINATOR,
@@ -82,14 +79,12 @@ import {
   ThreadRuntimePersistence,
   type TurnRuntimePersistence,
 } from "../turns/turn-runtime-persistence.js";
-import { TurnConversationProjectionService } from "../turns/turn-conversation-projection-service.js";
 import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import { BackgroundToolSettlementEffect } from "../turns/background-tool-settlement-effect.js";
 import { ThreadCreationCoordinator } from "../turns/thread-creation-coordinator.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { ThreadStartupFetchDecisions } from "../../thread-startup/thread-startup-fetch-decisions.js";
 import { CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
-import { ProviderTurnEventApplication } from "../turns/provider-turn-event-application.js";
 import {
   TURN_RUNTIME_EVENT_CONTROL,
   type TurnRuntimeEventControl,
@@ -203,8 +198,6 @@ export function registerAgentServices(container: DependencyContainer): void {
   });
   container.register(AgentRuntimeCommandPort, { useClass: AgentRuntimeCommandPort }, { lifecycle: Lifecycle.Singleton });
   container.register(AgentEventPublicationRuntimePort, { useClass: AgentEventPublicationRuntimePort }, { lifecycle: Lifecycle.Singleton });
-  container.register(AgentTurnContinuationPort, { useClass: AgentTurnContinuationPort }, { lifecycle: Lifecycle.Singleton });
-  container.register(AgentReliabilityPort, { useClass: AgentReliabilityPort }, { lifecycle: Lifecycle.Singleton });
   container.register(TurnSteerRuntimePort, { useClass: TurnSteerRuntimePort }, { lifecycle: Lifecycle.Singleton });
   container.register(TurnSteerService, { useClass: TurnSteerService }, { lifecycle: Lifecycle.Singleton });
   container.register(AgentEventPublicationRegistry, { useClass: AgentEventPublicationRegistry }, { lifecycle: Lifecycle.Singleton });
@@ -242,9 +235,6 @@ export function registerAgentServices(container: DependencyContainer): void {
   container.register("TurnRuntimeSnapshotRefPins", {
     useFactory: (c) => c.resolve(SnapshotRefPins),
   });
-  container.register<TurnFinalizer>(TURN_FINALIZER, {
-    useFactory: instanceCachingFactory(() => new TurnFinalizer()),
-  });
   container.register<TurnAdmissionDispatchCoordinator>(TURN_ADMISSION_DISPATCH_COORDINATOR, {
     useFactory: instanceCachingFactory((c) => new TurnAdmissionDispatchCoordinator(
       c.resolve(ThreadRepo),
@@ -268,7 +258,6 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(ProviderSwitchService),
     )),
   });
-  container.register(TurnConversationProjectionService, { useClass: TurnConversationProjectionService }, { lifecycle: Lifecycle.Singleton });
   container.register(BackgroundToolSettlementEffect, { useClass: BackgroundToolSettlementEffect }, { lifecycle: Lifecycle.Singleton });
   container.register(ThreadCreationCoordinator, {
     useFactory: instanceCachingFactory((c) => new ThreadCreationCoordinator(
@@ -296,11 +285,6 @@ export function registerAgentServices(container: DependencyContainer): void {
       };
     },
   });
-  container.register(
-    ProviderTurnEventApplication,
-    { useClass: ProviderTurnEventApplication },
-    { lifecycle: Lifecycle.Singleton },
-  );
   container.register(
     TurnRuntimeController,
     { useClass: TurnRuntimeController },

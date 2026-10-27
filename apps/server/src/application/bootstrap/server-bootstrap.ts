@@ -99,11 +99,8 @@ import { CoordinatorWakeService } from "../../features/thread-control/delegation
 import { wakeTargets } from "../../features/thread-control/delegation/wake-targets.js";
 import { TurnSteerRepo } from "../../features/agents/steering/persistence/turn-steer-repo.js";
 import { TurnSteerRuntimePort } from "../../features/agents/steering/turn-steer-runtime-port.js";
-import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
 import {
   AgentEventPublicationRuntimePort,
-  AgentReliabilityPort,
-  AgentTurnContinuationPort,
 } from "../../features/agents/orchestration/agent-runtime-internal-ports.js";
 import { NarrativeStore } from "../../features/agents/conversation/narrative/narrative-store.js";
 import { LegacyConversationMigration } from "../../features/agents/conversation/migrations/legacy-conversation-migration.js";
@@ -327,8 +324,6 @@ const workspaceEnvironmentService = container.resolve(WorkspaceEnvironmentServic
 const projectActionService = container.resolve(ProjectActionService);
 const threadService = container.resolve(ThreadService);
 const agentService = container.resolve(AgentService);
-const agentReliability = container.resolve(AgentReliabilityPort);
-const agentContinuation = container.resolve(AgentTurnContinuationPort);
 workspaceEnvironmentService.setAutomaticSetupDispatcher({
   dispatch: (submission) => agentService.dispatchQueuedAutomaticTurn(submission),
 });
@@ -543,9 +538,7 @@ const settleActionObserver = new SettleActionObserver({
   environment: workspaceEnvironmentService,
   actions: projectActionService,
 });
-const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undefined, {
-  streamAssistant: (threadId) => agentReliability.streamAssistantText(threadId),
-});
+const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter);
 const jobObject = container.resolve<JobObject>("JobObject");
 
 const portPush = new PortPush();
@@ -877,7 +870,6 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   projectActionService,
   threadService,
   agentService,
-  agentContinuation,
   approvalService,
   planTurnService,
   goalLifecycleService,
@@ -1238,7 +1230,6 @@ async function shutdown(): Promise<void> {
   await captureCleanupFailure(() => ciWatcherService.dispose());
 
   shutdownCoordinator.setPhase("drain terminal persistence and execution workers");
-  await captureCleanupFailure(() => container.resolve(ProviderTurnEventApplication).drainPersistence());
   await captureCleanupFailure(() => snapshotRefPins.drain());
   await captureCleanupFailure(() => container.resolve(AgentEventPublicationRegistry).drain());
   await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
