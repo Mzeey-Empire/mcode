@@ -47,7 +47,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ item, ctx }: { 
   const thread = useWorkspaceStore((s) => selectThreadIndex(s.threads).get(item.threadId));
   const workspace = useWorkspaceStore((s) => (thread ? s.workspaces.find((candidate) => candidate.id === thread.workspace_id) : undefined));
   if (!thread) return null;
-  return <ThreadRow thread={thread} workspace={workspace} depth={item.depth} ctx={ctx} />;
+  return <ThreadRow thread={thread} workspace={workspace} depth={item.depth} showProject={item.layout === "flat"} ctx={ctx} />;
 });
 
 function useThreadRowHandlers(ctx: SidebarRowContext, workspaceId: string, workspacePath: string): ThreadRowHandlers {
@@ -62,7 +62,7 @@ function useThreadRowHandlers(ctx: SidebarRowContext, workspaceId: string, works
   }), [ctx, workspaceId, workspacePath]);
 }
 
-function ThreadRow({ thread, workspace, depth, ctx }: { thread: WorkspaceThread; workspace: Workspace | undefined; depth: number; ctx: SidebarRowContext }) {
+function ThreadRow({ thread, workspace, depth, showProject, ctx }: { thread: WorkspaceThread; workspace: Workspace | undefined; depth: number; showProject: boolean; ctx: SidebarRowContext }) {
   const isEditing = ctx.inlineEdit?.threadId === thread.id;
   const handlers = useThreadRowHandlers(ctx, thread.workspace_id, workspace?.path ?? "");
   const isActive = useWorkspaceStore((s) => s.activeThreadId === thread.id);
@@ -89,6 +89,7 @@ function ThreadRow({ thread, workspace, depth, ctx }: { thread: WorkspaceThread;
       workspaceName={workspace?.name ?? ""}
       thread={thread}
       depth={depth}
+      showProject={showProject}
       isEditing={isEditing}
       inlineEdit={isEditing ? ctx.inlineEdit : null}
       isActive={isActive}
@@ -141,6 +142,8 @@ interface ThreadRowVisualProps {
   workspaceName: string;
   thread: WorkspaceThread;
   depth: number;
+  /** The flat Threads view has no project header, so each row names its project. */
+  showProject: boolean;
   isEditing: boolean;
   inlineEdit: InlineEditState | null;
   onInlineEditChange: (title: string) => void;
@@ -285,6 +288,7 @@ function ThreadRowVisual({
   workspaceName,
   thread,
   depth,
+  showProject,
   isEditing,
   inlineEdit,
   onInlineEditChange,
@@ -311,6 +315,7 @@ function ThreadRowVisual({
     >
       <ThreadStatusLane mark={presentation.look.mark} />
       <div className={cn("flex min-w-0 flex-1 flex-col gap-1", presentation.scaffoldDim)}>
+        {showProject && <ThreadRowProjectLine workspaceId={thread.workspace_id} workspaceName={workspaceName} />}
         <ThreadRowTitleLine
           thread={thread}
           isEditing={isEditing}
@@ -333,6 +338,15 @@ function ThreadRowVisual({
     </ThreadRowSurface>
   );
   return <ThreadRowPreview isEditing={isEditing} row={row} workspaceName={workspaceName} thread={thread} />;
+}
+
+function ThreadRowProjectLine({ workspaceId, workspaceName }: { workspaceId: string; workspaceName: string }) {
+  return (
+    <div className="flex h-4 min-w-0 items-center gap-1.5 text-caption text-muted">
+      <ProjectIcon workspaceId={workspaceId} name={workspaceName} size={14} className="shrink-0" />
+      <span className="text-fade min-w-0 flex-1">{workspaceName}</span>
+    </div>
+  );
 }
 
 type ThreadRowSurfaceProps = Pick<
