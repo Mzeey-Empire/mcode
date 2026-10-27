@@ -7,7 +7,7 @@
 import { injectable, inject } from "tsyringe";
 import * as NodeChildProcess from "node:child_process";
 import type { PrInfo, ChecksStatus, CheckRun, PullRequestTargetsListParams, PullRequestTargetsListResult } from "@mcode/contracts/github";
-import { PrInfoSchema } from "@mcode/contracts/github";
+import { parseGithubBranchPullRequests, parseGithubThreadPullRequest } from "./github-pull-request-normalizers.js";
 import { GitRepositoryService } from "../../projects/git/git-repository-service.js";
 import { GithubPullRequestClient, GithubPullRequestClientError } from "./github-pull-request-client.js";
 import { logger } from "@mcode/shared";
@@ -37,7 +37,9 @@ export interface PullRequestWatchTarget {
 export interface PullRequestWatchSnapshot {
   threadId: string;
   prNumber: number;
-  state: "OPEN" | "CLOSED" | "MERGED";
+  state: PrInfo["state"];
+  title: string;
+  url: string;
   checks: ChecksStatus;
 }
 
@@ -211,7 +213,7 @@ export class GithubService {
       let tracked: TrackedGithubProcess | null = null;
       const child = NodeChildProcess.execFile(
         "gh",
-        ["pr", "view", branch, "--json", "number,title,url,state"],
+        ["pr", "view", branch, "--json", "number,title,url,state,isDraft"],
         { cwd, encoding: "utf-8", timeout: 10_000, windowsHide: true },
         (error, stdout) => {
           tracked?.finish();
@@ -220,13 +222,51 @@ export class GithubService {
             return;
           }
           try {
-            const parsed = PrInfoSchema().safeParse(JSON.parse(stdout));
-            resolve(parsed.success ? parsed.data : null);
+            resolve(parseGithubThreadPullRequest(JSON.parse(stdout)));
           } catch {
             resolve(null);
           }
         },
       );
+      tracked = this.trackProcess(child, { repoPath: cwd });
+    });
+  }
+
+  /**
+   * Discover every PR opened from this checkout's origin on a branch, including drafts and
+   * terminal PRs, across GitHub pages.
+   */
+  async listBranchPrs(branch: string, cwd: string): Promise<PrInfo[]> {
+    const slug = await this.resolveRepoSlug(cwd);
+    const [owner, repository] = slug.split("/");
+    if (!owner || !repository) throw new Error(`Unexpected repository slug: ${slug}`);
+    const origin = githubOriginIdentity((await this.gitRepository.getRemoteUrl(cwd)).webUrl);
+    const headRepository = origin ? `${origin.owner}/${origin.name}` : slug;
+    await this.acquire();
+    try {
+      const stdout = await this.fetchBranchPullRequests(cwd, owner, repository, branch);
+      return parseGithubBranchPullRequests(JSON.parse(stdout), headRepository);
+    } finally { this.release(); }
+  }
+
+  private fetchBranchPullRequests(cwd: string, owner: string, repository: string, branch: string): Promise<string> {
+    const query = `query BranchPullRequests($owner: String!, $repository: String!, $branch: String!, $endCursor: String) {
+      repository(owner: $owner, name: $repository) {
+        pullRequests(headRefName: $branch, states: [OPEN, CLOSED, MERGED], first: 100, after: $endCursor) {
+          nodes { number state isDraft title url headRepository { nameWithOwner } }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    }`;
+    return new Promise((resolve, reject) => {
+      let tracked: TrackedGithubProcess | null = null;
+      const child = NodeChildProcess.execFile("gh", ["api", "graphql", "--paginate", "--slurp",
+        "-f", `query=${query}`, "-f", `owner=${owner}`, "-f", `repository=${repository}`, "-f", `branch=${branch}`],
+      { cwd, encoding: "utf-8", timeout: 15_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
+        tracked?.finish();
+        if (error) reject(error);
+        else resolve(stdout);
+      });
       tracked = this.trackProcess(child, { repoPath: cwd });
     });
   }
@@ -783,6 +823,9 @@ function buildPullRequestWatchQuery(prCount: number): string {
     pr${index}: pullRequest(number: $number${index}) {
       number
       state
+      isDraft
+      title
+      url
       commits(last: 1) {
         nodes {
           commit {
@@ -833,14 +876,17 @@ function parsePullRequestWatchBatch(
     if (!isRecord(pullRequest)) {
       throw new Error(`GitHub returned invalid data for pull request ${expectedPrNumber}`);
     }
-    if (pullRequest.number !== expectedPrNumber || !isPullRequestState(pullRequest.state)) {
+    const pr = parseGithubThreadPullRequest(pullRequest);
+    if (!pr || pr.number !== expectedPrNumber) {
       throw new Error(`GitHub returned mismatched data for pull request ${expectedPrNumber}`);
     }
 
     const rawChecks = readWatchCheckRuns(pullRequest);
     snapshots.set(expectedPrNumber, {
       prNumber: expectedPrNumber,
-      state: pullRequest.state,
+      state: pr.state,
+      title: pr.title,
+      url: pr.url,
       checks: summarizeWatchCheckRuns(rawChecks, fetchedAt),
     });
   }
@@ -937,10 +983,6 @@ function normalizeWatchConclusion(conclusion: string | null): CheckRun["conclusi
   if (normalized === "timed_out") return "timed_out";
   if (normalized === "neutral") return "neutral";
   return "failure";
-}
-
-function isPullRequestState(value: unknown): value is PullRequestWatchSnapshot["state"] {
-  return value === "OPEN" || value === "CLOSED" || value === "MERGED";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

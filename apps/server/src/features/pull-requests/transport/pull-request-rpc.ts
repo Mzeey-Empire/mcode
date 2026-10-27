@@ -214,12 +214,15 @@ async function routeCheckStatus(
   params: GithubCheckStatusParams,
 ): Promise<unknown> {
   const stalenessMs = 15_000;
+  const thread = deps.threadRepo.findById(params.threadId);
+  const primary = rankPullRequests(thread?.pull_requests ?? [])[0];
+  if (!primary) return { aggregate: "no_checks", runs: [], fetchedAt: Date.now() };
   if (!params.force) {
-    const fresh = deps.ciWatcherService.getFreshCache(params.threadId, stalenessMs);
+    const fresh = deps.ciWatcherService.getFreshCache(params.threadId, primary.number, stalenessMs);
     if (fresh) return fresh;
   }
 
-  let entry = deps.ciWatcherService.getEntry(params.threadId);
+  let entry = deps.ciWatcherService.getEntry(params.threadId, primary.number);
   if (!entry) {
     const bootstrap = bootstrapCheckStatusWatch(deps, params.threadId);
     if (bootstrap.kind === "terminal") {
@@ -231,7 +234,7 @@ async function routeCheckStatus(
     return { aggregate: "no_checks" as const, runs: [], fetchedAt: Date.now() };
   }
   const checks = await deps.githubService.getCheckRuns(entry.branch, entry.repoPath);
-  deps.ciWatcherService.refresh(params.threadId, checks);
+  deps.ciWatcherService.refresh(params.threadId, primary.number, checks);
   return checks;
 }
 
@@ -266,7 +269,7 @@ function bootstrapCheckStatusWatch(
     workspace.path,
     { skipInitialFetch: true },
   );
-  return { kind: "entry", entry: deps.ciWatcherService.getEntry(threadId) };
+  return { kind: "entry", entry: deps.ciWatcherService.getEntry(threadId, primary.number) };
 }
 
 type CheckStatusBootstrap =

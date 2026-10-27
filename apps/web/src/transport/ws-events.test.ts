@@ -359,6 +359,23 @@ describe("ws-events thread.checkoutChanged", () => {
     expect(useWorkspaceStore.getState().checksById).toBe(previous.checksById);
   });
 
+  it("displays checks for the ranked primary PR and clears them when the primary changes", () => {
+    startPushListeners();
+    pushEmitter.emit("thread.pullRequests", { threadId: "thread-1", pullRequests: [
+      createMockThreadPullRequest({ number: 10, state: "open" }),
+      createMockThreadPullRequest({ number: 20, state: "draft" }),
+    ] });
+    const primaryChecks = { aggregate: "failing", runs: [], fetchedAt: 3 };
+    pushEmitter.emit("thread.checksUpdated", { threadId: "thread-1", prNumber: 10, checks: primaryChecks });
+    pushEmitter.emit("thread.checksUpdated", { threadId: "thread-1", prNumber: 20, checks: { aggregate: "passing", runs: [], fetchedAt: 4 } });
+    expect(useWorkspaceStore.getState().checksById["thread-1"]).toEqual(primaryChecks);
+    pushEmitter.emit("thread.pullRequests", { threadId: "thread-1", pullRequests: [
+      createMockThreadPullRequest({ number: 10, state: "merged" }),
+      createMockThreadPullRequest({ number: 20, state: "draft" }),
+    ] });
+    expect(useWorkspaceStore.getState().checksById["thread-1"]).toBeUndefined();
+  });
+
   it("patches thread checkout fields and clears stale PR/check caches", () => {
     startPushListeners();
 

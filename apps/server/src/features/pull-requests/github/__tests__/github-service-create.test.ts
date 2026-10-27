@@ -34,14 +34,67 @@ describe("GithubService.createPr", () => {
   });
 
   it("requests and returns the branch PR title without relying on a picker cache", async () => {
-    const info = { number: 42, title: "Paged targets", url: "https://github.com/o/r/pull/42", state: "OPEN" };
+    const info = { number: 42, title: "Paged targets", url: "https://github.com/o/r/pull/42", state: "OPEN", isDraft: true };
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: object, callback: (error: null, stdout: string) => void) => {
         callback(null, JSON.stringify(info));
       },
     );
-    expect(await ghService.getBranchPr("feature", "/repo")).toEqual(info);
-    expect(mockExecFile.mock.calls[0]?.[1]).toEqual(["pr", "view", "feature", "--json", "number,title,url,state"]);
+    expect(await ghService.getBranchPr("feature", "/repo")).toEqual({ number: 42, title: "Paged targets", url: "https://github.com/o/r/pull/42", state: "draft" });
+    expect(mockExecFile.mock.calls[0]?.[1]).toEqual(["pr", "view", "feature", "--json", "number,title,url,state,isDraft"]);
+  });
+
+  it("discovers linked PRs across branch pages with draft state and titles", async () => {
+    mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: object, callback: (error: null, stdout: string) => void) => {
+      if (args[0] === "repo") { callback(null, "owner/repo"); return; }
+      expect(args).toContain("--paginate");
+      expect(args).toContain("--slurp");
+      expect(args).toContain("branch=feature");
+      callback(null, JSON.stringify([
+        { data: { repository: { pullRequests: { nodes: [
+          { number: 41, state: "OPEN", isDraft: true, title: "Draft feature", url: "https://github.com/owner/repo/pull/41", headRepository: { nameWithOwner: "owner/repo" } },
+        ] } } } },
+        { data: { repository: { pullRequests: { nodes: [
+          { number: 42, state: "MERGED", isDraft: false, title: "Merged feature", url: "https://github.com/owner/repo/pull/42", headRepository: { nameWithOwner: "Owner/Repo" } },
+        ] } } } },
+      ]));
+    });
+    expect(await ghService.listBranchPrs("feature", "/repo")).toEqual([
+      { number: 41, state: "draft", title: "Draft feature", url: "https://github.com/owner/repo/pull/41" },
+      { number: 42, state: "merged", title: "Merged feature", url: "https://github.com/owner/repo/pull/42" },
+    ]);
+  });
+
+  it("ignores PRs from forks that reuse the branch name", async () => {
+    mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: object, callback: (error: null, stdout: string) => void) => {
+      callback(null, args[0] === "repo" ? "owner/repo" : JSON.stringify([{ data: { repository: { pullRequests: { nodes: [
+        { number: 43, state: "OPEN", isDraft: false, title: "Ours", url: "https://github.com/owner/repo/pull/43", headRepository: { nameWithOwner: "owner/repo" } },
+        { number: 44, state: "CLOSED", isDraft: false, title: "Fork", url: "https://github.com/owner/repo/pull/44", headRepository: { nameWithOwner: "stranger/repo" } },
+        { number: 45, state: "MERGED", isDraft: false, title: "Deleted fork", url: "https://github.com/owner/repo/pull/45", headRepository: null },
+      ] } } } }]));
+    });
+    expect((await ghService.listBranchPrs("feature", "/repo")).map((pr) => pr.number)).toEqual([43]);
+  });
+
+  it("keeps PRs pushed from a fork origin into the upstream repository", async () => {
+    const forkCheckout = new GitRepositoryService({ findById: () => undefined }, {
+      exec: async () => ({ stdout: "https://github.com/me/repo.git", stderr: "" }),
+    });
+    const service = new GithubService({ findById: () => undefined }, TEST_HOST_RUNTIME, forkCheckout, pullRequestClient);
+    mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: object, callback: (error: null, stdout: string) => void) => {
+      callback(null, args[0] === "repo" ? "owner/repo" : JSON.stringify([{ data: { repository: { pullRequests: { nodes: [
+        { number: 46, state: "OPEN", isDraft: false, title: "Upstream copy", url: "https://github.com/owner/repo/pull/46", headRepository: { nameWithOwner: "owner/repo" } },
+        { number: 47, state: "OPEN", isDraft: false, title: "Mine", url: "https://github.com/owner/repo/pull/47", headRepository: { nameWithOwner: "me/repo" } },
+      ] } } } }]));
+    });
+    expect((await service.listBranchPrs("feature", "/repo")).map((pr) => pr.number)).toEqual([47]);
+  });
+
+  it("rejects a malformed branch discovery instead of reporting an empty PR set", async () => {
+    mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: object, callback: (error: null, stdout: string) => void) => {
+      callback(null, args[0] === "repo" ? "owner/repo" : JSON.stringify([{ data: { repository: null } }]));
+    });
+    await expect(ghService.listBranchPrs("feature", "/repo")).rejects.toThrow();
   });
 
   it("creates a PR and returns number and url", async () => {

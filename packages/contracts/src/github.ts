@@ -2,6 +2,7 @@ import { z } from "zod";
 import { lazySchema } from "./utils/lazySchema.js";
 import { pagedTargetResultSchema } from "./git.js";
 import { PullRequestErrorSchema } from "./pull-requests.js";
+import { ThreadPullRequestStateSchema } from "./models/thread-pull-request.js";
 
 /** PR metadata returned by the server. */
 export const PrInfoSchema = lazySchema(() =>
@@ -9,7 +10,7 @@ export const PrInfoSchema = lazySchema(() =>
     number: z.number(),
     title: z.string(),
     url: z.string(),
-    state: z.string(),
+    state: ThreadPullRequestStateSchema,
   }),
 );
 /** Basic PR metadata returned by the server. */

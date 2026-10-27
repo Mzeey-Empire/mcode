@@ -1,7 +1,8 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { GithubService } from "../../github/github-service.js";
+import type { PullRequestWatchSnapshot } from "../../github/github-service.js";
 import type { ChecksStatus } from "@mcode/contracts/github";
+import { createMockThread, createMockThreadPullRequest } from "@mcode/contracts/testing";
 
 vi.mock("@mcode/shared", () => ({
   getMcodeDir: () => "/mock/mcode",
@@ -18,12 +19,12 @@ describe("CiWatcherService", () => {
   let watcher: CiWatcherService;
   let mockGithubService: {
     getCheckRuns: ReturnType<typeof vi.fn<() => Promise<ChecksStatus>>>;
-    getPullRequestWatchSnapshots: ReturnType<typeof vi.fn<(targets: Array<{ threadId: string; prNumber: number }>) => Promise<unknown>>>;
+    getPullRequestWatchSnapshots: ReturnType<typeof vi.fn<(targets: Array<{ threadId: string; prNumber: number }>) => Promise<PullRequestWatchSnapshot[]>>>;
     cancelCheckRuns: ReturnType<typeof vi.fn<(branch: string, repoPath: string) => Promise<void>>>;
     cancelAllInFlight: ReturnType<typeof vi.fn<() => Promise<void>>>;
   };
   let mockBroadcast: ReturnType<typeof vi.fn<(channel: string, data: unknown) => void>>;
-  let mockPullRequestStateChange: ReturnType<typeof vi.fn<(change: PullRequestStateChange) => void>>;
+  let mockPullRequestStateChange: ReturnType<typeof vi.fn<(change: PullRequestStateChange) => void | Promise<void>>>;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -39,15 +40,17 @@ describe("CiWatcherService", () => {
       async (targets: Array<{ threadId: string; prNumber: number }>) => Promise.all(
         targets.map(async (target) => ({
           ...target,
-          state: "OPEN",
+          state: "open",
+          title: "Feature",
+          url: `https://github.com/o/r/pull/${target.prNumber}`,
           checks: await mockGithubService.getCheckRuns(),
         })),
       ),
     );
     mockBroadcast = vi.fn<(channel: string, data: unknown) => void>();
-    mockPullRequestStateChange = vi.fn<(change: PullRequestStateChange) => void>();
+    mockPullRequestStateChange = vi.fn<(change: PullRequestStateChange) => void | Promise<void>>();
     watcher = new CiWatcherService(
-      mockGithubService as unknown as GithubService,
+      mockGithubService,
       mockBroadcast,
       mockPullRequestStateChange,
     );
@@ -116,6 +119,7 @@ describe("CiWatcherService", () => {
 
     expect(mockBroadcast).toHaveBeenCalledWith("thread.checksUpdated", {
       threadId: "t1",
+      prNumber: 42,
       checks: pending,
     });
   });
@@ -133,11 +137,53 @@ describe("CiWatcherService", () => {
     ]);
   });
 
+  it("polls two PRs on one thread and keeps the second watched when the first merges", async () => {
+    const first = { threadId: "t1", prNumber: 41, state: "open", title: "First", url: "https://github.com/o/r/pull/41", checks: makeChecks("passing") } satisfies PullRequestWatchSnapshot;
+    const second = { threadId: "t1", prNumber: 42, state: "draft", title: "Second", url: "https://github.com/o/r/pull/42", checks: makeChecks("failing") } satisfies PullRequestWatchSnapshot;
+    mockGithubService.getPullRequestWatchSnapshots.mockResolvedValueOnce([first, second]);
+    watcher.watch("t1", 41, "feature", "/repo", { skipInitialFetch: true });
+    watcher.watch("t1", 42, "feature", "/repo", { skipInitialFetch: true });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(watcher.getEntry("t1", 41)?.cache).toEqual(first.checks);
+    expect(watcher.getEntry("t1", 42)?.cache).toEqual(second.checks);
+    expect(mockGithubService.getPullRequestWatchSnapshots).toHaveBeenLastCalledWith([
+      { threadId: "t1", prNumber: 41, repoPath: "/repo" },
+      { threadId: "t1", prNumber: 42, repoPath: "/repo" },
+    ]);
+    const retained = watcher.getEntry("t1", 42);
+    watcher.setWatchSet("t1", [41, 42], "feature", "/repo");
+    expect(watcher.getEntry("t1", 42)).toBe(retained);
+    mockGithubService.getPullRequestWatchSnapshots.mockResolvedValueOnce([{ ...first, state: "merged" }, second]);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(watcher.getEntry("t1", 41)).toBeNull();
+    expect(watcher.getEntry("t1", 42)?.cache).toEqual(second.checks);
+    expect(watcher.isWatching("t1", 42)).toBe(true);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(mockGithubService.getPullRequestWatchSnapshots).toHaveBeenLastCalledWith([
+      { threadId: "t1", prNumber: 42, repoPath: "/repo" },
+    ]);
+  });
+
+  it("seeds every open and draft PR while excluding terminal and unresolved links", async () => {
+    await watcher.seed([createMockThread({ id: "t1", branch: "feature", pull_requests: [
+      createMockThreadPullRequest({ number: 1, state: "open" }),
+      createMockThreadPullRequest({ number: 2, state: "draft" }),
+      createMockThreadPullRequest({ number: 3, state: "merged" }),
+      createMockThreadPullRequest({ number: 4, state: "unresolved" }),
+    ] })], new Map([["ws", "/repo"]]), () => "ws");
+    expect(watcher.getEntry("t1", 1)?.cache?.aggregate).toBe("no_checks");
+    expect(watcher.getEntry("t1", 2)?.cache?.aggregate).toBe("no_checks");
+    expect(watcher.getEntry("t1", 3)).toBeNull();
+    expect(watcher.getEntry("t1", 4)).toBeNull();
+  });
+
   it("stops polling and publishes a merged pull request state", async () => {
     mockGithubService.getPullRequestWatchSnapshots.mockResolvedValue([{
       threadId: "t1",
       prNumber: 41,
-      state: "MERGED",
+      state: "merged",
+      title: "Feature",
+      url: "https://github.com/o/r/pull/41",
       checks: makeChecks("passing"),
     }]);
     watcher.watch("t1", 41, "feature-1", "/repo", { skipInitialFetch: true });
@@ -148,7 +194,9 @@ describe("CiWatcherService", () => {
     expect(mockPullRequestStateChange).toHaveBeenCalledWith({
       threadId: "t1",
       prNumber: 41,
-      state: "MERGED",
+      state: "merged",
+      title: "Feature",
+      url: "https://github.com/o/r/pull/41",
     });
   });
 
@@ -156,7 +204,9 @@ describe("CiWatcherService", () => {
     mockGithubService.getPullRequestWatchSnapshots.mockResolvedValue([{
       threadId: "t1",
       prNumber: 41,
-      state: "MERGED",
+      state: "merged",
+      title: "Feature",
+      url: "https://github.com/o/r/pull/41",
       checks: makeChecks("passing"),
     }]);
     watcher.watch("t1", 42, "feature-2", "/repo", { skipInitialFetch: true });
@@ -171,7 +221,9 @@ describe("CiWatcherService", () => {
     mockGithubService.getPullRequestWatchSnapshots.mockResolvedValue([{
       threadId: "t1",
       prNumber: 41,
-      state: "CLOSED",
+      state: "closed",
+      title: "Feature",
+      url: "https://github.com/o/r/pull/41",
       checks: makeChecks("no_checks"),
     }]);
     mockPullRequestStateChange.mockImplementation(() => {
@@ -182,6 +234,20 @@ describe("CiWatcherService", () => {
     await vi.advanceTimersByTimeAsync(20_000);
 
     expect(watcher.isWatching("t1")).toBe(true);
+  });
+
+  it("retries a terminal PR after an asynchronous persistence failure", async () => {
+    mockGithubService.getPullRequestWatchSnapshots.mockResolvedValue([{
+      threadId: "t1", prNumber: 41, state: "merged", title: "Feature",
+      url: "https://github.com/o/r/pull/41", checks: makeChecks("passing"),
+    }]);
+    mockPullRequestStateChange.mockImplementationOnce(async () => { throw new Error("commit failed"); });
+    watcher.watch("t1", 41, "feature", "/repo", { skipInitialFetch: true });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(watcher.isWatching("t1", 41)).toBe(true);
+    expect(watcher.getEntry("t1", 41)?.cache).toBeNull();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(watcher.isWatching("t1", 41)).toBe(false);
   });
 
   it("does NOT broadcast when state is unchanged", async () => {
@@ -213,6 +279,7 @@ describe("CiWatcherService", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     expect(mockBroadcast).toHaveBeenCalledWith("thread.checksUpdated", {
       threadId: "t1",
+      prNumber: 42,
       checks: passing,
     });
   });
@@ -221,21 +288,22 @@ describe("CiWatcherService", () => {
     const passing = makeChecks("passing");
     watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
     // First call: cache is null → always broadcasts.
-    watcher.refresh("t1", passing);
+    watcher.refresh("t1", 42, passing);
     mockBroadcast.mockClear();
     // Second call with identical aggregate — no change, no broadcast.
-    watcher.refresh("t1", makeChecks("passing"));
+    watcher.refresh("t1", 42, makeChecks("passing"));
     expect(mockBroadcast).not.toHaveBeenCalled();
   });
 
   it("refresh() broadcasts when aggregate changes", () => {
     watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
-    watcher.refresh("t1", makeChecks("passing"));
+    watcher.refresh("t1", 42, makeChecks("passing"));
     mockBroadcast.mockClear();
     const failing = makeChecks("failing");
-    watcher.refresh("t1", failing);
+    watcher.refresh("t1", 42, failing);
     expect(mockBroadcast).toHaveBeenCalledWith("thread.checksUpdated", {
       threadId: "t1",
+      prNumber: 42,
       checks: failing,
     });
   });
@@ -247,7 +315,7 @@ describe("CiWatcherService", () => {
 
     await vi.advanceTimersByTimeAsync(30_000);
 
-    const entry = watcher.getEntry("t1");
+    const entry = watcher.getEntry("t1", 42);
     expect(entry).not.toBeNull();
     expect(entry!.prNumber).toBe(42);
     expect(entry!.cache).toEqual(passing);
@@ -255,12 +323,12 @@ describe("CiWatcherService", () => {
 
   describe("getFreshCache", () => {
     it("returns null when no entry exists", () => {
-      expect(watcher.getFreshCache("missing", 15_000)).toBeNull();
+      expect(watcher.getFreshCache("missing", 42, 15_000)).toBeNull();
     });
 
     it("returns null when entry exists but cache is null", () => {
       watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
-      expect(watcher.getFreshCache("t1", 15_000)).toBeNull();
+      expect(watcher.getFreshCache("t1", 42, 15_000)).toBeNull();
     });
 
     it("returns cached status when fetchedAt is within maxAgeMs", () => {
@@ -270,8 +338,8 @@ describe("CiWatcherService", () => {
         fetchedAt: Date.now() - 5_000, // 5s old
       };
       watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
-      watcher.refresh("t1", fresh);
-      expect(watcher.getFreshCache("t1", 15_000)).toEqual(fresh);
+      watcher.refresh("t1", 42, fresh);
+      expect(watcher.getFreshCache("t1", 42, 15_000)).toEqual(fresh);
     });
 
     it("returns null when fetchedAt is older than maxAgeMs", () => {
@@ -281,8 +349,8 @@ describe("CiWatcherService", () => {
         fetchedAt: Date.now() - 20_000, // 20s old
       };
       watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
-      watcher.refresh("t1", stale);
-      expect(watcher.getFreshCache("t1", 15_000)).toBeNull();
+      watcher.refresh("t1", 42, stale);
+      expect(watcher.getFreshCache("t1", 42, 15_000)).toBeNull();
     });
 
     it("treats exact boundary (maxAgeMs) as fresh", () => {
@@ -292,20 +360,20 @@ describe("CiWatcherService", () => {
         fetchedAt: Date.now() - 15_000,
       };
       watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
-      watcher.refresh("t1", boundary);
-      expect(watcher.getFreshCache("t1", 15_000)).toEqual(boundary);
+      watcher.refresh("t1", 42, boundary);
+      expect(watcher.getFreshCache("t1", 42, 15_000)).toEqual(boundary);
     });
   });
 
   it("getFreshCache does not mutate state or broadcast", async () => {
     const passing = makeChecks("passing");
     watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
-    watcher.refresh("t1", passing);
+    watcher.refresh("t1", 42, passing);
     mockBroadcast.mockClear();
 
     // Repeated reads must not cause broadcasts or move the entry between sets.
-    watcher.getFreshCache("t1", 15_000);
-    watcher.getFreshCache("t1", 15_000);
+    watcher.getFreshCache("t1", 42, 15_000);
+    watcher.getFreshCache("t1", 42, 15_000);
 
     expect(mockBroadcast).not.toHaveBeenCalled();
     expect(watcher.isWatching("t1")).toBe(true);

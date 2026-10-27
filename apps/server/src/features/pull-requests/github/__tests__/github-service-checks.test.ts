@@ -35,6 +35,10 @@ const TEST_HOST_RUNTIME = { platform: "win32", architecture: "x64", nodeAbi: "12
 
 type CallbackFn = (error: Error | null, stdout: string, stderr: string) => void;
 
+function githubWatchPr(number: number, state: "OPEN" | "CLOSED" | "MERGED", isDraft = false) {
+  return { number, state, isDraft, title: `PR ${number}`, url: `https://github.com/o/r/pull/${number}` };
+}
+
 async function waitFor(
   predicate: () => boolean,
   message: string,
@@ -515,8 +519,7 @@ describe("GithubService.getPullRequestWatchSnapshots", () => {
           data: {
             repository: {
               pr0: {
-                number: 41,
-                state: "OPEN",
+                ...githubWatchPr(41, "OPEN", true),
                 commits: {
                   nodes: [{
                     commit: {
@@ -538,8 +541,7 @@ describe("GithubService.getPullRequestWatchSnapshots", () => {
                 },
               },
               pr1: {
-                number: 42,
-                state: "MERGED",
+                ...githubWatchPr(42, "MERGED"),
                 commits: { nodes: [] },
               },
             },
@@ -558,13 +560,15 @@ describe("GithubService.getPullRequestWatchSnapshots", () => {
     expect(snapshots[0]).toMatchObject({
       threadId: "thread-1",
       prNumber: 41,
-      state: "OPEN",
+      state: "draft",
+      title: "PR 41",
+      url: "https://github.com/o/r/pull/41",
       checks: { aggregate: "pending" },
     });
     expect(snapshots[1]).toMatchObject({
       threadId: "thread-2",
       prNumber: 42,
-      state: "MERGED",
+      state: "merged",
       checks: { aggregate: "no_checks" },
     });
   });
@@ -578,7 +582,7 @@ describe("GithubService.getPullRequestWatchSnapshots", () => {
         cb(null, JSON.stringify({
           data: {
             repository: {
-              pr0: { number: 41, state: "OPEN", commits: { nodes: [] } },
+              pr0: { ...githubWatchPr(41, "OPEN"), commits: { nodes: [] } },
             },
           },
         }), "");
@@ -601,7 +605,7 @@ describe("GithubService.getPullRequestWatchSnapshots", () => {
         cb(null, JSON.stringify({
           data: {
             repository: {
-              pr0: { number, state: "OPEN", commits: { nodes: [] } },
+              pr0: { ...githubWatchPr(number, "OPEN"), commits: { nodes: [] } },
             },
           },
         }), "");
@@ -635,7 +639,7 @@ describe("GithubService.getPullRequestWatchSnapshots", () => {
         cb(null, JSON.stringify({
           data: {
             repository: {
-              pr0: { number, state: "OPEN", commits: { nodes: [] } },
+              pr0: { ...githubWatchPr(number, "OPEN"), commits: { nodes: [] } },
             },
           },
         }), "");
@@ -697,7 +701,7 @@ describe("GithubService.getPullRequestWatchSnapshots", () => {
         cb(null, JSON.stringify({
           data: {
             repository: {
-              pr0: { number, state: "OPEN", commits: { nodes: [] } },
+              pr0: { ...githubWatchPr(number, "OPEN"), commits: { nodes: [] } },
             },
           },
         }), "");

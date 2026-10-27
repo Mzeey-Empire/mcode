@@ -1,5 +1,6 @@
 import { ProviderCatalogChangeSchema } from "@mcode/contracts/providers/capability-catalog";
 import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
+import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
 import { type ProviderAvailability } from "@mcode/contracts/providers/availability";
 import { type Settings } from "@mcode/contracts/models/settings";
 import { type ThreadProviderSwitchedEvent } from "@mcode/contracts/models/message";
@@ -334,7 +335,9 @@ export function startPushListeners(): void {
     pushEmitter.on("thread.checksUpdated", (data) => {
       const parsed = WS_CHANNELS["thread.checksUpdated"].safeParse(data);
       if (!parsed.success) return;
-      const { threadId, checks } = parsed.data;
+      const { threadId, prNumber, checks } = parsed.data;
+      const thread = useWorkspaceStore.getState().threads.find((candidate) => candidate.id === threadId);
+      if (!thread || rankPullRequests(thread.pull_requests)[0]?.number !== prNumber) return;
       useWorkspaceStore.setState((ws) => ({
         checksById: { ...ws.checksById, [threadId]: checks },
       }));

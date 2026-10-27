@@ -24,7 +24,7 @@ async function fixture() {
   const other = await workspaces.create("Unopened", "/unopened", true);
   const thread = await threads.create(other.id, "Feature", "worktree", "feature");
   const github = {
-    getBranchPr: vi.fn().mockResolvedValue(null),
+    listBranchPrs: vi.fn().mockResolvedValue([]),
     getPullRequestWatchSnapshots: vi.fn<(targets: PullRequestWatchTarget[]) => Promise<PullRequestWatchSnapshot[]>>()
       .mockResolvedValue([]),
     getCheckRuns: vi.fn().mockResolvedValue(checks),
@@ -75,14 +75,14 @@ describe("global thread PR sync", () => {
     const f = await fixture();
     await f.funnel.observe(f.thread.id, [createMockThreadPullRequest()], "created");
     f.github.getPullRequestWatchSnapshots.mockResolvedValue([{
-      threadId: f.thread.id, prNumber: 42, state: "MERGED", checks,
+      threadId: f.thread.id, prNumber: 42, state: "merged", title: "Merged feature", url: "https://github.com/o/r/pull/42", checks,
     }]);
     const sockets = await connectClients();
     try {
       const pushes = sockets.clients.map(nextPush);
       expect(await syncThreadPullRequests(f.deps)).toEqual({ checked: 1 });
       const expected = { channel: "thread.pullRequests", data: {
-        threadId: f.thread.id, pullRequests: [createMockThreadPullRequest({ state: "merged" })],
+        threadId: f.thread.id, pullRequests: [createMockThreadPullRequest({ state: "merged", title: "Merged feature", url: "https://github.com/o/r/pull/42" })],
       } };
       expect(await Promise.all(pushes)).toEqual([expected, expected]);
       expect(f.threads.findById(f.thread.id)?.pull_requests[0]?.state).toBe("merged");
@@ -100,12 +100,12 @@ describe("global thread PR sync", () => {
     try {
       await f.threads.create(f.workspace.id, "Direct", "direct", "main");
       await f.threads.create(f.workspace.id, "Detached", "worktree", "HEAD", false, "codex", {}, "branchless");
-      f.github.getBranchPr.mockResolvedValue({ number: 17, state: "OPEN", title: "New feature", url: "https://github.com/o/r/pull/17" });
+      f.github.listBranchPrs.mockResolvedValue([{ number: 17, state: "open", title: "New feature", url: "https://github.com/o/r/pull/17" }]);
       expect(await syncThreadPullRequests(f.deps)).toEqual({ checked: 1 });
       expect(f.threads.findById(f.thread.id)?.pull_requests).toEqual([
         createMockThreadPullRequest({ number: 17, title: "New feature", url: "https://github.com/o/r/pull/17" }),
       ]);
-      expect(f.github.getBranchPr).toHaveBeenCalledExactlyOnceWith("feature", "/unopened");
+      expect(f.github.listBranchPrs).toHaveBeenCalledExactlyOnceWith("feature", "/unopened");
     } finally { await f.watcher.dispose(); }
   });
 
@@ -115,7 +115,7 @@ describe("global thread PR sync", () => {
       await f.funnel.observe(f.thread.id, [createMockThreadPullRequest()], "created");
       f.github.getPullRequestWatchSnapshots.mockImplementation(async () => {
         await f.threads.updateCheckoutFromHead(f.thread.id, "other", "named", null, null);
-        return [{ threadId: f.thread.id, prNumber: 42, state: "MERGED", checks }];
+        return [{ threadId: f.thread.id, prNumber: 42, state: "merged", title: "Merged feature", url: "https://github.com/o/r/pull/42", checks }];
       });
       await syncThreadPullRequests(f.deps);
       expect(f.threads.findById(f.thread.id)?.branch).toBe("other");
