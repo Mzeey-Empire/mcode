@@ -1666,7 +1666,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     set({ error: null });
     try {
       const completed = await getTransport().completeThread(threadId);
-      get().applyThreadLifecycle(completed);
+      if (!completed.ok) throw new Error(completed.refusal);
+      get().applyThreadLifecycle(completed.thread);
     } catch (e) {
       set({ error: String(e) });
       throw e;

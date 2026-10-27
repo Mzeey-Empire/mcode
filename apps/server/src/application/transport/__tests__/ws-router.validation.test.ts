@@ -1427,19 +1427,17 @@ describe("routeMessage thread completion lifecycle", () => {
       "direct",
       "main",
     );
-    const completed = await threadRepo.complete(
+    addClient(fakeOpenSocket(firstClient));
+    addClient(fakeOpenSocket(secondClient));
+    const complete = async () => ({ ok: true, thread: await threadRepo.complete(
       thread.id,
       "2026-08-12T08:00:00.000Z",
       "2026-08-15T08:00:00.000Z",
-    )!;
-    const complete = vi.fn().mockResolvedValue(completed);
+    ) });
     const deps = {
       threadCompletionService: { complete },
       threadRepo,
     } as unknown as RouterDeps;
-    // Connected after setup so the fixture's own thread.created broadcast is not counted.
-    addClient(fakeOpenSocket(firstClient));
-    addClient(fakeOpenSocket(secondClient));
 
     const response = await routeMessage(JSON.stringify({
       id: "req-complete",
@@ -1447,7 +1445,8 @@ describe("routeMessage thread completion lifecycle", () => {
       params: { threadId: thread.id },
     }), deps);
 
-    expect(response.result).toEqual(completed);
+    const completed = threadRepo.findById(thread.id);
+    expect(response.result).toEqual({ ok: true, thread: completed });
     await vi.waitFor(() => {
       expect(firstClient).toHaveLength(1);
       expect(secondClient).toHaveLength(1);

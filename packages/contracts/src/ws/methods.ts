@@ -185,6 +185,20 @@ import {
   BrowserAutomationResponseSchema,
 } from "../models/browser-automation.js";
 
+/** Expected reasons a thread completion cannot commit. */
+export const ThreadCompletionRefusalSchema = z.enum(["running", "approval-pending", "busy", "cancelled"]);
+
+/** The outcome of a user completion request. */
+export const ThreadCompletionResultSchema = lazySchema(() => z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), thread: ThreadSchema() }),
+  z.object({ ok: z.literal(false), refusal: ThreadCompletionRefusalSchema }),
+]));
+
+/** A completion refusal that callers can surface without parsing an error. */
+export type ThreadCompletionRefusal = z.infer<typeof ThreadCompletionRefusalSchema>;
+/** A committed completion or an expected refusal. */
+export type ThreadCompletionResult = z.infer<ReturnType<typeof ThreadCompletionResultSchema>>;
+
 const ExternalThreadControlScopeSchema = z.enum([
   "projects:read",
   "worktrees:read",
@@ -806,7 +820,7 @@ export const WS_METHODS = lazySchema(() => ({
   /** Persist explicit user completion and release thread-owned runtime resources. */
   "thread.complete": {
     params: z.object({ threadId: z.string() }),
-    result: ThreadSchema(),
+    result: ThreadCompletionResultSchema(),
   },
   /** Clear explicit user completion and cancel pending automatic deletion. */
   "thread.reopen": {

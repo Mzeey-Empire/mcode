@@ -1,7 +1,7 @@
 import type { DiffStats } from "@mcode/contracts/models/diff-stats";
 import type { FileReadResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
 import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
-import type { FilesystemBrowseResult, WorkspaceCreateResult } from "@mcode/contracts/ws/methods";
+import type { FilesystemBrowseResult, WorkspaceCreateResult, ThreadCompletionResult } from "@mcode/contracts/ws/methods";
 import type { ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import type { TurnRevertPreview, TurnRevertResult } from "@mcode/contracts/models/turn-revert";
 import type {
@@ -1076,7 +1076,7 @@ export function createWsTransport(
       ),
     deleteThread: (threadId, cleanupWorktree) =>
       rpc<boolean>("thread.delete", { threadId, cleanupWorktree }),
-    completeThread: (threadId) => rpc<Thread>("thread.complete", { threadId }),
+    completeThread: (threadId) => rpc<ThreadCompletionResult>("thread.complete", { threadId }),
     reopenThread: (threadId) => rpc<Thread>("thread.reopen", { threadId }),
     countBlockedThreadCleanupCandidates: () =>
       rpc<{ count: number }>("thread.cleanupBlockedCount", {}),

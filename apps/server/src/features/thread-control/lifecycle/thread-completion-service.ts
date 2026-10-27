@@ -2,6 +2,7 @@ import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import type { CompletedThreadRetentionDays, Settings } from "@mcode/contracts/models/settings";
 import type { Thread } from "@mcode/contracts/models/thread";
+import type { ThreadCompletionRefusal, ThreadCompletionResult } from "@mcode/contracts/ws/methods";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { AgentService } from "../../agents/index.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
@@ -95,18 +96,19 @@ export class ThreadCompletionService {
   }
 
   /** Complete an idle thread and release its thread-owned runtime resources. */
-  async complete(threadId: string): Promise<Thread> {
+  async complete(threadId: string): Promise<ThreadCompletionResult> {
     const token = this.mutationReservations.reserve(threadId, "completing");
-    if (!token) throw new Error(`Thread has a pending mutation: ${threadId}`);
+    if (!token) return { ok: false, refusal: "busy" };
 
     try {
       const thread = this.requireThread(threadId);
-      if (thread.user_completed_at !== null) return thread;
-      this.assertCompletable(threadId);
+      if (thread.user_completed_at !== null) return { ok: true, thread };
+      const refusal = this.assertCompletable(threadId);
+      if (refusal) return { ok: false, refusal };
       const { failures, barriers } = await this.releaseThreadResources(threadId);
       try {
         this.throwOnCompletionFailures(threadId, failures);
-        return await this.persistCompletion(thread);
+        return { ok: true, thread: await this.persistCompletion(thread) };
       } finally {
         for (const release of barriers) release();
       }
@@ -115,13 +117,14 @@ export class ThreadCompletionService {
     }
   }
 
-  private assertCompletable(threadId: string): void {
+  private assertCompletable(threadId: string): ThreadCompletionRefusal | null {
     if (this.agentService.runtimeAccess().activeThreadIds().includes(threadId)) {
-      throw new Error("Thread cannot be completed while it is running");
+      return "running";
     }
     if (this.permissions.listPendingApprovals(threadId).length > 0) {
-      throw new Error("Thread cannot be completed while permission is pending");
+      return "approval-pending";
     }
+    return null;
   }
 
   private async releaseThreadResources(threadId: string): Promise<{
