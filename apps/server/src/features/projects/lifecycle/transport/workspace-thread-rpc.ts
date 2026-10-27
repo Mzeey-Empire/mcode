@@ -8,7 +8,6 @@ import { serverWorkTrace } from "../../../agents/diagnostics/server-work-trace.j
 import { broadcast } from "../../../../application/transport/push.js";
 import type { GithubService } from "../../../pull-requests/github/github-service.js";
 import type { PullRequestLinkFunnel } from "../../../pull-requests/links/pull-request-link-funnel.js";
-import { normalizeThreadPullRequestState } from "../../../pull-requests/github/github-pull-request-normalizers.js";
 import type { CiWatcherService } from "../../../pull-requests/status/ci-watcher.js";
 import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import type { ThreadCompletionService } from "../../../thread-control/lifecycle/thread-completion-service.js";
@@ -61,7 +60,7 @@ export interface WorkspaceThreadRouterDeps {
   threadRepo: Pick<ThreadRepo, "findById" | "listAllByWorkspace" | "listAll">;
   workspaceRepo: Pick<WorkspaceRepo, "findById" | "removeRecent" | "setPinned" | "touchLastOpened">;
   gitWatcherService: Pick<GitWatcherService, "retryWatch" | "unwatchThreadWorktree" | "unwatchWorkspace" | "watchThreadWorktree" | "watchWorkspace">;
-  githubService: Pick<GithubService, "cancelForRepoPath" | "getBranchPr" | "getPullRequestWatchSnapshots">;
+  githubService: Pick<GithubService, "cancelForRepoPath" | "listBranchPrs" | "getPullRequestWatchSnapshots">;
   pullRequestLinkFunnel: Pick<PullRequestLinkFunnel, "observe">;
   ciWatcherService: Pick<CiWatcherService, "refresh" | "teardownThread" | "unwatch" | "watch">;
   enricher: Pick<WorkspaceEnricher, "enrich">;
@@ -300,7 +299,7 @@ function updateThreadSettings(
 type PrSyncDeps = {
   threadRepo: Pick<ThreadRepo, "listAll" | "findById">;
   workspaceService: Pick<WorkspaceService, "findById">;
-  githubService: Pick<GithubService, "getBranchPr" | "getPullRequestWatchSnapshots">;
+  githubService: Pick<GithubService, "listBranchPrs" | "getPullRequestWatchSnapshots">;
   pullRequestLinkFunnel: Pick<PullRequestLinkFunnel, "observe">;
   ciWatcherService: Pick<CiWatcherService, "refresh">;
 };
@@ -348,16 +347,14 @@ async function syncWorkspacePullRequests(
     const current = unchangedCheckout(deps, previous);
     if (!current?.pull_requests.some((pr) => pr.number === snapshot.prNumber)) continue;
     await deps.pullRequestLinkFunnel.observe(current.id, [{
-      number: snapshot.prNumber, state: normalizeThreadPullRequestState(snapshot.state), title: null, url: null,
+      number: snapshot.prNumber, state: snapshot.state, title: snapshot.title, url: snapshot.url,
     }], "sync");
-    deps.ciWatcherService.refresh(current.id, snapshot.checks);
+    deps.ciWatcherService.refresh(current.id, snapshot.prNumber, snapshot.checks);
   }
-  await Promise.all(threads.filter((thread) => thread.pull_requests.length === 0).map(async (thread) => {
-    const pr = await deps.githubService.getBranchPr(thread.branch, repoPath);
-    if (!pr || !unchangedCheckout(deps, thread)) return;
-    await deps.pullRequestLinkFunnel.observe(thread.id, [{
-      number: pr.number, state: normalizeThreadPullRequestState(pr.state), title: pr.title, url: pr.url,
-    }], "sync");
+  await Promise.all(threads.map(async (thread) => {
+    const prs = await deps.githubService.listBranchPrs(thread.branch, repoPath);
+    if (!unchangedCheckout(deps, thread)) return;
+    await deps.pullRequestLinkFunnel.observe(thread.id, prs, "sync");
   }));
 }
 

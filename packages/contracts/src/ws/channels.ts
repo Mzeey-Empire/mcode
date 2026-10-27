@@ -123,6 +123,7 @@ export const WS_CHANNELS = {
   }),
   "thread.checksUpdated": z.object({
     threadId: z.string(),
+    prNumber: z.number().int().positive(),
     checks: ChecksStatusSchema(),
   }),
   /** Emitted after the thread row's model (and active provider) are persisted for a send. */
