@@ -7,7 +7,7 @@ export interface PrStateVisual {
   color: string;
 }
 
-/** Returns the icon and color for a PR state. Shared by PrBadge and ProjectTree. */
+/** Returns the icon and color for a PR state. Shared by PrBadge and the sidebar thread row. */
 export function getPrVisual(state: string | null | undefined): PrStateVisual {
   switch (state) {
     case "merged":
