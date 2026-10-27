@@ -494,8 +494,7 @@
     animation: none;
   }
 }
-/* A completing sidebar row draws its strike across the title as a background, so the line can
-   grow from the left instead of appearing at once. */
+/* The strike is a background so it can grow from the left instead of appearing at once. */
 .sidebar-strike {
   background: linear-gradient(currentColor, currentColor) 0 55% / 100% 1px no-repeat;
   animation: sidebar-strike var(--duration-overlay) var(--ease-standard) both;
@@ -508,7 +507,6 @@
     animation: none;
   }
 }
-/* A sidebar row that left the list folds away in place, so the rows below close the gap. */
 .sidebar-row-closing {
   display: grid;
   animation: sidebar-row-close var(--duration-overlay) var(--ease-standard) both;
@@ -517,7 +515,6 @@
   from { grid-template-rows: 1fr; opacity: 1; }
   to { grid-template-rows: 0fr; opacity: 0; }
 }
-/* A thread that activity brings back out of Older rises into its slot. */
 .sidebar-row-rise {
   animation: sidebar-row-rise var(--duration-standard) var(--ease-standard) both;
 }

@@ -86,7 +86,6 @@ describe("useSidebarMotion", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  /** Copies land only when the test says so. */
   const landings: Array<() => void> = [];
 
   function environment(reducedMotion: boolean): MotionEnvironment {

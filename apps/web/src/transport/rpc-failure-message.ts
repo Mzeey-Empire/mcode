@@ -16,10 +16,7 @@ function validationIssueMessages(message: string): string | null {
   return messages.every((entry) => entry !== null) ? messages.join("; ") : null;
 }
 
-/**
- * The readable reason for a failed RPC. The server reports rejected params as a Zod issue list
- * serialized to JSON, so this shows the issues' messages instead of the raw list.
- */
+/** Returns a readable RPC failure reason, extracting messages from serialized validation issues. */
 export function rpcFailureMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return validationIssueMessages(message) ?? message;

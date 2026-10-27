@@ -88,7 +88,7 @@ export interface SidebarModel {
   readonly olderBar: { readonly count: number; readonly open: boolean } | null;
   /** Thread ids in Older, for the motion layer's clock-crossing diff. */
   readonly olderIds: ReadonlySet<string>;
-  /** Server-confirmed completed thread ids, for the motion layer's completion diff. */
+  /** Server-confirmed completed thread ids. */
   readonly completedIds: ReadonlySet<string>;
   /** Earliest future time an Active thread crosses into Older, or null. */
   readonly nextBoundaryAt: number | null;

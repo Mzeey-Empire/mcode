@@ -216,7 +216,6 @@ describe("SidebarList frozen order", () => {
     return screen.getByTestId("thread-list").parentElement!;
   }
 
-  /** The FLIP flag of the `setRows` call that first published `order`. */
   function flipWhenPublished(order: string[]): boolean | undefined {
     const keys = order.map((id) => `thread:${id}`);
     const index = FakeVirtualViewport.published.findIndex((ids) => ids.filter((id) => id.startsWith("thread:")).join() === keys.join());

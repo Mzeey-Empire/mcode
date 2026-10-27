@@ -10,7 +10,7 @@ import type { PullRequestLinkFunnel } from "../../pull-requests/links/pull-reque
 export type { ActiveWorktreePathSet, CompletedThreadRetentionRecord, CompletedThreadDeadlineUpdate } from "./thread-store.js";
 export { MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 
-/** Who completed a thread when it was not a user; marks the lifecycle push for the Undo line. */
+/** Marks a lifecycle push as an automatic completion. */
 export type ThreadCompletedBy = "auto";
 
 /** Read-only queries and committed mutations for ThreadRepo. */
