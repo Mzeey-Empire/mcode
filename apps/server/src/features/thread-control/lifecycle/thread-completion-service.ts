@@ -3,7 +3,7 @@ import { logger } from "@mcode/shared";
 import type { CompletedThreadRetentionDays, Settings } from "@mcode/contracts/models/settings";
 import type { Thread } from "@mcode/contracts/models/thread";
 import type { ThreadCompletionRefusal, ThreadCompletionResult } from "@mcode/contracts/ws/methods";
-import { ThreadRepo } from "../persistence/thread-repo.js";
+import { ThreadRepo, type ThreadCompletedBy } from "../persistence/thread-repo.js";
 import { AgentService } from "../../agents/index.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
 import { SettingsService } from "../../settings/settings-service.js";
@@ -101,11 +101,11 @@ export class ThreadCompletionService {
   }
 
   /** Complete an idle thread and release its thread-owned runtime resources. */
-  complete(threadId: string, holdMs = 0): Promise<ThreadCompletionResult> {
-    return this.completionHolds.complete(threadId, holdMs, () => this.commitCompletion(threadId));
+  complete(threadId: string, holdMs = 0, completedBy?: ThreadCompletedBy): Promise<ThreadCompletionResult> {
+    return this.completionHolds.complete(threadId, holdMs, () => this.commitCompletion(threadId, completedBy));
   }
 
-  private async commitCompletion(threadId: string): Promise<ThreadCompletionResult> {
+  private async commitCompletion(threadId: string, completedBy: ThreadCompletedBy | undefined): Promise<ThreadCompletionResult> {
     const token = this.mutationReservations.reserve(threadId, "completing");
     if (!token) return { ok: false, refusal: "busy" };
 
@@ -114,7 +114,7 @@ export class ThreadCompletionService {
       if (thread.user_completed_at !== null) return { ok: true, thread };
       const refusal = this.assertCompletable(threadId);
       if (refusal) return { ok: false, refusal };
-      const completed = await this.persistCompletion(thread);
+      const completed = await this.persistCompletion(thread, completedBy);
       return { ok: true, thread: await this.releaseResourcesBeforeAdmissionReopens(completed) };
     } finally {
       this.mutationReservations.release(threadId, token);
@@ -167,13 +167,13 @@ export class ThreadCompletionService {
     return blocked;
   }
 
-  private async persistCompletion(thread: Thread): Promise<Thread> {
+  private async persistCompletion(thread: Thread, completedBy: ThreadCompletedBy | undefined): Promise<Thread> {
     const completedAt = this.clock?.() ?? new Date();
     const retentionDays = this.retentionDays(this.settingsService.get());
     const scheduledDeletionAt = retentionDays === null
       ? null
       : new Date(completedAt.getTime() + retentionDays * DAY_MS).toISOString();
-    const completed = await this.threadRepo.complete(thread.id, completedAt.toISOString(), scheduledDeletionAt);
+    const completed = await this.threadRepo.complete(thread.id, completedAt.toISOString(), scheduledDeletionAt, completedBy);
     if (!completed) throw new Error(`Thread not found: ${thread.id}`);
     return completed;
   }

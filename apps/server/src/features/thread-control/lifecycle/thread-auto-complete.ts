@@ -80,7 +80,7 @@ export class ThreadAutoCompleteService {
     if (decision !== "complete") return;
     this.inFlight.add(threadId);
     try {
-      await this.completion.complete(threadId);
+      await this.completion.complete(threadId, 0, "auto");
     } finally {
       this.inFlight.delete(threadId);
     }

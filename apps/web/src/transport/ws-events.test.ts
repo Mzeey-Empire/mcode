@@ -25,6 +25,7 @@ import { pushEmitter } from "./ws-transport";
 import { openActionPreview } from "@/features/preview/navigation/open-url-in-preview";
 import { startPushListeners, stopPushListeners } from "./ws-events";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useCompletionStore } from "@/features/projects/sidebar/completion-store";
 import { useProviderCatalogStore } from "@/stores/providerCatalogStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
@@ -158,6 +159,19 @@ describe("ws-events thread.lifecycleChanged", () => {
         scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
       }),
     ]);
+  });
+
+  it.each([
+    [{ completedBy: "auto" }, "thread-1"],
+    [{}, null],
+  ] as const)("offers the Undo line for a remote completion only when it is automatic (%o)", (marker, undoLineThreadId) => {
+    useWorkspaceStore.setState({ threads: [makeThread()] });
+    useCompletionStore.setState({ undoLineThreadId: null });
+    startPushListeners();
+
+    pushEmitter.emit("thread.lifecycleChanged", { thread: makeThread({ user_completed_at: "2026-08-12T08:00:00.000Z" }), ...marker });
+
+    expect(useCompletionStore.getState().undoLineThreadId).toBe(undoLineThreadId);
   });
 
   it("removes a thread after an automatic deletion push", () => {

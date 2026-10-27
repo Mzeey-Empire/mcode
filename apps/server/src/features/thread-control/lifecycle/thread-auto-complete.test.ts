@@ -13,6 +13,9 @@ import { PullRequestLinkFunnel } from "../../pull-requests/links/pull-request-li
 import { CanonicalParentTurnWrite } from "../../agents/canonical/canonical-parent-turn-write.js";
 import { ThreadCompletionService } from "./thread-completion-service.js";
 import { autoCompleteDecision, ThreadAutoCompleteService, type AutoCompleteDecisionInput } from "./thread-auto-complete.js";
+import { broadcast } from "../../../application/transport/push.js";
+
+vi.mock("../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 
 const AT = "2030-01-01T10:00:00.000Z";
 const MERGED = createMockThreadPullRequest({ state: "merged" });
@@ -121,7 +124,7 @@ describe("ThreadAutoCompleteService", () => {
     expect(f.current().user_completed_at).toBeNull();
     await f.attention.acknowledgeSeen(f.thread.id, 2);
     await f.expectCompleted();
-    expect(f.complete.mock.calls).toEqual([[f.thread.id]]);
+    expect(f.complete.mock.calls).toEqual([[f.thread.id, 0, "auto"]]);
   });
 
   it("coalesces concurrent hints into one completion with no hold", async () => {
@@ -129,7 +132,16 @@ describe("ThreadAutoCompleteService", () => {
     await f.funnel.observe(f.thread.id, [MERGED]);
     await Promise.all([f.service.evaluate(f.thread.id), f.service.evaluate(f.thread.id)]);
     expect(f.current().user_completed_at).toBe(AT);
-    expect(f.complete.mock.calls).toEqual([[f.thread.id]]);
+    expect(f.complete.mock.calls).toEqual([[f.thread.id, 0, "auto"]]);
+  });
+
+  it("marks its lifecycle push as an automatic completion", async () => {
+    vi.mocked(broadcast).mockClear();
+    const f = await fixture();
+    await f.funnel.observe(f.thread.id, [MERGED]);
+    await f.service.evaluate(f.thread.id);
+    const pushes = vi.mocked(broadcast).mock.calls.filter(([channel]) => channel === "thread.lifecycleChanged");
+    expect(pushes).toEqual([["thread.lifecycleChanged", { thread: f.current(), completedBy: "auto" }]]);
   });
 
   it.each(["busy", "running"] as const)("waits for another hint after a %s refusal", async (refusal) => {
@@ -143,11 +155,11 @@ describe("ThreadAutoCompleteService", () => {
     f.running.length = 0;
     vi.useFakeTimers();
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(f.complete.mock.calls).toEqual([[f.thread.id]]);
+    expect(f.complete.mock.calls).toEqual([[f.thread.id, 0, "auto"]]);
     vi.useRealTimers();
     await f.service.evaluate(f.thread.id);
     expect(f.current().user_completed_at).toBe(AT);
-    expect(f.complete.mock.calls).toEqual([[f.thread.id], [f.thread.id]]);
+    expect(f.complete.mock.calls).toEqual([[f.thread.id, 0, "auto"], [f.thread.id, 0, "auto"]]);
   });
 
   it("keeps a reopened thread paused with its override intact until a new turn settles", async () => {
@@ -227,5 +239,5 @@ it.each([...new Set(Object.values(inputTriggers).flat())])("wires decision input
   if (trigger === "activity") await f.threads.advanceActivity(f.thread.id, "2030-01-01T10:01:00.000Z");
   if (trigger === "settings") f.setGlobal(true);
   await f.expectCompleted();
-  expect(f.complete.mock.calls).toEqual([[f.thread.id]]);
+  expect(f.complete.mock.calls).toEqual([[f.thread.id, 0, "auto"]]);
 });
