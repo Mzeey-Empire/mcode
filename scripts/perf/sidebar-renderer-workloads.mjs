@@ -792,7 +792,8 @@ const SIDEBAR_CHECKS = {
   sidebarScroll: (check) => [
     [check.reachedBottom, "the wheel did not reach the bottom of the sidebar"],
     [!check.scrollable || check.frames.frameCount > 0, "no frames were recorded during the scroll"],
-    [listHeightMatchesContent(check.listHeight), "the list's scroll height differs from the content height vlist set"],
+    // A list that fits has no scroller to compare, and no scroll to skew.
+    [!check.scrollable || listHeightMatchesContent(check.listHeight), "the list's scroll height differs from the content height vlist set"],
   ],
   sidebarHydration: (check, mode) => [
     [Number.isFinite(check.firstThreadRowMs), "no seeded thread row painted after reload"],
