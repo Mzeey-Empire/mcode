@@ -27,6 +27,7 @@ const OLDER_AFTER_DAYS = 14;
 const DAY_MS = 86_400_000;
 const IDLE_WINDOW_MS = 61_000;
 const ROW_RENDER_PREFIX = "sidebar-thread:";
+const AGE_RENDER_PREFIX = "sidebar-age:";
 const SET_ROWS_COUNTER = "sidebar.setRows";
 
 /** Returns the nearest-rank percentile of finite values, or null when there are none. */
@@ -667,10 +668,11 @@ async function runOlderCrossingSample(context) {
   return { durationMs: landing.landedMs - landing.firstFlightMs, check: { crossing, ...landing, frames, ...rows } };
 }
 
+// The minute ticker re-renders only each row's age line, so idle renders count the row and its age line.
 async function readRowRenderTotal(page) {
-  return page.evaluate((prefix) => Object.entries(window.__mcodePerformanceAttribution?.rowRenders ?? {})
-    .filter(([rowId]) => rowId.startsWith(prefix))
-    .reduce((total, [, count]) => total + count, 0), ROW_RENDER_PREFIX);
+  return page.evaluate((prefixes) => Object.entries(window.__mcodePerformanceAttribution?.rowRenders ?? {})
+    .filter(([rowId]) => prefixes.some((prefix) => rowId.startsWith(prefix)))
+    .reduce((total, [, count]) => total + count, 0), [ROW_RENDER_PREFIX, AGE_RENDER_PREFIX]);
 }
 
 /** Leaves the sidebar idle across at least one minute tick and counts thread row renders. */
