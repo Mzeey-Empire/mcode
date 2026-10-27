@@ -26,6 +26,7 @@ import {
 } from "@/lib/toast-presence";
 import { cn } from "@/lib/utils";
 import { useToastStore, type Toast, type ToastKind } from "@/stores/toastStore";
+import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 /** 8px under the 48px conversation header. */
 const LANE_TOP_PX = 56;
@@ -49,8 +50,6 @@ const KIND_STYLE: Record<ToastKind, { mark: StatusMarkState; label: string; tone
   failed: { mark: "error", label: "Failed", tone: "text-error", role: "alert" },
   info: { mark: "info", label: "Info", tone: "text-muted", role: "status" },
 };
-
-const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 interface LaneColumn {
   readonly left: number;
