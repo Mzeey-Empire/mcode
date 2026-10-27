@@ -265,9 +265,7 @@ export const ACTIVE_TURN_WRITE_POLICY = {
 } as const;
 
 const PROTECTED_CONVERSATION_HISTORY_INDEXES = [
-  ["tool_call_records", "idx_tool_call_records_message_sort_order"],
-  ["thought_segments", "idx_thought_segments_message_sort_order"],
-  ["hook_executions", "idx_hook_executions_message_sort_order"],
+  ["tool_call_records", "idx_tool_call_records_message_sort_order_id"],
   ["plan_question_answers", "idx_plan_question_answers_thread_answered_at"],
 ] as const;
 

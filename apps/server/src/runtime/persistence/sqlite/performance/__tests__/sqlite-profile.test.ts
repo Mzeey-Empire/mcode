@@ -170,18 +170,8 @@ describe("conversation history query plans", () => {
   const protectedPlans: SQLiteQueryPlan[] = [
     [
       "tool_call_records",
-      "idx_tool_call_records_message_sort_order",
-      "SELECT id FROM tool_call_records WHERE message_id IN (?) ORDER BY message_id, sort_order",
-    ],
-    [
-      "thought_segments",
-      "idx_thought_segments_message_sort_order",
-      "SELECT id FROM thought_segments WHERE message_id IN (?) ORDER BY message_id, sort_order",
-    ],
-    [
-      "hook_executions",
-      "idx_hook_executions_message_sort_order",
-      "SELECT id FROM hook_executions WHERE message_id IN (?) ORDER BY message_id, sort_order",
+      "idx_tool_call_records_message_sort_order_id",
+      "SELECT message_id, count(*) FROM tool_call_records WHERE message_id IN (?) GROUP BY message_id",
     ],
     [
       "plan_question_answers",
@@ -203,7 +193,7 @@ describe("conversation history query plans", () => {
       ? { ...plan, rows: [...plan.rows, { id: 2, parent: 0, detail: "USE TEMP B-TREE FOR ORDER BY" }] }
       : plan);
     const fullScan = protectedPlans.map((plan, index) => index === 1
-      ? { ...plan, rows: [{ id: 1, parent: 0, detail: "SCAN thought_segments" }] }
+      ? { ...plan, rows: [{ id: 1, parent: 0, detail: "SCAN plan_question_answers" }] }
       : plan);
 
     expect(() => assertConversationHistoryQueryPlans(temporarySort)).toThrow("temporary sort");
@@ -212,6 +202,20 @@ describe("conversation history query plans", () => {
 });
 
 describe("runSQLiteProfile", () => {
+  it.each(["conversation-read-100", "conversation-read-1000"] as const)("checks actual %s query plans", async (workload) => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-sqlite-profile-"));
+    const database = openSQLiteProfileDatabase(NodePath.join(directory, `${workload}.sqlite`));
+    try {
+      const sample = await runSQLiteProfileWorkload(database, workload, 1);
+      expect(() => assertConversationHistoryQueryPlans(sample.queryPlans)).not.toThrow();
+      expect(sample.queryPlans.map((plan) => plan.sql)).toContainEqual(expect.stringContaining('from "tool_call_records"'));
+      expect(sample.queryPlans.map((plan) => plan.sql)).toContainEqual(expect.stringContaining('from "plan_question_answers"'));
+    } finally {
+      database.db.close(true);
+      await NodeFS.promises.rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    }
+  }, 30_000);
+
   it("measures active-turn batches through the real owner and counts the owner's changed rows", async () => {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-sqlite-profile-"));
     try {
