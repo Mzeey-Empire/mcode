@@ -121,11 +121,6 @@ export const WS_CHANNELS = {
     threadId: z.string(),
     pullRequests: z.array(ThreadPullRequestSchema()),
   }),
-  "thread.prLinked": z.object({
-    threadId: z.string(),
-    prNumber: z.number(),
-    prStatus: z.string(),
-  }),
   "thread.checksUpdated": z.object({
     threadId: z.string(),
     checks: ChecksStatusSchema(),
@@ -146,8 +141,6 @@ export const WS_CHANNELS = {
       checkoutState: z.enum(["named", "branchless"]),
       baseBranch: z.string().nullable(),
       headSha: z.string().nullable(),
-      prNumber: z.number().nullable(),
-      prStatus: z.string().nullable(),
     }),
   )(),
   "files.changed": z.object({

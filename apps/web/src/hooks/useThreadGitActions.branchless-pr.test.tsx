@@ -1,4 +1,4 @@
-import { createMockThread } from "@mcode/contracts/testing";
+import { createMockThreadPullRequest, createMockThread } from "@mcode/contracts/testing";
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport";
@@ -43,8 +43,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     checkout_state: "named",
     base_branch: null,
     worktree_managed: true,
-    pr_number: null,
-    pr_status: null,
+    
     provider: "claude",
     ...overrides,
   });
@@ -103,6 +102,15 @@ describe("useThreadGitActions branchless PR gates", () => {
 });
 
 describe("useThreadGitActions PR title", () => {
+  it("uses the ranked primary link when a branch poll returns another linked PR", () => {
+    mockUseBranchPr.mockReturnValue({ number: 10, title: "Old PR", url: "https://github.com/o/r/pull/10", state: "MERGED" });
+    const { result } = renderHook(() => useThreadGitActions(makeThread({ pull_requests: [
+      createMockThreadPullRequest({ number: 10, state: "merged", url: "https://github.com/o/r/pull/10" }),
+      createMockThreadPullRequest({ number: 20, state: "draft", url: "https://github.com/o/r/pull/20" }),
+    ] })));
+    expect(result.current.pr).toEqual({ number: 20, state: "draft", url: "https://github.com/o/r/pull/20" });
+  });
+
   it("titles the PR row from the polled branch PR", () => {
     mockUseBranchPr.mockReturnValue({
       number: 12,
@@ -118,10 +126,10 @@ describe("useThreadGitActions PR title", () => {
   it("has no title for a PR this client created before the next poll", () => {
     seedWorkspace({ "thread-1": "https://github.com/acme/app/pull/13" });
     const { result } = renderHook(() =>
-      useThreadGitActions(makeThread({ branch: "feat/sidebar", pr_number: 13, pr_status: "OPEN" })),
+      useThreadGitActions(makeThread({ branch: "feat/sidebar", pull_requests: [createMockThreadPullRequest({ number: 13, state: "open" })] })),
     );
 
-    expect(result.current.pr).toEqual({ number: 13, url: "https://github.com/acme/app/pull/13", state: "OPEN" });
+    expect(result.current.pr).toEqual({ number: 13, url: "https://github.com/acme/app/pull/13", state: "open" });
     expect(result.current.openPrDetail).toBeNull();
   });
 });

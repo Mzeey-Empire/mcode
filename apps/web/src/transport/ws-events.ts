@@ -151,7 +151,7 @@ function handleTerminalData(data: unknown): void {
  * - `thread.lifecycleChanged` -- completion, reopen, or cleanup state persisted by the server
  * - `thread.deleted` -- successful automatic retention cleanup
  * - `workspace.environment.action.updated` -- retained Project Action lifecycle and output updates
- * - `thread.prLinked` -- PR detected for a thread, updates pr_number/pr_status
+ * - `thread.pullRequests` -- committed replacement of a thread’s linked PRs
  * - `thread.checksUpdated` -- CI check status polled for a thread's PR, updates checksById
  * - `thread.modelUpdated` -- thread model and provider synced after a message send (multi-client)
  * - `thread.providerSwitched` -- a send switched provider; patches the thread row and appends the switch marker once
@@ -179,6 +179,10 @@ function handleTerminalData(data: unknown): void {
 export function startPushListeners(): void {
   // Guard against double-init
   stopPushListeners();
+
+  const syncPrs = () => { void useWorkspaceStore.getState().syncThreadPrs(); };
+  window.addEventListener("focus", syncPrs);
+  unsubs.push(() => window.removeEventListener("focus", syncPrs));
   unsubs.push(startThreadAttentionTracking());
   unsubs.push(startThreadEventDetector());
   unsubs.push(pushEmitter.on("thread.attention", (data) => {
@@ -325,29 +329,12 @@ export function startPushListeners(): void {
     }),
   );
 
-  // thread.prLinked: a PR was detected and linked to a thread
-  unsubs.push(
-    pushEmitter.on("thread.prLinked", (data) => {
-      const { threadId, prNumber, prStatus } = data as {
-        threadId: string;
-        prNumber: number;
-        prStatus: string;
-      };
-      useWorkspaceStore.setState((ws) => ({
-        threads: ws.threads.map((t) =>
-          t.id === threadId ? { ...t, pr_number: prNumber, pr_status: prStatus } : t,
-        ),
-      }));
-    }),
-  );
-
   // thread.checksUpdated: CI check status polled for a thread's PR
   unsubs.push(
     pushEmitter.on("thread.checksUpdated", (data) => {
-      const { threadId, checks } = data as {
-        threadId: string;
-        checks: import("@mcode/contracts/github").ChecksStatus;
-      };
+      const parsed = WS_CHANNELS["thread.checksUpdated"].safeParse(data);
+      if (!parsed.success) return;
+      const { threadId, checks } = parsed.data;
       useWorkspaceStore.setState((ws) => ({
         checksById: { ...ws.checksById, [threadId]: checks },
       }));
@@ -387,26 +374,9 @@ export function startPushListeners(): void {
   // thread.checkoutChanged: thread worktree HEAD changed outside Mcode
   unsubs.push(
     pushEmitter.on("thread.checkoutChanged", (data) => {
-      const {
-        threadId,
-        workspaceId,
-        branch,
-        checkoutState,
-        baseBranch,
-        headSha,
-        prNumber,
-        prStatus,
-      } = data as {
-        threadId: string;
-        workspaceId: string;
-        branch: string;
-        checkoutState: "named" | "branchless";
-        baseBranch: string | null;
-        headSha: string | null;
-        prNumber: number | null;
-        prStatus: string | null;
-      };
-      if (!threadId || !workspaceId || !branch) return;
+      const parsed = WS_CHANNELS["thread.checkoutChanged"].safeParse(data);
+      if (!parsed.success) return;
+      const { threadId, branch, checkoutState, baseBranch, headSha } = parsed.data;
       useWorkspaceStore.setState((ws) => {
         const prUrlsByThreadId = { ...ws.prUrlsByThreadId };
         const checksById = { ...ws.checksById };
@@ -425,8 +395,6 @@ export function startPushListeners(): void {
                   checkout_state: checkoutState,
                   base_branch: baseBranch,
                   head_sha: headSha ?? null,
-                  pr_number: prNumber,
-                  pr_status: prStatus,
                 }
               : t,
           ),

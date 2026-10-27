@@ -1,4 +1,4 @@
-import { createMockApproval, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockApproval, createMockThread, createMockThreadPullRequest, createMockWorkspace } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { selectDockApprovals, useApprovalStore } from "@/stores/approvalStore";
 import { act } from "@testing-library/react";
@@ -107,8 +107,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     base_branch: null,
     head_sha: null,
     worktree_managed: true,
-    pr_number: 10,
-    pr_status: "OPEN",
+    pull_requests: [createMockThreadPullRequest({ number: 10, state: "open" })],
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     provider: "claude",
@@ -351,9 +350,19 @@ describe("ws-events thread.checkoutChanged", () => {
     });
   });
 
+  it("drops malformed checkout and checks pushes before touching thread state", () => {
+    startPushListeners();
+    const previous = useWorkspaceStore.getState();
+    pushEmitter.emit("thread.checkoutChanged", { threadId: "thread-1", branch: "invalid" });
+    pushEmitter.emit("thread.checksUpdated", { threadId: "thread-1", checks: { aggregate: "invalid" } });
+    expect(useWorkspaceStore.getState().threads).toBe(previous.threads);
+    expect(useWorkspaceStore.getState().checksById).toBe(previous.checksById);
+  });
+
   it("patches thread checkout fields and clears stale PR/check caches", () => {
     startPushListeners();
 
+    pushEmitter.emit("thread.pullRequests", { threadId: "thread-1", pullRequests: [] });
     pushEmitter.emit("thread.checkoutChanged", {
       threadId: "thread-1",
       workspaceId: "ws-1",
@@ -361,8 +370,6 @@ describe("ws-events thread.checkoutChanged", () => {
       checkoutState: "branchless",
       baseBranch: "feat/old",
       headSha: "3f9a1c2",
-      prNumber: null,
-      prStatus: null,
     });
 
     const state = useWorkspaceStore.getState();
@@ -371,8 +378,7 @@ describe("ws-events thread.checkoutChanged", () => {
       checkout_state: "branchless",
       base_branch: "feat/old",
       head_sha: "3f9a1c2",
-      pr_number: null,
-      pr_status: null,
+      
     });
     expect(state.prUrlsByThreadId).toEqual({ other: "keep" });
     expect(state.checksById).toEqual({
@@ -388,8 +394,6 @@ describe("ws-events thread.checkoutChanged", () => {
       branch: "HEAD",
       checkoutState: "branchless" as const,
       baseBranch: "feat/old",
-      prNumber: 10,
-      prStatus: "OPEN" as const,
     };
     pushEmitter.emit("thread.checkoutChanged", { ...detached, headSha: "3f9a1c2" });
     useWorkspaceStore.setState({

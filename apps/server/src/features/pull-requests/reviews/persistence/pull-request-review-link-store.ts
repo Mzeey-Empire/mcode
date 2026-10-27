@@ -12,6 +12,8 @@ import * as NodeCrypto from "node:crypto";
 import { ThreadStore } from "../../../thread-control/persistence/thread-store.js";
 import { reviewLinkProjection } from "../review-link-projection.js";
 import type { CreateReviewTaskInput, ReviewTaskCommit } from "./review-write-operations.js";
+import { observeThreadPullRequests } from "../../links/pull-request-link-funnel.js";
+import { normalizeThreadPullRequestState } from "../../github/github-pull-request-normalizers.js";
 
 /** Stable provider identity for one pull request. */
 export interface PullRequestReviewLinkIdentity {
@@ -166,9 +168,10 @@ export class PullRequestReviewLinkStore {
       reasoning_level: input.defaults.reasoning, interaction_mode: input.defaults.interactionMode,
       permission_mode: input.defaults.permission, context_window_mode: input.defaults.contextWindow, thinking: input.defaults.thinking,
     })) throw new Error("Failed to persist the Review task settings.");
-    if (!threads.updatePr(threadId, input.identity.number, input.checkout.pullRequestState.toUpperCase())) {
-      throw new Error("Failed to persist the pull request on the Review task.");
-    }
+    observeThreadPullRequests(this.db, threadId, [{
+      number: input.identity.number, state: normalizeThreadPullRequestState(input.checkout.pullRequestState),
+      title: input.pullRequestTitle, url: input.checkout.pullRequestUrl,
+    }]);
   }
 
   /** Find the canonical local link for a provider pull request identity. */

@@ -89,7 +89,6 @@ describe("workspaceStore pin/remove/touch", () => {
     ]);
     const updated = useWorkspaceStore.getState().threads[0];
     expect(updated.pull_requests.map((pr) => pr.number)).toEqual([10, 20]);
-    expect(updated.pr_number).toBe(20);
     expect(updated.last_activity_at).toBe(thread.last_activity_at);
   });
 
@@ -295,8 +294,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     worktree_path: null,
     branch: "main",
     checkout_state: "named",
-    pr_number: null,
-    pr_status: null,
+    
     created_at: "2026-08-12T08:00:00.000Z",
     updated_at: "2026-08-12T08:00:00.000Z",
     provider: "claude",
@@ -478,16 +476,15 @@ describe("workspaceStore completion lifecycle", () => {
 });
 
 
-const baseThread = {
+const baseThread = createMockThread({
   id: "t1",
   workspace_id: "ws1",
   branch: "feat/my-feature",
   mode: "worktree",
   worktree_path: "/path/to/worktree",
   status: "active",
-  pr_number: null,
-  pr_status: null,
-} as unknown as Thread;
+  
+});
 
 describe("workspaceStore.recordPrCreated", () => {
   beforeEach(() => {
@@ -497,12 +494,12 @@ describe("workspaceStore.recordPrCreated", () => {
     });
   });
 
-  it("sets pr_number and pr_status on the matching thread", () => {
+  it("records a created PR on the matching thread", () => {
     useWorkspaceStore.getState().recordPrCreated("t1", 42, "https://github.com/o/r/pull/42");
 
     const thread = useWorkspaceStore.getState().threads.find((t) => t.id === "t1");
-    expect(thread?.pr_number).toBe(42);
-    expect(thread?.pr_status).toBe("OPEN");
+    expect(thread?.pull_requests[0]?.number).toBe(42);
+    expect(thread?.pull_requests[0]?.state).toBe("open");
   });
 
   it("stores the pr url in prUrlsByThreadId keyed by thread id", () => {
@@ -514,20 +511,20 @@ describe("workspaceStore.recordPrCreated", () => {
   });
 
   it("leaves other threads unchanged", () => {
-    const other: Thread = { ...baseThread, id: "t2", pr_number: null };
+    const other: Thread = { ...baseThread, id: "t2", pull_requests: [] };
     useWorkspaceStore.setState({ threads: [baseThread, other] });
 
     useWorkspaceStore.getState().recordPrCreated("t1", 42, "https://github.com/o/r/pull/42");
 
     const unchanged = useWorkspaceStore.getState().threads.find((t) => t.id === "t2");
-    expect(unchanged?.pr_number).toBeNull();
+    expect(unchanged?.pull_requests[0]?.number).toBeUndefined();
   });
 
   it("is a no-op when the thread id is not found", () => {
     useWorkspaceStore.getState().recordPrCreated("not-exist", 1, "https://github.com/o/r/pull/1");
 
     const thread = useWorkspaceStore.getState().threads.find((t) => t.id === "t1");
-    expect(thread?.pr_number).toBeNull();
+    expect(thread?.pull_requests[0]?.number).toBeUndefined();
     expect(useWorkspaceStore.getState().prUrlsByThreadId["not-exist"]).toBeUndefined();
   });
 });
@@ -565,8 +562,7 @@ describe("workspaceStore.recordPullRequestLink", () => {
     );
 
     expect(useWorkspaceStore.getState().threads[0]).toMatchObject({
-      pr_number: 42,
-      pr_status: "merged",
+      pull_requests: [createMockThreadPullRequest({ number: 42, state: "merged", url: "https://github.com/o/r/pull/42" })],
     });
   });
 });

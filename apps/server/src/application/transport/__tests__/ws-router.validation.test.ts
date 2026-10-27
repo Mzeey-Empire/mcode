@@ -1,4 +1,4 @@
-import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockThreadPullRequest, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeEvents from "node:events";
@@ -1066,8 +1066,7 @@ describe("routeMessage git.createBranch", () => {
       checkout_state: "named",
       base_branch: null,
       head_sha: null,
-      pr_number: null,
-      pr_status: null,
+      pull_requests: [],
     });
     const deps = {
       threadService: {
@@ -1104,8 +1103,6 @@ describe("routeMessage git.createBranch", () => {
         checkoutState: "named",
         baseBranch: null,
         headSha: null,
-        prNumber: null,
-        prStatus: null,
       },
     });
   });
@@ -1203,8 +1200,7 @@ describe("routeMessage thread.create", () => {
       checkout_state: "branchless",
       base_branch: "main",
       worktree_managed: true,
-      pr_number: null,
-      pr_status: null,
+      pull_requests: [],
       model: null,
       provider: "claude",
       created_at: "2026-06-23T00:00:00.000Z",
@@ -1616,7 +1612,6 @@ describe("routeMessage github.createPr", () => {
       },
       threadService: {
         findById: vi.fn().mockReturnValue(thread),
-        linkPr: vi.fn(),
       },
       gitRepository: { getCurrentBranchAt, push },
       gitWorktrees: { resolveWorkingDir },
@@ -1705,235 +1700,6 @@ describe("routeMessage github.createPr", () => {
   });
 });
 
-describe("routeMessage thread.syncPrs", () => {
-  it("checks PRs only for named worktree checkouts", async () => {
-    const getBranchPr = vi.fn().mockResolvedValue({
-      number: 42,
-      state: "open",
-    });
-    const watch = vi.fn();
-    const deps = {
-      workspaceService: {
-        findById: vi.fn().mockReturnValue({
-          id: "ws-1",
-          path: "C:/repo",
-          is_git_repo: true,
-        }),
-      },
-      threadService: {
-        list: vi.fn().mockReturnValue([
-          {
-            id: "branchless-thread",
-            branch: "main",
-            mode: "worktree",
-            checkout_state: "branchless",
-            pr_number: null,
-            pr_status: null,
-          },
-          {
-            id: "named-thread",
-            branch: "feat/named",
-            mode: "worktree",
-            checkout_state: "named",
-            pr_number: null,
-            pr_status: null,
-          },
-          {
-            id: "direct-thread",
-            branch: "main",
-            mode: "direct",
-            checkout_state: "named",
-            pr_number: null,
-            pr_status: null,
-          },
-        ]),
-        linkPr: vi.fn(),
-      },
-      githubService: {
-        getBranchPr,
-      },
-      ciWatcherService: {
-        watch,
-        unwatch: vi.fn(),
-      },
-    } as unknown as RouterDeps;
-
-    const response = await routeMessage(
-      JSON.stringify({
-        id: "req-sync",
-        method: "thread.syncPrs",
-        params: { workspaceId: "ws-1" },
-      }),
-      deps,
-    );
-
-    expect(response.result).toEqual([
-      { threadId: "named-thread", prNumber: 42, prStatus: "open" },
-    ]);
-    expect(getBranchPr).toHaveBeenCalledTimes(1);
-    expect(getBranchPr).toHaveBeenCalledWith("feat/named", "C:/repo");
-    expect(deps.threadService.linkPr).toHaveBeenCalledWith(
-      "named-thread",
-      42,
-      "open",
-    );
-    expect(watch).toHaveBeenCalledWith("named-thread", 42, "feat/named", "C:/repo");
-  });
-
-  it("refreshes linked pull requests through one batch and stops terminal watchers", async () => {
-    const checks = { aggregate: "passing" as const, runs: [], fetchedAt: 1 };
-    const getPullRequestWatchSnapshots = vi.fn().mockResolvedValue([
-      { threadId: "thread-1", prNumber: 41, state: "OPEN", checks },
-      { threadId: "thread-2", prNumber: 42, state: "MERGED", checks },
-    ]);
-    const watch = vi.fn();
-    const refresh = vi.fn();
-    const unwatch = vi.fn();
-    const deps = {
-      workspaceService: {
-        findById: vi.fn().mockReturnValue({
-          id: "ws-1",
-          path: "C:/repo",
-          is_git_repo: true,
-        }),
-      },
-      threadService: {
-        list: vi.fn().mockReturnValue([
-          {
-            id: "thread-1",
-            branch: "feat/one",
-            mode: "worktree",
-            checkout_state: "named",
-            pr_number: 41,
-            pr_status: "OPEN",
-          },
-          {
-            id: "thread-2",
-            branch: "feat/two",
-            mode: "worktree",
-            checkout_state: "named",
-            pr_number: 42,
-            pr_status: "OPEN",
-          },
-        ]),
-        findById: vi.fn().mockImplementation((threadId: string) => ({
-          "thread-1": {
-            id: "thread-1",
-            branch: "feat/one",
-            mode: "worktree",
-            checkout_state: "named",
-            pr_number: 41,
-            pr_status: "OPEN",
-          },
-          "thread-2": {
-            id: "thread-2",
-            branch: "feat/two",
-            mode: "worktree",
-            checkout_state: "named",
-            pr_number: 42,
-            pr_status: "OPEN",
-          },
-        })[threadId] ?? null),
-        linkPr: vi.fn(),
-      },
-      githubService: {
-        getPullRequestWatchSnapshots,
-        getBranchPr: vi.fn(),
-      },
-      ciWatcherService: { watch, refresh, unwatch },
-    } as unknown as RouterDeps;
-
-    const response = await routeMessage(
-      JSON.stringify({
-        id: "req-sync-linked",
-        method: "thread.syncPrs",
-        params: { workspaceId: "ws-1" },
-      }),
-      deps,
-    );
-
-    expect(getPullRequestWatchSnapshots).toHaveBeenCalledTimes(1);
-    expect(getPullRequestWatchSnapshots).toHaveBeenCalledWith([
-      { threadId: "thread-1", prNumber: 41, repoPath: "C:/repo" },
-      { threadId: "thread-2", prNumber: 42, repoPath: "C:/repo" },
-    ]);
-    expect(deps.githubService.getBranchPr).not.toHaveBeenCalled();
-    expect(response.result).toEqual([
-      { threadId: "thread-2", prNumber: 42, prStatus: "MERGED" },
-    ]);
-    expect(watch).toHaveBeenCalledWith(
-      "thread-1",
-      41,
-      "feat/one",
-      "C:/repo",
-      { skipInitialFetch: true },
-    );
-    expect(refresh).toHaveBeenCalledWith("thread-1", checks);
-    expect(unwatch).toHaveBeenCalledWith("thread-2");
-  });
-
-  it("ignores a linked snapshot when the thread was relinked during the request", async () => {
-    const checks = { aggregate: "passing" as const, runs: [], fetchedAt: 1 };
-    const linkPr = vi.fn();
-    const watch = vi.fn();
-    const refresh = vi.fn();
-    const unwatch = vi.fn();
-    const deps = {
-      workspaceService: {
-        findById: vi.fn().mockReturnValue({
-          id: "ws-1",
-          path: "C:/repo",
-          is_git_repo: true,
-        }),
-      },
-      threadService: {
-        list: vi.fn().mockReturnValue([{
-          id: "thread-1",
-          branch: "feat/one",
-          mode: "worktree",
-          checkout_state: "named",
-          pr_number: 41,
-          pr_status: "OPEN",
-        }]),
-        findById: vi.fn().mockReturnValue({
-          id: "thread-1",
-          branch: "feat/relinked",
-          mode: "worktree",
-          checkout_state: "named",
-          pr_number: 99,
-          pr_status: "OPEN",
-        }),
-        linkPr,
-      },
-      githubService: {
-        getPullRequestWatchSnapshots: vi.fn().mockResolvedValue([{
-          threadId: "thread-1",
-          prNumber: 41,
-          state: "MERGED",
-          checks,
-        }]),
-        getBranchPr: vi.fn(),
-      },
-      ciWatcherService: { watch, refresh, unwatch },
-    } as unknown as RouterDeps;
-
-    const response = await routeMessage(
-      JSON.stringify({
-        id: "req-sync-stale",
-        method: "thread.syncPrs",
-        params: { workspaceId: "ws-1" },
-      }),
-      deps,
-    );
-
-    expect(response.result).toEqual([]);
-    expect(linkPr).not.toHaveBeenCalled();
-    expect(watch).not.toHaveBeenCalled();
-    expect(refresh).not.toHaveBeenCalled();
-    expect(unwatch).not.toHaveBeenCalled();
-  });
-});
-
 describe("routeMessage github.checkStatus", () => {
   it("does not bootstrap check polling for branchless worktree threads", async () => {
     const getCheckRuns = vi.fn();
@@ -1946,8 +1712,7 @@ describe("routeMessage github.checkStatus", () => {
           branch: "main",
           mode: "worktree",
           checkout_state: "branchless",
-          pr_number: 42,
-          pr_status: "OPEN",
+          pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })],
         }),
       },
       workspaceRepo: {
@@ -1996,8 +1761,7 @@ describe("routeMessage github.checkStatus", () => {
           branch: "feat/named",
           mode: "worktree",
           checkout_state: "named",
-          pr_number: 42,
-          pr_status: "OPEN",
+          pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })],
         }),
       },
       workspaceRepo: {

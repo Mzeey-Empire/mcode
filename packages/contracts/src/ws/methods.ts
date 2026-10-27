@@ -895,13 +895,8 @@ export const WS_METHODS = lazySchema(() => ({
     result: GoalLookupResultSchema(),
   },
   "thread.syncPrs": {
-    params: z.object({ workspaceId: z.string() }),
-    result: z.array(z.object({
-      threadId: z.string(),
-      /** null signals the PR was cleared from this thread (stale data removed). */
-      prNumber: z.number().nullable(),
-      prStatus: z.string().nullable(),
-    })),
+    params: z.object({}).strict(),
+    result: z.object({ checked: z.number().int().nonnegative() }).strict(),
   },
   /** Search threads across title, project, provider, branch, and worktree metadata. */
   "thread.search": {
