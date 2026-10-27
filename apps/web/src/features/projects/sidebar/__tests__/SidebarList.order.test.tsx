@@ -135,6 +135,19 @@ describe("SidebarList order", () => {
     expect(checkoutLabelCalls.get("second")).toBeGreaterThan(before.get("second") ?? 0);
     expect(checkoutLabelCalls.get("first")).toBe(before.get("first"));
   });
+
+  it("re-renders no thread row when one thread's CI checks change", () => {
+    seed([threadAt("first", 1), threadAt("second", 2)]);
+    render(<Harness />);
+    const before = new Map(checkoutLabelCalls);
+
+    act(() => useWorkspaceStore.setState((state) => ({
+      checksById: { ...state.checksById, second: { aggregate: "failing", fetchedAt: NOW, runs: [] } },
+    })));
+
+    expect(checkoutLabelCalls.get("first")).toBe(before.get("first"));
+    expect(checkoutLabelCalls.get("second")).toBe(before.get("second"));
+  });
 });
 
 describe("SidebarList Threads view", () => {
