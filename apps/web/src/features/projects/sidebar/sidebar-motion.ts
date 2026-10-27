@@ -6,9 +6,9 @@ import { flyCopy, type FlightTarget } from "./flight-layer";
 /** DESIGN.md motion tokens, in milliseconds, and the one ease curve. */
 export const MOTION = { fast: 120, standard: 180, overlay: 240, ease: "cubic-bezier(0.2, 0, 0, 1)" } as const;
 
-/** A big clock jump can move many rows; only this many on-screen copies fly, the rest just close. */
+/** Maximum on-screen copies flown into Older per model change; remaining rows only close. */
 export const MAX_OLDER_FLIGHTS = 3;
-/** Gap between consecutive Older flights, so the copies read as a sequence. */
+/** Delay in milliseconds between consecutive Older flights. */
 export const OLDER_FLIGHT_STAGGER_MS = 90;
 
 type ThreadKey = `thread:${string}`;
@@ -97,7 +97,7 @@ export interface ShownSidebar {
   readonly arriving: ReadonlySet<string>;
 }
 
-/** The DOM the motion layer reads and drives. Tests replace it. */
+/** The DOM operations the motion layer reads and drives. */
 export interface MotionEnvironment {
   visibleKeys(): ReadonlySet<string>;
   reducedMotion(): boolean;
@@ -138,7 +138,6 @@ interface MotionState {
   /** Threads closing into Older whose batch is still flying; the bar counts them in on landing. */
   readonly olderInbound: ReadonlySet<string>;
   readonly arriving: ReadonlySet<string>;
-  /** Transitions planned by the last model change, launched once after it commits. */
   readonly launch: readonly SidebarTransition[];
 }
 
@@ -205,9 +204,8 @@ function useTimers(): (callback: () => void, ms: number) => void {
 }
 
 /**
- * Runs {@link planTransitions} on each model change and merges the visual presence it plans over
- * the model: closing rows stay at their index while they fold, copies fly through the flight
- * layer, and the Completed count rises as each copy lands.
+ * Retains closing rows at their index, flies departing copies, and counts completed threads
+ * when their copies land.
  */
 export function useSidebarMotion(model: SidebarModel, cause: ModelCause, selectedThreadId: string | null, environment: MotionEnvironment = DOM_ENVIRONMENT): ShownSidebar {
   const [state, setState] = useState<MotionState>(() => ({ model, closing: new Map(), flying: new Set(), olderInbound: new Set(), arriving: new Set(), launch: [] }));
@@ -245,7 +243,6 @@ export function useSidebarMotion(model: SidebarModel, cause: ModelCause, selecte
     }
     if (olderFlights.length === 0) return;
     const batch = state.launch.flatMap((transition) => (transition.type === "close-row" ? [transition.key.slice("thread:".length)] : []));
-    // Everything the batch moved counts in when its last copy lands.
     void Promise.all(olderFlights).then(() => update((current) => ({ ...current, olderInbound: without(current.olderInbound, batch) })));
   }, [state.launch, environment, later]);
 
