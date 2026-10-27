@@ -268,6 +268,8 @@ interface SidebarListProps {
   readonly flip?: boolean;
   /** Row keys folding away after they left the model. */
   readonly closing?: ReadonlySet<string>;
+  /** Row keys rising back out of Older. */
+  readonly arriving?: ReadonlySet<string>;
 }
 
 const NO_KEYS: ReadonlySet<string> = new Set();
@@ -281,7 +283,7 @@ const unfreezeOnLeave = () => useSidebarUiStore.getState().unfreeze();
  * filters, sorts or caps: the model already did. Project headers in the recent list drag to
  * reorder projects.
  */
-export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KEYS }: SidebarListProps) {
+export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KEYS, arriving = NO_KEYS }: SidebarListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { controllerRef, hosts } = useSidebarViewport(containerRef);
   const drag = useProjectDrag(controllerRef);
@@ -299,11 +301,11 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
     const dropEdge = item.kind === "project" && dropIndicator?.id === item.workspaceId ? dropIndicator.edge : null;
     const isClosing = closing.has(item.key);
     return (
-      <div className={cn("px-1.5", isClosing && "sidebar-row-closing")} inert={isClosing || undefined}>
+      <div className={cn("px-1.5", isClosing && "sidebar-row-closing", arriving.has(item.key) && "sidebar-row-rise")} inert={isClosing || undefined}>
         <div className={cn(isClosing && "min-h-0 overflow-hidden")}><SidebarRow item={item} ctx={rowCtx} dropEdge={dropEdge} /></div>
       </div>
     );
-  }, [rowCtx, dropIndicator, closing]);
+  }, [rowCtx, dropIndicator, closing, arriving]);
 
   const dragged = drag.activeDragId === null ? undefined : itemsByKey.get(`project:${drag.activeDragId}`);
   return (
