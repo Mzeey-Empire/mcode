@@ -136,6 +136,8 @@ export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging
   const workspace = useWorkspaceStore((state) => state.workspaces.find((candidate) => candidate.id === item.workspaceId));
   const isActive = useWorkspaceStore((state) => state.activeWorkspaceId === item.workspaceId);
   const threads = useWorkspaceStore(useShallow((state) => workspaceThreads(state.threads, item.workspaceId)));
+  // Only headers roll up CI, so only they subscribe; a checks poll must not re-render thread rows.
+  const checksById = useWorkspaceStore((state) => state.checksById);
   const scope = useSidebarScope();
   const collapsedStatus = useCollapsedStatus(threads, item.collapsed);
   if (!workspace) return null;
@@ -148,7 +150,7 @@ export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging
         isProjectDragging={isDragging}
         sortableListeners={sortableListeners}
         sortableAttributes={sortableAttributes}
-        checksById={ctx.checksById}
+        checksById={checksById}
         collapsedStatus={collapsedStatus}
         threads={threads}
         scope={scope}
