@@ -30,8 +30,7 @@ function updateThreadToNamedBranch(threadId: string, branch: string): void {
           ...candidate,
           branch,
           checkout_state: "named" as const,
-          pr_number: null,
-          pr_status: null,
+          pull_requests: [],
         }
         : candidate,
     ),

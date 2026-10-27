@@ -194,14 +194,6 @@ export class ThreadService {
     });
   }
 
-  /** Link a GitHub PR to a thread by updating pr_number and pr_status. Throws on failure. */
-  async linkPr(threadId: string, prNumber: number, prStatus: string): Promise<void> {
-    const ok = await this.threadRepo.updatePr(threadId, prNumber, prStatus);
-    if (!ok) {
-      throw new Error(`Failed to link PR #${prNumber} to thread ${threadId}`);
-    }
-  }
-
   /** Find a thread by its primary key. */
   findById(threadId: string): Thread | null {
     return this.threadRepo.findById(threadId);

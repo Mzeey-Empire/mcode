@@ -427,7 +427,7 @@ export interface McodeTransport {
   acknowledgeSeen(threadId: string, throughSequence: number): Promise<import("@mcode/contracts/models/thread-attention").AcknowledgeSeenResult>;
   /** Scan threads for stale or missing PR data and refresh their state. Returns updated PR state
    * for all affected threads. A null prNumber/prStatus signals the PR was cleared (stale data removed). */
-  syncThreadPrs(workspaceId: string): Promise<Array<{ threadId: string; prNumber: number | null; prStatus: string | null }>>;
+  syncThreadPrs(): Promise<{ checked: number }>;
 
   // Message queries
   /**

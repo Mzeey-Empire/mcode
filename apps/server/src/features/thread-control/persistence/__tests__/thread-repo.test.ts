@@ -1,4 +1,6 @@
+import { createMockThreadPullRequest } from "@mcode/contracts/testing";
 import "reflect-metadata";
+import { observeThreadPullRequests } from "../../../pull-requests/links/pull-request-link-funnel.js";
 import { describe, it, expect, beforeEach } from "vitest";
 
 import type { Database } from "bun:sqlite";
@@ -137,19 +139,20 @@ describe("ThreadRepo.updateCheckoutToNamedBranch", () => {
 
     const updated = threadRepo.updateCheckoutToNamedBranch(thread.id, "feat/named");
 
-    expect(updated?.checkout_state).toBe("named");
-    expect(updated?.branch).toBe("feat/named");
-    expect(updated?.base_branch).toBe("release");
+    expect(updated?.thread.checkout_state).toBe("named");
+    expect(updated?.thread.branch).toBe("feat/named");
+    expect(updated?.thread.base_branch).toBe("release");
     expect(threadRepo.findById(thread.id)?.base_branch).toBe("release");
   });
 });
 
 describe("ThreadRepo.updateCheckoutFromHead", () => {
   let threadRepo: ThreadRepo;
+  let db: Database;
   let workspaceId: string;
 
   beforeEach(() => {
-    const db = openMemoryDatabase();
+    db = openMemoryDatabase();
 
 
     threadRepo = new ThreadRepo(db);
@@ -160,7 +163,7 @@ describe("ThreadRepo.updateCheckoutFromHead", () => {
 
   it("promotes a branchless checkout to a named branch, preserves base_branch, and clears stale PR metadata", () => {
     const thread = threadRepo.create(workspaceId, "t", "worktree", "release", true, "claude", undefined, "branchless", "release");
-    threadRepo.updatePr(thread.id, 12, "OPEN");
+    observeThreadPullRequests(db, thread.id, [createMockThreadPullRequest({ number: 12 })]);
 
     const result = threadRepo.updateCheckoutFromHead(thread.id, "feat/new", "named", null, null);
 
@@ -169,8 +172,7 @@ describe("ThreadRepo.updateCheckoutFromHead", () => {
       branch: "feat/new",
       checkout_state: "named",
       base_branch: "release",
-      pr_number: null,
-      pr_status: null,
+      pull_requests: [],
     });
   });
 
@@ -199,24 +201,24 @@ describe("ThreadRepo.updateCheckoutFromHead", () => {
 
   it("does not clear PR metadata when checkout branch and state are unchanged", () => {
     const thread = threadRepo.create(workspaceId, "t", "worktree", "feat/same");
-    threadRepo.updatePr(thread.id, 34, "OPEN");
+    observeThreadPullRequests(db, thread.id, [createMockThreadPullRequest({ number: 34 })]);
 
     const result = threadRepo.updateCheckoutFromHead(thread.id, "feat/same", "named", null, null);
 
     expect(result?.changed).toBe(false);
-    expect(result?.thread.pr_number).toBe(34);
-    expect(result?.thread.pr_status).toBe("OPEN");
+    expect(result?.thread.pull_requests[0]?.number).toBe(34);
+    expect(result?.thread.pull_requests[0]?.state).toBe("open");
   });
 
   it("reports a detached HEAD that moved to another commit and keeps the PR metadata", () => {
     const thread = threadRepo.create(workspaceId, "t", "worktree", "release", true, "claude", undefined, "branchless", "release");
     threadRepo.updateCheckoutFromHead(thread.id, "HEAD", "branchless", "release", "aaaaaaa");
-    threadRepo.updatePr(thread.id, 56, "OPEN");
+    observeThreadPullRequests(db, thread.id, [createMockThreadPullRequest({ number: 56 })]);
 
     const result = threadRepo.updateCheckoutFromHead(thread.id, "HEAD", "branchless", "release", "bbbbbbb");
 
     expect(result?.changed).toBe(true);
-    expect(result?.thread).toMatchObject({ head_sha: "bbbbbbb", pr_number: 56, pr_status: "OPEN" });
+    expect(result?.thread).toMatchObject({ head_sha: "bbbbbbb", pull_requests: [createMockThreadPullRequest({ number: 56, state: "open" })] });
   });
 
   it("does not report a detached HEAD that stayed on the same commit", () => {

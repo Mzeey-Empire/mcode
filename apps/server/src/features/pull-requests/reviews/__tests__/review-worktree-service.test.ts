@@ -1,4 +1,6 @@
+import { createMockThreadPullRequest } from "@mcode/contracts/testing";
 import "reflect-metadata";
+import { observeThreadPullRequests } from "../../links/pull-request-link-funnel.js";
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -273,7 +275,7 @@ describe("ReviewWorktreeService", () => {
       "feature/review",
     );
     await threadRepo.updateWorktreePath(thread.id, "C:/managed/review-42");
-    await threadRepo.updatePr(thread.id, 42, "OPEN");
+    observeThreadPullRequests(db, thread.id, [createMockThreadPullRequest()]);
     const link = await reviewLinkRepo.insert({
       worktreeId: NodeCrypto.randomUUID(),
       provider: "github",
@@ -453,8 +455,7 @@ describe("ReviewWorktreeService", () => {
     expect(thread).toMatchObject({
       worktree_path: "C:/managed/pr-42-mcode-aaaaaaa",
       worktree_managed: true,
-      pr_number: 42,
-      pr_status: "OPEN",
+      pull_requests: [expect.objectContaining({ number: 42, state: "open" })],
     });
     expect(service.getReviewLink(thread!.id)).toMatchObject({
       pullRequestUrl: "https://github.com/Mzeey-Empire/mcode/pull/42",

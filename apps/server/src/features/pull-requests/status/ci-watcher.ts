@@ -1,6 +1,7 @@
 import { logger } from "@mcode/shared";
 import type { GithubService, PullRequestWatchSnapshot } from "../github/github-service.js";
 import type { ChecksStatus } from "@mcode/contracts/github";
+import type { Thread } from "@mcode/contracts/models/thread";
 
 /** Internal tracking entry for a watched thread. */
 export interface WatchEntry {
@@ -48,7 +49,7 @@ export class CiWatcherService {
   private passiveTicking = false;
 
   constructor(
-    private readonly githubService: GithubService,
+    private readonly githubService: Pick<GithubService, "getCheckRuns" | "getPullRequestWatchSnapshots" | "cancelCheckRuns" | "cancelAllInFlight">,
     private readonly broadcast: BroadcastFn,
     private readonly onPullRequestStateChange?: PullRequestStateChangeFn,
   ) {
@@ -216,27 +217,25 @@ export class CiWatcherService {
    * Called once on server startup.
    */
   async seed(
-    threads: Array<{ id: string; pr_number: number | null; pr_status: string | null; branch: string }>,
+    threads: Array<Pick<Thread, "id" | "pull_requests" | "branch">>,
     workspacePaths: Map<string, string>,
     getWorkspaceId: (threadId: string) => string | null,
   ): Promise<void> {
-    const candidates = threads.filter(
-      (t) => t.pr_number != null && t.pr_status != null
-        && t.pr_status.toLowerCase() !== "merged"
-        && t.pr_status.toLowerCase() !== "closed",
-    );
+    const candidates = threads.flatMap((thread) => thread.pull_requests
+      .filter((pr) => pr.state === "open" || pr.state === "draft")
+      .map((pr) => ({ ...thread, prNumber: pr.number })));
 
     const targets = candidates.flatMap((t) => {
       const wsId = getWorkspaceId(t.id);
       const repoPath = wsId ? workspacePaths.get(wsId) : undefined;
-      if (!repoPath || t.pr_number == null) return [];
+      if (!repoPath) return [];
 
       // Insert placeholder synchronously so concurrent watch() calls see this threadId
       // and skip re-insertion during the async fetch window.
       if (!this.active.has(t.id) && !this.passive.has(t.id)) {
-        this.passive.set(t.id, { threadId: t.id, prNumber: t.pr_number, branch: t.branch, repoPath, cache: null });
+        this.passive.set(t.id, { threadId: t.id, prNumber: t.prNumber, branch: t.branch, repoPath, cache: null });
       }
-      return [{ threadId: t.id, prNumber: t.pr_number, repoPath }];
+      return [{ threadId: t.id, prNumber: t.prNumber, repoPath }];
     });
 
     try {

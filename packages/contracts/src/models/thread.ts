@@ -37,8 +37,6 @@ export const ThreadSchema = lazySchema(() =>
   /** Whether the worktree was provisioned by the app (true) or attached externally (false). */
   worktree_managed: z.boolean(),
   issue_number: z.number().nullable(),
-  pr_number: z.number().nullable(),
-  pr_status: z.string().nullable(),
   pull_requests: z.array(ThreadPullRequestSchema()),
   /** Whether this thread has at least one turn snapshot with file changes. Used to skip listSnapshots on switch when false. */
   has_file_changes: z.boolean().default(false),

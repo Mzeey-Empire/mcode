@@ -59,8 +59,6 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
     head_sha: null,
     worktree_managed: false,
     issue_number: null,
-    pr_number: null,
-    pr_status: null,
     pull_requests: [],
     sdk_session_id: null,
     created_at: new Date().toISOString(),
