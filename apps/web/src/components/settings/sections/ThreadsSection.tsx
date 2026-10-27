@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { SectionHeading } from "../SectionHeading";
 import { SettingRow } from "../SettingRow";
+import { SettingsSelectPicker } from "../SettingsSelectPicker";
 
 const DEFAULT_RETENTION_DAYS = 3;
 
@@ -101,6 +102,10 @@ function RetentionDaysControl({
 
 /** Settings for completed-thread retention and automatic deletion. */
 export function ThreadsSection() {
+  const completeOnPrMerge = useSettingsStore((state) => state.settings.thread.completion.completeOnPrMerge);
+  const olderAfterDays = useSettingsStore((state) => state.settings.thread.olderAfterDays);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+  const [olderError, setOlderError] = useState<string | null>(null);
   const retentionDays = useSettingsStore(
     (state) => state.settings.thread.completion.retentionDays,
   );
@@ -118,6 +123,39 @@ export function ThreadsSection() {
   return (
     <div>
       <SectionHeading>Threads</SectionHeading>
+      <SettingRow label="Complete threads when their PRs merge" configKey="thread.completion.completeOnPrMerge">
+        <div className="flex flex-wrap items-center gap-3">
+          <Switch
+            aria-label="Complete threads when their PRs merge"
+            checked={completeOnPrMerge}
+            onCheckedChange={async (checked) => {
+              const failure = await update({ thread: { completion: { completeOnPrMerge: checked } } });
+              setMergeError(failure || null);
+            }}
+          />
+          {mergeError ? <FieldError role="alert">{mergeError}</FieldError> : null}
+        </div>
+      </SettingRow>
+      <SettingRow label="Threads move to Older after" configKey="thread.olderAfterDays">
+        <div className="flex flex-wrap items-center gap-3">
+          <SettingsSelectPicker
+            value={String(olderAfterDays)}
+            options={[
+              { value: "null", label: "Never" },
+              { value: "7", label: "7 days" },
+              { value: "14", label: "14 days" },
+              { value: "30", label: "30 days" },
+            ]}
+            onChange={async (value) => {
+              const days = value === "null" ? null : Number(value);
+              if (days !== null && days !== 7 && days !== 14 && days !== 30) return;
+              const failure = await update({ thread: { olderAfterDays: days } });
+              setOlderError(failure || null);
+            }}
+          />
+          {olderError ? <FieldError role="alert">{olderError}</FieldError> : null}
+        </div>
+      </SettingRow>
       <SettingRow
         label="Completed thread retention"
         configKey="thread.completion.retentionDays"
