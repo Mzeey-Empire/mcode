@@ -8,6 +8,7 @@ import {
   buildSidebarStreamEvents,
   readFrameIndex,
   readFrameIntervals,
+  sampleMeasureOptions,
   summarizeFrameIntervals,
   summarizeFramesInWindow,
   summarizeSidebarStreamEvents,
@@ -153,6 +154,17 @@ NodeTest.describe("sidebar renderer workloads", () => {
     const check = { firstThreadRowMs: 900, sidebarCommitsBeforeSettle: 0 };
     assert.deepEqual(validateSidebarCheck("sidebarHydration", check, "profiling"), ["the sidebar Profiler recorded no commits"]);
     assert.deepEqual(validateSidebarCheck("sidebarHydration", check, "production"), []);
+  });
+
+  NodeTest.it("profiles the first measured sample of any workload only when the run asks", () => {
+    const context = { traceDirectory: "out-traces", runtime: "electron", mode: "profiling", fixture: { requestedThreadCount: 5000 } };
+    assert.deepEqual(sampleMeasureOptions(context, "sidebarStream", 0), {});
+    assert.equal(sampleMeasureOptions({ ...context, cpuProfile: true }, "sidebarStream", 1).cpuProfileFile, undefined);
+    assert.deepEqual(sampleMeasureOptions({ ...context, cpuProfile: true }, "sidebarStream", 0), {
+      trace: true,
+      traceFile: "out-traces/electron-profiling-5000-sidebarStream.trace.json",
+      cpuProfileFile: "out-traces/electron-profiling-5000-sidebarStream.cpuprofile",
+    });
   });
 
   NodeTest.it("keeps a sample's frames when the rAF buffer trims past ten thousand frames", async () => {
