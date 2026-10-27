@@ -29,7 +29,7 @@ export class TurnPullRequestCompletionEffect {
     const prs = await this.github.listBranchPrs(target.branch, target.workspacePath);
     const current = this.threads.findById(target.threadId);
     if (current?.branch !== target.branch || current.checkout_state !== target.checkoutState) return;
-    await this.funnel.observe(target.threadId, prs, "turn-settled");
+    await this.funnel.observe(target.threadId, prs);
   }
 
   private target(threadId: string): {
