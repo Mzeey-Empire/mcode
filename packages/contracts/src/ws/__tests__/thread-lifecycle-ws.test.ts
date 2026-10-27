@@ -51,6 +51,15 @@ describe("thread completion transport", () => {
     expect(result.safeParse({ ok: true }).success).toBe(false);
   });
 
+  it("clamps completion holds and rejects negative or fractional durations", () => {
+    const params = WS_METHODS()["thread.complete"].params;
+
+    expect(params.parse({ threadId: "thread-1", holdMs: 9000 })).toEqual({ threadId: "thread-1", holdMs: 5000 });
+    expect(params.parse({ threadId: "thread-1", holdMs: 0 })).toEqual({ threadId: "thread-1", holdMs: 0 });
+    expect(params.safeParse({ threadId: "thread-1", holdMs: -1 }).success).toBe(false);
+    expect(params.safeParse({ threadId: "thread-1", holdMs: 0.5 }).success).toBe(false);
+  });
+
   it("validates automatic deletion pushes", () => {
     expect(WS_CHANNELS["thread.deleted"].parse({ threadId: "thread-1" })).toEqual({
       threadId: "thread-1",
