@@ -1,7 +1,5 @@
-import type {
-  TerminalProfileInUseData,
-  WsMethodName,
-} from "@mcode/contracts";
+import type { TerminalProfileInUseData } from "@mcode/contracts/models/terminal";
+import type { WsMethodName } from "@mcode/contracts/ws/methods";
 import type { WebSocket } from "ws";
 import { ZodError } from "zod";
 import { TerminalBackendError, type TerminalBackend } from "../backends/terminal-backend.js";

@@ -1,6 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
-import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts/models/plan-questions";
 import { resolveUserMessagePreview } from "../user-message-preview";
 
 describe("resolveUserMessagePreview", () => {

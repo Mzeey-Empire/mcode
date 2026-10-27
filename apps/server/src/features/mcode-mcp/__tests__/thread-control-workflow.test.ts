@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
 import { describe, expect, it, vi } from "vitest";
-import { ThreadCreateBatchResultSchema, type WorkspaceSearchResult } from "@mcode/contracts";
+import { ThreadCreateBatchResultSchema, type WorkspaceSearchResult } from "@mcode/contracts/thread-control";
 import { MessageRepo } from "../../agents/conversation/persistence/message-repo.js";
 import { ThreadControlApprovalRepo } from "../../thread-control/authority/persistence/thread-control-approval-repo.js";
 import { ThreadControlAuditRepo } from "../../thread-control/authority/persistence/thread-control-audit-repo.js";

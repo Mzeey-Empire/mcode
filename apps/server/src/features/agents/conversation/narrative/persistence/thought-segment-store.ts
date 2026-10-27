@@ -8,7 +8,7 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type { ThoughtSegmentKind, ThoughtSegmentRecord } from "@mcode/contracts";
+import type { ThoughtSegmentKind, ThoughtSegmentRecord } from "@mcode/contracts/models/thought-segment";
 import {
   type WriteBatchLimits,
   type WriteBatchResult,

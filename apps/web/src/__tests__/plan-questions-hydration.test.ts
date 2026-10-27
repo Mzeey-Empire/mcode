@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanQuestion, PlanSnapshot } from "@mcode/contracts";
+import type { PlanQuestion } from "@mcode/contracts/models/plan-questions";
+import type { PlanSnapshot } from "@mcode/contracts/models/plan";
 import {
   activateTestConversation,
   getTestThreadPlanQuestions,

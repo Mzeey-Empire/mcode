@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { applyActionRun } from "@/features/terminal";
 import { useToastStore } from "@/stores/toastStore";

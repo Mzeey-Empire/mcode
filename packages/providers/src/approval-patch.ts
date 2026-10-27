@@ -1,4 +1,4 @@
-import type { ApprovalSubject } from "@mcode/contracts";
+import type { ApprovalSubject } from "@mcode/contracts/models/approval";
 
 type FilePatch = Extract<ApprovalSubject, { kind: "file_edit" }>["files"][number];
 

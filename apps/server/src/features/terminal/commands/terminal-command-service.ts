@@ -1,12 +1,8 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
-import {
-  type Settings,
-  type TerminalProfileReference,
-  type TerminalResolvedProfile,
-  type TerminalScope,
-} from "@mcode/contracts";
+import { type Settings } from "@mcode/contracts/models/settings";
+import { type TerminalProfileReference, type TerminalResolvedProfile, type TerminalScope } from "@mcode/contracts/models/terminal";
 import { killProcessTree } from "../../../runtime/process/containment/process-kill.js";
 import {
   TerminalReplayBuffer,

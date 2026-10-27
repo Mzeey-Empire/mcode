@@ -1,4 +1,4 @@
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { logger } from "@mcode/shared";
 
 /** Receives one batch of canonical events after SQLite saved them. */

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Ellipsis, Play, RotateCcw, Square } from "lucide-react";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { IconButton } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";

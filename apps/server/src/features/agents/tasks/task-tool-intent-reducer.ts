@@ -1,4 +1,4 @@
-import { isTaskListToolName } from "@mcode/contracts";
+import { isTaskListToolName } from "@mcode/contracts/models/task-list-tools";
 import type { BufferedToolCall } from "../conversation/narrative/narrative-turn-state.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import type { StoredTask } from "../orchestration/persistence/task-repo.js";

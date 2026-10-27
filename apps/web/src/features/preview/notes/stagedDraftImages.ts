@@ -1,4 +1,5 @@
-import type { PreviewAnnotationBundle, StagedDraftImage } from "@mcode/contracts";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import type { StagedDraftImage } from "@mcode/contracts/models/next-message-draft";
 import { getTransport } from "@/transport";
 
 /** Staged images never change under their id, so bytes read once serve every later thumbnail and redraw. */

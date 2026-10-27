@@ -49,15 +49,10 @@ import {
   toolCallRecords,
 } from "../../../../runtime/persistence/sqlite/schema.js";
 import { logger } from "@mcode/shared";
-import {
-  NarrativeEntrySchema,
-  type Message,
-  type NarrativeEntry,
-  type NarrativeDetailCursor,
-  type ParentNarrativeRecoveryItem,
-  type TurnRange,
-  type ToolCallRecord,
-} from "@mcode/contracts";
+import { NarrativeEntrySchema, type NarrativeEntry, type NarrativeDetailCursor, type TurnRange } from "@mcode/contracts/models/narrative-entry";
+import { type Message } from "@mcode/contracts/models/message";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { type ToolCallRecord } from "@mcode/contracts/models/tool-call-record";
 import { MessageRepo } from "../persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { ThoughtSegmentRepo } from "./persistence/thought-segment-repo.js";

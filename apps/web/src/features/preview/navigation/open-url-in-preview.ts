@@ -1,5 +1,5 @@
-import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts";
-import type { BrowserTabInfo } from "@mcode/contracts";
+import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts/models/workspace-preview-uri";
+import type { BrowserTabInfo } from "@mcode/contracts/models/browser-tab";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";

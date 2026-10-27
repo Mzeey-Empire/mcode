@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactElement } from "react";
 import { ChevronRightIcon, FolderIcon, PlusIcon } from "lucide-react";
-import type { Workspace } from "@mcode/contracts";
+import type { Workspace } from "@mcode/contracts/models/workspace";
 import { PALETTE_SOURCES } from "@/components/palette/palette-sources";
 import { Picker, type PickerRow } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";

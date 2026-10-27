@@ -1,8 +1,4 @@
-import type {
-  PullRequestFile,
-  PullRequestPatchResult,
-  PullRequestReviewThread,
-} from "@mcode/contracts";
+import type { PullRequestFile, PullRequestPatchResult, PullRequestReviewThread } from "@mcode/contracts/pull-requests";
 import { describe, expect, it } from "vitest";
 import {
   buildPullRequestDiffRowModel,

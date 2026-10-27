@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CanonicalAgentEventSchema } from "@mcode/contracts";
+import { CanonicalAgentEventSchema } from "@mcode/contracts/compat/agent-model";
 import {
   adapterTurnFailure,
   endingFromAdapterFailure,

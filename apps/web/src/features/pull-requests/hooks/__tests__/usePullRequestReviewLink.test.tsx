@@ -1,4 +1,4 @@
-import type { PullRequestReviewLink } from "@mcode/contracts";
+import type { PullRequestReviewLink } from "@mcode/contracts/pull-requests";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { usePullRequestReviewLink } from "../usePullRequestReviewLink";

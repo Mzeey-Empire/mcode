@@ -7,7 +7,8 @@
 
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
-import type { BrowserCertificateState, BrowserHistory } from "@mcode/contracts";
+import type { BrowserCertificateState } from "@mcode/contracts/models/browser-certificate";
+import type { BrowserHistory } from "@mcode/contracts/models/browser-preview";
 import type { PreviewSurfaceRef } from "../features/preview/surfaces/registry.js";
 import {
   PREVIEW_POPUP_REQUESTED_CHANNEL,
@@ -376,11 +377,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
      * did-update-favicon trio.
      */
     onPageStatus(
-      callback: (status: import("@mcode/contracts").PreviewPageStatus) => void,
+      callback: (status: import("@mcode/contracts/models/preview-page-status").PreviewPageStatus) => void,
     ) {
       const listener = (
         _event: unknown,
-        status: import("@mcode/contracts").PreviewPageStatus,
+        status: import("@mcode/contracts/models/preview-page-status").PreviewPageStatus,
       ) => callback(status);
       ipcRenderer.on("preview:page-status", listener);
       return () => ipcRenderer.removeListener("preview:page-status", listener);

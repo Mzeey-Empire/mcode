@@ -1,17 +1,6 @@
-import type {
-  DiffAnnotationPayload,
-  DraftBrowserNote,
-  DraftBrowserNotePage,
-  DraftDiffComment,
-  DraftElementField,
-  DraftElementMeta,
-  DraftFileComment,
-  DraftSubmission,
-  FileAnnotationPayload,
-  MessageMention,
-  PreviewAnnotationPayloadV2,
-  StagedDraftImage,
-} from "@mcode/contracts";
+import type { DiffAnnotationPayload, FileAnnotationPayload, PreviewAnnotationPayloadV2 } from "@mcode/contracts/models/browser-preview";
+import type { DraftBrowserNote, DraftBrowserNotePage, DraftDiffComment, DraftElementField, DraftElementMeta, DraftFileComment, DraftSubmission, StagedDraftImage } from "@mcode/contracts/models/next-message-draft";
+import type { MessageMention } from "@mcode/contracts/models/mention";
 
 /**
  * The next-message part of a persisted composer draft: everything that rides

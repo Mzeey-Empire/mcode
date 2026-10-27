@@ -1,6 +1,6 @@
 import { logger } from "@mcode/shared";
-import { AgentEventType } from "@mcode/contracts";
-import type { ProviderRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderIdentity } from "@mcode/agent-model";
 import { volatileIngestClass, type ProviderEventDraft, type ProviderEventSinkPort } from "../../host-ports.js";
 

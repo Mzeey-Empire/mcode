@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BrowserCertificateStateSchema } from "@mcode/contracts";
+import { BrowserCertificateStateSchema } from "@mcode/contracts/models/browser-certificate";
 
 const electron = vi.hoisted(() => {
   const makeSession = () => ({

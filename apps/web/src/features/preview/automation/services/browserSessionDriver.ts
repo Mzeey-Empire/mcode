@@ -1,21 +1,6 @@
-import type {
-  BrowserAutomationHostDispatch,
-  BrowserAutomationHostDispatchTarget,
-  BrowserAutomationOwnedTab,
-  BrowserAutomationResponse,
-  BrowserAutomationActStep,
-  BrowserAutomationEvaluateResult,
-  BrowserAutomationResult,
-  BrowserAutomationErrorCode,
-  BrowserAutomationOperation,
-  BrowserAutomationHostRuntime,
-} from "@mcode/contracts";
-import {
-  BROWSER_AUTOMATION_HOST_OPERATIONS,
-  BROWSER_AUTOMATION_MAX_EXPRESSION_BYTES,
-  BROWSER_AUTOMATION_OPERATIONS,
-} from "@mcode/contracts";
-import { BROWSER_AUTOMATION_MAX_INSPECT_TABS as MAX_LIFECYCLE_TABS } from "@mcode/contracts";
+import type { BrowserAutomationHostDispatch, BrowserAutomationHostDispatchTarget, BrowserAutomationOwnedTab, BrowserAutomationResponse, BrowserAutomationActStep, BrowserAutomationEvaluateResult, BrowserAutomationResult, BrowserAutomationErrorCode, BrowserAutomationOperation, BrowserAutomationHostRuntime } from "@mcode/contracts/models/browser-automation";
+import { BROWSER_AUTOMATION_HOST_OPERATIONS, BROWSER_AUTOMATION_MAX_EXPRESSION_BYTES, BROWSER_AUTOMATION_OPERATIONS } from "@mcode/contracts/models/browser-automation";
+import { BROWSER_AUTOMATION_MAX_INSPECT_TABS as MAX_LIFECYCLE_TABS } from "@mcode/contracts/models/browser-automation";
 
 const MAX_IDEMPOTENCY_RECORDS = 256;
 const IDEMPOTENCY_TTL_MS = 30 * 60_000;

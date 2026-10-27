@@ -1,7 +1,4 @@
-import {
-  readPreviewAnnotationBundle,
-  type PreviewAnnotationBundle,
-} from "@mcode/contracts";
+import { readPreviewAnnotationBundle, type PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { browserPageLabel } from "./browserNoteGroups";
 
 /** A page's snapshot as the sent tile can open it. */

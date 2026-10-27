@@ -1,7 +1,4 @@
-import {
-  BROWSER_V2_CORE_OPERATIONS,
-  type BrowserAutomationPublicOperation,
-} from "@mcode/contracts";
+import { BROWSER_V2_CORE_OPERATIONS, type BrowserAutomationPublicOperation } from "@mcode/contracts/models/browser-automation";
 import * as NodeCrypto from "node:crypto";
 import {
   BrowserAutomationCredentialRegistry,

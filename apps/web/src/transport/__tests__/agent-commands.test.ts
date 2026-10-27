@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CreateAndSendInput, SendMessageInput } from "@mcode/contracts";
+import type { CreateAndSendInput, SendMessageInput } from "@mcode/contracts/ws/methods";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { createWsTransport } from "../ws-transport";
 

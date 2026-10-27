@@ -1,4 +1,4 @@
-import type { TerminalPlatform } from "@mcode/contracts";
+import type { TerminalPlatform } from "@mcode/contracts/models/terminal";
 
 /** Maps supported Node host platforms to Terminal protocol platform names. */
 export function terminalPlatform(platform: NodeJS.Platform): TerminalPlatform {

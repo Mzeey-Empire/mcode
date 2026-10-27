@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CopilotSession, PermissionRequest, SessionConfig, SessionEvent } from "@github/copilot-sdk";
-import { ProviderRuntimeEventSchema, type TurnRequest } from "@mcode/contracts";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { type TurnRequest } from "@mcode/contracts/providers/interfaces";
 import { createCopilotProvider, type CopilotProviderBoundary, type ProviderHostPorts, type ProviderMcodeAttachment } from "../../../index.js";
 import { DeterministicCanonicalSink } from "../../../conformance/deterministic-sink.js";
 import { loadProviderFixtureManifest } from "../../../conformance/fixture-safety.js";

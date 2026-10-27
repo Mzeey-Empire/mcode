@@ -9,8 +9,9 @@ import { CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js"
 import type { CodexApprovalRequest } from "../../private/codex/codex-app-server.js";
 import { CodexAppServer } from "../../private/codex/codex-app-server.js";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
-import type { ApprovalRequestEnvelope, ApprovalOutcome, ApprovalOrigin, ProviderRuntimeEvent } from "@mcode/contracts";
-import { AgentEventType } from "@mcode/contracts";
+import type { ApprovalRequestEnvelope, ApprovalOutcome, ApprovalOrigin } from "@mcode/contracts/models/approval";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { logger } from "@mcode/shared";
 
 /**

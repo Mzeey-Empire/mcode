@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { create } from "zustand";
-import type { ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import { getTransport } from "@/transport";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

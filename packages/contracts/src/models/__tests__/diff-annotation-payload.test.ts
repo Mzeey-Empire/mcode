@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
-import {
-  DiffAnnotationPayloadSchema, DraftDiffCommentSchema, DraftElementFieldSchema,
-  DraftElementMetaSchema, DraftImageMissingErrorSchema, DraftSubmissionSchema,
-  MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS, StagedDraftImageSchema,
-  SendMessageSchema, WS_METHODS,
-} from "../../index.js";
+import { DiffAnnotationPayloadSchema } from "@mcode/contracts/models/browser-preview";
+import { DraftDiffCommentSchema, DraftElementFieldSchema, DraftElementMetaSchema, DraftImageMissingErrorSchema, DraftSubmissionSchema, StagedDraftImageSchema } from "@mcode/contracts/models/next-message-draft";
+import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "@mcode/contracts/models/selected-text-comment";
+import { SendMessageSchema, WS_METHODS } from "@mcode/contracts/ws/methods";
 
 const id = "550e8400-e29b-41d4-a716-446655440000";
 const mentions = [{ kind: "file", id: "file", path: "src/main.ts", label: "main.ts", range: { start: 0, end: 8 } }];

@@ -1,12 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { and, desc, eq, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import {
-  WorkspaceEnvironmentActionRunSchema,
-  WorkspaceEnvironmentActionPortSchema,
-  type WorkspaceEnvironmentActionPort,
-  type WorkspaceEnvironmentActionRun,
-} from "@mcode/contracts";
+import { WorkspaceEnvironmentActionRunSchema, WorkspaceEnvironmentActionPortSchema, type WorkspaceEnvironmentActionPort, type WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { projectActionRuns } from "../../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
 

@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import type { SubagentRosterEntry } from "@mcode/contracts";
+import type { SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { getTransport } from "@/transport";
 import { SubagentProviderScope } from "@/features/conversation";
 import { useSubagentRoster, useSubagentRosterStore } from "../state/subagentRosterStore";

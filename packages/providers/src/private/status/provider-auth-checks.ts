@@ -4,7 +4,7 @@
  * missing binary, or unrecognised answer returns `unknown`, which the bell
  * never shows, so a broken probe cannot tell a signed-in user to sign in.
  */
-import type { ProviderStatusFacts } from "@mcode/contracts";
+import type { ProviderStatusFacts } from "@mcode/contracts/providers/provider-status";
 import type { CliStatusOutcome, CliStatusRunner } from "./cli-status-runner.js";
 
 const SIGNED_IN: ProviderStatusFacts = { auth: { state: "signed_in" } };

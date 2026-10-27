@@ -2,7 +2,7 @@
  * Pure omnibox target normalization and validation for Preview navigation.
  */
 
-import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts";
+import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts/models/workspace-preview-uri";
 
 import {
   looksLikeFilePath,

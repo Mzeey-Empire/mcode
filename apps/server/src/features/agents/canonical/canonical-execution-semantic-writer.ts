@@ -1,22 +1,13 @@
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
-import {
-  AgentEventSchema,
-  AgentEventType,
-  CanonicalAgentEventEnvelopeSchema,
-  ParentNarrativeRecoveryItemSchema,
-  PlanQuestionBatchSchema,
-  ProviderIdSchema,
-  ProviderIdentitySchema,
-  providerFailureOutcome,
-  TurnOutcomeSchema,
-  type AgentEvent,
-  type CanonicalAgentEventEnvelope,
-  type ProviderIdentity,
-  type ParentNarrativeRecoveryItem,
-  type TurnOutcome,
-} from "@mcode/contracts";
+import { AgentEventSchema, AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { CanonicalAgentEventEnvelopeSchema, ProviderIdentitySchema, type CanonicalAgentEventEnvelope, type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { PlanQuestionBatchSchema } from "@mcode/contracts/models/plan-questions";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { providerFailureOutcome } from "@mcode/contracts/models/turn-failure";
+import { TurnOutcomeSchema, type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { z } from "zod";
 import { PlanPersistenceReadySchema } from "../planning/plan-capture-schema.js";
 import { readCanonicalPlan } from "../planning/legacy-plan-record.js";

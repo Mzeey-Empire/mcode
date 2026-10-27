@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { useShallow } from "zustand/shallow";
-import type { BrowserTabSet } from "@mcode/contracts";
+import type { BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useBrowserThreadActing } from "@/features/preview/state/useBrowserActing";
 import { useUiStore } from "@/stores/uiStore";

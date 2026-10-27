@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import * as NodeCrypto from "node:crypto";
-import { PlanCommentSchema, type PlanComment, type PlanCommentError, type PlanVersion } from "@mcode/contracts";
+import { PlanCommentSchema, type PlanComment, type PlanCommentError, type PlanVersion } from "@mcode/contracts/models/plan";
 import { planComments, plans } from "../../../../runtime/persistence/sqlite/schema.js";
 import { reanchorPlanComment } from "../reanchor-plan-comment.js";
 import { hasPreparingPlanImplement, hasUnfinishedPlanExecution } from "./plan-write-availability.js";

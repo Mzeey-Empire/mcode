@@ -1,4 +1,4 @@
-import { BROWSER_TAB_INFO_STRING_MAX } from "@mcode/contracts";
+import { BROWSER_TAB_INFO_STRING_MAX } from "@mcode/contracts/models/browser-tab";
 
 /** Validates and normalizes an absolute HTTP(S) Browser surface address. */
 export function normalizeBrowserSurfaceAddress(address: string): string {

@@ -1,4 +1,5 @@
-import type { SelectableProviderAgent, SkillInfo } from "@mcode/contracts";
+import type { SelectableProviderAgent } from "@mcode/contracts/providers/capability-catalog";
+import type { SkillInfo } from "@mcode/contracts/skills";
 import { CodexAppServer } from "./private/codex/codex-app-server.js";
 import {
   discoverCodexStandaloneAgents,
@@ -101,7 +102,7 @@ export interface CodexCatalogClient {
   readonly isAlive: boolean;
   on(event: "notification", listener: (notification: unknown) => void): this;
   start(): Promise<void>;
-  listModels(): Promise<import("@mcode/contracts").ProviderModelInfo[]>;
+  listModels(): Promise<import("@mcode/contracts/providers/models").ProviderModelInfo[]>;
   listSkills(cwds?: string[], forceReload?: boolean): Promise<CodexCatalogSkillsResult>;
   listPlugins(cwds?: string[]): Promise<CodexCatalogPluginsResult>;
   readPlugin(params: CodexCatalogPluginReadParams): Promise<CodexCatalogPluginReadResult>;
@@ -134,7 +135,7 @@ export interface CodexCatalogAgentDiscoveryOptions {
 /** Standalone agent suggestions and source-scoped diagnostics. */
 export interface CodexCatalogAgentDiscovery {
   readonly agents: readonly SelectableProviderAgent[];
-  readonly diagnostics: readonly import("@mcode/contracts").ProviderCatalogSourceDiagnostic[];
+  readonly diagnostics: readonly import("@mcode/contracts/providers/capability-catalog").ProviderCatalogSourceDiagnostic[];
 }
 
 /** Discovers provider catalog agents through the bounded compatibility adapter. */

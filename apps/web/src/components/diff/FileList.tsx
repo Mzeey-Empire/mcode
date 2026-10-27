@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReviewFileChange } from "@mcode/contracts";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import { useDiffStore, type DiffSource } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";

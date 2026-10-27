@@ -1,7 +1,7 @@
 import * as NodeBuffer from "node:buffer";
 import * as NodeModule from "node:module";
 import type { IPty } from "node-pty";
-import type { TerminalPlatform } from "@mcode/contracts";
+import type { TerminalPlatform } from "@mcode/contracts/models/terminal";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import {
   PTY_HOST_MAX_DATA_BYTES,

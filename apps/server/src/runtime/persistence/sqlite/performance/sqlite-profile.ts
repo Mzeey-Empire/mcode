@@ -4,7 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePerfHooks from "node:perf_hooks";
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { z } from "zod";
-import type { NarrativeEntry } from "@mcode/contracts";
+import type { NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
 import { HookExecutionRepo } from "../../../../features/agents/events/persistence/hook-execution-repo.js";
 import { MessageRepo } from "../../../../features/agents/conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../../../../features/agents/planning/persistence/plan-question-answers-repo.js";

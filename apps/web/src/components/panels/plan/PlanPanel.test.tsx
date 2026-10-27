@@ -3,7 +3,8 @@ import { act, render, renderHook, screen, waitFor } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanImplement, PlanImplementReceipt, PlanVersion, ReviewState } from "@mcode/contracts";
+import type { PlanImplement, PlanImplementReceipt, PlanVersion } from "@mcode/contracts/models/plan";
+import type { ReviewState } from "@mcode/contracts/models/review-comparison";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useConnectionStore } from "@/stores/connectionStore";

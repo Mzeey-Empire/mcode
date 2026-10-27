@@ -11,7 +11,7 @@ import * as NodeHTTP from "node:http";
 import WebSocket from "ws";
 import { createWsServer } from "../../../../application/transport/ws-server.js";
 import type { RouterDeps } from "../../../../application/transport/ws-router.js";
-import type { ProviderAvailability } from "@mcode/contracts";
+import type { ProviderAvailability } from "@mcode/contracts/providers/availability";
 import { ProviderDisabledError } from "../../availability/provider-availability-errors.js";
 
 const AUTH_TOKEN = "test-token-providers";

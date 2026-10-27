@@ -1,4 +1,4 @@
-import type { QuotaCategory } from "@mcode/contracts";
+import type { QuotaCategory } from "@mcode/contracts/providers/usage";
 
 /**
  * Source of provider usage data. Implementations look up plan utilization,

@@ -10,7 +10,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import { logger } from "@mcode/shared";
-import type { SkillInfo, SkillSource, SkillDiagnostics } from "@mcode/contracts";
+import type { SkillInfo, SkillSource, SkillDiagnostics } from "@mcode/contracts/skills";
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const DESC_RE = /^description:\s*(?:"([^"]*)"|'([^']*)'|(.*))$/m;

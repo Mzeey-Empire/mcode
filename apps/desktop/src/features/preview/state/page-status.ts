@@ -5,7 +5,7 @@
  * the single `preview:page-status` channel.
  */
 
-import type { PreviewPageStatus, PreviewPageError } from "@mcode/contracts";
+import type { PreviewPageStatus, PreviewPageError } from "@mcode/contracts/models/preview-page-status";
 
 /** Discrete inputs the host derives from guest webContents events. */
 export type PageStatusEvent =

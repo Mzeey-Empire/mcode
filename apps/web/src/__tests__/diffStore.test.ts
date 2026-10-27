@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { BranchComparison } from "@mcode/contracts";
+import type { BranchComparison } from "@mcode/contracts/git";
 import type { RightPanelState } from "../stores/diffStore";
 import { reviewViewAvailability } from "../lib/review-views";
 import {

@@ -3,8 +3,8 @@ import { Goal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { GoalState } from "@mcode/contracts";
-import { isGoalOpen } from "@mcode/contracts";
+import type { GoalState } from "@mcode/contracts/models/goal";
+import { isGoalOpen } from "@mcode/contracts/models/goal";
 import { useActiveGoalActions } from "./useActiveGoalActions";
 
 /** Props for the compact active-goal control above the composer. */

@@ -1,11 +1,7 @@
 import { inject, injectable } from "tsyringe";
-import {
-  PROVIDER_CATALOG,
-  getCatalogEntry,
-  type ProviderAvailability,
-  type ProviderId,
-  type IProviderRegistry,
-} from "@mcode/contracts";
+import { PROVIDER_CATALOG, getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { type ProviderAvailability } from "@mcode/contracts/providers/availability";
+import { type ProviderId, type IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../settings/settings-service.js";
 import {

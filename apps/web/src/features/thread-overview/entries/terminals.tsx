@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { Button, IconButton } from "@/components/ui/button";
 import { ActionIcon } from "@/features/projects/actions/ActionIcon";
 import { shellActionIconId } from "@/features/projects/actions/action-icons";

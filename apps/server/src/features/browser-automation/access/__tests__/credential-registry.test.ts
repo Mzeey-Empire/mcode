@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BROWSER_AUTOMATION_OPERATIONS } from "@mcode/contracts";
+import { BROWSER_AUTOMATION_OPERATIONS } from "@mcode/contracts/models/browser-automation";
 import { BrowserAutomationCredentialRegistry } from "../credential-registry.js";
 
 function scope(session = "provider-session") {

@@ -1,9 +1,4 @@
-import type {
-  WorkspaceEnvironmentActionLaunchSnapshot,
-  WorkspaceEnvironmentActionRun,
-  WorkspaceEnvironmentActionPort,
-  WorkspaceEnvironmentPlatform,
-} from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionLaunchSnapshot, WorkspaceEnvironmentActionRun, WorkspaceEnvironmentActionPort, WorkspaceEnvironmentPlatform } from "@mcode/contracts/models/workspace-environment";
 import type { ActionTerminal } from "../../terminal/backends/terminal-backend.js";
 
 /** Builds immutable retained Project Action runs with monotonic timestamps. */

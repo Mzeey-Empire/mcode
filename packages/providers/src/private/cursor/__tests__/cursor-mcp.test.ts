@@ -1,7 +1,8 @@
 import type * as NodeChildProcess from "node:child_process";
 import * as NodeEvents from "node:events";
 import type { ContentBlock, McpServer } from "@agentclientprotocol/sdk";
-import { getDefaultSettings, type TurnRequest } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { type TurnRequest } from "@mcode/contracts/providers/interfaces";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderHostPorts, ProviderMcodeAttachment } from "../../../host-ports.js";
 import { AcpSessionRuntime } from "../../protocols/acp/acp-session-runtime.js";

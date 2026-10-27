@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { PlanQuestion } from "@mcode/contracts";
+import type { PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import { AnsweredSummary } from "../AnsweredSummary";
 
 function question(id: string): PlanQuestion {

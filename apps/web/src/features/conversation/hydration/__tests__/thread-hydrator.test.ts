@@ -1,5 +1,5 @@
 import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import {
   resetThreadStoreForTests,
   getTestActiveMessages,
@@ -41,9 +41,11 @@ import { shallowEqualBy } from "@/lib/shallowEqualBy";
 import { coerceTaskStatus } from "@/stores/taskStore";
 import { getTransport } from "@/transport";
 import type { Message } from "@/transport";
-import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
-import type { ConversationPage, GoalLookupResult, GoalState, TurnSnapshot } from "@mcode/contracts";
-import { CONVERSATION_OLDER_PAGE_MAX_BYTES } from "@mcode/contracts";
+import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts/models/enums";
+import type { ConversationPage } from "@mcode/contracts/models/conversation-page";
+import type { GoalLookupResult, GoalState } from "@mcode/contracts/models/goal";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
+import { CONVERSATION_OLDER_PAGE_MAX_BYTES } from "@mcode/contracts/models/conversation-older-page";
 import { clearScrollMemory, rememberScrollTop } from "@/components/chat/scrollPositionMemory";
 
 vi.mock("@/transport", () => ({

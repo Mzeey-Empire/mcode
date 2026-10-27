@@ -12,8 +12,8 @@
  */
 
 import type { SessionNotification } from "@agentclientprotocol/sdk";
-import { AgentEventType } from "@mcode/contracts";
-import type { AgentEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import {
   extractCursorTodoEntries,
   normalizeCursorTodoEntry,

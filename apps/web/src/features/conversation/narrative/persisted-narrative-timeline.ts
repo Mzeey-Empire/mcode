@@ -1,13 +1,8 @@
-import {
-  createCanonicalSubagentPresentation,
-  createSubagentPresentation,
-  decodeCanonicalSubagentDetailTarget,
-  decodeSubagentAliasDetailTarget,
-  isDelegateTaskToolName,
-  isTaskListToolName,
-  resolveBrowserNarrativeTool,
-} from "@mcode/contracts";
-import type { ApprovalReceiptRecord } from "@mcode/contracts";
+import { createCanonicalSubagentPresentation, createSubagentPresentation, decodeCanonicalSubagentDetailTarget, decodeSubagentAliasDetailTarget } from "@mcode/contracts/models/tool-call-record";
+import { isDelegateTaskToolName } from "@mcode/contracts/models/subagent-roster";
+import { isTaskListToolName } from "@mcode/contracts/models/task-list-tools";
+import { resolveBrowserNarrativeTool } from "@mcode/contracts/models/browser-narrative";
+import type { ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
 import type {
   HookExecution,
   HookExecutionRecord,

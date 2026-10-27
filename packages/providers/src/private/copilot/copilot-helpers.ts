@@ -1,7 +1,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import type { QuotaCategory } from "@mcode/contracts";
+import type { QuotaCategory } from "@mcode/contracts/providers/usage";
 
 /** Preserves existing Copilot user instructions while appending runtime guidance. */
 export function composeCopilotSystemMessage(

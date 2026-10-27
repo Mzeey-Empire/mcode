@@ -2,7 +2,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { render } from "@testing-library/react";
 import { act } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { emitPtyData, onPtyData } from "@/features/terminal/adapters/pty-data-registry";
 import { dropRemountAnchor } from "../terminalRemountScroll";

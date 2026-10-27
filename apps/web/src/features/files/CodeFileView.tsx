@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { DraftFileComment, FileReadResult } from "@mcode/contracts";
+import type { DraftFileComment } from "@mcode/contracts/models/next-message-draft";
+import type { FileReadResult } from "@mcode/contracts/models/workspace-file";
 import {
   editDraftFileComment,
   setDraftFileCommentEditor,

@@ -3,14 +3,9 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement, ReactNode } from "react";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BrowserAutomationResponseSchema,
-  projectBrowserNarrativeResult,
-  type BrowserTabSet,
-  type BrowserAutomationControllerState,
-  type BrowserAutomationResponse,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BrowserAutomationResponseSchema, type BrowserAutomationControllerState, type BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
+import { projectBrowserNarrativeResult } from "@mcode/contracts/models/browser-narrative";
+import { type BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import {
   createBrowserConformanceResourceSnapshot,
   createBrowserConformanceScenario,

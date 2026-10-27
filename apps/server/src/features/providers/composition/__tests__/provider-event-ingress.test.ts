@@ -2,14 +2,10 @@ import "reflect-metadata";
 import * as NodeEvents from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { container, Lifecycle } from "tsyringe";
-import {
-  AgentEventType,
-  ProviderRuntimeEventSchema,
-  type CanonicalAgentEventEnvelope,
-  type IAgentProvider,
-  type ProviderId,
-  type ProviderRuntimeEvent,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { type IAgentProvider, type ProviderId } from "@mcode/contracts/providers/interfaces";
 
 import {
   ProviderEventIngress,

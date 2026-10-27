@@ -2,7 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
-import { lazySchema } from "@mcode/contracts";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
 import { z } from "zod";
 
 /**

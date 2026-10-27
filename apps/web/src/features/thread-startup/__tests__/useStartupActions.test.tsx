@@ -1,5 +1,6 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
-import type { AgentTurn, ThreadStartup } from "@mcode/contracts";
+import type { AgentTurn } from "@mcode/contracts/compat/agent-model";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

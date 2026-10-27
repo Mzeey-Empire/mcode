@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ApprovalReviewMode, SelectedTextComment } from "@mcode/contracts";
+import type { ApprovalReviewMode } from "@mcode/contracts/models/enums";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { createDefaultComposerAgentSelection } from "../draft/composer-selection-state";
 import type { ComposerExecutionTargetController } from "../execution/useComposerExecutionTarget";

@@ -1,4 +1,4 @@
-import type { ContextWindowMode } from "@mcode/contracts";
+import type { ContextWindowMode } from "@mcode/contracts/models/settings";
 import { getModelContextWindow } from "@mcode/shared/model-context";
 
 /** Input parameters for context window resolution. */

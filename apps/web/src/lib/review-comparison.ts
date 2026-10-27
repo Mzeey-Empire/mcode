@@ -1,4 +1,6 @@
-import type { FileEffect, ReviewFileChange, TurnSnapshot } from "@mcode/contracts";
+import type { FileEffect } from "@mcode/contracts/models/file-effect";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 
 function fromEffect(effect: FileEffect): ReviewFileChange | null {
   if (effect.scope !== "workspace") return null;

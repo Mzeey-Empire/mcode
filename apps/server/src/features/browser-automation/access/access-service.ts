@@ -1,4 +1,4 @@
-import type { InteractionMode } from "@mcode/contracts";
+import type { InteractionMode } from "@mcode/contracts/models/enums";
 import type { BrowserAutomationPermissionCapability } from "./credential-registry.js";
 
 /** Non-secret metadata retained with a live provider session. */

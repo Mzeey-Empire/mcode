@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolCallRecordSchema, ToolCallStatusSchema } from "@mcode/contracts";
+import { ToolCallRecordSchema, ToolCallStatusSchema } from "@mcode/contracts/models/tool-call-record";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 import { narrativeWriteBatchLimitsSchema, narrativeWriteBatchResultSchema } from "../../conversation/narrative/persistence/narrative-write-batches.js";
 

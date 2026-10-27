@@ -11,13 +11,7 @@ import {
   type Ref,
 } from "react";
 import { ErrorIcon } from "@/components/ui/icon-map";
-import type {
-  PullRequestBoundedDataMarker,
-  PullRequestCapability,
-  PullRequestConversationItem,
-  PullRequestDetail,
-  PullRequestSummary as PullRequestSummaryRecord,
-} from "@mcode/contracts";
+import type { PullRequestBoundedDataMarker, PullRequestCapability, PullRequestConversationItem, PullRequestDetail, PullRequestSummary as PullRequestSummaryRecord } from "@mcode/contracts/pull-requests";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";

@@ -3,13 +3,8 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { BrowserWindow, app, ipcMain, type WebContents } from "electron";
-import {
-  BrowserScreenshotOverlayPollSchema,
-  PREVIEW_ANNOTATION_STRING_MAX,
-  type AttachmentMeta,
-  type BrowserPreviewElementStyle,
-  type BrowserScreenshotSelection,
-} from "@mcode/contracts";
+import { BrowserScreenshotOverlayPollSchema, PREVIEW_ANNOTATION_STRING_MAX, type BrowserPreviewElementStyle, type BrowserScreenshotSelection } from "@mcode/contracts/models/browser-preview";
+import { type AttachmentMeta } from "@mcode/contracts/models/attachment";
 import {
   type Bounds,
   type PreviewSession,

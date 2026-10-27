@@ -1,4 +1,4 @@
-import { AgentEventSchema, type AgentEvent } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import * as NodeUtil from "node:util";
 
 import type {

@@ -1,4 +1,4 @@
-import type { ContextWindowMode } from "@mcode/contracts";
+import type { ContextWindowMode } from "@mcode/contracts/models/settings";
 import { supports1MContextWindow } from "@mcode/shared";
 
 /**

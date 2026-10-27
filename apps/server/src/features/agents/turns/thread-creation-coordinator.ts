@@ -2,20 +2,12 @@ import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { inject, injectable } from "tsyringe";
-import type {
-  ContextWindowMode,
-  CreateAndSendInput,
-  ApprovalReviewMode,
-  DevinMode,
-  InteractionMode,
-  OrchestrationMode,
-  PermissionMode,
-  ProviderId,
-  ReasoningLevel,
-  Thread,
-  ThreadStartup,
-  ThreadStartupStepDetail,
-} from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { CreateAndSendInput } from "@mcode/contracts/ws/methods";
+import type { ApprovalReviewMode, DevinMode, InteractionMode, OrchestrationMode, PermissionMode } from "@mcode/contracts/models/enums";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { Thread } from "@mcode/contracts/models/thread";
+import type { ThreadStartup, ThreadStartupStepDetail } from "@mcode/contracts/thread-startup";
 
 import { ThreadService } from "../../thread-control/index.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";

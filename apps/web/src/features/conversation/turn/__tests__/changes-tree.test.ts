@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TurnSnapshot } from "@mcode/contracts";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import {
   buildChangesTree,
   initialCollapse,

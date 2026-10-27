@@ -1,4 +1,5 @@
-import type { AgentTurnEnding, InterruptionCause, PersistedTurnFailure, SystemStopReason, TurnOutcome } from "@mcode/contracts";
+import type { AgentTurnEnding, InterruptionCause, PersistedTurnFailure, SystemStopReason } from "@mcode/contracts/compat/agent-model";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { workFoldLabel } from "../turn/WorkFold";
 import { usageLimitLabel } from "./usage-limit";
 

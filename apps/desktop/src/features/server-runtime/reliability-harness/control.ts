@@ -3,7 +3,7 @@ import * as NodeHTTP from "node:http";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import type * as NodeNet from "node:net";
-import { THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH } from "@mcode/contracts";
+import { THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH } from "@mcode/contracts/thread-control";
 
 /** Controls exposed by the opt-in packaged reliability harness. */
 export const RELIABILITY_HARNESS_CONTROLS = [

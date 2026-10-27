@@ -4,7 +4,7 @@ import {
   type AccessModeOption,
   type ComposerAccessMode,
 } from "../ComposerOptionControls";
-import type { DevinMode } from "@mcode/contracts";
+import type { DevinMode } from "@mcode/contracts/models/enums";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import type { PermissionMode } from "@/transport";
 import { PERMISSION_MODES } from "@/transport";

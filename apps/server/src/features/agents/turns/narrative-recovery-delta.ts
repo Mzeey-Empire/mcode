@@ -1,4 +1,4 @@
-import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import type { ParentNarrativeRecoveryCommit } from "./parent-turn-durability.js";
 import { assertActiveTurnRecoveryRetention } from "./active-turn-recovery-retention-policy.js";

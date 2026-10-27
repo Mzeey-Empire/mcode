@@ -1,9 +1,12 @@
 import "reflect-metadata";
-import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts";
+import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts/models/canonical-agent-progress";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { container } from "tsyringe";
-import type { Thread, IAgentProvider, IProviderRegistry, GoalState, AgentEvent, GoalLookupResult } from "@mcode/contracts";
-import { AgentEventType } from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
+import type { IAgentProvider, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
+import type { GoalState, GoalLookupResult } from "@mcode/contracts/models/goal";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";

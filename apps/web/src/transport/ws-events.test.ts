@@ -4,7 +4,7 @@ import { selectDockApprovals, useApprovalStore } from "@/stores/approvalStore";
 import { act } from "@testing-library/react";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import type { Thread } from "@/transport";
 
 vi.mock("@/transport", () => ({

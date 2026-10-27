@@ -1,9 +1,5 @@
 import { z } from "zod";
-import type {
-  PullRequestRelationship,
-  PullRequestState,
-  PullRequestSummary,
-} from "@mcode/contracts";
+import type { PullRequestRelationship, PullRequestState, PullRequestSummary } from "@mcode/contracts/pull-requests";
 
 const githubActorSchema = z.object({
   id: z.string().min(1).max(256),

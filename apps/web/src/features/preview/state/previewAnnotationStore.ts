@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { BrowserPreviewBounds, McodeBrowserCaptureV2 } from "@mcode/contracts";
+import type { BrowserPreviewBounds, McodeBrowserCaptureV2 } from "@mcode/contracts/models/browser-preview";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { projectBrowserNotes, type PreviewPageRecord, type SavedPreviewAnnotation } from "./previewNoteView";
 

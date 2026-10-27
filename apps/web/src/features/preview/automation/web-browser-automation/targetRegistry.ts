@@ -1,4 +1,4 @@
-import type { BrowserAutomationTargetIdentity } from "@mcode/contracts";
+import type { BrowserAutomationTargetIdentity } from "@mcode/contracts/models/browser-automation";
 
 /** A same-origin iframe target retained for one visible web preview. */
 export interface WebBrowserAutomationTarget {

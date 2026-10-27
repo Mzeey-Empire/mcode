@@ -2,15 +2,10 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
-import { AgentEventType } from "@mcode/contracts";
-import type {
-  AgentEvent,
-  CanonicalAgentEventEnvelope,
-  IAgentProvider,
-  IProviderRegistry,
-  ProviderId,
-  TurnRequest,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { IAgentProvider, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
 import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";

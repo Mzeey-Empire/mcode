@@ -1,6 +1,6 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import type { ProviderUsageInfo } from "@mcode/contracts";
+import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
 import { mergeProviderUsageSnapshot, useThreadStore } from "./threadStore";
 import { createEmptyThreadRecord } from "./thread-record";
 

@@ -1,4 +1,4 @@
-import type { PreviewPageError } from "@mcode/contracts";
+import type { PreviewPageError } from "@mcode/contracts/models/preview-page-status";
 
 /**
  * Presentation copy for one preview resolver failure code.

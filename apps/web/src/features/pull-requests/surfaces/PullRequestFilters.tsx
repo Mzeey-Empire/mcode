@@ -1,7 +1,4 @@
-import type {
-  PullRequestRelationship,
-  PullRequestState,
-} from "@mcode/contracts";
+import type { PullRequestRelationship, PullRequestState } from "@mcode/contracts/pull-requests";
 import {
   CircleCheck,
   FolderGit2,

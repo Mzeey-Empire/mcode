@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { delegatedTaskRosterEntryId } from "@mcode/contracts";
+import { delegatedTaskRosterEntryId } from "@mcode/contracts/models/subagent-roster";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import {
   TOOL_ICONS,

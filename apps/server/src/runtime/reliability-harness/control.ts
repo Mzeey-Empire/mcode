@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import * as NodeHTTP from "node:http";
 import type { ApplicationDatabaseWriter } from "../persistence/sqlite/application-database-writer.js";
 import type { WebSocketServer } from "ws";
-import { THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH } from "@mcode/contracts";
+import { THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH } from "@mcode/contracts/thread-control";
 
 /** Controls exposed by the opt-in packaged reliability harness. */
 export const RELIABILITY_HARNESS_CONTROLS = [

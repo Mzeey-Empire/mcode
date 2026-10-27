@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { CANONICAL_AGENT_EVENT_BATCH_MAX, CanonicalAgentProgressFrameSchema } from "@mcode/contracts";
+import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts/ws/channels";
+import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts/models/canonical-agent-progress";
 import type { Database } from "bun:sqlite";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";

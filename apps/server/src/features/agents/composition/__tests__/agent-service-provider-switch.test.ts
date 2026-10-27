@@ -6,14 +6,9 @@ import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
 import { container } from "tsyringe";
-import type {
-  AgentEvent,
-  IAgentProvider,
-  IProviderRegistry,
-  ProviderId,
-  ProviderModelInfo,
-  TurnRequest,
-} from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { IAgentProvider, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 import { ProviderTurnError, SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
 import { resolveHandoffDir } from "@mcode/shared";
 

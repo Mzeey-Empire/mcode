@@ -5,13 +5,20 @@
 
 import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
-import { PROVIDER_CATALOG } from "@mcode/contracts";
+import { PROVIDER_CATALOG } from "@mcode/contracts/providers/catalog";
 import { MessageStore } from "../../agents/conversation/persistence/message-store.js";
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { DevinModeSchema, PlanPhaseSchema, ReasoningLevelSchema, ScheduledTurnResumeSchema, type AcknowledgeSeenResult, type PlanPhase, type TurnOutcome } from "@mcode/contracts";
-import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, OrchestrationMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
+import { DevinModeSchema } from "@mcode/contracts/models/enums";
+import { PlanPhaseSchema, type PlanPhase } from "@mcode/contracts/models/thread";
+import { ReasoningLevelSchema } from "@mcode/contracts/models/settings";
+import { ScheduledTurnResumeSchema } from "@mcode/contracts/models/turn-recovery";
+import { type AcknowledgeSeenResult } from "@mcode/contracts/models/thread-attention";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
+import type { DevinMode, ThreadMode, ThreadStatus, InteractionMode, OrchestrationMode, PermissionMode } from "@mcode/contracts/models/enums";
+import type { Thread, RecentThread } from "@mcode/contracts/models/thread";
+import type { ReasoningLevel, ContextWindowMode } from "@mcode/contracts/models/settings";
 import {
   canonicalAgentThreads,
   canonicalAgentTurns,

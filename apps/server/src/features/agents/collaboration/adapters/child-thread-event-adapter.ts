@@ -1,5 +1,7 @@
-import { SUBAGENT_REPORTING, createCanonicalSubagentPresentation,
-  type AgentEvent, type ChildThreadEvidence } from "@mcode/contracts";
+import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
+import { createCanonicalSubagentPresentation } from "@mcode/contracts/models/tool-call-record";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type ChildThreadEvidence } from "@mcode/contracts/events/provider-runtime-event";
 import { ChildThreadRejection, type ChildThreadHandle, type ChildThreadReads,
   type ChildThreadRecorder } from "../child-thread-recorder.js";
 import type { ProviderEventProjection } from "../../../providers/composition/provider-event-adapter.js";

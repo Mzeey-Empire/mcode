@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { CanonicalAgentSemanticEnvelopeSchema } from "@mcode/contracts";
+import { CanonicalAgentSemanticEnvelopeSchema } from "@mcode/contracts/compat/agent-model";
 import { logger } from "@mcode/shared";
-import type { CanonicalAgentEventEnvelope, WorkspaceEnvironmentAction } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { WorkspaceEnvironmentAction } from "@mcode/contracts/models/workspace-environment";
 import { WorkspaceEnvironmentServiceError } from "../workspace-environment-errors.js";
 import { SettleActionObserver, type SettleActionThread, type SettleTimers } from "../settle-action-observer.js";
 

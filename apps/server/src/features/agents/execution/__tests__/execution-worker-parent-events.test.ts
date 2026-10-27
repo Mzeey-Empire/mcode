@@ -1,4 +1,5 @@
-import { AgentEventSchema, ProviderRuntimeEventSchema, type AgentEvent } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderEventDraft } from "@mcode/providers";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";

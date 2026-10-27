@@ -1,13 +1,6 @@
 import * as NodeHTTP from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BrowserAutomationHostDispatchTargetSchema,
-  BrowserAutomationResponseSchema,
-  type BrowserAutomationHostRegistration,
-  type BrowserAutomationHostDispatch,
-  type BrowserAutomationResponse,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BrowserAutomationHostDispatchTargetSchema, BrowserAutomationResponseSchema, type BrowserAutomationHostRegistration, type BrowserAutomationHostDispatch, type BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
 import {
   BROWSER_CONFORMANCE_RACE_CATALOGUE,
   BrowserConformanceFaultController,

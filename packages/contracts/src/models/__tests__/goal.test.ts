@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  GoalLookupReasonSchema,
-  GoalLookupResultSchema,
-  GoalLookupSourceSchema,
-  WS_METHODS,
-  isGoalOpen,
-  isGoalStatusOpen,
-  type GoalState,
-} from "../../index.js";
+import { GoalLookupReasonSchema, GoalLookupResultSchema, GoalLookupSourceSchema, isGoalOpen, isGoalStatusOpen, type GoalState } from "@mcode/contracts/models/goal";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 
 function goal(status: GoalState["status"]): GoalState {
   return {

@@ -1,12 +1,13 @@
 import { z } from "zod";
-import {
-  AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CanonicalAgentEventEnvelopeSchema,
-  CollaborationActionSchema, MessageMentionSchema,
-  PreviewAnnotationBundleSchema, ProviderIdentitySchema, SelectedTextCommentsSchema,
-  StoredAttachmentSchema, SystemNoticeMetadataSchema, TurnOutcomeSchema,
-  MessageSchema, NarrativeEntrySchema, TurnFileEffectSummarySchema,
-  InterruptionCauseSchema, PersistedTurnFailureSchema, TurnStopCauseSchema, TurnUsageLimitSchema,
-} from "@mcode/contracts";
+import { AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CanonicalAgentEventEnvelopeSchema, CollaborationActionSchema, ProviderIdentitySchema, InterruptionCauseSchema, PersistedTurnFailureSchema, TurnStopCauseSchema, TurnUsageLimitSchema } from "@mcode/contracts/compat/agent-model";
+import { MessageMentionSchema } from "@mcode/contracts/models/mention";
+import { PreviewAnnotationBundleSchema } from "@mcode/contracts/models/browser-preview";
+import { SelectedTextCommentsSchema } from "@mcode/contracts/models/selected-text-comment";
+import { StoredAttachmentSchema } from "@mcode/contracts/models/attachment";
+import { SystemNoticeMetadataSchema, MessageSchema } from "@mcode/contracts/models/message";
+import { TurnOutcomeSchema } from "@mcode/contracts/models/turn-outcome";
+import { NarrativeEntrySchema } from "@mcode/contracts/models/narrative-entry";
+import { TurnFileEffectSummarySchema } from "@mcode/contracts/models/file-effect";
 import type { TurnEndingCause } from "./turn-ending.js";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 

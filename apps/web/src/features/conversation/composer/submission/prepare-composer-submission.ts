@@ -1,4 +1,4 @@
-import type { PreviewAnnotationBundle } from "@mcode/contracts";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { useToastStore } from "@/stores/toastStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
 import { readVisibleBrowserNotePages } from "../draft/draft-browser-notes";

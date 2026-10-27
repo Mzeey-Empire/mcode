@@ -2,7 +2,7 @@ import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
 import { browserPartitionFor } from "@mcode/shared/browser-partition";
 import { browserProfiles } from "./browser-profiles.js";
 import { sanitizeHistoryUrl } from "../profiles/history-store.js";
-import { BrowserCertificateFailureSchema } from "@mcode/contracts";
+import { BrowserCertificateFailureSchema } from "@mcode/contracts/models/browser-certificate";
 import { resolveAdoptedPreviewSurfaceForWindow } from "../surfaces/registry.js";
 
 function validateSender(event: IpcMainInvokeEvent): BrowserWindow {

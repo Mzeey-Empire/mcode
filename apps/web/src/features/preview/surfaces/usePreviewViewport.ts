@@ -2,7 +2,7 @@
  * Owns the tab and viewport subscriptions and device toolbar lifecycle, separate from page navigation and rendering.
  */
 import { useCallback, useEffect, useState } from "react";
-import { BROWSER_AUTOMATION_VIEWPORT_CANVAS_PADDING_PX } from "@mcode/contracts";
+import { BROWSER_AUTOMATION_VIEWPORT_CANVAS_PADDING_PX } from "@mcode/contracts/models/browser-automation";
 import { previewTabsScopeKey, usePreviewTabsStore } from "../state/previewTabsStore";
 import { useViewportCoordinatorState } from "./useViewportCoordinatorState";
 import { usePreviewTabs } from "../tabs/usePreviewTabs";

@@ -1,9 +1,8 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import {
-  AgentEventSchema, CanonicalAgentSemanticEnvelopeSchema, MessageSchema, PlanVersionSchema,
-  createAgentModelState, reduceAgentEventBatch,
-  type AgentEvent, type AgentItem, type AgentThread, type AgentTurn, type Message, type PlanVersion,
-} from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { CanonicalAgentSemanticEnvelopeSchema, createAgentModelState, reduceAgentEventBatch, type AgentItem, type AgentThread, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { MessageSchema, type Message } from "@mcode/contracts/models/message";
+import { PlanVersionSchema, type PlanVersion } from "@mcode/contracts/models/plan";
 import { describe, expect, it, vi } from "vitest";
 import type { ExecutionSemanticOperation, ParentLiveEffects } from "../../execution/execution-worker-handler.js";
 import { taskToolWriteIntents } from "../../tasks/task-tool-intent-reducer.js";

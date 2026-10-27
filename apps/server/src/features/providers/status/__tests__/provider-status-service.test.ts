@@ -3,14 +3,10 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  AgentEventType,
-  SettingsSchema,
-  type ProviderId,
-  type ProviderStatusFacts,
-  type ProviderCliFacts,
-  type Settings,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { SettingsSchema, type Settings } from "@mcode/contracts/models/settings";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { type ProviderStatusFacts, type ProviderCliFacts } from "@mcode/contracts/providers/provider-status";
 import { describeDevinAuth } from "@mcode/providers";
 import { ProviderRateLimitStore } from "../provider-rate-limit-store.js";
 import { ProviderStatusService, recheckAfterAuthFailure, type StatusSourceRegistry } from "../provider-status-service.js";

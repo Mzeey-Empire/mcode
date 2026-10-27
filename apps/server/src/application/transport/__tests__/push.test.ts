@@ -13,7 +13,7 @@ import {
   unsubscribeClientFromThread,
   _resetForTest,
 } from "../push.js";
-import { decodeTerminalDataFrame } from "@mcode/contracts";
+import { decodeTerminalDataFrame } from "@mcode/contracts/ws/terminal-legacy-binary";
 import {
   createPassThroughTransportPayloadValidator,
   createValidatingTransportPayloadValidator,

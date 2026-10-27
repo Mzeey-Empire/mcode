@@ -10,7 +10,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { parse as parseToml } from "smol-toml";
-import type { ProviderStatusFacts } from "@mcode/contracts";
+import type { ProviderStatusFacts } from "@mcode/contracts/providers/provider-status";
 import { ProviderTurnError } from "../../provider-turn-error.js";
 
 /** Resolved Devin ACP authentication material. */

@@ -40,8 +40,8 @@ ruleTester.run("no-function-scope-zod-schema", noFunctionScopeZodSchema, {
       code: 'import { z } from "zod"; import { lazySchema as defer } from "./utils/lazySchema.js"; const UserSchema = defer(() => z.object({ id: z.string() }));',
     },
     {
-      name: "the contracts lazySchema re-export defers schema construction",
-      code: 'import { z } from "zod"; import { lazySchema } from "@mcode/contracts"; const UserSchema = lazySchema(() => z.object({ id: z.string() }));',
+      name: "the contracts lazySchema module defers schema construction",
+      code: 'import { z } from "zod"; import { lazySchema } from "@mcode/contracts/utils/lazySchema"; const UserSchema = lazySchema(() => z.object({ id: z.string() }));',
     },
   ],
   invalid: [

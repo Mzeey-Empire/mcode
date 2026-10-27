@@ -1,5 +1,5 @@
 import * as NodeFS from "node:fs";
-import type { ReviewComparisonResult } from "@mcode/contracts";
+import type { ReviewComparisonResult } from "@mcode/contracts/models/review-comparison";
 
 /** A bounded comparison whose complete file count exceeds the Review limit. */
 export class ReviewComparisonLimitError extends Error {

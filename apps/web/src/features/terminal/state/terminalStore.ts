@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { TERMINAL_MAX_PER_SCOPE, type LegacyTerminalRecord, type TerminalExitMetadata, type TerminalSessionState } from "@mcode/contracts";
+import { TERMINAL_MAX_PER_SCOPE, type TerminalExitMetadata, type TerminalSessionState } from "@mcode/contracts/models/terminal";
+import { type LegacyTerminalRecord } from "@mcode/contracts/ws/terminal-legacy";
 import { getTransport } from "@/transport";
 
 /** A single PTY-backed terminal instance displayed in the terminal panel. */

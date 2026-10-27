@@ -1,7 +1,8 @@
 import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
-import type { ProviderTurnDiffUpdate, TurnFileEffectSummary } from "@mcode/contracts";
+import type { ProviderTurnDiffUpdate } from "@mcode/contracts/providers/interfaces";
+import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
 import { openAgentStorageTestDatabase as openMemoryDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { TurnDiffRepo } from "../persistence/turn-diff-repo.js";
 import { TURN_DIFF_MAX_BYTES, TurnDiffService, selectTurnDiffSettlement } from "../turn-diff-service.js";

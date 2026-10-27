@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { NativePlanFileOutcomeSchema, NativePlanFileRefSchema, PlanImplementErrorSchema,
-  PlanImplementSchema, PlanImplementTargetSchema } from "@mcode/contracts";
+import { NativePlanFileOutcomeSchema, NativePlanFileRefSchema, PlanImplementErrorSchema, PlanImplementSchema, PlanImplementTargetSchema } from "@mcode/contracts/models/plan";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 
 /** Persisted Implement snapshot shared across the writer boundary. */

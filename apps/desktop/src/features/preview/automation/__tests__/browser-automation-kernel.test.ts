@@ -1,6 +1,6 @@
 import * as NodeEvents from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BROWSER_AUTOMATION_CONTRACT_VERSION, type BrowserAutomationRequest } from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, type BrowserAutomationRequest } from "@mcode/contracts/models/browser-automation";
 import {
   PREVIEW_GUEST_AGENT_INPUT_CHANNEL,
   PREVIEW_GUEST_AGENT_POINTER_CHANNEL,

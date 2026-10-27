@@ -2,8 +2,9 @@ import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ProviderAvailabilityService } from "../provider-availability-service.js";
 import type { SettingsService } from "../../../settings/settings-service.js";
-import type { IProviderRegistry, IAgentProvider, ProviderAvailability } from "@mcode/contracts";
-import { getDefaultSettings } from "@mcode/contracts";
+import type { IProviderRegistry, IAgentProvider } from "@mcode/contracts/providers/interfaces";
+import type { ProviderAvailability } from "@mcode/contracts/providers/availability";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { ProviderDisabledError, ProviderCliMissingError } from "../provider-availability-errors.js";
 
 function stubSettings(overrides: Partial<ReturnType<typeof getDefaultSettings>> = {}): SettingsService {

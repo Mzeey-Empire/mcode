@@ -1,6 +1,6 @@
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeCrypto from "node:crypto";
-import type { RevertFilePlan, TurnRevertPreview, TurnRevertScope } from "@mcode/contracts";
+import type { RevertFilePlan, TurnRevertPreview, TurnRevertScope } from "@mcode/contracts/models/turn-revert";
 import type { SnapshotService } from "../snapshots/snapshot-service.js";
 import type { TurnSnapshotRangeReader } from "../snapshots/turn-snapshot-range.js";
 import type { TurnSnapshotRange } from "../snapshots/turn-snapshot-range-model.js";

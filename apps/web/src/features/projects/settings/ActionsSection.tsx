@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { WorkspaceEnvironmentAction } from "@mcode/contracts";
+import type { WorkspaceEnvironmentAction } from "@mcode/contracts/models/workspace-environment";
 import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
 import { PlayGlyph } from "./PlayGlyph";

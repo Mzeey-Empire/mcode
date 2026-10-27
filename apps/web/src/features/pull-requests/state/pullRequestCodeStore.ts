@@ -1,17 +1,5 @@
-import type {
-  PullRequestBoundedDataMarker,
-  PullRequestError,
-  PullRequestFile,
-  PullRequestFileChangeType,
-  PullRequestIdentity,
-  PullRequestPatchResult,
-} from "@mcode/contracts";
-import {
-  PULL_REQUEST_FILE_MAX_COUNT,
-  PULL_REQUEST_PATCH_MAX_BYTES,
-  PULL_REQUEST_PATCH_MAX_LINES,
-  PULL_REQUEST_PATCH_MAX_LINE_LENGTH,
-} from "@mcode/contracts";
+import type { PullRequestBoundedDataMarker, PullRequestError, PullRequestFile, PullRequestFileChangeType, PullRequestIdentity, PullRequestPatchResult } from "@mcode/contracts/pull-requests";
+import { PULL_REQUEST_FILE_MAX_COUNT, PULL_REQUEST_PATCH_MAX_BYTES, PULL_REQUEST_PATCH_MAX_LINES, PULL_REQUEST_PATCH_MAX_LINE_LENGTH } from "@mcode/contracts/pull-requests";
 import { create } from "zustand";
 import {
   getPullRequestTransport,

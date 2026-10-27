@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { PlanComment, PlanVersion } from "@mcode/contracts";
+import type { PlanComment, PlanVersion } from "@mcode/contracts/models/plan";
 import { usePlanStore } from "@/stores/planStore";
 import { usePlanCommentChip } from "./usePlanCommentChip";
 

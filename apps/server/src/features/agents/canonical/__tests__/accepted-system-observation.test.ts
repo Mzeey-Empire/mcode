@@ -1,4 +1,6 @@
-import { AgentEventSchema, MessageSchema, type AgentEvent, type ProviderId } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { describe, expect, it } from "vitest";
 import { prepareAcceptedSystemObservation } from "../accepted-system-observation.js";
 

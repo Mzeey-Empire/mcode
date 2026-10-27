@@ -1,12 +1,6 @@
 import * as NodeCrypto from "node:crypto";
-import {
-  TERMINAL_V1_METHODS,
-  TerminalDiagnosticsBundleSchema,
-  type TerminalDiagnosticEvent,
-  type TerminalDiagnosticsBundle,
-  type TerminalHealthSnapshot,
-  type TerminalMetricId,
-} from "@mcode/contracts";
+import { TERMINAL_V1_METHODS } from "@mcode/contracts/ws/terminal";
+import { TerminalDiagnosticsBundleSchema, type TerminalDiagnosticEvent, type TerminalDiagnosticsBundle, type TerminalHealthSnapshot, type TerminalMetricId } from "@mcode/contracts/models/terminal-diagnostics";
 
 const RETENTION_MS = 5 * 60 * 1_000;
 const MAX_RETAINED_EVENTS = 2_048;

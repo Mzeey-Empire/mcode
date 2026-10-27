@@ -6,8 +6,8 @@
 
 import { injectable, inject } from "tsyringe";
 import * as NodeChildProcess from "node:child_process";
-import type { PrInfo, ChecksStatus, CheckRun, PullRequestTargetsListParams, PullRequestTargetsListResult } from "@mcode/contracts";
-import { PrInfoSchema } from "@mcode/contracts";
+import type { PrInfo, ChecksStatus, CheckRun, PullRequestTargetsListParams, PullRequestTargetsListResult } from "@mcode/contracts/github";
+import { PrInfoSchema } from "@mcode/contracts/github";
 import { GitRepositoryService } from "../../projects/git/git-repository-service.js";
 import { GithubPullRequestClient, GithubPullRequestClientError } from "./github-pull-request-client.js";
 import { logger } from "@mcode/shared";

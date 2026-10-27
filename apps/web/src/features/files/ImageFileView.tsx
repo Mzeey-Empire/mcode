@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from "react";
-import type { FileReadResult } from "@mcode/contracts";
+import type { FileReadResult } from "@mcode/contracts/models/workspace-file";
 import { buildServerImageUrl } from "@/lib/server-image-url";
 import type { ImageScale } from "./filesTabsStore";
 

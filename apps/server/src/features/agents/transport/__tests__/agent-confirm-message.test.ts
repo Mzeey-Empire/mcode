@@ -7,7 +7,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTimersPromises from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { IAgentProvider, IProviderRegistry } from "@mcode/contracts";
+import type { IAgentProvider, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";

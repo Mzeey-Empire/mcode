@@ -30,8 +30,10 @@ import { handleSlashCommandTrayKey, useSlashCommand } from "@/components/chat/us
 import type { Command } from "@/components/chat/useSlashCommand";
 import { ComposerOverlayLayout } from "@/components/chat/ComposerOverlaySurface";
 import { useQueueStore } from "@/stores/queueStore";
-import { attachmentAcceptAttribute, isGoalOpen } from "@mcode/contracts";
-import type { MessageMention, SelectedTextComment } from "@mcode/contracts";
+import { attachmentAcceptAttribute } from "@mcode/contracts/models/file-types";
+import { isGoalOpen } from "@mcode/contracts/models/goal";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { useComposerFormController } from "./draft/useComposerFormController";
 import { useComposerExecutionTarget } from "./execution/useComposerExecutionTarget";

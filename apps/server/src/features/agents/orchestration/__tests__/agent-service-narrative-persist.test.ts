@@ -5,13 +5,12 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { AgentEventType, CanonicalAgentProgressFrameSchema, ProviderRuntimeEventSchema } from "@mcode/contracts";
-import type {
-  AgentEvent,
-  IProviderRegistry,
-  ProviderRuntimeEvent,
-  ProviderRuntimeExtension,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts/models/canonical-agent-progress";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { IProviderRegistry } from "@mcode/contracts/providers/interfaces";
+import type { ProviderRuntimeEvent, ProviderRuntimeExtension } from "@mcode/contracts/events/provider-runtime-event";
 import { AgentService } from "../agent-service.js";
 import {
   continueAgentTurnWithoutSavingForTest,

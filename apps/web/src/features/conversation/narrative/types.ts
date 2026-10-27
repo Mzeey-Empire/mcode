@@ -1,5 +1,8 @@
 import type { ToolCall, HookExecution } from "@/transport/types";
-import type { ApprovalOutcome, ApprovalReviewMode, ThoughtSegmentKind, TurnOutcome } from "@mcode/contracts";
+import type { ApprovalOutcome } from "@mcode/contracts/models/approval";
+import type { ApprovalReviewMode } from "@mcode/contracts/models/enums";
+import type { ThoughtSegmentKind } from "@mcode/contracts/models/thought-segment";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { SubagentLifecycle } from "./subagent-lifecycle";
 
 /** Roster view associated with a sub-agent activity control. */

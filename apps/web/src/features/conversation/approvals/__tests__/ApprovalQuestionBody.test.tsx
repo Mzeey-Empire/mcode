@@ -2,7 +2,7 @@ import { createMockApproval } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useApprovalStore } from "@/stores/approvalStore";
 
-import type { ApprovalQuestion, ApprovalRequest } from "@mcode/contracts";
+import type { ApprovalQuestion, ApprovalRequest } from "@mcode/contracts/models/approval";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

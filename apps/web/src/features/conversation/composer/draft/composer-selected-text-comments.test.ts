@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SelectedTextComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import {
   removeSelectedTextComment,
   saveSelectedTextComment,

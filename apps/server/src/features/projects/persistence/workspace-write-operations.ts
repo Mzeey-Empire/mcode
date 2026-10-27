@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { WorkspaceSchema } from "@mcode/contracts";
+import { WorkspaceSchema } from "@mcode/contracts/models/workspace";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 
 /** Workspace mutations admitted to the sole application database writer. */

@@ -1,6 +1,6 @@
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import * as NodeCrypto from "node:crypto";
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type {
   CanonicalParentNarrativeClassificationReceipt,
   CanonicalParentNarrativeRecoveryReceipt,

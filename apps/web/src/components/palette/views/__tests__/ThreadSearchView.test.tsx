@@ -5,7 +5,7 @@ import { Command } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useUiStore } from "@/stores/uiStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
-import type { ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 
 import type { RecentThread } from "@/transport/types";

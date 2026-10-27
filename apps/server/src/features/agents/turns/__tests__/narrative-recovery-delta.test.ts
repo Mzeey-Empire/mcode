@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 
 import { NarrativeRecoveryDelta, splitNarrativeRecoveryDelta } from "../narrative-recovery-delta.js";
 

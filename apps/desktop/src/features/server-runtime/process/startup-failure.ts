@@ -1,12 +1,6 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import {
-  describeRefusal,
-  STARTUP_FAILURE_FILE_MAX_BYTES,
-  STARTUP_FAILURE_FILE_NAME,
-  StartupFailureFileSchema,
-  type StartupRefusal,
-} from "@mcode/contracts";
+import { describeRefusal, STARTUP_FAILURE_FILE_MAX_BYTES, STARTUP_FAILURE_FILE_NAME, StartupFailureFileSchema, type StartupRefusal } from "@mcode/contracts/startup-failure";
 
 /** The server started, found it must not open the user's data, and said why. */
 export class ServerStartupRefusedError extends Error {

@@ -1,7 +1,7 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 
 const approveWorkspaceEnvironmentCommand = vi.mocked(mockTransport.approveWorkspaceEnvironmentCommand);
 const startWorkspaceAction = vi.mocked(mockTransport.startWorkspaceAction);

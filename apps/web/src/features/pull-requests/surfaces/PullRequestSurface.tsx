@@ -1,4 +1,4 @@
-import type { PullRequestSummary } from "@mcode/contracts";
+import type { PullRequestSummary } from "@mcode/contracts/pull-requests";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ResizableRightPanel } from "@/components/panels/ResizableRightPanel";
 import { useElementWidth } from "@/hooks/useElementWidth";

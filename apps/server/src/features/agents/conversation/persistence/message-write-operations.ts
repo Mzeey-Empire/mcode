@@ -1,8 +1,11 @@
 import { z } from "zod";
-import {
-  MessageSchema, MessageRoleSchema, MessageMentionsSchema, PreviewAnnotationBundleSchema,
-  SelectedTextCommentsSchema, StoredAttachmentSchema, SystemNoticeMetadataSchema, TurnOutcomeSchema,
-} from "@mcode/contracts";
+import { MessageSchema, SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
+import { MessageRoleSchema } from "@mcode/contracts/models/enums";
+import { MessageMentionsSchema } from "@mcode/contracts/models/mention";
+import { PreviewAnnotationBundleSchema } from "@mcode/contracts/models/browser-preview";
+import { SelectedTextCommentsSchema } from "@mcode/contracts/models/selected-text-comment";
+import { StoredAttachmentSchema } from "@mcode/contracts/models/attachment";
+import { TurnOutcomeSchema } from "@mcode/contracts/models/turn-outcome";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 
 const origin = z.discriminatedUnion("type", [

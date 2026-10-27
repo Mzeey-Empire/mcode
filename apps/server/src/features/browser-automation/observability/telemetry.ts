@@ -1,8 +1,4 @@
-import type {
-  BrowserAutomationErrorCode,
-  BrowserAutomationOperation,
-  BrowserAutomationResponse,
-} from "@mcode/contracts";
+import type { BrowserAutomationErrorCode, BrowserAutomationOperation, BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
 
 /** Maximum content-free lifecycle events retained for local evidence. */
 export const BROWSER_AUTOMATION_MAX_TELEMETRY_EVENTS = 2_048;

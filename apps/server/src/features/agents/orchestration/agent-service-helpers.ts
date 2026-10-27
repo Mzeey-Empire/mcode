@@ -1,9 +1,6 @@
-import type {
-  AgentEvent,
-  AgentStopResult,
-  Thread,
-  TurnRuntimeSnapshot,
-} from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { AgentStopResult, TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
+import type { Thread } from "@mcode/contracts/models/thread";
 import type { FinalizeTurnCommand } from "../turns/turn-event-pipeline.js";
 import type { TurnEndingCause } from "../canonical/turn-ending.js";
 

@@ -18,7 +18,7 @@ import {
   providerNoticeSessionId,
 } from "@/stores/thread-record";
 import type { ThreadRecord } from "@/stores/thread-record";
-import type { GoalLookupResult } from "@mcode/contracts";
+import type { GoalLookupResult } from "@mcode/contracts/models/goal";
 import { resolveGoalLookupGoal } from "@/lib/goal-lookup";
 import type {
   HydrateMode,
@@ -30,13 +30,9 @@ import type {
 } from "./types";
 import { SnapshotBuilder, snapshotBuilder } from "./snapshot-builder";
 import { AuxiliaryHydrator } from "./auxiliary-hydrator";
-import {
-  CONVERSATION_OLDER_PAGE_MAX_BYTES,
-  type ConversationOlderPage,
-  type ConversationOlderPageIdentity,
-  type ConversationPage,
-  type ConversationTail,
-} from "@mcode/contracts";
+import { CONVERSATION_OLDER_PAGE_MAX_BYTES, type ConversationOlderPage, type ConversationOlderPageIdentity } from "@mcode/contracts/models/conversation-older-page";
+import { type ConversationPage } from "@mcode/contracts/models/conversation-page";
+import { type ConversationTail } from "@mcode/contracts/models/conversation-tail";
 import { hasRememberedHistoryPosition } from "@/components/chat/scrollPositionMemory";
 import {
   recordRunningFetchRequired,

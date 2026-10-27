@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IUsageSource } from "@mcode/shared/usage";
-import type { QuotaCategory } from "@mcode/contracts";
+import type { QuotaCategory } from "@mcode/contracts/providers/usage";
 import { CompositeUsageSource } from "../composite-usage-source.js";
 
 const stub = (id: string, result: QuotaCategory[] | null): IUsageSource => ({

@@ -2,7 +2,9 @@ import { createMockMessage } from "@mcode/contracts/testing";
 import { render, act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { StrictMode, useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createAgentModelState, type AgentItem, type AgentTurn, type Message, type SelectedTextComment } from "@mcode/contracts";
+import { createAgentModelState, type AgentItem, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { type Message } from "@mcode/contracts/models/message";
+import { type SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 
 const loadOlderMessagesSpy = vi.fn();
 const loadNewerMessagesSpy = vi.fn();

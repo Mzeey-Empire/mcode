@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PlanCommentAnchor } from "@mcode/contracts";
+import type { PlanCommentAnchor } from "@mcode/contracts/models/plan";
 import { reanchorPlanComment } from "./reanchor-plan-comment.js";
 
 const anchor: PlanCommentAnchor = { kind: "text", start: 7, end: 12, quote: "words", prefix: "# Step\n", suffix: " here", section: "Step" };

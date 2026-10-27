@@ -1,4 +1,4 @@
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { SplitButton } from "@/components/ui/split-button";
 import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";

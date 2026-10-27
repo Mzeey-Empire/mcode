@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { appDisplayName, type BuildStage } from "@mcode/contracts";
+import { appDisplayName, type BuildStage } from "@mcode/contracts/build-stage";
 import { getTransport } from "@/transport";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 

@@ -8,7 +8,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
-import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts";
+import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts/models/workspace-preview-uri";
 
 import { type PreviewSession } from "../state/window-session.js";
 import { isAllowedPreviewUrl } from "./policy.js";

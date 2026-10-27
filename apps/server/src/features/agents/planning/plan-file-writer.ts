@@ -2,7 +2,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { getMcodeDir, logger, resolveThreadPlanFile } from "@mcode/shared";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 
 /** Serializes atomic file projections and reads the latest row when each write starts. */
 export class PlanFileWriter {

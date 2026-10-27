@@ -8,22 +8,19 @@
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { AgentEventType, ProviderRuntimeEventSchema, isChildRoutedRuntimeEvent, isSessionEvictable, isTurnSteerCapable, providerFailureOutcome } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { ProviderRuntimeEventSchema, isChildRoutedRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { isSessionEvictable, isTurnSteerCapable } from "@mcode/contracts/providers/interfaces";
+import { providerFailureOutcome } from "@mcode/contracts/models/turn-failure";
 import type { ClaudeCanonicalEventRouting, ClaudeProviderBoundary, CodexProviderBoundary, CopilotProviderBoundary, ProviderTurnOpening } from "@mcode/providers";
 import { ProviderTurnError } from "@mcode/providers";
-import type {
-  Thread,
-  IProviderRegistry,
-  IAgentProvider,
-  TurnRequest,
-  AgentEvent,
-  ProviderId,
-  TurnRuntimeSnapshot,
-  AgentStopResult,
-  ProviderRuntimeEvent,
-  TurnFailure,
-  TurnStopCause,
-} from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
+import type { IProviderRegistry, IAgentProvider, TurnRequest, ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { TurnRuntimeSnapshot, AgentStopResult } from "@mcode/contracts/models/turn-runtime";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import type { TurnFailure } from "@mcode/contracts/models/turn-failure";
+import type { TurnStopCause } from "@mcode/contracts/compat/agent-model";
 import { TURN_FILE_EFFECTS, TurnFileEffects } from "../turns/turn-file-effects.js";
 import type { WorkspaceEnvironmentAutomaticSetupDispatch } from "../../projects/environment/workspace-environment-service.js";
 import { MemoryPressureService, type MemoryPressureSnapshot } from "../../../runtime/memory/memory-pressure-service.js";
@@ -213,7 +210,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       /** True once the provider's sendTurn invocation has begun. */
       dispatchStarted: boolean;
       sessionName: string;
-      resolvedProvider: import("@mcode/contracts").IAgentProvider;
+      resolvedProvider: import("@mcode/contracts/providers/interfaces").IAgentProvider;
       effectiveProvider: ProviderId;
       /** Provider-neutral thread-control activation selected during admission. */
       threadControl: ThreadControlLeaseDirective | null;
@@ -1852,12 +1849,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    * any trailing `Ended` from teardown is emitted while suppression is still armed.
    */
   private async evictPooledSession(
-    provider: import("@mcode/contracts").IAgentProvider,
+    provider: import("@mcode/contracts/providers/interfaces").IAgentProvider,
     sessionName: string,
   ): Promise<void> {
     if (!isSessionEvictable(provider)) return;
     await provider.discardSession(sessionName);
-    const withWait = provider as import("@mcode/contracts").IAgentProvider & {
+    const withWait = provider as import("@mcode/contracts/providers/interfaces").IAgentProvider & {
       waitForSessionExit?: (sessionId: string, timeoutMs?: number) => Promise<void>;
     };
     if (typeof withWait.waitForSessionExit === "function") {
@@ -2340,7 +2337,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
 
     if (!providerId) return;
-    let provider: import("@mcode/contracts").IAgentProvider;
+    let provider: import("@mcode/contracts/providers/interfaces").IAgentProvider;
     try {
       provider = this.providerRegistry.resolve(providerId);
     } catch (err) {

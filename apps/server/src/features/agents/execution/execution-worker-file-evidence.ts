@@ -1,5 +1,6 @@
 import "reflect-metadata";
-import type { AgentEvent, TurnFileEffectSummary } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 
 import { RealGitExecutor } from "../../projects/git/execution/real-git-executor.js";

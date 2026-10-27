@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { CanonicalAgentProgressFrameSchema, MessageSchema, createAgentModelState, reduceAgentEventBatch, type CanonicalAgentProgressFrame } from "@mcode/contracts";
+import { CanonicalAgentProgressFrameSchema, type CanonicalAgentProgressFrame } from "@mcode/contracts/models/canonical-agent-progress";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { createAgentModelState, reduceAgentEventBatch } from "@mcode/contracts/compat/agent-model";
 import { useThreadStore } from "@/stores/threadStore";
 import { resetThreadStoreForTests, seedThreadRecord } from "@/stores/thread-store-test-utils";
 import { mockTransport } from "./mocks/transport";

@@ -1,6 +1,7 @@
 import type { SessionEvent } from "@github/copilot-sdk";
 import { describe, expect, it } from "vitest";
-import { AgentEventSchema, ProviderRuntimeEventSchema, providerRuntimeEvent } from "@mcode/contracts";
+import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
+import { ProviderRuntimeEventSchema, providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { parseCopilotCapturedTrace } from "../../../conformance/copilot-trace.js";
 import { mapCopilotEvent, closeOpenChildren, type CopilotTurnState } from "../copilot-event-mapper.js";
 

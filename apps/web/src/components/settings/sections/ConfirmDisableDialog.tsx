@@ -9,8 +9,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
-import { PROVIDER_CATALOG } from "@mcode/contracts";
-import type { PartialSettings, ProviderId, SettingsProviderId } from "@mcode/contracts";
+import { PROVIDER_CATALOG } from "@mcode/contracts/providers/catalog";
+import type { PartialSettings, SettingsProviderId } from "@mcode/contracts/models/settings";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 
 /** Props for the dialog shown when disabling a provider that is set as default. */
 export interface ConfirmDisableDialogProps {

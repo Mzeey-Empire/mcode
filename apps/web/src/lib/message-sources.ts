@@ -1,4 +1,4 @@
-import type { Message } from "@mcode/contracts";
+import type { Message } from "@mcode/contracts/models/message";
 
 /** A deduped external link the assistant referenced during the thread. */
 export interface ThreadSource {

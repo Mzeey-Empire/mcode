@@ -6,7 +6,7 @@ import { rememberScrollTop, recallScrollPosition } from "@/components/chat/scrol
 import { STICKY_USER_MESSAGE_ESTIMATED_HEIGHT } from "@/components/chat/StickyUserMessage";
 import { registerCommand } from "@/lib/command-registry";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
-import type { SelectedTextComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import type { HistoryPageLoadResult } from "@/stores/threadStore";
 import type { SubagentRosterTarget } from "../narrative";

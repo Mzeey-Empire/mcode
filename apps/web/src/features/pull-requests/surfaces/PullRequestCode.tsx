@@ -1,9 +1,4 @@
-import type {
-  PullRequestBoundedDataMarker,
-  PullRequestDetail,
-  PullRequestIdentity,
-  PullRequestReviewThread,
-} from "@mcode/contracts";
+import type { PullRequestBoundedDataMarker, PullRequestDetail, PullRequestIdentity, PullRequestReviewThread } from "@mcode/contracts/pull-requests";
 import {
   useCallback,
   useEffect,

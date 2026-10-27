@@ -1,12 +1,8 @@
 import type { Database } from "bun:sqlite";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import {
-  TerminalProfileReferenceSchema,
-  WorkspaceTerminalPreferenceSchema,
-  type TerminalProfileReference,
-  type WorkspaceTerminalPreference,
-} from "@mcode/contracts";
+import { TerminalProfileReferenceSchema, type TerminalProfileReference } from "@mcode/contracts/models/terminal";
+import { WorkspaceTerminalPreferenceSchema, type WorkspaceTerminalPreference } from "@mcode/contracts/models/terminal-settings";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 import {
   workspaceTerminalPreferences,

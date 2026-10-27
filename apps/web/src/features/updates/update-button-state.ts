@@ -1,4 +1,4 @@
-import { isNightlyVersion } from "@mcode/contracts";
+import { isNightlyVersion } from "@mcode/contracts/build-stage";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 
 /** The step a Retry repeats, carried on the desktop error status. */

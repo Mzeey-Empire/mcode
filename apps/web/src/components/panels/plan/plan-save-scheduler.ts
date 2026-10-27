@@ -1,4 +1,4 @@
-import { PlanVersionSchema, type PlanImplement, type PlanSaveVersion, type PlanVersion } from "@mcode/contracts";
+import { PlanVersionSchema, type PlanImplement, type PlanSaveVersion, type PlanVersion } from "@mcode/contracts/models/plan";
 import { RpcError } from "@/transport/ws-transport";
 
 /** Quiet period after the last keystroke before a plan draft saves. */

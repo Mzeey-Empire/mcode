@@ -1,16 +1,5 @@
 import * as NodeCrypto from "node:crypto";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BROWSER_AUTOMATION_MAX_RESULT_BYTES,
-  BROWSER_AUTOMATION_OPERATION_METADATA,
-  BROWSER_V2_CORE_OPERATIONS,
-  BrowserAutomationRequestSchema,
-  type BrowserAutomationError,
-  type BrowserAutomationPublicOperation,
-  type BrowserAutomationRequest,
-  type BrowserAutomationResponse,
-  type BrowserAutomationResult,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_MAX_RESULT_BYTES, BROWSER_AUTOMATION_OPERATION_METADATA, BROWSER_V2_CORE_OPERATIONS, BrowserAutomationRequestSchema, type BrowserAutomationError, type BrowserAutomationPublicOperation, type BrowserAutomationRequest, type BrowserAutomationResponse, type BrowserAutomationResult } from "@mcode/contracts/models/browser-automation";
 import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type {
   BrowserAutomationBroker,

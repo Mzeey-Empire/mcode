@@ -1,4 +1,4 @@
-import type { TurnRuntimeSnapshot, TurnSavingStatus } from "@mcode/contracts";
+import type { TurnRuntimeSnapshot, TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import type { ThreadRecord } from "./thread-record";
 
 type SavingPatch = Pick<ThreadRecord, "savingStatus" | "savingStatuses" | "pendingSavingStatuses">;

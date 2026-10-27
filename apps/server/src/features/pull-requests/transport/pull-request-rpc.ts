@@ -1,23 +1,8 @@
-import type {
-  PullRequestCapabilitiesRequest,
-  PullRequestCancelRequest,
-  PullRequestCloseRequest,
-  PullRequestCreateReviewTaskRequest,
-  PullRequestFilesRequest,
-  PullRequestGetRequest,
-  PullRequestListRequest,
-  PullRequestMergeRequest,
-  PullRequestPatchRequest,
-  PullRequestPostCommentRequest,
-  PullRequestReviewLinkRequest,
-  PullRequestSetReadinessRequest,
-  PullRequestSubmitReviewRequest,
-  PullRequestTimelineRequest,
-  Thread,
-  Workspace,
-  WsMethodName,
-  PullRequestTargetsListParams,
-} from "@mcode/contracts";
+import type { PullRequestCapabilitiesRequest, PullRequestCancelRequest, PullRequestCloseRequest, PullRequestCreateReviewTaskRequest, PullRequestFilesRequest, PullRequestGetRequest, PullRequestListRequest, PullRequestMergeRequest, PullRequestPatchRequest, PullRequestPostCommentRequest, PullRequestReviewLinkRequest, PullRequestSetReadinessRequest, PullRequestSubmitReviewRequest, PullRequestTimelineRequest } from "@mcode/contracts/pull-requests";
+import type { Thread } from "@mcode/contracts/models/thread";
+import type { Workspace } from "@mcode/contracts/models/workspace";
+import type { WsMethodName } from "@mcode/contracts/ws/methods";
+import type { PullRequestTargetsListParams } from "@mcode/contracts/github";
 import { validateBranchName } from "@mcode/shared";
 import type { WebSocket } from "ws";
 import type { GitRepositoryService } from "../../projects/git/git-repository-service.js";

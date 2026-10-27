@@ -1,12 +1,7 @@
 import { act, render, waitFor } from "@testing-library/react";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  type BrowserAutomationControllerState,
-  type BrowserAutomationHostDispatch,
-  type BrowserAutomationResponse,
-  type BrowserTabSet,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, type BrowserAutomationControllerState, type BrowserAutomationHostDispatch, type BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
+import { type BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useThreadStore } from "@/stores/threadStore";

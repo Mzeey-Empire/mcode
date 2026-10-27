@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { TERMINAL_MAX_PER_SCOPE, type WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts/models/terminal";
+import { type WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { useTerminalStore, type TerminalInstance } from "@/features/terminal/state/terminalStore";
 import { getTransport } from "@/transport";
 import { resolveActiveTerminalId } from "./resolveActiveTerminalId";

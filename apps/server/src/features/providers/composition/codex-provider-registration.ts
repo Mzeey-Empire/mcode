@@ -1,5 +1,5 @@
 import { createCodexProvider, type ProviderFactoryInput } from "@mcode/providers";
-import type { IAgentProvider } from "@mcode/contracts";
+import type { IAgentProvider } from "@mcode/contracts/providers/interfaces";
 
 /** Registers the exact usable Codex factory instance as the server Provider. */
 export function registerCodexProvider(

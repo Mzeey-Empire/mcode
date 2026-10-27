@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, beforeEach } from "vitest";
-import { getDefaultSettings, ReasoningLevelSchema } from "@mcode/contracts";
+import { getDefaultSettings, ReasoningLevelSchema } from "@mcode/contracts/models/settings";
 import { useSettingsStore } from "@/stores/settingsStore";
 import {
   MODEL_PROVIDERS,

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanUseTool, query } from "@anthropic-ai/claude-agent-sdk";
-import { AgentEventType, ApprovalRequestBodySchema, type ApprovalRequestEnvelope, type ApprovalOrigin, type ApprovalSubject, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { ApprovalRequestBodySchema, type ApprovalRequestEnvelope, type ApprovalOrigin, type ApprovalSubject } from "@mcode/contracts/models/approval";
+import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { ClaudeProvider, stubEnvService, stubJobObject } from "./helpers/provider-fixture.js";
 import { queryMethodStubs } from "./helpers/mock-sdk-query.js";
 

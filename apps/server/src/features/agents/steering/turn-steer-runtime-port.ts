@@ -1,4 +1,5 @@
-import type { MessageMention, ProviderId, TurnSteerOutcome } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { ProviderId, TurnSteerOutcome } from "@mcode/contracts/providers/interfaces";
 import type { AcceptedSteerMessage } from "../canonical/canonical-accepted-progress.js";
 
 /** One message for the turn a {@link SteerableTurn} names. The runtime fills in the session and turn. */

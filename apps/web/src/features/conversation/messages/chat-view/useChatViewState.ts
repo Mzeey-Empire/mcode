@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { MAX_THREAD_SUBSCRIPTIONS } from "@mcode/contracts";
+import { MAX_THREAD_SUBSCRIPTIONS } from "@mcode/contracts/ws/methods";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

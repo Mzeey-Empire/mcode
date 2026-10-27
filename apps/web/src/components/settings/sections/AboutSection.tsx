@@ -7,7 +7,8 @@ import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Spinner } from "@/components/ui/spinner";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
-import type { BuildStage, Settings, UpdateCheckInterval, UpdateReleaseLine } from "@mcode/contracts";
+import type { BuildStage } from "@mcode/contracts/build-stage";
+import type { Settings, UpdateCheckInterval, UpdateReleaseLine } from "@mcode/contracts/models/settings";
 import { ConfirmChannelDowngradeDialog } from "./ConfirmChannelDowngradeDialog";
 import { semverGt } from "@/lib/semver";
 

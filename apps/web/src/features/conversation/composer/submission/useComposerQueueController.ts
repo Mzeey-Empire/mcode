@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import type { PreviewAnnotationBundle } from "@mcode/contracts";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import type { QueuedMessage } from "@/stores/queueStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";

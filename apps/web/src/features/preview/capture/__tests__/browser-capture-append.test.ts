@@ -1,11 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { appendBrowserCaptureFence, MCODE_BROWSER_CAPTURE_FENCE_CLOSE, MCODE_BROWSER_CAPTURE_FENCE_OPEN } from "../browser-capture-append";
-import {
-  AttachedBrowserCaptureSchema,
-  MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
-  type AttachedBrowserCaptureV1,
-  type AttachedBrowserCaptureV2,
-} from "@mcode/contracts";
+import { AttachedBrowserCaptureSchema, MCODE_BROWSER_CAPTURE_V2_STRING_MAX, type AttachedBrowserCaptureV1, type AttachedBrowserCaptureV2 } from "@mcode/contracts/models/browser-preview";
 
 const sampleCaptureV2: AttachedBrowserCaptureV2 = {
   attachmentId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",

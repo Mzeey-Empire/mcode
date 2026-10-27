@@ -12,14 +12,9 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeOS from "node:os";
 import { inject, injectable } from "tsyringe";
-import {
-  getCatalogEntry,
-  SkillInfoSchema,
-  type ProviderCatalogFreshness,
-  type ProviderCatalogSourceDiagnostic,
-  type SkillInfo,
-  type SkillSource,
-} from "@mcode/contracts";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { SkillInfoSchema, type SkillInfo, type SkillSource } from "@mcode/contracts/skills";
+import { type ProviderCatalogFreshness, type ProviderCatalogSourceDiagnostic } from "@mcode/contracts/providers/capability-catalog";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../settings/settings-service.js";
 import { EnvService } from "../../../runtime/environment/env-service.js";

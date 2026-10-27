@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type MutableRefObject, type RefObject } from "react";
 import type { LexicalEditor } from "lexical";
-import type { MessageMention } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
 import { Check, Trash2, X } from "lucide-react";
 import {
   ComposerEditor,

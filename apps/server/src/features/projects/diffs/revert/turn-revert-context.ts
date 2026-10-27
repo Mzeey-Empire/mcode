@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import * as NodeFSPromises from "node:fs/promises";
-import type { TurnRuntimeSnapshot } from "@mcode/contracts";
+import type { TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
 import { canonicalAgentTurns, threads, threadStartups, turnSnapshots } from "../../../../runtime/persistence/sqlite/schema.js";
 import { attributedWorkspacePaths } from "../snapshots/snapshot-attribution.js";
 import { resolveSnapshotCwd } from "../snapshots/resolve-snapshot-cwd.js";

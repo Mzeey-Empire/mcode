@@ -7,7 +7,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import type { SkillInfo } from "@mcode/contracts";
+import type { SkillInfo } from "@mcode/contracts/skills";
 
 /** Reads a Markdown file when it exists and is non-empty after trim. */
 function readOptionalMarkdownFile(filePath: string): string | undefined {

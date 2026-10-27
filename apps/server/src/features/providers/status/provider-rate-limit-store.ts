@@ -1,4 +1,6 @@
-import { AgentEventType, type ProviderId, type ProviderRateLimit } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
+import { type ProviderRateLimit } from "@mcode/contracts/providers/provider-status";
 import type { ProviderEventIngressEvent } from "../composition/provider-event-ingress.js";
 
 /** The fields of a `RateLimited` agent event the store reads. */

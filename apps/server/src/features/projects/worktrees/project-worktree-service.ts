@@ -1,6 +1,6 @@
 import { inject, injectable } from "tsyringe";
 import { sanitizeBranchForFolder, validateBranchName, logger } from "@mcode/shared";
-import type { Thread } from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import { GitWorktreeService } from "../git/git-worktree-service.js";

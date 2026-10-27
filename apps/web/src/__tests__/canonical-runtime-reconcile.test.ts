@@ -1,7 +1,9 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { createAgentModelState, reduceAgentEventBatch, type CanonicalAgentEventEnvelope, type Message, type TurnSavingStatus } from "@mcode/contracts";
+import { createAgentModelState, reduceAgentEventBatch, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { type Message } from "@mcode/contracts/models/message";
+import { type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import { useThreadStore } from "@/stores/threadStore";
 import {
   resetThreadStoreForTests,
@@ -130,7 +132,7 @@ describe("canonical runtime reconciliation", () => {
   it("restores partial final text and a closed full answer while its native turn remains active", () => {
     const textSlot = (content: string, isStreaming: boolean) => ({ id: `assistant-response-text:${EXECUTION_ID}`,
       threadId: THREAD_ID, turnId: TURN_ID, kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
-      payload: { projection: "assistantText", content, isStreaming } } satisfies import("@mcode/contracts").AgentItem);
+      payload: { projection: "assistantText", content, isStreaming } } satisfies import("@mcode/contracts/compat/agent-model").AgentItem);
     const prompt: Message = createMockMessage({
       id: "admitted-prompt",
       thread_id: THREAD_ID,

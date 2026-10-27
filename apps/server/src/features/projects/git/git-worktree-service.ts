@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import { inject, injectable } from "tsyringe";
 import { getMcodeDir, logger, validateBranchName, validateWorktreeName } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
-import type { WorktreeInfo } from "@mcode/contracts";
+import type { WorktreeInfo } from "@mcode/contracts/git";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import { WorktreeDirectoryRemover } from "../worktrees/worktree-directory-remover.js";
 import type { GitExecutor } from "./execution/index.js";

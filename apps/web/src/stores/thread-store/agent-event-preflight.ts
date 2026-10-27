@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { ThreadRecord } from "../thread-record";
 
 /** Runtime state captured before one agent event changes the resident record. */

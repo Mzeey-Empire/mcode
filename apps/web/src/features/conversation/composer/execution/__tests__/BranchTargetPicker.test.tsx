@@ -1,14 +1,7 @@
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import type {
-  DetachedWorktreeTarget,
-  GitRef,
-  GitRefsListParams,
-  GitRefsListResult,
-  PullRequestTarget,
-  PullRequestTargetsListParams,
-  PullRequestTargetsListResult,
-} from "@mcode/contracts";
+import type { DetachedWorktreeTarget, GitRef, GitRefsListParams, GitRefsListResult } from "@mcode/contracts/git";
+import type { PullRequestTarget, PullRequestTargetsListParams, PullRequestTargetsListResult } from "@mcode/contracts/github";
 
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { installListboxLayout, scrollListTo } from "@/__tests__/helpers/picker-layout";

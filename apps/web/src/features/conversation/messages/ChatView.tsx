@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { SelectedTextComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import {

@@ -1,7 +1,11 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
-import type { Message, MessageMention, PreviewAnnotationBundle, SelectedTextComment, StoredAttachment } from "@mcode/contracts";
+import type { Message } from "@mcode/contracts/models/message";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
+import type { StoredAttachment } from "@mcode/contracts/models/attachment";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
 import { MessageStore as MessageRepo } from "../../persistence/message-store.js";
 import { ToolCallRecordStore as ToolCallRecordRepo } from "../../../tools/persistence/tool-call-record-store.js";

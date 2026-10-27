@@ -1,4 +1,4 @@
-import { PullRequestIdentitySchema, PullRequestReviewLinkSchema, type PullRequestReviewLink as ReviewLinkDto } from "@mcode/contracts";
+import { PullRequestIdentitySchema, PullRequestReviewLinkSchema, type PullRequestReviewLink as ReviewLinkDto } from "@mcode/contracts/pull-requests";
 import type { PullRequestReviewLink } from "./persistence/pull-request-review-link-store.js";
 
 /** Validate a persisted link before the worker commits or a main read publishes it. */

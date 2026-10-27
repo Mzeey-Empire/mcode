@@ -1,29 +1,4 @@
-import {
-  DelegateTaskInputSchema,
-  DelegateTaskResultSchema,
-  ThreadLaunchInputSchema,
-  ThreadLaunchResultSchema,
-  TaskStatusInputSchema,
-  TaskStatusResultSchema,
-  TaskCancelInputSchema,
-  TaskCancelResultSchema,
-  ThreadGetInputSchema,
-  ThreadGetResultSchema,
-  ThreadSearchInputSchema,
-  ThreadSearchResultSchema,
-  ThreadSendInputSchema,
-  ThreadSendResultSchema,
-  ThreadStopInputSchema,
-  ThreadStopResultSchema,
-  ThreadTargetListInputSchema,
-  ThreadTargetListResultSchema,
-  ThreadWaitInputSchema,
-  ThreadWaitResultSchema,
-  WorkspaceSearchInputSchema,
-  WorkspaceSearchResultSchema,
-  WorktreeListInputSchema,
-  WorktreeListResultSchema,
-} from "@mcode/contracts";
+import { DelegateTaskInputSchema, DelegateTaskResultSchema, ThreadLaunchInputSchema, ThreadLaunchResultSchema, TaskStatusInputSchema, TaskStatusResultSchema, TaskCancelInputSchema, TaskCancelResultSchema, ThreadGetInputSchema, ThreadGetResultSchema, ThreadSearchInputSchema, ThreadSearchResultSchema, ThreadSendInputSchema, ThreadSendResultSchema, ThreadStopInputSchema, ThreadStopResultSchema, ThreadTargetListInputSchema, ThreadTargetListResultSchema, ThreadWaitInputSchema, ThreadWaitResultSchema, WorkspaceSearchInputSchema, WorkspaceSearchResultSchema, WorktreeListInputSchema, WorktreeListResultSchema } from "@mcode/contracts/thread-control";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import {
   getParseErrorMessage,

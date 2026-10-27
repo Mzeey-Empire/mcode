@@ -1,4 +1,4 @@
-import type { ApprovalChoice, ApprovalOrigin, ApprovalQuestion, ApprovalRequestBody, ApprovalRequestEnvelope, ApprovalSubject } from "@mcode/contracts";
+import type { ApprovalChoice, ApprovalOrigin, ApprovalQuestion, ApprovalRequestBody, ApprovalRequestEnvelope, ApprovalSubject } from "@mcode/contracts/models/approval";
 import { z } from "zod";
 
 const ToolIdentitySchema = z.object({ callID: z.string().optional() });

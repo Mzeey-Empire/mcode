@@ -1,5 +1,5 @@
 import * as NodeUtil from "node:util";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { CodexLiveWriterIntent } from "../execution/codex-live-event-reducer.js";
 
 /** System intents prepared by the execution reducer for admission and storage validation. */

@@ -1,7 +1,7 @@
 import type { ComposerDraft } from "@/stores/composerDraftStore";
 import type { ThreadDraft } from "@/stores/threadDraftStore";
 import { INTERACTION_MODES, PERMISSION_MODES } from "@/transport";
-import { ORCHESTRATION_MODES } from "@mcode/contracts";
+import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
 import { resolveComposerSession, snapshotComposerDraft, type ComposerSession } from "@/lib/composer-session";
 import { buildSavedComposerSession } from "@/lib/composer-session";
 import { readWorkspaceThread } from "@/features/projects/state/workspace-selectors";

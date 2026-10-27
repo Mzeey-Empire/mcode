@@ -2,7 +2,7 @@
 
 import * as NodeChildProcess from "node:child_process";
 import { logger } from "@mcode/shared";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { CursorStreamJsonParser } from "./cursor-stream-json-parser.js";
 import {
   createCursorStreamAccumulator,

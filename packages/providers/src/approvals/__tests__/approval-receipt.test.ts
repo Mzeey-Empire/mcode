@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ApprovalDecidedPayloadSchema, type ApprovalOutcome, type ApprovalRequestEnvelope, type ApprovalSubject } from "@mcode/contracts";
+import { ApprovalDecidedPayloadSchema } from "@mcode/contracts/models/approval-receipt";
+import { type ApprovalOutcome, type ApprovalRequestEnvelope, type ApprovalSubject } from "@mcode/contracts/models/approval";
 import { approvalReceipt } from "../approval-receipt.js";
 
 function request(subject: ApprovalSubject): ApprovalRequestEnvelope {

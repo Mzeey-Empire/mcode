@@ -3,9 +3,13 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { AgentEventSchema, CanonicalAgentProgressFrameSchema, ProviderRuntimeExtensionSchema, MessageSchema, ParentNarrativeRecoveryItemSchema, encodeCanonicalSubagentDetailTarget, type ProviderRuntimeExtension, type AgentEvent, type CanonicalAgentProgressFrame,
-  type AcceptedCanonicalAgentEventEnvelope,
-  type ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { CanonicalAgentProgressFrameSchema, type CanonicalAgentProgressFrame } from "@mcode/contracts/models/canonical-agent-progress";
+import { ProviderRuntimeExtensionSchema, type ProviderRuntimeExtension } from "@mcode/contracts/events/provider-runtime-event";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { encodeCanonicalSubagentDetailTarget } from "@mcode/contracts/models/tool-call-record";
+import { type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
@@ -28,7 +32,8 @@ import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { createDevinAcpTurnState, mapDevinAcpSessionNotification } from "../../../../../../../packages/providers/src/private/devin/devin-acp-event-mapper.js";
 import { z } from "zod";
 import { createCopilotProvider, type CopilotProviderBoundary, type ProviderEventBatch, type ProviderHostPorts } from "@mcode/providers";
-import { ProviderRuntimeEventSchema, type TurnOutcome } from "@mcode/contracts";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { SessionEvent } from "../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js";
 import { ThoughtSegmentStore } from "../../conversation/narrative/persistence/thought-segment-store.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";

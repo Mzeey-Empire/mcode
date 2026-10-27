@@ -1,4 +1,5 @@
-import type { BrowserHistoryEntry, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { BrowserHistoryEntry } from "@mcode/contracts/models/browser-preview";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { describe, expect, it } from "vitest";
 import { projectServerTiles, recentPages, serverForPort } from "../browserNewPageModel";
 

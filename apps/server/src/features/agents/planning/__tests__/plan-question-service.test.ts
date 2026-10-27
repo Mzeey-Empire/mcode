@@ -6,7 +6,8 @@ import { openAgentStorageTestDatabase as openMemoryDatabase, agentStorageTestWri
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../persistence/plan-question-answers-repo.js";
 import { PlanQuestionService } from "../plan-question-service.js";
-import { PLAN_ANSWER_MESSAGE_PREFIX, type Message } from "@mcode/contracts";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts/models/plan-questions";
+import { type Message } from "@mcode/contracts/models/message";
 
 /** Seed a workspace + thread so message foreign keys are satisfied. */
 function seedThread(db: Database): string {

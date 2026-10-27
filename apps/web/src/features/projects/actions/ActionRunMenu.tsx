@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { Pencil, Play, SquareTerminal } from "lucide-react";
-import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import {
   DropdownMenu,
   DropdownMenuContent,

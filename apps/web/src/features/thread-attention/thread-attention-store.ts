@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { SeenMark, ThreadAttention } from "@mcode/contracts";
+import type { SeenMark, ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 

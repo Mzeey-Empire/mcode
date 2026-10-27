@@ -8,11 +8,7 @@ import * as NodePath from "node:path";
 import { GithubService } from "../github-service.js";
 import { GitRepositoryService } from "../../../projects/git/git-repository-service.js";
 import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";
-import {
-  PULL_REQUEST_CURSOR_COMPONENT_MAX_LENGTH,
-  PULL_REQUEST_DETAIL_TEXT_MAX_LENGTH,
-  type PullRequestIdentity,
-} from "@mcode/contracts";
+import { PULL_REQUEST_CURSOR_COMPONENT_MAX_LENGTH, PULL_REQUEST_DETAIL_TEXT_MAX_LENGTH, type PullRequestIdentity } from "@mcode/contracts/pull-requests";
 import type { PullRequestRemoteListRequest, PullRequestViewerContext } from "../pull-request-remote.js";
 import {
   GithubPullRequestClient,

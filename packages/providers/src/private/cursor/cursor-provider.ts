@@ -1,4 +1,4 @@
-import { SUBAGENT_REPORTING } from "@mcode/contracts";
+import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
 /**
  * @internal
  * Cursor CLI provider via long-lived `cursor-agent acp` (Agent Client Protocol).
@@ -20,24 +20,15 @@ import {
 import type { CursorProviderPorts } from "../../factory-types.js";
 import { SessionRuntime } from "../session-runtime.js";
 import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../session-runtime.js";
-import {
-  AgentEventType,
-  CURSOR_STATIC_MODEL_FALLBACK,
-  getCatalogEntry,
-  providerRuntimeEvent,
-} from "@mcode/contracts";
-import type {
-  AgentEvent,
-  IAgentProvider,
-  ISessionEvictable,
-  TurnRequest,
-  ApprovalResponse,
-  ApprovalRespondResult,
-  ApprovalRequestEnvelope,
-  ProviderModelInfo,
-  Settings,
-  ProviderTurnDiffUpdate,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { CURSOR_STATIC_MODEL_FALLBACK } from "@mcode/contracts/providers/cursor-static-fallback";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { IAgentProvider, ISessionEvictable, TurnRequest, ProviderTurnDiffUpdate } from "@mcode/contracts/providers/interfaces";
+import type { ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { Settings } from "@mcode/contracts/models/settings";
 import { fetchCursorCliModels } from "./models/cursor-cli-models.js";
 import { buildMcodeInstructionSections, NO_MCODE_TOOLKITS, renderMcodeInstructionSections } from "@mcode/thread-orchestration";
 import { AcpSessionRuntime, SessionRecoveryFailedError } from "../protocols/acp/acp-session-runtime.js";

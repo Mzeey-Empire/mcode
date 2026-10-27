@@ -1,8 +1,10 @@
 import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Database } from "bun:sqlite";
-import type { IAgentProvider, AgentEvent, GoalState } from "@mcode/contracts";
-import { AgentEventType } from "@mcode/contracts";
+import type { IAgentProvider } from "@mcode/contracts/providers/interfaces";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { GoalState } from "@mcode/contracts/models/goal";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import * as NodeEvents from "node:events";
 import { createThreadPersistenceTestRuntime } from "../../../thread-control/testing/thread-persistence-test-runtime.js";
 import type { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";

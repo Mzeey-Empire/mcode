@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReviewState } from "@mcode/contracts";
+import type { ReviewState } from "@mcode/contracts/models/review-comparison";
 import { X } from "lucide-react";
 import { IconButton } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";

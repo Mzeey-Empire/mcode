@@ -2,7 +2,7 @@ import { createMockThread } from "@mcode/contracts/testing";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { createAgentModelState, type AgentTurn } from "@mcode/contracts";
+import { createAgentModelState, type AgentTurn } from "@mcode/contracts/compat/agent-model";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

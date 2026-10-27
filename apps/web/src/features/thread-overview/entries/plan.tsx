@@ -1,6 +1,6 @@
 import { FileText } from "lucide-react";
 import { useCallback } from "react";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 import { Button } from "@/components/ui/button";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { OVERVIEW_ROW_CLASS, OverviewRowIcon } from "@/features/thread-overview/overview-row";

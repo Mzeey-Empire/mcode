@@ -27,7 +27,7 @@ import { SettingsService } from "../settings-service.js";
 import { broadcast } from "../../../application/transport/push.js";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 
 const legacySettings = (
   engine: unknown,

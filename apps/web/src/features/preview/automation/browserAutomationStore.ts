@@ -1,9 +1,5 @@
-import type {
-  BrowserAutomationControllerState,
-  BrowserAutomationHostDispatch,
-  BrowserAutomationPointerEvent,
-} from "@mcode/contracts";
-import { BROWSER_AUTOMATION_MAX_INSPECT_TABS, BROWSER_AUTOMATION_MAX_PENDING_REQUESTS } from "@mcode/contracts";
+import type { BrowserAutomationControllerState, BrowserAutomationHostDispatch, BrowserAutomationPointerEvent } from "@mcode/contracts/models/browser-automation";
+import { BROWSER_AUTOMATION_MAX_INSPECT_TABS, BROWSER_AUTOMATION_MAX_PENDING_REQUESTS } from "@mcode/contracts/models/browser-automation";
 import { create } from "zustand";
 import { browserTargetRegistry } from "./services/browserTargetRegistry";
 import type {

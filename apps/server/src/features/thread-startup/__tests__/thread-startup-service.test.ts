@@ -2,10 +2,7 @@ import "reflect-metadata";
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS,
-  THREAD_STARTUP_TRANSCRIPT_MAX_CHARS,
-} from "@mcode/contracts";
+import { THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS, THREAD_STARTUP_TRANSCRIPT_MAX_CHARS } from "@mcode/contracts/thread-startup";
 import { broadcast } from "../../../application/transport/push.js";
 import { DatabaseWriterAdmissionFull } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { openReadOnlyDatabase } from "../../../runtime/persistence/sqlite/read-only-database.js";

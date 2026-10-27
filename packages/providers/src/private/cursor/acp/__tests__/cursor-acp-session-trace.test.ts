@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import {
   sanitizeCursorTraceValue,
   shouldEmitCursorSessionTrace,

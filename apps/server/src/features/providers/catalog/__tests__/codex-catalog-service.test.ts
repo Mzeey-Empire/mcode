@@ -4,7 +4,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SkillInfo } from "@mcode/contracts";
+import type { SkillInfo } from "@mcode/contracts/skills";
 import { CodexCatalogService } from "../codex-catalog-service.js";
 import type { CodexCustomPromptDiscoveryResult } from "../codex-custom-prompt-service.js";
 import type {

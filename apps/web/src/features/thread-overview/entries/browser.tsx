@@ -13,7 +13,8 @@ import {
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { type Thread } from "@/transport";
-import type { BrowserAutomationControllerState, BrowserTabInfo, BrowserTabSet } from "@mcode/contracts";
+import type { BrowserAutomationControllerState } from "@mcode/contracts/models/browser-automation";
+import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import { useMemo } from "react";
 import { ThreadOverviewBrowserRow } from "@/features/thread-overview/entries/ThreadOverviewBrowserRow";
 import { ThreadOverviewWhen } from "@/features/thread-overview/overview-row";

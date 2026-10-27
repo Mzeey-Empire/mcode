@@ -1,4 +1,4 @@
-import type { ProviderId } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { signInToSignedOutProvider } from "@/features/providers/sign-in";
 import { TurnEndNotice, type TurnEndActionHandlers } from "./TurnEndNotice";
 import type { TurnEndNoticeView } from "./turn-ending-notice";

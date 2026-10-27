@@ -1,9 +1,4 @@
-import type {
-  BrowserAutomationHostDispatch,
-  BrowserAutomationResult,
-  BrowserAutomationResponse,
-  BrowserAutomationTarget,
-} from "@mcode/contracts";
+import type { BrowserAutomationHostDispatch, BrowserAutomationResult, BrowserAutomationResponse, BrowserAutomationTarget } from "@mcode/contracts/models/browser-automation";
 import { getWebBrowserSemanticRegistry } from "./webBrowserSemanticRegistry";
 
 const MAX_TARGET_SCAN = 1_024;

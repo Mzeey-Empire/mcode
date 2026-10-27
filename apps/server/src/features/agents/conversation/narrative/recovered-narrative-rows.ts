@@ -1,4 +1,5 @@
-import type { ParentNarrativeRecoveryItem, ApprovalReceiptRecord } from "@mcode/contracts";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import type { ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
 import type { CreateToolCallRecordInput } from "../../tools/persistence/tool-call-record-store.js";
 import type { CreateThoughtSegmentInput } from "./persistence/thought-segment-store.js";
 import type { CreateHookExecutionInput } from "../../events/persistence/hook-execution-store.js";

@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  CanonicalAgentReconnectRecoverySchema,
-  reduceAgentEventBatch,
-  type CanonicalAgentEventEnvelope,
-  type AcceptedCanonicalAgentEventEnvelope,
-  type CanonicalAgentProgressFrame,
-} from "@mcode/contracts";
+import { CanonicalAgentReconnectRecoverySchema } from "@mcode/contracts/models/canonical-agent-reconnect";
+import { reduceAgentEventBatch, type CanonicalAgentEventEnvelope, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { type CanonicalAgentProgressFrame } from "@mcode/contracts/models/canonical-agent-progress";
 import {
   applyCanonicalPushEvents,
   applyCanonicalReconnectRecovery,

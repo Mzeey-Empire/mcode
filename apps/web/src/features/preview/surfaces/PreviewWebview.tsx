@@ -7,7 +7,7 @@ import {
   useMemo,
   useRef,
 } from "react";
-import type { PreviewPageStatus } from "@mcode/contracts";
+import type { PreviewPageStatus } from "@mcode/contracts/models/preview-page-status";
 import type {
   BrowserSurfaceIdentity,
   BrowserSurfacePageState,

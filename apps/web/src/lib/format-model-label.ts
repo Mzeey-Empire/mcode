@@ -1,4 +1,4 @@
-import { CURSOR_CLI_MODEL_SNAPSHOT } from "@mcode/contracts";
+import { CURSOR_CLI_MODEL_SNAPSHOT } from "@mcode/contracts/providers/cursor-cli-models-snapshot";
 import { findModelById, type ModelDefinition } from "./model-registry.js";
 import { formatCursorCliModelId, isCursorCliModelId } from "./format-cursor-model-id.js";
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { TurnSnapshotSchema, TurnFileEffectSummarySchema } from "@mcode/contracts";
+import { TurnSnapshotSchema } from "@mcode/contracts/models/turn-snapshot";
+import { TurnFileEffectSummarySchema } from "@mcode/contracts/models/file-effect";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 
 /** Validated snapshot input preserves provider-neutral authored effects. */

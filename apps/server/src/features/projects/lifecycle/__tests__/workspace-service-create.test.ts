@@ -4,7 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WS_METHODS } from "@mcode/contracts";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../testing/owned-test-database.js";
 import { WorkspaceRepo } from "../../persistence/workspace-repo.js";

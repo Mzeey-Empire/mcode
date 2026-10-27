@@ -51,7 +51,7 @@ const EFFECT_METHODS = new Set(["refine", "superRefine", "transform"]);
 const COMPOSITE_METHODS = new Set(["and", "merge", "or", "pipe"]);
 const PARSE_METHODS = new Set(["parse", "safeParse"]);
 const CONTRACTS_LAZY_SCHEMA_MODULES = new Set([
-  "@mcode/contracts",
+  "@mcode/contracts/utils/lazySchema",
   "./utils/lazySchema.js",
   "../utils/lazySchema.js",
 ]);

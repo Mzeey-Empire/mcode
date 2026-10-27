@@ -1,4 +1,6 @@
-import type { ProviderId, ProviderModelInfo, SendMessageInput } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { SendMessageInput } from "@mcode/contracts/ws/methods";
 
 /** Composer options that only some providers (or some of a provider's models) understand. */
 export type SwitchableOptions = Pick<

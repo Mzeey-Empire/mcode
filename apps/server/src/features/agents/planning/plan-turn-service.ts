@@ -1,19 +1,10 @@
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import type {
-  AgentEvent,
-  PlanCapture,
-  ContextWindowMode,
-  InteractionMode,
-  IProviderRegistry,
-  PermissionMode,
-  ProviderId,
-  ReasoningLevel,
-  TurnRequest,
-  PlanQuestion,
-  NativePlanQuestionBatch,
-  PlanQuestionSettlement,
-} from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { PlanCapture, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { InteractionMode, PermissionMode } from "@mcode/contracts/models/enums";
+import type { PlanQuestion, NativePlanQuestionBatch, PlanQuestionSettlement } from "@mcode/contracts/models/plan-questions";
 import { broadcast } from "../../../application/transport/push.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import {
@@ -23,7 +14,8 @@ import {
 import { PlanExecutionState, type PlanPersistenceReady } from "./plan-execution-state.js";
 import { PlanQuestionService, type PlanAnswerInput } from "./plan-question-service.js";
 import { PlanRepo } from "./persistence/plan-repo.js";
-import { isNativePlanQuestionId, ProviderIdSchema } from "@mcode/contracts";
+import { isNativePlanQuestionId } from "@mcode/contracts/models/plan-questions";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import type { PlanFileWriter } from "./plan-file-writer.js";
 import type { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import type { SendMessageCommand } from "../turns/turn-admission-dispatch-coordinator.js";

@@ -1,7 +1,8 @@
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
 import { logger, newHandoffUlid } from "@mcode/shared";
-import { ProviderIdSchema, toPreviewAnnotationBundleV2 } from "@mcode/contracts";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { toPreviewAnnotationBundleV2 } from "@mcode/contracts/models/browser-preview";
 import { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
@@ -21,16 +22,11 @@ import { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.j
 import { TurnRecoveryError } from "./turn-recovery-error.js";
 import { chooseResumePath, NativeResumeWatch, RESUME_CONTINUATION_PROMPT, type ResumePathInput } from "./turn-resume.js";
 import type { SendMessageCommand } from "../orchestration/agent-service.js";
-import type {
-  AgentTurnEnding,
-  IProviderRegistry,
-  Message,
-  Thread,
-  TurnResumeParams,
-  TurnResumeResult,
-  TurnRetryParams,
-  TurnRetryResult,
-} from "@mcode/contracts";
+import type { AgentTurnEnding } from "@mcode/contracts/compat/agent-model";
+import type { IProviderRegistry } from "@mcode/contracts/providers/interfaces";
+import type { Message } from "@mcode/contracts/models/message";
+import type { Thread } from "@mcode/contracts/models/thread";
+import type { TurnResumeParams, TurnResumeResult, TurnRetryParams, TurnRetryResult } from "@mcode/contracts/models/turn-recovery";
 
 const UNPROVED_EXECUTION_REASON =
   "The provider could not prove that this execution was still active after restart.";

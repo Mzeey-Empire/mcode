@@ -1,17 +1,7 @@
 import * as NodeBuffer from "node:buffer";
 import { z } from "zod";
-import {
-  TERMINAL_CONTRACT_VERSION,
-  TERMINAL_MAX_COLS,
-  TERMINAL_MAX_ROWS,
-  lazySchema,
-  TerminalExecutableSchema,
-  TerminalPlatformSchema,
-  TerminalProfileArgumentsSchema,
-  TerminalScopeSchema,
-  TerminalU64Schema,
-  TerminalUuidSchema,
-} from "@mcode/contracts";
+import { TERMINAL_CONTRACT_VERSION, TERMINAL_MAX_COLS, TERMINAL_MAX_ROWS, TerminalExecutableSchema, TerminalPlatformSchema, TerminalProfileArgumentsSchema, TerminalScopeSchema, TerminalU64Schema, TerminalUuidSchema } from "@mcode/contracts/models/terminal";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
 
 /** Maximum private PTY host IPC message bytes. */
 export const PTY_HOST_MAX_MESSAGE_BYTES = 131_072;

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PROJECT_ICON_RESOLVE_MAX_IDS, type ProjectIcon } from "@mcode/contracts";
+import { PROJECT_ICON_RESOLVE_MAX_IDS, type ProjectIcon } from "@mcode/contracts/models/project-icon";
 import { getTransport } from "@/transport";
 
 /** Resolved project icons keyed by workspace id; a missing entry renders the monogram. */

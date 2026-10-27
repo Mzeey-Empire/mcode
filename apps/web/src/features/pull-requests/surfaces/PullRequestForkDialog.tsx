@@ -1,9 +1,4 @@
-import type {
-  PullRequestCreateReviewTaskResult,
-  PullRequestDetail,
-  PullRequestError,
-  PullRequestWorkspaceCandidate,
-} from "@mcode/contracts";
+import type { PullRequestCreateReviewTaskResult, PullRequestDetail, PullRequestError, PullRequestWorkspaceCandidate } from "@mcode/contracts/pull-requests";
 import type { Thread } from "@/transport";
 import type { AttachedWorktree } from "@/lib/worktree";
 import type { WorkspaceThread } from "@/lib/workspace-thread";

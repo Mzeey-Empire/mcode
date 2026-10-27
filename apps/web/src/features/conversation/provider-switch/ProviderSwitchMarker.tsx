@@ -1,4 +1,4 @@
-import type { ProviderSwitchMarker as ProviderSwitch } from "@mcode/contracts";
+import type { ProviderSwitchMarker as ProviderSwitch } from "@mcode/contracts/models/message";
 import { ProviderIcon, providerLabel } from "@/components/ui/provider-icon";
 
 /** Timeline marker for a send that moved the thread to another provider. */

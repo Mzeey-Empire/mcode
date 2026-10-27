@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Database } from "bun:sqlite";
-import { ProviderCatalogSnapshotSchema } from "@mcode/contracts";
+import { ProviderCatalogSnapshotSchema } from "@mcode/contracts/providers/capability-catalog";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 import { ProviderCatalogSnapshotStore } from "./provider-catalog-snapshot-store.js";
 

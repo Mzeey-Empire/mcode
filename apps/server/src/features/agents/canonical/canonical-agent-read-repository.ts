@@ -1,18 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { and, asc, count, desc, eq, gt, or, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import {
-  CANONICAL_AGENT_RECONNECT_DELTA_MAX_EVENTS,
-  CanonicalAgentEventEnvelopeSchema,
-  MessageSchema,
-  type AgentModelState,
-  type AgentThread,
-  type AgentTurn,
-  type CanonicalAgentEventEnvelope,
-  type CanonicalAgentReconnectRecovery,
-  type CanonicalAgentRevision,
-  type Message,
-} from "@mcode/contracts";
+import { CANONICAL_AGENT_RECONNECT_DELTA_MAX_EVENTS, type CanonicalAgentReconnectRecovery, type CanonicalAgentRevision } from "@mcode/contracts/models/canonical-agent-reconnect";
+import { CanonicalAgentEventEnvelopeSchema, type AgentModelState, type AgentThread, type AgentTurn, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { MessageSchema, type Message } from "@mcode/contracts/models/message";
 import type { CanonicalAgentCheckpoint } from "./canonical-agent-boundary.js";
 import {
   CanonicalConversationProjectionReader,

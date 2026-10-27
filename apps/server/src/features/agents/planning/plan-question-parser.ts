@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PlanQuestionSchema } from "@mcode/contracts";
+import { PlanQuestionSchema } from "@mcode/contracts/models/plan-questions";
 import { logger } from "@mcode/shared";
 
 const OPEN_MARKER = "```plan-questions";

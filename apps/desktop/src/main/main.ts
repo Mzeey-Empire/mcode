@@ -25,7 +25,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { getLogPath, getMcodeDir, getRecentLogs, logger } from "@mcode/shared";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
-import { appDisplayName, resolveBuildStage } from "@mcode/contracts";
+import { appDisplayName, resolveBuildStage } from "@mcode/contracts/build-stage";
 
 import {
   registerOpenInHandlers,

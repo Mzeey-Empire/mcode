@@ -1,4 +1,5 @@
-import type { CanonicalAgentEvent, CanonicalAgentEventEnvelope, ThreadStartup, ThreadStartupError } from "@mcode/contracts";
+import type { CanonicalAgentEvent, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { ThreadStartup, ThreadStartupError } from "@mcode/contracts/thread-startup";
 import { describe, expect, it } from "vitest";
 import { StartupAgentPhaseObserver, type StartupAgentPhaseTransitions } from "../startup-agent-phase-observer.js";
 

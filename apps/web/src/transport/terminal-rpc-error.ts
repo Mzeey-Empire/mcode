@@ -1,9 +1,4 @@
-import {
-  TerminalErrorCodeSchema,
-  TerminalRetryClassSchema,
-  type TerminalErrorCode,
-  type TerminalRetryClass,
-} from "@mcode/contracts";
+import { TerminalErrorCodeSchema, TerminalRetryClassSchema, type TerminalErrorCode, type TerminalRetryClass } from "@mcode/contracts/models/terminal";
 
 /** Stable, bounded fields carried by a typed Terminal RPC failure. */
 export interface TerminalRpcErrorFields {

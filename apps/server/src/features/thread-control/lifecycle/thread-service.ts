@@ -6,7 +6,10 @@
 
 import { delay, injectable, inject } from "tsyringe";
 import { validateBranchName, logger } from "@mcode/shared";
-import type { Thread, RecentThread, ThreadMode, ContextWindowMode, ProviderId } from "@mcode/contracts";
+import type { Thread, RecentThread } from "@mcode/contracts/models/thread";
+import type { ThreadMode } from "@mcode/contracts/models/enums";
+import type { ContextWindowMode } from "@mcode/contracts/models/settings";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { ProjectWorktreeService } from "../../projects/index.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";

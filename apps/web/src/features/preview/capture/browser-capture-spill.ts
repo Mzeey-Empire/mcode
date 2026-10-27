@@ -1,4 +1,4 @@
-import type { AttachedBrowserCapture, McodeBrowserCapture } from "@mcode/contracts";
+import type { AttachedBrowserCapture, McodeBrowserCapture } from "@mcode/contracts/models/browser-preview";
 
 /**
  * Collects `spillAppDataPath` values from browser capture rows for cleanup when queued

@@ -1,4 +1,5 @@
-import type { AgentModelState, ScheduledTurnResume } from "@mcode/contracts";
+import type { AgentModelState } from "@mcode/contracts/compat/agent-model";
+import type { ScheduledTurnResume } from "@mcode/contracts/models/turn-recovery";
 import { latestThreadTurn, threadProviderLabel } from "../turn-ending/turn-endings-projection";
 import { usageLimitLabel } from "../turn-ending/usage-limit";
 

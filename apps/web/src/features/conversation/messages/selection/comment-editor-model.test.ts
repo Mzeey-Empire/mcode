@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { MessageMention, SelectedTextCommentSource } from "@mcode/contracts";
-import {
-  MAX_MESSAGE_MENTIONS,
-  MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS,
-} from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { SelectedTextCommentSource } from "@mcode/contracts/models/selected-text-comment";
+import { MAX_MESSAGE_MENTIONS } from "@mcode/contracts/models/mention";
+import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "@mcode/contracts/models/selected-text-comment";
 import {
   buildSelectedTextComment,
   canSaveSelectedTextComment,

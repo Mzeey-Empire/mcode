@@ -1,24 +1,6 @@
 import type { WebSocket } from "ws";
 import * as NodeCrypto from "node:crypto";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BROWSER_AUTOMATION_MAX_PENDING_REQUESTS,
-  BrowserAutomationHostDispatchTargetSchema,
-  BrowserAutomationHostDispatchSchema,
-  BrowserAutomationHostRegistrationSchema,
-  BrowserAutomationRequestSchema,
-  BrowserAutomationResponseSchema,
-  type BrowserAutomationErrorCode,
-  type BrowserAutomationActStep,
-  type BrowserAutomationHostRegistration,
-  type BrowserAutomationHostDispatchTarget,
-  type BrowserAutomationHostDispatch,
-  type BrowserAutomationRequest,
-  type BrowserAutomationResponse,
-  type BrowserAutomationOperation,
-  type BrowserAutomationPublicOperation,
-  type BrowserAutomationRequestOperation,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_MAX_PENDING_REQUESTS, BrowserAutomationHostDispatchTargetSchema, BrowserAutomationHostDispatchSchema, BrowserAutomationHostRegistrationSchema, BrowserAutomationRequestSchema, BrowserAutomationResponseSchema, type BrowserAutomationErrorCode, type BrowserAutomationActStep, type BrowserAutomationHostRegistration, type BrowserAutomationHostDispatchTarget, type BrowserAutomationHostDispatch, type BrowserAutomationRequest, type BrowserAutomationResponse, type BrowserAutomationOperation, type BrowserAutomationPublicOperation, type BrowserAutomationRequestOperation } from "@mcode/contracts/models/browser-automation";
 import { sendToClient } from "../../../application/transport/push.js";
 import type { BrowserAutomationCredentialClaims } from "../access/credential-registry.js";
 import {

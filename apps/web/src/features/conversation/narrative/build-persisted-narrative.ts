@@ -1,4 +1,4 @@
-import type { ApprovalReceiptRecord } from "@mcode/contracts";
+import type { ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
 import type { HookExecutionRecord, ThoughtSegmentRecord, ToolCallRecord } from "@/transport/types";
 import {
   preparePersistedNarrative,

@@ -5,24 +5,13 @@ import * as NodeEvents from "node:events";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import {
-  AgentEventType,
-  createAgentModelState,
-  reduceAgentEventBatch,
-  type CanonicalAgentEventEnvelope,
-} from "@mcode/contracts";
-import type {
-  AgentEvent,
-  AttachmentMeta,
-  IAgentProvider,
-  IProviderRegistry,
-  ProviderId,
-  PreviewAnnotationBundle,
-  TurnRequest,
-  ProviderTurnDiffUpdate,
-  NativePlanQuestionBatch,
-  PlanQuestionHandler,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { createAgentModelState, reduceAgentEventBatch, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { AttachmentMeta } from "@mcode/contracts/models/attachment";
+import type { IAgentProvider, IProviderRegistry, ProviderId, TurnRequest, ProviderTurnDiffUpdate } from "@mcode/contracts/providers/interfaces";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import type { NativePlanQuestionBatch, PlanQuestionHandler } from "@mcode/contracts/models/plan-questions";
 import type { Database } from "bun:sqlite";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases, registerAgentStorageTestProducer } from "../../__tests__/agent-storage-fixture.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";

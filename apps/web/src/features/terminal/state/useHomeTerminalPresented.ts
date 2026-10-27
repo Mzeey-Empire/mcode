@@ -1,4 +1,4 @@
-import { HOME_TERMINAL_SCOPE_ID } from "@mcode/contracts";
+import { HOME_TERMINAL_SCOPE_ID } from "@mcode/contracts/models/terminal";
 import { useTerminalStore } from "./terminalStore";
 
 /**

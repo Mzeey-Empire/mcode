@@ -1,5 +1,6 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
-import type { ThreadStartup, ThreadStartupAction, ThreadStartupStep, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { ThreadStartup, ThreadStartupAction, ThreadStartupStep } from "@mcode/contracts/thread-startup";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

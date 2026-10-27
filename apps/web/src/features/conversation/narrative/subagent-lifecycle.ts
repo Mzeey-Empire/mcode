@@ -1,9 +1,5 @@
-import {
-  isSubagentLaunchToolName,
-  mergeSubagentPresentation,
-  resolveProviderAgentKey,
-  resolveSubagentExactIdentity,
-} from "@mcode/contracts";
+import { isSubagentLaunchToolName } from "@mcode/contracts/models/subagent-roster";
+import { mergeSubagentPresentation, resolveProviderAgentKey, resolveSubagentExactIdentity } from "@mcode/contracts/models/tool-call-record";
 import type { ToolCall, ToolCallRecord } from "@/transport/types";
 
 /** Internal tool name used to persist Codex subagent interaction markers. */

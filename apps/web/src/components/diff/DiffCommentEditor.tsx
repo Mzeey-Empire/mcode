@@ -2,7 +2,8 @@ import { useCallback, useRef, useState, type MutableRefObject } from "react";
 import type { LexicalEditor } from "lexical";
 import { MessageCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { DraftDiffComment, MessageMention } from "@mcode/contracts";
+import type { DraftDiffComment } from "@mcode/contracts/models/next-message-draft";
+import type { MessageMention } from "@mcode/contracts/models/mention";
 import { basename } from "@/lib/path";
 import {
   CommentEditorComposer,

@@ -3,7 +3,7 @@ import type { OverviewSubject } from "@/features/thread-overview/overview-subjec
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { useThreadStore } from "@/stores/threadStore";
 import { type Thread } from "@/transport";
-import type { TurnSavingStatus } from "@mcode/contracts";
+import type { TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 
 const EMPTY_SAVING_STATUSES: readonly TurnSavingStatus[] = [];
 

@@ -3,7 +3,8 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import type { AgentEvent, ProviderId } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";

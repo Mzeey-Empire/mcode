@@ -1,14 +1,9 @@
 import { create } from "zustand";
 import type { AttachmentMeta, PermissionMode } from "@/transport";
-import type {
-  ApprovalReviewMode,
-  ContextWindowMode,
-  DevinMode,
-  MessageMention,
-  PreviewAnnotationBundle,
-  ReasoningLevel,
-  OrchestrationMode,
-} from "@mcode/contracts";
+import type { ApprovalReviewMode, DevinMode, OrchestrationMode } from "@mcode/contracts/models/enums";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 
 /**

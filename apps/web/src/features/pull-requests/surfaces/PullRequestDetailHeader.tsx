@@ -1,10 +1,4 @@
-import type {
-  PullRequestCheckState,
-  PullRequestDetail,
-  PullRequestMergeability,
-  PullRequestReviewer,
-  PullRequestSummary as PullRequestSummaryRecord,
-} from "@mcode/contracts";
+import type { PullRequestCheckState, PullRequestDetail, PullRequestMergeability, PullRequestReviewer, PullRequestSummary as PullRequestSummaryRecord } from "@mcode/contracts/pull-requests";
 import {
   ChevronRight,
   CircleUserRound,

@@ -1,4 +1,4 @@
-import { HTML_VISUAL_MIN_HEIGHT, type HtmlVisual } from "@mcode/contracts";
+import { HTML_VISUAL_MIN_HEIGHT, type HtmlVisual } from "@mcode/contracts/models/html-visual";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppearance } from "@/hooks/useTheme";
 import { buildHtmlVisualDocument, HTML_VISUAL_THEME_MESSAGE, readHtmlVisualHeight, readHtmlVisualTheme } from "./html-visual-document";

@@ -1,10 +1,7 @@
 import { inject, injectable } from "tsyringe";
-import {
-  AgentEventType,
-  createSubagentPresentation,
-  type AgentEvent,
-  type ProviderId,
-} from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { createSubagentPresentation } from "@mcode/contracts/models/tool-call-record";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { logger } from "@mcode/shared";
 import { persistTurnFailure, providerFailureTerminal, type TurnEndingCause } from "../canonical/turn-ending.js";
 
@@ -118,7 +115,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   /** Record a provider file mutation before its public event is available. */
-  observeFileMutation(event: import("@mcode/contracts").ProviderFileMutationStart): void {
+  observeFileMutation(event: import("@mcode/contracts/providers/interfaces").ProviderFileMutationStart): void {
     this.fileEffects.observeProviderMutation(event);
   }
 
@@ -247,7 +244,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   /** Return the saving status for active runtime snapshots. */
-  savingStatus(executionId: string | null): import("@mcode/contracts").TurnRuntimeSnapshot["savingStatus"] {
+  savingStatus(executionId: string | null): import("@mcode/contracts/models/turn-runtime").TurnRuntimeSnapshot["savingStatus"] {
     return executionId ? this.parentAssistantText.durabilityMode(executionId) : null;
   }
 

@@ -8,8 +8,9 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import type { AttachmentMeta, MessageMention } from "@mcode/contracts";
-import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
+import type { AttachmentMeta } from "@mcode/contracts/models/attachment";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import { isVirtualBrowserContextAttachment } from "@mcode/contracts/models/attachment";
 
 /**
  * Reads trimmed contents of `~/.cursor/AGENTS.md` when that file exists.

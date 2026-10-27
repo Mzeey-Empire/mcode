@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { logger, resolveThreadPlanFile } from "@mcode/shared";
-import { AgentEventType, type AgentEvent } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openAgentStorageTestDatabase as openMemoryDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";

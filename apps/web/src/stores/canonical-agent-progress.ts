@@ -1,11 +1,5 @@
-import {
-  CANONICAL_AGENT_PROGRESS_RECOVERY_MAX,
-  CanonicalAgentProgressFrameSchema,
-  reduceAgentEventBatch,
-  type AcceptedCanonicalAgentEventEnvelope,
-  type CanonicalAgentProgressFrame,
-  type CanonicalAgentProgressRecovery,
-} from "@mcode/contracts";
+import { CANONICAL_AGENT_PROGRESS_RECOVERY_MAX, CanonicalAgentProgressFrameSchema, type CanonicalAgentProgressFrame, type CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
+import { reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import {
   applyCanonicalPushEvents,
   applyCanonicalReconnectRecovery,

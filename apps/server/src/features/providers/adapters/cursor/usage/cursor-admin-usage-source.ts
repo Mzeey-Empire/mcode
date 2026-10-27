@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { QuotaCategory } from "@mcode/contracts";
+import type { QuotaCategory } from "@mcode/contracts/providers/usage";
 import { logger } from "@mcode/shared";
 
 const CURSOR_SPEND_ENDPOINT = "https://api.cursor.com/teams/spend";

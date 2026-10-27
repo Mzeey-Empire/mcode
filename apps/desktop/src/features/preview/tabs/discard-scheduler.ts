@@ -12,7 +12,7 @@ import { BrowserWindow } from "electron";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir, logger } from "@mcode/shared";
-import { SettingsSchema as BundledSettingsSchema } from "@mcode/contracts";
+import { SettingsSchema as BundledSettingsSchema } from "@mcode/contracts/models/settings";
 import {
   selectTabsToDiscard,
   type WarmTabRef,

@@ -1,6 +1,7 @@
 import type * as NodeChildProcess from "node:child_process";
 import { logger } from "@mcode/shared";
-import { getCatalogEntry, type Settings } from "@mcode/contracts";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { type Settings } from "@mcode/contracts/models/settings";
 import type { ProviderHostPorts } from "../../../host-ports.js";
 import { AcpSessionRuntime } from "../../protocols/acp/acp-session-runtime.js";
 import { buildCursorAcpArgs } from "../acp/cursor-acp-spawn-args.js";

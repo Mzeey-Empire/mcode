@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Database } from "bun:sqlite";
-import { WorkspaceEnvironmentStorageModeSchema } from "@mcode/contracts";
+import { WorkspaceEnvironmentStorageModeSchema } from "@mcode/contracts/models/workspace-environment";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 import { WorkspaceEnvironmentConfigurationStore } from "./workspace-environment-configuration-store.js";
 

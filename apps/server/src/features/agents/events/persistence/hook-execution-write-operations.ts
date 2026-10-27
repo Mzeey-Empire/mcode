@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { HookExecutionRecordSchema } from "@mcode/contracts";
+import { HookExecutionRecordSchema } from "@mcode/contracts/models/hook-execution";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 import { narrativeWriteBatchLimitsSchema, narrativeWriteBatchResultSchema } from "../../conversation/narrative/persistence/narrative-write-batches.js";
 

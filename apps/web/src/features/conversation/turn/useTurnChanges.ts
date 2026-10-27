@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type { DiffStats, TurnSnapshot } from "@mcode/contracts";
+import type { DiffStats } from "@mcode/contracts/models/diff-stats";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { useDiffStore } from "@/stores/diffStore";
 import { readThreadRecord } from "@/stores/thread-selectors";
 import { getTransport } from "@/transport";

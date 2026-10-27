@@ -1,7 +1,7 @@
 import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AcknowledgeSeenResult, ThreadAttention } from "@mcode/contracts";
+import type { AcknowledgeSeenResult, ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useThreadStore } from "@/stores/threadStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";

@@ -3,7 +3,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useApprovalStore } from "@/stores/approvalStore";
 
-import type { ApprovalRequest, ApprovalSubject } from "@mcode/contracts";
+import type { ApprovalRequest, ApprovalSubject } from "@mcode/contracts/models/approval";
 import { disposeHighlighter } from "@pierre/diffs";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

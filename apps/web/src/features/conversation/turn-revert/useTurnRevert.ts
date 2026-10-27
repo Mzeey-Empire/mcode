@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { TurnRevertPreview, TurnRevertResult, TurnRevertScope, TurnRevertedEvent } from "@mcode/contracts";
+import type { TurnRevertPreview, TurnRevertResult, TurnRevertScope, TurnRevertedEvent } from "@mcode/contracts/models/turn-revert";
 import { useDiffStore } from "@/stores/diffStore";
 import { appendServerNoticeOnceLoaded } from "@/stores/threadStore";
 import { getTransport } from "@/transport";

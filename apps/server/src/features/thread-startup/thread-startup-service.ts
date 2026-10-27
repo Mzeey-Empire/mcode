@@ -1,5 +1,6 @@
 import { inject, injectable } from "tsyringe";
-import type { Thread, ThreadStartup, ThreadStartupStartInput } from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
+import type { ThreadStartup, ThreadStartupStartInput } from "@mcode/contracts/thread-startup";
 import { broadcast } from "../../application/transport/push.js";
 import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
 import type { DatabaseWriteOperation } from "../../runtime/persistence/sqlite/database-write-operation.js";

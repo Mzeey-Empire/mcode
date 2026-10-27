@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentTurnEnding, InterruptionCause, PersistedTurnFailure } from "@mcode/contracts";
+import type { AgentTurnEnding, InterruptionCause, PersistedTurnFailure } from "@mcode/contracts/compat/agent-model";
 import { turnEndingView, type TurnEndingInput } from "../turn-ending-notice";
 
 const STARTED = "2026-10-11T10:00:00.000Z";

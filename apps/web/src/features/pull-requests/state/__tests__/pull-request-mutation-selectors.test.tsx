@@ -1,4 +1,4 @@
-import type { PullRequestIdentity } from "@mcode/contracts";
+import type { PullRequestIdentity } from "@mcode/contracts/pull-requests";
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import {

@@ -1,5 +1,5 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import {

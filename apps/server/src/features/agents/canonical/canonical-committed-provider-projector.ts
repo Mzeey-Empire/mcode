@@ -1,4 +1,4 @@
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 
 import { CodexCollaborationEventAdapter } from "../collaboration/adapters/codex-collaboration-event-adapter.js";
 import type { CodexCollaborationDurability } from "../collaboration/codex-collaboration-durability.js";

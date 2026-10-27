@@ -1,5 +1,7 @@
 import * as NodeCrypto from "node:crypto";
-import { encodeCanonicalSubagentDetailTarget, type AgentItem, type AgentThread, type AgentTurn, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import { encodeCanonicalSubagentDetailTarget } from "@mcode/contracts/models/tool-call-record";
+import { type AgentItem, type AgentThread, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import type { CanonicalAgentEventDraft, ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 
 /** Builds recovery events from hydrated items before any storage work. */

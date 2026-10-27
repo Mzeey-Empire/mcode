@@ -1,12 +1,4 @@
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BROWSER_AUTOMATION_MAX_ELEMENTS,
-  BROWSER_AUTOMATION_MAX_VISIBLE_TEXT_CHARS,
-  BROWSER_AUTOMATION_MAX_SCREENSHOT_WIDTH,
-  type BrowserAutomationHostDispatch,
-  type BrowserAutomationResult,
-  type BrowserAutomationResponse,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_MAX_ELEMENTS, BROWSER_AUTOMATION_MAX_VISIBLE_TEXT_CHARS, BROWSER_AUTOMATION_MAX_SCREENSHOT_WIDTH, type BrowserAutomationHostDispatch, type BrowserAutomationResult, type BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
 import { browserAutomationTargetKey, useBrowserAutomationStore } from "./browserAutomationStore";
 import { captureVisibleWebScreenshot } from "./web-browser-automation/capture";
 import { getWebBrowserSemanticRegistry } from "./webBrowserSemanticRegistry";

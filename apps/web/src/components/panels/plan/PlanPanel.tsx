@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { EditorView } from "@codemirror/view";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 import { isPlanVersionEditable, selectViewedPlanVersion, usePlanStore } from "@/stores/planStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";

@@ -1,4 +1,4 @@
-import { AcceptedCanonicalAgentEventEnvelopeSchema } from "@mcode/contracts";
+import { AcceptedCanonicalAgentEventEnvelopeSchema } from "@mcode/contracts/compat/agent-model";
 import { broadcast } from "../../../../application/transport/push.js";
 import type { Database } from "bun:sqlite";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Check, Layers } from "lucide-react";
-import { isLiveSubagentStatus, type CanonicalSubagentStopResult, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts";
+import { isLiveSubagentStatus, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
+import { type CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
 import { Button, IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { ProviderIcon } from "@/components/ui/provider-icon";

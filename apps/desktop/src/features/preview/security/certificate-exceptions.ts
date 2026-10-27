@@ -1,9 +1,5 @@
 import { app, type Certificate, type Event, type Session, type WebContents } from "electron";
-import {
-  BrowserCertificateFailureSchema,
-  type BrowserCertificateFailure,
-  type BrowserCertificateState,
-} from "@mcode/contracts";
+import { BrowserCertificateFailureSchema, type BrowserCertificateFailure, type BrowserCertificateState } from "@mcode/contracts/models/browser-certificate";
 
 type CertificateGuest = Pick<WebContents, "session" | "getURL" | "on">;
 

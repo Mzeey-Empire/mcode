@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { databaseWriteHandler, type DatabaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { CanonicalAgentStore } from "./canonical-agent-store.js";
 import { CanonicalParentTurnWrite } from "./canonical-parent-turn-write.js";

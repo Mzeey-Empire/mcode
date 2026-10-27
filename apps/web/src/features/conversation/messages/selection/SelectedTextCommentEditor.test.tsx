@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LexicalEditor } from "lexical";
-import type { MessageMention, SelectedTextComment, SelectedTextCommentSource } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { SelectedTextComment, SelectedTextCommentSource } from "@mcode/contracts/models/selected-text-comment";
 import { writeComposerContent } from "@/features/conversation/composer/draft/composer-editor-content";
 import { SelectedTextCommentEditor } from "./SelectedTextCommentEditor";
 

@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 
 /**

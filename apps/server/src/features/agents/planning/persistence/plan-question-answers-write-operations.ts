@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { MessageSchema, NativePlanQuestionBatchSchema } from "@mcode/contracts";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { NativePlanQuestionBatchSchema } from "@mcode/contracts/models/plan-questions";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 
 /** Question-answer persistence admitted to the shared owner. */

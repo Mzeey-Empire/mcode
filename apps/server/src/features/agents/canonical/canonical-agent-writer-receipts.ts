@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
-import { AgentProgressPositionSchema, CanonicalAgentEventEnvelopeSchema, CanonicalAgentRevisionSchema } from "@mcode/contracts";
+import { AgentProgressPositionSchema, CanonicalAgentEventEnvelopeSchema } from "@mcode/contracts/compat/agent-model";
+import { CanonicalAgentRevisionSchema } from "@mcode/contracts/models/canonical-agent-reconnect";
 import { and, count, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";

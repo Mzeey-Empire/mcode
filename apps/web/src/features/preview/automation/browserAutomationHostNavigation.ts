@@ -1,4 +1,4 @@
-import type { BrowserAutomationHostDispatch } from "@mcode/contracts";
+import type { BrowserAutomationHostDispatch } from "@mcode/contracts/models/browser-automation";
 import { browserAutomationTargetKey } from "./browserAutomationStore";
 import { normalizeWebPreviewUrl } from "./browserAutomationRuntime";
 import { resolveSameOriginFrame } from "./webBrowserInteractionExecutor";

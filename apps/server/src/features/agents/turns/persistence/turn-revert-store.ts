@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
-import { TurnRevertRecordSchema, TurnRevertResultSchema } from "@mcode/contracts";
+import { TurnRevertRecordSchema, TurnRevertResultSchema } from "@mcode/contracts/models/turn-revert";
 import { turnReverts } from "../../../../runtime/persistence/sqlite/schema.js";
 import { RevertContextSchema, RecoveryPathSchema } from "../../../projects/diffs/revert/turn-revert-model.js";
 import { MessageStore } from "../../conversation/persistence/message-store.js";

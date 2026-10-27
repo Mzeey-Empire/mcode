@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DraftBrowserNotePage, MessageMention } from "@mcode/contracts";
+import type { DraftBrowserNotePage } from "@mcode/contracts/models/next-message-draft";
+import type { MessageMention } from "@mcode/contracts/models/mention";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import {

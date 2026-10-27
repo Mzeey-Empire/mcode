@@ -14,11 +14,9 @@ import { ThreadProviderSessionRepo } from "../../../thread-control/persistence/t
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { ProviderSwitchService } from "../../turns/provider-switch-service.js";
 import type { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
-import type {
-  AgentEvent,
-  IProviderRegistry,
-  ProviderRuntimeEvent,
-} from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { IProviderRegistry } from "@mcode/contracts/providers/interfaces";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type * as NodeEvents from "node:events";
 
 import { AttachmentService } from "../../../attachments/storage/attachment-service.js";
@@ -114,7 +112,7 @@ export function wrapProviderEmitterForRuntimeEvents<T extends NodeEvents.EventEm
 /** Start provider ingress for a test-built service without expanding its production facade. */
 export function startAgentServiceIngressForTest(
   service: AgentService,
-  publisher?: (event: import("@mcode/contracts").AgentEvent) => void,
+  publisher?: (event: import("@mcode/contracts/events/agent-event").AgentEvent) => void,
 ): void {
   const publication = testEventPublications.get(service);
   if (!publication) throw new Error("AgentService test publication is unavailable");

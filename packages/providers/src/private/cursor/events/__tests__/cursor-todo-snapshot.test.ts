@@ -17,7 +17,7 @@ import {
   cursorUpdateTodosExtNotificationToAgentEvents,
 } from "../cursor-todo-snapshot.js";
 import type { TodoWriteItem } from "../../../protocols/acp/acp-plan-todo-write.js";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 
 describe("createCursorTodoSnapshot", () => {
   it("returns a fresh snapshot with an empty Map", () => {

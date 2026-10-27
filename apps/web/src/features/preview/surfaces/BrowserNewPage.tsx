@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Play, X } from "lucide-react";
-import type { BrowserHistory } from "@mcode/contracts";
+import type { BrowserHistory } from "@mcode/contracts/models/browser-preview";
 import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
 import { cn } from "@/lib/utils";
 import {

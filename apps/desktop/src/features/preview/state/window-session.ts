@@ -5,13 +5,10 @@
 
 import { BrowserWindow, type WebContents } from "electron";
 import * as NodeCrypto from "node:crypto";
-import type {
-  AttachmentMeta,
-  BrowserTabInfo,
-  BrowserTabSet,
-  McodeBrowserCaptureV2,
-  PreviewPageStatus,
-} from "@mcode/contracts";
+import type { AttachmentMeta } from "@mcode/contracts/models/attachment";
+import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts/models/browser-tab";
+import type { McodeBrowserCaptureV2 } from "@mcode/contracts/models/browser-preview";
+import type { PreviewPageStatus } from "@mcode/contracts/models/preview-page-status";
 import {
   pageStatusReducer,
   initialPageStatus,

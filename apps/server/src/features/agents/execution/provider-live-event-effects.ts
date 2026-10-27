@@ -1,4 +1,5 @@
-import type { AgentEvent, ProviderRuntimeEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 
 import type { DataOnlyParentTerminalProjectionInput } from "../canonical/canonical-parent-turn-write.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";

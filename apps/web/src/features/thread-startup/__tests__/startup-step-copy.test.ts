@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadStartup, ThreadStartupAction, ThreadStartupStep, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { ThreadStartup, ThreadStartupAction, ThreadStartupStep } from "@mcode/contracts/thread-startup";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import {
   formatStartupDuration,
   placeholderTrailRows,

@@ -1,4 +1,5 @@
-import type { AgentEvent, AgentModelState, AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { AgentModelState, AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 
 type PublicationRoute = Pick<AcceptedCanonicalAgentEventEnvelope, "routing">;
 

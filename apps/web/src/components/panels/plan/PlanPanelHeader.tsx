@@ -1,4 +1,4 @@
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
 import { PlanImplementSplit } from "./PlanImplementSplit";
 import { PlanVersionPicker } from "./PlanVersionPicker";

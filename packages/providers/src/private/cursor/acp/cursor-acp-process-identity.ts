@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
-import { getCatalogEntry, type Settings } from "@mcode/contracts";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { type Settings } from "@mcode/contracts/models/settings";
 import { buildCursorAcpArgs } from "./cursor-acp-spawn-args.js";
 
 /** Returns a bounded fingerprint of Cursor settings that affect ACP subprocess creation. */

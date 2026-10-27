@@ -1,10 +1,7 @@
 import * as NodeHTTP from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  ThreadSendResultSchema,
-  ThreadWaitResultSchema,
-  type BrowserAutomationPublicOperation,
-} from "@mcode/contracts";
+import { ThreadSendResultSchema, ThreadWaitResultSchema } from "@mcode/contracts/thread-control";
+import { type BrowserAutomationPublicOperation } from "@mcode/contracts/models/browser-automation";
 import { BrowserAutomationSessionLease } from "../../browser-automation/access/browser-automation-session-lease.js";
 import type { BrowserAutomationPermissionCapability } from "../../browser-automation/access/credential-registry.js";
 import {

@@ -1,10 +1,7 @@
-import type { LegacyTerminalRecord, LegacyTerminalCreateResult,
-  TerminalBackendCapabilities,
-  TerminalErrorCode,
-  TerminalProfileInUseData,
-  TerminalRetryClass,
-  WorkspaceEnvironmentActionLaunchSnapshot,
-} from "@mcode/contracts";
+import type { LegacyTerminalRecord, LegacyTerminalCreateResult } from "@mcode/contracts/ws/terminal-legacy";
+import type { TerminalBackendCapabilities } from "@mcode/contracts/models/terminal-backend";
+import type { TerminalErrorCode, TerminalProfileInUseData, TerminalRetryClass } from "@mcode/contracts/models/terminal";
+import type { WorkspaceEnvironmentActionLaunchSnapshot } from "@mcode/contracts/models/workspace-environment";
 import type { WebSocket } from "ws";
 
 /** Dependency-injection token for the server Terminal backend. */

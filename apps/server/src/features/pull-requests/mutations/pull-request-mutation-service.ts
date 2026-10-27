@@ -1,19 +1,5 @@
 import * as NodeCrypto from "node:crypto";
-import type {
-  PullRequestCloseRequest,
-  PullRequestCloseResult,
-  PullRequestIdentity,
-  PullRequestMergeRequest,
-  PullRequestMergeResult,
-  PullRequestMutationError,
-  PullRequestMutationExpected,
-  PullRequestPostCommentRequest,
-  PullRequestPostCommentResult,
-  PullRequestSetReadinessRequest,
-  PullRequestSetReadinessResult,
-  PullRequestSubmitReviewRequest,
-  PullRequestSubmitReviewResult,
-} from "@mcode/contracts";
+import type { PullRequestCloseRequest, PullRequestCloseResult, PullRequestIdentity, PullRequestMergeRequest, PullRequestMergeResult, PullRequestMutationError, PullRequestMutationExpected, PullRequestPostCommentRequest, PullRequestPostCommentResult, PullRequestSetReadinessRequest, PullRequestSetReadinessResult, PullRequestSubmitReviewRequest, PullRequestSubmitReviewResult } from "@mcode/contracts/pull-requests";
 import {
   GithubPullRequestClientError,
   GithubPullRequestMutationClientError,

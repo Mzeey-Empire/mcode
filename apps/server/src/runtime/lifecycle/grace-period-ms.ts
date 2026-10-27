@@ -1,4 +1,4 @@
-import { GRACE_PERIOD_DEFAULT_SECONDS } from "@mcode/contracts";
+import { GRACE_PERIOD_DEFAULT_SECONDS } from "@mcode/contracts/models/settings";
 
 /**
  * Converts persisted grace-period seconds into milliseconds using mode-aware defaults.

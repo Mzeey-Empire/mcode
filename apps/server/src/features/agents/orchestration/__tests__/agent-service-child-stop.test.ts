@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import type { IAgentProvider } from "@mcode/contracts";
+import type { IAgentProvider } from "@mcode/contracts/providers/interfaces";
 import { logger } from "@mcode/shared";
 import { SubagentRosterService } from "../../collaboration/subagent-roster-service.js";
 

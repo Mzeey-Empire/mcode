@@ -1,10 +1,9 @@
 import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  AgentEventSchema, AgentEventType, MessageSchema, ProviderRuntimeExtensionSchema, createAgentModelState,
-  type AgentEvent, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn, type CodexChildEvidence,
-  type ProviderRuntimeExtension,
-} from "@mcode/contracts";
+import { AgentEventSchema, AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { ProviderRuntimeExtensionSchema, type CodexChildEvidence, type ProviderRuntimeExtension } from "@mcode/contracts/events/provider-runtime-event";
+import { createAgentModelState, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn } from "@mcode/contracts/compat/agent-model";
 import { logger } from "@mcode/shared";
 import type { ProviderEventIngressEvent } from "../../../providers/composition/provider-event-ingress.js";
 import { AcceptedCodexCollaboration } from "../accepted-codex-collaboration.js";

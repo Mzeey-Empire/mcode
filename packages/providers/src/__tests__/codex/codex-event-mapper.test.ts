@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { AgentEventSchema, ProviderRuntimeEventSchema } from "@mcode/contracts";
+import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
 
 vi.mock("@mcode/shared", () => ({
   getMcodeDir: () => process.env.MCODE_DATA_DIR ?? ".",

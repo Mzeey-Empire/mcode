@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 import { nativeImage, type WebContents } from "electron";
-import { BrowserHistorySchema, type BrowserHistory, type BrowserHistoryEntry, type BrowserServerThumbnail } from "@mcode/contracts";
+import { BrowserHistorySchema, type BrowserHistory, type BrowserHistoryEntry, type BrowserServerThumbnail } from "@mcode/contracts/models/browser-preview";
 import { browserPartitionFor } from "@mcode/shared/browser-partition";
 import { normalizePreviewPageIdentity } from "@mcode/shared/browser-page-identity";
 import { logger } from "@mcode/shared";

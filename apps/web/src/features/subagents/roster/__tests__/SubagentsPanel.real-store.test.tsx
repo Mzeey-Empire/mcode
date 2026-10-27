@@ -1,7 +1,7 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
+import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";

@@ -2,7 +2,7 @@
  * Extracts and validates a structured PR draft from an AI text response.
  */
 import { z } from "zod";
-import type { PrDraft } from "@mcode/contracts";
+import type { PrDraft } from "@mcode/contracts/github";
 
 const PrDraftResponseSchema = z.object({
   title: z.string().min(1, "title must be a non-empty string"),

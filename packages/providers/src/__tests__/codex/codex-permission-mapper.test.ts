@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ApprovalRequestBodySchema } from "@mcode/contracts";
+import { ApprovalRequestBodySchema } from "@mcode/contracts/models/approval";
 
 vi.mock("@mcode/shared", async (importOriginal) => ({
   ...await importOriginal<typeof import("@mcode/shared")>(),

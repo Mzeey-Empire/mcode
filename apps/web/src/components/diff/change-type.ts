@@ -1,4 +1,4 @@
-import type { ReviewFileChange } from "@mcode/contracts";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 
 /** Human label for a file change classification. */
 export const CHANGE_TYPE_LABELS: Record<ReviewFileChange["changeType"], string> = {

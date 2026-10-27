@@ -1,4 +1,6 @@
-import { WS_METHODS, type DiffStats, type ReviewComparisonResult, type ReviewFileDiffResult, type ReviewFileChange, type WsMethodName } from "@mcode/contracts";
+import { WS_METHODS, type WsMethodName } from "@mcode/contracts/ws/methods";
+import { type DiffStats } from "@mcode/contracts/models/diff-stats";
+import { type ReviewComparisonResult, type ReviewFileDiffResult, type ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import type { z } from "zod";
 import type { TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-snapshot-repo.js";
 import type { ThreadService } from "../../../thread-control/lifecycle/thread-service.js";

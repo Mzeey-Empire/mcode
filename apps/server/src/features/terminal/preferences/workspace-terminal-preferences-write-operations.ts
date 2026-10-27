@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Database } from "bun:sqlite";
-import { TerminalProfileReferenceSchema, WorkspaceTerminalPreferenceSchema } from "@mcode/contracts";
+import { TerminalProfileReferenceSchema } from "@mcode/contracts/models/terminal";
+import { WorkspaceTerminalPreferenceSchema } from "@mcode/contracts/models/terminal-settings";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { WorkspaceTerminalPreferencesStore } from "./workspace-terminal-preferences-store.js";
 

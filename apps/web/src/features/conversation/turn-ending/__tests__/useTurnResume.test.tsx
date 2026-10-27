@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { TurnResumeResult } from "@mcode/contracts";
+import type { TurnResumeResult } from "@mcode/contracts/models/turn-recovery";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useTurnResume } from "../useTurnResume";
 

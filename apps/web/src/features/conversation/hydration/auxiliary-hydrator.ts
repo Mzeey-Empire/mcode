@@ -3,7 +3,8 @@ import {
   getThreadRecord,
   patchThreadRecord,
 } from "@/stores/thread-record";
-import type { PendingPlanImplement, PlanComment, PlanQuestion, PlanVersion } from "@mcode/contracts";
+import type { PendingPlanImplement, PlanComment, PlanVersion } from "@mcode/contracts/models/plan";
+import type { PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import type { TaskItem } from "@/stores/taskStore";
 import type {
   ThreadHydratorTransport,

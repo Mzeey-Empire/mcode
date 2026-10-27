@@ -5,12 +5,7 @@
  */
 import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
-import {
-  GitCommitRejectionSchema,
-  type GitCommitFile,
-  type GitCommitPushOutcome,
-  type GitCommitResult,
-} from "@mcode/contracts";
+import { GitCommitRejectionSchema, type GitCommitFile, type GitCommitPushOutcome, type GitCommitResult } from "@mcode/contracts/git-commit";
 
 /** Where a commit request pushes, captured under the lock before git runs. */
 export const CommitPushDestinationSchema = z.discriminatedUnion("kind", [

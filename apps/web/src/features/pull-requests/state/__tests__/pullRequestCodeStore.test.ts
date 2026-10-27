@@ -1,9 +1,4 @@
-import type {
-  PullRequestFile,
-  PullRequestFilesResult,
-  PullRequestIdentity,
-  PullRequestPatchResult,
-} from "@mcode/contracts";
+import type { PullRequestFile, PullRequestFilesResult, PullRequestIdentity, PullRequestPatchResult } from "@mcode/contracts/pull-requests";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PullRequestTransport } from "@/transport/pull-requests";
 import {

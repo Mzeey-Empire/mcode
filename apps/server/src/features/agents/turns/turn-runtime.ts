@@ -1,10 +1,6 @@
 import * as NodeCrypto from "node:crypto";
-import type {
-  AgentEvent,
-  AgentEventType,
-  TurnRuntimePhase,
-  TurnRuntimeSnapshot,
-} from "@mcode/contracts";
+import type { AgentEvent, AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { TurnRuntimePhase, TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
 
 const TURN_SCOPED_EVENT_TYPES = new Set<AgentEventType>([
   "turnStarted", "message", "generatedAttachment", "toolUse", "toolResult", "toolBackgrounded",

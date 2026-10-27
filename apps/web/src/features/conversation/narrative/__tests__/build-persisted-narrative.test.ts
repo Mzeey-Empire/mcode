@@ -5,10 +5,7 @@ import {
   recordToToolCall,
 } from "../build-persisted-narrative";
 import { collapseSubagentRecords } from "../subagent-lifecycle";
-import {
-  encodeCanonicalSubagentDetailTarget,
-  encodeSubagentAliasDetailTarget,
-} from "@mcode/contracts";
+import { encodeCanonicalSubagentDetailTarget, encodeSubagentAliasDetailTarget } from "@mcode/contracts/models/tool-call-record";
 import type {
   ToolCallRecord,
   ThoughtSegmentRecord,

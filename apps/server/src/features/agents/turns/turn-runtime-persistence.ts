@@ -1,5 +1,7 @@
 import { inject, injectable } from "tsyringe";
-import type { ProviderId, Thread, TurnOutcome } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { Thread } from "@mcode/contracts/models/thread";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 

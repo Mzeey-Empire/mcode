@@ -2,7 +2,9 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BrowserCertificateFailure, PreviewPageError, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { BrowserCertificateFailure } from "@mcode/contracts/models/browser-certificate";
+import type { PreviewPageError } from "@mcode/contracts/models/preview-page-status";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 
 const transport = {
   listWorkspaceActionRuns: vi.mocked(mockTransport.listWorkspaceActionRuns),

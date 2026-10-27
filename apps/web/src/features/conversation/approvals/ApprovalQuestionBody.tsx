@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { CircleAlert } from "lucide-react";
-import { MAX_APPROVAL_ANSWER_LENGTH, type ApprovalAnswers, type ApprovalQuestion } from "@mcode/contracts";
+import { MAX_APPROVAL_ANSWER_LENGTH, type ApprovalAnswers, type ApprovalQuestion } from "@mcode/contracts/models/approval";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useApprovalStore, type StoredApproval } from "@/stores/approvalStore";

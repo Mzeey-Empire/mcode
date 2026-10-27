@@ -1,4 +1,5 @@
-import { AgentEventType, type AgentEvent, type TurnOutcome } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { TurnPullRequestCompletionEffect } from "../../pull-requests/index.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { publishParentProviderEvent } from "../events/provider-event-publication.js";

@@ -1,4 +1,5 @@
-import type { DetachedWorktreeTarget, GitRef, PullRequestTarget } from "@mcode/contracts";
+import type { DetachedWorktreeTarget, GitRef } from "@mcode/contracts/git";
+import type { PullRequestTarget } from "@mcode/contracts/github";
 
 /** A checkout location, as the picker shows and the store records it. */
 export interface BranchTargetWorktree {

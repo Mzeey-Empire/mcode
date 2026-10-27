@@ -1,11 +1,4 @@
-import {
-  PULL_REQUEST_MUTATION_BODY_MAX_BYTES,
-  type PullRequestCapability,
-  type PullRequestDetail,
-  type PullRequestMergeMethod,
-  type PullRequestMutationError as PullRequestMutationErrorValue,
-  type PullRequestReadiness,
-} from "@mcode/contracts";
+import { PULL_REQUEST_MUTATION_BODY_MAX_BYTES, type PullRequestCapability, type PullRequestDetail, type PullRequestMergeMethod, type PullRequestMutationError as PullRequestMutationErrorValue, type PullRequestReadiness } from "@mcode/contracts/pull-requests";
 import {
   GitBranch,
   GitMerge,

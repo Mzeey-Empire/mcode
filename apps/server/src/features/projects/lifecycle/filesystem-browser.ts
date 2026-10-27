@@ -5,7 +5,7 @@
  */
 
 import { injectable } from "tsyringe";
-import type { FilesystemBrowseResult } from "@mcode/contracts";
+import type { FilesystemBrowseResult } from "@mcode/contracts/ws/methods";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";

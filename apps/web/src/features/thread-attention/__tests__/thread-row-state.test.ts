@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadAttention, ThreadWaitingKind, TurnOutcome } from "@mcode/contracts";
+import type { ThreadAttention, ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import {
   deriveThreadRowState,
   rollUpThreadRowStates,

@@ -4,13 +4,9 @@ import {
   providerCatalogCacheKey,
   useProviderCatalogStore,
 } from "@/stores/providerCatalogStore";
-import {
-  ProviderIdSchema,
-  type ProviderCapabilityEntry,
-  type ProviderCapabilityKind,
-  type ProviderCapabilityIdentity,
-  type SkillSource,
-} from "@mcode/contracts";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { type ProviderCapabilityEntry, type ProviderCapabilityKind, type ProviderCapabilityIdentity } from "@mcode/contracts/providers/capability-catalog";
+import { type SkillSource } from "@mcode/contracts/skills";
 import type { ProviderCatalogRequest } from "@/transport";
 import type { SlashCommandNamespace } from "./lexical/SlashCommandNode";
 import {

@@ -1,14 +1,9 @@
 import type { Provider } from "@mcode/agent-model";
-import type {
-  IAgentProvider,
-  ProviderCliFacts,
-  IGoalCapable,
-  ISessionEvictable,
-  ICompletionCapable,
-  Settings,
-  SkillInfo,
-  StoredAttachment,
-} from "@mcode/contracts";
+import type { IAgentProvider, IGoalCapable, ISessionEvictable, ICompletionCapable } from "@mcode/contracts/providers/interfaces";
+import type { ProviderCliFacts } from "@mcode/contracts/providers/provider-status";
+import type { Settings } from "@mcode/contracts/models/settings";
+import type { SkillInfo } from "@mcode/contracts/skills";
+import type { StoredAttachment } from "@mcode/contracts/models/attachment";
 import type { ProviderHostPorts } from "./host-ports.js";
 import type { CodexCanonicalEventRouting } from "./private/codex/codex-canonical-event-publisher.js";
 
@@ -62,7 +57,7 @@ export interface CodexProviderPorts {
     persistGeneratedImageFromPath(threadId: string, sourcePath: string): StoredAttachment;
   };
   catalog: {
-    listModels(): Promise<import("@mcode/contracts").ProviderModelInfo[]>;
+    listModels(): Promise<import("@mcode/contracts/providers/models").ProviderModelInfo[]>;
     currentSkills(cwd?: string): SkillInfo[];
     currentPrompts(): SkillInfo[];
     refreshCustomPrompts(): Promise<{ prompts: SkillInfo[] }>;

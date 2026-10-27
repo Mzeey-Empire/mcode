@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { container } from "tsyringe";
-import { SettingsSchema, type TerminalResolvedProfile } from "@mcode/contracts";
+import { SettingsSchema } from "@mcode/contracts/models/settings";
+import { type TerminalResolvedProfile } from "@mcode/contracts/models/terminal";
 import { EnvService } from "../../../runtime/environment/env-service.js";
 import { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
 import { TerminalProfileService } from "../profiles/terminal-profile-service.js";

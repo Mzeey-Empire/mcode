@@ -1,9 +1,10 @@
 import { z } from "zod";
 import type { Database } from "bun:sqlite";
-import {
-  StoredAttachmentSchema, MessageMentionsSchema, PreviewAnnotationBundleSchema,
-  WorkspaceEnvironmentAutomaticSetupSnapshotSchema, ThreadStartupSchema, ThreadStartupActionSchema, WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX,
-} from "@mcode/contracts";
+import { StoredAttachmentSchema } from "@mcode/contracts/models/attachment";
+import { MessageMentionsSchema } from "@mcode/contracts/models/mention";
+import { PreviewAnnotationBundleSchema } from "@mcode/contracts/models/browser-preview";
+import { WorkspaceEnvironmentAutomaticSetupSnapshotSchema, WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX } from "@mcode/contracts/models/workspace-environment";
+import { ThreadStartupSchema, ThreadStartupActionSchema } from "@mcode/contracts/thread-startup";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { QueuedTurnSubmissionSchema, WorkspaceEnvironmentAutomaticStore } from "./workspace-environment-automatic-store.js";
 

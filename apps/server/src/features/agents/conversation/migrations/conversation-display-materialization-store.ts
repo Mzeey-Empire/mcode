@@ -13,8 +13,8 @@ import {
   thoughtSegments,
   toolCallRecords,
 } from "../../../../runtime/persistence/sqlite/schema.js";
-import type { Message } from "@mcode/contracts";
-import { ApprovalReceiptRecordSchema } from "@mcode/contracts";
+import type { Message } from "@mcode/contracts/models/message";
+import { ApprovalReceiptRecordSchema } from "@mcode/contracts/models/approval-receipt";
 import { ApprovalReceiptStore } from "../../approvals/approval-receipt-store.js";
 import { terminalAssistantProjectionCondition, terminalProviderChildTurnCondition } from "../../canonical/canonical-conversation-visibility.js";
 

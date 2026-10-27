@@ -10,8 +10,10 @@ import type {
   SessionNotification,
 } from "@agentclientprotocol/sdk";
 import { logger } from "@mcode/shared";
-import { AgentEventType, PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts";
-import type { AgentEvent, ApprovalOutcome, ApprovalRequestBody, ApprovalRequestEnvelope, ApprovalResponse, ApprovalRespondResult } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts/models/plan";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ApprovalOutcome, ApprovalRequestBody, ApprovalRequestEnvelope, ApprovalResponse, ApprovalRespondResult } from "@mcode/contracts/models/approval";
 import { approvalChoice, approvalOutcome } from "../../../approval-scope.js";
 import type { CursorProviderPorts } from "../../../factory-types.js";
 import { buildCursorAskQuestionExtResponse } from "./cursor-acp-ask-question.js";

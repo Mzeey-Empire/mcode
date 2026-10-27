@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createSubagentPresentation, type SubagentRosterEntry } from "@mcode/contracts";
+import { createSubagentPresentation } from "@mcode/contracts/models/tool-call-record";
+import { type SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import type { ToolCall } from "@/transport/types";
 import { useSubagentRosterStore } from "@/features/subagents/state/subagentRosterStore";
 import { NarrativeRow } from "../NarrativeRow";

@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
-import {
-  ThreadAttentionSchema, type CanonicalAgentEventEnvelope, type ThreadAttention, type ThreadWaitingKind,
-} from "@mcode/contracts";
+import { ThreadAttentionSchema, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
+import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { threadWriteOperations } from "../persistence/thread-write-operations.js";
 import type { DelegatedTaskService } from "../delegation/delegated-task-service.js";

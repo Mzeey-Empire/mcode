@@ -6,7 +6,7 @@ import {
   WorkspaceEnvironmentService,
   WorkspaceEnvironmentServiceError,
 } from "../workspace-environment-service.js";
-import { WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES } from "@mcode/contracts";
+import { WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES } from "@mcode/contracts/models/workspace-environment";
 
 const workspaceId = "workspace-1";
 const document = {

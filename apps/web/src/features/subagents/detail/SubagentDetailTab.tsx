@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
-import { isLiveSubagentStatus, type SubagentDetail, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts";
+import { isLiveSubagentStatus, type SubagentDetail, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { Button, IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
 import { ProviderIcon } from "@/components/ui/provider-icon";

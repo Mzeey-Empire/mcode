@@ -1,4 +1,4 @@
-import { projectBrowserNarrativeResult } from "@mcode/contracts";
+import { projectBrowserNarrativeResult } from "@mcode/contracts/models/browser-narrative";
 import type { ToolCall } from "@/transport/types";
 import { isCancelledCall } from "./narrative-builder-helpers";
 

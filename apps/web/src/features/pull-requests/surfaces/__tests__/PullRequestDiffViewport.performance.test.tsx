@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { PullRequestFile, PullRequestPatchResult } from "@mcode/contracts";
+import type { PullRequestFile, PullRequestPatchResult } from "@mcode/contracts/pull-requests";
 import { buildPullRequestDiffRowModel } from "@/features/pull-requests/lib/pull-request-diff-row-model";
 import { PullRequestVirtualDiff } from "../PullRequestVirtualDiff";
 

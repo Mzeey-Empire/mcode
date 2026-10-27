@@ -1,7 +1,7 @@
 import * as NodeCrypto from "node:crypto";
-import { PlanImplementSchema, PlanImplementErrorSchema, ProviderIdSchema,
-  type PlanSaveError, type PlanSaveVersion, type PlanVersion, type PlanImplement, type PendingPlanImplement,
-  type PlanImplementError, type PlanImplementReceipt, type IProviderRegistry, type PlanCommentError, type PlanComment } from "@mcode/contracts";
+import { PlanImplementSchema, PlanImplementErrorSchema, type PlanSaveError, type PlanSaveVersion, type PlanVersion, type PlanImplement, type PendingPlanImplement, type PlanImplementError, type PlanImplementReceipt, type PlanCommentError, type PlanComment } from "@mcode/contracts/models/plan";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { type IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { ThreadService } from "../../thread-control/lifecycle/thread-service.js";
 import type { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";

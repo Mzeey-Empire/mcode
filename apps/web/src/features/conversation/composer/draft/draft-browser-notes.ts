@@ -1,14 +1,5 @@
-import {
-  PreviewAnnotationBundleSchema,
-  readPreviewAnnotationBundle,
-  toPreviewAnnotationBundleV2,
-  type DraftBrowserNote,
-  type DraftBrowserNotePage,
-  type DraftElementMeta,
-  type PreviewAnnotationBundle,
-  type PreviewAnnotationPayloadV2,
-  type StagedDraftImage,
-} from "@mcode/contracts";
+import { PreviewAnnotationBundleSchema, readPreviewAnnotationBundle, toPreviewAnnotationBundleV2, type PreviewAnnotationBundle, type PreviewAnnotationPayloadV2 } from "@mcode/contracts/models/browser-preview";
+import { type DraftBrowserNote, type DraftBrowserNotePage, type DraftElementMeta, type StagedDraftImage } from "@mcode/contracts/models/next-message-draft";
 import { useComposerDraftStore, type ComposerDraft } from "@/stores/composerDraftStore";
 import {
   removeBrowserNote,

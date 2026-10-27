@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { ReviewState, ReviewTurn, TurnSnapshot } from "@mcode/contracts";
+import type { ReviewState, ReviewTurn } from "@mcode/contracts/models/review-comparison";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import {
   REVIEW_VIEWS,
   defaultReviewView,

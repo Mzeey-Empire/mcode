@@ -1,4 +1,4 @@
-import { MessageSchema } from "@mcode/contracts";
+import { MessageSchema } from "@mcode/contracts/models/message";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import type { ThreadRecord } from "@/stores/thread-record";

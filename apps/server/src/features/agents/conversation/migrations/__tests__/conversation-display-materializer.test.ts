@@ -1,7 +1,7 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import type { Database } from "bun:sqlite";
-import type { Message } from "@mcode/contracts";
+import type { Message } from "@mcode/contracts/models/message";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
 import { ConversationDisplayMaterializationStore } from "../conversation-display-materialization-store.js";

@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import type { IAgentProvider, IProviderRegistry } from "@mcode/contracts";
+import type { IAgentProvider, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../settings/settings-service.js";
 

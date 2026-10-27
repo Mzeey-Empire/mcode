@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { ThreadsSection } from "../ThreadsSection";

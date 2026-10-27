@@ -3,7 +3,8 @@ import { ComposerCapabilityChip } from "@/components/chat/ComposerCapabilityChip
 import { ActiveGoalChip } from "../ActiveGoalChip";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import type { ResolvedComposerCapability } from "../composer-capabilities";
-import { ORCHESTRATION_MODES, type GoalState } from "@mcode/contracts";
+import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
+import { type GoalState } from "@mcode/contracts/models/goal";
 
 /** Props for Composer's attached capability controls. */
 export interface ComposerAttachedCapabilitiesProps {

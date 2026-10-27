@@ -1,5 +1,9 @@
-import { isSubagentLaunchToolName } from "@mcode/contracts";
-import type { AgentTurnStatus, ApprovalReceiptRecord, ProviderId, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
+import { isSubagentLaunchToolName } from "@mcode/contracts/models/subagent-roster";
+import type { AgentTurnStatus } from "@mcode/contracts/compat/agent-model";
+import type { ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
+import type { TurnRuntimePhase } from "@mcode/contracts/models/turn-runtime";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport/types";
 import type { ApprovalReceipt, NarrativeCounts, ThoughtSegment, TurnSummary } from "../narrative/types";
 import { buildNarrativeItems, computeLiveStreamingText } from "../narrative/build-narrative";

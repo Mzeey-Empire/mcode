@@ -1,4 +1,4 @@
-import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "@mcode/contracts";
+import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "@mcode/contracts/models/selected-text-comment";
 
 /** Canonical visible prose-and-code text for one eligible Message. */
 export interface CanonicalMessageTextProjection {

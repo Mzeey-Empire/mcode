@@ -1,5 +1,5 @@
 import * as NodeBuffer from "node:buffer";
-import { TerminalU64Schema, type TerminalPlatform } from "@mcode/contracts";
+import { TerminalU64Schema, type TerminalPlatform } from "@mcode/contracts/models/terminal";
 import type {
   PtyHostAdapter,
   PtyHostClose,

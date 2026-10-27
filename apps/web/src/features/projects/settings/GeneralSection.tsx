@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FolderOpen, RotateCcw } from "lucide-react";
-import type { ProjectIcon as ProjectIconModel } from "@mcode/contracts";
+import type { ProjectIcon as ProjectIconModel } from "@mcode/contracts/models/project-icon";
 import { IconButton } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";

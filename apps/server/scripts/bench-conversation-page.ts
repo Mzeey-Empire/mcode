@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import * as NodePerfHooks from "node:perf_hooks";
 import type { Database } from "bun:sqlite";
-import { CONVERSATION_HISTORY_PAGE_MAX_BYTES } from "@mcode/contracts";
+import { CONVERSATION_HISTORY_PAGE_MAX_BYTES } from "@mcode/contracts/models/conversation-history-page";
 import { openMemoryDatabase } from "../src/runtime/persistence/sqlite/database.js";
 import { MessageRepo } from "../src/features/agents/conversation/persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../src/features/agents/tools/persistence/tool-call-record-repo.js";

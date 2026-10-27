@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
-import type { StartupGate, ThreadStartupAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { StartupGate, WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
+import type { ThreadStartupAction } from "@mcode/contracts/thread-startup";
 import { TerminalPlainTextDecoder } from "../../terminal/output/terminal-plain-text.js";
 import type { ProjectActionService } from "./project-action-service.js";
 

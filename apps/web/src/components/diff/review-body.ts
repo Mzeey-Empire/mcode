@@ -1,4 +1,4 @@
-import type { ReviewComparison, ReviewComparisonResult } from "@mcode/contracts";
+import type { ReviewComparison, ReviewComparisonResult } from "@mcode/contracts/models/review-comparison";
 import { refLabel, type BranchOperands, type DiffViewMode } from "@/stores/diffStore";
 
 /**

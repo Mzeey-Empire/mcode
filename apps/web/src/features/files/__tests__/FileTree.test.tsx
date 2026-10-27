@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
-import type { WorkspaceFileChanges } from "@mcode/contracts";
+import type { WorkspaceFileChanges } from "@mcode/contracts/models/workspace-file";
 import { FileTree } from "../FileTree";
 import { buildFilesTree, flattenFileTree, indexFileChanges } from "../file-tree-model";
 

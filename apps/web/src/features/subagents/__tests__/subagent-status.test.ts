@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SubagentRosterEntrySchema } from "@mcode/contracts";
+import { SubagentRosterEntrySchema } from "@mcode/contracts/models/subagent-roster";
 import { formatLiveDuration, subagentChipStatus, subagentOverviewCounts, subagentStatusLabel } from "../subagent-status";
 
 describe("shared subagent surface words", () => {

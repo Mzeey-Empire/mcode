@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { useLayoutEffect, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SelectedTextComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import {
   useComposerDraftStore,
   type SelectedTextCommentEditorDraft,

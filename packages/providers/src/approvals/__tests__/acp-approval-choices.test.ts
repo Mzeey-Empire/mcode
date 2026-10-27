@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApprovalRequestBodySchema } from "@mcode/contracts";
+import { ApprovalRequestBodySchema } from "@mcode/contracts/models/approval";
 import { acpApprovalChoices } from "../../approval-scope.js";
 
 type AcpOption = Parameters<typeof acpApprovalChoices>[0][number];

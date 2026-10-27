@@ -1,4 +1,6 @@
-import { getCatalogEntry, type ProviderCliUpdate, type ProviderId, type ProviderRateLimit, type ProviderStatus } from "@mcode/contracts";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { type ProviderCliUpdate, type ProviderRateLimit, type ProviderStatus } from "@mcode/contracts/providers/provider-status";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 
 /** A CLI update the bell can show; `none` never becomes a row. */
 export type ProviderBellCliUpdate = Exclude<ProviderCliUpdate, { state: "none" }>;

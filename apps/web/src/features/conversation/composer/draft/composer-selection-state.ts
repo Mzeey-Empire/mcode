@@ -1,6 +1,7 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
-import type { ApprovalReviewMode, ContextWindowMode, DevinMode, OrchestrationMode, ReasoningLevel } from "@mcode/contracts";
-import { ORCHESTRATION_MODES } from "@mcode/contracts";
+import type { ApprovalReviewMode, DevinMode, OrchestrationMode } from "@mcode/contracts/models/enums";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
 import { INTERACTION_MODES, PERMISSION_MODES, type InteractionMode, type PermissionMode } from "@/transport";
 import {
   getDefaultModelId,

@@ -1,13 +1,8 @@
-import type {
-  ConversationNewerPage,
-  ConversationNewerPageRequest,
-  ConversationOlderPage,
-  ConversationOlderPageRequest,
-  ConversationPage,
-  ConversationTail,
-  ConversationTailMessage,
-} from "@mcode/contracts";
-import { CONVERSATION_TAIL_MAX_MESSAGES } from "@mcode/contracts";
+import type { ConversationNewerPage, ConversationNewerPageRequest } from "@mcode/contracts/models/conversation-newer-page";
+import type { ConversationOlderPage, ConversationOlderPageRequest } from "@mcode/contracts/models/conversation-older-page";
+import type { ConversationPage } from "@mcode/contracts/models/conversation-page";
+import type { ConversationTail, ConversationTailMessage } from "@mcode/contracts/models/conversation-tail";
+import { CONVERSATION_TAIL_MAX_MESSAGES } from "@mcode/contracts/models/conversation-tail";
 import type { MessageRepo } from "../persistence/message-repo.js";
 import type { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 

@@ -10,7 +10,9 @@
 
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import type { ProviderAvailability, ProviderId, ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
+import type { ProviderAvailability } from "@mcode/contracts/providers/availability";
+import type { ProviderId, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 import { broadcast } from "../../../application/transport/push.js";
 import { ModelCacheRepo } from "./persistence/model-cache-repo.js";
 import { ModelSightingsRepo } from "../status/model-sightings-repo.js";

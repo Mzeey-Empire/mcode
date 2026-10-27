@@ -1,5 +1,5 @@
 import { createMockThread } from "@mcode/contracts/testing";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import {
   resetThreadStoreForTests,
   getTestThreadAgentStartTime,
@@ -10,7 +10,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 
-import type { GoalState } from "@mcode/contracts";
+import type { GoalState } from "@mcode/contracts/models/goal";
 
 describe("running-session signal", () => {
   beforeEach(() => {

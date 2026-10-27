@@ -1,13 +1,4 @@
-import type {
-  PullRequestActor,
-  PullRequestCapabilities,
-  PullRequestCapabilityReason,
-  PullRequestCapabilityLimitation,
-  PullRequestError,
-  PullRequestRelationship,
-  PullRequestState,
-  PullRequestSummary,
-} from "@mcode/contracts";
+import type { PullRequestActor, PullRequestCapabilities, PullRequestCapabilityReason, PullRequestCapabilityLimitation, PullRequestError, PullRequestRelationship, PullRequestState, PullRequestSummary } from "@mcode/contracts/pull-requests";
 import { create } from "zustand";
 import {
   getPullRequestTransport,

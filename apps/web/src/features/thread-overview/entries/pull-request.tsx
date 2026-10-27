@@ -8,7 +8,7 @@ import { getBreakdown, getCiOverviewSummaryLabel, getCiSummaryHeadline } from "@
 import { registerCommand } from "@/lib/command-registry";
 import { cn } from "@/lib/utils";
 import { type Thread } from "@/transport";
-import type { ChecksStatus } from "@mcode/contracts";
+import type { ChecksStatus } from "@mcode/contracts/github";
 import { ChevronDown, GitPullRequest, Plus } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type MouseEvent } from "react";
 import {

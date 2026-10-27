@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { DetachedWorktreeTarget, GitListError, GitRef } from "@mcode/contracts";
+import type { DetachedWorktreeTarget, GitListError, GitRef } from "@mcode/contracts/git";
 
 import { getTransport } from "@/transport";
 import { pickDefaultBranchTarget, toBranchTarget, type BranchRefTarget, type BranchTarget } from "./branch-target";

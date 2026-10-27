@@ -19,11 +19,7 @@ import { WorkspaceRepo } from "../../../features/projects/persistence/workspace-
 import type { ProjectActionService } from "../../../features/projects/environment/project-action-service.js";
 import { WorkspaceEnvironmentService } from "../../../features/projects/environment/workspace-environment-service.js";
 import { _resetForTest, addClient } from "../push.js";
-import {
-  RECAP_MAX_MESSAGE_CONTENT_CHARS,
-  RECAP_MAX_MESSAGES,
-  RECAP_MAX_PREVIOUS_RECAP_CHARS,
-} from "@mcode/contracts";
+import { RECAP_MAX_MESSAGE_CONTENT_CHARS, RECAP_MAX_MESSAGES, RECAP_MAX_PREVIOUS_RECAP_CHARS } from "@mcode/contracts/ws/methods";
 import {
   resetTransportPayloadValidatorForTest,
   setTransportPayloadValidatorForTest,
@@ -252,7 +248,7 @@ describe("routeMessage provider.catalog", () => {
     } as unknown as RouterDeps;
 
     try {
-      const changed = new Promise<import("@mcode/contracts").ProviderCatalogChange>((resolve) => {
+      const changed = new Promise<import("@mcode/contracts/providers/capability-catalog").ProviderCatalogChange>((resolve) => {
         providerCatalogService.onChanged(resolve);
       });
       const response = await routeMessage(JSON.stringify({
@@ -333,7 +329,7 @@ describe("routeMessage provider.catalog", () => {
     } as unknown as RouterDeps;
 
     try {
-      const changed = new Promise<import("@mcode/contracts").ProviderCatalogChange>((resolve) => {
+      const changed = new Promise<import("@mcode/contracts/providers/capability-catalog").ProviderCatalogChange>((resolve) => {
         providerCatalogService.onChanged(resolve);
       });
       const response = await routeMessage(JSON.stringify({
@@ -511,7 +507,7 @@ describe("routeMessage provider.catalog", () => {
       skillService: { list },
     } as unknown as RouterDeps;
 
-    const firstChange = new Promise<import("@mcode/contracts").ProviderCatalogChange>((resolve) => {
+    const firstChange = new Promise<import("@mcode/contracts/providers/capability-catalog").ProviderCatalogChange>((resolve) => {
       providerCatalogService.onChanged(resolve);
     });
 
@@ -567,7 +563,7 @@ describe("routeMessage provider.catalog", () => {
 
     const restartedCatalogService = catalogService(snapshotRepo);
     (deps as { providerCatalogService: ProviderCatalogService }).providerCatalogService = restartedCatalogService;
-    const restartedChange = new Promise<import("@mcode/contracts").ProviderCatalogChange>((resolve) => {
+    const restartedChange = new Promise<import("@mcode/contracts/providers/capability-catalog").ProviderCatalogChange>((resolve) => {
       restartedCatalogService.onChanged((change) => {
         if (change.request.workspaceId === "workspace-1") resolve(change);
       });
@@ -586,7 +582,7 @@ describe("routeMessage provider.catalog", () => {
     });
     await restartedChange;
 
-    const otherWorkspaceChange = new Promise<import("@mcode/contracts").ProviderCatalogChange>((resolve) => {
+    const otherWorkspaceChange = new Promise<import("@mcode/contracts/providers/capability-catalog").ProviderCatalogChange>((resolve) => {
       restartedCatalogService.onChanged((change) => {
         if (change.request.workspaceId === "workspace-2") resolve(change);
       });
@@ -608,7 +604,7 @@ describe("routeMessage provider.catalog", () => {
     codexCatalogService.onSkillsChanged((cwd) => {
       restartedCatalogService.refreshKnownContexts("codex", cwd);
     });
-    const reconciled = new Promise<import("@mcode/contracts").ProviderCatalogChange>((resolve) => {
+    const reconciled = new Promise<import("@mcode/contracts/providers/capability-catalog").ProviderCatalogChange>((resolve) => {
       restartedCatalogService.onChanged((change) => {
         if (change.request.workspaceId === "workspace-1") resolve(change);
       });
@@ -629,7 +625,7 @@ describe("routeMessage provider.catalog", () => {
     expect(create).toHaveBeenCalledTimes(1);
 
     refresh.mockRejectedValueOnce(new Error("provider unavailable"));
-    const failedRefresh = new Promise<import("@mcode/contracts").ProviderCatalogChange>((resolve) => {
+    const failedRefresh = new Promise<import("@mcode/contracts/providers/capability-catalog").ProviderCatalogChange>((resolve) => {
       restartedCatalogService.onChanged((change) => {
         if (change.request.workspaceId === "workspace-1") resolve(change);
       });

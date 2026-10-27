@@ -1,4 +1,5 @@
-import type { TurnFailure, TurnFailureKind } from "@mcode/contracts";
+import type { TurnFailure } from "@mcode/contracts/models/turn-failure";
+import type { TurnFailureKind } from "@mcode/contracts/compat/agent-model";
 import { failureCode, failureRetries, httpStatus, kindByHttpStatus, retryAfterMsUntil, turnFailure } from "../turn-failure-fields.js";
 import { ProviderTurnError } from "../../provider-turn-error.js";
 import { CodexRpcResponseError, CodexTransportError } from "./codex-rpc-client.js";

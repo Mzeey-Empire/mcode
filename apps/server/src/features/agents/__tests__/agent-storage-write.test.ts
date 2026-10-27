@@ -21,7 +21,7 @@ import { PlanQuestionService } from "../planning/plan-question-service.js";
 import { NarrativeTurnState } from "../conversation/narrative/narrative-turn-state.js";
 import { ApprovalReceiptStore } from "../approvals/approval-receipt-store.js";
 import { recoveredNarrativeWriteOperation } from "../conversation/narrative/persistence/recovered-narrative-write-operation.js";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
 describe("agent storage through the application writer", () => {
   let directory: string;

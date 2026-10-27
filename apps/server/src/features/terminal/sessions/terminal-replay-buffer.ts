@@ -1,8 +1,5 @@
-import type { TerminalGap, TerminalHydrationDescriptor } from "@mcode/contracts";
-import {
-  TERMINAL_MAX_CHECKPOINT_BYTES,
-  TerminalHydrationDescriptorSchema,
-} from "@mcode/contracts";
+import type { TerminalGap, TerminalHydrationDescriptor } from "@mcode/contracts/models/terminal";
+import { TERMINAL_MAX_CHECKPOINT_BYTES, TerminalHydrationDescriptorSchema } from "@mcode/contracts/models/terminal";
 
 /** Minimum byte capacity for retained Terminal output. */
 export const TERMINAL_MIN_REPLAY_BYTES = 65_536;

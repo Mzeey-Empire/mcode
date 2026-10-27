@@ -4,11 +4,7 @@ import {
   type ProviderCatalogRequest,
   type ProviderCatalogSnapshot,
 } from "@/transport";
-import type {
-  ProviderCapabilityEntry,
-  ProviderCatalogChange,
-  SelectableProviderAgent,
-} from "@mcode/contracts";
+import type { ProviderCapabilityEntry, ProviderCatalogChange, SelectableProviderAgent } from "@mcode/contracts/providers/capability-catalog";
 
 /** Cached provider catalog state for one discovery context. */
 export interface ProviderCatalogCacheEntry {

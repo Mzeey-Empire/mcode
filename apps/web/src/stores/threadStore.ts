@@ -1,26 +1,37 @@
 import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
-import type { AgentEvent, AgentModelState, AgentTurn, CanonicalAgentEventEnvelope, CanonicalAgentProgressFrame, CanonicalAgentProgressRecovery, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, NarrativeDetailCursor, NarrativeEntry, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
-import type { reduceAgentEventBatch } from "@mcode/contracts";
-import type { DevinMode } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { AgentModelState, AgentTurn, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { CanonicalAgentProgressFrame, CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
+import type { CanonicalAgentReconnectRecovery } from "@mcode/contracts/models/canonical-agent-reconnect";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { NarrativeDetailCursor, NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
+import type { OrchestrationMode } from "@mcode/contracts/models/enums";
+import type { PlanQuestion, PlanAnswer } from "@mcode/contracts/models/plan-questions";
+import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
+import type { GoalLookupResult } from "@mcode/contracts/models/goal";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
+import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
+import type { TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
+import type { reduceAgentEventBatch } from "@mcode/contracts/compat/agent-model";
+import type { DevinMode } from "@mcode/contracts/models/enums";
 import { recoverParentNarrative, steeredUserMessages } from "./parent-narrative-recovery";
 import { backgroundHeldToolIds, stepsSettledWith, type ToolCallLink } from "@/features/conversation/narrative/background-held-tools";
-import {
-  AgentEventSchema,
-  CANONICAL_AGENT_PROGRESS_BATCH_MAX,
-  MessageSchema,
-  PERMISSION_MODES,
-  INTERACTION_MODES,
-  ProviderIdSchema,
-  isGoalOpen,
-  isTaskListToolName,
-  CONVERSATION_HISTORY_PAGE_MAX_BYTES,
-  isSubagentLaunchToolName,
-  mergeSubagentPresentation,
-  providerFailureOutcome,
-  previewAnnotationPageSnapshotName,
-  readPreviewAnnotationBundle,
-} from "@mcode/contracts";
+import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
+import { CANONICAL_AGENT_PROGRESS_BATCH_MAX } from "@mcode/contracts/models/canonical-agent-progress";
+import { MessageSchema } from "@mcode/contracts/models/message";
+import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts/models/enums";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { isGoalOpen } from "@mcode/contracts/models/goal";
+import { isTaskListToolName } from "@mcode/contracts/models/task-list-tools";
+import { CONVERSATION_HISTORY_PAGE_MAX_BYTES } from "@mcode/contracts/models/conversation-history-page";
+import { isSubagentLaunchToolName } from "@mcode/contracts/models/subagent-roster";
+import { mergeSubagentPresentation } from "@mcode/contracts/models/tool-call-record";
+import { providerFailureOutcome } from "@mcode/contracts/models/turn-failure";
+import { previewAnnotationPageSnapshotName, readPreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { getTransport, RpcError } from "@/transport";
 import { createSubagentLaunchPresentation } from "@/features/conversation/narrative/narrative-builder-helpers";
 import { approvalSubjectLabel } from "@/features/conversation/narrative/tool-detail";
@@ -445,12 +456,12 @@ interface ThreadState {
   // Message actions
   loadOlderMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
   loadNewerMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, fastMode?: boolean, replyToMessageId?: string, quotedText?: string, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string, planCommentIds?: string[]) => Promise<boolean>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, fastMode?: boolean, replyToMessageId?: string, quotedText?: string, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts/models/enums").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string, planCommentIds?: string[]) => Promise<boolean>;
   /** Remove one durably cancelled message from the resident thread transcript. */
   removePersistedMessage: (threadId: string, messageId: string) => void;
   stopAgent: (threadId: string) => Promise<void>;
   /** Apply server-authoritative assistant-text saving state for one active execution. */
-  setTurnSavingStatus: (status: import("@mcode/contracts").TurnSavingStatus) => void;
+  setTurnSavingStatus: (status: import("@mcode/contracts/models/turn-runtime").TurnSavingStatus) => void;
   /** Apply one authoritative runtime snapshot without replacing other running threads. */
   applyThreadRuntimeSnapshot: (snapshot: TurnRuntimeSnapshot) => void;
   /**
@@ -462,7 +473,7 @@ interface ThreadState {
   hydrateRunningThreads: (ids: string[], observed?: ReadonlyMap<string, RuntimeHydrationObservation>) => void;
   /** Restore authoritative per-thread execution snapshots during reconnect. */
   hydrateThreadRuntimes: (
-    snapshots: import("@mcode/contracts").TurnRuntimeSnapshot[],
+    snapshots: import("@mcode/contracts/models/turn-runtime").TurnRuntimeSnapshot[],
     observed?: ReadonlyMap<string, RuntimeHydrationObservation>,
   ) => void;
   addMessage: (message: Message) => void;

@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { getCatalogEntry, type PendingPlanImplement, type PlanComment, type PlanVersion, type PlanVersionStatus } from "@mcode/contracts";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { type PendingPlanImplement, type PlanComment, type PlanVersion, type PlanVersionStatus } from "@mcode/contracts/models/plan";
 
 const statusOrder: Record<PlanVersionStatus, number> = { draft: 0, ready: 0, superseded: 1, accepted: 2 };
 

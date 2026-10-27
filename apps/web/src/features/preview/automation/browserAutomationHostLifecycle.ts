@@ -1,10 +1,4 @@
-import {
-  BrowserAutomationHostDispatchSchema,
-  BrowserAutomationRequestSchema,
-  type BrowserAutomationHostDispatch,
-  type BrowserAutomationHostDispatchTarget,
-  type BrowserAutomationRequest,
-} from "@mcode/contracts";
+import { BrowserAutomationHostDispatchSchema, BrowserAutomationRequestSchema, type BrowserAutomationHostDispatch, type BrowserAutomationHostDispatchTarget, type BrowserAutomationRequest } from "@mcode/contracts/models/browser-automation";
 import { getTransport } from "@/transport";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

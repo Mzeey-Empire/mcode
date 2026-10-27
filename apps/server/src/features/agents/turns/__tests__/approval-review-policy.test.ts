@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ApprovalReviewSupport } from "@mcode/contracts";
+import type { ApprovalReviewSupport } from "@mcode/contracts/providers/interfaces";
 import { ApprovalReviewPolicy, type ApprovalReviewProvider } from "../approval-review-policy.js";
 
 function provider(support: ApprovalReviewSupport): ApprovalReviewProvider {

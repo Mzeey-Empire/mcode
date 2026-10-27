@@ -1,7 +1,10 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AgentTurn, Message, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
+import type { AgentTurn } from "@mcode/contracts/compat/agent-model";
+import type { Message } from "@mcode/contracts/models/message";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
+import type { TurnRuntimePhase } from "@mcode/contracts/models/turn-runtime";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";

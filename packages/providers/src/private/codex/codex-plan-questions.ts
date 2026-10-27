@@ -1,13 +1,8 @@
 import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
 import { logger } from "@mcode/shared";
-import {
-  lazySchema,
-  type NativePlanQuestionBatch,
-  type PlanAnswer,
-  type PlanQuestionHandler,
-  type PlanQuestionSettlement,
-} from "@mcode/contracts";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
+import { type NativePlanQuestionBatch, type PlanAnswer, type PlanQuestionHandler, type PlanQuestionSettlement } from "@mcode/contracts/models/plan-questions";
 
 const requestSchema = lazySchema(() => z.object({
   threadId: z.string().min(1),

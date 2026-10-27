@@ -4,7 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { ReactNode, ReactElement } from "react";
 import type { Thread } from "@/transport/types";
-import type { ProviderUsageInfo, ReviewFileChange, TurnSnapshot } from "@mcode/contracts";
+import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { mockTransport } from "@/__tests__/mocks/transport";
 
 // vi.hoisted runs before vi.mock hoisting, so these are available in mock factories.
@@ -233,7 +235,7 @@ function defaultWorkspaceState() {
     pendingNewThread: false,
     threads: [makeThread()],
     prUrlsByThreadId: {} as Record<string, string>,
-    checksById: {} as Record<string, import("@mcode/contracts").ChecksStatus>,
+    checksById: {} as Record<string, import("@mcode/contracts/github").ChecksStatus>,
     loadWorkspaces: vi.fn(),
     loadThreads: vi.fn(),
     setActiveWorkspace: vi.fn(),

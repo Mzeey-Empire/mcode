@@ -1,6 +1,6 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import {
   act,
   fireEvent,

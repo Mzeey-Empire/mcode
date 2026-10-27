@@ -1,5 +1,5 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import type { HtmlVisual } from "@mcode/contracts";
+import type { HtmlVisual } from "@mcode/contracts/models/html-visual";
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

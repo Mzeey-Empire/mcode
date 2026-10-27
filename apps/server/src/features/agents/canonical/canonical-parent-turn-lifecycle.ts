@@ -7,14 +7,11 @@ import {
   canonicalAgentIngestCheckpoints,
   messages,
 } from "../../../runtime/persistence/sqlite/schema.js";
-import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
+import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts/ws/channels";
 import { TurnRecoveryError } from "../recovery/turn-recovery-error.js";
-import type {
-  AgentThread,
-  AgentTurn,
-  Message,
-  ParentNarrativeRecoveryItem,
-} from "@mcode/contracts";
+import type { AgentThread, AgentTurn } from "@mcode/contracts/compat/agent-model";
+import type { Message } from "@mcode/contracts/models/message";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import type {
   ParentTurnFinishInput as CanonicalParentTurnFinishInput,
   ParentTurnInterruptionInput,

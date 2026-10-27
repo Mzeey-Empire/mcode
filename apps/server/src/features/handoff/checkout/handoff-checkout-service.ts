@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import type { Thread } from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { GitRepositoryService } from "../../projects/git/git-repository-service.js";

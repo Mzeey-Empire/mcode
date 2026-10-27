@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { BrowserPerfCounters } from "@mcode/contracts";
+import type { BrowserPerfCounters } from "@mcode/contracts/models/browser-tab";
 
 /**
  * Floating dev HUD for the embedded browser's perf counters. Gated behind

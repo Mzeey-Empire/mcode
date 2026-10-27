@@ -5,7 +5,8 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { AttachmentMetaSchema, WebSocketResponseSchema } from "@mcode/contracts";
+import { AttachmentMetaSchema } from "@mcode/contracts/models/attachment";
+import { WebSocketResponseSchema } from "@mcode/contracts/ws/protocol";
 import { getMcodeDir } from "@mcode/shared";
 import { createWsServer } from "../ws-server.js";
 

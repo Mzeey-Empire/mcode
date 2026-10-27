@@ -1,8 +1,9 @@
 import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
-import type { AgentItem, CanonicalAgentEventEnvelope, ProviderId } from "@mcode/contracts";
-import { SUBAGENT_REPORTING } from "@mcode/contracts";
+import type { AgentItem, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";

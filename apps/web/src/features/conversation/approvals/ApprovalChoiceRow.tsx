@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from "react";
-import type { ApprovalChoice } from "@mcode/contracts";
+import type { ApprovalChoice } from "@mcode/contracts/models/approval";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 

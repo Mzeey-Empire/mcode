@@ -1,5 +1,5 @@
-import { supportsCodexUltraOrchestration } from "@mcode/contracts";
-import type { ProviderCapability } from "@mcode/contracts";
+import { supportsCodexUltraOrchestration } from "@mcode/contracts/providers/codex-static-fallback";
+import type { ProviderCapability } from "@mcode/contracts/compat/agent-model";
 import { isXhighEffortModel } from "@/lib/model-registry";
 
 /** Stable IDs for capabilities that can be attached to the composer. */

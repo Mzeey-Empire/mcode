@@ -1,13 +1,8 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import {
-  AgentEventSchema,
-  AgentEventType,
-  type AgentEvent,
-  type AgentThread,
-  type AgentTurn,
-  type ProviderRuntimeExtension,
-} from "@mcode/contracts";
+import { AgentEventSchema, AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type AgentThread, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { type ProviderRuntimeExtension } from "@mcode/contracts/events/provider-runtime-event";
 
 import { CodexCollaborationEventAdapter } from "../codex-collaboration-event-adapter.js";
 import type { CodexCollaborationDurability } from "../../codex-collaboration-durability.js";

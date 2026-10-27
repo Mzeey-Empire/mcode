@@ -9,7 +9,7 @@ import { usePlanStore } from "@/stores/planStore";
 import { useTaskStore, type TaskItem } from "@/stores/taskStore";
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
-import type { PlanVersion } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

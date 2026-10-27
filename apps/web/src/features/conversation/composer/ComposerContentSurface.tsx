@@ -20,14 +20,12 @@ import { ComposerEditor } from "@/components/chat/lexical";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { getCatalogEntry } from "@mcode/contracts";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
 import { getModelContextWindow } from "@mcode/shared/model-context";
-import type {
-  ContextWindowMode,
-  MessageMention,
-  ProviderId,
-  SelectedTextComment,
-} from "@mcode/contracts";
+import type { ContextWindowMode } from "@mcode/contracts/models/settings";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { Thread } from "@/transport";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { cn } from "@/lib/utils";

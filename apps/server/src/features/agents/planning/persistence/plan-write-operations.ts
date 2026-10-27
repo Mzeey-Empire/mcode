@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { PlanVersionSchema, PlanSnapshotSchema, PlanSaveVersionSchema, PlanSaveErrorSchema, ProviderIdSchema } from "@mcode/contracts";
+import { PlanVersionSchema, PlanSnapshotSchema, PlanSaveVersionSchema, PlanSaveErrorSchema } from "@mcode/contracts/models/plan";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 import { PlanPersistenceReadySchema } from "../plan-capture-schema.js";
 

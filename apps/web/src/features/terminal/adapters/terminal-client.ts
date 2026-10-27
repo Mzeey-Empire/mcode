@@ -1,10 +1,6 @@
-import type {
-  LegacyTerminalRecord,
-  LegacyTerminalCreateResult,
-  TerminalDiagnosticsBundle,
-  TerminalExitMetadata,
-  TerminalGap,
-} from "@mcode/contracts";
+import type { LegacyTerminalRecord, LegacyTerminalCreateResult } from "@mcode/contracts/ws/terminal-legacy";
+import type { TerminalDiagnosticsBundle } from "@mcode/contracts/models/terminal-diagnostics";
+import type { TerminalExitMetadata, TerminalGap } from "@mcode/contracts/models/terminal";
 
 /** Upper bound for renderer-side Terminal cleanup RPCs. */
 export const TERMINAL_CLEANUP_TIMEOUT_MS = 2_000;

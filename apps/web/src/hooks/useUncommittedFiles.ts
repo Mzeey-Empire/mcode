@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ReviewComparisonResult, ReviewFileChange } from "@mcode/contracts";
+import type { ReviewComparisonResult, ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import { getTransport } from "@/transport";
 import { useDiffStore } from "@/stores/diffStore";
 

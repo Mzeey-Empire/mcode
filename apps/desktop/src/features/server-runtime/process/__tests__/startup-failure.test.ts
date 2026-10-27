@@ -2,7 +2,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { STARTUP_FAILURE_FILE_MAX_BYTES, STARTUP_FAILURE_FILE_NAME, type StartupRefusal } from "@mcode/contracts";
+import { STARTUP_FAILURE_FILE_MAX_BYTES, STARTUP_FAILURE_FILE_NAME, type StartupRefusal } from "@mcode/contracts/startup-failure";
 import { readStartupRefusal } from "../startup-failure.js";
 
 const STARTUP_ID = "00000000-0000-4000-8000-0000000000bb";

@@ -9,8 +9,8 @@
  * in-progress rows immediately.
  */
 
-import { AgentEventType } from "@mcode/contracts";
-import type { AgentEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { CursorAcpTurnState } from "./cursor-acp-event-mapper.js";
 
 /** Metadata cached between `cursor/task` and the matching `tool_call_update`. */

@@ -1,16 +1,8 @@
-import {
-  AgentEventIdSchema,
-  AgentEventRoutingSchema,
-  AgentEventSchema,
-  CanonicalTimestampSchema,
-  MessageSchema,
-  ProviderIdSchema,
-  AgentThreadIdSchema,
-  HTML_VISUAL_SYSTEM_SUBTYPE,
-  htmlVisualContent,
-  type AgentEvent,
-  type Message,
-} from "@mcode/contracts";
+import { AgentEventIdSchema, AgentEventRoutingSchema, CanonicalTimestampSchema, AgentThreadIdSchema } from "@mcode/contracts/compat/agent-model";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { MessageSchema, type Message } from "@mcode/contracts/models/message";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { HTML_VISUAL_SYSTEM_SUBTYPE, htmlVisualContent } from "@mcode/contracts/models/html-visual";
 import { v5 as uuidv5 } from "uuid";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 

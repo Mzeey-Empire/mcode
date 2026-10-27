@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ThreadSchema } from "@mcode/contracts";
+import { ThreadSchema } from "@mcode/contracts/models/thread";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 
 const jobInput = z.object({ thread_id: z.string(), workspace_path: z.string(), worktree_path: z.string().nullable(), branch: z.string().nullable(), kind: z.enum(["explicit", "retention"]).optional() });

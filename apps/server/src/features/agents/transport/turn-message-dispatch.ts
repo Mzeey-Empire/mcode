@@ -1,4 +1,4 @@
-import { toPreviewAnnotationBundleV2, type PreviewAnnotationBundle } from "@mcode/contracts";
+import { toPreviewAnnotationBundleV2, type PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { logger } from "@mcode/shared";
 import type { AgentService } from "../orchestration/agent-service.js";
 import type { SendMessageCommand } from "../turns/turn-admission-dispatch-coordinator.js";

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { MessageSchema, SystemNoticeMetadataSchema } from "@mcode/contracts";
+import { MessageSchema, SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
 import { z } from "zod";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { MessageStore } from "../conversation/persistence/message-store.js";

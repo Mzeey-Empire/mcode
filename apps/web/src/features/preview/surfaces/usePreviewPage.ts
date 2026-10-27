@@ -2,7 +2,8 @@
  * Owns resident webview navigation, status hydration and capture feedback. Keeping these effects together preserves their ordering and per-tab navigation guards.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { WS_CHANNELS, type PreviewPageStatus } from "@mcode/contracts";
+import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
+import { type PreviewPageStatus } from "@mcode/contracts/models/preview-page-status";
 import { pushEmitter } from "@/transport/ws-transport";
 import { isEmptyPreviewTabUrl } from "../navigation/open-url-in-preview";
 import { useDiffStore } from "@/stores/diffStore";

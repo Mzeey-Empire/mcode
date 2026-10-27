@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeFS from "node:fs";
 import { z } from "zod";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { mapOpenCodeEnvelope, normalizeOpenCodeEnvelope, trackOpenCodePartType } from "../opencode-event-mapper.js";
 
 const CTX = { threadId: "thread-1", turnExecutionId: "11111111-1111-4111-8111-111111111111" };

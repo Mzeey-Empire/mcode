@@ -1,11 +1,4 @@
-import {
-  PULL_REQUEST_PATCH_MAX_BYTES,
-  PULL_REQUEST_PATCH_MAX_LINES,
-  PULL_REQUEST_PATCH_MAX_LINE_LENGTH,
-  type PullRequestFile,
-  type PullRequestPatchResult,
-  type PullRequestReviewThread,
-} from "@mcode/contracts";
+import { PULL_REQUEST_PATCH_MAX_BYTES, PULL_REQUEST_PATCH_MAX_LINES, PULL_REQUEST_PATCH_MAX_LINE_LENGTH, type PullRequestFile, type PullRequestPatchResult, type PullRequestReviewThread } from "@mcode/contracts/pull-requests";
 import {
   getPullRequestCoordinateKey,
   getPullRequestThreadCoordinate,

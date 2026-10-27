@@ -1,11 +1,7 @@
 import { z } from "zod";
 import type { Database } from "bun:sqlite";
-import {
-  ThreadSchema, ThreadStartupSchema, ThreadStartupStartInputSchema, ThreadStartupPhaseSchema,
-  ThreadStartupBlockSchema, ThreadStartupErrorSchema, THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS,
-  type ThreadStartup,
-  ThreadStartupStepDetailSchema,
-} from "@mcode/contracts";
+import { ThreadSchema } from "@mcode/contracts/models/thread";
+import { ThreadStartupSchema, ThreadStartupStartInputSchema, ThreadStartupPhaseSchema, ThreadStartupBlockSchema, ThreadStartupErrorSchema, THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS, type ThreadStartup, ThreadStartupStepDetailSchema } from "@mcode/contracts/thread-startup";
 import { databaseWriteHandler, databaseWriteOperation } from "../../runtime/persistence/sqlite/database-write-operation.js";
 import { ThreadStore } from "../thread-control/persistence/thread-store.js";
 import { threadWriteOperations } from "../thread-control/persistence/thread-write-operations.js";

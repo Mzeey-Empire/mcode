@@ -1,11 +1,12 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
-import {
-  AgentEventSchema, AgentEventType, CANONICAL_SUBAGENT_TASK_MAX_LENGTH, MessageSchema, createAgentModelState, resolveSubagentDisplayName, resolveSubagentMetadata,
-  type AgentEvent,
-  type AgentItem, type AgentModelState, type AgentThread, type AgentTurn, type CollaborationAction, type Message,
-  type ProviderIdentity, type TurnOutcome, type ProviderRuntimeExtensionKind,
-} from "@mcode/contracts";
+import { AgentEventSchema, AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { CANONICAL_SUBAGENT_TASK_MAX_LENGTH } from "@mcode/contracts/models/canonical-subagent-roster";
+import { MessageSchema, type Message } from "@mcode/contracts/models/message";
+import { createAgentModelState, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn, type CollaborationAction, type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import { resolveSubagentDisplayName, resolveSubagentMetadata } from "@mcode/contracts/models/tool-call-record";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
+import { type ProviderRuntimeExtensionKind } from "@mcode/contracts/events/provider-runtime-event";
 import { CodexCollaborationEventAdapter } from "../collaboration/adapters/codex-collaboration-event-adapter.js";
 import { ChildThreadEventAdapter, type ExtensionAdapter } from "../collaboration/adapters/child-thread-event-adapter.js";
 import { childThreadHandle, ChildThreadRejection, type ChildThreadRecorder, type ChildThreadHandle,

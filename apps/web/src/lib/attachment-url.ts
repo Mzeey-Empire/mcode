@@ -1,4 +1,4 @@
-import { storedAttachmentSuffix } from "@mcode/contracts";
+import { storedAttachmentSuffix } from "@mcode/contracts/models/attachment";
 import { AUTH_TOKEN_STORAGE_KEY } from "@/transport/scan-port-range";
 
 /** Last WebSocket URL used by the transport; drives HTTP attachment URLs in browser builds. */

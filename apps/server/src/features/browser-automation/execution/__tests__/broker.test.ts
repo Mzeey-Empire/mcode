@@ -1,11 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BROWSER_AUTOMATION_OPERATIONS,
-  BrowserAutomationHostDispatchSchema,
-  type BrowserAutomationHostRegistration,
-  type BrowserAutomationRequest,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_OPERATIONS, BrowserAutomationHostDispatchSchema, type BrowserAutomationHostRegistration, type BrowserAutomationRequest } from "@mcode/contracts/models/browser-automation";
 import type { WebSocket } from "ws";
 import { BrowserAutomationBroker, type BrowserAutomationBrokerOptions } from "../broker.js";
 import type { BrowserAutomationCredentialClaims } from "../../access/credential-registry.js";

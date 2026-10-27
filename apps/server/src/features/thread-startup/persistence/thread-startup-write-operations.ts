@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ThreadStartupSchema } from "@mcode/contracts";
+import { ThreadStartupSchema } from "@mcode/contracts/thread-startup";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 
 /** Explicit low-level snapshot writes, executed only on the shared owner. */

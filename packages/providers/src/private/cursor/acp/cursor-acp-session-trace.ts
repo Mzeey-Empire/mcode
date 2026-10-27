@@ -4,8 +4,8 @@
  * when `provider.cursor.traceSessionUpdates` is enabled (see `cursor-provider`).
  */
 import type { SessionNotification } from "@agentclientprotocol/sdk";
-import { AgentEventType } from "@mcode/contracts";
-import type { AgentEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
 /** Long strings inside rawInput/rawOutput swamp logs; truncate with a footprint note. */
 const MAX_TRACE_CHARS = 2_048;

@@ -1,7 +1,7 @@
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
-import { HTML_VISUAL_MAX_HTML_BYTES } from "@mcode/contracts";
+import { HTML_VISUAL_MAX_HTML_BYTES } from "@mcode/contracts/models/html-visual";
 
 const IMAGE_MIME_BY_EXTENSION = new Map([
   [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"], [".gif", "image/gif"],

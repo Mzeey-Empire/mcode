@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { describe, expect, it } from "vitest";
-import { AgentEventSchema, type AgentEvent, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderEventDraft } from "@mcode/providers";
 import { CodexEventMapper } from "../../../../../../../packages/providers/src/private/codex/codex-event-mapper.js";
 import { CodexLiveEventReducer } from "../codex-live-event-reducer.js";

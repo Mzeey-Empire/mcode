@@ -1,13 +1,5 @@
-import {
-  getThreadStartupPhases,
-  type ThreadStartup,
-  type ThreadStartupAction,
-  type ThreadStartupKind,
-  type ThreadStartupPhase,
-  type ThreadStartupStep,
-  type ThreadStartupStepState,
-  type WorkspaceEnvironmentActionRun,
-} from "@mcode/contracts";
+import { getThreadStartupPhases, type ThreadStartup, type ThreadStartupAction, type ThreadStartupKind, type ThreadStartupPhase, type ThreadStartupStep, type ThreadStartupStepState } from "@mcode/contracts/thread-startup";
+import { type WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { formatDuration } from "@/lib/time";
 
 /** Startup phases the trail draws. The "thread" phase is bookkeeping and never renders. */

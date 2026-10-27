@@ -1,4 +1,10 @@
-import { providerFailureOutcome, type AgentEvent, type ParentNarrativeRecoveryItem, type PlanQuestion, type ProviderRuntimeEvent, type StoredAttachment, type TurnFailure, type TurnOutcome } from "@mcode/contracts";
+import { providerFailureOutcome, type TurnFailure } from "@mcode/contracts/models/turn-failure";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { type PlanQuestion } from "@mcode/contracts/models/plan-questions";
+import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { type StoredAttachment } from "@mcode/contracts/models/attachment";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { NarrativeTurnState, type NarrativeTurnStateEffect } from "../conversation/narrative/narrative-turn-state.js";
 import { AssistantExecutionState, type AssistantMaterializationInput } from "../turns/assistant-execution-state.js";
 import { NarrativeRecoveryDelta, type PreparedNarrativeRecoveryDelta } from "../turns/narrative-recovery-delta.js";

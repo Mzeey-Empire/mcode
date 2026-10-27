@@ -1,7 +1,8 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
-import { PLAN_MAX_CONTENT_CHARS, type NativePlanFileOutcome, type NativePlanFileRef } from "@mcode/contracts";
+import { PLAN_MAX_CONTENT_CHARS, type NativePlanFileOutcome } from "@mcode/contracts/models/plan";
+import { type NativePlanFileRef } from "@mcode/contracts/providers/interfaces";
 
 type SkippedFile = Extract<NativePlanFileOutcome, { outcome: "skipped" }>;
 

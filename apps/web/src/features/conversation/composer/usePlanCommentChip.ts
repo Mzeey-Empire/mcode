@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { PlanComment } from "@mcode/contracts";
+import type { PlanComment } from "@mcode/contracts/models/plan";
 import { usePlanStore } from "@/stores/planStore";
 import { sendablePlanComments } from "./draft/sendable-plan-comments";
 

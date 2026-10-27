@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { PlanComment } from "@mcode/contracts";
+import type { PlanComment } from "@mcode/contracts/models/plan";
 import { PlanCommentRow } from "./PlanCommentRow";
 
 const comment = { id: "c1", body: "Split this step" } as PlanComment;

@@ -1,5 +1,5 @@
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import type { ReasoningLevel } from "@mcode/contracts";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import {
   logger,
   normalizeReasoningLevelForModel,

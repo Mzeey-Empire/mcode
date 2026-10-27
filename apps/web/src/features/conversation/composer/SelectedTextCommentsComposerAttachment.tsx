@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { MessageCircle, Pencil, X } from "lucide-react";
-import type { SelectedTextComment } from "@mcode/contracts";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverRootChangeEventDetails } from "@/components/ui/popover";

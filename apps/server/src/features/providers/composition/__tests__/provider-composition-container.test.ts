@@ -5,9 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { container } from "tsyringe";
 import type { Database } from "bun:sqlite";
-import {
-  AgentEventType,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import type { ProviderHostPorts } from "@mcode/providers";
 
 import { setupContainer } from "../../../../application/composition/container.js";

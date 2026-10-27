@@ -1,10 +1,8 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
-import {
-  getAttachmentMaxSizeForMime,
-  storedAttachmentSuffix,
-} from "@mcode/contracts";
+import { getAttachmentMaxSizeForMime } from "@mcode/contracts/models/attachment-limits";
+import { storedAttachmentSuffix } from "@mcode/contracts/models/attachment";
 
 /** Dependencies used by the temporary attachment store. */
 export interface TempAttachmentStoreDependencies {

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
-import { ProviderIdSchema } from "@mcode/contracts";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { ModelSightingsStore } from "./model-sightings-store.js";
 

@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ReviewComparisonResultSchema, TurnSnapshotSchema } from "@mcode/contracts";
+import { ReviewComparisonResultSchema } from "@mcode/contracts/models/review-comparison";
+import { TurnSnapshotSchema } from "@mcode/contracts/models/turn-snapshot";
 import { routeSnapshotRpc } from "../snapshot-rpc.js";
 import { createSnapshotRangeFixture } from "../../snapshots/__tests__/turn-snapshot-range-fixture.js";
 import { SnapshotService } from "../../snapshots/snapshot-service.js";

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ThoughtSegmentKindSchema, ThoughtSegmentRecordSchema } from "@mcode/contracts";
+import { ThoughtSegmentKindSchema, ThoughtSegmentRecordSchema } from "@mcode/contracts/models/thought-segment";
 import { databaseWriteOperation } from "../../../../../runtime/persistence/sqlite/database-write-operation.js";
 import { narrativeWriteBatchLimitsSchema, narrativeWriteBatchResultSchema } from "./narrative-write-batches.js";
 

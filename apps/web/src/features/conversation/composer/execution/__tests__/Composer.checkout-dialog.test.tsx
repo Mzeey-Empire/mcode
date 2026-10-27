@@ -3,13 +3,11 @@ import React from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  ORCHESTRATION_MODES,
-  type AgentEvent,
-  type DraftDiffComment,
-  type PreviewAnnotationPayloadV2,
-  type SelectedTextComment,
-} from "@mcode/contracts";
+import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type DraftDiffComment } from "@mcode/contracts/models/next-message-draft";
+import { type PreviewAnnotationPayloadV2 } from "@mcode/contracts/models/browser-preview";
+import { type SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import { Composer } from "../../Composer";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
@@ -26,7 +24,7 @@ import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useThreadDraftStore } from "@/stores/threadDraftStore";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { INTERACTION_MODES, PERMISSION_MODES } from "@/transport";
-import type { GitRef } from "@mcode/contracts";
+import type { GitRef } from "@mcode/contracts/git";
 import type { BranchTarget } from "../targets/branch-target";
 import { invalidateBranchTargets } from "../targets/useBranchTargets";
 

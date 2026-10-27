@@ -1,4 +1,4 @@
-import type { ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import type { AgentService } from "../agents/orchestration/agent-service.js";
 import type { WorkspaceEnvironmentService } from "../projects/environment/workspace-environment-service.js";
 import type { ThreadStartupService } from "./thread-startup-service.js";

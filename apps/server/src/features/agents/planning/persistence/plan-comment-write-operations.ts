@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { PlanCommentCreateSchema, PlanCommentDeleteSchema, PlanCommentErrorSchema, PlanCommentSchema,
-  PlanCommentSetStatusSchema, PlanCommentUpdateSchema } from "@mcode/contracts";
+import { PlanCommentCreateSchema, PlanCommentDeleteSchema, PlanCommentErrorSchema, PlanCommentSchema, PlanCommentSetStatusSchema, PlanCommentUpdateSchema } from "@mcode/contracts/models/plan";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 
 const failure = PlanCommentErrorSchema().extend({ ok: z.literal(false) });

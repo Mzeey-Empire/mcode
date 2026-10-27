@@ -1,7 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import * as NodeV8 from "node:v8";
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { CanonicalWriterRequest, CanonicalWriterResponse } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { DatabaseStartupRefusal } from "./startup-refusal.js";

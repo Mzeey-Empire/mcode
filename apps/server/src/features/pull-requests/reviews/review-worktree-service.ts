@@ -1,21 +1,10 @@
 import { DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { reviewLinkProjection } from "./review-link-projection.js";
 import { inject, injectable } from "tsyringe";
-import {
-  THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS,
-} from "@mcode/contracts";
-import type {
-  InteractionMode,
-  ProviderId,
-  PullRequestCreateReviewTaskRequest,
-  PullRequestCreateReviewTaskResult,
-  PullRequestError,
-  PullRequestIdentity,
-  PullRequestReviewLink as PullRequestReviewLinkDto,
-  PullRequestReviewLinkResult,
-  PullRequestReviewSource,
-  PullRequestWorkspaceCandidate,
-} from "@mcode/contracts";
+import { THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS } from "@mcode/contracts/thread-startup";
+import type { InteractionMode } from "@mcode/contracts/models/enums";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { PullRequestCreateReviewTaskRequest, PullRequestCreateReviewTaskResult, PullRequestError, PullRequestIdentity, PullRequestReviewLink as PullRequestReviewLinkDto, PullRequestReviewLinkResult, PullRequestReviewSource, PullRequestWorkspaceCandidate } from "@mcode/contracts/pull-requests";
 import { logger } from "@mcode/shared";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";

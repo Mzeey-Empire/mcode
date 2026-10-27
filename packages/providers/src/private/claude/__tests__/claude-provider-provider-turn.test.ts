@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { AgentEventType, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderTurnOpening } from "@mcode/providers";
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));

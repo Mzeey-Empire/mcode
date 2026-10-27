@@ -1,5 +1,5 @@
 import * as NodeFSPromises from "node:fs/promises";
-import type { SkillInfo } from "@mcode/contracts";
+import type { SkillInfo } from "@mcode/contracts/skills";
 
 const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 const MAX_PROMPT_TEMPLATE_BYTES = 256 * 1024;

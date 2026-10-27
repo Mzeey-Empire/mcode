@@ -11,7 +11,9 @@ import * as NodeReadline from "node:readline";
 import * as NodeEvents from "node:events";
 import * as NodePath from "node:path";
 import which from "which";
-import { resolveSubagentDisplayName, type TurnFailureKind, type TurnSteerOutcome } from "@mcode/contracts";
+import { resolveSubagentDisplayName } from "@mcode/contracts/models/tool-call-record";
+import { type TurnFailureKind } from "@mcode/contracts/compat/agent-model";
+import { type TurnSteerOutcome } from "@mcode/contracts/providers/interfaces";
 import { logger } from "@mcode/shared";
 import type { McodeInstructionSection } from "@mcode/thread-orchestration";
 import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
@@ -1425,7 +1427,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   }
 
   /** Reads and validates the native model catalog from this connection. */
-  async listModels(): Promise<import("@mcode/contracts").ProviderModelInfo[]> {
+  async listModels(): Promise<import("@mcode/contracts/providers/models").ProviderModelInfo[]> {
     if (!this._isAlive || !this.rpc) throw new Error("Codex app-server is not ready");
     return listCodexModels(this.rpc);
   }

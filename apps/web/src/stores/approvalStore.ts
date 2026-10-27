@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ApprovalRequest, ApprovalResponse } from "@mcode/contracts";
+import type { ApprovalRequest, ApprovalResponse } from "@mcode/contracts/models/approval";
 
 /**
  * Pending-approval state. A settled request stays as a tombstone so a late replay of

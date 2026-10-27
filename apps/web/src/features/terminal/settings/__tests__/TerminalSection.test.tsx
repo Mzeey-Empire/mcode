@@ -2,7 +2,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 
 
 vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));

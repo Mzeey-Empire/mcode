@@ -1,10 +1,4 @@
-import type {
-  PullRequestCapabilitiesResult,
-  PullRequestDetail,
-  PullRequestGetResult,
-  PullRequestIdentity,
-  PullRequestSummary,
-} from "@mcode/contracts";
+import type { PullRequestCapabilitiesResult, PullRequestDetail, PullRequestGetResult, PullRequestIdentity, PullRequestSummary } from "@mcode/contracts/pull-requests";
 import {
   act,
   fireEvent,

@@ -1,4 +1,9 @@
-import type { DiffStats, FileReadResult, ProjectIcon, FilesystemBrowseResult, ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn, TurnRevertPreview, TurnRevertResult, WorkspaceCreateResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts";
+import type { DiffStats } from "@mcode/contracts/models/diff-stats";
+import type { FileReadResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
+import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
+import type { FilesystemBrowseResult, WorkspaceCreateResult } from "@mcode/contracts/ws/methods";
+import type { ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
+import type { TurnRevertPreview, TurnRevertResult } from "@mcode/contracts/models/turn-revert";
 import type {
   McodeTransport,
   Workspace,
@@ -25,59 +30,37 @@ import type {
   WorkspaceEnvironmentReadResult,
   WorkspaceEnvironmentActionRun,
 } from "./types";
-import { TurnRuntimeSnapshotSchema, WS_CHANNELS, WS_METHODS } from "@mcode/contracts";
-import { TerminalErrorCodeSchema } from "@mcode/contracts";
-import type {
-  CreateAndSendResult,
-  ThreadStartup,
-  ThreadStartupListResult,
-  PullRequestCapabilitiesRequest,
-  PullRequestCapabilitiesResult,
-  PullRequestListRequest,
-  PullRequestListResult,
-  PullRequestGetRequest,
-  PullRequestGetResult,
-  PullRequestTimelineRequest,
-  PullRequestTimelineResult,
-  PullRequestFilesRequest,
-  PullRequestFilesResult,
-  PullRequestPatchRequest,
-  PullRequestPatchResult,
-  PullRequestCancelRequest,
-  PullRequestCancelResult,
-  PullRequestCreateReviewTaskRequest,
-  PullRequestCreateReviewTaskResult,
-  PullRequestReviewLinkRequest,
-  PullRequestReviewLinkResult,
-  PullRequestPostCommentRequest,
-  PullRequestPostCommentResult,
-  PullRequestSubmitReviewRequest,
-  PullRequestSubmitReviewResult,
-  PullRequestSetReadinessRequest,
-  PullRequestSetReadinessResult,
-  PullRequestCloseRequest,
-  PullRequestCloseResult,
-  PullRequestMergeRequest,
-  PullRequestMergeResult,
-  BrowserAutomationHostRegistration,
-  BrowserAutomationHostDispatchTarget,
-  BrowserAutomationResponse,
-  SendMessageInput,
-  CreateAndSendInput,
-  TerminalBackendCapabilities,
-  TerminalDiagnosticsBundle,
-  TerminalCustomProfile,
-  TerminalProfileReference,
-} from "@mcode/contracts";
-import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, SubagentRoster, SubagentDetail, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, ProviderStatus, GoalLookupResult } from "@mcode/contracts";
-import {
-  TERMINAL_DATA_TAG,
-  decodeTerminalDataFrame,
-} from "@mcode/contracts";
+import { TurnRuntimeSnapshotSchema } from "@mcode/contracts/models/turn-runtime";
+import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
+import { TerminalErrorCodeSchema } from "@mcode/contracts/models/terminal";
+import type { CreateAndSendResult, SendMessageInput, CreateAndSendInput } from "@mcode/contracts/ws/methods";
+import type { ThreadStartup, ThreadStartupListResult } from "@mcode/contracts/thread-startup";
+import type { PullRequestCapabilitiesRequest, PullRequestCapabilitiesResult, PullRequestListRequest, PullRequestListResult, PullRequestGetRequest, PullRequestGetResult, PullRequestTimelineRequest, PullRequestTimelineResult, PullRequestFilesRequest, PullRequestFilesResult, PullRequestPatchRequest, PullRequestPatchResult, PullRequestCancelRequest, PullRequestCancelResult, PullRequestCreateReviewTaskRequest, PullRequestCreateReviewTaskResult, PullRequestReviewLinkRequest, PullRequestReviewLinkResult, PullRequestPostCommentRequest, PullRequestPostCommentResult, PullRequestSubmitReviewRequest, PullRequestSubmitReviewResult, PullRequestSetReadinessRequest, PullRequestSetReadinessResult, PullRequestCloseRequest, PullRequestCloseResult, PullRequestMergeRequest, PullRequestMergeResult } from "@mcode/contracts/pull-requests";
+import type { BrowserAutomationHostRegistration, BrowserAutomationHostDispatchTarget, BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
+import type { TerminalBackendCapabilities } from "@mcode/contracts/models/terminal-backend";
+import type { TerminalDiagnosticsBundle } from "@mcode/contracts/models/terminal-diagnostics";
+import type { TerminalCustomProfile, TerminalProfileReference } from "@mcode/contracts/models/terminal";
+import type { PaginatedMessages } from "@mcode/contracts/models/message";
+import type { ConversationPage } from "@mcode/contracts/models/conversation-page";
+import type { ConversationNewerPage, ConversationNewerPageRequest } from "@mcode/contracts/models/conversation-newer-page";
+import type { ConversationOlderPage, ConversationOlderPageRequest } from "@mcode/contracts/models/conversation-older-page";
+import type { ConversationTail } from "@mcode/contracts/models/conversation-tail";
+import type { SubagentRoster, SubagentDetail } from "@mcode/contracts/models/subagent-roster";
+import type { CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
+import type { SetThreadSubscriptionsInput, SetThreadSubscriptionsResult } from "@mcode/contracts/ws/methods";
+import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
+import type { PrDraft, CreatePrResult, ChecksStatus } from "@mcode/contracts/github";
+import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
+import type { ProviderAvailability } from "@mcode/contracts/providers/availability";
+import type { ProviderStatus } from "@mcode/contracts/providers/provider-status";
+import type { GoalLookupResult } from "@mcode/contracts/models/goal";
+import { TERMINAL_DATA_TAG, decodeTerminalDataFrame } from "@mcode/contracts/ws/terminal-legacy-binary";
 import { stagedSnapshotIds } from "@/lib/staged-snapshot-ids";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
-import type { ApprovalRequest, BuildStage } from "@mcode/contracts";
+import type { ApprovalRequest } from "@mcode/contracts/models/approval";
+import type { BuildStage } from "@mcode/contracts/build-stage";
 import { setAttachmentTransportWsUrl } from "@/lib/attachment-url";
 import { LegacyTerminalClient } from "@/features/terminal/adapters/legacy/legacy-terminal-client";
 import type {
@@ -573,7 +556,7 @@ export function createWsTransport(
       const hydration = hydrateRunningThreadsFromServer((method, params) => rpc(method, params as Record<string, unknown>));
       void import("@/features/thread-attention/thread-attention-store").then(({ threadAttentionStore }) => {
         const observedAttention = threadAttentionStore.getState().byThreadId;
-        return rpc<import("@mcode/contracts").ThreadAttention[]>("thread.listAttention", {})
+        return rpc<import("@mcode/contracts/models/thread-attention").ThreadAttention[]>("thread.listAttention", {})
           .then((attention) => threadAttentionStore.getState().hydrate(attention, observedAttention));
       })
         .catch((error: unknown) => console.warn("[thread-attention] hydration failed", error));
@@ -1054,12 +1037,12 @@ export function createWsTransport(
     forgetWorkspaceEnvironmentApproval: (workspaceId, actionId) =>
       rpc<void>("workspace.environment.command.forget", { workspaceId, actionId }),
     continueAutomaticSetup: (threadId) =>
-      rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
+      rpc<import("@mcode/contracts/models/workspace-environment").WorkspaceEnvironmentAutomaticSetupSnapshot>(
         "workspace.environment.automaticSetup.continue",
         { threadId },
       ),
     retryAutomaticSetup: (threadId) =>
-      rpc<import("@mcode/contracts").WorkspaceEnvironmentAutomaticSetupSnapshot>(
+      rpc<import("@mcode/contracts/models/workspace-environment").WorkspaceEnvironmentAutomaticSetupSnapshot>(
         "workspace.environment.automaticSetup.retry",
         { threadId },
       ),
@@ -1132,8 +1115,8 @@ export function createWsTransport(
         devinMode: settings.devinMode,
         defaultOpenInApp: settings.defaultOpenInApp,
       }),
-    listAttention: () => rpc<import("@mcode/contracts").ThreadAttention[]>("thread.listAttention", {}),
-    acknowledgeSeen: (threadId, throughSequence) => rpc<import("@mcode/contracts").AcknowledgeSeenResult>("thread.acknowledgeSeen", { threadId, throughSequence }),
+    listAttention: () => rpc<import("@mcode/contracts/models/thread-attention").ThreadAttention[]>("thread.listAttention", {}),
+    acknowledgeSeen: (threadId, throughSequence) => rpc<import("@mcode/contracts/models/thread-attention").AcknowledgeSeenResult>("thread.acknowledgeSeen", { threadId, throughSequence }),
     syncThreadPrs: (workspaceId) =>
       rpc<Array<{ threadId: string; prNumber: number; prStatus: string }>>("thread.syncPrs", { workspaceId }),
 
@@ -1167,10 +1150,10 @@ export function createWsTransport(
         ...guardrails,
       }, { timeoutMs: SEND_MESSAGE_TIMEOUT_MS });
     },
-    steerTurn: (params) => rpc<import("@mcode/contracts").TurnSteerResult>("agent.steer", params),
-    listHeldSteers: () => rpc<import("@mcode/contracts").ListHeldSteersResult>("agent.listHeldSteers", {}),
+    steerTurn: (params) => rpc<import("@mcode/contracts/models/turn-steer").TurnSteerResult>("agent.steer", params),
+    listHeldSteers: () => rpc<import("@mcode/contracts/models/turn-steer").ListHeldSteersResult>("agent.listHeldSteers", {}),
     settleUnknownSteer: (params) =>
-      rpc<import("@mcode/contracts").SettleUnknownSteerResult>("agent.settleUnknownSteer", params),
+      rpc<import("@mcode/contracts/models/turn-steer").SettleUnknownSteerResult>("agent.settleUnknownSteer", params),
     retryErroredTurn: async (params) => WS_METHODS()["turn.retry"].result.parse(await rpc<unknown>("turn.retry", params)),
     scheduleTurnResume: async (params) =>
       WS_METHODS()["turn.resume.schedule"].result.parse(await rpc<unknown>("turn.resume.schedule", params)),
@@ -1199,7 +1182,7 @@ export function createWsTransport(
         ? createAndSendWithReconnect(params)
         : rpc<CreateAndSendResult>("agent.createAndSend", params);
     },
-    stopAgent: (threadId) => rpc<import("@mcode/contracts").AgentStopResult>("agent.stop", { threadId }),
+    stopAgent: (threadId) => rpc<import("@mcode/contracts/models/turn-runtime").AgentStopResult>("agent.stop", { threadId }),
     retrySave: async (threadId) => WS_METHODS()["agent.retrySave"].result.parse(await rpc<unknown>("agent.retrySave", { threadId })),
     continueWithoutSaving: (executionId) =>
       rpc<void>("agent.continueWithoutSaving", { executionId }),
@@ -1220,7 +1203,7 @@ export function createWsTransport(
         await rpc<unknown>("attachments.stageDraft", { threadId, attachment }),
       ),
     getActiveAgentCount: () => rpc<number>("agent.activeCount", {}),
-    listRunning: () => rpc<import("@mcode/contracts").TurnRuntimeSnapshot[]>("agent.listRunning", {}),
+    listRunning: () => rpc<import("@mcode/contracts/models/turn-runtime").TurnRuntimeSnapshot[]>("agent.listRunning", {}),
     subscribeThread: (threadId) => rpc<void>("push.subscribeThread", { threadId }),
     unsubscribeThread: (threadId) => rpc<void>("push.unsubscribeThread", { threadId }),
     setThreadSubscriptions: (input: SetThreadSubscriptionsInput) =>
@@ -1388,10 +1371,10 @@ export function createWsTransport(
         tools: ToolCallRecord[];
         thoughts: ThoughtSegmentRecord[];
         hooks: HookExecutionRecord[];
-        approvals: import("@mcode/contracts").ApprovalReceiptRecord[];
+        approvals: import("@mcode/contracts/models/approval-receipt").ApprovalReceiptRecord[];
       }>("narrative.list", { messageId }),
     loadTurn: (threadId, range) =>
-      rpc<import("@mcode/contracts").NarrativeEntry[]>("turn.load", {
+      rpc<import("@mcode/contracts/models/narrative-entry").NarrativeEntry[]>("turn.load", {
         threadId,
         ...(range ? { range } : {}),
       }),
@@ -1403,14 +1386,14 @@ export function createWsTransport(
       ),
 
     getPlanSnapshot: (threadId: string) =>
-      rpc<import("@mcode/contracts").PlanSnapshot>("plan.snapshot", { threadId }),
-    createPlanComment: (payload) => rpc<import("@mcode/contracts").PlanComment>("plan.comment.create", payload),
-    updatePlanComment: (payload) => rpc<import("@mcode/contracts").PlanComment>("plan.comment.update", payload),
-    setPlanCommentStatus: (payload) => rpc<import("@mcode/contracts").PlanComment>("plan.comment.setStatus", payload),
+      rpc<import("@mcode/contracts/models/plan").PlanSnapshot>("plan.snapshot", { threadId }),
+    createPlanComment: (payload) => rpc<import("@mcode/contracts/models/plan").PlanComment>("plan.comment.create", payload),
+    updatePlanComment: (payload) => rpc<import("@mcode/contracts/models/plan").PlanComment>("plan.comment.update", payload),
+    setPlanCommentStatus: (payload) => rpc<import("@mcode/contracts/models/plan").PlanComment>("plan.comment.setStatus", payload),
     deletePlanComment: (payload) => rpc<void>("plan.comment.delete", payload),
 
-    savePlanVersion: (payload) => rpc<import("@mcode/contracts").PlanVersion>("plan.saveVersion", payload),
-    implementPlan: (payload) => rpc<import("@mcode/contracts").PlanImplementReceipt>("plan.implement", payload),
+    savePlanVersion: (payload) => rpc<import("@mcode/contracts/models/plan").PlanVersion>("plan.saveVersion", payload),
+    implementPlan: (payload) => rpc<import("@mcode/contracts/models/plan").PlanImplementReceipt>("plan.implement", payload),
 
     // Snapshots
     getSnapshotDiff: (snapshotId, filePath?, maxLines?) =>
@@ -1468,17 +1451,17 @@ export function createWsTransport(
       }),
     getBranchComparison: (workspaceId, threadId?) =>
       rpc<BranchComparison>("git.branchComparison", { workspaceId, threadId }),
-    searchCommits: (params) => rpc<import("@mcode/contracts").GitSearchCommitsResult>("git.searchCommits", params),
+    searchCommits: (params) => rpc<import("@mcode/contracts/git").GitSearchCommitsResult>("git.searchCommits", params),
     getRemoteUrl: (workspaceId, threadId?) =>
       rpc<GitRemoteUrl>("git.getRemoteUrl", { workspaceId, threadId }),
     getReviewState: (workspaceId, threadId?) =>
-      rpc<import("@mcode/contracts").ReviewState>("git.reviewState", { workspaceId, threadId }),
+      rpc<import("@mcode/contracts/models/review-comparison").ReviewState>("git.reviewState", { workspaceId, threadId }),
     getReviewComparison: (params) =>
-      rpc<import("@mcode/contracts").ReviewComparisonResult>("git.reviewComparison", params),
+      rpc<import("@mcode/contracts/models/review-comparison").ReviewComparisonResult>("git.reviewComparison", params),
 
     generateCommitMessage: (params) =>
-      rpc<import("@mcode/contracts").GitGenerateCommitMessageResult>("git.generateCommitMessage", params),
-    commitChanges: (params) => rpc<import("@mcode/contracts").GitCommitResult>("git.commit", params),
+      rpc<import("@mcode/contracts/git-commit").GitGenerateCommitMessageResult>("git.generateCommitMessage", params),
+    commitChanges: (params) => rpc<import("@mcode/contracts/git-commit").GitCommitResult>("git.commit", params),
 
     // GitHub PR (advanced)
     push: (workspaceId, branch, threadId?) =>

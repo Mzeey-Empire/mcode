@@ -1,4 +1,5 @@
-import type { Message, NarrativeEntry } from "@mcode/contracts";
+import type { Message } from "@mcode/contracts/models/message";
+import type { NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
 import type { ToolCallRecordStore } from "../../tools/persistence/tool-call-record-store.js";
 import type { ThoughtSegmentStore } from "./persistence/thought-segment-store.js";
 import type { HookExecutionStore } from "../../events/persistence/hook-execution-store.js";

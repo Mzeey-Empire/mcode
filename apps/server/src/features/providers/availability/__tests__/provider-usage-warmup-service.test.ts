@@ -1,11 +1,7 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import {
-  SettingsSchema,
-  type IAgentProvider,
-  type IProviderRegistry,
-  type Settings,
-} from "@mcode/contracts";
+import { SettingsSchema, type Settings } from "@mcode/contracts/models/settings";
+import { type IAgentProvider, type IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import { ProviderUsageWarmupService } from "../provider-usage-warmup-service.js";
 import type { SettingsService } from "../../../settings/settings-service.js";
 

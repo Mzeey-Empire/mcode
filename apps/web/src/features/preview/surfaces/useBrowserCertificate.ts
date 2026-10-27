@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { BrowserCertificateState } from "@mcode/contracts";
+import type { BrowserCertificateState } from "@mcode/contracts/models/browser-certificate";
 import type { BrowserSurfaceIdentity } from "../browser-surfaces";
 import { browserSurfaceHost } from "./BrowserSurfaceHostRoot";
 import { showFailure } from "./useProjectServers";

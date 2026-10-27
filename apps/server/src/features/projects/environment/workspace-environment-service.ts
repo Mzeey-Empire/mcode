@@ -4,36 +4,12 @@ import type { ApplicationDatabaseWriter } from "../../../runtime/persistence/sql
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
-import {
-  actionSchedule,
-  DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT,
-  encodeEnvironmentDocument,
-  WORKSPACE_ENVIRONMENT_APPROVAL_CONTRACT_VERSION,
-  WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES,
-  WorkspaceEnvironmentDocumentSchema,
-  workspaceEnvironmentValidationIssues,
-  type WorkspaceEnvironmentPlatform,
-  type WorkspaceEnvironmentStorageMode,
-  type WorkspaceEnvironmentCommandTarget,
-  type WorkspaceEnvironmentCommandApproval,
-  type WorkspaceEnvironmentCommandApproveInput,
-  type WorkspaceEnvironmentStorageSetInput,
-  type WorkspaceEnvironmentCommand,
-  type WorkspaceEnvironmentReadResult,
-  type WorkspaceEnvironmentSaveInput,
-  type WorkspaceEnvironmentActionLaunchSnapshot,
-  type WorkspaceEnvironmentAction,
-  type WorkspaceEnvironmentAutomaticSetupSnapshot,
-  type WorkspaceEnvironmentAutomaticSetupStopInput,
-  type WorkspaceEnvironmentAutomaticSetupRetryInput,
-  type StoredAttachment,
-  type ThreadStartup,
-  type TurnRuntimePhase,
-  type MessageMention,
-  type PreviewAnnotationBundle,
-  type WorkspaceEnvironmentValidationIssue,
-  type WorkspaceEnvironmentValidationReason,
-} from "@mcode/contracts";
+import { actionSchedule, DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT, encodeEnvironmentDocument, WORKSPACE_ENVIRONMENT_APPROVAL_CONTRACT_VERSION, WORKSPACE_ENVIRONMENT_DOCUMENT_MAX_BYTES, WorkspaceEnvironmentDocumentSchema, workspaceEnvironmentValidationIssues, type WorkspaceEnvironmentPlatform, type WorkspaceEnvironmentStorageMode, type WorkspaceEnvironmentCommandTarget, type WorkspaceEnvironmentCommandApproval, type WorkspaceEnvironmentCommandApproveInput, type WorkspaceEnvironmentStorageSetInput, type WorkspaceEnvironmentCommand, type WorkspaceEnvironmentReadResult, type WorkspaceEnvironmentSaveInput, type WorkspaceEnvironmentActionLaunchSnapshot, type WorkspaceEnvironmentAction, type WorkspaceEnvironmentAutomaticSetupSnapshot, type WorkspaceEnvironmentAutomaticSetupStopInput, type WorkspaceEnvironmentAutomaticSetupRetryInput, type WorkspaceEnvironmentValidationIssue, type WorkspaceEnvironmentValidationReason } from "@mcode/contracts/models/workspace-environment";
+import { type StoredAttachment } from "@mcode/contracts/models/attachment";
+import { type ThreadStartup } from "@mcode/contracts/thread-startup";
+import { type TurnRuntimePhase } from "@mcode/contracts/models/turn-runtime";
+import { type MessageMention } from "@mcode/contracts/models/mention";
+import { type PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { getMcodeDir, logger } from "@mcode/shared";
 import { ZodError } from "zod";
 import type { Database } from "bun:sqlite";

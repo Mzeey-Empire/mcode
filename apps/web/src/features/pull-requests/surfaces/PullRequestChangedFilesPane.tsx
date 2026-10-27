@@ -1,4 +1,4 @@
-import type { PullRequestFile } from "@mcode/contracts";
+import type { PullRequestFile } from "@mcode/contracts/pull-requests";
 import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import {

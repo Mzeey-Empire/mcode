@@ -1,11 +1,5 @@
-import type {
-  AgentItem,
-  AgentThread,
-  AgentTurn,
-  CollaborationAction,
-  ProviderIdentity,
-  TurnOutcome,
-} from "@mcode/contracts";
+import type { AgentItem, AgentThread, AgentTurn, CollaborationAction, ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 /** The durable state created for one Codex provider-native child delegation. */
 export interface CodexChildDelegation {

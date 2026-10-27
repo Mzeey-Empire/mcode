@@ -10,7 +10,7 @@ import { Popover, PopoverContent, type PopoverRootChangeEventDetails } from "@/c
 import { sidePlacement } from "@/components/ui/side-placement";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { ChecksStatus, CheckRun } from "@mcode/contracts";
+import type { ChecksStatus, CheckRun } from "@mcode/contracts/github";
 
 /** Props for {@link ChecksPopover}. */
 interface ChecksPopoverProps {

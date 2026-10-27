@@ -4,7 +4,7 @@ import {
   CircleSlash, FileText, FilePen, FolderSearch, Globe,
   ListChecks, Pencil, Search, Terminal, Wrench,
 } from "lucide-react";
-import { stripMcodeMcpPrefix } from "@mcode/contracts";
+import { stripMcodeMcpPrefix } from "@mcode/contracts/models/subagent-roster";
 import { StackedLayersIcon } from "@/components/ui/StackedLayersIcon";
 
 /** Accepts both Lucide icons and plain SVG function components. */

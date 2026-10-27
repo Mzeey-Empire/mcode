@@ -8,7 +8,7 @@ import { injectable, inject } from "tsyringe";
 import type { Database } from "bun:sqlite";
 import { and, asc, count, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type { Workspace } from "@mcode/contracts";
+import type { Workspace } from "@mcode/contracts/models/workspace";
 import { threads, workspaces } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 

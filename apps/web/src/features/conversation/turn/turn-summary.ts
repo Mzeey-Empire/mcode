@@ -1,4 +1,4 @@
-import { isTaskListToolName } from "@mcode/contracts";
+import { isTaskListToolName } from "@mcode/contracts/models/task-list-tools";
 import type { ThoughtSegmentRecord, ToolCallRecord } from "@/transport/types";
 import { backgroundHeldToolIds } from "../narrative/background-held-tools";
 import { isSubagentLaunchRecord } from "../narrative/narrative-builder-helpers";

@@ -1,6 +1,6 @@
 import type * as NodeChildProcess from "node:child_process";
 import type { ClientSideConnection } from "@agentclientprotocol/sdk";
-import type { DevinMode } from "@mcode/contracts";
+import type { DevinMode } from "@mcode/contracts/models/enums";
 import type { AcpSessionRuntime } from "../protocols/acp/acp-session-runtime.js";
 import type { DevinAcpTurnState } from "./devin-acp-event-mapper.js";
 

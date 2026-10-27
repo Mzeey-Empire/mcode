@@ -4,28 +4,7 @@
 import { BrowserWindow, nativeImage, type IpcMainInvokeEvent, type WebContents } from "electron";
 import * as NodeCrypto from "node:crypto";
 import { createBrowserThreadControl, reduceBrowserControl, type BrowserThreadControl, type BrowserControlEvent } from "@mcode/shared/browser-control";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BROWSER_AUTOMATION_MAX_AX_NODES,
-  BROWSER_AUTOMATION_MAX_DIAGNOSTIC_ENTRIES,
-  BROWSER_AUTOMATION_MAX_ELEMENTS,
-  BROWSER_AUTOMATION_MAX_EXPRESSION_BYTES,
-  BROWSER_AUTOMATION_MAX_PENDING_REQUESTS,
-  BROWSER_AUTOMATION_MAX_RESULT_BYTES,
-  BROWSER_AUTOMATION_MAX_VISIBLE_TEXT_CHARS,
-  BrowserAutomationResponseSchema,
-  BrowserAutomationHostDispatchSchema,
-  type BrowserAutomationRequestOperation,
-  type BrowserAutomationErrorCode,
-  type BrowserAutomationRequest,
-  type BrowserAutomationResponse,
-  type BrowserAutomationResult,
-  type BrowserAutomationTarget,
-  type BrowserAutomationHostDispatchTarget,
-  type BrowserAutomationHostDispatch,
-  type BrowserAutomationControllerState,
-  type BrowserAutomationPointerEvent,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_MAX_AX_NODES, BROWSER_AUTOMATION_MAX_DIAGNOSTIC_ENTRIES, BROWSER_AUTOMATION_MAX_ELEMENTS, BROWSER_AUTOMATION_MAX_EXPRESSION_BYTES, BROWSER_AUTOMATION_MAX_PENDING_REQUESTS, BROWSER_AUTOMATION_MAX_RESULT_BYTES, BROWSER_AUTOMATION_MAX_VISIBLE_TEXT_CHARS, BrowserAutomationResponseSchema, BrowserAutomationHostDispatchSchema, type BrowserAutomationRequestOperation, type BrowserAutomationErrorCode, type BrowserAutomationRequest, type BrowserAutomationResponse, type BrowserAutomationResult, type BrowserAutomationTarget, type BrowserAutomationHostDispatchTarget, type BrowserAutomationHostDispatch, type BrowserAutomationControllerState, type BrowserAutomationPointerEvent } from "@mcode/contracts/models/browser-automation";
 import { findAdoptedWebContentsForWindow } from "../surfaces/registry.js";
 import { resolveActivePreviewWebContentsForWindow } from "../surfaces/active-web-contents.js";
 import { loadPreviewGuestUrl } from "../navigation/guest-navigation.js";

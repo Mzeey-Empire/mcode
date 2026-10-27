@@ -1,4 +1,4 @@
-import type { ContextWindowMode } from "@mcode/contracts";
+import type { ContextWindowMode } from "@mcode/contracts/models/settings";
 
 /**
  * Default per-model context window (tokens). Every Claude model supports this

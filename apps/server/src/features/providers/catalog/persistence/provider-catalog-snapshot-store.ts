@@ -1,10 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import {
-  ProviderCatalogSnapshotSchema,
-  type ProviderCatalogSnapshot,
-} from "@mcode/contracts";
+import { ProviderCatalogSnapshotSchema, type ProviderCatalogSnapshot } from "@mcode/contracts/providers/capability-catalog";
 import { logger } from "@mcode/shared";
 import {
   providerCatalogSnapshots,

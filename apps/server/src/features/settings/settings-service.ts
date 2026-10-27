@@ -8,19 +8,9 @@ import { injectable } from "tsyringe";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import {
-  SettingsSchema,
-  getDefaultSettings,
-  type Settings,
-  type PartialSettings,
-  type TerminalPreferencesUpdate,
-  type TerminalSettings,
-  type TerminalCustomProfile,
-  type TerminalProfileRecovery,
-  TerminalProfileReferenceSchema,
-  TerminalCustomProfileSchema,
-  getDefaultTerminalSettingsDocument,
-} from "@mcode/contracts";
+import { SettingsSchema, getDefaultSettings, type Settings, type PartialSettings } from "@mcode/contracts/models/settings";
+import { type TerminalPreferencesUpdate, type TerminalSettings, type TerminalProfileRecovery, getDefaultTerminalSettingsDocument } from "@mcode/contracts/models/terminal-settings";
+import { type TerminalCustomProfile, TerminalProfileReferenceSchema, TerminalCustomProfileSchema } from "@mcode/contracts/models/terminal";
 import { getMcodeDir, logger } from "@mcode/shared";
 import { broadcast } from "../../application/transport/push.js";
 import { migrateTerminalSettingsDocument } from "../terminal/preferences/terminal-settings-migration.js";

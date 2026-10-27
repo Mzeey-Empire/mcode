@@ -2,7 +2,7 @@
  * Owns resident page surfaces, viewport presentation, loading and control overlays, error and empty states, and the performance HUD. Design overlays occupy an explicit slot in the existing element order.
  */
 import { useCallback, useMemo, type RefObject, type ReactNode } from "react";
-import type { PreviewPageError } from "@mcode/contracts";
+import type { PreviewPageError } from "@mcode/contracts/models/preview-page-status";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePreviewTabsStore } from "../state/previewTabsStore";

@@ -18,8 +18,9 @@
  * {@link getLastPersistedMessageId}.
  */
 import { logger } from "@mcode/shared";
-import { AgentEventType } from "@mcode/contracts";
-import type { AgentEvent, StoredAttachment } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { StoredAttachment } from "@mcode/contracts/models/attachment";
 import { ApplicationDatabaseWriter, DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { persistTurnSnapshot } from "./persistence/turn-finalization-write-operations.js";
 import { broadcast } from "../../../application/transport/push.js";
@@ -32,7 +33,7 @@ import type { NarrativeStore } from "../conversation/narrative/narrative-store.j
 import type { TurnOutcome } from "./turn-outcome.js";
 import type { TurnEndingCause } from "../canonical/turn-ending.js";
 import type { TurnFileTracker } from "./turn-file-tracker.js";
-import type { TurnFileEffectSummary } from "@mcode/contracts";
+import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
 import type { ParentTurnDurability } from "./parent-turn-durability.js";
 import { publishSynthesizedAgentEvents } from "../canonical/synthesized-agent-event-publication.js";
 import type { ParentAssistantTextCheckpointService } from "./parent-assistant-text-checkpoint-service.js";

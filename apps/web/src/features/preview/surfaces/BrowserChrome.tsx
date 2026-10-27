@@ -17,7 +17,7 @@ import {
   type BrowserTools,
   type BrowserTrustException,
 } from "./browserToolbarModel";
-import type { PreviewPageError } from "@mcode/contracts";
+import type { PreviewPageError } from "@mcode/contracts/models/preview-page-status";
 import { useBrowserCommands } from "./useBrowserCommands";
 import { useBrowserCertificate, type BrowserCertificate } from "./useBrowserCertificate";
 

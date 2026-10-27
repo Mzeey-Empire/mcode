@@ -164,13 +164,13 @@ beforeEach(() => {
 });
 
 import { reconcileWarmPreviewScopes, RightPanel } from "./RightPanel";
-import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
+import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts/models/terminal";
 import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { setLayoutMeasurements } from "@/lib/composer-layout";
 import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { createTerminalForScope } from "@/lib/ensure-terminal";

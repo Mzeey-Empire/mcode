@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
 import type { WebSocket } from "ws";
 import { container } from "tsyringe";
-import type { AgentEvent, IAgentProvider, IProviderRegistry, ProviderRuntimeEvent, TurnRequest } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { IAgentProvider, IProviderRegistry, TurnRequest } from "@mcode/contracts/providers/interfaces";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 
 import { setupContainer } from "../../../../application/composition/container.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";

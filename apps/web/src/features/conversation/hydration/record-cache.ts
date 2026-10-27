@@ -4,11 +4,8 @@ import {
   recallScrollPosition,
 } from "@/components/chat/scrollPositionMemory";
 import type { ThreadRecord } from "@/stores/thread-record";
-import type {
-  ConversationOlderPage,
-  ConversationOlderPageIdentity,
-  ConversationPage,
-} from "@mcode/contracts";
+import type { ConversationOlderPage, ConversationOlderPageIdentity } from "@mcode/contracts/models/conversation-older-page";
+import type { ConversationPage } from "@mcode/contracts/models/conversation-page";
 import {
   ACTIVE_CONVERSATION_MESSAGE_BYTES,
   ACTIVE_CONVERSATION_BYTES,

@@ -1,8 +1,4 @@
-import type {
-  PullRequestIdentity,
-  PullRequestSummary,
-  PullRequestTimelineItem,
-} from "@mcode/contracts";
+import type { PullRequestIdentity, PullRequestSummary, PullRequestTimelineItem } from "@mcode/contracts/pull-requests";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   buildPullRequestInboxListItems,

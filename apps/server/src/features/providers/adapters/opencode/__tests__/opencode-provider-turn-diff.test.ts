@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
-import type { ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts";
+import type { ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts/providers/interfaces";
 
 function testProvider(http: never, pool: OpenCodeServerPool) {
   const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };

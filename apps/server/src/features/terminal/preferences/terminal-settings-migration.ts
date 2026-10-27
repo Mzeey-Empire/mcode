@@ -1,12 +1,5 @@
-import {
-  PartialSettingsSchema,
-  SettingsSchema,
-  TERMINAL_DEFAULT_FONT_FAMILY,
-  TERMINAL_SETTINGS_SCHEMA_VERSION,
-  getDefaultSettings,
-  migrateLegacyTerminalScrollback,
-  type Settings,
-} from "@mcode/contracts";
+import { PartialSettingsSchema, SettingsSchema, getDefaultSettings, type Settings } from "@mcode/contracts/models/settings";
+import { TERMINAL_DEFAULT_FONT_FAMILY, TERMINAL_SETTINGS_SCHEMA_VERSION, migrateLegacyTerminalScrollback } from "@mcode/contracts/models/terminal-settings";
 import { z } from "zod";
 
 const LEGACY_TERMINAL_DEFAULT_FONT_FAMILY = "mcodeMono";

@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
-import type { AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type { AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import type { DatabaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { CanonicalAgentWriterClient } from "./canonical-agent-writer-client.js";
@@ -71,7 +71,7 @@ export class CanonicalAgentBoundary {
     const endedAt = new Date().toISOString();
     let cursor = 0;
     const writeBatches = { batches: 0, rows: 0, bytes: 0 };
-    const events: import("@mcode/contracts").CanonicalAgentEventEnvelope[] = [];
+    const events: import("@mcode/contracts/compat/agent-model").CanonicalAgentEventEnvelope[] = [];
     while (true) {
       const batch = await this.mutate(canonicalRuntimeWriteOperations.parentFinishBatch, { input, endedAt, cursor });
       writeBatches.batches += batch.result.writeBatches.batches;
@@ -95,14 +95,14 @@ export class CanonicalAgentBoundary {
   }
 
   private async mutate<Input, Output>(operation: DatabaseWriteOperation<Input, {
-    result: Output; events: import("@mcode/contracts").CanonicalAgentEventEnvelope[];
+    result: Output; events: import("@mcode/contracts/compat/agent-model").CanonicalAgentEventEnvelope[];
   }>, input: Input): Promise<Output> {
     const completed = await this.writer.execute(operation, input);
     this.publishCommittedGroups(completed.events);
     return completed.result;
   }
 
-  private publishCommittedGroups(events: readonly import("@mcode/contracts").CanonicalAgentEventEnvelope[]): void {
+  private publishCommittedGroups(events: readonly import("@mcode/contracts/compat/agent-model").CanonicalAgentEventEnvelope[]): void {
     let start = 0;
     while (start < events.length) {
       const threadId = events[start]!.routing.threadId;

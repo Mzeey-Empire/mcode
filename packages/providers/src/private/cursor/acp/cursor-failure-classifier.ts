@@ -1,4 +1,4 @@
-import type { TurnFailure } from "@mcode/contracts";
+import type { TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { ProviderTurnError } from "../../../provider-turn-error.js";
 import { ACP_AUTH_REQUIRED_CODE, acpRequestErrorCode } from "../../protocols/acp/acp-request-error.js";
 import { cursorHttpStatus, isLikelyTransientCursorPromptFailure } from "./cursor-acp-transient-retry.js";

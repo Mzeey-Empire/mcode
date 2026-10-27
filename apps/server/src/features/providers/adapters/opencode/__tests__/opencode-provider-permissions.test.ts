@@ -2,13 +2,14 @@ import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import * as NodeFS from "node:fs";
 import { z } from "zod";
-import { ApprovalRequestBodySchema } from "@mcode/contracts";
+import { ApprovalRequestBodySchema } from "@mcode/contracts/models/approval";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import { OpenCodeReplySessionNotFoundError } from "../opencode-http-client.js";
 import { ApprovalService } from "../../../../agents/approvals/approval-service.js";
 import { logger } from "@mcode/shared";
-import type { ApprovalRequestEnvelope, TurnRequest } from "@mcode/contracts";
+import type { ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
+import type { TurnRequest } from "@mcode/contracts/providers/interfaces";
 
 function testPool(): OpenCodeServerPool {
   return new OpenCodeServerPool({

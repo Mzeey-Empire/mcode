@@ -1,10 +1,4 @@
-import {
-  PULL_REQUEST_MUTATION_BODY_MAX_BYTES,
-  type PullRequestCapability,
-  type PullRequestIdentity,
-  type PullRequestMutationError as MutationError,
-  type PullRequestMutationExpected,
-} from "@mcode/contracts";
+import { PULL_REQUEST_MUTATION_BODY_MAX_BYTES, type PullRequestCapability, type PullRequestIdentity, type PullRequestMutationError as MutationError, type PullRequestMutationExpected } from "@mcode/contracts/pull-requests";
 import { ArrowUp, X } from "lucide-react";
 import { type KeyboardEvent, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";

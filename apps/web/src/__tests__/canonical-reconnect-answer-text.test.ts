@@ -1,12 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import {
-  createAgentModelState,
-  reduceAgentEventBatch,
-  type AcceptedCanonicalAgentEventEnvelope,
-  type AgentItem,
-  type CanonicalAgentEventEnvelope,
-} from "@mcode/contracts";
+import { createAgentModelState, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentItem, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { useThreadStore } from "@/stores/threadStore";
 import { resetThreadStoreForTests, seedThreadRecord } from "@/stores/thread-store-test-utils";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";

@@ -1,9 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type {
-  ApprovalReviewMode,
-  OrchestrationMode,
-} from "@mcode/contracts";
+import type { ApprovalReviewMode, OrchestrationMode } from "@mcode/contracts/models/enums";
 import type { AttachedWorktree } from "@/lib/worktree";
 import type {
   InteractionMode,

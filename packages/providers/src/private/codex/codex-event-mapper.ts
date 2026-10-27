@@ -3,16 +3,12 @@ import { mapCodexNotice } from "./codex-notices.js";
 import { parseCodexNotification, type CodexTokenUsage } from "./codex-notification-validation.js";
 import { codexIgnoredNotificationReason, type CodexNotificationDisposition } from "./codex-notification-policy.js";
 import { logger } from "@mcode/shared";
-import { AgentEventType } from "@mcode/contracts";
-import type {
-  AgentEvent,
-  ApprovalRequestBody,
-  CodexChildEvidence,
-  CodexCollaborationEvidence,
-  GoalState,
-  ProviderFileMutationStart,
-  ProviderRuntimeEvent,
-} from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ApprovalRequestBody } from "@mcode/contracts/models/approval";
+import type { CodexChildEvidence, CodexCollaborationEvidence, ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import type { GoalState } from "@mcode/contracts/models/goal";
+import type { ProviderFileMutationStart } from "@mcode/contracts/providers/interfaces";
 import {
   BoundedToolOutputBuffer,
   boundToolOutput,

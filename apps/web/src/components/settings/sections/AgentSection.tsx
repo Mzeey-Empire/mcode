@@ -3,7 +3,7 @@ import { SettingRow } from "../SettingRow";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { RangeControl } from "../RangeControl";
 import { SectionHeading } from "../SectionHeading";
-import type { AgentDefaultMode } from "@mcode/contracts";
+import type { AgentDefaultMode } from "@mcode/contracts/models/settings";
 
 /**
  * Agent settings section: concurrency, defaults, and per-session guardrails.

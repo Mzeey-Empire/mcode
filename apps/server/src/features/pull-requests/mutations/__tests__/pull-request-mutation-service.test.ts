@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type {
-  PullRequestPostCommentRequest,
-  PullRequestSubmitReviewRequest,
-} from "@mcode/contracts";
+import type { PullRequestPostCommentRequest, PullRequestSubmitReviewRequest } from "@mcode/contracts/pull-requests";
 import {
   GithubPullRequestMutationClientError,
 } from "../../github/github-pull-request-client.js";

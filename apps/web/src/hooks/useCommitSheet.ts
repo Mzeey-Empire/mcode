@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GitCommitParams, GitCommitRejection, GitCommitResult, ReviewFileChange } from "@mcode/contracts";
+import type { GitCommitParams, GitCommitRejection, GitCommitResult } from "@mcode/contracts/git-commit";
+import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import { getTransport } from "@/transport";
 import { RpcError } from "@/transport/ws-transport";
 import { useConnectionStore } from "@/stores/connectionStore";

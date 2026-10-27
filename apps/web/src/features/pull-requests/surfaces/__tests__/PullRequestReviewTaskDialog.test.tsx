@@ -1,10 +1,5 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
-import type {
-  PullRequestCreateReviewTaskResult,
-  PullRequestIdentity,
-  PullRequestReviewLink,
-  PullRequestReviewSource,
-} from "@mcode/contracts";
+import type { PullRequestCreateReviewTaskResult, PullRequestIdentity, PullRequestReviewLink, PullRequestReviewSource } from "@mcode/contracts/pull-requests";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";

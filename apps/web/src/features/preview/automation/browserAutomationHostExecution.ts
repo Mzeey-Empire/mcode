@@ -1,11 +1,4 @@
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  type BrowserAutomationErrorCode,
-  type BrowserAutomationHostDispatch,
-  type BrowserAutomationOperation,
-  type BrowserAutomationRequest,
-  type BrowserAutomationResponse,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, type BrowserAutomationErrorCode, type BrowserAutomationHostDispatch, type BrowserAutomationOperation, type BrowserAutomationRequest, type BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
 import { useThreadStore } from "@/stores/threadStore";
 import {
   browserAutomationRequestKey,

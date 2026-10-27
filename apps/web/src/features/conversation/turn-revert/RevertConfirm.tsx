@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
-import type { TurnRevertPreview } from "@mcode/contracts";
+import type { TurnRevertPreview } from "@mcode/contracts/models/turn-revert";
 import { Button } from "@/components/ui/button";
 import { failureCopy, previewBlockedReason, revertWarning, unattributedNote } from "./revert-copy";
 import type { TurnRevertState } from "./useTurnRevert";

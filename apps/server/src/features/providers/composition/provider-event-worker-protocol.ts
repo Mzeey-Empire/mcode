@@ -1,13 +1,8 @@
-import {
-  AgentEventType,
-  CanonicalAgentEventEnvelopeSchema,
-  ProviderIdSchema,
-  ProviderRuntimeEventSchema,
-  type AgentEvent,
-  type CanonicalAgentEventEnvelope,
-  type ProviderId,
-  type ProviderRuntimeEvent,
-} from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { CanonicalAgentEventEnvelopeSchema, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 
 import type {
   CanonicalProviderEventReceipt,

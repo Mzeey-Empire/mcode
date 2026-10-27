@@ -12,15 +12,11 @@ import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import { getMcodeDir } from "@mcode/shared";
 import { DraftImageMissingError } from "./draft-image-missing-error.js";
-import type { AttachmentMeta, StoredAttachment, StagedDraftImage } from "@mcode/contracts";
-import {
-  StagedDraftImageSchema,
-  getAttachmentMaxSizeForMime,
-  isVirtualBrowserContextAttachment,
-  MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
-  shouldPersistAttachmentWithoutFile,
-  storedAttachmentSuffix,
-} from "@mcode/contracts";
+import type { AttachmentMeta, StoredAttachment } from "@mcode/contracts/models/attachment";
+import type { StagedDraftImage } from "@mcode/contracts/models/next-message-draft";
+import { StagedDraftImageSchema } from "@mcode/contracts/models/next-message-draft";
+import { getAttachmentMaxSizeForMime } from "@mcode/contracts/models/attachment-limits";
+import { isVirtualBrowserContextAttachment, MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME, shouldPersistAttachmentWithoutFile, storedAttachmentSuffix } from "@mcode/contracts/models/attachment";
 
 const MAX_GENERATED_IMAGE_SIZE = 16 * 1024 * 1024;
 

@@ -13,8 +13,10 @@ import { injectable, inject } from "tsyringe";
 import { z } from "zod";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "./persistence/plan-question-answers-repo.js";
-import { lazySchema, PLAN_ANSWER_MESSAGE_PREFIX, type Message } from "@mcode/contracts";
-import type { NativePlanQuestionBatch, PlanQuestionSettlement } from "@mcode/contracts";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts/models/plan-questions";
+import { type Message } from "@mcode/contracts/models/message";
+import type { NativePlanQuestionBatch, PlanQuestionSettlement } from "@mcode/contracts/models/plan-questions";
 
 /** Matches a fenced `plan-questions` block and captures its JSON body. */
 const PLAN_QUESTIONS_RE = /```plan-questions\n([\s\S]*?)```/;

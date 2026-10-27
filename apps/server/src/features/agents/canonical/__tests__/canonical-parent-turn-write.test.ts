@@ -11,7 +11,7 @@ import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlit
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
 import type { Database } from "bun:sqlite";
-import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";

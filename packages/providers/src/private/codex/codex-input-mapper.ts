@@ -1,12 +1,8 @@
-import {
-  isVirtualBrowserContextAttachment,
-  type AttachmentMeta,
-  type MessageMention,
-  type ProviderCapabilityIdentity,
-  type ProviderUsageInfo,
-  type QuotaCategory,
-  type SkillInfo,
-} from "@mcode/contracts";
+import { isVirtualBrowserContextAttachment, type AttachmentMeta } from "@mcode/contracts/models/attachment";
+import { type MessageMention } from "@mcode/contracts/models/mention";
+import { type ProviderCapabilityIdentity } from "@mcode/contracts/providers/capability-catalog";
+import { type ProviderUsageInfo, type QuotaCategory } from "@mcode/contracts/providers/usage";
+import { type SkillInfo } from "@mcode/contracts/skills";
 import {
   expandCodexPromptCommand,
   isCodexPromptCommand,

@@ -1,6 +1,6 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanComment, PlanCommentEditorDraft } from "@mcode/contracts";
+import type { PlanComment, PlanCommentEditorDraft } from "@mcode/contracts/models/plan";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { usePlanStore } from "@/stores/planStore";
 import { useToastStore } from "@/stores/toastStore";

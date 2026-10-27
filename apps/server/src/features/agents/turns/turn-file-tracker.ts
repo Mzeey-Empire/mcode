@@ -3,8 +3,8 @@ import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { createTextPatch } from "@mcode/shared";
-import type { FileEffect, TurnFileEffectSummary } from "@mcode/contracts";
-import { MAX_TURN_FILE_EFFECTS } from "@mcode/contracts";
+import type { FileEffect, TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
+import { MAX_TURN_FILE_EFFECTS } from "@mcode/contracts/models/file-effect";
 import { z } from "zod";
 import { normalizeFilesystemPath } from "../../../shared/filesystem/path-identity.js";
 

@@ -1,7 +1,10 @@
 import * as NodeEvents from "node:events";
 import * as NodeStream from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentEventType, isTurnSteerCapable, type NativePlanQuestionBatch, type ProviderRuntimeEvent, type TurnRequest } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { isTurnSteerCapable, type TurnRequest } from "@mcode/contracts/providers/interfaces";
+import { type NativePlanQuestionBatch } from "@mcode/contracts/models/plan-questions";
+import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
 import { checkCodexVersion, clearVersionCache } from "../../private/codex/codex-version.js";

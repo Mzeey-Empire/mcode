@@ -1,5 +1,6 @@
-import { MessageSchema, ParentNarrativeRecoveryItemSchema, type AgentModelState, type Message,
-  type ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import { MessageSchema, type Message } from "@mcode/contracts/models/message";
+import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { type AgentModelState } from "@mcode/contracts/compat/agent-model";
 import type { ExecutionSemanticOperation, ParentLiveEffects } from "../execution/execution-worker-handler.js";
 import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
 import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";

@@ -1,4 +1,4 @@
-import { describeRefusal, type StartupRefusal } from "@mcode/contracts";
+import { describeRefusal, type StartupRefusal } from "@mcode/contracts/startup-failure";
 
 const BUTTONS = ["Quit", "Open data folder", "Copy details"] as const;
 const QUIT = 0;

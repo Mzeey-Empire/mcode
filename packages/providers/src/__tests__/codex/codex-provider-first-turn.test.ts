@@ -85,8 +85,11 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
 });
 
 import { BrowserAutomationSessionLease, CodexProvider, mcodeAttachment, stubEnvService } from "./codex-provider-test-fixture.js";
-import { AgentEventSchema, AgentEventType, ProviderRuntimeEventSchema } from "@mcode/contracts";
-import type { ApprovalRequestEnvelope, ProviderFileMutationStart, ProviderRuntimeEvent, ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts";
+import { AgentEventSchema, AgentEventType } from "@mcode/contracts/events/agent-event";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import type { ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
+import type { ProviderFileMutationStart, ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts/providers/interfaces";
+import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderEventBatch, ProviderEventSinkPort, ProviderEventSubmissionReceipt, ProviderMcodeAttachRequest, ProviderMcodeAttachment } from "../../host-ports.js";
 import { buildMcodeInstructionSections, NO_MCODE_TOOLKITS } from "@mcode/thread-orchestration";
 

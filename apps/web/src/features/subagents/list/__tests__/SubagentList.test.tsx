@@ -2,7 +2,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { createRef } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
+import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { pushEmitter } from "@/transport";
 import { useSubagentRosterStore } from "../../state/subagentRosterStore";
 import { SubagentsPanel } from "../../roster/SubagentsPanel";

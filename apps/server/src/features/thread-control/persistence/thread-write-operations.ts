@@ -1,6 +1,10 @@
 import { z } from "zod";
-import { HandoffIdSchema, MessageSchema } from "@mcode/contracts";
-import { AcknowledgeSeenResultSchema, ContextWindowModeSchema, PlanPhaseSchema, ThreadModeSchema, ThreadSchema, ThreadStatusSchema, TurnOutcomeSchema } from "@mcode/contracts";
+import { HandoffIdSchema, MessageSchema } from "@mcode/contracts/models/message";
+import { AcknowledgeSeenResultSchema } from "@mcode/contracts/models/thread-attention";
+import { ContextWindowModeSchema } from "@mcode/contracts/models/settings";
+import { PlanPhaseSchema, ThreadSchema } from "@mcode/contracts/models/thread";
+import { ThreadModeSchema, ThreadStatusSchema } from "@mcode/contracts/models/enums";
+import { TurnOutcomeSchema } from "@mcode/contracts/models/turn-outcome";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 
 const settings = z.object({

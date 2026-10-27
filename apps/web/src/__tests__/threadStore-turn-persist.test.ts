@@ -2,7 +2,7 @@ import { createMockApproval, createMockMessage, createMockThread } from "@mcode/
 // @vitest-environment jsdom
 import { useApprovalStore } from "@/stores/approvalStore";
 
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import {

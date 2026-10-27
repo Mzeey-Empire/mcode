@@ -1,4 +1,5 @@
-import type { DelegatedTaskNotice, DelegatedTaskNoticeStatus, SystemNoticeMetadata, TaskState } from "@mcode/contracts";
+import type { DelegatedTaskNotice, DelegatedTaskNoticeStatus, SystemNoticeMetadata } from "@mcode/contracts/models/message";
+import type { TaskState } from "@mcode/contracts/thread-control";
 
 /** One notifiable task snapshot and its durable coverage key. */
 export interface TaskNoticeEntry {

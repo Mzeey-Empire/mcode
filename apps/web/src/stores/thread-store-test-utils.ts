@@ -1,6 +1,6 @@
 import type { Message, ToolCall } from "@/transport";
 import type { ThoughtSegment } from "@/features/conversation/narrative/types";
-import type { PlanQuestion } from "@mcode/contracts";
+import type { PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import { LruCache } from "@/lib/lru-cache";
 import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "./threadStore";
 import { stableAgentEventPublications } from "./thread-store/stable-agent-event-publications";

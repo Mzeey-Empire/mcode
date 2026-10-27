@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { notifyCommittedCanonicalEvents } from "../../canonical/committed-canonical-events.js";
 import { ProviderSwitchService, type PlannedSwitch, type ProviderSwitchTicket } from "../provider-switch-service.js";
 import type { SendMessageCommand } from "../turn-admission-dispatch-coordinator.js";

@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReviewTurn } from "@mcode/contracts";
+import type { ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import { useDiffStore } from "@/stores/diffStore";
 import { PanelHeaderSlotScope } from "@/components/panels/shell/PanelHeader";
 import { TurnPicker } from "../TurnPicker";

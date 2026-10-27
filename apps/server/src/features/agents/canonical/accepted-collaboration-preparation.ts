@@ -1,5 +1,8 @@
-import { ProviderRuntimeEventSchema, ProviderIdSchema, CollaborationObservationChangeSchema, type AgentEvent, type AgentModelState,
-  type CollaborationObservationChange, type ProviderRuntimeEvent, type ProviderId } from "@mcode/contracts";
+import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { CollaborationObservationChangeSchema, type AgentModelState, type CollaborationObservationChange } from "@mcode/contracts/compat/agent-model";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { ExecutionSemanticOperation } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
 import { AcceptedCodexCollaboration } from "./accepted-codex-collaboration.js";

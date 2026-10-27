@@ -1,6 +1,6 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 
 const transport = {
   getSettings: vi.mocked(mockTransport.getSettings),

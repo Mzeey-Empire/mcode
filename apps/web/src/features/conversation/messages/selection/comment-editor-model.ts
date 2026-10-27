@@ -1,12 +1,7 @@
-import type {
-  MessageMention,
-  SelectedTextComment,
-  SelectedTextCommentSource,
-} from "@mcode/contracts";
-import {
-  MAX_MESSAGE_MENTIONS,
-  MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS,
-} from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { SelectedTextComment, SelectedTextCommentSource } from "@mcode/contracts/models/selected-text-comment";
+import { MAX_MESSAGE_MENTIONS } from "@mcode/contracts/models/mention";
+import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "@mcode/contracts/models/selected-text-comment";
 
 export type CommentDismissalFamily = "escape" | "outside";
 

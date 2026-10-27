@@ -1,8 +1,4 @@
-import type {
-  PullRequestCapabilities,
-  PullRequestDetail,
-  PullRequestSummary,
-} from "@mcode/contracts";
+import type { PullRequestCapabilities, PullRequestDetail, PullRequestSummary } from "@mcode/contracts/pull-requests";
 import { ArrowLeft, ExternalLink, GitPullRequest, X } from "lucide-react";
 import { type ReactNode, type Ref } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";

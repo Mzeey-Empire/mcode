@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BROWSER_AUTOMATION_OPERATIONS,
-  WS_CHANNELS,
-  WS_METHODS,
-} from "../../index.js";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BROWSER_AUTOMATION_OPERATIONS } from "@mcode/contracts/models/browser-automation";
+import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 
 function registration() {
   return {

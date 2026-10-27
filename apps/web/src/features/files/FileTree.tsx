@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight, Folder } from "lucide-react";
-import { FILE_LIST_MAX_PATHS } from "@mcode/contracts";
+import { FILE_LIST_MAX_PATHS } from "@mcode/contracts/models/workspace-file";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
 import { cn } from "@/lib/utils";
 import type { FileChangeMark, FileTreeRow } from "./file-tree-model";

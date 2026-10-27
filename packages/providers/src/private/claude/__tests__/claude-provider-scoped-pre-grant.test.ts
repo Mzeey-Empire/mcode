@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, assert } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
-import type { ApprovalRequestEnvelope } from "@mcode/contracts";
+import type { ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
 
 /**
  * Verifies the plan-file Read grant in ClaudeProvider.canUseTool (PRD #538):

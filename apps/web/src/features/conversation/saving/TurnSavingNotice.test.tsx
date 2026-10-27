@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAgentModelState, type CanonicalAgentProgressRecovery, type TurnSavingStatus } from "@mcode/contracts";
+import { createAgentModelState } from "@mcode/contracts/compat/agent-model";
+import { type CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
+import { type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import { createCanonicalAgentReplica } from "@/stores/canonical-agent-replica";
 import { TurnSaveRecovery, TurnSavingNotice } from "./TurnSavingNotice";
 import { mockTransport } from "@/__tests__/mocks/transport";

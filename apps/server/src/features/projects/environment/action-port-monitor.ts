@@ -1,4 +1,4 @@
-import type { WorkspaceEnvironmentActionPort } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionPort } from "@mcode/contracts/models/workspace-environment";
 import { ActionPortDetector, type ActionPortCandidate } from "./action-port-detector.js";
 import { probeActionPort } from "./action-port-probe.js";
 

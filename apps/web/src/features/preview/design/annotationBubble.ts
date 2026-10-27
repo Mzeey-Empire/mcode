@@ -2,7 +2,7 @@
  * Owns annotation bubble geometry, draft conversion and local edit state, shared by design rendering and its ordered lifecycle hooks.
  */
 import { useCallback, useState, type CSSProperties } from "react";
-import type { McodeBrowserCaptureV2 } from "@mcode/contracts";
+import type { McodeBrowserCaptureV2 } from "@mcode/contracts/models/browser-preview";
 import { cn } from "@/lib/utils";
 import type { PreviewDraftAnnotation, SavedPreviewAnnotation } from "../state/previewAnnotationStore";
 import type { WorkspaceThread } from "@/lib/workspace-thread";

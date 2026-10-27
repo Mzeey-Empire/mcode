@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { CircleHelp } from "lucide-react";
-import { getCatalogEntry, isNativePlanQuestionId, type PlanAnswer, type PlanQuestion, type ProviderId } from "@mcode/contracts";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { isNativePlanQuestionId, type PlanAnswer, type PlanQuestion } from "@mcode/contracts/models/plan-questions";
+import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useThreadRecord } from "@/stores/thread-selectors";

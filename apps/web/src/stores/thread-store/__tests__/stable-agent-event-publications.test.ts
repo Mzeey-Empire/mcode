@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { describe, expect, it } from "vitest";
 import { StableAgentEventPublications } from "../stable-agent-event-publications";
 

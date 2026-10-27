@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { GitListError } from "@mcode/contracts";
+import type { GitListError } from "@mcode/contracts/git";
 
 /** Fields git command failures carry, read loosely because callers receive them as `unknown`. */
 export const gitCommandFailureSchema = z.object({

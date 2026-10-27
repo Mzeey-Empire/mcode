@@ -1,5 +1,5 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
-import type { PlanQuestion } from "@mcode/contracts";
+import type { PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";

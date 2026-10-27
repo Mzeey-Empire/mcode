@@ -1,13 +1,6 @@
 import { useId, useState, type ReactNode } from "react";
 import { ShieldAlert, SquareMousePointer } from "lucide-react";
-import {
-  projectBrowserNarrativeInput,
-  projectBrowserNarrativeResult,
-  resolveBrowserNarrativeTool,
-  type BrowserNarrativeReceipt,
-  type BrowserNarrativeResult,
-  type BrowserNarrativeStepInput,
-} from "@mcode/contracts";
+import { projectBrowserNarrativeInput, projectBrowserNarrativeResult, resolveBrowserNarrativeTool, type BrowserNarrativeReceipt, type BrowserNarrativeResult, type BrowserNarrativeStepInput } from "@mcode/contracts/models/browser-narrative";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import type { ToolCall } from "@/transport/types";
 import { buildToolSummaryText } from "@/components/chat/tool-renderers/constants";

@@ -1,12 +1,4 @@
-import type {
-  PullRequestActor,
-  PullRequestBoundedDataMarker,
-  PullRequestCapability,
-  PullRequestCheck,
-  PullRequestCheckState,
-  PullRequestConversationItem,
-  PullRequestDetail,
-} from "@mcode/contracts";
+import type { PullRequestActor, PullRequestBoundedDataMarker, PullRequestCapability, PullRequestCheck, PullRequestCheckState, PullRequestConversationItem, PullRequestDetail } from "@mcode/contracts/pull-requests";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ChevronDown,

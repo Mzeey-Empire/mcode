@@ -28,7 +28,7 @@ import {
   type PullRequestDiffRow,
 } from "@/features/pull-requests/lib/pull-request-diff-row-model";
 import { cn } from "@/lib/utils";
-import type { PullRequestReviewThread } from "@mcode/contracts";
+import type { PullRequestReviewThread } from "@mcode/contracts/pull-requests";
 import { PullRequestInlineThread } from "./PullRequestInlineThread";
 
 const DIFF_ROW_ESTIMATE_PX = 28;

@@ -2,7 +2,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { SettingRow } from "../SettingRow";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SectionHeading } from "../SectionHeading";
-import type { Theme } from "@mcode/contracts";
+import type { Theme } from "@mcode/contracts/models/settings";
 
 /**
  * Appearance settings section: color theme preference.

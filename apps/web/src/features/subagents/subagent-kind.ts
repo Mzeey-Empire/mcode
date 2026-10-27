@@ -1,4 +1,4 @@
-import type { SubagentRosterEntry } from "@mcode/contracts";
+import type { SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { formatReasoningLabel, resolveModelDisplayLabel } from "@/lib/format-model-label";
 
 /** The entry's agent, model, and effort labeled the way the composer labels them, leaving out what was not reported. */

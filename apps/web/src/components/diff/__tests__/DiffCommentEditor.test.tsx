@@ -1,12 +1,10 @@
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LexicalEditor } from "lexical";
-import {
-  DiffAnnotationPayloadSchema,
-  MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS,
-  type DraftDiffComment,
-  type MessageMention,
-} from "@mcode/contracts";
+import { DiffAnnotationPayloadSchema } from "@mcode/contracts/models/browser-preview";
+import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "@mcode/contracts/models/selected-text-comment";
+import { type DraftDiffComment } from "@mcode/contracts/models/next-message-draft";
+import { type MessageMention } from "@mcode/contracts/models/mention";
 import { writeComposerContent } from "@/features/conversation/composer/draft/composer-editor-content";
 import {
   canSaveDiffComment,

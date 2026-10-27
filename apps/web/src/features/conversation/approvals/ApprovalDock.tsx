@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { CircleAlert, CircleHelp, GitBranch, Pencil, Send, Shield, Terminal, type LucideIcon } from "lucide-react";
 import { useShallow } from "zustand/shallow";
-import type { ApprovalChoice, ApprovalSubject as ApprovalSubjectModel } from "@mcode/contracts";
+import type { ApprovalChoice, ApprovalSubject as ApprovalSubjectModel } from "@mcode/contracts/models/approval";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { useSubagentRoster } from "@/features/subagents/state/subagentRosterStore";
 import { selectDockApprovals, useApprovalStore, type StoredApproval } from "@/stores/approvalStore";

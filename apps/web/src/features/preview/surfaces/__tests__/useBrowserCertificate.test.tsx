@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BrowserCertificateState } from "@mcode/contracts";
+import type { BrowserCertificateState } from "@mcode/contracts/models/browser-certificate";
 import type { BrowserSurfaceIdentity } from "../../browser-surfaces";
 
 vi.mock("../BrowserSurfaceHostRoot", () => ({

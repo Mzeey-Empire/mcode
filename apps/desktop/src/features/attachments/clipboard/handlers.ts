@@ -1,4 +1,4 @@
-import type { AttachmentMeta } from "@mcode/contracts";
+import type { AttachmentMeta } from "@mcode/contracts/models/attachment";
 import type { TempAttachmentStore } from "../staging/temp-store.js";
 
 /** IPC channel for reading a clipboard image into temporary storage. */

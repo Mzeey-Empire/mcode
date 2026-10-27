@@ -1,6 +1,6 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts";
+import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { pushEmitter } from "@/transport";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSubagentRosterStore } from "../subagentRosterStore";

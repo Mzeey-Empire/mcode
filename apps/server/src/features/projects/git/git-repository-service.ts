@@ -1,7 +1,7 @@
 import * as NodePath from "node:path";
 import { inject, injectable } from "tsyringe";
 import { logger, validateBranchName } from "@mcode/shared";
-import type { GitBranch, GitRemoteUrl, GitRefsListParams, GitRefsListResult } from "@mcode/contracts";
+import type { GitBranch, GitRemoteUrl, GitRefsListParams, GitRefsListResult } from "@mcode/contracts/git";
 import { buildRefPage } from "./git-ref-targets.js";
 import { gitCommandFailureSchema, gitListError } from "./git-list-error.js";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";

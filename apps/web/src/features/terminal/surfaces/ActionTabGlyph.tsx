@@ -1,4 +1,4 @@
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { ActionIcon } from "@/features/projects/actions/ActionIcon";
 
 type RunBadge = "running" | "failed" | "pending";

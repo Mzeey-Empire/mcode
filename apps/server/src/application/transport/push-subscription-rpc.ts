@@ -1,4 +1,5 @@
-import type { WsMethodName, SetThreadSubscriptionsInput, CanonicalAgentProgressRecovery } from "@mcode/contracts";
+import type { WsMethodName, SetThreadSubscriptionsInput } from "@mcode/contracts/ws/methods";
+import type { CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
 import type { WebSocket } from "ws";
 import type { CanonicalAgentBoundary } from "../../features/agents/index.js";
 import type { CanonicalAcceptedProgress } from "../../features/agents/canonical/canonical-accepted-progress.js";

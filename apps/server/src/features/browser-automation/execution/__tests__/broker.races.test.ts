@@ -1,15 +1,5 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  BrowserAutomationHostDispatchSchema,
-  BrowserAutomationRequestSchema,
-  BrowserAutomationResponseSchema,
-  type BrowserAutomationHostRegistration,
-  type BrowserAutomationOperation,
-  type BrowserAutomationPublicOperation,
-  type BrowserAutomationRequest,
-  type BrowserAutomationResponse,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BrowserAutomationHostDispatchSchema, BrowserAutomationRequestSchema, BrowserAutomationResponseSchema, type BrowserAutomationHostRegistration, type BrowserAutomationOperation, type BrowserAutomationPublicOperation, type BrowserAutomationRequest, type BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
 import {
   BROWSER_CONFORMANCE_RACE_CATALOGUE,
   BrowserConformanceFaultController,

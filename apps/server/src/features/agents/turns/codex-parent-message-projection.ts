@@ -1,4 +1,6 @@
-import type { ParentNarrativeRecoveryItem, StoredAttachment, TurnOutcome } from "@mcode/contracts";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import type { StoredAttachment } from "@mcode/contracts/models/attachment";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 import type { DataOnlyParentTerminalProjectionInput } from "../canonical/canonical-parent-turn-write.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";

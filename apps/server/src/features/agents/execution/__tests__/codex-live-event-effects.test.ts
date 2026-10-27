@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentEventSchema, type AgentEvent } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { CodexLiveEventReducer, type CodexPlanFeature } from "../codex-live-event-reducer.js";
 import { CodexLiveEventEffects } from "../codex-live-event-effects.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";

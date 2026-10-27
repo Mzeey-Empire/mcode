@@ -1,4 +1,4 @@
-import type { Thread } from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
 
 /** The thread itself and, for a delegated thread, its parent Coordinator: a nested Coordinator is both. */
 export function wakeTargets(thread: Pick<Thread, "id" | "delegation_coordinator_thread_id">): string[] {

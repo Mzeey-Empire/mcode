@@ -1,15 +1,14 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
-import {
-  AgentEventIdSchema, AgentEventSchema, AgentItemSchema, CanonicalTimestampSchema,
-  MessageSchema, PlanVersionSchema,
-  type AgentEvent, type AgentItem, type AgentThread, type AgentTurn, type Message, type PlanVersion,
-} from "@mcode/contracts";
+import { AgentEventIdSchema, AgentItemSchema, CanonicalTimestampSchema, type AgentItem, type AgentThread, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { MessageSchema, type Message } from "@mcode/contracts/models/message";
+import { PlanVersionSchema, type PlanVersion } from "@mcode/contracts/models/plan";
 import { PlanPersistenceReadySchema } from "../planning/plan-capture-schema.js";
 import type { PlanPersistenceReady } from "../planning/plan-execution-state.js";
 import { readCanonicalPlan } from "../planning/legacy-plan-record.js";
 import { mergePlanVersions } from "../planning/merge-plan-versions.js";
-import type { NativePlanFileRef } from "@mcode/contracts";
+import type { NativePlanFileRef } from "@mcode/contracts/providers/interfaces";
 import { v5 as uuidv5 } from "uuid";
 import { z } from "zod";
 import type {

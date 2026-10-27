@@ -1,15 +1,7 @@
 import * as NodePath from "node:path";
 import * as NodeFS from "node:fs";
 import { z } from "zod";
-import {
-  GitRefSchema,
-  DetachedWorktreeTargetSchema,
-  type GitRef,
-  type GitRefPurpose,
-  type GitRefsListParams,
-  type GitRefsListResult,
-  type TargetWorktree,
-} from "@mcode/contracts";
+import { GitRefSchema, DetachedWorktreeTargetSchema, type GitRef, type GitRefPurpose, type GitRefsListParams, type GitRefsListResult, type TargetWorktree } from "@mcode/contracts/git";
 
 type Target = Extract<GitRefsListResult, { ok: true }>["items"][number];
 type RefOptions = Omit<GitRefsListParams, "workspaceId" | "threadId">;

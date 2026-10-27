@@ -3,7 +3,9 @@ import {
   CanonicalAgentEventSchema,
   type CanonicalAgentEvent,
 } from "@mcode/agent-model";
-import { AgentEventType, ProviderRuntimeEventSchema, type AgentEvent, type PlanCapture } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { type PlanCapture } from "@mcode/contracts/providers/interfaces";
 import { PlanFenceParser } from "@mcode/shared";
 import type { ProviderBoundary } from "../factory-types.js";
 import type { RequestPermissionRequest, SessionNotification } from "@agentclientprotocol/sdk";

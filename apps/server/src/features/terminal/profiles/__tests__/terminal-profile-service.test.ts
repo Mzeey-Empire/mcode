@@ -3,7 +3,8 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { TerminalPlatform, TerminalProfileRecovery, TerminalProfileReference } from "@mcode/contracts";
+import type { TerminalPlatform, TerminalProfileReference } from "@mcode/contracts/models/terminal";
+import type { TerminalProfileRecovery } from "@mcode/contracts/models/terminal-settings";
 import type { SettingsService } from "../../../settings/settings-service.js";
 import type { WorkspaceTerminalPreferencesService } from "../../preferences/workspace-terminal-preferences-service.js";
 import {

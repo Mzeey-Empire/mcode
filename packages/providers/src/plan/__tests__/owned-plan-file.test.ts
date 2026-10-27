@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts";
+import { PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts/models/plan";
 import { captureOwnedPlanFile, deleteOwnedPlanFile } from "../owned-plan-file.js";
 
 const helloHash = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";

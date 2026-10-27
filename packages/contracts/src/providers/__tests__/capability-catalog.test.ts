@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  PROVIDER_CATALOG_PATH_MAX_CHARS,
-  ProviderCatalogChangeSchema,
-  ProviderCatalogRequestSchema,
-  ProviderCatalogSnapshotSchema,
-} from "../../index.js";
+import { PROVIDER_CATALOG_PATH_MAX_CHARS, ProviderCatalogChangeSchema, ProviderCatalogRequestSchema, ProviderCatalogSnapshotSchema } from "@mcode/contracts/providers/capability-catalog";
 
 const fetchedAt = "2026-07-20T12:00:00.000Z";
 

@@ -1,4 +1,4 @@
-import type { PullRequestReviewThread } from "@mcode/contracts";
+import type { PullRequestReviewThread } from "@mcode/contracts/pull-requests";
 import { MessageCircle } from "lucide-react";
 import { memo, useState } from "react";
 import { Badge } from "@/components/ui/badge";

@@ -1,17 +1,11 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
-import {
-  MessageSchema,
-  ProviderRuntimeEventSchema,
-  type AgentEvent,
-  type AgentItem,
-  type AgentThread,
-  type AgentTurn,
-  type CanonicalAgentEvent,
-  type Message,
-  type ParentNarrativeRecoveryItem,
-  type TurnOutcome,
-} from "@mcode/contracts";
+import { MessageSchema, type Message } from "@mcode/contracts/models/message";
+import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type AgentItem, type AgentThread, type AgentTurn, type CanonicalAgentEvent } from "@mcode/contracts/compat/agent-model";
+import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { ExecutionSemanticOperation, ParentLiveEffects } from "../execution/execution-worker-handler.js";
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";

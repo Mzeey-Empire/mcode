@@ -1,10 +1,5 @@
-import {
-  SelectedTextCommentsSchema,
-  type SelectedTextComment,
-  PlanCommentSchema,
-  type PlanComment,
-  type PlanVersion,
-} from "@mcode/contracts";
+import { SelectedTextCommentsSchema, type SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
+import { PlanCommentSchema, type PlanComment, type PlanVersion } from "@mcode/contracts/models/plan";
 
 /** Opens the machine-readable selected-text comment data appended to a provider turn. */
 export const MCODE_SELECTED_TEXT_COMMENTS_FENCE_OPEN = "<!-- mcode-selected-text-comments-v1 -->";

@@ -9,11 +9,8 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
-import {
-  BROWSER_AUTOMATION_CONTRACT_VERSION,
-  getDefaultSettings,
-  type BrowserAutomationHostDispatch,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, type BrowserAutomationHostDispatch } from "@mcode/contracts/models/browser-automation";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 
 const {
   mockUsePreviewBridge,

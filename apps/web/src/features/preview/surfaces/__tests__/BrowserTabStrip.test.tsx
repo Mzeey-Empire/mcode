@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts";
+import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import { useDiffStore } from "@/stores/diffStore";
 import { browserAutomationTargetKey, useBrowserAutomationStore } from "../../automation/browserAutomationStore";
 import { usePreviewDisplayTabSet, usePreviewTabsStore } from "../../state/previewTabsStore";

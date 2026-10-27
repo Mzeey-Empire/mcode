@@ -1,4 +1,6 @@
-import { providerFailureOutcome, type AgentEvent, type TurnOutcome } from "@mcode/contracts";
+import { providerFailureOutcome } from "@mcode/contracts/models/turn-failure";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 /** Dependencies used to publish one normalized provider event to the parent UI. */
 export interface ParentProviderEventPublicationDeps {

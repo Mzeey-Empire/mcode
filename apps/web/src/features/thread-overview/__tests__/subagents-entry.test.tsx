@@ -1,7 +1,7 @@
 import { createMockThread } from "@mcode/contracts/testing";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SubagentRosterEntry } from "@mcode/contracts";
+import type { SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useSubagentRosterStore } from "@/features/subagents/state/subagentRosterStore";
 import { SubagentsEntryBlock } from "../entries/subagents";

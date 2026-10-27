@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { DraftDiffComment, DraftFileComment } from "@mcode/contracts";
+import type { DraftDiffComment, DraftFileComment } from "@mcode/contracts/models/next-message-draft";
 import { useFilesTabsStore } from "@/features/files/filesTabsStore";
 import { useDiffStore } from "@/stores/diffStore";
 import {

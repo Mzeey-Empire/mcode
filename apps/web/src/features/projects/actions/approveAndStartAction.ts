@@ -1,4 +1,4 @@
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { applyActionRun } from "@/features/terminal/state/applyActionRun";
 import { getTransport } from "@/transport";
 

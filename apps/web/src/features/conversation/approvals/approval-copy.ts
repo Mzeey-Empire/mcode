@@ -1,4 +1,5 @@
-import { getCatalogEntry, type ApprovalChoice, type ApprovalRequest, type ApprovalSubject } from "@mcode/contracts";
+import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
+import { type ApprovalChoice, type ApprovalRequest, type ApprovalSubject } from "@mcode/contracts/models/approval";
 
 type ThreadOperation = Extract<ApprovalSubject, { kind: "thread_operation" }>["operation"];
 type DockSubjectKind = Exclude<ApprovalSubject["kind"], "question" | "thread_operation">;

@@ -6,7 +6,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeUtil from "node:util";
 import { logger } from "@mcode/shared";
-import type { ProviderModelInfo } from "@mcode/contracts";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 
 const execFileAsync = NodeUtil.promisify(NodeChildProcess.execFile);
 

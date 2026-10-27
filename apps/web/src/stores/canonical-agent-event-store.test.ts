@@ -1,5 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import { createAgentModelState, type AgentItem, type CanonicalAgentEventEnvelope, type Message } from "@mcode/contracts";
+import { createAgentModelState, type AgentItem, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { type Message } from "@mcode/contracts/models/message";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";

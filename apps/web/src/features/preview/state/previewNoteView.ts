@@ -1,9 +1,5 @@
-import type {
-  DraftBrowserNotePage,
-  McodeBrowserCaptureV2,
-  PreviewAnnotationPayloadV2,
-  StagedDraftImage,
-} from "@mcode/contracts";
+import type { DraftBrowserNotePage, StagedDraftImage } from "@mcode/contracts/models/next-message-draft";
+import type { McodeBrowserCaptureV2, PreviewAnnotationPayloadV2 } from "@mcode/contracts/models/browser-preview";
 import {
   visibleBrowserNotePages,
   type NextMessageDraft,

@@ -1,4 +1,4 @@
-import type { QuotaCategory } from "@mcode/contracts";
+import type { QuotaCategory } from "@mcode/contracts/providers/usage";
 import type { IUsageSource } from "@mcode/shared/usage";
 
 /**

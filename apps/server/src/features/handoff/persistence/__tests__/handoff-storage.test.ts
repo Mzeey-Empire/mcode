@@ -4,7 +4,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { WS_METHODS } from "@mcode/contracts";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
 import { HandoffStorage, type HandoffAudit } from "../handoff-storage.js";
 import { routeHandoffRpc } from "../../transport/handoff-rpc.js";
 

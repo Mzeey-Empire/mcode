@@ -3,7 +3,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
-import type { ProviderId } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { useNumberedDiffComments } from "./draft/draft-diff-comments";
 import { useNumberedFileComments } from "./draft/draft-file-comments";
 import { reconcileOrphanedDraftSubmissions } from "./draft/draft-submission-lifecycle";

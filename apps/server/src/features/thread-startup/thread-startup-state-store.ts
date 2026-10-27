@@ -1,19 +1,7 @@
-import {
-  THREAD_STARTUP_TRANSCRIPT_MAX_CHARS,
-  THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES,
-  ThreadStartupTranscriptEntrySchema,
-  ThreadStartupSchema,
-  getThreadStartupPhases,
-  type ThreadStartup,
-  type ThreadStartupBlock,
-  type ThreadStartupError,
-  type ThreadStartupStepDetail,
-  type ThreadStartupPhase,
-  type ThreadStartupStartInput,
-} from "@mcode/contracts";
+import { THREAD_STARTUP_TRANSCRIPT_MAX_CHARS, THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES, ThreadStartupTranscriptEntrySchema, ThreadStartupSchema, getThreadStartupPhases, type ThreadStartup, type ThreadStartupBlock, type ThreadStartupError, type ThreadStartupStepDetail, type ThreadStartupPhase, type ThreadStartupStartInput } from "@mcode/contracts/thread-startup";
 import { ThreadStartupStore } from "./persistence/thread-startup-store.js";
 import type { z } from "zod";
-import type { Thread } from "@mcode/contracts";
+import type { Thread } from "@mcode/contracts/models/thread";
 import { ThreadStore } from "../thread-control/persistence/thread-store.js";
 import type { threadWriteOperations } from "../thread-control/persistence/thread-write-operations.js";
 

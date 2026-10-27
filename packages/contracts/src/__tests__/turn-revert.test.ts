@@ -1,6 +1,10 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
-import { WS_METHODS, WS_CHANNELS, TurnRevertPreviewSchema, TurnRevertResultSchema, SystemNoticeMetadataSchema, TurnSnapshotSchema } from "../index.js";
+import { WS_METHODS } from "@mcode/contracts/ws/methods";
+import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
+import { TurnRevertPreviewSchema, TurnRevertResultSchema } from "@mcode/contracts/models/turn-revert";
+import { SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
+import { TurnSnapshotSchema } from "@mcode/contracts/models/turn-snapshot";
 
 describe("turn revert wire contract", () => {
   it("requires explicit reverted paths on every snapshot", () => {

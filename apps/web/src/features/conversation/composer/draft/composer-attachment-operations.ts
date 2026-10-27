@@ -1,13 +1,7 @@
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import type { AttachmentMeta } from "@/transport";
-import {
-  classifyFile,
-  getMaxFileSize,
-  inferMimeType,
-  isFileSupported,
-  isVirtualBrowserContextAttachment,
-  MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
-} from "@mcode/contracts";
+import { classifyFile, getMaxFileSize, inferMimeType, isFileSupported } from "@mcode/contracts/models/file-types";
+import { isVirtualBrowserContextAttachment, MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME } from "@mcode/contracts/models/attachment";
 
 /** Inputs for preparing file rows before the Composer persists pathless files. */
 export interface ComposerAttachmentSelectionInput {

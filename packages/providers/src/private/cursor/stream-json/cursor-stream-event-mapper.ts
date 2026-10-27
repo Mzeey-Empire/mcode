@@ -14,9 +14,9 @@
  * band; the mapper returns `[]` for it so no agent event is emitted.
  */
 
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { logger } from "@mcode/shared";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import {
   extractCursorTodoEntries,
   normalizeCursorTodoEntry,

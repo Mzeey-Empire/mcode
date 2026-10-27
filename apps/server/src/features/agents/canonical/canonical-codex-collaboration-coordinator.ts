@@ -8,21 +8,11 @@ import {
   canonicalCollaborationActions,
   threads,
 } from "../../../runtime/persistence/sqlite/schema.js";
-import {
-  CANONICAL_SUBAGENT_TASK_MAX_LENGTH,
-  resolveSubagentDisplayName,
-  resolveSubagentMetadata,
-} from "@mcode/contracts";
-import type {
-  AgentItem,
-  AgentThread,
-  AgentTurn,
-  CanonicalAgentEvent,
-  CollaborationAction,
-  NarrativeEntry,
-  ParentNarrativeRecoveryItem,
-  ProviderIdentity,
-} from "@mcode/contracts";
+import { CANONICAL_SUBAGENT_TASK_MAX_LENGTH } from "@mcode/contracts/models/canonical-subagent-roster";
+import { resolveSubagentDisplayName, resolveSubagentMetadata } from "@mcode/contracts/models/tool-call-record";
+import type { AgentItem, AgentThread, AgentTurn, CanonicalAgentEvent, CollaborationAction, ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import type { NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import type {
   CanonicalChildTurnFinishInput,
   CodexChildDeliveryInput,

@@ -1,11 +1,8 @@
-import {
-  AgentEventType,
-  type AgentEvent,
-  type ContextWindowMode,
-  type ProviderBillingMode,
-  type ProviderIdentity,
-  type TurnFailure,
-} from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type ContextWindowMode } from "@mcode/contracts/models/settings";
+import { type ProviderBillingMode } from "@mcode/contracts/providers/usage";
+import { type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import { type TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { logger } from "@mcode/shared";
 import type { ProviderBackgroundToolSettlement } from "../../host-ports.js";
 import { clampContextWindowToMode } from "./context-window.js";

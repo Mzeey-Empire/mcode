@@ -1,26 +1,15 @@
 import { create } from "zustand";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import type {
-  DraftBrowserNotePage,
-  DraftDiffComment,
-  DraftFileComment,
-  DraftSubmission,
-  McodeBrowserCapture,
-  PlanCommentEditorDraft,
-  SelectedTextComment,
-} from "@mcode/contracts";
-import {
-  DiffAnnotationPayloadSchema,
-  DraftBrowserNotePageSchema,
-  DraftDiffCommentSchema,
-  DraftFileCommentSchema,
-  DraftSubmissionSchema,
-  FileAnnotationPayloadSchema,
-  MAX_ATTACHMENTS,
-  MessageMentionsSchema,
-  PlanCommentEditorDraftSchema,
-  SelectedTextCommentSchema,
-} from "@mcode/contracts";
+import type { DraftBrowserNotePage, DraftDiffComment, DraftFileComment, DraftSubmission } from "@mcode/contracts/models/next-message-draft";
+import type { McodeBrowserCapture } from "@mcode/contracts/models/browser-preview";
+import type { PlanCommentEditorDraft } from "@mcode/contracts/models/plan";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
+import { DiffAnnotationPayloadSchema, FileAnnotationPayloadSchema } from "@mcode/contracts/models/browser-preview";
+import { DraftBrowserNotePageSchema, DraftDiffCommentSchema, DraftFileCommentSchema, DraftSubmissionSchema } from "@mcode/contracts/models/next-message-draft";
+import { MAX_ATTACHMENTS } from "@mcode/contracts/models/file-types";
+import { MessageMentionsSchema } from "@mcode/contracts/models/mention";
+import { PlanCommentEditorDraftSchema } from "@mcode/contracts/models/plan";
+import { SelectedTextCommentSchema } from "@mcode/contracts/models/selected-text-comment";
 import type {
   ComposerDraft,
   DiffCommentEditorDraft,

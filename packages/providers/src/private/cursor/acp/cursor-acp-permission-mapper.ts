@@ -1,5 +1,5 @@
 import type { PermissionOption, RequestPermissionOutcome, ToolCallContent } from "@agentclientprotocol/sdk";
-import type { ApprovalRequestBody, ApprovalResponse, ApprovalSubject } from "@mcode/contracts";
+import type { ApprovalRequestBody, ApprovalResponse, ApprovalSubject } from "@mcode/contracts/models/approval";
 import { z } from "zod";
 import { createTextPatch } from "@mcode/shared";
 import { approvalPatch } from "../../../approval-patch.js";

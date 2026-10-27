@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { isAwaitingApproval } from "../isAwaitingApproval";
 import { useTerminalStore, type TerminalInstance } from "../terminalStore";

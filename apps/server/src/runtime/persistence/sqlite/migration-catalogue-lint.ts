@@ -1,6 +1,6 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { lazySchema } from "@mcode/contracts";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
 import { z } from "zod";
 import {
   ADD_COLUMN,

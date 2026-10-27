@@ -1,10 +1,5 @@
-import type {
-  ApprovalReviewMode,
-  IAgentProvider,
-  IApprovalReviewCapable,
-  InteractionMode,
-  PermissionMode,
-} from "@mcode/contracts";
+import type { ApprovalReviewMode, InteractionMode, PermissionMode } from "@mcode/contracts/models/enums";
+import type { IAgentProvider, IApprovalReviewCapable } from "@mcode/contracts/providers/interfaces";
 
 /** Provider fields needed to resolve a review decision before dispatch. */
 export type ApprovalReviewProvider = Pick<IAgentProvider, "id" | "descriptor"> & Partial<Pick<IApprovalReviewCapable, "getApprovalReviewSupport">>;

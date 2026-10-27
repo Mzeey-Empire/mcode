@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { ActionControls } from "./ActionControls";
 import { ShellControls } from "./ShellControls";

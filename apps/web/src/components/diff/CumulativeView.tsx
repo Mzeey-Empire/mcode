@@ -1,4 +1,4 @@
-import type { ReviewComparison } from "@mcode/contracts";
+import type { ReviewComparison } from "@mcode/contracts/models/review-comparison";
 import { FileList } from "./FileList";
 
 /** Props for CumulativeView. */

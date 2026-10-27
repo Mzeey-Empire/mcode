@@ -1,6 +1,7 @@
 import { createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
-import type { AgentEvent, AgentStopResult } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { AgentStopResult } from "@mcode/contracts/models/turn-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useQueueStore } from "@/stores/queueStore";
 import { useToastStore } from "@/stores/toastStore";

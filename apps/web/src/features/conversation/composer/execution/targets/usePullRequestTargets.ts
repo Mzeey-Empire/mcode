@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import type { PullRequestError, PullRequestTarget } from "@mcode/contracts";
+import type { PullRequestError } from "@mcode/contracts/pull-requests";
+import type { PullRequestTarget } from "@mcode/contracts/github";
 
 import { getTransport } from "@/transport";
 import { toPullRequestTarget, type PullRequestBranchTarget } from "./branch-target";

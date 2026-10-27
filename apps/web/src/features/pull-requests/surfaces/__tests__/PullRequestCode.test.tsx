@@ -1,12 +1,4 @@
-import type {
-  PullRequestFile,
-  PullRequestDetail,
-  PullRequestFilesResult,
-  PullRequestGetResult,
-  PullRequestIdentity,
-  PullRequestPatchResult,
-  PullRequestReviewThread,
-} from "@mcode/contracts";
+import type { PullRequestFile, PullRequestDetail, PullRequestFilesResult, PullRequestGetResult, PullRequestIdentity, PullRequestPatchResult, PullRequestReviewThread } from "@mcode/contracts/pull-requests";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";

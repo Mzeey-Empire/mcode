@@ -1,4 +1,4 @@
-import type { ReviewFileDiffResult } from "@mcode/contracts";
+import type { ReviewFileDiffResult } from "@mcode/contracts/models/review-comparison";
 import type { DiffReadOptions, McodeTransport } from "@/transport/types";
 import type { DiffSource } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";

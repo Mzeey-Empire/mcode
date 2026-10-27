@@ -1,21 +1,6 @@
-import {
-  PROVIDER_CATALOG_MAX_ENTRIES,
-  PROVIDER_CATALOG_MAX_DIAGNOSTICS,
-  PROVIDER_CATALOG_MAX_SELECTABLE_AGENTS,
-  ProviderCapabilityEntrySchema,
-  ProviderCatalogSnapshotSchema,
-  SelectableProviderAgentSchema,
-  SkillInfoSchema,
-  type ProviderCapabilityEntry,
-  type ProviderCatalogContext,
-  type ProviderCatalogDiagnostic,
-  type ProviderCatalogSourceDiagnostic,
-  type ProviderCatalogFreshness,
-  type ProviderCatalogSnapshot,
-  type SelectableProviderAgent,
-  type SettingsProviderId,
-  type SkillInfo,
-} from "@mcode/contracts";
+import { PROVIDER_CATALOG_MAX_ENTRIES, PROVIDER_CATALOG_MAX_DIAGNOSTICS, PROVIDER_CATALOG_MAX_SELECTABLE_AGENTS, ProviderCapabilityEntrySchema, ProviderCatalogSnapshotSchema, SelectableProviderAgentSchema, type ProviderCapabilityEntry, type ProviderCatalogContext, type ProviderCatalogDiagnostic, type ProviderCatalogSourceDiagnostic, type ProviderCatalogFreshness, type ProviderCatalogSnapshot, type SelectableProviderAgent } from "@mcode/contracts/providers/capability-catalog";
+import { SkillInfoSchema, type SkillInfo } from "@mcode/contracts/skills";
+import { type SettingsProviderId } from "@mcode/contracts/models/settings";
 import { isCodexProviderCatalogPrompt } from "@mcode/providers";
 
 /** Inputs used to construct and validate one provider catalog snapshot. */

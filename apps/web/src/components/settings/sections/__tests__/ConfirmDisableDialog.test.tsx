@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
-import { getDefaultSettings, type PartialSettings } from "@mcode/contracts";
+import { getDefaultSettings, type PartialSettings } from "@mcode/contracts/models/settings";
 
 // @base-ui/react (used by Dialog primitives) does not work in jsdom; stub with plain HTML.
 vi.mock("@/components/ui/dialog", () => ({

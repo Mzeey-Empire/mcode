@@ -2,7 +2,8 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderCatalogSnapshot, WorkspaceFileList } from "@mcode/contracts";
+import type { ProviderCatalogSnapshot } from "@mcode/contracts/providers/capability-catalog";
+import type { WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
 
 const listWorkspaceFiles = vi.mocked(mockTransport.listWorkspaceFiles);
 const getProviderCatalog = vi.mocked(mockTransport.getProviderCatalog);

@@ -1,8 +1,5 @@
-import type {
-  ConversationNewerPageIdentity,
-  ConversationOlderPage,
-  ConversationOlderPageIdentity,
-} from "@mcode/contracts";
+import type { ConversationNewerPageIdentity } from "@mcode/contracts/models/conversation-newer-page";
+import type { ConversationOlderPage, ConversationOlderPageIdentity } from "@mcode/contracts/models/conversation-older-page";
 import {
   createAdjacentPrefetchScheduler,
   type AdjacentPrefetchThread,

@@ -1,15 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type {
-  PullRequestDetail,
-  PullRequestGetRequest,
-  PullRequestFilesRequest,
-  PullRequestListRequest,
-  PullRequestPatchRequest,
-  PullRequestRelationship,
-  PullRequestSummary,
-  PullRequestTimelineRequest,
-} from "@mcode/contracts";
-import { PULL_REQUEST_CURSOR_COMPONENT_MAX_LENGTH } from "@mcode/contracts";
+import type { PullRequestDetail, PullRequestGetRequest, PullRequestFilesRequest, PullRequestListRequest, PullRequestPatchRequest, PullRequestRelationship, PullRequestSummary, PullRequestTimelineRequest } from "@mcode/contracts/pull-requests";
+import { PULL_REQUEST_CURSOR_COMPONENT_MAX_LENGTH } from "@mcode/contracts/pull-requests";
 import { GithubPullRequestClientError } from "../../github/github-pull-request-client.js";
 import type {
   PullRequestRemoteClient,

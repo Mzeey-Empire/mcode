@@ -2,7 +2,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { LexicalEditor } from "lexical";
-import type { FileReadResult, WorkspaceFileChanges } from "@mcode/contracts";
+import type { FileReadResult, WorkspaceFileChanges } from "@mcode/contracts/models/workspace-file";
 import { writeComposerContent } from "@/features/conversation/composer/draft/composer-editor-content";
 import { saveDraftFileComment } from "@/features/conversation/composer/draft/draft-file-comments";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";

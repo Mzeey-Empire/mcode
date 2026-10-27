@@ -13,7 +13,8 @@ import { asc, eq, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { planQuestionAnswers } from "../../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
-import { NativePlanQuestionBatchSchema, type Message, type NativePlanQuestionBatch, type PlanQuestionSettlement } from "@mcode/contracts";
+import { NativePlanQuestionBatchSchema, type NativePlanQuestionBatch, type PlanQuestionSettlement } from "@mcode/contracts/models/plan-questions";
+import { type Message } from "@mcode/contracts/models/message";
 import { MessageStore } from "../../conversation/persistence/message-store.js";
 
 /** Repository for the `plan_question_answers` sidecar table. */

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ProviderModelInfo } from "@mcode/contracts";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 import {
   MODEL_PROVIDERS,
   registerProviderModels,

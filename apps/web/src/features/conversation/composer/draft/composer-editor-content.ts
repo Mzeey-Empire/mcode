@@ -1,4 +1,4 @@
-import type { MessageMention } from "@mcode/contracts";
+import type { MessageMention } from "@mcode/contracts/models/mention";
 import {
   $createSlashCommandNode,
   $createTypedMentionNode,

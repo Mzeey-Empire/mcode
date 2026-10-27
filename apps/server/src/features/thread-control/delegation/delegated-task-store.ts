@@ -3,7 +3,11 @@ import type { Database } from "bun:sqlite";
 import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
-import { PermissionModeSchema, ProviderIdSchema, CanonicalAgentEventEnvelopeSchema, AgentEventSchema, isDelegateTaskToolName } from "@mcode/contracts";
+import { PermissionModeSchema } from "@mcode/contracts/models/enums";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { CanonicalAgentEventEnvelopeSchema } from "@mcode/contracts/compat/agent-model";
+import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
+import { isDelegateTaskToolName } from "@mcode/contracts/models/subagent-roster";
 import { canonicalAgentEvents, canonicalAgentItems, canonicalAgentTurns, delegatedTasks, threadStartups, threadControlApprovals } from "../../../runtime/persistence/sqlite/schema.js";
 import { noticeCovered } from "./task-notice.js";
 

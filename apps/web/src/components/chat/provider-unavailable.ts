@@ -1,4 +1,4 @@
-import type { ProviderId } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 
 /** Why the thread's provider cannot run: disabled in settings, or its CLI binary was not found. */
 export type ProviderUnavailableReason = "disabled" | "cli_missing";

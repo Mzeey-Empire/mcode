@@ -3,7 +3,7 @@ import * as NodeEvents from "node:events";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BROWSER_AUTOMATION_CONTRACT_VERSION, BrowserAutomationResponseSchema, type BrowserAutomationHostDispatch, type BrowserAutomationResponse } from "@mcode/contracts";
+import { BROWSER_AUTOMATION_CONTRACT_VERSION, BrowserAutomationResponseSchema, type BrowserAutomationHostDispatch, type BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
 import {
   createBrowserConformanceResourceSnapshot,
   normalizeBrowserConformanceRun,

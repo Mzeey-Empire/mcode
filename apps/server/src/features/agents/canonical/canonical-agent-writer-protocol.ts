@@ -1,4 +1,6 @@
-import type { CanonicalAgentEventEnvelope, CanonicalAgentRevision, StartupRefusal } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { CanonicalAgentRevision } from "@mcode/contracts/models/canonical-agent-reconnect";
+import type { StartupRefusal } from "@mcode/contracts/startup-failure";
 import type { SavedProgressReceipt } from "../execution/thread-progress-types.js";
 import type { CanonicalProviderProjection } from "./canonical-provider-projection.js";
 import type { CanonicalAcceptedWriteInput } from "./canonical-accepted-write.js";

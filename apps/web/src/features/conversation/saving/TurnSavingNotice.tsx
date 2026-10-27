@@ -1,4 +1,4 @@
-import type { TurnSavingStatus } from "@mcode/contracts";
+import type { TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { getTransport } from "@/transport";

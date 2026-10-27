@@ -1,8 +1,5 @@
-import type {
-  BrowserHistoryEntry,
-  BrowserServerThumbnail,
-  WorkspaceEnvironmentActionRun,
-} from "@mcode/contracts";
+import type { BrowserHistoryEntry, BrowserServerThumbnail } from "@mcode/contracts/models/browser-preview";
+import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { loopbackPort } from "../navigation/nav-errors";
 
 /** What a project server tile shows. Derived from the run, never stored. */

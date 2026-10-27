@@ -1,4 +1,6 @@
-import { createSubagentPresentation, type AgentEvent, type TurnFailure } from "@mcode/contracts";
+import { createSubagentPresentation } from "@mcode/contracts/models/tool-call-record";
+import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { type TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { ProviderTurnError } from "@mcode/providers";
 
 /**

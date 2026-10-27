@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentEventRoutingSchema } from "@mcode/agent-model";
-import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts/events/agent-event";
+import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderEventBatch, ProviderEventSinkPort } from "../../../host-ports.js";
 import {
   CursorCanonicalEventPublisher,

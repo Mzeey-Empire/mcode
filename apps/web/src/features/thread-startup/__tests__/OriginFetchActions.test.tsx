@@ -1,5 +1,5 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
-import type { ThreadStartup } from "@mcode/contracts";
+import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

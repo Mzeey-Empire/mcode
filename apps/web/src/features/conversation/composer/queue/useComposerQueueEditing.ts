@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { PreviewAnnotationBundle } from "@mcode/contracts";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import {
   MCODE_BROWSER_CAPTURE_FENCE_CLOSE,

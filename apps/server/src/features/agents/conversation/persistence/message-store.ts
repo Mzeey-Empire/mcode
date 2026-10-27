@@ -8,29 +8,19 @@ import { notSessionNotice, transcriptMessageVisibility } from "./transcript-visi
 import type { Changes, Database } from "bun:sqlite";
 import { and, asc, count, desc, eq, getTableColumns, gt, inArray, isNotNull, lt, lte, notExists, placeholder, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type {
-  HtmlVisual,
-  Message,
-  LegacyMessageProvenance,
-  MessageMention,
-  MessageRole,
-  ParentAgentMessageProvenance,
-  PreviewAnnotationBundle,
-  SelectedTextComment,
-  StoredAttachment,
-  SystemNoticeMetadata,
-  TurnOutcome,
-} from "@mcode/contracts";
-import {
-  HtmlVisualSchema,
-  PreviewAnnotationBundleSchema,
-  ProviderSwitchMarkerSchema,
-  LegacyMessageProvenanceSchema,
-  ParentAgentMessageProvenanceSchema,
-  SelectedTextCommentsSchema,
-  SystemNoticeMetadataSchema,
-  THREAD_GET_TRANSCRIPT_MAX_BYTES,
-} from "@mcode/contracts";
+import type { HtmlVisual } from "@mcode/contracts/models/html-visual";
+import type { Message, LegacyMessageProvenance, ParentAgentMessageProvenance, SystemNoticeMetadata } from "@mcode/contracts/models/message";
+import type { MessageMention } from "@mcode/contracts/models/mention";
+import type { MessageRole } from "@mcode/contracts/models/enums";
+import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
+import type { StoredAttachment } from "@mcode/contracts/models/attachment";
+import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
+import { HtmlVisualSchema } from "@mcode/contracts/models/html-visual";
+import { PreviewAnnotationBundleSchema } from "@mcode/contracts/models/browser-preview";
+import { ProviderSwitchMarkerSchema, LegacyMessageProvenanceSchema, ParentAgentMessageProvenanceSchema, SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
+import { SelectedTextCommentsSchema } from "@mcode/contracts/models/selected-text-comment";
+import { THREAD_GET_TRANSCRIPT_MAX_BYTES } from "@mcode/contracts/thread-control";
 import { messages, threads, toolCallRecords, turnSteers } from "../../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
 

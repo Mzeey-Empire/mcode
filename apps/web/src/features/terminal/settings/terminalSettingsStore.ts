@@ -1,11 +1,6 @@
 import { create } from "zustand";
-import type {
-  TerminalCustomProfile,
-  TerminalPreferencesUpdate,
-  TerminalProfileReference,
-  TerminalProfileRecovery,
-  TerminalResolvedProfile,
-} from "@mcode/contracts";
+import type { TerminalCustomProfile, TerminalProfileReference, TerminalResolvedProfile } from "@mcode/contracts/models/terminal";
+import type { TerminalPreferencesUpdate, TerminalProfileRecovery } from "@mcode/contracts/models/terminal-settings";
 import { getTransport } from "@/transport";
 import type { TerminalProfileList } from "@/transport/types";
 import { useSettingsStore } from "@/stores/settingsStore";

@@ -1,6 +1,6 @@
 import { useThreadRecord } from "@/stores/thread-selectors";
 import { type Thread } from "@/transport";
-import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts";
+import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
 import { useMemo } from "react";
 
 /** Shared usageCategoryShortLabel used by the overview entries. */

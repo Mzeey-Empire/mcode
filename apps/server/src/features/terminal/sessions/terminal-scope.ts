@@ -1,6 +1,6 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { TerminalScopeSchema, type TerminalScope } from "@mcode/contracts";
+import { TerminalScopeSchema, type TerminalScope } from "@mcode/contracts/models/terminal";
 
 /** Dependencies that resolve a Terminal scope to its current checkout. */
 export interface TerminalScopeResolverDependencies {

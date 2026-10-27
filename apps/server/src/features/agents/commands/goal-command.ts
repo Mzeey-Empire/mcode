@@ -1,12 +1,6 @@
-import {
-  type IAgentProvider,
-  type AgentEvent,
-  AgentEventType,
-  type GoalState,
-  type IGoalCapable,
-  isGoalCapable,
-  isGoalOpen,
-} from "@mcode/contracts";
+import { type IAgentProvider, type IGoalCapable, isGoalCapable } from "@mcode/contracts/providers/interfaces";
+import { type AgentEvent, AgentEventType } from "@mcode/contracts/events/agent-event";
+import { type GoalState, isGoalOpen } from "@mcode/contracts/models/goal";
 import type { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { goalCommandWriteOperations } from "./goal-command-write-operations.js";
 import type { CommandContext, CommandOutcome, McodeCommand } from "./command-router.js";

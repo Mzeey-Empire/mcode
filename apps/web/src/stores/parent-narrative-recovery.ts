@@ -1,4 +1,6 @@
-import { MessageSchema, ParentNarrativeRecoveryItemSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import { MessageSchema, type Message } from "@mcode/contracts/models/message";
+import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { type AgentItem, type AgentModelState, type AgentTurn } from "@mcode/contracts/compat/agent-model";
 import { recordToApprovalReceipt, recordToHookExecution, recordToToolCall } from "@/features/conversation/narrative/build-persisted-narrative";
 import { narrationSegments } from "@/features/conversation/narrative/narrative-thought-classification";
 import { backgroundHeldToolIds } from "@/features/conversation/narrative/background-held-tools";

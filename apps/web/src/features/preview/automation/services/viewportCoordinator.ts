@@ -1,9 +1,4 @@
-import {
-  BROWSER_AUTOMATION_MAX_VIEWPORT_PX,
-  BROWSER_AUTOMATION_MIN_VIEWPORT_PX,
-  resolveBrowserAutomationViewportPresentationScale,
-  type BrowserAutomationViewportPresentation,
-} from "@mcode/contracts";
+import { BROWSER_AUTOMATION_MAX_VIEWPORT_PX, BROWSER_AUTOMATION_MIN_VIEWPORT_PX, resolveBrowserAutomationViewportPresentationScale, type BrowserAutomationViewportPresentation } from "@mcode/contracts/models/browser-automation";
 
 /** Lower bound for a renderer CSS viewport dimension. */
 export const MIN_VIEWPORT_CSS_PX = BROWSER_AUTOMATION_MIN_VIEWPORT_PX;
