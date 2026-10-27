@@ -14,16 +14,26 @@ interface ProvidersPopoverProps {
   onTry: (providerId: ProviderId, modelId: string) => void;
 }
 
-/** Body of the sidebar Providers popover: a header and one row per provider that needs attention. */
+/** Body of the sidebar Providers popover: a header and one row per provider that needs attention, or an empty state when none do. */
 export function ProvidersPopover({ rows, ...actions }: ProvidersPopoverProps) {
   return (
     <div data-testid="providers-popover">
       <div className="flex h-9 items-center px-2.5 text-button text-ink">Providers</div>
-      {rows.length > 0 && (
+      {rows.length > 0 ? (
         <ul>
           {rows.map((row) => <ProviderRow key={row.providerId} row={row} {...actions} />)}
         </ul>
+      ) : (
+        <EmptyState />
       )}
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div role="status" className="py-6 text-center text-sm text-muted">
+      No notifications
     </div>
   );
 }

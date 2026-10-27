@@ -65,13 +65,14 @@ afterEach(() => {
 });
 
 describe("ProvidersBell", () => {
-  it("shows only the header and no dot when nothing needs attention", async () => {
+  it("shows the header and a No notifications empty state, with no dot, when nothing needs attention", async () => {
     serve([status("claude", {})]);
     render(<ProvidersBell />);
 
     expect(screen.queryByTestId("providers-bell-dot")).toBeNull();
     const popover = await openBell();
     expect(within(popover).getByText("Providers")).toBeInTheDocument();
+    expect(within(popover).getByRole("status")).toHaveTextContent("No notifications");
     expect(within(popover).queryAllByRole("listitem")).toHaveLength(0);
     expect(mockTransport.listProviderStatus).toHaveBeenCalledWith(false);
     expect(mockTransport.getProviderUsage).not.toHaveBeenCalled();
@@ -85,6 +86,7 @@ describe("ProvidersBell", () => {
     const popover = await openBell();
     expect(within(popover).getByText("Devin")).toBeInTheDocument();
     expect(within(popover).getByText("Signed out · threads on Devin can't start")).toBeInTheDocument();
+    expect(within(popover).queryByText("No notifications")).toBeNull();
     fireEvent.click(within(popover).getByRole("button", { name: "Sign in" }));
     expect(signInMock).toHaveBeenCalledWith(["devin", "auth", "login"]);
     expect(mockTransport.getProviderUsage).not.toHaveBeenCalled();
