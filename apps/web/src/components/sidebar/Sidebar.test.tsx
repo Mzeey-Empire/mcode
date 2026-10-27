@@ -88,7 +88,7 @@ describe("Sidebar", () => {
 
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(hoisted.setPrimarySurface).toHaveBeenCalledWith("pullRequests");
-    expect(within(footer).getByRole("button", { name: "Providers" })).toBeEnabled();
+    expect(within(footer).getByRole("button", { name: "Notifications" })).toBeEnabled();
     expect(within(screen.getByTestId("sidebar-update-slot")).getByTestId("update-button")).toBeInTheDocument();
   });
 
