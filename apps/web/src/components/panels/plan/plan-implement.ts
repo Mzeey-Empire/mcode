@@ -189,8 +189,8 @@ async function openImplementedThread(sourceThreadId: string, targetThreadId: str
   const workspace = useWorkspaceStore.getState();
   const source = workspace.threads.find(thread => thread.id === sourceThreadId);
   if (source) {
-    await workspace.loadThreads(source.workspace_id);
-    workspace.setActiveWorkspace(source.workspace_id, undefined, false);
+    if (!workspace.threads.some(thread => thread.id === targetThreadId)) await workspace.hydrateThreads();
+    workspace.setActiveWorkspace(source.workspace_id);
   }
   workspace.setActiveThread(targetThreadId);
 }

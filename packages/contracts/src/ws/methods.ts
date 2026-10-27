@@ -779,10 +779,6 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ path: z.string() }),
     result: FilesystemBrowseResultSchema(),
   },
-  "thread.list": {
-    params: z.object({ workspaceId: z.string() }),
-    result: z.array(ThreadSchema()),
-  },
   "thread.listAll": {
     params: z.object({}),
     result: z.array(ThreadSchema()),

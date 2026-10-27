@@ -254,7 +254,7 @@ function defaultWorkspaceState(overrides: Partial<{
     resolvePendingStartup: vi.fn(),
     threads: overrides.threads ?? [thread],
     loadWorkspaces: vi.fn(),
-    loadThreads: vi.fn(),
+    hydrateThreads: vi.fn(),
     setActiveWorkspace: vi.fn(),
     setActiveThread: vi.fn(),
     createWorkspace: vi.fn(),

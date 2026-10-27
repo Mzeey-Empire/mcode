@@ -237,7 +237,7 @@ function defaultWorkspaceState() {
     prUrlsByThreadId: {} as Record<string, string>,
     checksById: {} as Record<string, import("@mcode/contracts/github").ChecksStatus>,
     loadWorkspaces: vi.fn(),
-    loadThreads: vi.fn(),
+    hydrateThreads: vi.fn(),
     setActiveWorkspace: vi.fn(),
     setActiveThread: vi.fn(),
     createWorkspace: vi.fn(),

@@ -368,21 +368,6 @@ function ThreadDeleteWorktreeOption({
   );
 }
 
-function useLoadExpandedWorkspaceThreads(
-  workspaces: Workspace[],
-  expanded: Record<string, boolean>,
-  loadThreads: (workspaceId: string) => Promise<void>,
-) {
-  const didLoadExpandedRef = useRef(false);
-  useEffect(() => {
-    if (workspaces.length === 0 || didLoadExpandedRef.current) return;
-    didLoadExpandedRef.current = true;
-    for (const workspace of workspaces) {
-      if (expanded[workspace.id]) loadThreads(workspace.id);
-    }
-  }, [workspaces, expanded, loadThreads]);
-}
-
 function useLoadActiveWorkspaceWorktrees(
   activeWorkspaceId: string | null,
   threads: WorkspaceThread[],
@@ -496,7 +481,6 @@ export function ProjectTree() {
   const threadDrafts = useThreadDraftStore((s) => s.drafts);
   const threads = useWorkspaceStore((s) => s.threads);
   const loadWorkspaces = useWorkspaceStore((s) => s.loadWorkspaces);
-  const loadThreads = useWorkspaceStore((s) => s.loadThreads);
   const loadWorktrees = useWorkspaceStore((s) => s.loadWorktrees);
   const worktreesLoadedForWorkspace = useWorkspaceStore(
     (s) => s.worktreesLoadedForWorkspace,
@@ -583,7 +567,6 @@ export function ProjectTree() {
     loadWorkspaces();
   }, [loadWorkspaces]);
 
-  useLoadExpandedWorkspaceThreads(workspaces, expanded, loadThreads);
   useWorkspaceStartupRecovery(workspaceIds);
 
   // In-flight lifecycle flags outlive any one row; tearing the whole tree down
@@ -637,16 +620,9 @@ export function ProjectTree() {
     (wsId: string) => {
       // A click in the same tick as a drag release is the drop, not a toggle.
       if (Date.now() < suppressPostDragClickUntilRef.current) return;
-      const isExpanding = !expanded[wsId];
       setExpanded((prev) => ({ ...prev, [wsId]: !prev[wsId] }));
-      if (isExpanding) {
-        // Load threads independently without changing the active workspace.
-        // Updaters must stay pure: StrictMode can invoke them twice, which
-        // would double-fire this load.
-        loadThreads(wsId);
-      }
     },
-    [expanded, loadThreads],
+    [],
   );
 
   // Open the palette's folder-browse view instead of using the native OS dialog.

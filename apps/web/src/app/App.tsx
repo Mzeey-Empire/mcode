@@ -507,9 +507,7 @@ export function App() {
     async (location: NavigationLocation): Promise<boolean> => {
       const workspace = useWorkspaceStore.getState();
       if (location.workspaceId !== workspace.activeWorkspaceId) {
-        workspace.setActiveWorkspace(location.workspaceId, undefined, false);
-        if (location.workspaceId)
-          await useWorkspaceStore.getState().loadThreads(location.workspaceId);
+        workspace.setActiveWorkspace(location.workspaceId);
       }
       if (location.kind === "thread") {
         if (
