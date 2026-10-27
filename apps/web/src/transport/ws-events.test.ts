@@ -174,6 +174,25 @@ describe("ws-events thread.lifecycleChanged", () => {
     expect(useCompletionStore.getState().undoLineThreadId).toBe(undoLineThreadId);
   });
 
+  it.each([
+    ["an activity push", (id: string) => pushEmitter.emit("thread.activity", { threadId: id, at: "2026-01-03T00:00:00.000Z" })],
+    ["a lifecycle push", (id: string) => pushEmitter.emit("thread.lifecycleChanged", { thread: makeThread({ id }) })],
+  ])("clears a refused completion on %s for its thread, but keeps a retryable failure", (_push, push) => {
+    useWorkspaceStore.setState({ threads: [makeThread(), makeThread({ id: "thread-2" })] });
+    useCompletionStore.setState({
+      entries: new Map([
+        ["thread-1", { phase: "failed", failure: { kind: "refused", refusal: "running", message: "The thread is running" } }],
+        ["thread-2", { phase: "failed", failure: { kind: "retryable", message: "socket closed" } }],
+      ]),
+    });
+    startPushListeners();
+
+    push("thread-1");
+    push("thread-2");
+
+    expect([...useCompletionStore.getState().entries.keys()]).toEqual(["thread-2"]);
+  });
+
   it("removes a thread after an automatic deletion push", () => {
     useWorkspaceStore.setState({ threads: [makeThread(), makeThread({ id: "thread-2" })] });
     startPushListeners();
