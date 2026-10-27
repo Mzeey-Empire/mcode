@@ -604,6 +604,8 @@ interface WorkspaceState {
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
   threads: WorkspaceThread[];
+  /** Bumped each time `hydrateThreads` replaces the index, so the sidebar places those changes without motion. */
+  threadSnapshotEpoch: number;
   activeThreadId: string | null;
   /** Startup identity retained per thread until its startup lifecycle resolves. */
   pendingStartupByThreadId: Readonly<Record<string, PendingStartup>>;
@@ -1115,6 +1117,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   workspaces: [],
   activeWorkspaceId: null,
   threads: [],
+  threadSnapshotEpoch: 0,
   activeThreadId: null,
   pendingStartupByThreadId: {},
   activeDraftId: null,
@@ -1400,7 +1403,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     try {
       const incoming = await getTransport().listAllThreads();
       if (request !== hydrationRequest) return;
-      set((state) => ({ threads: mergeThreadSnapshot(incoming, before, state.threads), loading: false, error: null }));
+      set((state) => ({ threads: mergeThreadSnapshot(incoming, before, state.threads), threadSnapshotEpoch: state.threadSnapshotEpoch + 1, loading: false, error: null }));
       void get().syncThreadPrs();
     } catch (error) {
       if (request === hydrationRequest) set({ error: String(error), loading: false });
