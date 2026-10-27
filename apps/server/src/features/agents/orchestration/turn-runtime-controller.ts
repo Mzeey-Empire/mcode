@@ -623,12 +623,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private async abortTurnAdmission(lease: TurnRuntimeLease): Promise<void> {
     if (await this.finishUnsentWorkerTurn(lease.threadId, lease.turnExecutionId)) {
       this.turnRuntime.terminalize(lease.threadId, lease.turnExecutionId, "errored");
-      this.disarmTurnRetryWindow(lease.threadId);
-      this.trackSessionEnded(lease.threadId, lease.turnExecutionId);
+    } else if (!this.turnRuntime.terminalize(lease.threadId, lease.turnExecutionId, "errored")) {
       return;
     }
-    if (!this.turnRuntime.terminalize(lease.threadId, lease.turnExecutionId, "errored")) return;
-    await (this.finalizeTerminalTurn(lease.threadId, "errored", "turn admission failure") ?? Promise.resolve());
+    // Before the parent start commits there are no durable turn rows or baseline to finalize;
+    // the failed send RPC is how the client learns the turn never started.
     this.disarmTurnRetryWindow(lease.threadId);
     this.trackSessionEnded(lease.threadId, lease.turnExecutionId);
   }
