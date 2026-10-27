@@ -59,6 +59,7 @@ import { ThreadBranchingService } from "../../projects/worktrees/thread-branchin
 import { ThreadService } from "../../thread-control/index.js";
 import { ThreadProviderSessionRepo } from "../../thread-control/persistence/thread-provider-session-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import { CompletionHolds } from "../../thread-control/lifecycle/completion-holds.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
@@ -300,6 +301,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(WorkerOwnedTurnRuntime).owner,
       c.resolve(TurnResumeScheduler),
       c.resolve(ProviderSwitchService),
+      c.resolve(CompletionHolds),
     )),
   });
   container.register(TurnConversationProjectionService, { useClass: TurnConversationProjectionService }, { lifecycle: Lifecycle.Singleton });
