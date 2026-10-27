@@ -12,7 +12,6 @@ interface PullRequestChipProps {
   readonly dimmed: boolean;
 }
 
-// The chip sits inside the clickable row: its own clicks, presses and keys must not select it.
 function stopRowEvent(event: React.SyntheticEvent): void {
   event.stopPropagation();
 }
@@ -29,10 +28,7 @@ function StateIcon({ pr }: { pr: ThreadPullRequest }) {
 
 const CHIP_CLASS = "flex h-5 shrink-0 items-center gap-1 rounded-md px-1 text-caption tabular-nums text-muted outline-none transition-colors hover:bg-selected/60 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70";
 
-/**
- * A thread's PR chip on the branch line. One PR shows its state icon and number and opens it;
- * several show the top-ranked PR's icon and "+N" and toggle the inline list instead.
- */
+/** Opens a single PR or toggles the ranked list when several PRs are linked. */
 export function PullRequestChip({ threadId, ranked, expanded, onToggleExpanded, dimmed }: PullRequestChipProps) {
   const [primary] = ranked;
   if (!primary) return null;
