@@ -26,6 +26,8 @@ import { IDLE_CLEANUP_RETRY, useRowLifecycleStore } from "./row-lifecycle-store"
 import type { SidebarItem } from "./sidebar-model";
 import type { InlineEditState, SidebarProviderAvailability, SidebarRowContext } from "./sidebar-row-context";
 import { PullRequestChip, PullRequestList } from "./PullRequestChip";
+import { useCompletionStore } from "./completion-store";
+import type { CompletionEntry } from "./completion-machine";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
 
@@ -69,16 +71,16 @@ function ThreadRow({ thread, workspace, depth, showProject, ctx }: { thread: Wor
   const isRunning = useThreadStore((s) => isThreadExecuting(thread.id, s));
   const startupPending = useWorkspaceStore((s) => s.pendingStartupByThreadId[thread.id] !== undefined);
   const rowState = useThreadRowState(thread.id, thread.clientPreparing === true);
-  const presentation = createThreadRowPresentation(thread, rowState, ctx, startupPending, isActive);
+  const completion = useCompletionStore((s) => s.entries.get(thread.id));
+  const presentation = createThreadRowPresentation(thread, rowState, ctx, startupPending, isActive, completion);
   const lifecycle = useThreadLifecycleActions({
     thread,
     isEditing,
     isRunning,
     awaitingApproval: rowState.kind === "needs-you" && rowState.label === "Approval required",
     startupPending,
-    isUserCompleted: presentation.isUserCompleted,
+    lifecycleKind: presentation.lifecycleKind,
     cleanupBlocked: presentation.cleanupBlocked,
-    onCompleteThread: ctx.onCompleteThread,
     onReopenThread: ctx.onReopenThread,
     onRetryThreadCleanup: ctx.onRetryThreadCleanup,
   });
@@ -126,6 +128,19 @@ interface ThreadRowPresentation {
   scaffoldDim: string | false;
   isUserCompleted: boolean;
   cleanupBlocked: boolean;
+  /** Struck through in place: the server is holding the completion, or the pointer keeps it. */
+  completing: boolean;
+  completionFailure: string | null;
+  lifecycleKind: ThreadLifecycleKind;
+}
+
+/** What the row's lifecycle button does now. */
+type ThreadLifecycleKind = "complete" | "undo" | "retry" | "reopen";
+
+function lifecycleKindOf(completion: CompletionEntry | undefined, isUserCompleted: boolean): ThreadLifecycleKind {
+  if (completion?.phase === "failed") return "retry";
+  if (completion) return "undo";
+  return isUserCompleted ? "reopen" : "complete";
 }
 
 interface ThreadRowLifecycleActions {
@@ -164,6 +179,7 @@ function createThreadRowPresentation(
   ctx: Pick<SidebarRowContext, "worktreesLoadedFor" | "validWorktreePaths" | "availableProviders">,
   startupPending: boolean,
   isActive: boolean,
+  completion: CompletionEntry | undefined,
 ): ThreadRowPresentation {
   const isUserCompleted = thread.user_completed_at !== null;
   return {
@@ -174,6 +190,9 @@ function createThreadRowPresentation(
     scaffoldDim: thread.clientPreparing || thread.clientError || startupPending ? "opacity-[0.72]" : false,
     isUserCompleted,
     cleanupBlocked: isUserCompleted && thread.cleanup_state === "blocked",
+    completing: completion !== undefined && completion.phase !== "failed",
+    completionFailure: completion?.phase === "failed" ? completion.failure.message : null,
+    lifecycleKind: lifecycleKindOf(completion, isUserCompleted),
   };
 }
 
@@ -207,18 +226,17 @@ function useThreadLifecycleActions({
   isRunning,
   awaitingApproval,
   startupPending,
-  isUserCompleted,
+  lifecycleKind,
   cleanupBlocked,
-  onCompleteThread,
   onReopenThread,
   onRetryThreadCleanup,
-}: Pick<SidebarRowContext, "onCompleteThread" | "onReopenThread" | "onRetryThreadCleanup"> & {
+}: Pick<SidebarRowContext, "onReopenThread" | "onRetryThreadCleanup"> & {
   thread: WorkspaceThread;
   isEditing: boolean;
   isRunning: boolean;
   awaitingApproval: boolean;
   startupPending: boolean;
-  isUserCompleted: boolean;
+  lifecycleKind: ThreadLifecycleKind;
   cleanupBlocked: boolean;
 }): ThreadRowLifecycleActions {
   const isLifecyclePending = useRowLifecycleStore((state) => state.pendingLifecycle.has(thread.id));
@@ -233,24 +251,18 @@ function useThreadLifecycleActions({
     || Boolean(thread.clientPreparing || thread.clientError);
   const handleLifecycleClick = useCallback(async (event: React.MouseEvent) => {
     event.stopPropagation();
-    // Read the store directly: two clicks in one frame both pass the committed
+    const completions = useCompletionStore.getState();
+    if (lifecycleKind === "undo") return completions.undo(thread.id);
+    // Read the stores directly: two clicks in one frame both pass the committed
     // snapshot before the subscribed re-render lands.
-    const rowLifecycle = useRowLifecycleStore.getState();
     if (lifecycleUnavailable
-      || rowLifecycle.pendingLifecycle.has(thread.id)
+      || useRowLifecycleStore.getState().pendingLifecycle.has(thread.id)
+      || completions.entries.get(thread.id)?.phase === "holding"
       || useWorkspaceStore.getState().pendingStartupByThreadId[thread.id] !== undefined) return;
-    rowLifecycle.setLifecyclePending(thread.id, true);
-    try {
-      const updateLifecycle = isUserCompleted ? onReopenThread : onCompleteThread;
-      await updateLifecycle(thread.id);
-    } catch {
-      // The store action already surfaces the failure via workspaceStore.error;
-      // swallowing here keeps expected rejections (e.g. a pending mutation when
-      // a turn raced the click) out of the unhandled-rejection crash reporter.
-    } finally {
-      useRowLifecycleStore.getState().setLifecyclePending(thread.id, false);
-    }
-  }, [isUserCompleted, lifecycleUnavailable, onCompleteThread, onReopenThread, thread.id]);
+    if (lifecycleKind === "retry") return completions.retry(thread.id);
+    if (lifecycleKind === "complete") return completions.complete(thread.id);
+    await reopenWithPendingFlag(thread.id, onReopenThread);
+  }, [lifecycleKind, lifecycleUnavailable, onReopenThread, thread.id]);
   const handleCleanupRetry = useCallback(async (event: React.MouseEvent) => {
     event.stopPropagation();
     if (!cleanupBlocked || useRowLifecycleStore.getState().cleanupRetry.get(thread.id)?.pending) return;
@@ -275,6 +287,19 @@ function useThreadLifecycleActions({
     handleLifecycleClick,
     handleCleanupRetry,
   };
+}
+
+async function reopenWithPendingFlag(threadId: string, onReopenThread: (threadId: string) => Promise<void>): Promise<void> {
+  useRowLifecycleStore.getState().setLifecyclePending(threadId, true);
+  try {
+    await onReopenThread(threadId);
+  } catch {
+    // The store action already surfaces the failure via workspaceStore.error;
+    // swallowing here keeps expected rejections (e.g. a pending mutation when
+    // a turn raced the click) out of the unhandled-rejection crash reporter.
+  } finally {
+    useRowLifecycleStore.getState().setLifecyclePending(threadId, false);
+  }
 }
 
 function cleanupStatusLabel(retryError: string | null, cleanupState: WorkspaceThread["cleanup_state"]): string | null {
@@ -316,6 +341,8 @@ function ThreadRowVisual({
       onSelectThread={onSelectThread}
       onThreadContextMenu={onThreadContextMenu}
       onRevealChange={setRevealed}
+      onMouseEnter={() => useCompletionStore.getState().pointerEntered(thread.id)}
+      onMouseLeave={() => useCompletionStore.getState().pointerLeft(thread.id)}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         {showProject && <ThreadRowProjectLine workspaceId={thread.workspace_id} workspaceName={workspaceName} />}
@@ -511,11 +538,12 @@ function ThreadRowTitleLine({
             className={cn(
               "text-fade min-w-0 flex-1 text-label",
               presentation.titleTone === "prominent" ? "text-ink" : "text-muted",
-              presentation.isUserCompleted && "text-muted/55 line-through decoration-muted/55 decoration-1",
+              presentation.isUserCompleted && !presentation.completing && "text-muted/55 line-through decoration-muted/55 decoration-1",
+              presentation.completing && "text-muted/55",
             )}
             data-testid="thread-title"
           >
-            {thread.title}
+            {presentation.completing ? <span data-strike className="sidebar-strike">{thread.title}</span> : thread.title}
           </div>
         )}
       </div>
@@ -608,6 +636,17 @@ function ThreadRowTrailingSlot({
 
 /** The row's status: its state mark and label, else the most urgent standing caption. */
 function ThreadRowStatus({ thread, presentation, lifecycle }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {
+  if (presentation.completionFailure !== null) {
+    return <ThreadRowCaption role="status" className="text-error">{presentation.completionFailure}</ThreadRowCaption>;
+  }
+  if (presentation.completing) {
+    return (
+      <>
+        <StatusMark state="success" label="Completed" />
+        <ThreadRowCaption className="text-success">Completed</ThreadRowCaption>
+      </>
+    );
+  }
   const { mark, label } = presentation.look;
   if (!mark && !label) return <ThreadRowStandingCaption thread={thread} presentation={presentation} lifecycle={lifecycle} />;
   return (
@@ -665,24 +704,32 @@ function ThreadRowActions({
   );
 }
 
+const LIFECYCLE_ACTION: Record<ThreadLifecycleKind, { readonly verb: string; readonly tooltip: string }> = {
+  complete: { verb: "Complete", tooltip: "Complete thread" },
+  undo: { verb: "Undo completing", tooltip: "Undo" },
+  retry: { verb: "Retry completing", tooltip: "Retry" },
+  reopen: { verb: "Reopen", tooltip: "Undo completion" },
+};
+
 function ThreadLifecycleAction({ thread, presentation, lifecycle }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {
-  const reopen = presentation.isUserCompleted;
+  const kind = presentation.lifecycleKind;
   return (
     <ThreadRowAction
-      label={reopen ? `Reopen ${thread.title}` : `Complete ${thread.title}`}
-      tooltip={reopen ? "Undo completion" : "Complete thread"}
-      disabled={lifecycle.lifecycleUnavailable}
+      label={`${LIFECYCLE_ACTION[kind].verb} ${thread.title}`}
+      tooltip={LIFECYCLE_ACTION[kind].tooltip}
+      disabled={kind !== "undo" && lifecycle.lifecycleUnavailable}
       onClick={lifecycle.handleLifecycleClick}
     >
-      <ThreadLifecycleIcon isPending={lifecycle.isLifecyclePending} reopen={reopen} />
+      <ThreadLifecycleIcon isPending={lifecycle.isLifecyclePending} kind={kind} />
     </ThreadRowAction>
   );
 }
 
-function ThreadLifecycleIcon({ isPending, reopen }: { isPending: boolean; reopen: boolean }) {
+function ThreadLifecycleIcon({ isPending, kind }: { isPending: boolean; kind: ThreadLifecycleKind }) {
   if (isPending) return <Spinner size={12} />;
-  if (reopen) return <Undo2 size={14} aria-hidden />;
-  return <Check size={14} aria-hidden />;
+  if (kind === "retry") return <RefreshCw size={13} aria-hidden />;
+  if (kind === "complete") return <Check size={14} aria-hidden />;
+  return <Undo2 size={14} aria-hidden />;
 }
 
 function ThreadCleanupRetry({ thread, lifecycle }: Pick<ThreadRowVisualProps, "thread" | "lifecycle">) {

@@ -37,7 +37,6 @@ export interface SidebarRowContext {
   onThreadDoubleClick(threadId: string): void;
   onSelectThread(workspaceId: string, threadId: string): void;
   onThreadContextMenu(event: React.MouseEvent, thread: Thread, workspacePath: string): void;
-  onCompleteThread(threadId: string): Promise<void>;
   onReopenThread(threadId: string): Promise<void>;
   onRetryThreadCleanup(threadId: string): Promise<void>;
   onOpenDraft(workspaceId: string, draftId: string): void;
