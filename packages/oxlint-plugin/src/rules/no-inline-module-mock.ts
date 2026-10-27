@@ -12,7 +12,7 @@ function isViMock(node: ESTree.CallExpression): boolean {
   );
 }
 
-function isFactory(node: ESTree.Argument | undefined): node is ESTree.ArrowFunctionExpression | ESTree.FunctionExpression {
+function isFactory(node: ESTree.Argument | undefined): node is ESTree.ArrowFunctionExpression | ESTree.Function {
   return node?.type === "ArrowFunctionExpression" || node?.type === "FunctionExpression";
 }
 
