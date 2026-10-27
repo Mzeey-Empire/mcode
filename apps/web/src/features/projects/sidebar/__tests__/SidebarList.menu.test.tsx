@@ -3,6 +3,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
+import { RpcError } from "@/transport/ws-transport";
 
 vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
 
@@ -98,7 +99,8 @@ describe("SidebarList thread menu switch", () => {
   });
 
   it("restores the value with the reason when the save fails", async () => {
-    vi.mocked(mockTransport.updateThreadSettings).mockRejectedValue(new Error("Server unreachable"));
+    const issues = [{ code: "unrecognized_keys", keys: ["autoCompleteOnMerge"], path: [], message: "Unrecognized key: \"autoCompleteOnMerge\"" }];
+    vi.mocked(mockTransport.updateThreadSettings).mockRejectedValue(new RpcError(JSON.stringify(issues), "INVALID_PARAMS"));
     seedThread({ auto_complete_on_merge: null });
     const item = openThreadMenu();
 
@@ -107,7 +109,8 @@ describe("SidebarList thread menu switch", () => {
 
     const restored = screen.getByRole("menuitemcheckbox", { name: /Complete when PRs merge/ });
     expect(restored).toHaveAttribute("aria-checked", "true");
-    expect(restored).toHaveTextContent("Server unreachable");
+    expect(restored).toHaveTextContent('Unrecognized key: "autoCompleteOnMerge"');
+    expect(restored).not.toHaveTextContent("unrecognized_keys");
     expect(useWorkspaceStore.getState().threads[0]?.auto_complete_on_merge).toBeNull();
   });
 });

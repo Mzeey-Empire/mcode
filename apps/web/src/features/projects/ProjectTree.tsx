@@ -17,6 +17,7 @@ import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useSidebarUiStore } from "./sidebar/sidebar-ui-store";
 import type { InlineEditState, SidebarRowContext } from "./sidebar/sidebar-row-context";
+import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 
 /** Time window in ms during which a second click on the same thread row is treated as a double-click. */
 const DOUBLE_CLICK_THRESHOLD_MS = 250;
@@ -429,7 +430,7 @@ function useAutoCompleteSwitch(threadId: string | null): SwitchMenuItem | null {
     onCheckedChange: (next) => {
       setFailure(null);
       setOverride(thread.id, next).catch((error: unknown) => {
-        setFailure({ threadId: thread.id, message: error instanceof Error ? error.message : String(error) });
+        setFailure({ threadId: thread.id, message: rpcFailureMessage(error) });
       });
     },
   };
