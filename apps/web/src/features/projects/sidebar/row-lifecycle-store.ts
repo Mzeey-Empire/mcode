@@ -18,10 +18,7 @@ interface RowLifecycleState {
 /** Idle cleanup retry, shared so selectors return a stable value. */
 export const IDLE_CLEANUP_RETRY: CleanupRetryUi = { pending: false, error: null };
 
-/**
- * In-flight row actions, held outside React because virtualized rows unmount off screen and
- * local state would drop a pending spinner or a retry error mid-flight.
- */
+/** In-flight lifecycle actions and cleanup retry state that persists while sidebar rows unmount. */
 export const useRowLifecycleStore = create<RowLifecycleState>((set) => ({
   pendingLifecycle: new Set(),
   cleanupRetry: new Map(),

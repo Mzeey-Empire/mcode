@@ -195,7 +195,6 @@ export function usePreparingRowEntrance(
     const entering = splitKey(preparingKey).find((id) => !before.includes(id));
     if (!entering) return;
     const elements = new Map<string, HTMLElement>();
-    // Rows may sit at any depth, such as inside a virtual list's recycled wrappers.
     for (const child of container.querySelectorAll<HTMLElement>("[data-thread-id], [data-draft-id]")) {
       const { threadId, draftId } = child.dataset;
       if (threadId) elements.set(threadId, child);
