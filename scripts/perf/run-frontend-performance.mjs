@@ -318,6 +318,7 @@ function readFrontendPerformanceOptions(root) {
     outputFile,
     failureFile,
     sessionFileName: `electron-performance-${mode}.json`,
+    cpuProfile: process.argv.includes("--cpu-profile"),
   };
   for (const artifact of [outputFile, `${outputFile}.complete`, failureFile]) NodeFS.rmSync(artifact, { force: true });
   return options;
@@ -416,6 +417,7 @@ function frontendPerformanceWorkerArguments(root, options, webUrl) {
     "--web-url", webUrl, "--output", options.outputFile,
   ];
   if (options.runtimes.includes("electron")) args.push("--electron-session-file", options.sessionFileName);
+  if (options.cpuProfile) args.push("--cpu-profile");
   return args;
 }
 

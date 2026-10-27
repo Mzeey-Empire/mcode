@@ -120,7 +120,8 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
-    minify: "oxc",
+    // The profiling build keeps names so CPU profiles name components and functions.
+    minify: performanceMode === "profiling" ? false : "oxc",
     sourcemap: false,
     manifest: true,
     chunkSizeWarningLimit: 1500,
