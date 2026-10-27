@@ -23,7 +23,7 @@ import { VirtualViewport, type VirtualHost, type VirtualRow, type ViewportPositi
 import { usePreparingRowEntrance } from "@/features/thread-startup";
 import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { selectSidebarFacts, selectThreadIndex } from "../state/thread-index";
+import { selectPreparingThreadIds, selectSidebarFacts } from "../state/thread-index";
 import type { SidebarItem } from "./sidebar-model";
 import type { SidebarRowContext } from "./sidebar-row-context";
 import { ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProjectRow";
@@ -246,19 +246,18 @@ function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, it
 
 /** Thread and draft row keys plus the preparing threads among them, for the first-send entrance. */
 function useEntranceKeys(items: readonly SidebarItem[]): { rowKeys: string[]; preparing: string[] } {
-  const threads = useWorkspaceStore((state) => state.threads);
+  const preparingIds = useWorkspaceStore((state) => selectPreparingThreadIds(state.threads));
   return useMemo(() => {
-    const index = selectThreadIndex(threads);
     const rowKeys: string[] = [];
     const preparing: string[] = [];
     for (const item of items) {
       if (item.kind === "draft") rowKeys.push(`draft:${item.draftId}`);
       if (item.kind !== "thread") continue;
       rowKeys.push(item.threadId);
-      if (index.get(item.threadId)?.clientPreparing === true) preparing.push(item.threadId);
+      if (preparingIds.has(item.threadId)) preparing.push(item.threadId);
     }
     return { rowKeys, preparing };
-  }, [items, threads]);
+  }, [items, preparingIds]);
 }
 
 interface SidebarListProps {
