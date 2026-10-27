@@ -25,20 +25,22 @@ function isSidebarScope(value: string): value is SidebarScope {
 }
 
 interface ScopeBarProps {
+  /** True once any thread is completed, even while the first one is still flying in. */
+  readonly visible: boolean;
   /** The count to show, which may trail the model while a completed row is still on its way. */
   readonly completedCount: number;
   readonly scope: SidebarScope;
 }
 
 /** Shows Active / Completed while completed threads exist; resets to Active when none remain. */
-export function ScopeBar({ completedCount, scope }: ScopeBarProps) {
+export function ScopeBar({ visible, completedCount, scope }: ScopeBarProps) {
   const setScope = useSidebarUiStore((state) => state.setScope);
 
   useEffect(() => {
-    if (completedCount === 0 && useSidebarUiStore.getState().scope !== "active") setScope("active");
-  }, [completedCount, setScope]);
+    if (!visible && useSidebarUiStore.getState().scope !== "active") setScope("active");
+  }, [visible, setScope]);
 
-  if (completedCount === 0) return null;
+  if (!visible) return null;
   const options: readonly SegmentedOption[] = [
     { value: "active", label: "Active" },
     { value: "completed", label: "Completed", count: completedCount },

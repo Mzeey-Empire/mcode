@@ -88,6 +88,8 @@ export interface SidebarModel {
   readonly olderBar: { readonly count: number; readonly open: boolean } | null;
   /** Thread ids in Older, for the motion layer's clock-crossing diff. */
   readonly olderIds: ReadonlySet<string>;
+  /** Server-confirmed completed thread ids, for the motion layer's completion diff. */
+  readonly completedIds: ReadonlySet<string>;
   /** Earliest future time an Active thread crosses into Older, or null. */
   readonly nextBoundaryAt: number | null;
 }
@@ -389,6 +391,7 @@ export function deriveSidebarModel(inputs: SidebarInputs): SidebarModel {
     items: [...body, { kind: "end-spacer", key: "end-spacer" }],
     olderBar: active && parts.older.length > 0 ? { count: parts.older.length, open: inputs.ui.olderOpen } : null,
     olderIds: new Set(active ? parts.older.map((entry) => entry.fact.id) : []),
+    completedIds: new Set(parts.completed.map((entry) => entry.fact.id)),
     nextBoundaryAt: nextBoundary(parts, inputs),
   };
 }
