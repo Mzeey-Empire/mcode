@@ -23,7 +23,6 @@ function toFacts(thread: WorkspaceThread): SidebarThreadFacts {
     id: thread.id,
     workspaceId: thread.workspace_id,
     parentId: thread.parent_thread_id ?? null,
-    // Placeholder rows may not carry an activity time yet; they sort by creation.
     activityMs: parseTime(thread.last_activity_at) ?? parseTime(thread.created_at) ?? 0,
     completedMs: parseTime(thread.user_completed_at),
   };
@@ -43,9 +42,7 @@ interface FactsCache {
 let factsCache: FactsCache | null = null;
 
 /**
- * Sidebar facts with identity reuse. A thread whose sort-relevant fields did not change keeps its
- * previous facts object, and when no fact changed the previous array comes back, so a status-only
- * push leaves the model's input untouched.
+ * Returns sidebar facts, reusing unchanged fact objects and the array when all facts stay equal.
  */
 export function selectSidebarFacts(threads: readonly WorkspaceThread[]): readonly SidebarThreadFacts[] {
   if (factsCache?.threads === threads) return factsCache.facts;

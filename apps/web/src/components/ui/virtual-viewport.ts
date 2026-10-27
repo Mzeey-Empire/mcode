@@ -33,8 +33,8 @@ export interface VirtualViewportOptions {
   readonly initialPosition?: ViewportPosition;
   readonly positionOnScroll?: (anchor: ViewportPosition, atEnd: boolean) => ViewportPosition;
   /**
-   * Row id rendered in normal flow between size-cache spacers instead of a recycled wrapper, so it
-   * can be sticky. Callers list it as an ordinary row and portal into {@link VirtualViewport.flowHost}.
+   * Sticky row id rendered in normal flow. Include it in the rows and portal its content into
+   * {@link VirtualViewport.flowHost}.
    */
   readonly flowHostId?: string;
 }
@@ -48,7 +48,6 @@ export interface SetRowsOptions {
   readonly flip?: boolean;
 }
 
-// DESIGN.md motion tokens: standard duration and the one ease curve.
 const FLIP_DURATION_MS = 180;
 const FLIP_EASING = "cubic-bezier(0.2, 0, 0, 1)";
 
@@ -147,7 +146,7 @@ export class VirtualViewport {
   }
 
   // vlist removes only wrappers it tracks and skips content children without data-index, so these
-  // three nodes survive recycling. The host's own index keeps an empty wrapper that reserves its slot.
+  // three nodes survive recycling. vlist still renders an empty wrapper at the host's index.
   private mountFlowHost(id: string): void {
     const prefix = document.createElement("div");
     const suffix = document.createElement("div");
@@ -165,12 +164,11 @@ export class VirtualViewport {
     return this.flow?.host;
   }
 
-  /** Visible height of the scroller, for chrome that tracks a row. */
+  /** Visible height of the scroller. */
   get clientHeight(): number {
     return this.viewport.clientHeight;
   }
 
-  // Resized in the same pass as the content size, so the host never shows a frame off its slot.
   private layoutFlowHost(): void {
     if (!this.flow || this.options.flowHostId === undefined) return;
     const index = this.rowIndexes.get(this.options.flowHostId);
@@ -188,8 +186,8 @@ export class VirtualViewport {
   }
 
   /**
-   * Calls `listener` after commits, scroll frames and measured resizes, at most once per frame,
-   * so chrome can read `rowTop` and `rowBottom` without its own scroll listener. Returns an unsubscribe.
+   * Calls `listener` after commits, scroll frames and measured resizes, at most once per frame.
+   * Returns an unsubscribe function.
    */
   onLayout(listener: () => void): () => void {
     this.layoutListeners.add(listener);
@@ -215,7 +213,7 @@ export class VirtualViewport {
     return offsets;
   }
 
-  // Animates the React-owned host, never vlist's wrapper, whose transform vlist owns.
+  // Animates the React-owned host, never the vlist wrapper, whose transform vlist owns.
   private playFlip(before: ReadonlyMap<string, number>): void {
     for (const { id, element } of this.publishedHosts) {
       const from = before.get(id);

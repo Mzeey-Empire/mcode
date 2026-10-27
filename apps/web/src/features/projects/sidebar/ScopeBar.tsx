@@ -24,11 +24,7 @@ function isSidebarScope(value: string): value is SidebarScope {
   return value === "active" || value === "completed";
 }
 
-/**
- * The Active / Completed segmented control under the Projects header. It exists only while at
- * least one thread is completed, and when the last one goes it resets the stored scope so the
- * next completion shows the bar on Active.
- */
+/** Shows Active / Completed while completed threads exist; resets to Active when none remain. */
 export function ScopeBar() {
   const completedCount = useCompletedThreadCount();
   const scope = useSidebarScope();
