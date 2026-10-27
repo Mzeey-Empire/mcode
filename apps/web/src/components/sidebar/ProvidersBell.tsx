@@ -31,7 +31,7 @@ export function ProvidersBell() {
         if (nextOpen) void fetchStatus(hasSignedOut);
       }}
     >
-      <PopoverTrigger render={<IconButton aria-label="Providers" />}>
+      <PopoverTrigger render={<IconButton aria-label="Notifications" />}>
         <Bell aria-hidden />
         {rows.length > 0 && (
           <span
