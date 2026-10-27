@@ -494,6 +494,20 @@
     animation: none;
   }
 }
+/* A completing sidebar row draws its strike across the title as a background, so the line can
+   grow from the left instead of appearing at once. */
+.sidebar-strike {
+  background: linear-gradient(currentColor, currentColor) 0 55% / 100% 1px no-repeat;
+  animation: sidebar-strike var(--duration-overlay) var(--ease-standard) both;
+}
+@keyframes sidebar-strike {
+  from { background-size: 0 1px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-strike {
+    animation: none;
+  }
+}
 /* Toasts slide down from under the conversation header. Close and auto-hide
    play the same motion in reverse; reduced motion keeps only a short fade. */
 @keyframes toast-enter {

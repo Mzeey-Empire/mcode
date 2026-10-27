@@ -6,6 +6,7 @@ import { useWorkspaceStartupRecovery } from "@/features/thread-startup/state/thr
 import { ProjectDropWell } from "../ProjectDropWell";
 import { useProjectTreeMenus } from "../ProjectTree";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { CompletionUndoLine } from "./CompletionUndoLine";
 import { ScopeBar } from "./ScopeBar";
 import { SidebarList } from "./SidebarList";
 import { useRowLifecycleStore } from "./row-lifecycle-store";
@@ -55,7 +56,8 @@ export function ProjectSidebar() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
       <SidebarProjectsHeader />
-      <ScopeBar />
+      <ScopeBar completedCount={model.scopeBar.completedCount} scope={model.scope} />
+      <CompletionUndoLine onOpen={ctx.onSelectThread} />
       <SidebarList
         items={model.items}
         ctx={ctx}

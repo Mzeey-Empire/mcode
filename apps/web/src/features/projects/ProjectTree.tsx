@@ -286,7 +286,6 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
   const actions = useThreadAndDraftActions();
   const toggleProject = useSidebarUiStore((s) => s.toggleProject);
   const toggleShowMore = useSidebarUiStore((s) => s.toggleShowMore);
-  const completeThread = useWorkspaceStore((s) => s.completeThread);
   const reopenThread = useWorkspaceStore((s) => s.reopenThread);
   const retryThreadCleanup = useWorkspaceStore((s) => s.retryThreadCleanup);
   useLoadActiveWorkspaceWorktrees();
@@ -310,7 +309,6 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
     onThreadDoubleClick: clicks.doubleClick,
     onSelectThread: clicks.select,
     onThreadContextMenu: menus.openThreadMenu,
-    onCompleteThread: completeThread,
     onReopenThread: reopenThread,
     onRetryThreadCleanup: retryThreadCleanup,
     onOpenDraft: actions.openDraft,
@@ -321,7 +319,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
     rename.inlineEdit, rename.change, rename.commit, rename.cancel,
     toggleProject, toggleShowMore, actions.createThread, actions.openDraft, actions.discardDraft,
     projects.openDelete, projects.openRename, clicks.click, clicks.doubleClick, clicks.select,
-    menus.openThreadMenu, menus.openDraftMenu, completeThread, reopenThread, retryThreadCleanup,
+    menus.openThreadMenu, menus.openDraftMenu, reopenThread, retryThreadCleanup,
   ]);
 
   const overlays = (
