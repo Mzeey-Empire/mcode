@@ -64,7 +64,7 @@ export interface WorkspaceThreadRouterDeps {
   goalLifecycleService: Pick<GoalLifecycleService, "clear" | "get">;
   threadCompletionService: Pick<ThreadCompletionService, "cleanupBlockedCount" | "complete" | "reopen" | "retryCleanup">;
   threadDeletionTeardownService: Pick<ThreadDeletionTeardownService, "teardownThread">;
-  threadRepo: Pick<ThreadRepo, "findById" | "listAllByWorkspace">;
+  threadRepo: Pick<ThreadRepo, "findById" | "listAllByWorkspace" | "listAll">;
   workspaceRepo: Pick<WorkspaceRepo, "findById" | "removeRecent" | "setPinned" | "touchLastOpened">;
   gitWatcherService: Pick<GitWatcherService, "retryWatch" | "unwatchThreadWorktree" | "unwatchWorkspace" | "watchThreadWorktree" | "watchWorkspace">;
   githubService: Pick<GithubService, "cancelForRepoPath" | "getBranchPr" | "getPullRequestWatchSnapshots">;
@@ -99,6 +99,7 @@ const workspaceThreadHandlers = {
   "workspace.enrich": enrichWorkspaces,
   "filesystem.browse": (deps, params) => deps.filesystemBrowser.browse(params.path),
   "thread.list": listWorkspaceThreads,
+  "thread.listAll": (deps) => deps.threadRepo.listAll(),
   "thread.recent": (deps, params) => deps.threadService.listRecent(params.limit),
   "thread.create": createThread,
   "thread.delete": (deps, params) => deleteThread(deps, params),
