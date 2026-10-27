@@ -10,6 +10,9 @@ import type { PullRequestLinkFunnel } from "../../pull-requests/links/pull-reque
 export type { ActiveWorktreePathSet, CompletedThreadRetentionRecord, CompletedThreadDeadlineUpdate } from "./thread-store.js";
 export { MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 
+/** Who completed a thread when it was not a user; marks the lifecycle push for the Undo line. */
+export type ThreadCompletedBy = "auto";
+
 /** Read-only queries and committed mutations for ThreadRepo. */
 @injectable()
 export class ThreadRepo {
@@ -75,10 +78,10 @@ export class ThreadRepo {
   }
 
   /** Publish completion only after its lifecycle write commits. */
-  async complete(id: Parameters<ThreadStore["complete"]>[0], completedAt: Parameters<ThreadStore["complete"]>[1], scheduledDeletionAt: Parameters<ThreadStore["complete"]>[2]): Promise<ReturnType<ThreadStore["complete"]>> {
+  async complete(id: Parameters<ThreadStore["complete"]>[0], completedAt: Parameters<ThreadStore["complete"]>[1], scheduledDeletionAt: Parameters<ThreadStore["complete"]>[2], completedBy?: ThreadCompletedBy): Promise<ReturnType<ThreadStore["complete"]>> {
     const previous = this.findById(id);
     const thread = await this.writer.execute(threadWriteOperations.complete, [id, completedAt, scheduledDeletionAt]);
-    if (thread && previous?.user_completed_at === null) broadcast("thread.lifecycleChanged", { thread });
+    if (thread && previous?.user_completed_at === null) broadcast("thread.lifecycleChanged", completedBy ? { thread, completedBy } : { thread });
     return thread;
   }
 

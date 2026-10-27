@@ -126,6 +126,13 @@ describe("ThreadCompletionService", () => {
     expect(teardownService.teardownThread).toHaveBeenCalledTimes(1);
   });
 
+  it("publishes a manual completion without the automatic marker", async () => {
+    await service.complete(threadId);
+
+    const pushes = vi.mocked(broadcast).mock.calls.filter(([channel]) => channel === "thread.lifecycleChanged");
+    expect(pushes).toEqual([["thread.lifecycleChanged", { thread: threadRepo.findById(threadId) }]]);
+  });
+
   it("disables automatic deletion when the setting is Never", async () => {
     await applyRetention(null);
 
