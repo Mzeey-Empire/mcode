@@ -465,13 +465,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Terminalize an admitted turn when durable admission cannot complete. */
   private async abortTurnAdmission(lease: TurnRuntimeLease): Promise<void> {
-    if (await this.finishUnsentWorkerTurn(lease.threadId, lease.turnExecutionId)) {
-      this.turnRuntime.terminalize(lease.threadId, lease.turnExecutionId, "errored");
-    } else if (!this.turnRuntime.terminalize(lease.threadId, lease.turnExecutionId, "errored")) {
-      return;
-    }
-    // Before the parent start commits there are no durable turn rows or baseline to finalize;
-    // the failed send RPC is how the client learns the turn never started.
+    const finishedDurably = await this.finishUnsentWorkerTurn(lease.threadId, lease.turnExecutionId);
+    const terminalizedRuntime = this.turnRuntime.terminalize(lease.threadId, lease.turnExecutionId, "errored");
+    if (!finishedDurably && !terminalizedRuntime) return;
     this.disarmTurnRetryWindow(lease.threadId);
     this.trackSessionEnded(lease.threadId, lease.turnExecutionId);
   }
@@ -929,7 +925,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await send;
   }
 
-  /** Terminalize a failed initial worker dispatch. */
   private async handleInitialDispatchFailure(
     threadId: string,
     dispatch: ReturnType<TurnRuntimeController["createRetryDispatch"]>,
