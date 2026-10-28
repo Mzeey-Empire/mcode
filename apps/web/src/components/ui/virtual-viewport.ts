@@ -89,6 +89,8 @@ export class VirtualViewport {
   private flowFill = 0;
   private readonly layoutListeners = new Set<() => void>();
   private layoutFramePending = false;
+  // Fed by the resize observer so commits never force a layout just to learn the scroller's height.
+  private viewportHeight = 0;
 
   constructor(
     container: HTMLElement,
@@ -143,6 +145,8 @@ export class VirtualViewport {
     this.context.dom.content.style.position = "relative";
     this.context.dom.liveRegion.style.display = "none";
     if (options.flowHostId !== undefined) this.mountFlowHost(options.flowHostId);
+    this.viewportHeight = this.viewport.clientHeight;
+    this.observer.observe(this.viewport);
     this.viewport.addEventListener("scroll", this.onScroll, { passive: true });
     this.viewport.addEventListener("wheel", this.onWheel, { passive: true });
     this.viewport.addEventListener("touchstart", this.interrupt, { passive: true });
@@ -182,7 +186,7 @@ export class VirtualViewport {
 
   /** Visible height of the scroller. */
   get clientHeight(): number {
-    return this.viewport.clientHeight;
+    return this.viewportHeight;
   }
 
   private layoutFlowHost(): void {
@@ -308,7 +312,7 @@ export class VirtualViewport {
   private measure(entries: readonly ResizeObserverEntry[]): void {
     let changed = false;
     for (const entry of entries) {
-      if (this.updateHeight(entry)) changed = true;
+      if (entry.target === this.viewport ? this.updateViewportHeight() : this.updateHeight(entry)) changed = true;
     }
     if (!changed || this.disposed || this.measurePending) return;
     // Applying sizes inside the observer callback resizes observed rows and
@@ -322,6 +326,13 @@ export class VirtualViewport {
       this.context.updateContentSize(this.context.sizeCache.getTotalSize());
       this.applyPosition(true);
     });
+  }
+
+  private updateViewportHeight(): boolean {
+    const height = this.viewport.clientHeight;
+    if (height === this.viewportHeight) return false;
+    this.viewportHeight = height;
+    return true;
   }
 
   private updateHeight(entry: ResizeObserverEntry): boolean {
@@ -341,7 +352,7 @@ export class VirtualViewport {
   private fitFlowFill(): void {
     if (!this.flow || this.options.flowHostId === undefined) return;
     const natural = this.context.sizeCache.getTotalSize() - this.flowFill;
-    const available = this.viewport.clientHeight - this.insets.top - this.insets.bottom;
+    const available = this.viewportHeight - this.insets.top - this.insets.bottom;
     const fill = this.rowIndexes.has(this.options.flowHostId) ? Math.max(0, available - natural) : 0;
     if (fill === this.flowFill) return;
     this.flowFill = fill;
@@ -357,7 +368,7 @@ export class VirtualViewport {
     const padsBelowReadingRow = this.position.kind === "reading" && this.options.padBelowReadingRow === true;
     this.context.updateContentSize(Math.max(
       this.context.sizeCache.getTotalSize(),
-      padsBelowReadingRow ? target + this.viewport.clientHeight - this.insets.top - this.insets.bottom : 0,
+      padsBelowReadingRow ? target + this.viewportHeight - this.insets.top - this.insets.bottom : 0,
     ));
     if (!this.animating) {
       this.context.scrollTo(target);
@@ -393,7 +404,7 @@ export class VirtualViewport {
   private targetScrollTop(): number {
     const cache = this.context.sizeCache;
     const { top: insetTop, bottom: insetBottom } = this.insets;
-    const height = this.viewport.clientHeight;
+    const height = this.viewportHeight;
     if (this.position.kind === "offset") return this.position.top;
     if (this.position.kind === "end") return insetTop + cache.getTotalSize() + insetBottom - height;
     const index = this.rowIndexes.get(this.position.key);
@@ -441,7 +452,7 @@ export class VirtualViewport {
     this.scheduleLayout();
     const top = this.viewport.scrollTop;
     if (Math.abs(top - this.expectedScrollTop) < 1) return;
-    const atEnd = this.viewport.scrollHeight - this.viewport.clientHeight - top <= 2;
+    const atEnd = this.viewport.scrollHeight - this.viewportHeight - top <= 2;
     const anchor = this.readingPosition();
     this.position = this.options.positionOnScroll?.(anchor, atEnd) ?? anchor;
     this.pinReadingAnchor();
