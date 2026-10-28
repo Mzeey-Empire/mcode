@@ -1717,10 +1717,15 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return { kind: "declined", reason: "stopping" };
   }
 
-  /** Map an admission refusal to the decline the provider acts on; a terminal thread also stops the session. */
+  /** Map an admission refusal to the decline the provider acts on; a pending mutation or terminal thread also stops the session. */
   private providerTurnAdmissionFailure(threadId: string, error: unknown): Extract<ProviderTurnOpening, { kind: "declined" }> {
     const message = error instanceof Error ? error.message : String(error);
-    if (/already has an active agent session|already has a pending mutation/.test(message)) return { kind: "declined", reason: "busy" };
+    if (/already has an active agent session/.test(message)) return { kind: "declined", reason: "busy" };
+    if (/already has a pending mutation/.test(message)) {
+      // The active-session refusal is the runtime's own turn; a pending mutation owns the thread, so the provider stream has nothing to join.
+      this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "provider turn during pending mutation");
+      return { kind: "declined", reason: "busy" };
+    }
     if (/Cannot send message to (terminal|deleted) thread/.test(message)) {
       this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "provider turn on stopped thread");
       return { kind: "declined", reason: "stopped" };
