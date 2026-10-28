@@ -44,11 +44,12 @@ const PROVISIONAL_HEIGHT: Record<SidebarItem["kind"], number> = {
 };
 
 const PROJECT_DND_MODIFIERS = [restrictToVerticalAxis];
-// The virtual list mounts project droppables only near the viewport, so they must be measured as
-// they register rather than once before the drag starts. Rows never displace during a project
-// drag; the indicator line marks the landing boundary instead.
+// The virtual list mounts project droppables only near the viewport, so during a drag they must be
+// measured as they register rather than once at drag start. Outside a drag nothing reads them, and
+// measuring each one as it mounts would add layout reads to every expand and scroll. Rows never
+// displace during a project drag; the indicator line marks the landing boundary instead.
 const STATIC_SORT_STRATEGY = () => null;
-const PROJECT_DND_MEASURING = { droppable: { strategy: MeasuringStrategy.Always } } as const;
+const PROJECT_DND_MEASURING = { droppable: { strategy: MeasuringStrategy.WhileDragging } } as const;
 // The pointerup that ends a drag still fires click on whatever row it lands on.
 const POST_DRAG_CLICK_GRACE_MS = 250;
 
