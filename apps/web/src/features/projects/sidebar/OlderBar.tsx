@@ -46,7 +46,7 @@ export function OlderBar({ item, viewport, onToggle }: OlderBarProps) {
         type="button"
         aria-expanded={item.open}
         onClick={onToggle}
-        className="flex h-8 w-full items-center gap-2 border-t border-border/60 px-3 text-caption text-muted outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70"
+        className="flex h-8 w-full items-center gap-2 px-3 text-caption text-muted outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70"
       >
         <span className="min-w-0 flex-1 text-left">Older</span>
         <span className="tabular-nums">{item.count}</span>
