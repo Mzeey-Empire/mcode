@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { GitBranch, GitMerge } from "lucide-react";
-import { effectiveAutoCompleteOnMerge } from "@mcode/contracts/models/thread";
-import { ContextMenu, type SwitchMenuItem } from "@/components/ui/context-menu";
+import { GitBranch } from "lucide-react";
+import { ContextMenu } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,25 +8,21 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
-import { useSettingsStore } from "@/stores/settingsStore";
 import { useUiStore } from "@/stores/uiStore";
 import type { Thread, Workspace } from "@/transport/types";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useSidebarUiStore } from "./sidebar/sidebar-ui-store";
 import type { InlineEditState, SidebarRowContext } from "./sidebar/sidebar-row-context";
-import { rpcFailureMessage } from "@/transport/rpc-failure-message";
+import { threadMenuItems, useAutoCompleteSwitch, useHoldThreadMenuOpen, type ThreadMenuActions, type ThreadMenuTarget } from "./sidebar/thread-menu";
 
 /** Time window in ms during which a second click on the same thread row is treated as a double-click. */
 const DOUBLE_CLICK_THRESHOLD_MS = 250;
 
-interface ContextMenuState {
+interface ContextMenuState extends ThreadMenuTarget {
   x: number;
   y: number;
-  threadId: string;
-  threadTitle: string;
-  workspacePath: string;
-  worktreePath: string | null;
+  anchor: Element;
 }
 
 interface DraftContextMenuState {
@@ -236,7 +231,7 @@ function useMenus() {
   const [draftMenu, setDraftMenu] = useState<DraftContextMenuState | null>(null);
   const openThreadMenu = useCallback((event: React.MouseEvent, thread: Thread, workspacePath: string) => {
     event.preventDefault();
-    setThreadMenu({ x: event.clientX, y: event.clientY, threadId: thread.id, threadTitle: thread.title, workspacePath, worktreePath: thread.worktree_path });
+    setThreadMenu({ x: event.clientX, y: event.clientY, anchor: event.currentTarget, threadId: thread.id, threadTitle: thread.title, workspacePath, worktreePath: thread.worktree_path });
   }, []);
   const openDraftMenu = useCallback((event: React.MouseEvent, draftId: string) => {
     event.preventDefault();
@@ -292,6 +287,12 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
   useLoadActiveWorkspaceWorktrees();
 
   const { worktreesLoadedFor, validWorktreePaths, availableProviders } = facts;
+  const { setInlineEdit } = rename;
+  const openDeletion = deletion.open;
+  const threadMenuActions = useMemo<ThreadMenuActions>(() => ({
+    onRename: (target) => setInlineEdit({ threadId: target.threadId, title: target.threadTitle, originalTitle: target.threadTitle }),
+    onDelete: (target) => openDeletion({ threadId: target.threadId, threadTitle: target.threadTitle, worktreePath: target.worktreePath }),
+  }), [setInlineEdit, openDeletion]);
   const ctx = useMemo<SidebarRowContext>(() => ({
     worktreesLoadedFor,
     validWorktreePaths,
@@ -309,6 +310,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
     onThreadDoubleClick: clicks.doubleClick,
     onSelectThread: clicks.select,
     onThreadContextMenu: menus.openThreadMenu,
+    threadMenuActions,
     onReopenThread: reopenThread,
     onRetryThreadCleanup: retryThreadCleanup,
     onOpenDraft: actions.openDraft,
@@ -319,7 +321,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
     rename.inlineEdit, rename.change, rename.commit, rename.cancel,
     toggleProject, toggleShowMore, actions.createThread, actions.openDraft, actions.discardDraft,
     projects.openDelete, projects.openRename, clicks.click, clicks.doubleClick, clicks.select,
-    menus.openThreadMenu, menus.openDraftMenu, reopenThread, retryThreadCleanup,
+    menus.openThreadMenu, menus.openDraftMenu, reopenThread, retryThreadCleanup, threadMenuActions,
   ]);
 
   const overlays = (
@@ -327,8 +329,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
       <ThreadContextMenuOverlay
         contextMenu={menus.threadMenu}
         onClose={() => menus.setThreadMenu(null)}
-        onStartRename={rename.setInlineEdit}
-        onDeleteThread={deletion.open}
+        actions={threadMenuActions}
       />
       <DraftContextMenuOverlay contextMenu={menus.draftMenu} onClose={() => menus.setDraftMenu(null)} onDeleteDraft={actions.discardDraft} />
       <ThreadDeleteDialog
@@ -407,79 +408,19 @@ function WorkspaceRenameDialog({ dialog, value, isRenaming, onChange, onClose, o
   );
 }
 
-function useAutoCompleteSwitch(threadId: string | null): SwitchMenuItem | null {
-  const thread = useWorkspaceStore((s) => (threadId === null ? undefined : s.threads.find((candidate) => candidate.id === threadId)));
-  const globalValue = useSettingsStore((s) => s.settings.thread.completion.completeOnPrMerge);
-  const setOverride = useWorkspaceStore((s) => s.setAutoCompleteOverride);
-  const [failure, setFailure] = useState<{ threadId: string; message: string } | null>(null);
-  if (!thread) return null;
-  return {
-    kind: "switch",
-    label: "Close when PRs merge",
-    icon: <GitMerge />,
-    checked: effectiveAutoCompleteOnMerge(thread, globalValue),
-    disabledReason: thread.pull_requests.length === 0 ? "No linked PRs" : null,
-    description: failure?.threadId === thread.id ? failure.message : undefined,
-    onCheckedChange: (next) => {
-      setFailure(null);
-      setOverride(thread.id, next).catch((error: unknown) => {
-        setFailure({ threadId: thread.id, message: rpcFailureMessage(error) });
-      });
-    },
-  };
-}
-
 function ThreadContextMenuOverlay({
   contextMenu,
   onClose,
-  onStartRename,
-  onDeleteThread,
+  actions,
 }: {
   contextMenu: ContextMenuState | null;
   onClose: () => void;
-  onStartRename: (state: InlineEditState) => void;
-  onDeleteThread: (state: DeleteDialogState) => void;
+  actions: ThreadMenuActions;
 }) {
   const autoComplete = useAutoCompleteSwitch(contextMenu?.threadId ?? null);
+  useHoldThreadMenuOpen(contextMenu !== null);
   if (!contextMenu) return null;
-  return (
-    <ContextMenu
-      x={contextMenu.x}
-      y={contextMenu.y}
-      onClose={onClose}
-      items={[
-        {
-          label: "Rename",
-          onClick: () => onStartRename({
-            threadId: contextMenu.threadId,
-            title: contextMenu.threadTitle,
-            originalTitle: contextMenu.threadTitle,
-          }),
-        },
-        {
-          label: "Copy Path",
-          onClick: () => navigator.clipboard.writeText(
-            contextMenu.worktreePath ?? contextMenu.workspacePath,
-          ),
-        },
-        {
-          label: "Copy Thread ID",
-          onClick: () => navigator.clipboard.writeText(contextMenu.threadId),
-        },
-        { label: "", onClick: () => {}, divider: true },
-        ...(autoComplete ? [autoComplete, { label: "", onClick: () => {}, divider: true }] : []),
-        {
-          label: "Delete",
-          destructive: true,
-          onClick: () => onDeleteThread({
-            threadId: contextMenu.threadId,
-            threadTitle: contextMenu.threadTitle,
-            worktreePath: contextMenu.worktreePath,
-          }),
-        },
-      ]}
-    />
-  );
+  return <ContextMenu x={contextMenu.x} y={contextMenu.y} anchor={contextMenu.anchor} onClose={onClose} items={threadMenuItems(contextMenu, autoComplete, actions)} />;
 }
 
 function DraftContextMenuOverlay({

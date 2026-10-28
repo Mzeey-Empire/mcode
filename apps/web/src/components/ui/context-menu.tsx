@@ -37,6 +37,11 @@ interface ContextMenuProps {
   y: number;
   items: ContextMenuItem[];
   onClose: () => void;
+  /**
+   * The element the menu was opened on. Scrolling a container that holds it closes the menu, which
+   * has no way to follow it. Without an anchor, scrolling never closes the menu.
+   */
+  anchor?: Element;
 }
 
 function SwitchRow({ item }: { item: SwitchMenuItem }) {
@@ -72,7 +77,7 @@ function SwitchRow({ item }: { item: SwitchMenuItem }) {
 }
 
 /** Renders a pointer-positioned menu above application layout boundaries. */
-export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
+export function ContextMenu({ x, y, items, onClose, anchor }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -83,13 +88,20 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
+    // Scroll does not bubble, so a capture listener is the only way to hear every scroller. Other
+    // scrollers, such as a streaming transcript, move constantly and must not close the menu.
+    const handleScroll = (event: Event) => {
+      if (anchor && event.target instanceof Node && event.target.contains(anchor)) onClose();
+    };
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleEscape);
+    document.addEventListener("scroll", handleScroll, { capture: true, passive: true });
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleEscape);
+      document.removeEventListener("scroll", handleScroll, { capture: true });
     };
-  }, [onClose]);
+  }, [onClose, anchor]);
 
   // Adjust position to stay within viewport
   useEffect(() => {

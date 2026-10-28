@@ -57,7 +57,8 @@ function DropdownMenuContent({
         alignOffset={alignOffset}
         anchor={anchor}
         collisionAvoidance={collisionAvoidance}
-        className="pointer-events-none isolate z-(--layer-modal)"
+        // A trigger scrolled out of its list leaves the menu nothing to point at, so it hides until the trigger returns.
+        className="pointer-events-none isolate z-(--layer-modal) data-anchor-hidden:invisible"
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"

@@ -1,4 +1,5 @@
 import type { Thread, Workspace } from "@/transport/types";
+import type { ThreadMenuActions } from "./thread-menu";
 
 /** An inline thread rename in progress. */
 export interface InlineEditState {
@@ -35,6 +36,8 @@ export interface SidebarRowContext {
   onThreadDoubleClick(threadId: string): void;
   onSelectThread(workspaceId: string, threadId: string): void;
   onThreadContextMenu(event: React.MouseEvent, thread: Thread, workspacePath: string): void;
+  /** What the thread options dropdown's rows do; the right-click menu shares them. */
+  readonly threadMenuActions: ThreadMenuActions;
   onReopenThread(threadId: string): Promise<void>;
   onRetryThreadCleanup(threadId: string): Promise<void>;
   onOpenDraft(workspaceId: string, draftId: string): void;
