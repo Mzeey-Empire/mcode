@@ -30,21 +30,33 @@ export function clampSidebarWidth(width: number, viewportWidth: number = window.
   return Math.min(max, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
-function readPersistedWidth(persisted: unknown): number {
+/** Rounds `width` into the drag limits without regard to the window; non-finite input yields the default. */
+function clampPreferredWidth(width: number): number {
+  return clampSidebarWidth(width, Number.POSITIVE_INFINITY);
+}
+
+// The key stays `width` so a width saved before the preference split loads as the preference.
+function readPersistedPreference(persisted: unknown): number {
   if (typeof persisted !== "object" || persisted === null || !("width" in persisted)) {
     return SIDEBAR_DEFAULT_WIDTH;
   }
-  return typeof persisted.width === "number" ? clampSidebarWidth(persisted.width) : SIDEBAR_DEFAULT_WIDTH;
+  return typeof persisted.width === "number" ? clampPreferredWidth(persisted.width) : SIDEBAR_DEFAULT_WIDTH;
+}
+
+function widthState(preferredWidth: number): Pick<SidebarWidthState, "preferredWidth" | "width"> {
+  return { preferredWidth, width: clampSidebarWidth(preferredWidth) };
 }
 
 interface SidebarWidthState {
-  /** Current sidebar width in px, always inside the limits. */
+  /** Width the user chose, kept apart from the window so a narrow window does not overwrite it. */
+  preferredWidth: number;
+  /** Displayed sidebar width in px: the preference fitted to the current window. */
   width: number;
-  /** Sets the width, clamped to the limits. */
+  /** Sets the preferred width, clamped to the drag limits. */
   setWidth: (width: number) => void;
-  /** Returns the width to {@link SIDEBAR_DEFAULT_WIDTH}. */
+  /** Returns the preferred width to {@link SIDEBAR_DEFAULT_WIDTH}. */
   resetWidth: () => void;
-  /** Re-clamps the current width after the window resizes. */
+  /** Refits the displayed width to the preference after the window resizes. */
   fitToViewport: () => void;
 }
 
@@ -52,20 +64,20 @@ interface SidebarWidthState {
 export const useSidebarWidthStore = create<SidebarWidthState>()(
   persist(
     (set, get) => ({
-      width: SIDEBAR_DEFAULT_WIDTH,
-      setWidth: (width) => set({ width: clampSidebarWidth(width) }),
-      resetWidth: () => set({ width: clampSidebarWidth(SIDEBAR_DEFAULT_WIDTH) }),
+      ...widthState(SIDEBAR_DEFAULT_WIDTH),
+      setWidth: (width) => set(widthState(clampPreferredWidth(width))),
+      resetWidth: () => set(widthState(SIDEBAR_DEFAULT_WIDTH)),
       fitToViewport: () => {
-        const width = clampSidebarWidth(get().width);
+        const width = clampSidebarWidth(get().preferredWidth);
         if (width !== get().width) set({ width });
       },
     }),
     {
       name: "mcode-sidebar-width",
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ width: state.width }),
+      partialize: (state) => ({ width: state.preferredWidth }),
       // Stored data is untrusted: a hand-edited or older value must not size the sidebar.
-      merge: (persisted, current) => ({ ...current, width: readPersistedWidth(persisted) }),
+      merge: (persisted, current) => ({ ...current, ...widthState(readPersistedPreference(persisted)) }),
     },
   ),
 );
