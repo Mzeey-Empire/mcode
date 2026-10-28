@@ -241,7 +241,7 @@ function ProjectWorkspaceRow({
       data-testid={`project-row-${workspace.id}`}
       onClick={actions.toggle}
       className={cn(
-        "group/ws relative flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-body-small transition-colors touch-none outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "group/ws relative flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-body-small touch-none outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         isProjectDragging && "cursor-grabbing",
         isActive ? "text-ink" : "text-muted hover:bg-selected/40 hover:text-ink",
       )}

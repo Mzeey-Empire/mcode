@@ -443,7 +443,7 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
         onTriggerBlur?.(event);
       }}
       className={cn(
-        "group/row relative flex min-h-16 items-start gap-2 rounded-lg py-3 pr-2 cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "group/row relative flex min-h-16 items-start gap-2 rounded-lg py-3 pr-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         "has-[[data-status-mark=running]]:opacity-55",
         isActive ? "bg-selected" : "hover:bg-selected/40",
         triggerClassName,

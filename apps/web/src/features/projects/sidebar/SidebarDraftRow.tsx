@@ -64,7 +64,7 @@ function DraftRow({
       onClick={() => onOpen(workspaceId, draft.id)}
       onContextMenu={(event) => onContextMenu(event, draft.id)}
       className={cn(
-        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-body-small cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-body-small cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         isActive
           ? "bg-selected text-ink"
           : "text-muted/70 hover:bg-selected/40 hover:text-ink",
