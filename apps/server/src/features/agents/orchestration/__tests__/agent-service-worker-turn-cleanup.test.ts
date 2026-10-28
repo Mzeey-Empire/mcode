@@ -240,6 +240,17 @@ describe("AgentService cleanup through production worker composition", { timeout
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
   });
 
+  it("releases an exact provider_lost Ended without terminalizing its durable turn", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
+    await vi.waitFor(() => expect(fixture.service.runtimeAccess().activeThreadIds()).not.toContain(fixture.thread.id));
+    expect(fixture.service.runtimeAccess().runtimeSnapshots().find((snapshot) => snapshot.threadId === fixture.thread.id)).toBeUndefined();
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Running");
+    expect(fixture.canonical.loadCheckpoint(turn.turnExecutionId)).toMatchObject({ phase: "running", terminalOutcome: null });
+    expect(fixture.threads.findById(fixture.thread.id)?.status).toBe("active");
+  });
+
   it("maps provider-cancelled Ended to the recoverable interrupted outcome", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);
