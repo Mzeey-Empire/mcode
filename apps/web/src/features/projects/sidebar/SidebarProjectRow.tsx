@@ -2,7 +2,7 @@ import { memo, useCallback, type CSSProperties } from "react";
 import { useShallow } from "zustand/shallow";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { DraggableSyntheticListeners } from "@dnd-kit/core";
+import { useDndContext, type DraggableSyntheticListeners } from "@dnd-kit/core";
 import { ChevronRight, FolderOpen, GitBranchMinus, Pencil, SquarePen, Trash2 } from "lucide-react";
 import type { ChecksStatus } from "@mcode/contracts/github";
 import { Button } from "@/components/ui/button";
@@ -348,8 +348,10 @@ function ciRollupStatus(
 }
 
 function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: () => void }) {
+  // A title tooltip opened by hover would otherwise ride along with the drag and clip at the edge.
+  const dragging = useDndContext().active !== null;
   return (
-    <Tooltip>
+    <Tooltip disabled={dragging}>
       <TooltipTrigger render={
         <Button type="button" variant="ghost" size="compact" aria-label={`Open project ${workspace.name}`} onKeyDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left hover:bg-transparent group-hover/ws:pr-24 group-focus-within/ws:pr-24 dark:hover:bg-transparent">
           <span className="flex-1 text-fade font-medium tracking-tight">{workspace.name}</span>
