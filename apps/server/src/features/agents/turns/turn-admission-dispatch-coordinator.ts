@@ -70,6 +70,8 @@ export class ExistingWorktreePlacementError extends Error {
   }
 }
 
+class TurnAdmissionOwnershipLostError extends Error {}
+
 /** Why a turn's runtime slot was released; absent for a turn that ran to its terminal state. */
 export type RuntimeReleaseCause = "admission-failed";
 
@@ -302,15 +304,24 @@ export class TurnAdmissionDispatchCoordinator {
       this.reserveCommandEffect(prepared.value.commandEffect);
       return await this.commit(prepared.value, lease, runtime);
     } catch (error) {
-      if (prepared.value.providerSwitch) this.providerSwitch?.discard(prepared.value.providerSwitch);
-      await this.cleanupAutomaticDraftCopies(prepared.value);
-      if (lease) {
-        await runtime.abort(lease);
-        runtime.release(lease);
-      }
-      await this.rollbackCommandEffect(prepared.value.commandEffect);
+      await this.rollbackAdmission(prepared.value, lease, runtime);
+      if (error instanceof TurnAdmissionOwnershipLostError) return { kind: "handled" };
       throw error;
     }
+  }
+
+  private async rollbackAdmission(
+    prepared: PreparedCommand,
+    lease: TurnRuntimeLease | undefined,
+    runtime: TurnRuntimeAdmissionAuthority,
+  ): Promise<void> {
+    if (prepared.providerSwitch) this.providerSwitch?.discard(prepared.providerSwitch);
+    await this.cleanupAutomaticDraftCopies(prepared);
+    if (lease) {
+      await runtime.abort(lease);
+      runtime.release(lease);
+    }
+    await this.rollbackCommandEffect(prepared.commandEffect);
   }
 
   /** Activate a deferred command effect at the provider-dispatch boundary. */
@@ -562,7 +573,7 @@ export class TurnAdmissionDispatchCoordinator {
     runtime.activate(lease);
     const attachmentData = await this.persistAttachments(prepared);
     try {
-      return await this.commitWithAttachments(prepared, lease, attachmentData, cwd, review);
+      return await this.commitWithAttachments(prepared, lease, attachmentData, cwd, review, runtime);
     } catch (error) {
       if (prepared.command.stagedDraftImageIds?.length && !prepared.command.persistedUserMessage) {
         await this.attachments.removeStoredAttachments(prepared.command.threadId, ownCopies(attachmentData));
@@ -603,6 +614,7 @@ export class TurnAdmissionDispatchCoordinator {
     attachmentData: PersistedAttachmentData,
     cwd: string,
     review: ApprovalReviewDecision,
+    runtime: TurnRuntimeAdmissionAuthority,
   ): Promise<PreparedTurnDispatch> {
     const sourceTurnId = prepared.command.sourceTurnId ?? NodeCrypto.randomUUID();
     const parentStartInput = this.prepareParentTurnStartInput(prepared, lease, sourceTurnId, attachmentData, review);
@@ -610,6 +622,7 @@ export class TurnAdmissionDispatchCoordinator {
       ? { revertIds: [], paths: [] } : this.reverts.pendingAgentNotice(prepared.thread.id);
     parentStartInput.revertNoticeIds = revertNotice.revertIds;
     let wirePayload = await this.buildWirePayload(prepared, revertNotice.paths);
+    if (!runtime.owns(lease)) throw new TurnAdmissionOwnershipLostError();
     await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
     if (prepared.command.planCommentIds?.length) {
       const { comments, versions } = this.plans.sentComments(prepared.thread.id, prepared.command.planCommentIds);

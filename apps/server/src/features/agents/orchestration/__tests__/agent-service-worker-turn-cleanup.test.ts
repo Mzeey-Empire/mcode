@@ -107,6 +107,43 @@ describe("AgentService cleanup through production worker composition", { timeout
     expect(fixture.sent.map((turn) => turn.message)).toEqual(["replacement"]);
   });
 
+  it("finishes a parent start committed after a user stop before admitting a replacement", async () => {
+    const fixture = await openFixture("claude");
+    let releaseStart!: () => void;
+    const startReady = new Promise<void>((resolve) => { releaseStart = resolve; });
+    const owner = fixture.workers.owner;
+    const startParent = owner.start.bind(owner);
+    const start = vi.spyOn(owner, "start").mockImplementationOnce(async (input) => {
+      await startReady;
+      await startParent(input);
+    });
+    const send = fixture.service.sendMessage({
+      threadId: fixture.thread.id, content: "hello", permissionMode: "default",
+      model: "claude-sonnet-4-6", attachments: [], provider: "claude",
+    });
+    try {
+      await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+      const stopped = await fixture.service.stopSession(fixture.thread.id, { by: "user" });
+      expect(stopped.status).toBe("cancelled");
+      expect(stopped.dispatchState).toBe("not-dispatched");
+      expect(fixture.sent).toEqual([]);
+    } finally {
+      releaseStart();
+      await send;
+    }
+
+    await expect(fixture.service.sendMessage({
+      threadId: fixture.thread.id, content: "replacement", permissionMode: "default",
+      model: "claude-sonnet-4-6", attachments: [], provider: "claude",
+    })).resolves.toBeUndefined();
+    expect(fixture.sent.map((turn) => turn.message)).toEqual(["replacement"]);
+    const executionId = start.mock.calls[0]?.[0].execution.executionId;
+    if (!executionId) throw new Error("Parent start did not receive an execution identity");
+    const stoppedTurn = fixture.canonical.loadTurnByExecution(executionId);
+    expect(stoppedTurn?.status).toBe("Cancelled");
+    expect(stoppedTurn?.ending).toEqual({ outcome: "cancelled", stop: { by: "user" } });
+  });
+
   it("keeps an automatic queued dispatch pending after an early provider send until Ended releases the active Turn", async () => {
     const fixture = await openFixture("claude");
     const message = await fixture.messages.create(fixture.thread.id, "user", "Queued work", 1);

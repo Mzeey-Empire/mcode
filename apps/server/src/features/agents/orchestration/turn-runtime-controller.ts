@@ -203,6 +203,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private readonly activeMutationReservations = new Map<string, string>();
   /** Single-flight user stop operation per thread. */
   private readonly stopOperationsByThread = new Map<string, Promise<AgentStopResult>>();
+  /** Stop cause for a turn stopped before dispatch, so a parent start that commits afterwards finishes cancelled. */
+  private readonly unsentStopsByThread = new Map<string, { executionId: string; stop: TurnStopCause }>();
   /** Monotonic turn generation per thread, including turns that failed setup. */
   private readonly turnGenerations = new Map<string, number>();
   /** Single ordered pipeline for validated provider envelopes and terminal materialization. */
@@ -419,6 +421,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       this.activeSessionIds.delete(command.threadId);
       throw new Error(`Thread ${command.threadId} already has a pending mutation`);
     }
+    this.unsentStopsByThread.delete(command.threadId);
     const generation = (this.turnGenerations.get(command.threadId) ?? 0) + 1;
     this.turnGenerations.set(command.threadId, generation);
     const turnExecutionId = this.turnRuntime.start(command.threadId).turnExecutionId!;
@@ -448,6 +451,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Release a failed admission without disturbing a replacement turn that won the lease. */
   private releaseTurnAdmission(lease: TurnRuntimeLease): void {
+    const wasStopped = this.unsentStopFor(lease) !== undefined;
+    if (wasStopped) this.unsentStopsByThread.delete(lease.threadId);
     const ownsRuntime = this.turnRuntime.snapshot(lease.threadId)?.turnExecutionId === lease.turnExecutionId;
     const ownsMutation = this.activeMutationReservations.get(lease.threadId) === lease.mutationReservationToken;
     if ((ownsRuntime || ownsMutation) && this.activeSessionIds.delete(lease.threadId)) {
@@ -459,7 +464,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     // subscription, a queued turn's completion) would otherwise never be told.
     const released = this.runtimeReleaseCallbacks.get(lease.turnExecutionId);
     this.runtimeReleaseCallbacks.delete(lease.turnExecutionId);
-    released?.("admission-failed");
+    released?.(wasStopped ? undefined : "admission-failed");
     for (const listener of this.runtimeReleaseListeners) listener(lease.threadId);
   }
 
@@ -484,6 +489,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Set up generic turn tracking, apply a stable command receipt, then send through the provider. */
   private async dispatchPreparedTurn(prepared: PreparedTurnDispatch): Promise<void> {
     if (!this.ownsTurnAdmission(prepared.lease)) {
+      const stop = this.unsentStopFor(prepared.lease);
+      const terminal: UnsentWorkerTerminal = stop
+        ? { outcome: "cancelled", stop }
+        : { outcome: "errored" };
+      await this.finishUnsentWorkerTurn(prepared.lease.threadId, prepared.lease.turnExecutionId, terminal);
       this.releaseTurnAdmission(prepared.lease);
       return;
     }
@@ -496,6 +506,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         error: error instanceof Error ? error.message : String(error) });
       await this.failPreparedTurnDispatch(prepared, error);
     }
+  }
+
+  /** The recorded pre-dispatch stop for this exact lease, if a stop landed before its provider send. */
+  private unsentStopFor(lease: TurnRuntimeLease): TurnStopCause | undefined {
+    const stopped = this.unsentStopsByThread.get(lease.threadId);
+    return stopped?.executionId === lease.turnExecutionId ? stopped.stop : undefined;
   }
 
   /** Bind file evidence and the exact provider route after the parent start receipt. */
@@ -1157,6 +1173,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    */
   private async stopSessionInternal(threadId: string, stop: TurnStopCause): Promise<AgentStopResult> {
     const prepared = this.prepareStop(threadId, stop);
+    if (isRunningRuntime(prepared.runtime) && prepared.dispatchState === "not-dispatched") {
+      this.unsentStopsByThread.set(threadId, { executionId: prepared.runtime.turnExecutionId!, stop: prepared.stop });
+    }
     const owned = this.workerRuntime?.owner.current(threadId);
     if (owned?.started && owned.execution.executionId === prepared.runtime.turnExecutionId) {
       return this.stopWorkerSession(prepared);
