@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { and, asc, count, desc, eq, gt, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, or, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { CANONICAL_AGENT_RECONNECT_DELTA_MAX_EVENTS, type CanonicalAgentReconnectRecovery, type CanonicalAgentRevision } from "@mcode/contracts/models/canonical-agent-reconnect";
 import { CanonicalAgentEventEnvelopeSchema, type AgentModelState, type AgentThread, type AgentTurn, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
@@ -32,13 +32,34 @@ export interface CanonicalAgentReadRepositoryOperations {
 export class CanonicalAgentReadRepository {
   private readonly conversationProjection: CanonicalConversationProjectionReader;
   private readonly orm: BunSQLiteDatabase;
+  private readonly loadThreadStatement: ReturnType<CanonicalAgentReadRepository["buildLoadThreadStatement"]>;
+  private readonly loadTurnStatement: ReturnType<CanonicalAgentReadRepository["buildLoadTurnStatement"]>;
+  private readonly loadCheckpointStatement: ReturnType<CanonicalAgentReadRepository["buildLoadCheckpointStatement"]>;
 
   constructor(
     db: Database,
     private readonly operations: CanonicalAgentReadRepositoryOperations,
   ) {
     this.orm = drizzle(db);
+    this.loadThreadStatement = this.buildLoadThreadStatement();
+    this.loadTurnStatement = this.buildLoadTurnStatement();
+    this.loadCheckpointStatement = this.buildLoadCheckpointStatement();
     this.conversationProjection = new CanonicalConversationProjectionReader(db);
+  }
+
+  private buildLoadThreadStatement() {
+    return this.orm.select().from(canonicalAgentThreads)
+      .where(eq(canonicalAgentThreads.id, placeholder("threadId"))).prepare();
+  }
+
+  private buildLoadTurnStatement() {
+    return this.orm.select().from(canonicalAgentTurns)
+      .where(eq(canonicalAgentTurns.id, placeholder("turnId"))).prepare();
+  }
+
+  private buildLoadCheckpointStatement() {
+    return this.orm.select().from(canonicalAgentIngestCheckpoints)
+      .where(eq(canonicalAgentIngestCheckpoints.executionId, placeholder("executionId"))).prepare();
   }
 
   /** Loads canonical conversation messages and narrative rows for a compatibility page. */
@@ -68,13 +89,13 @@ export class CanonicalAgentReadRepository {
 
   /** Loads one canonical thread. */
   loadThread(threadId: string): AgentThread | null {
-    const row = this.orm.select().from(canonicalAgentThreads).where(eq(canonicalAgentThreads.id, threadId)).get();
+    const row = this.loadThreadStatement.get({ threadId });
     return row ? this.operations.mapThread(row) : null;
   }
 
   /** Loads one canonical turn. */
   loadTurn(turnId: string): AgentTurn | null {
-    const row = this.orm.select().from(canonicalAgentTurns).where(eq(canonicalAgentTurns.id, turnId)).get();
+    const row = this.loadTurnStatement.get({ turnId });
     return row ? this.operations.mapTurn(row) : null;
   }
 
@@ -86,9 +107,7 @@ export class CanonicalAgentReadRepository {
 
   /** Loads one canonical checkpoint. */
   loadCheckpoint(executionId: string): CanonicalAgentCheckpoint | null {
-    const row = this.orm.select().from(canonicalAgentIngestCheckpoints)
-      .where(eq(canonicalAgentIngestCheckpoints.executionId, executionId))
-      .get();
+    const row = this.loadCheckpointStatement.get({ executionId });
     return row ? this.operations.mapCheckpoint(row) : null;
   }
 

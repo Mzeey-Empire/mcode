@@ -6,7 +6,7 @@ import { writeNarrativeBatch } from "../../conversation/narrative/persistence/na
 
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, eq, inArray, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { HookExecutionRecord } from "@mcode/contracts/models/hook-execution";
 import {
@@ -53,9 +53,13 @@ function rowToRecord(row: HookExecutionRow): HookExecutionRecord {
 /** Repository for hook execution creation and retrieval against SQLite. */
 export class HookExecutionStore {
   private readonly orm: BunSQLiteDatabase;
+  private readonly insertStatement: ReturnType<HookExecutionStore["buildInsertStatement"]>;
+  private readonly replaceStatement: ReturnType<HookExecutionStore["buildInsertStatement"]>;
 
   constructor(db: Database) {
     this.orm = drizzle(db);
+    this.insertStatement = this.buildInsertStatement(false);
+    this.replaceStatement = this.buildInsertStatement(true);
   }
 
   /** Create a single hook execution record and return the fully-populated record. */
@@ -96,30 +100,64 @@ export class HookExecutionStore {
   /** Insert multiple hook execution records in a single transaction. */
   bulkCreate(inputs: CreateHookExecutionInput[], replaceExisting = false): void {
     if (inputs.length === 0) return;
-    this.orm.transaction((tx) => {
+    this.orm.transaction(() => {
       for (const item of inputs) {
-        const { id, ...rest } = {
-          id: item.id ?? NodeCrypto.randomUUID(),
-          messageId: item.messageId,
-          hookName: item.hookName,
-          toolName: item.toolName,
-          phase: item.phase,
-          payload: item.payload,
-          durationMs: item.durationMs,
-          didBlock: item.didBlock ? 1 : 0,
-          startedAt: item.startedAt,
-          endedAt: item.endedAt,
-          sortOrder: item.sortOrder,
-        };
-        const write = tx.insert(hookExecutions).values({ id, ...rest });
-        if (replaceExisting) write.onConflictDoUpdate({ target: hookExecutions.id, set: rest }).run();
-        else write.onConflictDoNothing().run();
+        this.writePrepared(item, replaceExisting);
       }
     });
   }
   /** Commit one bounded prefix inside the owner transaction. */
   createBoundedBatch(inputs: readonly CreateHookExecutionInput[], limits: WriteBatchLimits, replaceExisting: boolean): WriteBatchResult {
-    return writeNarrativeBatch(inputs, limits, item => this.bulkCreate([item], replaceExisting));
+    return writeNarrativeBatch(inputs, limits, item => this.writePrepared(item, replaceExisting));
+  }
+
+  private buildInsertStatement(replaceExisting: boolean) {
+    const write = this.orm.insert(hookExecutions).values({
+      id: placeholder("id"),
+      messageId: placeholder("messageId"),
+      hookName: placeholder("hookName"),
+      toolName: placeholder("toolName"),
+      phase: placeholder("phase"),
+      payload: placeholder("payload"),
+      durationMs: placeholder("durationMs"),
+      didBlock: placeholder("didBlock"),
+      startedAt: placeholder("startedAt"),
+      endedAt: placeholder("endedAt"),
+      sortOrder: placeholder("sortOrder"),
+    });
+    if (!replaceExisting) return write.onConflictDoNothing().prepare();
+    return write.onConflictDoUpdate({
+      target: hookExecutions.id,
+      set: {
+        messageId: sql`excluded.message_id`,
+        hookName: sql`excluded.hook_name`,
+        toolName: sql`excluded.tool_name`,
+        phase: sql`excluded.phase`,
+        payload: sql`excluded.payload`,
+        durationMs: sql`excluded.duration_ms`,
+        didBlock: sql`excluded.did_block`,
+        startedAt: sql`excluded.started_at`,
+        endedAt: sql`excluded.ended_at`,
+        sortOrder: sql`excluded.sort_order`,
+      },
+    }).prepare();
+  }
+
+  private writePrepared(item: CreateHookExecutionInput, replaceExisting: boolean): void {
+    const statement = replaceExisting ? this.replaceStatement : this.insertStatement;
+    statement.run({
+      id: item.id ?? NodeCrypto.randomUUID(),
+      messageId: item.messageId,
+      hookName: item.hookName,
+      toolName: item.toolName,
+      phase: item.phase,
+      payload: item.payload,
+      durationMs: item.durationMs,
+      didBlock: item.didBlock ? 1 : 0,
+      startedAt: item.startedAt,
+      endedAt: item.endedAt,
+      sortOrder: item.sortOrder,
+    });
   }
 
   /** List all hook executions for a message, ordered by sort_order ascending. */

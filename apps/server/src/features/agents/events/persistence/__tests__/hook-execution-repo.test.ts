@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { HookExecutionStore } from "../hook-execution-store.js";
+import { HookExecutionStore, type CreateHookExecutionInput } from "../hook-execution-store.js";
 
 function seedFixtures(db: Database): { messageId: string } {
   const now = new Date().toISOString();
@@ -27,6 +27,68 @@ describe("HookExecutionStore", () => {
     db = openMemoryDatabase();
     repo = new HookExecutionStore(db);
     ({ messageId } = seedFixtures(db));
+  });
+
+  it.each(["bulkCreate", "createBoundedBatch"])("%s preserves conflicts unless replacement is enabled, then updates every column", (method) => {
+    db.prepare(
+      "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence) SELECT 'msg-2', thread_id, role, content, timestamp, 2 FROM messages WHERE id = ?",
+    ).run(messageId);
+    const write = (input: CreateHookExecutionInput, replaceExisting: boolean) => {
+      if (method === "bulkCreate") {
+        repo.bulkCreate([input], replaceExisting);
+      } else {
+        db.transaction(() => repo.createBoundedBatch(
+          [input], { maxRows: 1, maxBytes: 10_000, maxElapsedMs: 1_000 }, replaceExisting,
+        ))();
+      }
+    };
+    write({
+      id: "hook-conflict",
+      messageId,
+      hookName: "PreToolUse",
+      toolName: null,
+      phase: "pre",
+      payload: "{}",
+      durationMs: null,
+      didBlock: false,
+      startedAt: "2026-05-15T10:00:00Z",
+      endedAt: null,
+      sortOrder: 1,
+    }, false);
+    const original = repo.listByMessage(messageId);
+    const replacement: CreateHookExecutionInput = {
+      id: "hook-conflict",
+      messageId: "msg-2",
+      hookName: "PostToolUse",
+      toolName: "Bash",
+      phase: "post",
+      payload: '{"blocked":true}',
+      durationMs: 250,
+      didBlock: true,
+      startedAt: "2026-05-15T10:01:00Z",
+      endedAt: "2026-05-15T10:01:01Z",
+      sortOrder: 3,
+    };
+
+    write(replacement, false);
+    expect(repo.listByMessage(messageId)).toEqual(original);
+    expect(repo.listByMessage("msg-2")).toEqual([]);
+
+    write(replacement, true);
+    expect(repo.listByMessage(messageId)).toEqual([]);
+    expect(repo.listByMessage("msg-2")).toEqual([{
+      id: "hook-conflict",
+      message_id: "msg-2",
+      hook_name: "PostToolUse",
+      tool_name: "Bash",
+      phase: "post",
+      payload: '{"blocked":true}',
+      duration_ms: 250,
+      did_block: true,
+      started_at: "2026-05-15T10:01:00Z",
+      ended_at: "2026-05-15T10:01:01Z",
+      sort_order: 3,
+    }]);
   });
 
   it("create then listByMessage round-trips a hook with all fields", () => {

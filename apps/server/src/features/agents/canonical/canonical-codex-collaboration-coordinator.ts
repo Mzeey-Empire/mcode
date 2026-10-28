@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { and, asc, desc, eq, getTableColumns, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   canonicalAgentItems,
@@ -70,12 +70,14 @@ interface ResolvedDiagnosticTurn {
 /** Owns Codex-native child delegation lookup and later lifecycle coordination. */
 export class CanonicalCodexCollaborationCoordinator {
   private readonly orm: BunSQLiteDatabase;
+  private readonly delegationToolCallIdsStatement: ReturnType<CanonicalCodexCollaborationCoordinator["buildDelegationToolCallIdsStatement"]>;
 
   constructor(
     private readonly db: Database,
     private readonly operations: CanonicalCodexCollaborationOperations,
   ) {
     this.orm = drizzle(db);
+    this.delegationToolCallIdsStatement = this.buildDelegationToolCallIdsStatement();
   }
 
   /** Loads the one Codex child delegation sourced by a canonical parent item. */
@@ -286,13 +288,17 @@ export class CanonicalCodexCollaborationCoordinator {
     return narrative.filter((entry) => entry.kind !== "toolCall" || !owned.has(entry.record.id) || anchors.has(entry.record.id));
   }
 
-  private delegationToolCallIds(threadId: string, turnId: string): Set<string> {
-    const rows = this.orm.select({ itemId: canonicalCollaborationActions.sourceItemId })
+  private buildDelegationToolCallIdsStatement() {
+    return this.orm.select({ itemId: canonicalCollaborationActions.sourceItemId })
       .from(canonicalCollaborationActions).where(and(
-        eq(canonicalCollaborationActions.sourceThreadId, threadId),
-        eq(canonicalCollaborationActions.sourceTurnId, turnId),
+        eq(canonicalCollaborationActions.sourceThreadId, placeholder("threadId")),
+        eq(canonicalCollaborationActions.sourceTurnId, placeholder("turnId")),
         eq(canonicalCollaborationActions.kind, "delegate"),
-      )).all();
+      )).prepare();
+  }
+
+  private delegationToolCallIds(threadId: string, turnId: string): Set<string> {
+    const rows = this.delegationToolCallIdsStatement.all({ threadId, turnId });
     return new Set(rows.filter((row) => row.itemId.startsWith("toolCall:")).map((row) => row.itemId.slice("toolCall:".length)));
   }
 
