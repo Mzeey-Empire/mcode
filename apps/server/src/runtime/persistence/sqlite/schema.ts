@@ -770,6 +770,11 @@ export const canonicalAgentItems = sqliteTable(
   (table) => [
     index("idx_canonical_agent_items_turn").on(table.turnId, table.createdAt),
     index("idx_canonical_agent_items_thread").on(table.threadId, table.createdAt),
+    index("idx_canonical_agent_items_thread_message").on(
+      table.threadId,
+      sql`json_extract(${table.payloadJson}, '$.message.id')`,
+      table.createdAt,
+    ).where(sql`json_valid(${table.payloadJson}) AND json_extract(${table.payloadJson}, '$.projection') = 'message'`),
     index("idx_canonical_agent_items_created_id").on(table.createdAt, table.id),
   ],
 );

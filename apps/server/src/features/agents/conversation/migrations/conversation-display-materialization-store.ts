@@ -736,7 +736,7 @@ export class ConversationDisplayMaterializationStore {
   }
 
   private childAnchor(row: CanonicalItemRow): string | null {
-    const childMessage = this.findChildMessage.get({ threadId: row.threadId, turnId: row.turnId });
+    const childMessage = this.findChildMessage.get({ turnId: row.turnId });
     // Historical child events may be complete while their provider never
     // emitted a visible message. They have no display projection yet, but the
     // canonical row remains intact and a later terminal message reanchors it.
@@ -757,7 +757,6 @@ export class ConversationDisplayMaterializationStore {
       updatedAt: canonicalAgentItems.updatedAt,
     }).from(canonicalAgentItems)
       .where(and(
-        eq(canonicalAgentItems.threadId, placeholder("threadId")),
         eq(canonicalAgentItems.turnId, placeholder("turnId")),
         eq(canonicalAgentItems.kind, "message"),
         sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
@@ -822,9 +821,11 @@ export class ConversationDisplayMaterializationStore {
     }).from(canonicalAgentItems)
       .where(and(
         eq(canonicalAgentItems.threadId, placeholder("threadId")),
+        sql`json_valid(${canonicalAgentItems.payloadJson})`,
         sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
         sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.id') = ${placeholder("messageId")}`,
       ))
+      .orderBy(asc(canonicalAgentItems.createdAt), sql`${canonicalAgentItems}.rowid ASC`)
       .limit(1)
       .prepare();
   }

@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS `idx_canonical_agent_items_thread_message` ON `canonical_agent_items` (`thread_id`,json_extract("payload_json", '$.message.id'),`created_at`) WHERE json_valid("payload_json") AND json_extract("payload_json", '$.projection') = 'message';
