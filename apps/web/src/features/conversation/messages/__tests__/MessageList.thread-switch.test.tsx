@@ -831,13 +831,12 @@ describe("MessageList thread switch", () => {
         });
       });
       expect(document.querySelector('[data-slot="popover-trigger"]')).toBeNull();
+      // The virtual list observes the viewport too, so pick the tracker's observer by what it watches.
+      const tracksSelection = (observer: ResizeObserverMock) => observer.observed.has(viewport) && observer.observed.has(content);
       await vi.waitFor(() => {
-        expect(resizeObservers.some((observer) => observer.observed.has(viewport))).toBe(true);
+        expect(resizeObservers.some(tracksSelection)).toBe(true);
       });
-      const viewportObserver = resizeObservers.find((observer) => observer.observed.has(viewport))!;
-      await vi.waitFor(() => {
-        expect([...viewportObserver.observed]).toContain(content);
-      });
+      const viewportObserver = resizeObservers.find(tracksSelection)!;
 
       expect(actionPositioner).toHaveStyle({ transform: "translate(120px, 188px)" });
 
