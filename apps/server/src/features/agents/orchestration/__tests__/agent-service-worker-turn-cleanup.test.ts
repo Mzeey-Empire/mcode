@@ -11,6 +11,7 @@ import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-pr
 import { broadcast } from "../../../../application/transport/push.js";
 import { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
+import { ThreadControlMutationReservationService } from "../../../thread-control/index.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
 import { appendPreviewAnnotations, sendRecoveryAttempt } from "../../transport/turn-message-dispatch.js";
@@ -61,6 +62,21 @@ afterEach(async () => {
 });
 
 describe("AgentService cleanup through production worker composition", { timeout: 30_000 }, () => {
+  it("aborts an auto-resumed turn when a pending mutation reservation owns the thread", async () => {
+    const fixture = await openFixture("claude");
+    const mutationReservations = container.resolve(ThreadControlMutationReservationService);
+    mutationReservations.rehydrate(fixture.thread.id, "pending-approval");
+
+    await expect(fixture.host.turns.open({
+      threadId: fixture.thread.id,
+      notice: "Claude continued without a prompt",
+    })).resolves.toEqual({ kind: "declined", reason: "busy" });
+
+    await vi.waitFor(() => {
+      expect(fixture.provider.stopSession).toHaveBeenCalledWith(`mcode-${fixture.thread.id}`);
+    });
+  });
+
   it("keeps an automatic queued dispatch pending after an early provider send until Ended releases the active Turn", async () => {
     const fixture = await openFixture("claude");
     const message = await fixture.messages.create(fixture.thread.id, "user", "Queued work", 1);
