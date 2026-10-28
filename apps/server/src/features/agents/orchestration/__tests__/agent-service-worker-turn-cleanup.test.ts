@@ -144,6 +144,40 @@ describe("AgentService cleanup through production worker composition", { timeout
     expect(stoppedTurn?.ending).toEqual({ outcome: "cancelled", stop: { by: "user" } });
   });
 
+  it("redacts Browser tool input and output before persistence and publication", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    await fixture.emit({ type: "toolUse", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
+      toolCallId: "browser-evaluate", toolName: "mcp__mcode__browser_evaluate",
+      toolInput: { expression: "globalThis.BROWSER_INPUT_SECRET" } });
+    await fixture.emit({ type: "toolResult", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
+      toolCallId: "browser-evaluate", output: '{"valueJson":"BROWSER_OUTPUT_SECRET"}', isError: false });
+    await fixture.emit(turnComplete(fixture.thread.id, turn.turnExecutionId));
+    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
+
+    const durableEvents = fixture.db.query<{
+      type: string;
+      tool_input: string | null;
+      output: string | null;
+    }, [string]>(`
+      SELECT json_extract(envelope_json, '$.payload.item.payload.runtimeEvent.event.type') AS type,
+        json_extract(envelope_json, '$.payload.item.payload.runtimeEvent.event.toolInput') AS tool_input,
+        json_extract(envelope_json, '$.payload.item.payload.runtimeEvent.event.output') AS output
+      FROM canonical_agent_events
+      WHERE execution_id = ?
+        AND json_extract(envelope_json, '$.payload.item.payload.runtimeEvent.event.toolCallId') = 'browser-evaluate'
+      ORDER BY accepted_sequence
+    `).all(turn.turnExecutionId);
+    expect.soft(durableEvents).toEqual([
+      { type: "toolUse", tool_input: '{"operation":"browser_evaluate"}', output: null },
+      { type: "toolResult", tool_input: null, output: '{"operation":"browser_evaluate","outcome":"completed"}' },
+    ]);
+    const publishedUse = fixture.published.find((event) => event.type === "toolUse" && event.toolCallId === "browser-evaluate");
+    const publishedResult = fixture.published.find((event) => event.type === "toolResult" && event.toolCallId === "browser-evaluate");
+    expect.soft(publishedUse).toHaveProperty("toolInput", { operation: "browser_evaluate" });
+    expect.soft(publishedResult).toHaveProperty("output", '{"operation":"browser_evaluate","outcome":"completed"}');
+  });
+
   it("keeps an automatic queued dispatch pending after an early provider send until Ended releases the active Turn", async () => {
     const fixture = await openFixture("claude");
     const message = await fixture.messages.create(fixture.thread.id, "user", "Queued work", 1);
