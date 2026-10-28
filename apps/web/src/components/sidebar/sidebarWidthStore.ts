@@ -64,7 +64,9 @@ interface SidebarWidthState {
 export const useSidebarWidthStore = create<SidebarWidthState>()(
   persist(
     (set, get) => ({
-      ...widthState(SIDEBAR_DEFAULT_WIDTH),
+      // Literal, not widthState: this runs at import, where node-environment tests have no window.
+      preferredWidth: SIDEBAR_DEFAULT_WIDTH,
+      width: SIDEBAR_DEFAULT_WIDTH,
       setWidth: (width) => set(widthState(clampPreferredWidth(width))),
       resetWidth: () => set(widthState(SIDEBAR_DEFAULT_WIDTH)),
       fitToViewport: () => {
