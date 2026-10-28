@@ -119,6 +119,20 @@ describe("useSidebarWidthStore", () => {
     expect(useSidebarWidthStore.getState().width).toBe(420);
   });
 
+  it("restores the chosen width after a narrow window widens again", () => {
+    useSidebarWidthStore.getState().setWidth(308);
+    setViewportWidth(640);
+    useSidebarWidthStore.getState().fitToViewport();
+    expect(useSidebarWidthStore.getState().width).toBe(SIDEBAR_MIN_WIDTH);
+
+    setViewportWidth(WIDE_VIEWPORT);
+    useSidebarWidthStore.getState().fitToViewport();
+
+    expect(useSidebarWidthStore.getState().width).toBe(308);
+    const stored: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
+    expect(stored).toMatchObject({ state: { width: 308 } });
+  });
+
   it("ignores a stored width that is not a number", async () => {
     useSidebarWidthStore.getState().setWidth(240);
     storeStoredWidth("wide");
