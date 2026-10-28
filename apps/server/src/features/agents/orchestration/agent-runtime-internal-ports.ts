@@ -14,19 +14,14 @@ export class AgentEventPublicationRuntimePort implements AgentEventPublicationRu
     return this.requireTarget().getCurrentFileEffectTurnId(threadId);
   }
 
-  /** Return whether an ended event remains private during retry or stopping. */
+  /** Return whether an ended event remains private during session replacement or stopping. */
   shouldSuppressTurnEnded(threadId: string): boolean {
     return this.requireTarget().shouldSuppressTurnEnded(threadId);
   }
 
-  /** Return whether a terminal completion belongs to a suppressed retry. */
+  /** Return whether a terminal completion belongs to a replaced pooled session. */
   shouldSuppressTurnComplete(threadId: string): boolean {
     return this.requireTarget().shouldSuppressTurnComplete(threadId);
-  }
-
-  /** Return whether a transient provider error remains private during retry. */
-  shouldSuppressTransientTurnError(threadId: string, errorMessage: string): boolean {
-    return this.requireTarget().shouldSuppressTransientTurnError(threadId, errorMessage);
   }
 
   private requireTarget(): AgentEventPublicationRuntime {

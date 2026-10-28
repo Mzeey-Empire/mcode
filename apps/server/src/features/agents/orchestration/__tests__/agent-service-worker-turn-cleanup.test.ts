@@ -332,6 +332,18 @@ describe("AgentService cleanup through production worker composition", { timeout
     expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({ threadId: fixture.thread.id, messageId: assistant?.id, outcome: "errored", executionId: turn.turnExecutionId }));
   });
 
+  it("publishes one transient provider Error and durably ends the worker turn errored", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    await fixture.emit({ type: "error", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
+      error: "Provider connection failed: ECONNRESET", failure: { kind: "retryable" } });
+    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
+    await vi.waitFor(() => expect(fixture.service.runtimeAccess().activeThreadIds()).not.toContain(fixture.thread.id));
+
+    expect(fixture.published.filter((event) => event.type === "error" && event.turnExecutionId === turn.turnExecutionId)).toHaveLength(1);
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Errored");
+  });
+
   it("ends a provider usage limit as an interruption that keeps the absolute reset time", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);
