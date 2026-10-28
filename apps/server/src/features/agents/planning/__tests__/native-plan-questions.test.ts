@@ -73,7 +73,11 @@ function createProvider(child: NativeProcess) {
         isConfigured: () => false, issue: () => null, refresh: () => { throw new Error("Unused browser"); },
         release: leaseId => ({ leaseId, released: false }), revokeCredential: () => false },
       mcode: { attach: async () => null, close: async () => {} }, grants: { consume: () => false },
-      events: { submit: async () => { throw new Error("Unexpected canonical event"); } },
+      events: { submit: async (batch) => ({
+        commit: { outcome: "committed", conversationRevision: 1, rosterRevision: 0,
+          acceptedThrough: 1, durableThrough: 1, eventCount: batch.events.length },
+        delivery: { ingress: "queued" },
+      }) },
     },
     codex: { settings: { get: async () => ({ cliPath: "codex" }) },
       attachments: { persistGeneratedImageFromPath: () => { throw new Error("Unexpected image"); } },

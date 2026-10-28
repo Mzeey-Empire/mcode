@@ -5,15 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
-import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
-import { ThoughtSegmentRepo } from "../../conversation/narrative/persistence/thought-segment-repo.js";
-import { HookExecutionRepo } from "../../events/persistence/hook-execution-repo.js";
-import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
-import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
-import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
-import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";
-import { TurnSnapshotRepo } from "../persistence/turn-snapshot-repo.js";
-import { TurnFinalizer } from "../turn-finalizer.js";
 import { CodexParentMessageProjection } from "../codex-parent-message-projection.js";
 import { deriveTurnAssistantMessageId } from "../turn-assistant-message-id.js";
 
@@ -47,25 +38,12 @@ describe("CodexParentMessageProjection", () => {
 
   function writer() { return agentStorageTestWriter(setup); }
 
-  function finalizer(): TurnFinalizer {
-    return new TurnFinalizer(
-      messages,
-      new ThreadRepo(db, writer()),
-      new NarrativeStore(messages, new ToolCallRecordRepo(db, writer()), new ThoughtSegmentRepo(db, writer()), new HookExecutionRepo(db, writer())),
-      new SnapshotService(new RealGitExecutor()),
-      new TurnSnapshotRepo(db, writer()),
-      writer(),
-    );
-  }
-
   function projection(): CodexParentMessageProjection {
     return new CodexParentMessageProjection({ execution, turnKind: "ordinary" });
   }
 
-  it("matches the live finalizer after an intervening notice and survives repeat and reload", async () => {
-    const live = finalizer();
+  it("keeps deterministic identity after an intervening notice and survives repeat and reload", async () => {
     const worker = projection();
-    live.bufferAssistantAttachments(execution.threadId, [image]);
     worker.bufferGeneratedAttachment(execution, image);
     await messages.create(execution.threadId, "system", "Notice", 2, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, undefined, "notice-1");
@@ -74,7 +52,7 @@ describe("CodexParentMessageProjection", () => {
       execution, content: "Answer", model: "codex-model", precedingMessageId: "notice-1",
       postTurnGoalReceipt: false,
     });
-    const liveMessageId = live.bufferAssistantBody(execution.threadId, "Answer", "codex-model");
+    const liveMessageId = deriveTurnAssistantMessageId(execution.threadId, "notice-1");
     expect(publicMessage).toEqual({ messageId: liveMessageId, model: "codex-model", attachments: [image] });
     expect(liveMessageId).toBe(deriveTurnAssistantMessageId(execution.threadId, "notice-1"));
 

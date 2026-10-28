@@ -7,7 +7,7 @@ import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
 import { findOpenCodeSession, parseOpenCodeHealth, resolveUpstreamOpenCode } from "./opencode-serve.mjs";
-import { assertRuntimeFreshness, canonicalFrameToLiveEvents, createOpenCodeAttachReport, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openCodeAttachPassed, openVerificationSocketUrl, parseArguments, runBun } from "./runtime.mjs";
+import { assertRuntimeFreshness, canonicalFrameToLiveEvents, createOpenCodeAttachReport, findLiveWorkspace, hasSharedStopResult, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openCodeAttachPassed, openVerificationSocketUrl, parseArguments, runBun } from "./runtime.mjs";
 
 const CLI = NodePath.join(import.meta.dirname, "verify-mcode.mjs");
 const BROWSER_PROOF = NodePath.join(import.meta.dirname, "browser-opencode-proof.mjs");
@@ -24,6 +24,45 @@ function runBunCommand(args) {
     child.once("close", (code) => resolve({ code, stdout, stderr }));
   });
 }
+
+NodeTest.test("completion selects the fixture workspace without registering the worktree root", async () => {
+  const repoRoot = NodePath.resolve("runtime-live-workspace");
+  const fixturePath = NodePath.join(repoRoot, ".dev", "fixture-repo");
+  const socket = {
+    rpc: async () => [
+      { id: "unrelated-workspace", path: NodePath.join(repoRoot, "other-repo") },
+      { id: "fixture-workspace", path: fixturePath },
+    ],
+  };
+
+  const workspace = await findLiveWorkspace(socket, repoRoot, "completion");
+
+  NodeAssertStrict.equal(workspace.id, "fixture-workspace");
+  NodeAssertStrict.equal(workspace.path, fixturePath);
+});
+
+NodeTest.test("completion rejects a registered worktree root when the fixture workspace is missing", async () => {
+  const repoRoot = NodePath.resolve("runtime-live-workspace");
+  const socket = {
+    rpc: async () => [{ id: "worktree-workspace", path: repoRoot }],
+  };
+
+  await NodeAssertStrict.rejects(
+    () => findLiveWorkspace(socket, repoRoot, "completion"),
+    /The disposable fixture workspace is not registered/,
+  );
+});
+
+NodeTest.test("accepts concurrent stops that joined one cancelled stop of the same execution", () => {
+  const cancelled = (turnExecutionId) => ({
+    status: "cancelled", threadId: "thread-1", turnExecutionId, snapshot: { phase: "cancelled", turnExecutionId },
+  });
+  const alreadyTerminal = { status: "already-terminal", threadId: "thread-1", turnExecutionId: "exec-1", snapshot: { phase: "cancelled" } };
+  NodeAssertStrict.equal(hasSharedStopResult([cancelled("exec-1"), cancelled("exec-1")], "thread-1"), true);
+  NodeAssertStrict.equal(hasSharedStopResult([cancelled("exec-1"), alreadyTerminal], "thread-1"), true);
+  NodeAssertStrict.equal(hasSharedStopResult([cancelled("exec-1"), cancelled("exec-2")], "thread-1"), false);
+  NodeAssertStrict.equal(hasSharedStopResult([cancelled("exec-1"), { ...alreadyTerminal, turnExecutionId: "exec-2" }], "thread-1"), false);
+});
 
 NodeTest.test("lists every runtime command through the public wrapper help", async () => {
   const help = await runBunCommand([CLI, "--help"]);

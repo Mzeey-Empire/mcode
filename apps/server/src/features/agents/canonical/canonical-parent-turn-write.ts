@@ -1,4 +1,4 @@
-import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
+import { CanonicalAgentStore } from "./canonical-agent-store.js";
 import { PlanImplementStore } from "../planning/persistence/plan-implement-store.js";
 import { PlanCommentStore } from "../planning/persistence/plan-comment-store.js";
 import type { Database } from "bun:sqlite";
@@ -165,7 +165,7 @@ export interface LostParentExecutionInput {
 /** Writer-local semantic operations with cloneable inputs and durable receipts. */
 export class CanonicalParentTurnWrite {
   private readonly db: Database;
-  private readonly canonical: CanonicalAgentBoundary;
+  private readonly canonical: CanonicalAgentStore;
   private readonly messages: MessageRepo;
   private readonly narrative: NarrativeReadStore;
   private readonly toolRecords: ToolCallRecordRepo;
@@ -182,7 +182,7 @@ export class CanonicalParentTurnWrite {
 
   constructor(db: Database, publish: CanonicalAgentEventPublisher) {
     this.db = db;
-    this.canonical = new CanonicalAgentBoundary(db, publish);
+    this.canonical = new CanonicalAgentStore(db, publish);
     this.messages = new MessageRepo(db);
     this.toolRecords = new ToolCallRecordRepo(db);
     this.thoughtRecords = new ThoughtSegmentRepo(db);
@@ -235,7 +235,7 @@ export class CanonicalParentTurnWrite {
 
   private assignedAssistantForLoss(
     input: LostParentExecutionInput,
-    terminal: ReturnType<CanonicalAgentBoundary["loadTerminalProjection"]>["message"],
+    terminal: ReturnType<CanonicalAgentStore["loadTerminalProjection"]>["message"],
   ) {
     if (!input.assignedMessageId) return null;
     const assigned = this.messages.findByIdInThreadIncludingInternal(input.threadId, input.assignedMessageId);
@@ -495,20 +495,6 @@ export class CanonicalParentTurnWrite {
     }, onBatchWrite);
   }
 
-  /** Commit one bounded terminal checkpoint without crossing the worker transaction with a callback. */
-  finishBatch(input: DataOnlyParentTurnFinishInput, endedAt: string, cursor: number) {
-    const checkpoint = this.canonical.loadCheckpoint(input.executionId);
-    if (!checkpoint || checkpoint.threadId !== input.threadId || checkpoint.turnId !== input.turnId) {
-      throw new Error(`Canonical parent execution not found: ${input.executionId}`);
-    }
-    if (checkpoint.terminalOutcome) {
-      return this.canonical.finishParentTurnBatch({ ...input, projectTurn: () => ({ message: null, narrative: [] }) }, endedAt, cursor);
-    }
-    const projection = this.terminalProjection(input);
-    return this.canonical.finishParentTurnBatch({ ...input, projectTurn: () => projection,
-      finalizeCompatibility: () => this.finalizeProjectionCompatibility(input, projection) }, endedAt, cursor);
-  }
-
   private terminalProjection(input: DataOnlyParentTurnFinishInput): ParentTurnProjection {
     const staged = "kind" in input.projection
       ? this.loadStagedTerminalProjection(input.threadId, input.executionId, input.projection.messageId)
@@ -662,8 +648,8 @@ function validSelectedPatch(source: "native" | "tracked", patch: string | null):
 }
 
 function isUnfinishedLostTurn(
-  turn: ReturnType<CanonicalAgentBoundary["loadTurnByExecution"]>,
-  checkpoint: ReturnType<CanonicalAgentBoundary["loadCheckpoint"]>,
+  turn: ReturnType<CanonicalAgentStore["loadTurnByExecution"]>,
+  checkpoint: ReturnType<CanonicalAgentStore["loadCheckpoint"]>,
   input: LostParentExecutionInput,
 ): boolean {
   return Boolean(turn && checkpoint && turn.id === input.turnId

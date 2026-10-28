@@ -115,7 +115,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
         atDispatch.push({ text: NodeFS.readFileSync(files.path(threadId), "utf8"), status: plans.getById(ready.id)?.status });
       },
       stopSession: async () => undefined, shutdown: () => undefined, listModels: async () => [],
-      setCanonicalTurnEventDeliveryEnabled: () => undefined, setCanonicalTurnDeliveryFailureHandler: () => undefined,
+      setCanonicalTurnDeliveryFailureHandler: () => undefined,
       fenceCanonicalTurnEvents: async () => undefined, retireCanonicalTurnEvents: async () => undefined,
     });
     const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => undefined };
@@ -501,7 +501,6 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(second.planTurn).toEqual({ kind: "planning", planFilePath: files.path(threadId) });
     expect(second.message).toContain("**Where?**: Local");
     const content = "````mcode-plan\n# Storage plan\nUse SQLite.\n````";
-    expect(planTurns.needsAssistantMaterialization({ type: "message", threadId, messageId: "pending", content })).toBe(true);
     await providerEvent(second, "textDelta", { delta: content, isFinalResponse: true });
     await providerEvent(second, "message", { content, tokens: null });
     await providerEvent(second, "turnComplete");

@@ -119,7 +119,6 @@ describe("provider composition container", () => {
     ]));
 
     ingress.start(registry, {
-      handleProviderEvent: (event) => received.push(event),
       handleProjectedCommitted: (event) => received.push(event),
       handleProviderFileMutation: () => undefined,
       handleProviderTurnDiff: () => undefined,

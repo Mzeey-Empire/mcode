@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import { applySQLiteConnectionPolicy } from "../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
 import { openDatabase as openBootstrapDatabase } from "../../../runtime/persistence/sqlite/database.js";
 import { DatabaseStartupRefusal, rootCauseMessage } from "../../../runtime/persistence/sqlite/startup-refusal.js";
-import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
+import { CanonicalAgentStore } from "./canonical-agent-store.js";
 import { CanonicalProviderCommitProjector } from "./canonical-provider-projection.js";
 import { CanonicalAcceptedEventWrite } from "./canonical-accepted-write.js";
 import { CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
@@ -29,7 +29,7 @@ import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-bound
 
 let db: Database | undefined;
 let ordinaryHandlers: ReadonlyMap<string, (input: unknown) => unknown> | undefined;
-let boundary: CanonicalAgentBoundary | undefined;
+let boundary: CanonicalAgentStore | undefined;
 let providerProjector: CanonicalProviderCommitProjector | undefined;
 let acceptedWriter: CanonicalAcceptedEventWrite | undefined;
 let assistantTextCheckpoints: ParentAssistantTextCheckpointService | undefined;
@@ -230,7 +230,7 @@ async function handleWrite(
 function applyWrite(
   request: Extract<CanonicalWriterRequest, { kind: "commit" | "append-accepted" | "classify-parent-narrative-recovery" }>,
   correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
-  canonical: CanonicalAgentBoundary,
+  canonical: CanonicalAgentStore,
 ): Extract<CanonicalWriterResponse, { kind: "committed" | "accepted-appended" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified" }> {
   if (request.kind === "append-accepted") {
     if (!acceptedWriter || request.input.execution.executionId !== request.executionId) {

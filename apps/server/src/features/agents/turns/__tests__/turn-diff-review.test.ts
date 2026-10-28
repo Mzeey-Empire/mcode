@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { selectTurnDiffSettlement } from "../turn-diff-service.js";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
@@ -6,11 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
 import { ReviewComparisonResultSchema } from "@mcode/contracts/models/review-comparison";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
-import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
-import { ThoughtSegmentRepo } from "../../conversation/narrative/persistence/thought-segment-repo.js";
-import { HookExecutionRepo } from "../../events/persistence/hook-execution-repo.js";
-import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
-import { TurnFinalizer } from "../turn-finalizer.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
@@ -90,7 +86,7 @@ describe("Last turn Review public comparison boundary", { timeout: 30_000 }, () 
     expect(live.turnDiff?.phase).toBe("live");
     expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: live.turnDiff!.id, filePath: "a.txt" }, deps)).toBe(nativePatch);
     await snapshotBothEdits(before);
-    await deps.turnDiffs.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
+    await settleEvidence(deps.turnDiffs, new TurnDiffRepo(db, writer()), identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
     deps.turnDiffs = new TurnDiffService(new TurnDiffRepo(db, writer()));
     const settled = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(settled.turnDiff).toMatchObject({ phase: "settled", source: "native", fidelity: "agent" });
@@ -155,7 +151,7 @@ describe("Last turn Review public comparison boundary", { timeout: 30_000 }, () 
     expect(deps.turnDiffs.liveComparison(identity.threadId)).toBeNull();
     const afterEmpty = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(afterEmpty.turnDiff).toMatchObject({ phase: "settled", source: "git", fidelity: "same-file-changes-possible" });
-    await deps.turnDiffs.prepareFinalization(identity.threadId, next.turnExecutionId, "completed")("message-2", {
+    await settleEvidence(deps.turnDiffs, new TurnDiffRepo(db, writer()), identity.threadId, next.turnExecutionId, "completed")("message-2", {
       revision: 2, fileCount: 1, additions: 1, deletions: 1,
       effects: [{ path: "a.txt", scope: "workspace", kind: "edited", additions: 1, deletions: 1, binary: false, toolCallIds: [] }],
     });
@@ -168,7 +164,7 @@ describe("Last turn Review public comparison boundary", { timeout: 30_000 }, () 
     await snapshotBothEdits();
     deps.turnDiffs.begin(identity);
     deps.turnDiffs.push({ ...identity, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
-    await deps.turnDiffs.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
+    await settleEvidence(deps.turnDiffs, new TurnDiffRepo(db, writer()), identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
     const previous = readyComparison(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     const next = { ...identity, turnId: "turn-2", turnExecutionId: "execution-2" };
     deps.turnDiffs.begin(next);
@@ -202,16 +198,15 @@ describe("Last turn Review public comparison boundary", { timeout: 30_000 }, () 
     const previous = hasPrevious ? await snapshotBothEdits() : null;
     const messages = new MessageRepo(db, writer());
     await messages.create(identity.threadId, "user", "Make the next edit", 2);
-    const narrative = new NarrativeStore(messages, new ToolCallRecordRepo(db, writer()), new ThoughtSegmentRepo(db, writer()), new HookExecutionRepo(db, writer()));
-    const finalizer = new TurnFinalizer(messages, new ThreadRepo(db, writer()), narrative, snapshotService,
-      snapshots, writer(), undefined, undefined, undefined, deps.turnDiffs);
     const executionId = "execution-2";
-    deps.turnDiffs.begin({ ...identity, turnExecutionId: executionId });
-    deps.turnDiffs.push({ ...identity, turnExecutionId: executionId, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
-    finalizer.recordTurnRef(identity.threadId, await snapshotService.captureRef(directory), directory);
-    finalizer.bufferAssistantBody(identity.threadId, "Partial agent edit", "test-model");
+    const before = await snapshotService.captureRef(directory);
+    const assistant = await messages.create(identity.threadId, "assistant", "Partial agent edit", 3);
+    await messages.setAssistantOutcome(assistant.id, outcome, executionId);
     NodeFS.writeFileSync(NodePath.join(directory, "a.txt"), "PARTIAL=edit\n");
-    await finalizer.finalize(identity.threadId, outcome, Promise.resolve(), executionId);
+    await snapshots.create({
+      messageId: assistant.id, threadId: identity.threadId, refBefore: before,
+      refAfter: await snapshotService.captureRef(directory), filesChanged: ["a.txt"], worktreePath: null,
+    });
     expect(deps.turnDiffs.latest(identity.threadId)).toBeUndefined();
     const result = await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps);
     if (previous) expect(readyComparison(result).turnDiff?.id).toBe(`git:${previous.id}`);
@@ -219,3 +214,22 @@ describe("Last turn Review public comparison boundary", { timeout: 30_000 }, () 
     expect(deps.turnSnapshotRepo.listByThread(identity.threadId)).toHaveLength(hasPrevious ? 2 : 1);
   });
 });
+
+function settleEvidence(
+  service: TurnDiffService,
+  repo: TurnDiffRepo,
+  threadId: string,
+  executionId: string,
+  outcome: import("../turn-outcome.js").TurnOutcome,
+) {
+  const frozen = service.takeFinalizationEvidence(threadId, executionId);
+  return async (
+    messageId: string,
+    effects: import("@mcode/contracts/models/file-effect").TurnFileEffectSummary | undefined,
+    reconstruction?: string,
+  ) => {
+    if (!frozen) return;
+    const selected = selectTurnDiffSettlement(frozen, outcome, effects, reconstruction);
+    if (selected) await repo.create({ id: "settled:" + executionId, message_id: messageId, ...selected });
+  };
+}

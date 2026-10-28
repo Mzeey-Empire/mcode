@@ -2,8 +2,8 @@
  * Packaged Desktop reliability scenario.
  *
  * Launches the packaged Desktop executable with an isolated data directory,
- * performs one authenticated settings write, publishes a deterministic assistant
- * prefix, injects an abnormal server exit, then proves Desktop restored both.
+ * performs one authenticated settings write, injects an abnormal server exit,
+ * then proves Desktop restored the persisted setting.
  * The test intentionally sends no mutation after the restart.
  */
 
@@ -47,10 +47,9 @@ export async function runPackagedReliabilityScenario() {
   try {
     const { initialLock, rendezvous } = await startReliabilityRun(run, desktop.child);
     ownedServerAuthToken = initialLock.authToken;
-    const thread = await createReliabilityThread(initialLock, run.runRoot);
-    const assistant = await publishReliabilityAssistant(initialLock, rendezvous, run.token, thread.id);
-    const recovered = await recoverReliabilityRun(run, rendezvous, initialLock, thread, assistant.stream);
-    return reliabilityEvidence(initialLock, recovered.lock, recovered.persisted, thread, assistant, recovered.assistant, recovered.mutationCount);
+    const mutationCount = await writeReliabilitySettings(initialLock);
+    const recovered = await recoverReliabilityRun(run, rendezvous, initialLock);
+    return reliabilityEvidence(initialLock, recovered.lock, recovered.persisted, mutationCount);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`${detail}\nPackaged Desktop output:\n${desktop.output().slice(-4_000)}`);
@@ -113,51 +112,19 @@ async function startReliabilityRun(run, child) {
   return { initialLock, rendezvous };
 }
 
-async function createReliabilityThread(lock, runRoot) {
+async function writeReliabilitySettings(lock) {
   let mutationCount = 0;
   await rpc(lock, "settings.update", { appearance: { theme: "dark" } }, () => { mutationCount += 1; });
-  const created = (await rpc(lock, "workspace.create", { name: "Reliability harness", path: runRoot })).result;
-  if (!created.ok) throw new Error(`Workspace registration failed (${created.error.code}): ${created.error.message}`);
-  const { workspace } = created;
-  const thread = (await rpc(lock, "thread.create", {
-    workspaceId: workspace.id,
-    title: "Restart recovery",
-    mode: "direct",
-    branch: "main",
-  })).result;
-  return { thread, mutationCount };
+  return mutationCount;
 }
 
-async function publishReliabilityAssistant(lock, rendezvous, token, threadId) {
-  const observer = await observeAgentText(lock, threadId);
-  try {
-    const streamed = await postDesktopFault(rendezvous.port, token, { control: "assistant-stream", threadId });
-    const stream = reliableAssistantStream(streamed, threadId);
-    const published = await observer.published;
-    if (published.delta !== stream.text) throw new Error("Published assistant prefix differed from the durable stream");
-    return { stream, published };
-  } finally {
-    observer.close();
-  }
-}
-
-function reliableAssistantStream(streamed, threadId) {
-  const stream = streamed?.stream;
-  if (!stream || stream.threadId !== threadId || typeof stream.executionId !== "string" || typeof stream.text !== "string") {
-    throw new Error("Reliability assistant stream did not return its durable identity");
-  }
-  return stream;
-}
-
-async function recoverReliabilityRun(run, rendezvous, initialLock, thread, stream) {
+async function recoverReliabilityRun(run, rendezvous, initialLock) {
   await postDesktopFault(rendezvous.port, run.token, { control: "server-exit" });
   const lock = await waitForChangedServerLock(run.dataDir, initialLock, RECOVERY_TIMEOUT_MS);
   await waitForHealth(lock.port, RECOVERY_TIMEOUT_MS);
   const persisted = await rpc(lock, "settings.get", {});
   assertPersistedTheme(persisted);
-  const conversation = await rpc(lock, "message.list", { threadId: thread.thread.id, limit: 10 });
-  const assistant = restoredReliabilityAssistant(conversation, stream);
-  return { lock, persisted, assistant, mutationCount: thread.mutationCount };
+  return { lock, persisted };
 }
 
 function assertPersistedTheme(persisted) {
@@ -166,29 +133,13 @@ function assertPersistedTheme(persisted) {
   }
 }
 
-function restoredReliabilityAssistant(conversation, stream) {
-  const assistants = conversation?.result?.messages?.filter((message) => message.role === "assistant") ?? [];
-  const assistant = assistants[0];
-  if (assistants.length !== 1 || assistant.content !== stream.text || assistant.outcome !== "interrupted" || assistant.outcomeExecutionId !== stream.executionId) {
-    throw new Error("Recovered assistant prefix was not restored exactly once as Interrupted");
-  }
-  return assistant;
-}
-
-function reliabilityEvidence(initialLock, recoveredLock, persisted, thread, stream, restoredAssistant, mutationCount) {
+function reliabilityEvidence(initialLock, recoveredLock, persisted, mutationCount) {
   if (mutationCount !== 1) throw new Error(`Expected one settings mutation, observed ${mutationCount}`);
   return {
     initialServer: { pid: initialLock.pid, startedAt: initialLock.startedAt },
     recoveredServer: { pid: recoveredLock.pid, startedAt: recoveredLock.startedAt },
     persistedTheme: persisted.result.appearance.theme,
     mutationCount,
-    assistant: {
-      threadId: thread.thread.id,
-      executionId: stream.stream.executionId,
-      publishedPrefix: stream.published.delta,
-      restoredPrefix: restoredAssistant.content,
-      outcome: restoredAssistant.outcome,
-    },
   };
 }
 
@@ -256,58 +207,6 @@ async function postDesktopFault(port, token, command) {
   });
   if (!response.ok) throw new Error(`Fault activation failed with HTTP ${response.status}`);
   return response.json();
-}
-
-async function observeAgentText(lock, threadId) {
-  return new Promise((resolvePromise, reject) => {
-    const subscriptionId = NodeCrypto.randomUUID();
-    const ws = new WebSocket(`ws://127.0.0.1:${lock.port}/?token=${lock.authToken}`);
-    let resolved = false;
-    let receiveText;
-    const published = new Promise((resolveText, rejectText) => {
-      receiveText = resolveText;
-      const timeout = setTimeout(() => rejectText(new Error("Timed out waiting for published assistant text")), 10_000);
-      ws.addEventListener("close", () => clearTimeout(timeout), { once: true });
-    });
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error("WebSocket subscription timed out"));
-    }, 10_000);
-    ws.addEventListener("open", () => {
-      ws.send(JSON.stringify({
-        id: subscriptionId,
-        method: "push.subscribeThread",
-        params: { threadId },
-      }));
-    });
-    ws.addEventListener("message", (event) => {
-      let message;
-      try {
-        message = JSON.parse(String(event.data));
-      } catch {
-        return;
-      }
-      if (message.id === subscriptionId) {
-        clearTimeout(timeout);
-        resolved = true;
-        resolvePromise({
-          published,
-          close: () => {
-            if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
-          },
-        });
-        return;
-      }
-      if (message.type === "push" && message.channel === "agent.event"
-        && message.data?.threadId === threadId && message.data?.type === "textDelta") {
-        receiveText({ delta: message.data.delta, sequence: message.data.sequence });
-      }
-    });
-    ws.addEventListener("error", () => {
-      clearTimeout(timeout);
-      if (!resolved) reject(new Error("WebSocket subscription failed"));
-    });
-  });
 }
 
 function rpc(lock, method, params, onMutation = () => undefined) {

@@ -4,7 +4,6 @@ import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { IAgentProvider, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
 import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
@@ -13,7 +12,7 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { AgentService } from "../agent-service.js";
-import { createAgentServiceForTest, drainAgentServicePersistenceForTest, startAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents } from "./agent-service-test-harness.js";
+import { createAgentServiceForTest, drainAgentServicePersistenceForTest, startAgentServiceIngressForTest, waitForAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -26,55 +25,6 @@ import type { SettingsService } from "../../../settings/settings-service.js";
 import type { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { ProviderEventIngress } from "../../../providers/composition/provider-event-ingress.js";
 
-const CANONICAL_TIMESTAMP = "2026-08-29T15:00:00.000Z";
-
-/** Creates a committed Cursor SDK-session identity event for the provider ingress boundary. */
-function cursorSessionIdentityEnvelope(
-  threadId: string,
-  turnId: string,
-  executionId: string,
-): CanonicalAgentEventEnvelope {
-  const eventId = `cursor:${executionId}:session-identity`;
-  const itemId = `cursor:${executionId}:session-identity-item`;
-  return {
-    eventId,
-    routing: { threadId, turnId, executionId, itemId },
-    sourceProviderId: "cursor",
-    sourceIdentities: [],
-    sourceSequence: 1,
-    acceptedSequence: 1,
-    durableRevision: 1,
-    serverTimestamps: { acceptedAt: CANONICAL_TIMESTAMP },
-    payload: {
-      type: "item.recorded",
-      item: {
-        id: itemId,
-        threadId,
-        turnId,
-        kind: "system",
-        providerIdentities: [],
-        payload: {
-          projection: "providerRuntimeEvent",
-          runtimeEvent: {
-            event: {
-              type: AgentEventType.System,
-              threadId,
-              turnExecutionId: executionId,
-              subtype: "sdk_session_id:cursor-session-1",
-            },
-          },
-        },
-        createdAt: CANONICAL_TIMESTAMP,
-        updatedAt: CANONICAL_TIMESTAMP,
-      },
-    },
-  };
-}
-
-/** Lets the asynchronous provider ingress drain one queued event batch. */
-async function flushIngressEvents(): Promise<void> {
-  await new Promise<void>((resolve) => setImmediate(resolve));
-}
 
 /**
  * Verifies the poison-pill recovery wiring: when the Claude provider abandons an
@@ -94,7 +44,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
   let providerStub: NodeEvents.EventEmitter & IAgentProvider;
   let providerEventIngress: ProviderEventIngress;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     database = createOwnedTestDatabase();
     db = database.db;
     threadRepo = new ThreadRepo(db, database.writer);
@@ -111,7 +61,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       supportsCompletion: false,
 
       maxInputCharactersPerTurn: 16_000,
-      sendTurn: vi.fn(() => new Promise<void>(() => {})),
+      sendTurn: vi.fn(async () => undefined),
       stopSession: vi.fn(),
       shutdown: vi.fn(),
     }));
@@ -129,7 +79,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       persist: vi.fn(async () => ({ stored: [], persisted: [] })),
     } as unknown as AttachmentService;
     const snapshotServiceStub = {
-      captureRef: vi.fn(async () => "ref-before-sha"),
+      captureRef: vi.fn(async () => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
     } as unknown as SnapshotService;
     const memoryPressureServiceStub = {
       markActive: vi.fn(),
@@ -187,6 +137,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     undefined,
     database.writer,
   );
+    await waitForAgentServiceWorkersForTest(svc);
     startAgentServiceIngressForTest(svc, );
   });
 
@@ -199,6 +150,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     const workspace = await workspaceRepo.create("test-ws", process.cwd());
     const thread = await threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
     await threadRepo.updateSdkSessionId(thread.id, "claude", "poison-sid");
+    await svc.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "default" });
     expect(threadRepo.findById(thread.id)?.sdk_session_id).toBe("poison-sid");
 
     providerStub.emit("event", {
@@ -206,7 +158,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       threadId: thread.id,
       subtype: "sdk_session_invalidated",
     } satisfies AgentEvent);
-    await flushIngressEvents();
+    await waitForAgentServiceIngressForTest(svc, thread.id);
 
     await vi.waitFor(() => expect(threadRepo.findById(thread.id)?.sdk_session_id).toBeNull());
   });
@@ -215,13 +167,14 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     const workspace = await workspaceRepo.create("test-ws", process.cwd());
     const thread = await threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
     await threadRepo.updateSdkSessionId(thread.id, "claude", "keep-sid");
+    await svc.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "default" });
 
     providerStub.emit("event", {
       type: AgentEventType.System,
       threadId: thread.id,
       subtype: "session_restarted",
     } satisfies AgentEvent);
-    await flushIngressEvents();
+    await waitForAgentServiceIngressForTest(svc, thread.id);
 
     expect(threadRepo.findById(thread.id)?.sdk_session_id).toBe("keep-sid");
   });
@@ -240,10 +193,11 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       attachments: [],
     });
     const firstRequest = vi.mocked(providerStub.sendTurn).mock.calls[0]?.[0] as TurnRequest;
-    providerEventIngress.acceptCommitted([
-      cursorSessionIdentityEnvelope(thread.id, firstRequest.turnId, firstRequest.turnExecutionId),
-    ]);
-    await flushIngressEvents();
+    providerStub.emit("event", {
+      type: AgentEventType.System, threadId: thread.id, turnExecutionId: firstRequest.turnExecutionId,
+      subtype: "sdk_session_id:cursor-session-1",
+    } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(svc, thread.id);
 
     await vi.waitFor(() => expect(threadRepo.findById(thread.id)?.sdk_session_id).toBe("cursor-session-1"));
 
@@ -256,8 +210,12 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       tokensIn: 0,
       tokensOut: 0,
     } satisfies AgentEvent);
-    await flushIngressEvents();
+    await waitForAgentServiceIngressForTest(svc, thread.id);
 
+    providerStub.emit("event", {
+      type: AgentEventType.Ended, threadId: thread.id, turnExecutionId: firstRequest.turnExecutionId,
+    } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(svc, thread.id);
     await svc.sendMessage({
       threadId: thread.id,
       content: "second prompt",

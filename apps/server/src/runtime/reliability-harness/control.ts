@@ -4,7 +4,6 @@ import * as NodePath from "node:path";
 import * as NodeHTTP from "node:http";
 import type { ApplicationDatabaseWriter } from "../persistence/sqlite/application-database-writer.js";
 import type { WebSocketServer } from "ws";
-import { THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH } from "@mcode/contracts/thread-control";
 
 /** Controls exposed by the opt-in packaged reliability harness. */
 export const RELIABILITY_HARNESS_CONTROLS = [
@@ -12,7 +11,6 @@ export const RELIABILITY_HARNESS_CONTROLS = [
   "server-hang",
   "transport-loss",
   "persistence-failure",
-  "assistant-stream",
 ] as const;
 
 /** A reliability harness control name. */
@@ -29,14 +27,6 @@ export interface ReliabilityHarnessCapability {
 export interface ReliabilityHarnessCommand {
   readonly control: ReliabilityHarnessControl;
   readonly durationMs?: number;
-  readonly threadId?: string;
-}
-
-/** Published result from the private deterministic assistant-stream control. */
-export interface ReliabilityHarnessAssistantStream {
-  readonly threadId: string;
-  readonly executionId: string;
-  readonly text: string;
 }
 
 /** Runtime adapter for deterministic server faults in one isolated run. */
@@ -93,7 +83,6 @@ export function createReliabilityHarnessAdapter(
   capability = readReliabilityHarnessCapability(),
   hooks: {
     readonly blockEventLoop?: (durationMs: number) => void;
-    readonly streamAssistant?: (threadId: string) => Promise<ReliabilityHarnessAssistantStream>;
   } = {},
 ): ReliabilityHarnessAdapter {
   if (!capability) return { enabled: false, handleRequest: async () => false };
@@ -114,8 +103,6 @@ export function createReliabilityHarnessAdapter(
       if (!authorizeReliabilityRequest(request, response, capability)) return true;
       const body = await readReliabilityCommand(request, response);
       if (!body) return true;
-      const stream = await executeAssistantStream(body, hooks, response);
-      if (stream === undefined) return true;
       try {
         persistenceFailure = await executeReliabilityControl(body, sockets, block, writer, persistenceFailure, closeSockets);
       } catch {
@@ -124,7 +111,7 @@ export function createReliabilityHarnessAdapter(
         return true;
       }
       response.writeHead(202, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      response.end(JSON.stringify({ accepted: true, control: body.control, ...(stream ? { stream } : {}) }));
+      response.end(JSON.stringify({ accepted: true, control: body.control }));
       return true;
     },
   };
@@ -160,26 +147,6 @@ async function readReliabilityCommand(
   }
 }
 
-async function executeAssistantStream(
-  command: ReliabilityHarnessCommand,
-  hooks: { readonly streamAssistant?: (threadId: string) => Promise<ReliabilityHarnessAssistantStream> },
-  response: NodeHTTP.ServerResponse,
-): Promise<ReliabilityHarnessAssistantStream | null | undefined> {
-  if (command.control !== "assistant-stream") return null;
-  if (!hooks.streamAssistant) {
-    response.writeHead(409);
-    response.end("Assistant stream control is unavailable");
-    return undefined;
-  }
-  try {
-    return await hooks.streamAssistant(command.threadId!);
-  } catch {
-    response.writeHead(500);
-    response.end("Reliability control failed");
-    return undefined;
-  }
-}
-
 async function executeReliabilityControl(
   command: ReliabilityHarnessCommand,
   sockets: WebSocketServer["clients"],
@@ -201,8 +168,6 @@ async function executeReliabilityControl(
     case "persistence-failure":
       if (!persistenceFailure) await writer.setQueryOnlyForReliability(true);
       return true;
-    case "assistant-stream":
-      return persistenceFailure;
   }
 }
 
@@ -212,11 +177,9 @@ async function readCommand(request: NodeHTTP.IncomingMessage): Promise<Reliabili
   const value = parsed as Record<string, unknown>;
   const control = parseReliabilityControl(value.control);
   const durationMs = parseReliabilityDuration(value.durationMs);
-  const threadId = parseAssistantThreadId(control, value.threadId);
   return {
     control,
     ...(durationMs === undefined ? {} : { durationMs }),
-    ...(threadId === undefined ? {} : { threadId }),
   };
 }
 
@@ -253,17 +216,6 @@ function parseReliabilityDuration(value: unknown): number | undefined {
     return value;
   }
   throw new Error(`Reliability hang duration must be between 1 and ${MAX_HANG_MS} milliseconds`);
-}
-
-function parseAssistantThreadId(
-  control: ReliabilityHarnessControl,
-  value: unknown,
-): string | undefined {
-  if (control !== "assistant-stream") return undefined;
-  if (typeof value === "string" && value.trim().length > 0 && value.trim().length <= THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH) {
-    return value.trim();
-  }
-  throw new Error(`Reliability assistant stream requires a thread id up to ${THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH} characters`);
 }
 
 function safeTokenEqual(left: string, right: string): boolean {

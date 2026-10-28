@@ -31,7 +31,7 @@ Devin defaults to disabled; `--allow-enable-devin` enables it through `settings.
 
 The focused adapter tests (`vitest run devin` in `packages/providers`) cover the ACP boundary: authenticate credentials, model and mode `set_config_option` sequences including plan-mode restore, `session/load` resume, fs scoping refusals, permission option passthrough, and the event mapper. Use them when no Devin account is logged in. For reasoning text and tool-call ordering through the real ACP boundary, use the shared fixture in [ACP narrative ordering](acp-narrative.md) with `provider.cli.devin` and `WINDSURF_API_KEY=fixture`.
 
-The `devin-permission` scenario proves the permission round trip live: it runs a supervised turn that prompts, answers with the project-scoped allow-always option, and records which `.devin/` config file Devin wrote (`allowAlwaysConfigFile` in the receipt). The grant the proof creates is removed afterwards.
+The `devin-permission` scenario proves the permission round trip live in `.dev/fixture-repo`: it runs a supervised turn that prompts, answers with the project-scoped allow-always option, and records which `.devin/` config file Devin wrote (`allowAlwaysConfigFile` in the receipt). The grant the proof creates is removed afterwards.
 
 ## Gotchas
 

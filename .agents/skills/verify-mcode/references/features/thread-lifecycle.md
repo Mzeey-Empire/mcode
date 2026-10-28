@@ -11,7 +11,7 @@
 
 ## How to get to it (user POV)
 
-1. Open the registered project for this worktree.
+1. Open this worktree's registered `.dev/fixture-repo` project.
 2. Start a thread with the selected provider and model.
 3. Stop the running thread from the chat controls.
 4. Confirm that the running indicator clears.

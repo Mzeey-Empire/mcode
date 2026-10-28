@@ -4,18 +4,16 @@ import * as NodeOS from "node:os";
 import * as NodePerfHooks from "node:perf_hooks";
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { z } from "zod";
-import type { NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
-import { HookExecutionRepo } from "../../../../features/agents/events/persistence/hook-execution-repo.js";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ProviderEventDraft } from "@mcode/providers";
 import { MessageRepo } from "../../../../features/agents/conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../../../../features/agents/planning/persistence/plan-question-answers-repo.js";
 import { PlanQuestionAnswersStore } from "../../../../features/agents/planning/persistence/plan-question-answers-store.js";
 import { MessageStore } from "../../../../features/agents/conversation/persistence/message-store.js";
-import { ThoughtSegmentRepo } from "../../../../features/agents/conversation/narrative/persistence/thought-segment-repo.js";
-import { ToolCallRecordRepo } from "../../../../features/agents/tools/persistence/tool-call-record-repo.js";
 import { loadConversationPage } from "../../../../features/agents/conversation/read-model/conversation-page.js";
-import { CanonicalAgentBoundary } from "../../../../features/agents/canonical/canonical-agent-boundary.js";
 import { CanonicalAgentStore } from "../../../../features/agents/canonical/canonical-agent-store.js";
-import { CanonicalAgentWriterClient } from "../../../../features/agents/canonical/canonical-agent-writer-client.js";
+import { CanonicalExecutionSemanticWriter } from "../../../../features/agents/canonical/canonical-execution-semantic-writer.js";
+import { ExecutionWorkerHandler, type ExecutionWorkCommand } from "../../../../features/agents/execution/execution-worker-handler.js";
 import {
   PARENT_ASSISTANT_TEXT_RETAINED_LIMITS,
   ParentAssistantTextCheckpointStore,
@@ -24,7 +22,7 @@ import { openDatabase } from "../database.js";
 import { openReadOnlyDatabase } from "../read-only-database.js";
 import { ApplicationDatabaseWriter } from "../application-database-writer.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../bounded-write-batches.js";
-import { sqliteProfileWriteOperations } from "./sqlite-profile-write-operations.js";
+import { sqliteProfileWriteHandlers, sqliteProfileWriteOperations } from "./sqlite-profile-write-operations.js";
 
 /** Workloads measured by the repeatable SQLite performance profile. */
 export const SQLITE_PROFILE_WORKLOADS = [
@@ -86,9 +84,6 @@ export interface SQLiteProfileSample {
   pragmas: Record<string, string | number>;
   activeTurnWrite?: {
     rowsChanged: number;
-    batches: number;
-    boundedRows: number;
-    boundedBytes: number;
   };
 }
 
@@ -265,9 +260,7 @@ export const ACTIVE_TURN_WRITE_POLICY = {
 } as const;
 
 const PROTECTED_CONVERSATION_HISTORY_INDEXES = [
-  ["tool_call_records", "idx_tool_call_records_message_sort_order"],
-  ["thought_segments", "idx_thought_segments_message_sort_order"],
-  ["hook_executions", "idx_hook_executions_message_sort_order"],
+  ["tool_call_records", "idx_tool_call_records_message_sort_order_id"],
   ["plan_question_answers", "idx_plan_question_answers_thread_answered_at"],
 ] as const;
 
@@ -608,12 +601,12 @@ async function measureSQLiteWorkload(
   database: WorkloadDatabase,
   workload: SQLiteProfileWorkloadName,
 ): Promise<MeasuredResult<unknown>> {
-  const { db, dbPath } = database;
+  const { db } = database;
   switch (workload) {
     case "startup-and-migrations": throw new Error("Startup must be measured while the database opens.");
     case "active-turn-writes":
       seedWorkspaceAndThread(db);
-      return measureOwnedWorkload(dbPath, writeActiveTurn);
+      return measureAsync(() => writeActiveTurn(db));
     case "conversation-read-100": return measureConversationRead(database, 100);
     case "conversation-read-1000": return measureConversationRead(database, 1000);
     case "cleanup":
@@ -915,109 +908,82 @@ function simulateCheckpointPolicy(
   return { durableChunkCount, retainedBytes, deltasPerChunk, virtualChunkWindowMs };
 }
 
-async function writeActiveTurn(db: Database, writer: ApplicationDatabaseWriter): Promise<NonNullable<SQLiteProfileSample["activeTurnWrite"]>> {
-  const beforeChanges = await writer.execute(sqliteProfileWriteOperations.totalChanges, undefined);
-  const messageRepo = new MessageRepo(db, writer);
-  const toolRepo = new ToolCallRecordRepo(db, writer);
-  const thoughtRepo = new ThoughtSegmentRepo(db, writer);
-  const hookRepo = new HookExecutionRepo(db, writer);
-  const sink = new CanonicalAgentBoundary(db, writer, new CanonicalAgentWriterClient(writer), () => undefined);
-  const executionId = "00000000-0000-4000-8000-000000000001";
-  const turnId = "sqlite-profile-turn";
-  await sink.startParentTurn({
-    thread: {
-      id: THREAD_ID,
-      workspaceId: WORKSPACE_ID,
-      providerId: "profile",
-      createdAt: FIXED_TIMESTAMP,
-    },
-    turnId,
-    executionId,
+async function writeActiveTurn(db: Database): Promise<NonNullable<SQLiteProfileSample["activeTurnWrite"]>> {
+  const changesOperation = sqliteProfileWriteOperations.totalChanges;
+  const countChanges = sqliteProfileWriteHandlers(db).get(changesOperation.name);
+  if (!countChanges) throw new Error("SQLite profile totalChanges handler is missing.");
+  const beforeChanges = changesOperation.output.parse(countChanges(undefined));
+  const execution = {
+    threadId: THREAD_ID,
+    turnId: "sqlite-profile-turn",
+    executionId: "00000000-0000-4000-8000-000000000001",
+  };
+  const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "sqlite-profile-lease" };
+  const semanticWriter = new CanonicalExecutionSemanticWriter(db, () => undefined);
+  const handler = new ExecutionWorkerHandler({ transact: (operation) => semanticWriter.transact(operation) });
+  let ordinal = 0;
+  const send = async (command: ExecutionWorkCommand) => {
+    ordinal += 1;
+    const reply = await handler.handle({ requestId: ordinal, execution, lease, ordinal, command });
+    if (reply.result.kind !== "committed" && reply.result.kind !== "accepted") {
+      throw new Error(`SQLite profile ${command.kind} failed: ${JSON.stringify(reply.result)}`);
+    }
+  };
+  let sourceSequence = 0;
+  const draft = (type: AgentEvent["type"], fields: Record<string, unknown> = {}): ProviderEventDraft => {
+    sourceSequence += 1;
+    const event = AgentEventSchema().parse({ type, threadId: THREAD_ID, turnExecutionId: execution.executionId, ...fields });
+    const itemId = `active-item-${sourceSequence}`;
+    return {
+      eventId: `active-event-${sourceSequence}`,
+      routing: { ...execution, itemId },
+      sourceProviderId: "codex",
+      sourceIdentities: [],
+      sourceSequence,
+      payload: {
+        type: "item.recorded",
+        item: {
+          id: itemId, threadId: THREAD_ID, turnId: execution.turnId, kind: "system", providerIdentities: [],
+          payload: { projection: "providerRuntimeEvent", runtimeEvent: { event } },
+          createdAt: FIXED_TIMESTAMP, updatedAt: FIXED_TIMESTAMP,
+        },
+      },
+    };
+  };
+  const event = (type: AgentEvent["type"], fields: Record<string, unknown> = {}) => send({
+    kind: "event", phase: "running", nativeCursor: null, events: [draft(type, fields)],
+  });
+  await send({
+    kind: "start",
+    providerId: "codex",
+    parentLive: { planFeature: "none", precedingMessageId: "active-user" },
+    input: {
+      thread: { id: THREAD_ID, workspaceId: WORKSPACE_ID, providerId: "codex", createdAt: FIXED_TIMESTAMP },
+      turnId: execution.turnId,
+      executionId: execution.executionId,
       permissionMode: "supervised",
       approvalReviewMode: "manual",
       approvalReviewReason: "manual-requested",
-    providerIdentities: [],
-    userMessage: { kind: "create", content: CONTENT, sequence: 1 },
+      providerIdentities: [],
+      userMessage: { kind: "create", messageId: "active-user", content: CONTENT, sequence: 1 },
+    },
   });
-  const assistant = await messageRepo.createAssistantIdempotent({
-    id: "active-assistant",
-    threadId: THREAD_ID,
-    content: CONTENT,
-    sequence: 2,
-    isInternal: true,
+  await event("turnStarted");
+  for (let index = 0; index < 65; index++) {
+    await event("toolUse", { toolCallId: `active-tool-${index}`, toolName: "Read", toolInput: { file_path: `src/file-${index}.ts` } });
+    await event("toolResult", { toolCallId: `active-tool-${index}`, output: "ok", isError: false });
+  }
+  await event("reasoningDelta", { delta: "Measured thought", reasoningItemId: "active-thought" });
+  await event("hookStarted", { hookName: "PreToolUse", toolName: "Read", hookType: "permission" });
+  await event("hookCompleted", { hookName: "PreToolUse", exitCode: 0, durationMs: 1, didBlock: false });
+  await event("textDelta", { delta: CONTENT, isFinalResponse: true });
+  await event("message", { content: CONTENT, tokens: null, provider: "codex" });
+  await send({
+    kind: "event", phase: "running", nativeCursor: null,
+    events: [draft("turnComplete", { reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 })],
+    terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } },
   });
-  const tools = Array.from({ length: 65 }, (_, index) => ({
-    toolCallId: `active-tool-${index}`,
-    messageId: assistant.id,
-    toolName: "Read",
-    inputSummary: `src/file-${index}.ts`,
-    outputSummary: "ok",
-    status: "completed" as const,
-    startedAt: FIXED_TIMESTAMP,
-    completedAt: FIXED_TIMESTAMP,
-    sortOrder: index,
-  }));
-  const thoughts = [{
-    id: "active-thought",
-    messageId: assistant.id,
-    text: "Measured thought",
-    startedAt: FIXED_TIMESTAMP,
-    endedAt: FIXED_TIMESTAMP,
-    sortOrder: 65,
-  }];
-  const hooks = [{
-    id: "active-hook",
-    messageId: assistant.id,
-    hookName: "PreToolUse",
-    toolName: "Read",
-    phase: "pre",
-    payload: "{}",
-    durationMs: 1,
-    didBlock: false,
-    startedAt: FIXED_TIMESTAMP,
-    endedAt: FIXED_TIMESTAMP,
-    sortOrder: 66,
-  }];
-  const toolBatches = await toolRepo.bulkCreateBatched(tools);
-  const thoughtBatches = await thoughtRepo.bulkCreateBatched(thoughts);
-  const hookBatches = await hookRepo.bulkCreateBatched(hooks);
-  const narrative: NarrativeEntry[] = [
-    ...toolRepo.listByMessage(assistant.id).map((record) => ({
-      kind: "toolCall" as const,
-      sequence: 2,
-      sortOrder: record.sort_order,
-      record,
-    })),
-    ...thoughtRepo.listByMessage(assistant.id).map((record) => ({
-      kind: "narrationSegment" as const,
-      sequence: 2,
-      sortOrder: record.sort_order,
-      record,
-    })),
-    ...hookRepo.listByMessage(assistant.id).map((record) => ({
-      kind: "hook" as const,
-      sequence: 2,
-      sortOrder: record.sort_order,
-      record,
-    })),
-  ];
-  const canonicalBatches = await sink.finishParentTurnBatched({
-    threadId: THREAD_ID,
-    turnId,
-    executionId,
-    providerId: "profile",
-    providerIdentities: [],
-    outcome: "completed",
-    projection: { message: { ...assistant, is_internal: false }, narrative },
-  });
-  const changes = await writer.execute(sqliteProfileWriteOperations.totalChanges, undefined);
-  const batchResults = [toolBatches, thoughtBatches, hookBatches, canonicalBatches.writeBatches];
-  return {
-    rowsChanged: changes - beforeChanges,
-    batches: batchResults.reduce((total, result) => total + result.batches, 0),
-    boundedRows: batchResults.reduce((total, result) => total + result.rows, 0),
-    boundedBytes: batchResults.reduce((total, result) => total + result.bytes, 0),
-  };
+  return { rowsChanged: changesOperation.output.parse(countChanges(undefined)) - beforeChanges };
 }
 
 function readConversation(db: Database, writer: ApplicationDatabaseWriter, limit: 100 | 1000): unknown {

@@ -12,13 +12,6 @@ const persistSnapshotInput = z.object({
   markFilesChanged: z.boolean(),
 }).strict();
 
-/** Commit a snapshot and its thread file-change marker as one business write. */
-export const persistTurnSnapshot = databaseWriteOperation(
-  "turnFinalization.persistSnapshot",
-  persistSnapshotInput,
-  z.object({ snapshotId: z.string().min(1) }).strict(),
-);
-
 /**
  * Commit an interrupted attempt's snapshot only when its message has none. The check runs inside
  * the write because `turn_snapshots.message_id` is not unique and recovery can run concurrently.
@@ -42,7 +35,6 @@ export function turnFinalizationWriteHandlers(db: Database): ReadonlyMap<string,
     return created.id;
   };
   return new Map([
-    [persistTurnSnapshot.name, databaseWriteHandler(persistTurnSnapshot, (input) => ({ snapshotId: persist(input) }))],
     [persistInterruptedAttemptSnapshot.name, databaseWriteHandler(persistInterruptedAttemptSnapshot, (input) => ({
       snapshotId: snapshots.getByMessage(input.snapshot.messageId) ? null : persist(input),
     }))],

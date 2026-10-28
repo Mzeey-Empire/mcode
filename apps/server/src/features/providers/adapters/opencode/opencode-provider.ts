@@ -413,7 +413,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
 
   private readonly turns = new Map<string, OpenCodeTurnState>();
   private readonly canonicalRoutings = new Map<string, CanonicalLiveEventRouting>();
-  private readonly canonicalEventPublisher: CanonicalLiveEventPublisher | undefined;
+  private readonly canonicalEventPublisher: CanonicalLiveEventPublisher;
   private readonly pendingPermissions = new Map<string, OpenCodePendingAsk>();
   private readonly seenNotices = new Map<string, Set<string>>();
   private readonly turnDiffListeners = new Set<(event: ProviderTurnDiffUpdate) => void>();
@@ -428,9 +428,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     @inject("ProviderHostPorts") private readonly host: ProviderHostPorts,
   ) {
     super();
-    this.canonicalEventPublisher = this.host?.events
-      ? new CanonicalLiveEventPublisher(this.id, this.host.events)
-      : undefined;
+    this.canonicalEventPublisher = new CanonicalLiveEventPublisher(this.id, this.host.events);
     this.pool = OpenCodeServerPool.withDefaults({
       platform: this.host.runtime.platform,
       terminateTree: (pid) => this.host.processes.terminateTree(pid),
@@ -567,7 +565,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     this.drainAllPending();
     const results = await Promise.allSettled([this.pool.shutdown()]);
     results.push(...await Promise.allSettled(pendingTurns));
-    results.push(...await Promise.allSettled([this.canonicalEventPublisher?.stopAdmissionAndDrain()]));
+    results.push(...await Promise.allSettled([this.canonicalEventPublisher.stopAdmissionAndDrain()]));
     this.turns.clear();
     const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
     if (failures.length > 0) throw new AggregateError(failures, "OpenCode provider shutdown failed");
@@ -757,10 +755,6 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
 
   private publishTurnEvent(routing: CanonicalLiveEventRouting, sessionId: string, event: AgentEvent): void {
     const runtimeEvent = providerRuntimeEvent({ ...event, turnExecutionId: routing.executionId });
-    if (!this.canonicalEventPublisher) {
-      this.emit("event", runtimeEvent);
-      return;
-    }
     this.canonicalEventPublisher.publish(routing, runtimeEvent, this.sessionIdentities(sessionId));
   }
 
@@ -777,7 +771,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
 
   private async waitForCanonicalExecution(executionId: string): Promise<void> {
     const routing = this.canonicalRoutings.get(executionId);
-    if (!routing || !this.canonicalEventPublisher) return;
+    if (!routing) return;
     try {
       await this.canonicalEventPublisher.waitForExecution(routing);
     } catch (error) {
@@ -1128,7 +1122,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     if (gate !== "go") return gate;
     const routing = this.canonicalRoutings.get(req.turnExecutionId);
     if (routing && capture?.outcome === "captured") {
-      this.canonicalEventPublisher?.capturePlan(routing, {
+      this.canonicalEventPublisher.capturePlan(routing, {
         markdown: capture.markdown, source: "native", nativePlanFile: capture.nativePlanFile,
       });
     }

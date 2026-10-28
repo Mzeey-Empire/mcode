@@ -47,7 +47,6 @@ beforeEach(() => {
   vi.mocked(mockTransport.deleteWorkspace).mockReset().mockResolvedValue(true);
   vi.mocked(mockTransport.createThread).mockReset().mockResolvedValue(createMockThread());
   vi.mocked(mockTransport.deleteThread).mockReset().mockResolvedValue(true);
-  vi.mocked(mockTransport.continueWithoutSaving).mockReset().mockResolvedValue(undefined);
   vi.mocked(mockTransport.stopAgent).mockReset().mockImplementation((threadId: string) => Promise.resolve({
     threadId,
     turnExecutionId: null,

@@ -20,7 +20,6 @@ async function buildOrchestration() {
     getCurrentFileEffectTurnId: vi.fn(() => undefined),
     shouldSuppressTurnEnded: vi.fn(() => false),
     shouldSuppressTurnComplete: vi.fn(() => false),
-    shouldSuppressTransientTurnError: vi.fn(() => false),
   };
   const publicationRegistry = new AgentEventPublicationRegistry();
   const publishThreadStatus = vi.fn();

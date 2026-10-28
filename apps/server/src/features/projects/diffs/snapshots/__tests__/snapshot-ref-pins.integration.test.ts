@@ -16,7 +16,7 @@ import { CanonicalAgentWriterClient } from "../../../../agents/canonical/canonic
 import { ParentAssistantTextCheckpointService } from "../../../../agents/turns/parent-assistant-text-checkpoint-service.js";
 import { TurnRecoveryService } from "../../../../agents/recovery/turn-recovery-service.js";
 import { TurnSnapshotRepo } from "../../../../agents/turns/persistence/turn-snapshot-repo.js";
-import { persistTurnSnapshot } from "../../../../agents/turns/persistence/turn-finalization-write-operations.js";
+import { persistInterruptedAttemptSnapshot } from "../../../../agents/turns/persistence/turn-finalization-write-operations.js";
 import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.js";
 import { ThreadStartupRepo } from "../../../../thread-startup/persistence/thread-startup-repo.js";
 import { AttachmentService } from "../../../../attachments/storage/attachment-service.js";
@@ -217,7 +217,7 @@ function snapshotRows(store: TestStore, messageId: string): SnapshotRow[] {
 }
 
 async function writeSnapshotRow(store: TestStore, input: { messageId: string; threadId: string; refBefore: string; refAfter: string }): Promise<string> {
-  const { snapshotId } = await store.writer.execute(persistTurnSnapshot, {
+  const { snapshotId } = await store.writer.execute(persistInterruptedAttemptSnapshot, {
     snapshot: { ...input, filesChanged: ["a.ts"], worktreePath: null },
     markFilesChanged: true,
   });

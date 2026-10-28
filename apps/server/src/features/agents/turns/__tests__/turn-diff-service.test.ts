@@ -42,7 +42,7 @@ describe("TurnDiffService production settlement", () => {
       additions: 1, deletions: 1,
       turnDiff: { id: "live:turn-1:execution-1:1:1", phase: "live", source: "native", fidelity: "agent", revision: 1 },
     });
-    const settle = service.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed");
+    const settle = settleEvidence(service, repo, identity.threadId, identity.turnExecutionId, "completed");
     expect(service.liveComparison(identity.threadId)).toBeNull();
     await settle("message-1", effects);
     expect(new TurnDiffService(repo).latest(identity.threadId)).toMatchObject({ message_id: "message-1", source: "native", patch, revision: 1 });
@@ -57,16 +57,16 @@ describe("TurnDiffService production settlement", () => {
       update({ deliveryAttempt: 2, revision: 100 }), update({ deliveryAttempt: 0, revision: 100 }),
       update({ turnExecutionId: "other", revision: 100 }),
     ]) expect(service.push(rejected)).toBe("stale");
-    await service.prepareFinalization(identity.threadId, "other", "completed")("message-1", effects);
+    await settleEvidence(service, repo, identity.threadId, "other", "completed")("message-1", effects);
     expect(service.liveComparison(identity.threadId)?.turnDiff?.revision).toBe(1);
-    await service.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", effects);
+    await settleEvidence(service, repo, identity.threadId, identity.turnExecutionId, "completed")("message-1", effects);
     expect(service.push(update({ revision: 100 }))).toBe("stale");
     expect(repo.latest(identity.threadId)?.patch).toBe(patch);
   });
 
   it("freezes terminal evidence before another execution starts", async () => {
     service.push(update());
-    const settle = service.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed");
+    const settle = settleEvidence(service, repo, identity.threadId, identity.turnExecutionId, "completed");
     service.begin({ ...identity, turnId: "turn-2", turnExecutionId: "execution-2" });
     service.push(update({ turnId: "turn-2", turnExecutionId: "execution-2", patch: patch.replace("+new", "+second") }));
     await settle("message-1", effects);
@@ -92,11 +92,11 @@ describe("TurnDiffService production settlement", () => {
 
   it.each(["invalidated", "interrupted", "cancelled", "errored"] as const)("preserves previous settlement on %s", async (state) => {
     service.push(update());
-    await service.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", effects);
+    await settleEvidence(service, repo, identity.threadId, identity.turnExecutionId, "completed")("message-1", effects);
     service.begin({ ...identity, turnId: "turn-2", turnExecutionId: "execution-2" });
     service.push(update({ turnId: "turn-2", turnExecutionId: "execution-2" }));
     if (state === "invalidated") service.push({ turnId: "turn-2", turnExecutionId: "execution-2", deliveryAttempt: 1, revision: 2, state: "invalidated" });
-    await service.prepareFinalization(identity.threadId, "execution-2", state === "invalidated" ? "completed" : state)("message-2", effects);
+    await settleEvidence(service, repo, identity.threadId, "execution-2", state === "invalidated" ? "completed" : state)("message-2", effects);
     expect(service.liveComparison(identity.threadId)).toBeNull();
     expect(repo.latest(identity.threadId)?.message_id).toBe("message-1");
   });
@@ -105,7 +105,7 @@ describe("TurnDiffService production settlement", () => {
     service.push(update());
     service.push({ ...identity, revision: 2, state: "indeterminate-empty" });
     expect(service.liveComparison(identity.threadId)).toBeNull();
-    await service.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", hasEffects ? effects : empty);
+    await settleEvidence(service, repo, identity.threadId, identity.turnExecutionId, "completed")("message-1", hasEffects ? effects : empty);
     expect(repo.latest(identity.threadId)).toMatchObject({ source: hasEffects ? "git" : "native", patch: hasEffects ? null : "" });
   });
 
@@ -113,36 +113,55 @@ describe("TurnDiffService production settlement", () => {
     service.push(update());
     expect(service.push(update({ patch: invalid, revision: 2 }))).toBe("invalidated");
     expect(service.liveComparison(identity.threadId)).toBeNull();
-    await service.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", effects);
+    await settleEvidence(service, repo, identity.threadId, identity.turnExecutionId, "completed")("message-1", effects);
     expect(repo.latest(identity.threadId)).toMatchObject({ source: "git", patch: null });
   });
 
   it("uses Git after an adapter rejects native evidence before persistence", async () => {
     expect(service.push({ ...identity, revision: 1, state: "rejected" })).toBe("accepted");
-    await service.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", effects);
+    await settleEvidence(service, repo, identity.threadId, identity.turnExecutionId, "completed")("message-1", effects);
     expect(repo.latest(identity.threadId)).toMatchObject({ source: "git", patch: null });
   });
 
   it("orders native evidence before tracked reconstruction and Git fallback", async () => {
     const reconstruction = patch.replace("+new", "+tracked");
     service.push(update());
-    await service.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", effects, reconstruction);
+    await settleEvidence(service, repo, identity.threadId, identity.turnExecutionId, "completed")("message-1", effects, reconstruction);
     expect(repo.latest(identity.threadId)).toMatchObject({ source: "native", patch });
 
     service = new TurnDiffService(repo);
     service.begin({ ...identity, turnId: "turn-2", turnExecutionId: "execution-2" });
-    await service.prepareFinalization(identity.threadId, "execution-2", "completed")("message-2", effects, reconstruction);
+    await settleEvidence(service, repo, identity.threadId, "execution-2", "completed")("message-2", effects, reconstruction);
     expect(repo.latest(identity.threadId)).toMatchObject({ source: "tracked", patch: reconstruction });
 
     service.begin({ ...identity, turnId: "turn-3", turnExecutionId: "execution-3" });
-    await service.prepareFinalization(identity.threadId, "execution-3", "completed")("message-2", effects, undefined);
+    await settleEvidence(service, repo, identity.threadId, "execution-3", "completed")("message-2", effects, undefined);
     expect(repo.latest(identity.threadId)).toMatchObject({ source: "tracked", patch: reconstruction });
   });
 
   it("uses Git for a provider without native evidence and removes records on message rollback", async () => {
-    await service.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", effects);
+    await settleEvidence(service, repo, identity.threadId, identity.turnExecutionId, "completed")("message-1", effects);
     expect(repo.latest(identity.threadId)).toMatchObject({ source: "git", patch: null });
     db.prepare("DELETE FROM messages WHERE id = ?").run("message-1");
     expect(repo.latest(identity.threadId)).toBeUndefined();
   });
 });
+
+function settleEvidence(
+  service: TurnDiffService,
+  repo: TurnDiffRepo,
+  threadId: string,
+  executionId: string,
+  outcome: import("../turn-outcome.js").TurnOutcome,
+) {
+  const frozen = service.takeFinalizationEvidence(threadId, executionId);
+  return async (
+    messageId: string,
+    effects: import("@mcode/contracts/models/file-effect").TurnFileEffectSummary | undefined,
+    reconstruction?: string,
+  ) => {
+    if (!frozen) return;
+    const selected = selectTurnDiffSettlement(frozen, outcome, effects, reconstruction);
+    if (selected) await repo.create({ id: "settled:" + executionId, message_id: messageId, ...selected });
+  };
+}

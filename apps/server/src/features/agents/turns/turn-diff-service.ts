@@ -1,4 +1,3 @@
-import * as NodeCrypto from "node:crypto";
 import type { ProviderTurnDiffUpdate } from "@mcode/contracts/providers/interfaces";
 import type { ReviewComparison } from "@mcode/contracts/models/review-comparison";
 import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
@@ -69,18 +68,6 @@ export class TurnDiffService {
     }
   }
 
-  /** Freeze native evidence at the terminal fence before asynchronous file settlement. */
-  prepareFinalization(threadId: string, executionId: string | undefined, outcome: TurnOutcome): SettleTurnDiff {
-    const current = this.takeFinalizationEvidence(threadId, executionId);
-    if (!current) return async () => {};
-    return async (messageId, effects, reconstructionPatch) => {
-      const selected = selectTurnDiffSettlement(current, outcome, effects, reconstructionPatch);
-      if (!selected) return;
-      await this.repo.create({ id: NodeCrypto.randomUUID(), message_id: messageId, ...selected });
-      this.changed(threadId);
-    };
-  }
-
   /** Transfer terminal evidence only for its exact admitted execution. */
   takeFinalizationEvidence(threadId: string, executionId: string | undefined): PreparedTurnDiffEvidence | null {
     const current = [...this.active.values()].find((entry) => entry.threadId === threadId && entry.turnExecutionId === executionId);
@@ -126,8 +113,6 @@ export class TurnDiffService {
   forMessage(threadId: string, messageId: string): StoredTurnDiff | undefined { return this.repo.findByMessage(threadId, messageId); }
 }
 
-/** Persists a frozen terminal candidate after the assistant message and file effects exist. */
-export type SettleTurnDiff = (messageId: string, effects: TurnFileEffectSummary | undefined, reconstructionPatch?: string) => Promise<void>;
 
 function liveId(current: ActiveDiff): string {
   return `live:${current.turnId}:${current.turnExecutionId}:${current.deliveryAttempt}:${current.revision}`;

@@ -170,18 +170,8 @@ describe("conversation history query plans", () => {
   const protectedPlans: SQLiteQueryPlan[] = [
     [
       "tool_call_records",
-      "idx_tool_call_records_message_sort_order",
-      "SELECT id FROM tool_call_records WHERE message_id IN (?) ORDER BY message_id, sort_order",
-    ],
-    [
-      "thought_segments",
-      "idx_thought_segments_message_sort_order",
-      "SELECT id FROM thought_segments WHERE message_id IN (?) ORDER BY message_id, sort_order",
-    ],
-    [
-      "hook_executions",
-      "idx_hook_executions_message_sort_order",
-      "SELECT id FROM hook_executions WHERE message_id IN (?) ORDER BY message_id, sort_order",
+      "idx_tool_call_records_message_sort_order_id",
+      "SELECT message_id, count(*) FROM tool_call_records WHERE message_id IN (?) GROUP BY message_id",
     ],
     [
       "plan_question_answers",
@@ -203,7 +193,7 @@ describe("conversation history query plans", () => {
       ? { ...plan, rows: [...plan.rows, { id: 2, parent: 0, detail: "USE TEMP B-TREE FOR ORDER BY" }] }
       : plan);
     const fullScan = protectedPlans.map((plan, index) => index === 1
-      ? { ...plan, rows: [{ id: 1, parent: 0, detail: "SCAN thought_segments" }] }
+      ? { ...plan, rows: [{ id: 1, parent: 0, detail: "SCAN plan_question_answers" }] }
       : plan);
 
     expect(() => assertConversationHistoryQueryPlans(temporarySort)).toThrow("temporary sort");
@@ -212,20 +202,37 @@ describe("conversation history query plans", () => {
 });
 
 describe("runSQLiteProfile", () => {
-  it("measures active-turn batches through the real owner and counts the owner's changed rows", async () => {
+  it.each(["conversation-read-100", "conversation-read-1000"] as const)("checks actual %s query plans", async (workload) => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-sqlite-profile-"));
+    const database = openSQLiteProfileDatabase(NodePath.join(directory, `${workload}.sqlite`));
+    try {
+      const sample = await runSQLiteProfileWorkload(database, workload, 1);
+      expect(() => assertConversationHistoryQueryPlans(sample.queryPlans)).not.toThrow();
+      expect(sample.queryPlans.map((plan) => plan.sql)).toContainEqual(expect.stringContaining('from "tool_call_records"'));
+      expect(sample.queryPlans.map((plan) => plan.sql)).toContainEqual(expect.stringContaining('from "plan_question_answers"'));
+    } finally {
+      database.db.close(true);
+      await NodeFS.promises.rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    }
+  }, 30_000);
+
+  it("measures a worker-owned completed turn and counts its changed rows", async () => {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-sqlite-profile-"));
     try {
       for (let index = 1; index <= 3; index++) {
         const database = openSQLiteProfileDatabase(NodePath.join(directory, `active-turn-writes-${index}.sqlite`));
         try {
           const sample = await runSQLiteProfileWorkload(database, "active-turn-writes", index);
-          expect(sample.activeTurnWrite?.rowsChanged).toBeGreaterThan(67);
-          expect(sample.activeTurnWrite?.batches).toBeGreaterThanOrEqual(4);
-          expect(sample.activeTurnWrite?.boundedRows).toBeGreaterThanOrEqual(67);
-          expect(database.db.query("SELECT role, sequence, is_internal FROM messages WHERE id = ?").get("active-assistant"))
-            .toEqual({ role: "assistant", sequence: 2, is_internal: 0 });
-          expect(database.db.query("SELECT COUNT(*) AS count FROM tool_call_records WHERE message_id = ?").get("active-assistant"))
+          expect(sample.activeTurnWrite?.rowsChanged).toBeGreaterThanOrEqual(3_000);
+          expect(database.db.query("SELECT role, sequence, is_internal, outcome FROM messages WHERE role = 'assistant'").get())
+            .toEqual({ role: "assistant", sequence: 2, is_internal: 0, outcome: "completed" });
+          expect(database.db.query("SELECT COUNT(*) AS count FROM tool_call_records WHERE status = 'completed' AND tool_name = 'Read'").get())
             .toEqual({ count: 65 });
+          expect(database.db.query("SELECT text FROM thought_segments").all()).toEqual([{ text: "Measured thought" }]);
+          expect(database.db.query("SELECT hook_name, tool_name, duration_ms, did_block FROM hook_executions").all())
+            .toEqual([{ hook_name: "PreToolUse", tool_name: "Read", duration_ms: 1, did_block: 0 }]);
+          expect(database.db.query("SELECT status FROM canonical_agent_turns WHERE id = 'sqlite-profile-turn'").get())
+            .toEqual({ status: "Completed" });
         } finally {
           database.db.close(true);
         }

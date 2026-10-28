@@ -6,7 +6,7 @@ import { AcceptedCanonicalAgentEventEnvelopeSchema, CanonicalAgentEventEnvelopeS
 import { TurnOutcomeSchema } from "@mcode/contracts/models/turn-outcome";
 import { MessageSchema } from "@mcode/contracts/models/message";
 import { canonicalAgentEvents } from "../../../runtime/persistence/sqlite/schema.js";
-import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
+import { CanonicalAgentStore } from "./canonical-agent-store.js";
 import type { CanonicalAcceptedWriteReceipt } from "./canonical-agent-writer-protocol.js";
 import type { ExecutionSemanticOperation } from "../execution/execution-worker-handler.js";
 import type { CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
@@ -45,7 +45,7 @@ export class CanonicalAcceptedEventWrite {
   private readonly steers;
   private readonly advancePublicationHead;
 
-  constructor(private readonly db: Database, private readonly canonical: CanonicalAgentBoundary,
+  constructor(private readonly db: Database, private readonly canonical: CanonicalAgentStore,
     private readonly compatibility?: Pick<CanonicalExecutionSemanticWriter, "applyAcceptedCompatibility" | "confirmAcceptedCompatibility">) {
     this.orm = drizzle(db);
     this.planAnswers = new PlanQuestionAnswersRepo(db);

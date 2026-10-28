@@ -62,7 +62,7 @@ class NativeProcess extends NodeEvents.EventEmitter {
 }
 
 const turn: TurnRequest<"codex"> = {
-  turnId: "turn", turnExecutionId: "execution", sessionId: "mcode-native-plan", threadId: "native-plan",
+  turnId: "turn", turnExecutionId: "a402c433-6ebf-4782-87de-a06341f394c6", sessionId: "mcode-native-plan", threadId: "native-plan",
   workspaceId: "fixture", cwd: process.cwd(), message: "Plan a greeting", model: "gpt-6.1-sol",
   reasoningLevel: "low", permissionMode: "full", approvalReviewMode: "manual", interactionMode: "plan",
   providerOptions: {}, planTurn: { kind: "planning", planFilePath: null },
@@ -92,7 +92,7 @@ function fixture(
     requested: async batch => { batches.push(batch); await record(batch); },
     settled: async (_batch, status) => { settlements.push(status); await settle(status); },
   });
-  provider.on("event", event => events.push(event));
+  provider.observeCanonicalEvents(event => events.push(event));
   const starts = () => children.flatMap(spawned => spawned.requests).filter(request => request.method === "turn/start");
   return { provider, get child() { return children[children.length - 1]!; }, batches, settlements, events, starts };
 }
@@ -167,13 +167,13 @@ describe("Codex native planning", () => {
         settings: { model: "gpt-6.1-sol", reasoning_effort: "low", developer_instructions: null } } });
       f.child.complete();
       await vi.waitFor(() => expect(f.events.some(event => event.event.type === "ended")).toBe(true));
-      await f.provider.sendTurn({ ...turn, turnId: "build", turnExecutionId: "build-execution", planTurn: undefined, interactionMode: "build" });
+      await f.provider.sendTurn({ ...turn, turnId: "build", turnExecutionId: "931f202c-951d-46b1-883a-084a41d189ec", planTurn: undefined, interactionMode: "build" });
       await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
       expect(f.starts()[1]?.params?.collaborationMode).toEqual({ mode: "default",
         settings: { model: "gpt-6.1-sol", reasoning_effort: "low", developer_instructions: null } });
       f.child.complete();
       await vi.waitFor(() => expect(f.events.filter(event => event.event.type === "ended")).toHaveLength(2));
-      await f.provider.sendTurn({ ...turn, turnId: "build-again", turnExecutionId: "build-again-execution", planTurn: undefined, interactionMode: "build" });
+      await f.provider.sendTurn({ ...turn, turnId: "build-again", turnExecutionId: "e9ccef6b-a837-4481-85c3-d05c747f4b1a", planTurn: undefined, interactionMode: "build" });
       await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
       expect(f.starts()[2]?.params).not.toHaveProperty("collaborationMode");
       f.child.complete();
@@ -226,7 +226,7 @@ describe("Codex native planning", () => {
       } else {
         expect(response).toBeUndefined();
         await vi.waitFor(() => expect(f.events.filter(event => event.event.type === "ended").map(event => event.event))
-          .toEqual([{ type: "ended", threadId: "native-plan", turnExecutionId: "execution", outcome: "interrupted" }]));
+          .toEqual([{ type: "ended", threadId: "native-plan", turnExecutionId: "a402c433-6ebf-4782-87de-a06341f394c6", outcome: "interrupted" }]));
       }
     } finally { await f.provider.shutdown(); }
   });
@@ -251,7 +251,7 @@ describe("Codex native planning", () => {
       await ask(f);
       f.child.emit("exit", 1, null);
       await vi.waitFor(() => expect(f.events.filter(event => event.event.type === "ended").map(event => event.event))
-        .toEqual([{ type: "ended", threadId: "native-plan", turnExecutionId: "execution", outcome: "interrupted" }]));
+        .toEqual([{ type: "ended", threadId: "native-plan", turnExecutionId: "a402c433-6ebf-4782-87de-a06341f394c6", outcome: "interrupted" }]));
       await f.provider.discardSession(turn.sessionId);
       expect(f.events.filter(event => event.event.type === "ended")).toHaveLength(1);
     } finally {
@@ -264,7 +264,7 @@ describe("Codex native planning", () => {
     try {
       await ask(f);
       await f.provider.discardSession(turn.sessionId);
-      await f.provider.sendTurn({ ...turn, turnId: "next", turnExecutionId: "next-execution" });
+      await f.provider.sendTurn({ ...turn, turnId: "next", turnExecutionId: "612520b0-7178-49f4-88b2-a9594d359f89" });
       await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2));
     } finally { await f.provider.shutdown(); }
   });
@@ -302,7 +302,7 @@ describe("Codex native planning", () => {
       f.child.complete();
       await vi.waitFor(() => expect(f.events.some(event => event.event.type === "ended")).toBe(true));
       await f.provider.discardSession(turn.sessionId);
-      await f.provider.sendTurn({ ...turn, turnId: "build", turnExecutionId: "build-execution", planTurn: undefined, interactionMode: "build" });
+      await f.provider.sendTurn({ ...turn, turnId: "build", turnExecutionId: "931f202c-951d-46b1-883a-084a41d189ec", planTurn: undefined, interactionMode: "build" });
       await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
       expect(f.starts()[1]?.params?.collaborationMode).toMatchObject({ mode: "default" });
       f.child.complete();
@@ -318,7 +318,7 @@ describe("Codex native planning", () => {
       expect(f.starts()[0]?.params?.collaborationMode).toMatchObject({ mode: "default" });
       f.child.complete();
       await vi.waitFor(() => expect(f.events.some(event => event.event.type === "ended")).toBe(true));
-      await f.provider.sendTurn({ ...resumedBuild, turnId: "build-again", turnExecutionId: "build-again-execution" });
+      await f.provider.sendTurn({ ...resumedBuild, turnId: "build-again", turnExecutionId: "e9ccef6b-a837-4481-85c3-d05c747f4b1a" });
       await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
       expect(f.starts()[1]?.params).not.toHaveProperty("collaborationMode");
       f.child.complete();

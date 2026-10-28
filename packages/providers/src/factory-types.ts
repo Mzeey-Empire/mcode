@@ -90,7 +90,6 @@ export interface ProviderBoundary {
 
 /** Usable Codex Provider returned by its public factory. */
 export type CodexProviderBoundary = IAgentProvider & ProviderBoundary & {
-  setCanonicalTurnEventDeliveryEnabled(enabled: boolean): void;
   setCanonicalTurnDeliveryFailureHandler(handler: (routing: CodexCanonicalEventRouting, error: Error) => void | Promise<void>): void;
   fenceCanonicalTurnEvents(routing: CodexCanonicalEventRouting, options?: { discardQueued?: boolean }): Promise<void>;
   waitForCanonicalTurnEvents(routing: CodexCanonicalEventRouting): Promise<void>;

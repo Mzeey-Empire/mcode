@@ -4,7 +4,7 @@ import { projectBrowserNarrativeInput, projectBrowserNarrativeResult, serializeB
 /** Replaces Browser provider events with content-free narrative projections. */
 export class BrowserNarrativeEventSanitizer {
   constructor(
-    private readonly resolveToolName: (threadId: string, toolCallId: string) => string | undefined = () => undefined,
+    private readonly resolveToolName: (threadId: string, toolCallId: string) => string | undefined,
   ) {}
 
   /** Returns a bounded Browser event while preserving tool identity and outcome. */

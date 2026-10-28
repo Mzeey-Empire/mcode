@@ -29,7 +29,7 @@ import type {
   ParentLiveEffects,
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventDraft, CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
-import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
+import { CanonicalAgentStore } from "./canonical-agent-store.js";
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { APPEND_GROUP_LIMITS, isGroupableAppend } from "./canonical-append-group.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
@@ -43,6 +43,7 @@ import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type Dat
 import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
 import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
 import { HookExecutionStore as HookExecutionRepo } from "../events/persistence/hook-execution-store.js";
+import { isLostProviderStream } from "../events/provider-event-publication.js";
 import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
 import {
   ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService,
@@ -218,7 +219,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private readonly threads: ThreadRepo;
   private readonly hooks: HookExecutionRepo;
   private readonly assistantText: ParentAssistantTextCheckpointService;
-  private readonly canonical: CanonicalAgentBoundary;
+  private readonly canonical: CanonicalAgentStore;
   private readonly findOperation: ReturnType<Database["prepare"]>;
   private readonly listPublicationChunks: ReturnType<Database["prepare"]>;
   private readonly acknowledgePublication: ReturnType<Database["prepare"]>;
@@ -243,7 +244,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     });
     // Compound terminal batches publish from their durable sequence log only after the final receipt commits.
     this.compoundTurns = new CanonicalParentTurnWrite(db, () => {});
-    const codexBoundary = new CanonicalAgentBoundary(db, (events) => {
+    const codexBoundary = new CanonicalAgentStore(db, (events) => {
       if (!this.bufferedPublication) throw new Error("Codex projection requires a semantic transaction");
       this.bufferPublication(events);
     });
@@ -1366,7 +1367,7 @@ function validLivePublicationIntent(
     && intent.event.turnExecutionId === operation.execution.executionId
     && (operation.mutation.kind !== "begin" || intent.event.type === "turnStarted")
     && validTurnStartedPublication(intent.event, operation.mutation)
-    && (barrier === "terminal" || !isTerminalLiveEvent(intent.event.type));
+    && (barrier === "terminal" || !isTerminalLiveEvent(intent.event.type) || isLostProviderStream(intent.event));
 }
 
 function isTerminalLiveEvent(type: ExecutionLivePublicationIntent["event"]["type"]): boolean {
@@ -1728,6 +1729,7 @@ function validFinish(
 
 function unchangedTextEvent(event: ExecutionLivePublicationIntent["event"]): boolean {
   return ["system", "turnStarted", "generatedAttachment", "contextEstimate", "compacting", "compactSummary"].includes(event.type)
+    || isLostProviderStream(event)
     || validNarrativeEvent(event);
 }
 
@@ -1850,7 +1852,7 @@ function committed(
 }
 
 function matchesCommittedTerminalMessage(
-  message: NonNullable<ReturnType<CanonicalAgentBoundary["loadTerminalProjection"]>["message"]>,
+  message: NonNullable<ReturnType<CanonicalAgentStore["loadTerminalProjection"]>["message"]>,
   execution: ExecutionIdentity,
   outcome: TurnOutcome,
 ): boolean {

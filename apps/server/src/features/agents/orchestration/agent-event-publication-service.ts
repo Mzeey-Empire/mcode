@@ -11,7 +11,6 @@ export interface AgentEventPublicationRuntime {
   getCurrentFileEffectTurnId(threadId: string): string | undefined;
   shouldSuppressTurnEnded(threadId: string): boolean;
   shouldSuppressTurnComplete(threadId: string): boolean;
-  shouldSuppressTransientTurnError(threadId: string, errorMessage: string): boolean;
 }
 
 /** Dependencies required to publish already-normalized provider events. */
@@ -69,7 +68,6 @@ export class AgentEventPublicationService {
     if (event.publicationId) return false;
     if (event.type === AgentEventType.Ended) return this.dependencies.runtime.shouldSuppressTurnEnded(event.threadId);
     if (event.type === AgentEventType.TurnComplete) return this.dependencies.runtime.shouldSuppressTurnComplete(event.threadId);
-    return event.type === AgentEventType.Error
-      && this.dependencies.runtime.shouldSuppressTransientTurnError(event.threadId, event.error ?? "");
+    return false;
   }
 }

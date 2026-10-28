@@ -1,4 +1,4 @@
-import { instanceCachingFactory, Lifecycle, type DependencyContainer } from "tsyringe";
+import { Lifecycle, type DependencyContainer } from "tsyringe";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 
 import { OpenCodeProvider } from "../adapters/opencode/opencode-provider.js";
@@ -7,7 +7,6 @@ import { createProviderHostPorts, PROVIDER_TURN_PORT } from "./provider-host-por
 import type { ProviderTurnPort } from "@mcode/providers";
 import { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import { McodeMcpServer, McodeProviderPort, McodeSessionAuthority } from "../../mcode-mcp/index.js";
-import { CanonicalAgentBoundary } from "../../agents/index.js";
 import { WorkerOwnedTurnRuntime } from "../../agents/execution/worker-owned-turn-runtime.js";
 import { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
 import { EnvService } from "../../../runtime/environment/env-service.js";
@@ -18,17 +17,9 @@ import {
   ProviderEventIngress,
   type ProviderEventIngressDiagnosticSink,
 } from "./provider-event-ingress.js";
-import {
-  PROVIDER_EVENT_WORKER_POOL,
-  ThreadEventWorkerPool,
-  type ProviderEventWorkerPool,
-} from "./provider-event-worker-pool.js";
 
 /** Register provider adapters, the provider registry, and provider host ports. */
 export function registerProviderAdapters(container: DependencyContainer): void {
-  container.register<ProviderEventWorkerPool>(PROVIDER_EVENT_WORKER_POOL, {
-    useFactory: instanceCachingFactory(() => new ThreadEventWorkerPool()),
-  });
   container.register(
     ProviderEventIngress,
     { useClass: ProviderEventIngress },
@@ -67,7 +58,6 @@ export function registerProviderAdapters(container: DependencyContainer): void {
         isBrowserConfigured: () => c.resolve(BrowserAutomationSessionLease).isConfigured(),
       }),
       grants: c.resolve(ScopedPreGrantService),
-      events: c.resolve(CanonicalAgentBoundary),
       ingress: c.resolve(ProviderEventIngress),
       eventOwnership: c.resolve(WorkerOwnedTurnRuntime).providerEvents,
       turns: () => c.resolve<ProviderTurnPort>(PROVIDER_TURN_PORT),

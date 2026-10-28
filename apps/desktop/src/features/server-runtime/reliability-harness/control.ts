@@ -3,7 +3,6 @@ import * as NodeHTTP from "node:http";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import type * as NodeNet from "node:net";
-import { THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH } from "@mcode/contracts/thread-control";
 
 /** Controls exposed by the opt-in packaged reliability harness. */
 export const RELIABILITY_HARNESS_CONTROLS = [
@@ -11,7 +10,6 @@ export const RELIABILITY_HARNESS_CONTROLS = [
   "server-hang",
   "transport-loss",
   "persistence-failure",
-  "assistant-stream",
 ] as const;
 
 /** A reliability harness control name. */
@@ -28,22 +26,15 @@ export interface ReliabilityHarnessCapability {
 export interface ReliabilityHarnessCommand {
   readonly control: ReliabilityHarnessControl | "planned-restart";
   readonly durationMs?: number;
-  readonly threadId?: string;
 }
 
 /** Published result forwarded from the server-only reliability control. */
 export interface ReliabilityHarnessForwardResult {
   readonly accepted: true;
   readonly control: ReliabilityHarnessControl;
-  readonly stream?: {
-    readonly threadId: string;
-    readonly executionId: string;
-    readonly text: string;
-  };
 }
 
 const RELIABILITY_FORWARD_RESPONSE_MAX_BYTES = 16 * 1024;
-const RELIABILITY_STREAM_TEXT_MAX_LENGTH = 4 * 1024;
 
 /** Read and validate the bounded response from the private server reliability endpoint. */
 export async function readReliabilityHarnessForwardResponse(
@@ -54,11 +45,8 @@ export async function readReliabilityHarnessForwardResponse(
     throw new Error("Planned restart is not a server fault");
   }
   const parsed = await readReliabilityForwardJson(response);
-  const result = validateReliabilityForwardResult(parsed, command.control);
-  if (command.control !== "assistant-stream") {
-    return { accepted: true, control: command.control };
-  }
-  return validateReliabilityStreamResult(result, command);
+  validateReliabilityForwardResult(parsed, command.control);
+  return { accepted: true, control: command.control };
 }
 
 async function readReliabilityForwardJson(response: Response): Promise<unknown> {
@@ -114,46 +102,6 @@ function validateReliabilityForwardResult(
     throw new Error("Reliability server control returned an invalid response");
   }
   return result;
-}
-
-function validateReliabilityStreamResult(
-  result: Record<string, unknown>,
-  command: ReliabilityHarnessCommand,
-): ReliabilityHarnessForwardResult {
-  if (command.control !== "assistant-stream" || typeof command.threadId !== "string") {
-    throw new Error("Reliability assistant stream returned an invalid response");
-  }
-  return createReliabilityStreamResult(result.stream, command.threadId);
-}
-
-function createReliabilityStreamResult(
-  stream: unknown,
-  threadId: string,
-): ReliabilityHarnessForwardResult {
-  if (!stream || typeof stream !== "object") {
-    throw new Error("Reliability assistant stream returned an invalid response");
-  }
-  const value = stream as Record<string, unknown>;
-  if (
-    value.threadId !== threadId
-    || typeof value.executionId !== "string"
-    || value.executionId.length === 0
-    || value.executionId.length > THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH
-    || typeof value.text !== "string"
-    || value.text.length === 0
-    || value.text.length > RELIABILITY_STREAM_TEXT_MAX_LENGTH
-  ) {
-    throw new Error("Reliability assistant stream returned an invalid response");
-  }
-  return {
-    accepted: true,
-    control: "assistant-stream",
-    stream: {
-      threadId,
-      executionId: value.executionId,
-      text: value.text,
-    },
-  };
 }
 
 /** Rendezvous data written without the capability token. */
@@ -230,8 +178,8 @@ export class ReliabilityHarnessControlPlane {
     if (rejection) return sendReliabilityResponse(response, rejection.status, rejection.body);
     try {
       const command = await readCommand(request);
-      const result = await this.executeCommand(command);
-      sendReliabilitySuccess(response, command, result);
+      await this.executeCommand(command);
+      sendReliabilitySuccess(response, command);
     } catch (error) {
       sendReliabilityFailure(response, error);
     }
@@ -248,11 +196,7 @@ export class ReliabilityHarnessControlPlane {
 
   private async executeCommand(command: ReliabilityHarnessCommand): Promise<ReliabilityHarnessForwardResult | void> {
     if (command.control === "planned-restart") return this.callbacks.plannedRestart();
-    const result = await this.callbacks.serverFault(command, this.capability.token);
-    if (command.control === "assistant-stream" && result?.stream?.threadId !== command.threadId) {
-      throw new Error("Assistant stream control did not return its requested thread");
-    }
-    return result;
+    return this.callbacks.serverFault(command, this.capability.token);
   }
 }
 
@@ -281,11 +225,9 @@ async function readCommand(request: NodeHTTP.IncomingMessage): Promise<Reliabili
   const value = parseReliabilityCommand(await readReliabilityCommandBody(request));
   const control = parseReliabilityControl(value.control);
   const durationMs = parseReliabilityDuration(value.durationMs);
-  const threadId = parseReliabilityStreamThreadId(control, value.threadId);
   return {
     control,
     ...(durationMs === undefined ? {} : { durationMs }),
-    ...(threadId === undefined ? {} : { threadId }),
   };
 }
 
@@ -326,17 +268,6 @@ function parseReliabilityDuration(value: unknown): number | undefined {
   return value;
 }
 
-function parseReliabilityStreamThreadId(
-  control: ReliabilityHarnessCommand["control"],
-  value: unknown,
-): string | undefined {
-  if (control !== "assistant-stream") return undefined;
-  if (typeof value !== "string" || value.trim().length === 0 || value.trim().length > THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH) {
-    throw new Error(`Reliability assistant stream requires a thread id up to ${THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH} characters`);
-  }
-  return value.trim();
-}
-
 function isReliabilityRequest(request: NodeHTTP.IncomingMessage): boolean {
   return request.method === "POST" && new URL(request.url ?? "/", "http://127.0.0.1").pathname === "/__mcode/reliability";
 }
@@ -354,10 +285,9 @@ function sendReliabilityResponse(response: NodeHTTP.ServerResponse, status: numb
 function sendReliabilitySuccess(
   response: NodeHTTP.ServerResponse,
   command: ReliabilityHarnessCommand,
-  result: ReliabilityHarnessForwardResult | void,
 ): void {
   response.writeHead(202, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-  response.end(JSON.stringify({ accepted: true, control: command.control, ...(result?.stream ? { stream: result.stream } : {}) }));
+  response.end(JSON.stringify({ accepted: true, control: command.control }));
 }
 
 function sendReliabilityFailure(response: NodeHTTP.ServerResponse, error: unknown): void {

@@ -52,6 +52,7 @@ import {
 import { appendSelectedTextComments, appendPlanComments } from "./selected-text-comment-append.js";
 import { ApprovalReviewPolicy, type ApprovalReviewDecision } from "./approval-review-policy.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
+import type { ExecutionParentStartContext } from "../execution/provider-execution-event-state.js";
 import type { ProviderSwitchService, ProviderSwitchTicket } from "./provider-switch-service.js";
 
 
@@ -68,6 +69,8 @@ export class ExistingWorktreePlacementError extends Error {
     this.name = "ExistingWorktreePlacementError";
   }
 }
+
+class TurnAdmissionOwnershipLostError extends Error {}
 
 /** Why a turn's runtime slot was released; absent for a turn that ran to its terminal state. */
 export type RuntimeReleaseCause = "admission-failed";
@@ -169,7 +172,7 @@ export interface TurnParentStartOwner {
     readonly ownerEpoch: number;
     readonly providerId: string;
     readonly parentTurn: DataOnlyParentTurnStartInput;
-    readonly parentLive?: import("../execution/provider-execution-event-state.js").ExecutionParentStartContext;
+    readonly parentLive?: ExecutionParentStartContext;
     readonly publishParentStart?: boolean;
   }): Promise<void>;
 }
@@ -196,7 +199,6 @@ export interface PreparedTurnDispatch {
   readonly threadControl: ThreadControlLeaseDirective | null;
   readonly contextSeed: number;
   readonly contextWindow: number | null;
-  readonly workerOwned?: true;
   /** Discard any pooled provider session first, so a fresh-session turn cannot inherit its native history. */
   readonly replaceSession?: true;
   /** A switch whose history cannot fit the target: the turn ends with this error instead of reaching the provider. */
@@ -258,7 +260,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly files: FileService | undefined,
     private readonly platform: NodeJS.Platform,
     private readonly models: TurnModelCatalog,
-    private readonly parentStartOwner?: TurnParentStartOwner,
+    private readonly parentStartOwner: TurnParentStartOwner,
     private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
     private readonly providerSwitch?: ProviderSwitchService,
   ) {}
@@ -302,15 +304,24 @@ export class TurnAdmissionDispatchCoordinator {
       this.reserveCommandEffect(prepared.value.commandEffect);
       return await this.commit(prepared.value, lease, runtime);
     } catch (error) {
-      if (prepared.value.providerSwitch) this.providerSwitch?.discard(prepared.value.providerSwitch);
-      await this.cleanupAutomaticDraftCopies(prepared.value);
-      if (lease) {
-        await runtime.abort(lease);
-        runtime.release(lease);
-      }
-      await this.rollbackCommandEffect(prepared.value.commandEffect);
+      await this.rollbackAdmission(prepared.value, lease, runtime);
+      if (error instanceof TurnAdmissionOwnershipLostError) return { kind: "handled" };
       throw error;
     }
+  }
+
+  private async rollbackAdmission(
+    prepared: PreparedCommand,
+    lease: TurnRuntimeLease | undefined,
+    runtime: TurnRuntimeAdmissionAuthority,
+  ): Promise<void> {
+    if (prepared.providerSwitch) this.providerSwitch?.discard(prepared.providerSwitch);
+    await this.cleanupAutomaticDraftCopies(prepared);
+    if (lease) {
+      await runtime.abort(lease);
+      runtime.release(lease);
+    }
+    await this.rollbackCommandEffect(prepared.commandEffect);
   }
 
   /** Activate a deferred command effect at the provider-dispatch boundary. */
@@ -333,15 +344,6 @@ export class TurnAdmissionDispatchCoordinator {
   /** Discard a completed command effect once it no longer needs rollback. */
   completeCommandEffect(receipt: CommandEffectReceipt | null): void {
     if (receipt) this.goals.completeCommandEffect(receipt);
-  }
-
-  /** Mark a failed provider dispatch after the runtime retry policy gives up. */
-  async markDispatchErrored(threadId: string): Promise<void> {
-    await this.threads.recordTurnOutcome(threadId, "errored", new Date().toISOString());
-    broadcast("turn.persisted", {
-      threadId, messageId: null, settledMessage: this.messages.latestSequenceMessage(threadId),
-      outcome: "errored", toolCallCount: 0, filesChanged: [],
-    });
   }
 
   /** Mark a committed turn active before its provider receives TurnStarted. */
@@ -571,7 +573,7 @@ export class TurnAdmissionDispatchCoordinator {
     runtime.activate(lease);
     const attachmentData = await this.persistAttachments(prepared);
     try {
-      return await this.commitWithAttachments(prepared, lease, attachmentData, cwd, review);
+      return await this.commitWithAttachments(prepared, lease, attachmentData, cwd, review, runtime);
     } catch (error) {
       if (prepared.command.stagedDraftImageIds?.length && !prepared.command.persistedUserMessage) {
         await this.attachments.removeStoredAttachments(prepared.command.threadId, ownCopies(attachmentData));
@@ -612,6 +614,7 @@ export class TurnAdmissionDispatchCoordinator {
     attachmentData: PersistedAttachmentData,
     cwd: string,
     review: ApprovalReviewDecision,
+    runtime: TurnRuntimeAdmissionAuthority,
   ): Promise<PreparedTurnDispatch> {
     const sourceTurnId = prepared.command.sourceTurnId ?? NodeCrypto.randomUUID();
     const parentStartInput = this.prepareParentTurnStartInput(prepared, lease, sourceTurnId, attachmentData, review);
@@ -619,6 +622,7 @@ export class TurnAdmissionDispatchCoordinator {
       ? { revertIds: [], paths: [] } : this.reverts.pendingAgentNotice(prepared.thread.id);
     parentStartInput.revertNoticeIds = revertNotice.revertIds;
     let wirePayload = await this.buildWirePayload(prepared, revertNotice.paths);
+    if (!runtime.owns(lease)) throw new TurnAdmissionOwnershipLostError();
     await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
     if (prepared.command.planCommentIds?.length) {
       const { comments, versions } = this.plans.sentComments(prepared.thread.id, prepared.command.planCommentIds);
@@ -638,7 +642,6 @@ export class TurnAdmissionDispatchCoordinator {
       threadControl: this.threadControlDirective(prepared, sourceTurnId),
       contextSeed: prepared.thread.last_context_tokens ?? 0,
       contextWindow: prepared.thread.context_window,
-      ...(this.parentStartOwner ? { workerOwned: true as const } : {}),
       ...this.sessionDirectives(prepared),
     };
   }
@@ -930,18 +933,12 @@ export class TurnAdmissionDispatchCoordinator {
     return prepared.automaticAttachments ?? this.persistCommandAttachments(prepared.command);
   }
 
-  private async startParentTurn(input: DataOnlyParentTurnStartInput): Promise<void> {
-    await this.parentTurns.startParentTurn(input);
-    if (input.reopenThread) broadcast("thread.lifecycleChanged", { thread: this.requireThread(input.thread.id) });
-  }
-
   private async commitParentStart(
     prepared: PreparedCommand,
     lease: TurnRuntimeLease,
     sourceTurnId: string,
     input: DataOnlyParentTurnStartInput,
   ): Promise<void> {
-    if (!this.parentStartOwner) return this.startParentTurn(input);
     const precedingMessageId = input.userMessage.messageId;
     if (!precedingMessageId) throw new Error("Worker-owned turn needs its committed user message identity");
     const planFeature = this.planFeature(prepared.plan);

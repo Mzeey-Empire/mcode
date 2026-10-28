@@ -1184,8 +1184,6 @@ export function createWsTransport(
     },
     stopAgent: (threadId) => rpc<import("@mcode/contracts/models/turn-runtime").AgentStopResult>("agent.stop", { threadId }),
     retrySave: async (threadId) => WS_METHODS()["agent.retrySave"].result.parse(await rpc<unknown>("agent.retrySave", { threadId })),
-    continueWithoutSaving: (executionId) =>
-      rpc<void>("agent.continueWithoutSaving", { executionId }),
     respondToApproval: async (requestId, response) =>
       WS_METHODS()["approval.respond"].result.parse(await rpc<unknown>("approval.respond", { requestId, ...response })),
     listPendingApprovals: (threadId) =>

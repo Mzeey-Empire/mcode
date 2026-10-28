@@ -3,7 +3,6 @@ import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { GoalLifecycleService } from "../goals/goal-lifecycle-service.js";
 import { PlanTurnService } from "../planning/plan-turn-service.js";
 import { SubagentRosterService } from "../collaboration/subagent-roster-service.js";
-import { TaskPersistenceService } from "../tasks/task-persistence-service.js";
 
 type AgentMessage = Extract<AgentEvent, { type: "message" }>;
 
@@ -16,40 +15,11 @@ export class TurnFeatureEffects {
     private readonly plans: PlanTurnService,
     private readonly goals: GoalLifecycleService,
     private readonly subagents: SubagentRosterService,
-    private readonly tasks: TaskPersistenceService,
   ) {}
-
-  /** Feed visible text to the plan parser for an active plan turn. */
-  onTextDelta(threadId: string, delta: string): void {
-    this.plans.onTextDelta(threadId, delta);
-  }
 
   /** Apply plan and goal reactions at an assistant-message boundary. */
   onAssistantMessage(providerId: ProviderId, event: AgentMessage): void {
     this.goals.onAssistantMessage(providerId, event);
-  }
-
-  /** Return whether the current assistant message must be materialized before plan persistence. */
-  needsAssistantMaterialization(event: AgentMessage): boolean {
-    return this.plans.needsAssistantMaterialization(event);
-  }
-
-  /** Persist the plan record tied to an already-materialized assistant message. */
-  async persistAssistantMessage(event: AgentMessage): Promise<void> {
-    await this.plans.persistAssistantMessage(event);
-  }
-
-  /** Persist one provider task result for reconnect hydration. */
-  async onToolResult(threadId: string, toolCallId: string, output: string, isError: boolean): Promise<void> {
-    await this.tasks.onToolResult(threadId, toolCallId, output, isError);
-  }
-
-  /** Persist one provider task request with its resolved narrative parent. */
-  async onToolUse(
-    threadId: string,
-    event: Parameters<TaskPersistenceService["onToolUse"]>[1],
-  ): Promise<void> {
-    await this.tasks.onToolUse(threadId, event);
   }
 
   /** Refresh goal state after the terminal turn reaches durable completion. */

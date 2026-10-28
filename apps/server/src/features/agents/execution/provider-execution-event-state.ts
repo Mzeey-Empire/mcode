@@ -1,7 +1,7 @@
 import { ProviderRuntimeEventSchema, isChildRoutedRuntimeEvent, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { type AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { ProviderEventDraft } from "@mcode/providers";
-import { processProviderEventWorkerTask } from "../../providers/composition/provider-event-worker-protocol.js";
+import { normalizeProviderEvent } from "../../providers/composition/provider-event-normalization.js";
 import { CodexLiveEventReducer, type CodexPlanFeature, type SyntheticTerminalInput } from "./codex-live-event-reducer.js";
 import { CodexLiveEventEffects, type PreparedCodexLiveEvent } from "./codex-live-event-effects.js";
 import { sameExecution } from "./execution-mailbox-protocol.js";
@@ -114,7 +114,7 @@ export class ProviderExecutionEventState {
     const runtime = ProviderRuntimeEventSchema().safeParse(item.payload.runtimeEvent);
     if (!runtime.success || item.threadId !== draft.routing.threadId || item.turnId !== draft.routing.turnId
       || item.id !== draft.routing.itemId) return undefined;
-    const parsed = processProviderEventWorkerTask({ kind: "provider-runtime", providerId: this.providerId, runtimeEvent: runtime.data });
+    const parsed = normalizeProviderEvent({ kind: "provider-runtime", providerId: this.providerId, runtimeEvent: runtime.data });
     if (parsed.status === "rejected") return undefined;
     if (parsed.status !== "accepted" || parsed.event.event.threadId !== this.execution.threadId
       || parsed.event.event.turnExecutionId !== this.execution.executionId) return undefined;

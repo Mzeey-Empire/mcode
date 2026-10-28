@@ -1,5 +1,6 @@
 import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
 import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { resolveBrowserNarrativeTool } from "@mcode/contracts/models/browser-narrative";
 import { type AgentProgressPosition } from "@mcode/contracts/compat/agent-model";
 import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { type PlanQuestion } from "@mcode/contracts/models/plan-questions";
@@ -17,6 +18,7 @@ import type {
 import type { CodexSystemWriterIntent } from "../canonical/canonical-codex-system-error-projection.js";
 import type { CanonicalAgentCommitResult } from "../canonical/canonical-agent-boundary.js";
 import type { ProviderEventIngressEvent } from "../../providers/composition/provider-event-ingress.js";
+import { BrowserNarrativeEventSanitizer } from "../../browser-automation/index.js";
 import type {
   ParentAssistantTextCheckpointInput,
   ParentAssistantTextCheckpointResult,
@@ -41,6 +43,7 @@ import type { FrozenExecutionFileEvidence } from "./execution-file-evidence-coor
 import type { CapturedToolUseObservation, FileTurnHandoff } from "../turns/turn-file-tracker.js";
 import type { SyntheticTerminalInput } from "./codex-live-event-reducer.js";
 import { adapterTurnFailure } from "../canonical/turn-ending.js";
+import { isLostProviderStream } from "../events/provider-event-publication.js";
 
 /** Data that an execution worker may receive without a server dependency container. */
 export type ExecutionWorkCommand =
@@ -203,11 +206,13 @@ interface ExecutionState {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
   readonly providerId: string;
+  readonly browserToolNames: Map<string, string>;
   parentEvents?: ProviderExecutionEventState;
   nextOrdinal: number;
   phase: "running" | "stopping" | "finalized" | "poisoned";
   durableRevision: number;
   fileAttempt?: number;
+  providerLostOperationId?: string;
 }
 
 interface PreparedExecutionRequest {
@@ -223,6 +228,9 @@ interface PreparedExecutionRequest {
  */
 export class ExecutionWorkerHandler {
   private readonly states = new Map<string, ExecutionState>();
+  private readonly browserNarrativeEvents = new BrowserNarrativeEventSanitizer(
+    (threadId, toolCallId) => this.states.get(threadId)?.browserToolNames.get(toolCallId),
+  );
 
   constructor(private readonly writer: ExecutionSemanticWriter, private readonly files = new ExecutionWorkerFileEvidence()) {}
 
@@ -352,6 +360,7 @@ export class ExecutionWorkerHandler {
     state.nextOrdinal += 1;
     if (receipt.kind === "committed") state.durableRevision = receipt.durableRevision;
     if (prepared.candidate) state.parentEvents = prepared.candidate;
+    state.providerLostOperationId = providerLostOperationId(prepared, receipt);
     if (request.command.kind === "stop") state.phase = "stopping";
     if (request.command.kind === "finish-live-event") {
       state.phase = "finalized";
@@ -359,7 +368,8 @@ export class ExecutionWorkerHandler {
     }
   }
 
-  private prepareRequest(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): PreparedExecutionRequest | undefined {
+  private prepareRequest(raw: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): PreparedExecutionRequest | undefined {
+    const request = this.sanitizeRequest(raw, state);
     const command = request.command;
     if (command.kind === "finish-from-state") return this.prepareSyntheticFinish(request, command, state);
     if (!state.parentEvents || command.kind !== "event") return { request };
@@ -379,6 +389,37 @@ export class ExecutionWorkerHandler {
       parentLive: effects, livePublication: [parentEvent.publication] } }, parentEvent, candidate };
   }
 
+  private sanitizeRequest(
+    request: ExecutionWorkerRequest<WorkerCommand>,
+    state: ExecutionState,
+  ): ExecutionWorkerRequest<WorkerCommand> {
+    const command = request.command;
+    if (command.kind === "event") {
+      const events = command.events.map((draft) => this.sanitizeProviderDraft(draft, state));
+      return { ...request, command: { ...command, events } };
+    }
+    if ((command.kind === "finish-live-event" || command.kind === "post-terminal-event") && command.providerEvent) {
+      const events = command.providerEvent.events.map((draft) => this.sanitizeProviderDraft(draft, state));
+      return { ...request, command: { ...command, providerEvent: { ...command.providerEvent, events } } };
+    }
+    return request;
+  }
+
+  private sanitizeProviderDraft(draft: ProviderEventDraft, state: ExecutionState): ProviderEventDraft {
+    const payload = draft.payload;
+    if (payload.type !== "item.recorded" || payload.item.payload.projection !== "providerRuntimeEvent") return draft;
+    const runtime = ProviderRuntimeEventSchema().safeParse(payload.item.payload.runtimeEvent);
+    if (!runtime.success) return draft;
+    const event = runtime.data.event;
+    if (event.type === "toolUse" && resolveBrowserNarrativeTool(event.toolName)) {
+      state.browserToolNames.set(event.toolCallId, event.toolName);
+    }
+    const sanitized = this.browserNarrativeEvents.sanitize(event);
+    if (sanitized === event) return draft;
+    return { ...draft, payload: { ...payload, item: { ...payload.item,
+      payload: { ...payload.item.payload, runtimeEvent: { ...runtime.data, event: sanitized } },
+    } } };
+  }
 
   private prepareSyntheticFinish(
     request: ExecutionWorkerRequest<WorkerCommand>,
@@ -513,6 +554,7 @@ export class ExecutionWorkerHandler {
       execution: request.execution,
       lease: request.lease,
       providerId: command.providerId,
+      browserToolNames: new Map(),
       ...parent,
       nextOrdinal: 2,
       phase: "running",
@@ -534,7 +576,8 @@ export class ExecutionWorkerHandler {
   }
 
   private release(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): ExecutionWorkerResult {
-    if (state.phase !== "finalized" && !validRecoveryRelease(request.command, state.lease)) {
+    if (state.phase !== "finalized" && !validRecoveryRelease(request.command, state.lease)
+      && !validProviderLostRelease(request.command, state)) {
       return { kind: "rejected", reason: "invalid-transition" };
     }
     if (state.fileAttempt !== undefined) this.files.retire(state.execution, state.fileAttempt);
@@ -725,6 +768,17 @@ function validRecoveryRelease(command: WorkerCommand, lease: ExecutionLease): bo
   return command.recovery.kind === "committed" && Number.isSafeInteger(command.recovery.durableRevision)
     || command.recovery.kind === "accepted" && Number.isSafeInteger(command.recovery.progressPosition.sequence)
     || command.recovery.kind === "conflict" && command.recovery.recoveryState === "already-terminal";
+}
+
+function validProviderLostRelease(command: WorkerCommand, state: ExecutionState): boolean {
+  return state.phase === "running" && command.kind === "release" && command.recovery?.kind === "accepted"
+    && command.recovery.operationId === state.providerLostOperationId;
+}
+
+function providerLostOperationId(prepared: PreparedExecutionRequest, receipt: ExecutionWriteReceipt): string | undefined {
+  const event = prepared.parentEvent?.publication.event;
+  if (receipt.kind !== "accepted" || !event || !isLostProviderStream(event)) return undefined;
+  return receipt.operationId;
 }
 
 function invalidReason(request: ExecutionWorkerRequest<WorkerCommand>): Extract<ExecutionWorkerResult, { kind: "rejected" }>["reason"] {

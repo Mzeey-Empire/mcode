@@ -16,9 +16,9 @@ import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/rea
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
 import { ExecutionWorkerHandler, type ExecutionWorkCommand, type ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
-import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agent-store.js";
+import { CanonicalAgentStore } from "../canonical-agent-store.js";
 import { syntheticThreadExecutionId } from "../canonical-thread-execution.js";
-import { CanonicalAgentBoundary as MainCanonicalAgentBoundary } from "../canonical-agent-boundary.js";
+import { CanonicalAgentStore as MainCanonicalAgentBoundary } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient, CanonicalWriterAcknowledgementCapacity } from "../canonical-agent-writer-client.js";
 import { CanonicalAcceptedProgress, TurnVisualRejectedError } from "../canonical-accepted-progress.js";
 import { MessageStore } from "../../conversation/persistence/message-store.js";
@@ -337,7 +337,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       session.emit({ type: "assistant.message_delta", ephemeral: true, data: { messageId: "answer", deltaContent: expected.delta } });
       if (expected.snapshot) session.emit({ type: "assistant.message", data: { messageId: "answer", content: "Final answer" } }, "original-final-snapshot");
       await finishCopilotNativeTurn(provider, session, ending);
-      const canonical = new CanonicalAgentBoundary(db, () => {});
+      const canonical = new CanonicalAgentStore(db, () => {});
       await expect.poll(() => canonical.loadTurn(execution.turnId)?.status).toBe(expected.status);
       await expect.poll(() => progress.depth().pending).toBe(0);
       const terminal = canonical.loadTerminalProjection(execution.turnId);
@@ -377,7 +377,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await expect.poll(() => progress.depth().pending).toBe(0);
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
     expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").get(execution.threadId)).toEqual({ content: "Still completes" });
-    expect(new CanonicalAgentBoundary(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
+    expect(new CanonicalAgentStore(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
     expect((await send(6, { kind: "release" })).result.kind).toBe("released");
   });
 
@@ -514,7 +514,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT id FROM threads WHERE id = ?").get(childId)).toEqual({ id: childId });
     expect(progress.loadSubagentStopTarget({ owningParentThreadId: execution.threadId, childThreadId: childId }))
       .toMatchObject({ latestTurn: { status: "Interrupted" } });
-    const saved = new CanonicalAgentBoundary(db, () => {});
+    const saved = new CanonicalAgentStore(db, () => {});
     expect(saved.loadSubagentStopTarget({ owningParentThreadId: execution.threadId, childThreadId: childId }))
       .toMatchObject({ latestTurn: { status: "Interrupted" } });
     expect(saved.loadTurn(execution.turnId)?.status).toBe("Completed");
@@ -543,7 +543,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       events: [familyDraft(3, "textDelta", { delta: "Child answer" }, { child: { ...evidence,
         nativeItemId: "child-message", itemEventKey: "delta" } })] });
     await expect.poll(() => progress.depth().pending).toBe(0);
-    const saved = new CanonicalAgentBoundary(db, () => {});
+    const saved = new CanonicalAgentStore(db, () => {});
     expect(saved.loadConversationProjection(childId, 20).messages.map((message) => message.content)).toEqual(["Child task"]);
     expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").all(childId)).toEqual([]);
     await send(5, { kind: "event", phase: "running", nativeCursor: null,
@@ -598,7 +598,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await expect.poll(() => append.mock.results.length).toBeGreaterThanOrEqual(3);
     await expect(append.mock.results[2]?.value).resolves.toHaveProperty("receipt");
     await expect.poll(() => progress.depth().pending).toBe(0);
-    const canonical = new CanonicalAgentBoundary(db, () => {});
+    const canonical = new CanonicalAgentStore(db, () => {});
     expect(canonical.loadParentNarrativeForBinding(execution.threadId, execution.turnId)
       .flatMap((item) => item.kind === "narrationSegment" ? [item.record.text] : [])).toEqual(["THOUGHT", "UNKNOWN", "NEXT"]);
     expect(db.prepare("SELECT retained_bytes FROM parent_assistant_text_checkpoints WHERE execution_id = ?")
@@ -644,7 +644,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(recovery().retained.some((value) => value.payload.type === "turn.completed")).toBe(true);
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
-    expect(new CanonicalAgentBoundary(db, () => {}).loadTerminalProjection(execution.turnId).message?.content).toBe("PREFIX\nCOMPLETE");
+    expect(new CanonicalAgentStore(db, () => {}).loadTerminalProjection(execution.turnId).message?.content).toBe("PREFIX\nCOMPLETE");
     const saved = frames().flatMap((frame) => frame.phase === "saved" ? frame.events : [])
       .filter((value) => before.some((event) => event.id === value.eventId));
     expect(saved.map((value) => ({ id: value.eventId, position: value.progressPosition }))).toEqual(before);
@@ -673,7 +673,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
 
-    const saved = new CanonicalAgentBoundary(db, () => {});
+    const saved = new CanonicalAgentStore(db, () => {});
     expect(saved.loadTurn(execution.turnId)?.status).toBe("Cancelled");
     expect(db.prepare("SELECT id, status FROM tool_call_records").all())
       .toEqual([{ id: "agent", status: "cancelled" }]);
@@ -796,7 +796,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     holdWrites();
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 1, "textDelta", { delta: "Held", isFinalResponse: true })] });
-    const boundary = new CanonicalAgentBoundary(db, () => {});
+    const boundary = new CanonicalAgentStore(db, () => {});
     boundary.bindAcceptedSynthesizedPublications((threadId, events) => progress.acceptSynthesizedPublications(threadId, events));
     const observed = boundary.recordSynthesizedPublications(execution.threadId, [{ type: "system", threadId: execution.threadId,
       subtype: "goal.paused", message: "Paused" }]);
@@ -866,7 +866,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect((await finish()).result.kind).toBe("accepted");
     await expect.poll(() => progress.depth().pending).toBe(0);
     await send(releaseOrdinal + 1, { kind: "release" });
-    const saved = new CanonicalAgentBoundary(db, () => {});
+    const saved = new CanonicalAgentStore(db, () => {});
     expect(db.prepare("SELECT status, completed_at, background FROM tool_call_records WHERE id = 'agent'").get())
       .toEqual({ status: "running", completed_at: null, background: 1 });
     expect(saved.listHeldBackgroundToolCalls())
@@ -1042,7 +1042,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "turnComplete")],
       terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
     await expect.poll(() => progress.depth().pending).toBe(0);
-    const boundary = new CanonicalAgentBoundary(db, () => {});
+    const boundary = new CanonicalAgentStore(db, () => {});
     expect(boundary.interruptSavedFamilyChildren("Server restarted")).toEqual([childId]);
     expect(boundary.loadSubagentStopTarget({ owningParentThreadId: execution.threadId, childThreadId: childId })?.latestTurn?.status).toBe("Interrupted");
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
@@ -1320,7 +1320,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(pushes.turns).toEqual([]);
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
-    const saved = new CanonicalAgentBoundary(db, () => {}).loadTerminalProjection(execution.turnId).message;
+    const saved = new CanonicalAgentStore(db, () => {}).loadTerminalProjection(execution.turnId).message;
     if (!saved) throw new Error("Expected saved assistant response");
     expect(pushes.turns).toEqual([
       { channel: "thread.status", data: { threadId: execution.threadId, status: "completed" } },

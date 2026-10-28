@@ -437,8 +437,8 @@ export class NarrativeTurnState {
    * Move the open thought text out of NarrativeStore without persisting it.
    *
    * Used when an authoritative boundary retroactively classifies previously
-   * unknown deltas as the final assistant response. Ownership moves to
-   * TurnFinalizer so the same text is not buffered in both stores.
+   * unknown deltas as the final assistant response. The text is removed here
+   * so it is not buffered as both narration and the assistant body.
    */
   takeOpenThought(threadId: string): string {
     this.assertThread(threadId);
@@ -1163,8 +1163,8 @@ export class NarrativeTurnState {
   /**
    * True when the current turn has buffered at least one narrative contributor —
    * a tool call, a narration segment (open or closed), or a hook (open or
-   * closed). Feeds the {@link TurnFinalizer.hasRecordableActivity} predicate so
-   * a turn with narrative but no assistant body still earns a persisted row.
+   * closed). A turn with narrative but no assistant body still earns a
+   * persisted row.
    */
   hasBufferedNarrative(threadId: string): boolean {
     this.assertThread(threadId);

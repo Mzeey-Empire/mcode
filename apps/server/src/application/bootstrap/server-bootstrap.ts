@@ -99,12 +99,8 @@ import { CoordinatorWakeService } from "../../features/thread-control/delegation
 import { wakeTargets } from "../../features/thread-control/delegation/wake-targets.js";
 import { TurnSteerRepo } from "../../features/agents/steering/persistence/turn-steer-repo.js";
 import { TurnSteerRuntimePort } from "../../features/agents/steering/turn-steer-runtime-port.js";
-import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
-import { TURN_FINALIZER, TurnFinalizer } from "../../features/agents/turns/turn-finalizer.js";
 import {
   AgentEventPublicationRuntimePort,
-  AgentReliabilityPort,
-  AgentTurnContinuationPort,
 } from "../../features/agents/orchestration/agent-runtime-internal-ports.js";
 import { NarrativeStore } from "../../features/agents/conversation/narrative/narrative-store.js";
 import { LegacyConversationMigration } from "../../features/agents/conversation/migrations/legacy-conversation-migration.js";
@@ -134,7 +130,6 @@ import { TurnSnapshotRangeReader } from "../../features/projects/diffs/snapshots
 import { TaskRepo } from "../../features/agents/orchestration/persistence/task-repo.js";
 import { PlanQuestionAnswersRepo } from "../../features/agents/planning/persistence/plan-question-answers-repo.js";
 import { PlanQuestionService } from "../../features/agents/planning/plan-question-service.js";
-import { PostTerminalHookCompletionEffect } from "../../features/agents/turns/post-terminal-hook-completion-effect.js";
 import { BackgroundToolSettlementEffect } from "../../features/agents/turns/background-tool-settlement-effect.js";
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
 import { PlanService, type PlanImplementRuntime } from "../../features/agents/planning/plan-service.js";
@@ -329,8 +324,6 @@ const workspaceEnvironmentService = container.resolve(WorkspaceEnvironmentServic
 const projectActionService = container.resolve(ProjectActionService);
 const threadService = container.resolve(ThreadService);
 const agentService = container.resolve(AgentService);
-const agentReliability = container.resolve(AgentReliabilityPort);
-const agentContinuation = container.resolve(AgentTurnContinuationPort);
 workspaceEnvironmentService.setAutomaticSetupDispatcher({
   dispatch: (submission) => agentService.dispatchQueuedAutomaticTurn(submission),
 });
@@ -435,7 +428,6 @@ if (workerOwnedTurnRuntime.progress) {
   container.resolve(PlanQuestionService).bindAcceptedProgress(progress);
   container.resolve(SubagentRosterService).bindAcceptedProgress(progress);
   container.resolve(ThreadService).bindAcceptedProgress(progress);
-  container.resolve(PostTerminalHookCompletionEffect).bindAcceptedProgress(progress);
   container.resolve(BackgroundToolSettlementEffect).bindAcceptedProgress(progress);
   canonicalSink.bindAcceptedSynthesizedPublications((threadId, events) =>
     progress.acceptSynthesizedPublications(threadId, events));
@@ -546,9 +538,7 @@ const settleActionObserver = new SettleActionObserver({
   environment: workspaceEnvironmentService,
   actions: projectActionService,
 });
-const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undefined, {
-  streamAssistant: (threadId) => agentReliability.streamAssistantText(threadId),
-});
+const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter);
 const jobObject = container.resolve<JobObject>("JobObject");
 
 const portPush = new PortPush();
@@ -880,7 +870,6 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   projectActionService,
   threadService,
   agentService,
-  agentContinuation,
   approvalService,
   planTurnService,
   goalLifecycleService,
@@ -1241,8 +1230,6 @@ async function shutdown(): Promise<void> {
   await captureCleanupFailure(() => ciWatcherService.dispose());
 
   shutdownCoordinator.setPhase("drain terminal persistence and execution workers");
-  await captureCleanupFailure(() => container.resolve(ProviderTurnEventApplication).drainPersistence());
-  await captureCleanupFailure(() => container.resolve<TurnFinalizer>(TURN_FINALIZER).drain());
   await captureCleanupFailure(() => snapshotRefPins.drain());
   await captureCleanupFailure(() => container.resolve(AgentEventPublicationRegistry).drain());
   await captureCleanupFailure(() => workerOwnedTurnRuntime.close());

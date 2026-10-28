@@ -24,7 +24,6 @@ import type { AgentService } from "../orchestration/agent-service.js";
 import { appendPreviewAnnotations, sendAdmittedTurn, sendRecoveryAttempt } from "./turn-message-dispatch.js";
 import type { TurnResumeScheduler } from "../recovery/turn-resume-scheduler.js";
 import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
-import type { AgentTurnContinuationPort } from "../orchestration/agent-runtime-internal-ports.js";
 import type { TaskRepo } from "../orchestration/persistence/task-repo.js";
 import type { ApprovalService } from "../approvals/approval-service.js";
 import type { PlanTurnService } from "../planning/plan-turn-service.js";
@@ -44,7 +43,6 @@ type AgentRpcMethod =
   | "turn.resume"
   | "turn.resume.schedule"
   | "turn.resume.unschedule"
-  | "agent.continueWithoutSaving"
   | "agent.createAndSend"
   | "agent.stop"
   | "agent.retrySave"
@@ -90,7 +88,6 @@ export interface AgentRouterDeps {
     AgentService,
     "sendMessage" | "createAndSend" | "stopSession" | "runtimeAccess"
   >;
-  agentContinuation?: Pick<AgentTurnContinuationPort, "continueWithoutSaving">;
   approvalService: Pick<
     ApprovalService,
     "respondToApproval" | "listPendingApprovals"
@@ -175,10 +172,6 @@ const agentHandlers: AgentRpcHandlerMap = {
     sendRecoveryAttempt(deps.agentService, command)),
   "turn.resume.schedule": (deps, params) => deps.turnResumeScheduler.schedule(params),
   "turn.resume.unschedule": (deps, params) => deps.turnResumeScheduler.unschedule(params.threadId),
-  "agent.continueWithoutSaving": (deps, params) => {
-    if (!deps.agentContinuation) throw new Error("Agent turn continuation is unavailable");
-    deps.agentContinuation.continueWithoutSaving(params.executionId);
-  },
   "agent.createAndSend": async (deps, params) => {
     const previewAnnotations = params.previewAnnotations && toPreviewAnnotationBundleV2(params.previewAnnotations);
     const thread = await deps.agentService.createAndSend({

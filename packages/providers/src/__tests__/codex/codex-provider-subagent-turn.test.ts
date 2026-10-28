@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fixtureExecutionId } from "./codex-provider-test-fixture.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { loggerWarnMock } = vi.hoisted(() => ({ loggerWarnMock: vi.fn() }));
 
@@ -13,7 +14,7 @@ vi.mock("../../private/codex/codex-version.js", () => ({
 vi.mock("../../version-policy.js", () => ({ meetsMinVersion: () => true }));
 
 const { sendTurnMock, getChildThreadMetadataMock, interruptChildTurnMock } = vi.hoisted(() => ({
-  sendTurnMock: vi.fn().mockResolvedValue(null),
+  sendTurnMock: vi.fn().mockResolvedValue("native-main-turn"),
   getChildThreadMetadataMock: vi.fn().mockResolvedValue({
     identity: "read_docs_worker",
     model: "gpt-5.6-sol",
@@ -66,10 +67,11 @@ async function startSession(
   provider: CodexProvider,
   sessionId: string,
   threadId: string,
+  executionId = fixtureExecutionId(sessionId),
 ): Promise<PoolEntry> {
   await provider.sendTurn({
     turnId: "test-turn",
-    turnExecutionId: `exec-${sessionId}`,
+    turnExecutionId: executionId,
     sessionId,
     workspaceId: "workspace-test",
     threadId,
@@ -84,7 +86,9 @@ async function startSession(
   for (let i = 0; i < 20 && sendTurnMock.mock.calls.length === 0; i++) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  expect(sendTurnMock).toHaveBeenCalled();
+
+    await provider.flushCanonicalEvents();
+    expect(sendTurnMock).toHaveBeenCalled();
 
   const pool = (
     provider as unknown as {
@@ -92,15 +96,19 @@ async function startSession(
     }
   ).runtime;
   const entry = pool.get(sessionId);
-  expect(entry).toBeDefined();
+
+    await provider.flushCanonicalEvents();
+    expect(entry).toBeDefined();
   return entry!;
 }
 
+const providers: CodexProvider[] = [];
+
 function makeProvider(): CodexProvider {
-  return new CodexProvider(
+  const provider = new CodexProvider(
     { get: async () => ({ provider: { cli: { codex: "codex" } } }) } as never,
     stubEnvService() as never,
-    { persistGeneratedImageFromPath: vi.fn() } as never,
+    { persistGeneratedImageFromPath: vi.fn(() => ({ id: "generated-image", name: "image.png", mimeType: "image/png", sizeBytes: 4 })) } as never,
     {
       currentSkills: vi.fn(() => []),
       listModels: vi.fn(async () => []),
@@ -111,6 +119,8 @@ function makeProvider(): CodexProvider {
       shutdown: vi.fn(async () => undefined),
     } as never,
   );
+  providers.push(provider);
+  return provider;
 }
 
 /**
@@ -122,8 +132,11 @@ function makeProvider(): CodexProvider {
  * narration keeps streaming (and the still-busy session becomes evictable).
  */
 describe("CodexProvider sub-agent turn lifecycle isolation", () => {
+  afterEach(async () => {
+    for (const provider of providers.splice(0)) await provider.shutdown();
+  });
   beforeEach(() => {
-    sendTurnMock.mockClear();
+    sendTurnMock.mockReset().mockResolvedValue("native-main-turn");
     getChildThreadMetadataMock.mockClear();
     interruptChildTurnMock.mockClear();
     loggerWarnMock.mockClear();
@@ -140,34 +153,46 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       nativeExecutionConflictKeys: Set<string>;
       turnDiffRouting?: { turnId: string; turnExecutionId: string; deliveryAttempt: number };
     };
-    state.turnExecutionIdsByNativeTurn.set("bound-native", "same-execution");
+    state.turnExecutionIdsByNativeTurn.set("bound-native", "7ec4dc86-bd75-49d9-8019-1680eb92b8bc");
     state.turnDeliveryAttemptsByNativeTurn.set("bound-native", 1);
-    state.turnDiffRouting = { turnId: "test-turn", turnExecutionId: "same-execution", deliveryAttempt: 2 };
+    state.turnDiffRouting = { turnId: "test-turn", turnExecutionId: "7ec4dc86-bd75-49d9-8019-1680eb92b8bc", deliveryAttempt: 2 };
     const item = { type: "fileChange", id: "edit", changes: [{ path: "tracked.txt", kind: "edit" }] };
 
     entry.server.emit("notification", { method: "item/started",
       params: { threadId: "early-child", turnId: "old-native", item } });
+
     entry.server.emit("notification", { method: "item/started",
       params: { threadId: "early-child", turnId: "bound-native", item: { ...item, id: "edit-current" } } });
 
+    await provider.flushCanonicalEvents();
     expect(mutations).toHaveLength(2);
+
+    await provider.flushCanonicalEvents();
     expect(mutations[0]).toMatchObject({ toolCallId: "edit" });
+
+    await provider.flushCanonicalEvents();
     expect(mutations[0]?.turnExecutionId).toBeUndefined();
+
+    await provider.flushCanonicalEvents();
     expect(mutations[0]?.deliveryAttempt).toBeUndefined();
+
+    await provider.flushCanonicalEvents();
     expect(mutations[1]).toMatchObject({
-      toolCallId: "edit-current", turnExecutionId: "same-execution", deliveryAttempt: 1,
+      toolCallId: "edit-current", turnExecutionId: "7ec4dc86-bd75-49d9-8019-1680eb92b8bc", deliveryAttempt: 1,
     });
     state.nativeExecutionConflictKeys.add("bound-native");
     entry.server.emit("notification", { method: "item/started",
       params: { threadId: "early-child", turnId: "bound-native", item: { ...item, id: "edit-conflicted" } } });
+
+    await provider.flushCanonicalEvents();
     expect(mutations[2]?.deliveryAttempt).toBeUndefined();
   });
 
   it("assigns the active execution to main tool and text events before turn/start binds", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
-    const entry = await startSession(provider, "mcode-early-main", "early-main");
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
+    const entry = await startSession(provider, "mcode-early-main", "early-main", "fdb68c9c-9f8a-4dc0-82e0-5876508522ed");
     const state = entry as PoolEntry & {
       currentTurnExecutionId?: string;
       activeParentTurnExecutionId?: string;
@@ -177,9 +202,9 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       currentNativeTurnId?: string;
     };
     entry.mapper.prepareForTurn();
-    state.currentTurnExecutionId = "exec-early-main";
-    state.activeParentTurnExecutionId = "exec-early-main";
-    state.nextTurnExecutionId = "exec-early-main";
+    state.currentTurnExecutionId = "fdb68c9c-9f8a-4dc0-82e0-5876508522ed";
+    state.activeParentTurnExecutionId = "fdb68c9c-9f8a-4dc0-82e0-5876508522ed";
+    state.nextTurnExecutionId = "fdb68c9c-9f8a-4dc0-82e0-5876508522ed";
     state.turnBindingPhase = "awaiting";
     state.turnStartResponsePending = true;
     state.currentNativeTurnId = undefined;
@@ -192,10 +217,12 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "commandExecution", id: "early-tool", command: "echo early" },
       },
     });
+
     entry.server.emit("notification", {
       method: "item/agentMessage/delta",
       params: { threadId: "sdk-thread-1", turnId: "early-native-turn", delta: "early text" },
     });
+
     entry.server.emit("notification", {
       method: "turn/completed",
       params: {
@@ -204,17 +231,18 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       },
     });
 
+    await provider.flushCanonicalEvents();
     expect(events).toEqual(expect.arrayContaining([
-      expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.ToolUse, toolCallId: "early-tool", turnExecutionId: "exec-early-main" }) }),
-      expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.TextDelta, delta: "early text", turnExecutionId: "exec-early-main" }) }),
-      expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.TurnComplete, turnExecutionId: "exec-early-main" }) }),
+      expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.ToolUse, toolCallId: "early-tool", turnExecutionId: "fdb68c9c-9f8a-4dc0-82e0-5876508522ed" }) }),
+      expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.TextDelta, delta: "early text", turnExecutionId: "fdb68c9c-9f8a-4dc0-82e0-5876508522ed" }) }),
+      expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.TurnComplete, turnExecutionId: "fdb68c9c-9f8a-4dc0-82e0-5876508522ed" }) }),
     ]));
   });
 
   it("resolves an early main completion after turn/start returns its native id", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     let resolveNativeTurn!: (turnId: string) => void;
     sendTurnMock.mockImplementationOnce(() => new Promise<string>((resolve) => {
       resolveNativeTurn = resolve;
@@ -223,7 +251,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     const sessionId = "mcode-early-completion";
     const completion = provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-early-completion",
+      turnExecutionId: "87b18f2d-a2e6-4726-8d5a-5b841d720e76",
       sessionId,
       workspaceId: "workspace-test",
       threadId: "early-completion",
@@ -246,10 +274,14 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
     }
+
+    await provider.flushCanonicalEvents();
     expect(entry).toBeDefined();
     for (let i = 0; i < 20 && !resolveNativeTurn; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
+
+    await provider.flushCanonicalEvents();
     expect(resolveNativeTurn).toEqual(expect.any(Function));
 
     entry!.server.emit("notification", {
@@ -259,23 +291,26 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         turn: { id: "early-native-turn", status: "completed", usage: {} },
       },
     });
+
     resolveNativeTurn("early-native-turn");
 
     await expect(completion).resolves.toBeUndefined();
+
+    await provider.flushCanonicalEvents();
     expect(events).toEqual(expect.arrayContaining([
-      expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.TurnComplete, turnExecutionId: "exec-early-completion" }) }),
+      expect.objectContaining({ event: expect.objectContaining({ type: AgentEventType.TurnComplete, turnExecutionId: "87b18f2d-a2e6-4726-8d5a-5b841d720e76" }) }),
     ]));
   });
 
   it("settles the root turn by native identity after a child thread id churn", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     sendTurnMock.mockResolvedValueOnce("root-native-turn");
 
     const completion = provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-root-child-churn",
+      turnExecutionId: "04651f7d-240a-40a8-8561-edcefaa7b83b",
       sessionId: "mcode-root-child-churn",
       workspaceId: "workspace-test",
       threadId: "root-child-churn",
@@ -296,10 +331,14 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       ).runtime.get("mcode-root-child-churn");
       if (!entry) await new Promise<void>((resolve) => setImmediate(resolve));
     }
+
+    await provider.flushCanonicalEvents();
     expect(entry).toBeDefined();
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length === 0; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
+
+    await provider.flushCanonicalEvents();
     expect(sendTurnMock).toHaveBeenCalled();
 
     // A child thread/started notification without parentThreadId can churn the
@@ -312,10 +351,12 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         turn: { id: "child-native-turn", status: "completed" },
       },
     });
+
     entry!.server.emit("notification", {
       method: "item/agentMessage/delta",
       params: { threadId: "sdk-thread-1", turnId: "root-native-turn", delta: "root final" },
     });
+
     entry!.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -324,6 +365,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "agentMessage", id: "root-message" },
       },
     });
+
     entry!.server.emit("notification", {
       method: "turn/completed",
       params: {
@@ -332,9 +374,16 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       },
     });
 
+
     await expect(completion).resolves.toBeUndefined();
+
+    await provider.flushCanonicalEvents();
     expect(events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.TurnComplete)).toHaveLength(1);
+
+    await provider.flushCanonicalEvents();
     expect(events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended)).toHaveLength(1);
+
+    await provider.flushCanonicalEvents();
     expect(events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Message)?.event).toMatchObject({
       content: "root final",
     });
@@ -343,8 +392,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
   it("buffers ambiguous child events, replays after native mapping, and stays bounded", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
-    const entry = await startSession(provider, "mcode-child-buffer", "child-buffer");
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
+    const entry = await startSession(provider, "mcode-child-buffer", "child-buffer", "4bdd2783-2837-44a1-87e2-bf624bba01ae");
     const state = entry as PoolEntry & {
       currentTurnExecutionId?: string;
       activeParentTurnExecutionId?: string;
@@ -356,13 +405,13 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       pendingChildEvents: unknown[];
     };
     entry.mapper.prepareForTurn();
-    state.currentTurnExecutionId = "exec-child-buffer";
-    state.activeParentTurnExecutionId = "exec-child-buffer";
+    state.currentTurnExecutionId = "4bdd2783-2837-44a1-87e2-bf624bba01ae";
+    state.activeParentTurnExecutionId = "4bdd2783-2837-44a1-87e2-bf624bba01ae";
     state.turnBindingPhase = "bound";
     state.currentNativeTurnId = "main-native-turn";
-    state.turnExecutionIdsByNativeTurn.set("main-native-turn", "exec-child-buffer");
-    state.childExecutionGenerations.set("child-buffered", { executionId: "exec-child-buffer", generation: 1 });
-    state.nativeThreadExecutionIds.set("child-buffered", "exec-child-buffer");
+    state.turnExecutionIdsByNativeTurn.set("main-native-turn", "4bdd2783-2837-44a1-87e2-bf624bba01ae");
+    state.childExecutionGenerations.set("child-buffered", { executionId: "4bdd2783-2837-44a1-87e2-bf624bba01ae", generation: 1 });
+    state.nativeThreadExecutionIds.set("child-buffered", "4bdd2783-2837-44a1-87e2-bf624bba01ae");
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -376,6 +425,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     entry.server.emit("notification", {
       method: "item/started",
       params: {
@@ -384,20 +434,27 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "commandExecution", id: "child-tool", command: "echo child" },
       },
     });
+
+    await provider.flushCanonicalEvents();
     expect(events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.ToolUse && runtimeEvent.event.toolCallId === "child-tool")).toBeUndefined();
 
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-buffered", turn: { id: "child-native-turn" } },
     });
+
+    await provider.flushCanonicalEvents();
     expect(events).toContainEqual(expect.objectContaining({ event: expect.objectContaining({
       type: AgentEventType.ToolUse,
       toolCallId: "child-tool",
-      turnExecutionId: "exec-child-buffer",
+      turnExecutionId: "4bdd2783-2837-44a1-87e2-bf624bba01ae",
     }) }));
+    await provider.flushCanonicalEvents();
     const childToolEvents = events.filter((runtimeEvent) => (
       runtimeEvent.event.type === AgentEventType.ToolUse && runtimeEvent.event.toolCallId === "child-tool"
     ));
+
+    await provider.flushCanonicalEvents();
     expect(childToolEvents).toHaveLength(1);
     entry.server.emit("notification", {
       method: "item/started",
@@ -407,6 +464,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "commandExecution", id: "child-tool", command: "echo child" },
       },
     });
+
+    await provider.flushCanonicalEvents();
     expect(events.filter((runtimeEvent) => (
       runtimeEvent.event.type === AgentEventType.ToolUse && runtimeEvent.event.toolCallId === "child-tool"
     ))).toHaveLength(1);
@@ -420,15 +479,18 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
           item: { type: "commandExecution", id: `child-tool-${i}`, command: "echo child" },
         },
       });
+
     }
+
+    await provider.flushCanonicalEvents();
     expect(state.pendingChildEvents).toHaveLength(128);
   });
 
   it("delivers every child assistant delta and its completed message once", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
-    const entry = await startSession(provider, "mcode-child-assistant-stream", "child-assistant-stream");
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
+    const entry = await startSession(provider, "mcode-child-assistant-stream", "child-assistant-stream", "1bee6da6-5955-40fc-8a67-a0f13e6e1949");
     const state = entry as PoolEntry & {
       currentTurnExecutionId?: string;
       activeParentTurnExecutionId?: string;
@@ -439,8 +501,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       nativeThreadExecutionIds: Map<string, string>;
     };
     entry.mapper.prepareForTurn();
-    state.currentTurnExecutionId = "exec-child-assistant-stream";
-    state.activeParentTurnExecutionId = "exec-child-assistant-stream";
+    state.currentTurnExecutionId = "1bee6da6-5955-40fc-8a67-a0f13e6e1949";
+    state.activeParentTurnExecutionId = "1bee6da6-5955-40fc-8a67-a0f13e6e1949";
     state.turnBindingPhase = "bound";
     state.currentNativeTurnId = "main-native-turn";
     state.turnExecutionIdsByNativeTurn.set("main-native-turn", state.currentTurnExecutionId);
@@ -458,20 +520,24 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     state.childExecutionGenerations.set("child-assistant-stream", { executionId: state.currentTurnExecutionId, generation: 1 });
     state.nativeThreadExecutionIds.set("child-assistant-stream", state.currentTurnExecutionId);
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-assistant-stream", turn: { id: "child-native-turn" } },
     });
+
     entry.server.emit("notification", {
       method: "item/agentMessage/delta",
       params: { threadId: "child-assistant-stream", turnId: "child-native-turn", itemId: "child-message", delta: "A" },
     });
+
     entry.server.emit("notification", {
       method: "item/agentMessage/delta",
       params: { threadId: "child-assistant-stream", turnId: "child-native-turn", itemId: "child-message", delta: "A" },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -481,10 +547,18 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       },
     });
 
+
+    await provider.flushCanonicalEvents();
     const childEvents = events.filter((event) => event.extension?.child?.nativeThreadId === "child-assistant-stream");
     const deltas = childEvents.filter((event) => event.event.type === AgentEventType.TextDelta);
+
+    await provider.flushCanonicalEvents();
     expect(deltas.map((event) => event.event.delta)).toEqual(["A", "A"]);
+
+    await provider.flushCanonicalEvents();
     expect(new Set(deltas.map((event) => event.extension?.child?.nativeEventId)).size).toBe(2);
+
+    await provider.flushCanonicalEvents();
     expect(childEvents).toContainEqual(expect.objectContaining({
       event: expect.objectContaining({ type: AgentEventType.Message, content: "AA" }),
       extension: expect.objectContaining({ child: expect.objectContaining({ itemEventKey: "stream-complete" }) }),
@@ -494,8 +568,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
   it("replays mapper and provider child buffers in structural order exactly once", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
-    const entry = await startSession(provider, "mcode-child-two-layer-replay", "child-two-layer-replay");
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
+    const entry = await startSession(provider, "mcode-child-two-layer-replay", "child-two-layer-replay", "aa4f59f8-b68b-4939-85e0-3c4cfa559583");
     const state = entry as PoolEntry & {
       currentTurnExecutionId?: string;
       activeParentTurnExecutionId?: string;
@@ -509,8 +583,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       pendingChildEvents: unknown[];
     };
     entry.mapper.prepareForTurn();
-    state.currentTurnExecutionId = "exec-mcode-child-two-layer-replay";
-    state.activeParentTurnExecutionId = "exec-mcode-child-two-layer-replay";
+    state.currentTurnExecutionId = "aa4f59f8-b68b-4939-85e0-3c4cfa559583";
+    state.activeParentTurnExecutionId = "aa4f59f8-b68b-4939-85e0-3c4cfa559583";
     state.turnBindingPhase = "bound";
     state.currentNativeTurnId = "main-native-turn";
     state.turnExecutionIdsByNativeTurn.set("main-native-turn", state.currentTurnExecutionId);
@@ -530,6 +604,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     state.activeParentTurnExecutionId = undefined;
     entry.server.emit("notification", {
       method: "item/started",
@@ -538,6 +613,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "commandExecution", id: "child-two-layer-item", command: "echo child" },
       },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -551,10 +627,13 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-two-layer", turn: { id: "child-two-layer-turn" } },
     });
+
+    await provider.flushCanonicalEvents();
     expect(state.pendingChildEvents).toHaveLength(3);
 
     state.activeParentTurnExecutionId = state.currentTurnExecutionId;
@@ -573,14 +652,20 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       },
     });
 
+
+    await provider.flushCanonicalEvents();
     const childEvents = events.filter((runtimeEvent) => (
       runtimeEvent.extension?.child?.nativeThreadId === "child-two-layer"
     ));
+
+    await provider.flushCanonicalEvents();
     expect(childEvents.map((runtimeEvent) => runtimeEvent.event.type)).toEqual([
       AgentEventType.TurnStarted,
       AgentEventType.ToolUse,
       AgentEventType.ToolResult,
     ]);
+
+    await provider.flushCanonicalEvents();
     expect(childEvents.map((runtimeEvent) => (
       runtimeEvent.event.type === AgentEventType.ToolUse || runtimeEvent.event.type === AgentEventType.ToolResult
         ? runtimeEvent.event.toolCallId
@@ -590,14 +675,24 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       "child-two-layer-item",
       "child-two-layer-item",
     ]);
+
+    await provider.flushCanonicalEvents();
     expect(childEvents).toHaveLength(3);
-    expect(childEvents.every((runtimeEvent) => runtimeEvent.deliveryAttempt === undefined)).toBe(true);
+
+    await provider.flushCanonicalEvents();
+    expect(childEvents.every((runtimeEvent) => runtimeEvent.deliveryAttempt === 1)).toBe(true);
+
+    await provider.flushCanonicalEvents();
     expect(childEvents.every((runtimeEvent) => (
       runtimeEvent.event.turnExecutionId
-        === "exec-mcode-child-two-layer-replay"
+        === "aa4f59f8-b68b-4939-85e0-3c4cfa559583"
     ))).toBe(true);
     const childEventIds = childEvents.map((runtimeEvent) => runtimeEvent.extension?.child?.nativeEventId);
+
+    await provider.flushCanonicalEvents();
     expect(childEventIds.every((id): id is string => Boolean(id))).toBe(true);
+
+    await provider.flushCanonicalEvents();
     expect(new Set(childEventIds).size).toBe(3);
 
     entry.server.emit("notification", {
@@ -613,6 +708,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
+    await provider.flushCanonicalEvents();
     expect(events.filter((runtimeEvent) => (
       runtimeEvent.extension?.child?.nativeThreadId === "child-two-layer"
     ))).toHaveLength(3);
@@ -621,7 +718,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
   it("enriches nested native sub-agents from one authoritative child lookup each", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-subagent-metadata", "subagent-metadata");
 
     entry.server.emit("notification", {
@@ -637,6 +734,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -650,6 +748,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -663,19 +762,26 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
     await new Promise<void>((resolve) => setImmediate(resolve));
 
+    await provider.flushCanonicalEvents();
     expect(getChildThreadMetadataMock).toHaveBeenCalledTimes(2);
+    await provider.flushCanonicalEvents();
     const nestedUpdate = events.find((runtimeEvent) => (
       runtimeEvent.event.type === AgentEventType.ToolUse && runtimeEvent.event.toolCallId === "call-inner"
     ));
+
+    await provider.flushCanonicalEvents();
     expect(nestedUpdate?.event).toMatchObject({
       type: AgentEventType.ToolUse,
       toolCallId: "call-inner",
       parentToolCallId: "call-outer",
       toolInput: { description: "Inspect the delegated task." },
     });
+
+    await provider.flushCanonicalEvents();
     expect(nestedUpdate?.extension).toMatchObject({
       collaboration: expect.objectContaining({
         agentName: "read_docs_worker",
@@ -689,7 +795,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
   it("enriches a Codex collab spawn from its receiver thread", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-collab-metadata", "collab-metadata");
 
     entry.server.emit("notification", {
@@ -704,19 +810,26 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
     await new Promise<void>((resolve) => setImmediate(resolve));
 
+    await provider.flushCanonicalEvents();
     expect(getChildThreadMetadataMock).toHaveBeenCalledWith("child-collab-metadata");
+    await provider.flushCanonicalEvents();
     const collabUpdate = events.find((runtimeEvent) => (
       runtimeEvent.event.type === AgentEventType.ToolUse
       && runtimeEvent.event.toolCallId === "call-collab-metadata"
       && runtimeEvent.extension?.collaboration?.agentName === "read_docs_worker"
     ));
+
+    await provider.flushCanonicalEvents();
     expect(collabUpdate?.event).toMatchObject({
       type: AgentEventType.ToolUse,
       toolCallId: "call-collab-metadata",
     });
+
+    await provider.flushCanonicalEvents();
     expect(collabUpdate?.extension).toMatchObject({
       collaboration: expect.objectContaining({
         agentName: "read_docs_worker",
@@ -736,7 +849,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       });
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-subagent-late-identity", "subagent-late-identity");
 
     entry.server.emit("notification", {
@@ -753,6 +866,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       },
     });
 
+
     await vi.waitFor(() => {
       expect(events.some((runtimeEvent) => (
         runtimeEvent.event.type === AgentEventType.ToolUse
@@ -760,6 +874,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         && runtimeEvent.extension?.collaboration?.agentName === "Euclid"
       ))).toBe(true);
     });
+
+    await provider.flushCanonicalEvents();
     expect(getChildThreadMetadataMock).toHaveBeenCalledTimes(2);
   });
 
@@ -787,7 +903,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       });
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-subagent-delayed-task", "subagent-delayed-task");
 
     entry.server.emit("notification", {
@@ -803,6 +919,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     await vi.waitFor(() => {
       expect(getChildThreadMetadataMock).toHaveBeenCalledTimes(4);
     }, { timeout: 3_000 });
@@ -816,6 +933,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         turn: { id: "child-turn", status: "completed", usage: {} },
       },
     });
+
 
     await vi.waitFor(() => {
       expect(getChildThreadMetadataMock).toHaveBeenCalledTimes(5);
@@ -847,7 +965,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       .mockResolvedValueOnce({ identity: "Dirac" });
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-subagent-read-race", "subagent-read-race");
 
     entry.server.emit("notification", {
@@ -863,6 +981,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       },
     });
 
+
     await vi.waitFor(() => {
       expect(events.some((runtimeEvent) => (
         runtimeEvent.event.type === AgentEventType.ToolUse
@@ -870,6 +989,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         && runtimeEvent.extension?.collaboration?.agentName === "Dirac"
       ))).toBe(true);
     });
+
+    await provider.flushCanonicalEvents();
     expect(getChildThreadMetadataMock).toHaveBeenCalledTimes(2);
   });
 
@@ -891,25 +1012,30 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     };
 
     entry.server.emit("notification", childActivity);
+
     await new Promise<void>((resolve) => setImmediate(resolve));
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-next" } },
     });
+
     entry.server.emit("notification", childActivity);
+
     await new Promise<void>((resolve) => setImmediate(resolve));
 
+    await provider.flushCanonicalEvents();
     expect(getChildThreadMetadataMock).toHaveBeenCalledTimes(2);
   });
 
   it("ignores stale metadata lookup results after a new main turn starts", async () => {
+    sendTurnMock.mockResolvedValueOnce("turn-old").mockResolvedValueOnce("turn-next");
     let resolveOldMetadata: ((value: { model: string; reasoningEffort: string }) => void) | undefined;
     getChildThreadMetadataMock
       .mockImplementationOnce(() => new Promise((resolve) => { resolveOldMetadata = resolve; }))
       .mockResolvedValueOnce({ model: "gpt-current", reasoningEffort: "high" });
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-subagent-metadata-race", "subagent-metadata-race");
     const oldActivity = {
       method: "item/completed",
@@ -926,12 +1052,15 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     };
 
     entry.server.emit("notification", oldActivity);
+
     await new Promise<void>((resolve) => setImmediate(resolve));
+
+    await provider.flushCanonicalEvents();
     expect(getChildThreadMetadataMock).toHaveBeenCalledTimes(1);
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-next",
+      turnExecutionId: "8ef3fa9c-edb9-4907-8d86-00a0a4514359",
       sessionId: "mcode-subagent-metadata-race",
       workspaceId: "workspace-test",
       threadId: "subagent-metadata-race",
@@ -945,11 +1074,14 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length < 2; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
+
+    await provider.flushCanonicalEvents();
     expect(sendTurnMock).toHaveBeenCalledTimes(2);
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-next" } },
     });
+
     entry.server.emit("notification", {
       ...oldActivity,
       params: {
@@ -957,19 +1089,25 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { ...oldActivity.params.item, id: "call-current-metadata" },
       },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
     resolveOldMetadata?.({ model: "gpt-stale", reasoningEffort: "low" });
     await new Promise<void>((resolve) => setImmediate(resolve));
 
+    await provider.flushCanonicalEvents();
     const currentMetadataEvents = events.filter((runtimeEvent) =>
       runtimeEvent.event.type === AgentEventType.ToolUse
       && runtimeEvent.event.toolCallId === "call-current-metadata"
       && runtimeEvent.extension?.collaboration?.model !== undefined,
     );
+
+    await provider.flushCanonicalEvents();
     expect(currentMetadataEvents).toEqual([expect.objectContaining({ event: expect.objectContaining({
       toolInput: { description: "explorer" },
     })
     })]);
+
+    await provider.flushCanonicalEvents();
     expect(currentMetadataEvents[0]?.extension).toMatchObject({
       collaboration: { model: "gpt-current", reasoningEffort: "high" },
     });
@@ -984,12 +1122,16 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-main" } },
     });
+
+    await provider.flushCanonicalEvents();
     expect(entry.pendingTurnId).toBe("turn-main");
 
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-thread-9", turn: { id: "turn-child" } },
     });
+
+    await provider.flushCanonicalEvents();
     expect(entry.pendingTurnId).toBe("turn-main");
   });
 
@@ -997,7 +1139,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     sendTurnMock.mockResolvedValueOnce("turn-main");
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
 
     const entry = await startSession(provider, "mcode-subagent-b", "subagent-b");
 
@@ -1006,23 +1148,29 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       params: { threadId: "sdk-thread-1", turn: { id: "turn-main" } },
     });
 
+
     // Child completion with its own turn id.
     entry.server.emit("notification", {
       method: "turn/completed",
       params: { threadId: "child-thread-9", turn: { id: "turn-child", status: "completed" } },
     });
+
     // Child completion without a turn id (shape observed from wait-less collabs).
     entry.server.emit("notification", {
       method: "turn/completed",
       params: { threadId: "child-thread-10", turn: { status: "completed" } },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
 
+    await provider.flushCanonicalEvents();
     expect(events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended)).toHaveLength(0);
+
+    await provider.flushCanonicalEvents();
     expect(entry.pendingTurnId).toBe("turn-main");
 
     const ended = new Promise<void>((resolve) => {
-      provider.on("event", (runtimeEvent: ProviderRuntimeEvent) => {
+      provider.observeCanonicalEvents((runtimeEvent: ProviderRuntimeEvent) => {
         if (runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.threadId === "subagent-b") resolve();
       });
     });
@@ -1030,25 +1178,28 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-main", status: "completed" } },
     });
+
     await ended;
   });
 
   it("attributes reused-session child notifications to the active execution", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-origin-a", "origin-a");
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "item/agentMessage/delta",
       params: { threadId: "sdk-thread-1", turnId: "turn-a", delta: "A" },
     });
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-origin-a",
       workspaceId: "workspace-test",
       threadId: "origin-a",
@@ -1061,15 +1212,17 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
     await new Promise<void>((resolve) => setImmediate(resolve));
-    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "exec-b";
+    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "c6239384-cf6e-4b69-809a-6d00ed0980c6";
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-b", turn: { id: "child-turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1084,22 +1237,25 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(events.some((runtimeEvent) => runtimeEvent.event.turnExecutionId === "exec-b")).toBe(true);
+    await provider.flushCanonicalEvents();
+    expect(events.some((runtimeEvent) => runtimeEvent.event.turnExecutionId === "c6239384-cf6e-4b69-809a-6d00ed0980c6")).toBe(true);
   });
 
   it("keeps known native A mappings immutable after B starts", async () => {
     sendTurnMock.mockResolvedValueOnce("turn-a").mockResolvedValueOnce("turn-b");
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-origin-immutable", "origin-immutable");
 
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1113,19 +1269,22 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-a", turn: { id: "child-turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a", status: "completed" } },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-origin-immutable",
       workspaceId: "workspace-test",
       threadId: "origin-immutable",
@@ -1139,8 +1298,10 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length < 2; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
+
+    await provider.flushCanonicalEvents();
     expect(sendTurnMock).toHaveBeenCalledTimes(2);
-    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "exec-b";
+    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "c6239384-cf6e-4b69-809a-6d00ed0980c6";
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     entry.server.emit("notification", {
@@ -1148,69 +1309,92 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
 
+
     // Replayed A lifecycle ids must not overwrite either native map or leak
     // completed main-turn text into B.
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "item/agentMessage/delta",
       params: { threadId: "sdk-thread-1", turnId: "turn-a", delta: "late A" },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-a", turn: { id: "child-turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "item/agentMessage/delta",
       params: { threadId: "child-a", turnId: "child-turn-a", delta: "late child A" },
     });
+
     entry.server.emit("notification", {
       method: "turn/completed",
       params: { threadId: "child-a", turn: { id: "child-turn-a", status: "completed" } },
     });
 
+    await provider.flushCanonicalEvents();
     expect(entry.pendingTurnId).toBe("turn-b");
     const nativeMaps = entry as PoolEntry & {
       turnExecutionIdsByNativeTurn: Map<string, string>;
       nativeThreadExecutionIds: Map<string, string>;
     };
-    expect(nativeMaps.turnExecutionIdsByNativeTurn.get("turn-a")).toBe("exec-mcode-origin-immutable");
-    expect(nativeMaps.turnExecutionIdsByNativeTurn.get("child-turn-a")).toBe("exec-mcode-origin-immutable");
-    expect(nativeMaps.nativeThreadExecutionIds.get("child-a")).toBe("exec-mcode-origin-immutable");
+
+    await provider.flushCanonicalEvents();
+    expect(nativeMaps.turnExecutionIdsByNativeTurn.get("turn-a")).toBe("b19d6e35-9407-4ac5-8794-8a3eabd2f2bd");
+
+    await provider.flushCanonicalEvents();
+    expect(nativeMaps.turnExecutionIdsByNativeTurn.get("child-turn-a")).toBe("b19d6e35-9407-4ac5-8794-8a3eabd2f2bd");
+
+    await provider.flushCanonicalEvents();
+    expect(nativeMaps.nativeThreadExecutionIds.get("child-a")).toBe("b19d6e35-9407-4ac5-8794-8a3eabd2f2bd");
 
     entry.server.emit("notification", {
       method: "item/agentMessage/delta",
       params: { threadId: "sdk-thread-1", turnId: "turn-b", delta: "B" },
     });
+
     entry.server.emit("notification", {
       method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b", status: "completed" } },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
 
+    await provider.flushCanonicalEvents();
     const lateA = events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "late A");
+    await provider.flushCanonicalEvents();
     const bText = events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "B");
+
+    await provider.flushCanonicalEvents();
     expect(lateA).toEqual([]);
-    expect(bText?.event.turnExecutionId).toBe("exec-b");
-    expect(events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended).at(-1)?.event.turnExecutionId).toBe("exec-b");
+
+    await provider.flushCanonicalEvents();
+    expect(bText?.event.turnExecutionId).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
+
+    await provider.flushCanonicalEvents();
+    expect(events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended).at(-1)?.event.turnExecutionId).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
   });
 
   it("does not settle B from late A completion before B binds", async () => {
     sendTurnMock.mockResolvedValueOnce("turn-a").mockResolvedValueOnce("turn-b");
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-late-completion", "late-completion");
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
 
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-late-completion",
       workspaceId: "workspace-test",
       threadId: "late-completion",
@@ -1229,34 +1413,42 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a", status: "completed" } },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.turnExecutionId === "exec-b")).toBe(false);
+
+    await provider.flushCanonicalEvents();
+    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.turnExecutionId === "c6239384-cf6e-4b69-809a-6d00ed0980c6")).toBe(false);
 
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b", status: "completed" } },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.turnExecutionId === "exec-b")).toBe(true);
+
+    await provider.flushCanonicalEvents();
+    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.turnExecutionId === "c6239384-cf6e-4b69-809a-6d00ed0980c6")).toBe(true);
   });
 
   it("does not rebind an evicted native A turn id from a late start", async () => {
     sendTurnMock.mockResolvedValueOnce("turn-a").mockResolvedValueOnce("turn-b");
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-evicted-turn", "evicted-turn");
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-evicted-turn",
       workspaceId: "workspace-test",
       threadId: "evicted-turn",
@@ -1274,38 +1466,44 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     for (let i = 0; i < 129; i++) {
       entry.server.emit("notification", {
         method: "turn/started",
         params: { threadId: `child-${i}`, turn: { id: `child-turn-${i}` } },
       });
+
     }
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a", status: "completed" } },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.turnExecutionId === "exec-b")).toBe(false);
+    await provider.flushCanonicalEvents();
+    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.turnExecutionId === "c6239384-cf6e-4b69-809a-6d00ed0980c6")).toBe(false);
   });
 
   it("attributes parent notifications without turn ids to active B", async () => {
     sendTurnMock.mockResolvedValueOnce("turn-a").mockResolvedValueOnce("turn-b");
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-parent-no-turn", "parent-no-turn");
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-parent-no-turn",
       workspaceId: "workspace-test",
       threadId: "parent-no-turn",
@@ -1319,16 +1517,19 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length < 2; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "exec-b";
+    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "c6239384-cf6e-4b69-809a-6d00ed0980c6";
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "item/agentMessage/delta",
       params: { threadId: "sdk-thread-1", delta: "B no turn id" },
     });
-    expect(events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "B no turn id")?.event.turnExecutionId).toBe("exec-b");
+
+    await provider.flushCanonicalEvents();
+    expect(events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "B no turn id")?.event.turnExecutionId).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
   });
 
   it("bounds repeated native mapping conflict diagnostics", async () => {
@@ -1339,9 +1540,10 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-conflict-bound",
       workspaceId: "workspace-test",
       threadId: "conflict-bound",
@@ -1355,17 +1557,21 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length < 2; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "exec-b";
+    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "c6239384-cf6e-4b69-809a-6d00ed0980c6";
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     for (let i = 0; i < 200; i++) {
       entry.server.emit("notification", {
         method: "turn/started",
         params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
       });
+
     }
+
+    await provider.flushCanonicalEvents();
     expect(loggerWarnMock.mock.calls.length).toBeLessThanOrEqual(1);
   });
 
@@ -1376,30 +1582,38 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     }));
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-null-before", "null-before");
 
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-null-before" } },
     });
+
     resolveTurnStart?.(null);
     await new Promise<void>((resolve) => setImmediate(resolve));
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Error && runtimeEvent.event.turnExecutionId === "exec-mcode-null-before")).toBe(true);
-    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.turnExecutionId === "exec-mcode-null-before")).toBe(true);
+
+    await provider.flushCanonicalEvents();
+    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Error && runtimeEvent.event.turnExecutionId === "f081a40d-d4c8-4902-840d-e52641d135bc")).toBe(true);
+
+    await provider.flushCanonicalEvents();
+    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.turnExecutionId === "f081a40d-d4c8-4902-840d-e52641d135bc")).toBe(true);
+
+    await provider.flushCanonicalEvents();
     expect((entry as PoolEntry & { turnBindingPhase?: string }).turnBindingPhase).toBe("idle");
     entry.server.emit("notification", {
       method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-null-before", status: "completed" } },
     });
+
   });
 
   it("fails closed when turn/started follows a null turn/start response", async () => {
     sendTurnMock.mockResolvedValueOnce(null);
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-null-after", "null-after");
 
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -1407,10 +1621,16 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-null-after" } },
     });
+
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Error && runtimeEvent.event.turnExecutionId === "exec-mcode-null-after")).toBe(true);
-    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.turnExecutionId === "exec-mcode-null-after")).toBe(true);
+    await provider.flushCanonicalEvents();
+    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Error && runtimeEvent.event.turnExecutionId === "419b5013-06be-4a12-82c0-4d18a8a799aa")).toBe(true);
+
+    await provider.flushCanonicalEvents();
+    expect(events.some((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.event.turnExecutionId === "419b5013-06be-4a12-82c0-4d18a8a799aa")).toBe(true);
+
+    await provider.flushCanonicalEvents();
     expect((entry as PoolEntry & { turnBindingPhase?: string }).turnBindingPhase).toBe("idle");
   });
 
@@ -1418,15 +1638,16 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     sendTurnMock.mockResolvedValueOnce("turn-a").mockResolvedValueOnce("turn-b");
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-pruned-text", "pruned-text");
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-pruned-text",
       workspaceId: "workspace-test",
       threadId: "pruned-text",
@@ -1440,23 +1661,26 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length < 2; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "exec-b";
+    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "c6239384-cf6e-4b69-809a-6d00ed0980c6";
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     const maps = entry as PoolEntry & {
       turnExecutionIdsByNativeTurn: Map<string, string>;
       nativeThreadExecutionIds: Map<string, string>;
     };
     for (let i = 0; i < 129; i++) {
-      maps.turnExecutionIdsByNativeTurn.set(`filler-${i}`, "exec-b");
+      maps.turnExecutionIdsByNativeTurn.set(`filler-${i}`, "c6239384-cf6e-4b69-809a-6d00ed0980c6");
     }
+    await new Promise<void>((resolve) => setImmediate(resolve));
     maps.turnExecutionIdsByNativeTurn.delete("turn-a");
     entry.server.emit("notification", {
       method: "item/agentMessage/delta",
       params: { threadId: "sdk-thread-1", turnId: "turn-a", delta: "late pruned A" },
     });
+
     entry.server.emit("notification", {
       method: "item/started",
       params: {
@@ -1466,22 +1690,30 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       },
     });
 
+
+    await provider.flushCanonicalEvents();
     const lateText = events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "late pruned A");
+    await provider.flushCanonicalEvents();
     const lateTool = events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.ToolUse && runtimeEvent.event.toolCallId === "late-pruned-tool");
-    expect(lateText?.event.turnExecutionId).not.toBe("exec-b");
-    expect(lateTool?.event.turnExecutionId).not.toBe("exec-b");
+
+    await provider.flushCanonicalEvents();
+    expect(lateText?.event.turnExecutionId).not.toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
+
+    await provider.flushCanonicalEvents();
+    expect(lateTool?.event.turnExecutionId).not.toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
   });
 
   it("binds first child turn/start to B and preserves reused child A generation", async () => {
     sendTurnMock.mockResolvedValueOnce("turn-a").mockResolvedValueOnce("turn-b");
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-child-generation", "child-generation");
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1490,13 +1722,15 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-reused", kind: "started", agentThreadId: "child-reused" },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-reused", turn: { id: "child-turn-a" } },
     });
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-child-generation",
       workspaceId: "workspace-test",
       threadId: "child-generation",
@@ -1510,23 +1744,30 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length < 2; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "exec-b";
+    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "c6239384-cf6e-4b69-809a-6d00ed0980c6";
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-first", turn: { id: "child-turn-first" } },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-reused", turn: { id: "child-turn-prelink-reused" } },
     });
+
     const preLinkMaps = entry as PoolEntry & {
       turnExecutionIdsByNativeTurn: Map<string, string>;
     };
+
+    await provider.flushCanonicalEvents();
     expect(preLinkMaps.turnExecutionIdsByNativeTurn.get("child-turn-first")).toBeUndefined();
+
+    await provider.flushCanonicalEvents();
     expect(preLinkMaps.turnExecutionIdsByNativeTurn.get("child-turn-prelink-reused")).toBeUndefined();
     entry.server.emit("notification", {
       method: "item/completed",
@@ -1536,6 +1777,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-child-new", kind: "started", agentThreadId: "child-new" },
       },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1544,23 +1786,36 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-reused-b", kind: "started", agentThreadId: "child-reused" },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-new", turn: { id: "child-turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-reused", turn: { id: "child-turn-b-reused" } },
     });
+
     const maps = entry as PoolEntry & {
       turnExecutionIdsByNativeTurn: Map<string, string>;
       nativeThreadExecutionIds: Map<string, string>;
     };
-    expect(maps.nativeThreadExecutionIds.get("child-new")).toBe("exec-b");
-    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-b")).toBe("exec-b");
-    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-a")).toBe("exec-mcode-child-generation");
-    expect(maps.nativeThreadExecutionIds.get("child-reused")).toBe("exec-b");
-    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-b-reused")).toBe("exec-b");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.nativeThreadExecutionIds.get("child-new")).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-b")).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-a")).toBe("4d236715-3c85-42c1-8ae5-7b086ccf5fb1");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.nativeThreadExecutionIds.get("child-reused")).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-b-reused")).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
     void events;
   });
 
@@ -1568,12 +1823,13 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     sendTurnMock.mockResolvedValueOnce("turn-a").mockResolvedValueOnce("turn-b");
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-late-parent", "late-parent");
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1582,13 +1838,15 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-reused-a", kind: "started", agentThreadId: "child-reused" },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-reused", turn: { id: "child-turn-a" } },
     });
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-late-parent",
       workspaceId: "workspace-test",
       threadId: "late-parent",
@@ -1602,11 +1860,12 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length < 2; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "exec-b";
+    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "c6239384-cf6e-4b69-809a-6d00ed0980c6";
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1615,10 +1874,12 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-reused-b", kind: "started", agentThreadId: "child-reused" },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1627,10 +1888,12 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-reused-a-late", kind: "started", agentThreadId: "child-reused" },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-reused", turn: { id: "child-turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1639,28 +1902,36 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "imageGeneration", id: "child-b-image", savedPath: "C:/tmp/child-b.png" },
       },
     });
+
     const maps = entry as PoolEntry & {
       turnExecutionIdsByNativeTurn: Map<string, string>;
       nativeThreadExecutionIds: Map<string, string>;
     };
-    expect(maps.nativeThreadExecutionIds.get("child-reused")).toBe("exec-b");
-    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-b")).toBe("exec-b");
-    expect(events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.GeneratedAttachment)?.event.turnExecutionId).toBe("exec-b");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.nativeThreadExecutionIds.get("child-reused")).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-b")).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
+
+    await provider.flushCanonicalEvents();
+    expect(events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.GeneratedAttachment)?.event.turnExecutionId).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
   });
 
   it("keeps B child attribution after a stale A main turn/started replay", async () => {
     sendTurnMock.mockResolvedValueOnce("turn-a").mockResolvedValueOnce("turn-b");
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
-    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     const entry = await startSession(provider, "mcode-stale-main", "stale-main");
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-stale-main",
       workspaceId: "workspace-test",
       threadId: "stale-main",
@@ -1674,11 +1945,12 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length < 2; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "exec-b";
+    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "c6239384-cf6e-4b69-809a-6d00ed0980c6";
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1687,14 +1959,17 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-stale-main", kind: "started", agentThreadId: "child-stale-main" },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-stale-main", turn: { id: "child-turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1703,7 +1978,9 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "imageGeneration", id: "stale-main-b-image", savedPath: "C:/tmp/stale-main-b.png" },
       },
     });
-    expect(events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.GeneratedAttachment)?.event.turnExecutionId).toBe("exec-b");
+
+    await provider.flushCanonicalEvents();
+    expect(events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.GeneratedAttachment)?.event.turnExecutionId).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
   });
 
   it("links a current B parent activity without a turn id to B", async () => {
@@ -1714,9 +1991,10 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-parent-no-turn",
       workspaceId: "workspace-test",
       threadId: "parent-no-turn",
@@ -1730,11 +2008,12 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length < 2; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "exec-b";
+    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "c6239384-cf6e-4b69-809a-6d00ed0980c6";
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1742,14 +2021,18 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-no-turn", kind: "started", agentThreadId: "child-no-turn" },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-no-turn", turn: { id: "child-turn-b" } },
     });
+
     const maps = entry as PoolEntry & {
       turnExecutionIdsByNativeTurn: Map<string, string>;
     };
-    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-b")).toBe("exec-b");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-b")).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
   });
 
   it("keeps old A child events A while new B child events stay B after late replay", async () => {
@@ -1760,6 +2043,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1768,13 +2052,15 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-replay-a", kind: "started", agentThreadId: "child-replay" },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-replay", turn: { id: "child-turn-a" } },
     });
+
     await provider.sendTurn({
       turnId: "test-turn",
-      turnExecutionId: "exec-b",
+      turnExecutionId: "c6239384-cf6e-4b69-809a-6d00ed0980c6",
       sessionId: "mcode-child-replay-events",
       workspaceId: "workspace-test",
       threadId: "child-replay-events",
@@ -1788,11 +2074,12 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length < 2; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "exec-b";
+    (entry as PoolEntry & { nextTurnExecutionId?: string }).nextTurnExecutionId = "c6239384-cf6e-4b69-809a-6d00ed0980c6";
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1801,6 +2088,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-replay-b", kind: "started", agentThreadId: "child-replay" },
       },
     });
+
     entry.server.emit("notification", {
       method: "item/completed",
       params: {
@@ -1809,17 +2097,25 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
         item: { type: "subAgentActivity", id: "call-replay-a-late", kind: "started", agentThreadId: "child-replay" },
       },
     });
+
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "child-replay", turn: { id: "child-turn-b" } },
     });
+
     const maps = entry as PoolEntry & {
       turnExecutionIdsByNativeTurn: Map<string, string>;
       nativeThreadExecutionIds: Map<string, string>;
     };
-    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-a")).toBe("exec-mcode-child-replay-events");
-    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-b")).toBe("exec-b");
-    expect(maps.nativeThreadExecutionIds.get("child-replay")).toBe("exec-b");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-a")).toBe("d6852ce1-d3bd-4515-8578-469375ad5a97");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.turnExecutionIdsByNativeTurn.get("child-turn-b")).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
+
+    await provider.flushCanonicalEvents();
+    expect(maps.nativeThreadExecutionIds.get("child-replay")).toBe("c6239384-cf6e-4b69-809a-6d00ed0980c6");
   });
 
   it("interrupts one exact child through the existing runtime session", async () => {
@@ -1832,11 +2128,16 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       "native-child-turn",
     );
 
+    await provider.flushCanonicalEvents();
     expect(interruptChildTurnMock).toHaveBeenCalledOnce();
+
+    await provider.flushCanonicalEvents();
     expect(interruptChildTurnMock).toHaveBeenCalledWith(
       "native-child-thread",
       "native-child-turn",
     );
+
+    await provider.flushCanonicalEvents();
     expect((provider as unknown as {
       runtime: { get: (sessionId: string) => PoolEntry | undefined };
     }).runtime.get("mcode-child-stop")).toBe(entry);

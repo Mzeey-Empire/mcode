@@ -1,3 +1,5 @@
+import type { TurnRequest } from "@mcode/contracts/providers/interfaces";
+import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import * as NodeCrypto from "node:crypto";
 import { CodexProvider as PackageCodexProvider } from "../../private/codex/codex-provider.js";
 import type { CodexProviderPorts } from "../../factory-types.js";
@@ -161,6 +163,29 @@ export function mcodeAttachment(
 
 /** Builds the package-private Codex Provider with local test authorities. */
 export class CodexProvider extends PackageCodexProvider {
+  private readonly canonicalRequests = new Map<string, TurnRequest<"codex">>();
+
+  override async sendTurn(request: TurnRequest<"codex">): Promise<void> {
+    this.canonicalRequests.set(request.turnExecutionId, request);
+    await super.sendTurn(request);
+  }
+
+  async flushCanonicalEvents(): Promise<void> {
+    for (const request of this.canonicalRequests.values()) {
+      await this.waitForCanonicalTurnEvents({
+        threadId: request.threadId, turnId: request.turnId,
+        executionId: request.turnExecutionId, deliveryAttempt: request.deliveryAttempt ?? 1,
+      });
+    }
+  }
+
+  private readonly canonicalObservers: Set<(event: ProviderRuntimeEvent) => void>;
+
+  observeCanonicalEvents(observer: (event: ProviderRuntimeEvent) => void): this {
+    this.canonicalObservers.add(observer);
+    return this;
+  }
+
   readonly settingsService!: { get(): unknown | Promise<unknown> };
 
   constructor(
@@ -175,6 +200,7 @@ export class CodexProvider extends PackageCodexProvider {
     },
     eventSink?: ProviderEventSinkPort,
   ) {
+    const observers = new Set<(event: ProviderRuntimeEvent) => void>();
     const delegatedSettingsService = { get: () => settings.get() };
     const host: ProviderHostPorts = {
       runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
@@ -194,7 +220,23 @@ export class CodexProvider extends PackageCodexProvider {
         close: (sessionId) => mcode?.close?.(sessionId) ?? Promise.resolve(),
       },
       grants: { consume: () => false },
-      events: eventSink ?? { submit: async () => { throw new Error("Canonical event sink is not configured for this fixture"); } },
+      events: {
+        submit: async (batch) => {
+          const receipt = eventSink ? await eventSink.submit(batch) : {
+            commit: {
+              outcome: "committed" as const, conversationRevision: 1, rosterRevision: 0,
+              acceptedThrough: 1, durableThrough: 1, eventCount: batch.events.length,
+            },
+            delivery: { ingress: "queued" as const },
+          };
+          for (const draft of batch.events) {
+            if (draft.payload.type !== "item.recorded" || draft.payload.item.payload.projection !== "providerRuntimeEvent") continue;
+            const event = ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent);
+            for (const observer of observers) observer(event);
+          }
+          return receipt;
+        },
+      },
     };
     const codexPorts: CodexProviderPorts = {
       settings: {
@@ -212,6 +254,13 @@ export class CodexProvider extends PackageCodexProvider {
       catalog,
     };
     super(host, codexPorts, 10 * 60 * 1_000);
+    this.canonicalObservers = observers;
     this.settingsService = delegatedSettingsService;
   }
+}
+
+export function fixtureExecutionId(sessionId: string): string {
+  const hash = NodeCrypto.createHash("sha256").update(sessionId).digest("hex");
+  return hash.slice(0, 8) + "-" + hash.slice(8, 12) + "-4" + hash.slice(13, 16)
+    + "-8" + hash.slice(17, 20) + "-" + hash.slice(20, 32);
 }

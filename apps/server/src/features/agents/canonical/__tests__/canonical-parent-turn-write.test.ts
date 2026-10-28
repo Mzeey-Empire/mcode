@@ -6,7 +6,7 @@ import * as NodeCrypto from "node:crypto";
 import { PlanStore } from "../../planning/persistence/plan-store.js";
 import { PlanImplementStore } from "../../planning/persistence/plan-implement-store.js";
 import { PlanCommentAdmissionError, PlanCommentStore } from "../../planning/persistence/plan-comment-store.js";
-import { canonicalRuntimeWriteOperations } from "../canonical-runtime-write-operations.js";
+import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
@@ -49,6 +49,16 @@ function startInput(): DataOnlyParentTurnStartInput {
     providerIdentities: [],
     userMessage: { kind: "create", messageId: "user-1", content: "Question", sequence: 1 },
   };
+}
+
+async function startOnWriter(writer: ApplicationDatabaseWriter, input: DataOnlyParentTurnStartInput): Promise<void> {
+  const execution = { threadId: input.thread.id, turnId: input.turnId, executionId: input.executionId };
+  const receipt = await new CanonicalAgentWriterClient(writer).transactSemantic({
+    operationId: `${execution.executionId}:1`, execution, ordinal: 1,
+    lease: { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: execution.executionId },
+    mutation: { kind: "begin", providerId: input.thread.providerId, input },
+  }, () => {});
+  if (receipt.kind !== "committed") throw new Error(`Parent start ${receipt.kind}`);
 }
 
 function finishInput(message: ReturnType<MessageRepo["create"]>): DataOnlyParentTurnFinishInput {
@@ -143,7 +153,7 @@ describe("CanonicalParentTurnWrite", () => {
     const input = { ...startInput(), planCommentIds: [comment.id] };
     const owner = mode === "worker" ? new ApplicationDatabaseWriter(path, leaseWriterWorker) : null;
     try {
-      if (owner) await owner.execute(canonicalRuntimeWriteOperations.parentStart, input);
+      if (owner) await startOnWriter(owner, input);
       else writer.start(input);
       expect(new PlanCommentStore(db).getById(comment.id)).toMatchObject({ sentMessageId: "user-1" });
       expect(db.prepare("SELECT role, content FROM messages WHERE id = 'user-1'").get()).toEqual({ role: "user", content: "Question" });
@@ -161,7 +171,7 @@ describe("CanonicalParentTurnWrite", () => {
     const owner = mode === "worker" ? new ApplicationDatabaseWriter(path, leaseWriterWorker) : null;
     try {
       const input = { ...startInput(), planCommentIds: [comment.id] };
-      if (owner) await owner.execute(canonicalRuntimeWriteOperations.parentStart, input);
+      if (owner) await startOnWriter(owner, input);
       else writer.start(input);
       expect(new PlanCommentStore(db).getById(comment.id)?.sentMessageId).toBe("user-1");
       expect(db.prepare("SELECT id FROM canonical_agent_turns WHERE id = ?").get(TURN_ID)).toEqual({ id: TURN_ID });
@@ -200,7 +210,7 @@ describe("CanonicalParentTurnWrite", () => {
       const owner = mode === "worker" ? new ApplicationDatabaseWriter(path, leaseWriterWorker) : null;
       try {
         const input = { ...startInput(), planCommentIds: [valid.id, invalid.id] };
-        const start = async () => owner ? owner.execute(canonicalRuntimeWriteOperations.parentStart, input) : writer.start(input);
+        const start = async () => owner ? startOnWriter(owner, input) : writer.start(input);
         await expect(start()).rejects.toMatchObject({ code: "plan_comment_invalid" });
         if (!owner) expect(() => writer.start(input)).toThrow(PlanCommentAdmissionError);
         expect(store.listByThread(THREAD_ID)).toEqual(before);
@@ -215,7 +225,7 @@ describe("CanonicalParentTurnWrite", () => {
     const input = { ...startInput(), planCommentIds: [comment.id], planImplement: { requestId: NodeCrypto.randomUUID() } };
     const owner = mode === "worker" ? new ApplicationDatabaseWriter(path, leaseWriterWorker) : null;
     try {
-      const start = async () => owner ? owner.execute(canonicalRuntimeWriteOperations.parentStart, input) : writer.start(input);
+      const start = async () => owner ? startOnWriter(owner, input) : writer.start(input);
       await expect(start()).rejects.toThrow();
       expect(new PlanCommentStore(db).getById(comment.id)?.sentMessageId).toBeNull();
       expect(db.prepare("SELECT id FROM messages WHERE id = 'user-1'").all()).toEqual([]);

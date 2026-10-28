@@ -17,7 +17,7 @@ async function fixture() {
   const publication = new AgentEventPublicationService({
     threads, pullRequests: { schedule() {} },
     runtime: { getCurrentFileEffectTurnId: () => undefined, shouldSuppressTurnEnded: () => false,
-      shouldSuppressTurnComplete: () => false, shouldSuppressTransientTurnError: () => false },
+      shouldSuppressTurnComplete: () => false },
     publishThreadStatus: (event) => published.push(event.status),
   });
   return { database, reader, threads, thread, published, publication };

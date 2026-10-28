@@ -406,7 +406,7 @@ export const messages = sqliteTable(
      * the user-visible rendering.
      */
     isInternal: integer("is_internal").notNull().default(0),
-    /** Durable terminal outcome written only by TurnFinalizer. */
+    /** Durable terminal outcome for the assistant message. */
     outcome: text("outcome"),
     /** Exact execution identity for retrying an interrupted or errored turn. */
     outcomeExecutionId: text("outcome_execution_id"),

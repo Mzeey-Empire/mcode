@@ -10,6 +10,7 @@ import { AssistantExecutionState, type AssistantMaterializationInput } from "../
 import { NarrativeRecoveryDelta, type PreparedNarrativeRecoveryDelta } from "../turns/narrative-recovery-delta.js";
 import { PlanExecutionState, type PlanPersistenceReady } from "../planning/plan-execution-state.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
+import { isLostProviderStream } from "../events/provider-event-publication.js";
 
 type ToolUseEvent = Extract<AgentEvent, { type: "toolUse" }>;
 type ToolResultEvent = Extract<AgentEvent, { type: "toolResult" }>;
@@ -517,7 +518,7 @@ export class CodexLiveEventReducer {
         assistant: this.assistant.materializationInput(null), narrative: this.narrative.terminalSnapshot(event.threadId) });
     }
     writer.push({ kind: "turn-ended" });
-    this.phase = "ended";
+    if (!isLostProviderStream(event)) this.phase = "ended";
     return writer;
   }
 

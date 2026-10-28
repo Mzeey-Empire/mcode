@@ -37,7 +37,6 @@ describe("PlanExecutionState", () => {
       captureSource: "fence",
     });
     state.markPlanPersisted();
-    expect(state.needsAssistantMaterialization()).toBe(false);
     expect(state.consumeAssistantMessage(fenced)).toBeNull();
     expect(state.finishTurn()).toEqual({ outcome: "captured" });
   });
@@ -47,7 +46,6 @@ describe("PlanExecutionState", () => {
     state.beginOutputGeneration();
     state.feedText("# Findings\n## Status\nStill investigating.");
     expect(state.consumeAssistantMessage("# Findings\n## Status\nStill investigating.")).toBeNull();
-    expect(state.hasPersistedPlan()).toBe(false);
     expect(state.finishTurn()).toEqual({ outcome: "missing" });
   });
 

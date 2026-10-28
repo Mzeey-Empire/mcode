@@ -32,7 +32,6 @@ import type { PendingStartup } from "@/features/projects/state/workspaceStore";
 import type { SubagentRosterTarget } from "../../narrative";
 import { Composer } from "../../composer/Composer";
 import type { ComposerStartingThread } from "../../composer/useComposerStartup";
-import { SavingDelayedDialog } from "../../saving/SavingDelayedDialog";
 import { TurnSavingNotice } from "../../saving/TurnSavingNotice";
 import { MessageBubble } from "../MessageBubble";
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
@@ -67,10 +66,6 @@ export interface ChatViewInteractions {
   onSelectedTextCommentSourceUnavailable: (request: SelectedTextCommentSourceNavigationRequest) => void;
   /** Moves a restored source editor to its card when source loading fails. */
   onSelectedTextCommentEditorSourceUnavailable: (editor: SelectedTextCommentEditorDraft) => void;
-  /** Stops the active agent after saving has stalled. */
-  onStopSafely: () => Promise<void>;
-  /** Continues a stalled turn without saving its recovery state. */
-  onContinueWithoutSaving: () => Promise<void>;
   /** Dismisses the active CLI error. */
   onDismissCliError: () => void;
   /** Opens the model settings section. */
@@ -641,7 +636,6 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
           <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} paneWidth={paneWidth} />
           <ActiveThreadBanners state={state} />
           {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
-          <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
           <TurnSavingNotice lostProgress={state.lostProgress} />
         </div>
         <ChatMessageStage state={state} interactions={interactions} contentPaddingRight={overviewReserve} chromeInsets={chromeInsets} startupTrail={startup && startup.state !== "completed" ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />

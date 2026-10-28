@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ApprovalReviewSupport, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import type { Thread } from "@mcode/contracts/models/thread";
 import { supportsInternalThreadControl } from "../../turns/turn-admission-dispatch-coordinator.js";
-import { createAgentServiceForTest, drainAgentServicePersistenceForTest } from "./agent-service-test-harness.js";
+import { createAgentServiceForTest, drainAgentServicePersistenceForTest, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -28,7 +28,7 @@ import * as NodeEvents from "node:events";
 
 // Capture canonical progress published by the real service.
 // without a real WebSocket server.
-vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
+vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn(), subscribedThreadIds: () => new Set<string>() }));
 import { broadcast } from "../../../../application/transport/push.js";
 function publishedEvents() {
   return vi.mocked(broadcast).mock.calls.flatMap(([topic, payload]) => {
@@ -70,7 +70,7 @@ function makeThread(overrides: Partial<PersistedThread> = {}): Thread {
  * Build a minimal AgentService with only the dependencies needed to test
  * the provider availability gate. All other deps are no-op stubs.
  */
-function buildService({
+async function buildService({
   assertUsable = vi.fn(),
   resolveProvider = vi.fn(),
   threadStatus = "idle",
@@ -120,11 +120,13 @@ function buildService({
 
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn(() => Promise.resolve()),
+    stopSession: vi.fn(async () => undefined),
+    shutdown: vi.fn(),
   }, getApprovalReviewSupport ? { getApprovalReviewSupport } : {});
 
   const providerRegistry = {
     resolve: resolveProvider.getMockImplementation() ? resolveProvider : vi.fn(() => providerStub),
-    resolveAll: vi.fn(() => []),
+    resolveAll: vi.fn(() => [providerStub]),
     shutdown: vi.fn(),
   } as unknown as IProviderRegistry;
 
@@ -142,7 +144,7 @@ function buildService({
   } as unknown as TurnSnapshotRepo;
 
   const snapshotService = {
-    captureRef: vi.fn(() => Promise.resolve("abc123")),
+    captureRef: vi.fn(() => Promise.resolve("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
     getFilesChanged: vi.fn(() => Promise.resolve([])),
   } as unknown as SnapshotService;
 
@@ -203,6 +205,7 @@ function buildService({
     undefined,
     writer,
   );
+  await waitForAgentServiceWorkersForTest(svc);
   ownedFixtures.push({ database, service: svc });
   return {
     db,
@@ -229,7 +232,7 @@ describe("AgentService.sendMessage — admission gates", () => {
       throw new ProviderDisabledError("codex");
     });
 
-    const { svc } = buildService({ assertUsable, resolveProvider });
+    const { svc } = await buildService({ assertUsable, resolveProvider });
 
     await expect(
       svc.sendMessage({
@@ -259,7 +262,7 @@ describe("AgentService.sendMessage — admission gates", () => {
 
   it.each(["failed", "stopped", "archived", "deleted"] as const)("rejects composer sends to %s threads before persistence", async (threadStatus) => {
     const assertUsable = vi.fn();
-    const { svc } = buildService({ threadStatus, assertUsable });
+    const { svc } = await buildService({ threadStatus, assertUsable });
 
     await expect(svc.sendMessage({
       threadId: THREAD_ID,
@@ -274,7 +277,7 @@ describe("AgentService.sendMessage — admission gates", () => {
   });
 
   it.each(["completed", "interrupted", "errored"] as const)("allows a direct follow-up to the %s thread through persistence and provider dispatch", async (threadStatus) => {
-    const { svc, db, messageRepo, providerStub } = buildService({ threadStatus });
+    const { svc, db, messageRepo, providerStub } = await buildService({ threadStatus });
 
     await svc.sendMessage({
       threadId: THREAD_ID,
@@ -293,7 +296,7 @@ describe("AgentService.sendMessage — admission gates", () => {
   });
 
   it.each(["completed", "interrupted"] as const)("allows a fully-provenanced cross-thread send to a %s thread", async (threadStatus) => {
-    const { svc, db, providerStub } = buildService({ threadStatus });
+    const { svc, db, providerStub } = await buildService({ threadStatus });
 
     await svc.sendMessage({
       threadId: THREAD_ID,
@@ -318,7 +321,7 @@ describe("AgentService.sendMessage — admission gates", () => {
   it("rejects incomplete cross-thread provenance before provider side effects", async () => {
     const assertUsable = vi.fn();
     const resolveProvider = vi.fn();
-    const { svc } = buildService({ assertUsable, resolveProvider });
+    const { svc } = await buildService({ assertUsable, resolveProvider });
 
     await expect(svc.sendMessage({
       threadId: THREAD_ID,
@@ -349,7 +352,7 @@ describe("AgentService.sendMessage — admission gates", () => {
       memoryPressureService,
       settingsService,
       getApprovalReviewSupport,
-    } = buildService({ approvalReviewSupport: requiredReview });
+    } = await buildService({ approvalReviewSupport: requiredReview });
 
     await expect(svc.sendMessage({
       threadId: THREAD_ID,
@@ -388,7 +391,7 @@ describe("AgentService internal MCP provider allowlist", () => {
     "Call delegate_task exactly once to hand this review to Codex. Do not call any other tool.",
     "Do not create an Mcode thread",
   ])("activates thread control whatever the message says: %s", async (content) => {
-    const { svc, threadControlMcp } = buildService();
+    const { svc, threadControlMcp } = await buildService();
 
     await svc.sendMessage({
       threadId: THREAD_ID,
@@ -408,7 +411,7 @@ describe("AgentService internal MCP provider allowlist", () => {
   });
 
   it("activates full thread control for a default command on a persisted full thread", async () => {
-    const { svc, threadControlMcp } = buildService({ threadPermissionMode: "full" });
+    const { svc, threadControlMcp } = await buildService({ threadPermissionMode: "full" });
 
     await svc.sendMessage({
       threadId: THREAD_ID,

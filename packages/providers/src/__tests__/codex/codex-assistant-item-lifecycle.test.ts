@@ -120,9 +120,9 @@ describe("Codex assistant item lifecycle", () => {
 
   it("uses a different identity for a reused native item on another delivery attempt", () => {
     const mapper = new CodexEventMapper("thread");
-    mapper.prepareForTurn({ executionId: "execution", deliveryAttempt: 1 });
+    mapper.prepareForTurn({ executionId: "a402c433-6ebf-4782-87de-a06341f394c6", deliveryAttempt: 1 });
     const first = completed(mapper, "same-id", "Done").at(-1);
-    mapper.prepareForTurn({ executionId: "execution", deliveryAttempt: 2 });
+    mapper.prepareForTurn({ executionId: "a402c433-6ebf-4782-87de-a06341f394c6", deliveryAttempt: 2 });
     const second = completed(mapper, "same-id", "Done").at(-1);
     if (first?.type !== "assistantMessageBoundary" || second?.type !== "assistantMessageBoundary") throw new Error("Missing boundary");
     expect(first.textItemId).not.toBe(second.textItemId);
