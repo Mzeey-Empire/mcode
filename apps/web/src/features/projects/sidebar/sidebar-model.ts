@@ -439,7 +439,7 @@ export function reconcileItems(prev: readonly SidebarItem[], next: readonly Side
 
 /**
  * What made the model change. `snapshot` (hydration, reconnect) places without motion, `layout`
- * (scope, view, threshold, Older open) re-lays out without FLIP, `clock` is time alone, and
+ * (scope, view, threshold, Older open, project reorder) re-lays out without FLIP, `clock` is time alone, and
  * `push` is live data, the only cause that animates.
  */
 export type ModelCause = "snapshot" | "layout" | "clock" | "push";
