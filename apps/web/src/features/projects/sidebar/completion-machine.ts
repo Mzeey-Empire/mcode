@@ -1,7 +1,7 @@
 import type { ThreadCompletionRefusal } from "@mcode/contracts/ws/methods";
 
 /** How long the server holds a completion before it commits, so Undo can cancel it. */
-export const HOLD_MS = 3000;
+export const HOLD_MS = 1500;
 
 /** Why a completion did not land. A refusal is the server's answer; a retryable failure is the connection's. */
 export type CompletionFailure =

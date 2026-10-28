@@ -39,7 +39,7 @@ describe("completion store", () => {
 
     useCompletionStore.getState().complete("thread-1");
 
-    expect(mockTransport.completeThread).toHaveBeenCalledWith("thread-1", 3000);
+    expect(mockTransport.completeThread).toHaveBeenCalledWith("thread-1", 1500);
     expect(entry()?.phase).toBe("holding");
   });
 
@@ -66,7 +66,7 @@ describe("completion store", () => {
 
     vi.mocked(mockTransport.completeThread).mockReturnValueOnce(replyAfter(3000, { ok: true, thread: completed }));
     useCompletionStore.getState().retry("thread-1");
-    expect(mockTransport.completeThread).toHaveBeenLastCalledWith("thread-1", 3000);
+    expect(mockTransport.completeThread).toHaveBeenLastCalledWith("thread-1", 1500);
     await vi.advanceTimersByTimeAsync(3000);
     expect(entry()).toBeUndefined();
     expect(useWorkspaceStore.getState().threads[0]?.user_completed_at).toBe(completed.user_completed_at);

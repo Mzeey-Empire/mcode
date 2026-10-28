@@ -90,7 +90,7 @@ describe("SidebarList completion", () => {
 
     expect(renderedThreadIds()).toEqual(["newer", "target", "older"]);
     expect(within(targetRow()).getByText("Title target")).toHaveClass("sidebar-strike");
-    expect(mockTransport.completeThread).toHaveBeenCalledWith("target", 3000);
+    expect(mockTransport.completeThread).toHaveBeenCalledWith("target", 1500);
   });
 
   it("keeps the strike when the row remounts during the hold", () => {
