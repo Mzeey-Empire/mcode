@@ -77,6 +77,36 @@ describe("AgentService cleanup through production worker composition", { timeout
     });
   });
 
+  it("admits a replacement after cancelling delayed setup without dispatching the cancelled message", async () => {
+    const fixture = await openFixture("claude");
+    let releaseSetup!: () => void;
+    const setupReady = new Promise<void>((resolve) => { releaseSetup = resolve; });
+    const persist = vi.spyOn(container.resolve(AttachmentService), "persist").mockImplementationOnce(() => (
+      setupReady.then(() => ({ stored: [], persisted: [] }))
+    ));
+    const send = fixture.service.sendMessage({
+      threadId: fixture.thread.id, content: "hello", permissionMode: "default",
+      model: "claude-sonnet-4-6", attachments: [], provider: "claude",
+    });
+    try {
+      await vi.waitFor(() => expect(persist).toHaveBeenCalledOnce());
+      const stopped = await fixture.service.stopSession(fixture.thread.id, { by: "user" });
+      expect(stopped.status).toBe("cancelled");
+      expect(stopped.dispatchState).toBe("not-dispatched");
+      expect(fixture.sent).toEqual([]);
+    } finally {
+      releaseSetup();
+      await send;
+    }
+    expect(fixture.sent).toEqual([]);
+
+    await expect(fixture.service.sendMessage({
+      threadId: fixture.thread.id, content: "replacement", permissionMode: "default",
+      model: "claude-sonnet-4-6", attachments: [], provider: "claude",
+    })).resolves.toBeUndefined();
+    expect(fixture.sent.map((turn) => turn.message)).toEqual(["replacement"]);
+  });
+
   it("keeps an automatic queued dispatch pending after an early provider send until Ended releases the active Turn", async () => {
     const fixture = await openFixture("claude");
     const message = await fixture.messages.create(fixture.thread.id, "user", "Queued work", 1);
