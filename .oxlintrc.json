@@ -111,6 +111,25 @@
       }
     },
     {
+      "files": ["apps/web/src/**/*Row.tsx", "apps/web/src/**/*-row.tsx", "apps/web/src/**/*Bubble.tsx"],
+      "rules": {
+        "mcode/no-row-overlay-root": ["error", {
+          "baseline": {
+            "apps/web/src/features/conversation/messages/MessageBubble.tsx": 3,
+            "apps/web/src/features/conversation/narrative/ApprovalReceiptRow.tsx": 2,
+            "apps/web/src/features/conversation/narrative/NarrativeToolRow.tsx": 1,
+            "apps/web/src/features/projects/ProjectRow.tsx": 5,
+            "apps/web/src/features/projects/sidebar/SidebarDraftRow.tsx": 1,
+            "apps/web/src/features/projects/sidebar/SidebarProjectRow.tsx": 4,
+            "apps/web/src/features/projects/sidebar/SidebarThreadRow.tsx": 2,
+            "apps/web/src/features/pull-requests/surfaces/PullRequestFileRow.tsx": 2,
+            "apps/web/src/features/pull-requests/surfaces/ReviewFileChangeRow.tsx": 2,
+            "apps/web/src/features/thread-overview/overview-row.tsx": 1
+          }
+        }]
+      }
+    },
+    {
       "files": ["apps/web/src/**/EditorIcons.tsx", "apps/web/src/**/ProviderIcons.tsx", "apps/web/src/lib/file-icons.tsx", "apps/web/src/lib/vscode-icons.ts", "apps/web/src/features/projects/actions/action-icons.ts", "apps/web/src/components/chat/ImageAttachmentLightbox.tsx"],
       "rules": {
         "mcode/no-raw-color": "off"
