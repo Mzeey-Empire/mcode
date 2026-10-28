@@ -3,7 +3,7 @@ import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-
 import { CodexCollaborationEventAdapter } from "../collaboration/adapters/codex-collaboration-event-adapter.js";
 import type { CodexCollaborationDurability } from "../collaboration/codex-collaboration-durability.js";
 import type { ProjectedCommittedProviderEvent } from "../execution/execution-worker-handler.js";
-import { processProviderEventWorkerTask } from "../../providers/composition/provider-event-worker-protocol.js";
+import { normalizeProviderEvent } from "../../providers/composition/provider-event-normalization.js";
 import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
 import type { ProviderEventIngressEvent } from "../../providers/composition/provider-event-ingress.js";
 
@@ -24,7 +24,7 @@ export class CanonicalCommittedProviderProjector {
     for (const envelope of envelopes) {
       if (envelope.payload.type !== "item.recorded"
         || envelope.payload.item.payload.projection !== "providerRuntimeEvent") continue;
-      const outcome = processProviderEventWorkerTask({ kind: "canonical-commit", envelope });
+      const outcome = normalizeProviderEvent({ kind: "canonical-commit", envelope });
       if (outcome.status !== "accepted" || !outcome.event.canonicalReceipt) {
         throw new Error(`Committed provider envelope cannot be interpreted: ${envelope.eventId}`);
       }

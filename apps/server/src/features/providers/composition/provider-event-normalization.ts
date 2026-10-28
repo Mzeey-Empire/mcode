@@ -11,8 +11,8 @@ import type {
   ProviderEventSourceKind,
 } from "./provider-event-ingress.js";
 
-/** One cloneable provider payload submitted to the fixed preprocessing pool. */
-export type ProviderEventWorkerTask =
+/** One untrusted provider runtime event or canonical envelope to validate and normalize. */
+export type ProviderEventNormalizationInput =
   | {
     kind: "provider-runtime";
     providerId: unknown;
@@ -23,18 +23,18 @@ export type ProviderEventWorkerTask =
     envelope: unknown;
   };
 
-/** A validated event or its content-free rejection returned by a worker. */
-export type ProviderEventWorkerOutcome =
+/** A validated event or its content-free rejection. */
+export type ProviderEventNormalization =
   | { status: "accepted"; event: ProviderEventIngressEvent }
   | { status: "rejected"; diagnostic: ProviderEventIngressDiagnostic };
 
 /** Return a canonical identity early enough to coalesce duplicate in-flight work. */
-export function canonicalEventIdentity(task: ProviderEventWorkerTask): string | undefined {
+function canonicalEventIdentity(task: ProviderEventNormalizationInput): string | undefined {
   return task.kind === "canonical-commit" ? directString(task.envelope, "eventId") : undefined;
 }
 
-/** Validate and normalize one cloneable provider payload without server dependencies. */
-export function processProviderEventWorkerTask(task: ProviderEventWorkerTask): ProviderEventWorkerOutcome {
+/** Validate and normalize one provider payload without server dependencies. */
+export function normalizeProviderEvent(task: ProviderEventNormalizationInput): ProviderEventNormalization {
   try {
     return task.kind === "provider-runtime"
       ? processProviderRuntimeEvent(task)
@@ -50,8 +50,8 @@ export function processProviderEventWorkerTask(task: ProviderEventWorkerTask): P
 }
 
 function processProviderRuntimeEvent(
-  task: Extract<ProviderEventWorkerTask, { kind: "provider-runtime" }>,
-): ProviderEventWorkerOutcome {
+  task: Extract<ProviderEventNormalizationInput, { kind: "provider-runtime" }>,
+): ProviderEventNormalization {
   const parsedProviderId = ProviderIdSchema.safeParse(task.providerId);
   if (!parsedProviderId.success) {
     return rejected({
@@ -80,8 +80,8 @@ function processProviderRuntimeEvent(
 }
 
 function processCanonicalEvent(
-  task: Extract<ProviderEventWorkerTask, { kind: "canonical-commit" }>,
-): ProviderEventWorkerOutcome {
+  task: Extract<ProviderEventNormalizationInput, { kind: "canonical-commit" }>,
+): ProviderEventNormalization {
   const parsedEnvelope = CanonicalAgentEventEnvelopeSchema.safeParse(task.envelope);
   if (!parsedEnvelope.success) {
     return rejected({
@@ -194,11 +194,11 @@ function withoutUntrustedSubagentPresentation(event: AgentEvent): AgentEvent {
   return sanitized;
 }
 
-function accepted(event: ProviderEventIngressEvent): ProviderEventWorkerOutcome {
+function accepted(event: ProviderEventIngressEvent): ProviderEventNormalization {
   return { status: "accepted", event };
 }
 
-function rejected(diagnostic: ProviderEventIngressDiagnostic): ProviderEventWorkerOutcome {
+function rejected(diagnostic: ProviderEventIngressDiagnostic): ProviderEventNormalization {
   return { status: "rejected", diagnostic };
 }
 
