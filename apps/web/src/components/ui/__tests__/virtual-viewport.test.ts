@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { VirtualViewport, type VirtualHost, type VirtualRow } from "../virtual-viewport";
+import { VirtualViewport, type ViewportPosition, type VirtualHost, type VirtualRow } from "../virtual-viewport";
 
 class SilentObserver implements ResizeObserver {
   observe(): void {}
@@ -129,6 +129,34 @@ describe("VirtualViewport additions", () => {
     const wrappers = [...container.querySelectorAll<HTMLElement>("[data-index]")];
     expect(wrappers.map((wrapper) => wrapper.dataset.index)).toEqual(["0", "1", "2"]);
     expect(wrappers.map((wrapper) => wrapper.style.position)).toEqual(["absolute", "absolute", "absolute"]);
+  });
+
+  it("hands a released move back to the reading row so later row changes stop chasing the target", () => {
+    view.destroy();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const positions: ViewportPosition[] = [];
+    view = new VirtualViewport(container, (next) => { hosts = next; }, (position) => positions.push(position), { ariaLabel: "Rows" });
+    view.setRows(rows);
+
+    view.moveTo({ kind: "target", key: "r10", align: "start" }, false, { release: true });
+    view.setRows(rows.slice(1));
+
+    expect(positions.at(-1)?.kind).toBe("reading");
+  });
+
+  it("keeps an unreleased target across row changes", () => {
+    view.destroy();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const positions: ViewportPosition[] = [];
+    view = new VirtualViewport(container, (next) => { hosts = next; }, (position) => positions.push(position), { ariaLabel: "Rows" });
+    view.setRows(rows);
+
+    view.moveTo({ kind: "target", key: "r10", align: "center" });
+    view.setRows(rows.slice(1));
+
+    expect(positions.at(-1)).toEqual({ kind: "target", key: "r10", align: "center" });
   });
 
   it("reports the scroller's visible height", () => {

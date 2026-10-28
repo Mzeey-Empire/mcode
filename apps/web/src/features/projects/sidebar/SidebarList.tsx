@@ -225,7 +225,7 @@ function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, it
     viewport.setRows(rows, { flip });
     if (!riseRef.current) return;
     riseRef.current = false;
-    viewport.moveTo({ kind: "target", key: OLDER_BAR_KEY, align: "start" }, !prefersReducedMotion());
+    viewport.moveTo({ kind: "target", key: OLDER_BAR_KEY, align: "start" }, !prefersReducedMotion(), { release: true });
   }, [controllerRef, rows, flip]);
   const toggleOlder = useCallback(() => {
     riseRef.current = !olderOpen;
