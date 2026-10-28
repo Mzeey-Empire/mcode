@@ -43,6 +43,7 @@ import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type Dat
 import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
 import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
 import { HookExecutionStore as HookExecutionRepo } from "../events/persistence/hook-execution-store.js";
+import { isLostProviderStream } from "../events/provider-event-publication.js";
 import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
 import {
   ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService,
@@ -1366,7 +1367,7 @@ function validLivePublicationIntent(
     && intent.event.turnExecutionId === operation.execution.executionId
     && (operation.mutation.kind !== "begin" || intent.event.type === "turnStarted")
     && validTurnStartedPublication(intent.event, operation.mutation)
-    && (barrier === "terminal" || !isTerminalLiveEvent(intent.event.type) || isOutcomeLessProviderLost(intent.event));
+    && (barrier === "terminal" || !isTerminalLiveEvent(intent.event.type) || isLostProviderStream(intent.event));
 }
 
 function isTerminalLiveEvent(type: ExecutionLivePublicationIntent["event"]["type"]): boolean {
@@ -1728,12 +1729,8 @@ function validFinish(
 
 function unchangedTextEvent(event: ExecutionLivePublicationIntent["event"]): boolean {
   return ["system", "turnStarted", "generatedAttachment", "contextEstimate", "compacting", "compactSummary"].includes(event.type)
-    || isOutcomeLessProviderLost(event)
+    || isLostProviderStream(event)
     || validNarrativeEvent(event);
-}
-
-function isOutcomeLessProviderLost(event: ExecutionLivePublicationIntent["event"]): boolean {
-  return event.type === "ended" && event.outcome === undefined && event.reason === "provider_lost";
 }
 
 function isFinishMutation(mutation: ExecutionSemanticOperation["mutation"]): mutation is Extract<

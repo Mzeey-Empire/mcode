@@ -36,6 +36,11 @@ export function publishParentProviderEvent(
   return true;
 }
 
+/** An Ended that reports no outcome because the provider lost its stream; a stop or recovery settles the turn instead. */
+export function isLostProviderStream(event: AgentEvent): boolean {
+  return event.type === "ended" && event.outcome === undefined && event.reason === "provider_lost";
+}
+
 function shouldPublishParentEvent(event: AgentEvent): boolean {
   if (event.type === "generatedAttachment") return false;
   return event.type !== "ended"

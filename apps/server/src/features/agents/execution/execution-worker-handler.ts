@@ -43,6 +43,7 @@ import type { FrozenExecutionFileEvidence } from "./execution-file-evidence-coor
 import type { CapturedToolUseObservation, FileTurnHandoff } from "../turns/turn-file-tracker.js";
 import type { SyntheticTerminalInput } from "./codex-live-event-reducer.js";
 import { adapterTurnFailure } from "../canonical/turn-ending.js";
+import { isLostProviderStream } from "../events/provider-event-publication.js";
 
 /** Data that an execution worker may receive without a server dependency container. */
 export type ExecutionWorkCommand =
@@ -367,8 +368,8 @@ export class ExecutionWorkerHandler {
     }
   }
 
-  private prepareRequest(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): PreparedExecutionRequest | undefined {
-    request = this.sanitizeRequest(request, state);
+  private prepareRequest(raw: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): PreparedExecutionRequest | undefined {
+    const request = this.sanitizeRequest(raw, state);
     const command = request.command;
     if (command.kind === "finish-from-state") return this.prepareSyntheticFinish(request, command, state);
     if (!state.parentEvents || command.kind !== "event") return { request };
@@ -776,9 +777,8 @@ function validProviderLostRelease(command: WorkerCommand, state: ExecutionState)
 
 function providerLostOperationId(prepared: PreparedExecutionRequest, receipt: ExecutionWriteReceipt): string | undefined {
   const event = prepared.parentEvent?.publication.event;
-  if (receipt.kind !== "accepted" || event?.type !== "ended") return undefined;
-  if (event.outcome === undefined && event.reason === "provider_lost") return receipt.operationId;
-  return undefined;
+  if (receipt.kind !== "accepted" || !event || !isLostProviderStream(event)) return undefined;
+  return receipt.operationId;
 }
 
 function invalidReason(request: ExecutionWorkerRequest<WorkerCommand>): Extract<ExecutionWorkerResult, { kind: "rejected" }>["reason"] {

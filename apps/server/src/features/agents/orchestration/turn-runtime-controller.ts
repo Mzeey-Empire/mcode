@@ -72,6 +72,7 @@ import {
 import { idleRuntime, isActiveRuntimeExecution, isRunningRuntime, ownsStoppedExecution, stopDispatchState } from "./agent-service-helpers.js";
 import type { TurnRuntimeEventControl } from "./turn-runtime-event-control.js";
 import { TurnSteerRuntimePort, type SteerableTurn } from "../steering/turn-steer-runtime-port.js";
+import { isLostProviderStream } from "../events/provider-event-publication.js";
 
 /**
  * Bounded wait for `provider.stopSession` before the turn is force-finalized.
@@ -665,7 +666,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       // The callback still belongs to the route's pending set. Release on the next task.
       active.terminalRelease = new Promise<void>((resolve) => { setTimeout(resolve, 0); })
         .then(() => {
-          if (event.outcome === undefined && event.reason === "provider_lost" && result.kind === "accepted" && !active.terminalCommitted) {
+          if (isLostProviderStream(event) && result.kind === "accepted" && !active.terminalCommitted) {
             return this.releaseProviderLostWorkerTurn(active, result);
           }
           return this.releaseWorkerTurn(active);
@@ -753,7 +754,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
   }
 
-  /** Free a turn whose provider stream was lost, leaving its durable turn Running for recovery as the legacy route did. */
+  /** Free a turn whose provider stream was lost, leaving its durable turn Running for recovery. */
   private async releaseProviderLostWorkerTurn(active: WorkerOwnedTurn, receipt: ExecutionAcceptedReceipt): Promise<void> {
     const { execution, provider, deliveryAttempt } = active;
     if (this.workerTurns.get(execution.threadId) !== active || active.releaseStarted
