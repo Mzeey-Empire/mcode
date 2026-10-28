@@ -33,7 +33,9 @@ import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import { freezeOrder, useSidebarUiStore } from "./sidebar-ui-store";
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
-import { PreviewScrollGuard, PreviewScrollGuardContext } from "./preview-scroll-guard";
+import { PreviewScrollGuard } from "./preview-scroll-guard";
+import { ThreadPreviewHandleContext, ThreadPreviewTooltip, type ThreadPreviewPayload } from "./SidebarThreadPreview";
+import { createTooltipHandle } from "@/components/ui/tooltip";
 import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 
 /** Provisional heights until the ResizeObserver measures; they only shape the first frame. */
@@ -289,6 +291,7 @@ const unfreezeOnLeave = () => useSidebarUiStore.getState().unfreeze();
 export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KEYS, arriving = NO_KEYS }: SidebarListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { controllerRef, hosts, previewGuard } = useSidebarViewport(containerRef);
+  const [previewHandle] = useState(() => createTooltipHandle<ThreadPreviewPayload>());
   const drag = useProjectDrag(controllerRef);
   const rowCtx = useDragSafeContext(ctx, drag.isClickSuppressed);
   const rows = useMemo(() => toVirtualRows(items), [items]);
@@ -326,14 +329,15 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
         onDragCancel={drag.onDragCancel}
       >
         <SortableContext items={sortableIds} strategy={STATIC_SORT_STRATEGY}>
-          <PreviewScrollGuardContext.Provider value={previewGuard}>
+          <ThreadPreviewHandleContext.Provider value={previewHandle}>
             <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={renderRow} />
-          </PreviewScrollGuardContext.Provider>
+          </ThreadPreviewHandleContext.Provider>
         </SortableContext>
         <DragOverlay>
           {dragged?.kind === "project" ? <div className="px-1.5"><ProjectHeader item={dragged} ctx={rowCtx} /></div> : null}
         </DragOverlay>
       </DndContext>
+      <ThreadPreviewTooltip handle={previewHandle} guard={previewGuard} />
       {olderBar && controllerRef.current && <OlderBar item={olderBar} viewport={controllerRef.current} onToggle={toggleOlder} />}
       {overlay}
     </div>
