@@ -97,4 +97,9 @@ function TooltipContent({
   )
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
+/** Imperative actions a tooltip exposes through `actionsRef`. */
+type TooltipActions = TooltipPrimitive.Root.Actions
+/** Details Base UI passes to a tooltip's `onOpenChange`, including its reason and `cancel()`. */
+type TooltipChangeDetails = TooltipPrimitive.Root.ChangeEventDetails
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, type TooltipActions, type TooltipChangeDetails }
