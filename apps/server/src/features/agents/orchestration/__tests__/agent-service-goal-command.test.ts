@@ -15,7 +15,7 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 import type { AgentService } from "../agent-service.js";
-import { createAgentServiceForTest, drainAgentServicePersistenceForTest, goalLifecycleForAgentServiceTest, startAgentServiceIngressForTest, waitForAgentServiceIngressForTest, startProviderTurnForTest, wrapProviderEmitterForRuntimeEvents } from "./agent-service-test-harness.js";
+import { createAgentServiceForTest, drainAgentServicePersistenceForTest, goalLifecycleForAgentServiceTest, startAgentServiceIngressForTest, waitForAgentServiceIngressForTest, startProviderTurnForTest, wrapProviderEmitterForRuntimeEvents, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
@@ -48,7 +48,7 @@ const createdServices: AgentService[] = [];
  * setGoal/clearGoal/sendTurn so we can assert which path the /goal
  * intercept took (control short-circuit vs SET fall-through).
  */
-function buildService(database: OwnedTestDatabase) {
+async function buildService(database: OwnedTestDatabase) {
   const { db, writer } = database;
   container.reset();
   container.registerInstance("Database", db);
@@ -190,6 +190,7 @@ function buildService(database: OwnedTestDatabase) {
     undefined,
     writer,
   );
+  await waitForAgentServiceWorkersForTest(svc);
   eventPublication.bind(() => undefined);
   eventPublication.start();
   startAgentServiceIngressForTest(svc);
@@ -215,7 +216,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     database = createOwnedTestDatabase();
-    const { workspaceRepo, threadRepo } = buildService(database);
+    const { workspaceRepo, threadRepo } = await buildService(database);
     const ws = await workspaceRepo.create("test-ws", process.cwd(), false);
     thread = await threadRepo.create(ws.id, "thread", "direct", "main");
   });
@@ -226,7 +227,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("/goal <condition> installs the goal AND invokes the provider with a directive payload", async () => {
-    const { svc, providerStub, messageRepo } = buildService(database);
+    const { svc, providerStub, messageRepo } = await buildService(database);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -258,7 +259,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("tracks goal command effects through prepared, reserved, dispatched, and completed", async () => {
-    const { goals, providerStub } = buildService(database);
+    const { goals, providerStub } = await buildService(database);
     const outcome = await goals.routeCommand({
       threadId: thread.id,
       content: "/goal effect states",
@@ -279,7 +280,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("allocates a user sequence after a staged internal assistant", async () => {
-    const { svc, messageRepo } = buildService(database);
+    const { svc, messageRepo } = await buildService(database);
     await messageRepo.create(thread.id, "user", "prior question", 1);
     await messageRepo.createAssistantIdempotent({
       id: "staged-assistant",
@@ -303,7 +304,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("installs a typed composer goal without persisting slash-command text", async () => {
-    const { svc, providerStub, messageRepo } = buildService(database);
+    const { svc, providerStub, messageRepo } = await buildService(database);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -328,7 +329,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("native Claude /goal sends exact slash-command wire text", async () => {
-    const { svc, goals: _goals, providerStub } = buildService(database);
+    const { svc, goals: _goals, providerStub } = await buildService(database);
     providerStub.hasNativeGoalCommand.mockReturnValue(true);
 
     await svc.sendMessage({
@@ -349,7 +350,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("completes a direct say-goal when the assistant says the requested text", async () => {
-    const { svc, svc: _svc, goals: _goals, providerStub } = buildService(database);
+    const { svc, svc: _svc, goals: _goals, providerStub } = await buildService(database);
     const activeGoal: GoalState = {
       threadId: thread.id,
       objective: "say hi",
@@ -395,7 +396,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("does not complete broad goals from an arbitrary assistant answer", async () => {
-    const { svc, goals: _goals, providerStub } = buildService(database);
+    const { svc, goals: _goals, providerStub } = await buildService(database);
     providerStub.getGoal.mockReturnValueOnce({
       threadId: thread.id,
       objective: "fix the bug",
@@ -424,7 +425,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("does not emit direct-response completion events when provider clear returns false", async () => {
-    const { svc, svc: _svc, goals: _goals, providerStub } = buildService(database);
+    const { svc, svc: _svc, goals: _goals, providerStub } = await buildService(database);
     const events: AgentEvent[] = [];
     providerStub.clearGoal.mockResolvedValueOnce(false);
     providerStub.getGoal
@@ -466,7 +467,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   ;
 
   it("keeps the native goal mirror when a native control send fails", async () => {
-    const { svc, providerStub } = buildService(database);
+    const { svc, providerStub } = await buildService(database);
     providerStub.hasNativeGoalCommand.mockReturnValue(true);
     providerStub.sendTurn.mockRejectedValueOnce(new Error("provider boom"));
 
@@ -484,7 +485,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("/goal clear short-circuits — clears the goal, does NOT invoke the provider, broadcasts a Message pill without Ended", async () => {
-    const { svc, providerStub, messageRepo } = buildService(database);
+    const { svc, providerStub, messageRepo } = await buildService(database);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -515,7 +516,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("/goal (no args) reports active goal without invoking the provider", async () => {
-    const { svc, providerStub, messageRepo } = buildService(database);
+    const { svc, providerStub, messageRepo } = await buildService(database);
     providerStub.getGoal.mockReturnValueOnce({
       threadId: thread.id,
       objective: "ship the feature",
@@ -548,7 +549,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("providers without the goal capability pass /goal through as plain text", async () => {
-    const { svc, providerStub, nonGoalStub } = buildService(database);
+    const { svc, providerStub, nonGoalStub } = await buildService(database);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -569,7 +570,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   ;
 
   it("rejects a normal send while the thread already has an active turn", async () => {
-    const { svc, providerStub, messageRepo } = buildService(database);
+    const { svc, providerStub, messageRepo } = await buildService(database);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -598,7 +599,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("rolls back a prepared goal effect when runtime reservation fails", async () => {
-    const { svc, providerStub, messageRepo } = buildService(database);
+    const { svc, providerStub, messageRepo } = await buildService(database);
     await svc.sendMessage({
       threadId: thread.id,
       content: "first turn",
@@ -626,7 +627,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("rejects concurrent normal sends before either can persist a duplicate row", async () => {
-    const { svc, providerStub, messageRepo } = buildService(database);
+    const { svc, providerStub, messageRepo } = await buildService(database);
 
     const first = svc.sendMessage({
       threadId: thread.id,
@@ -654,7 +655,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("still handles /goal clear while the thread already has an active turn", async () => {
-    const { svc, providerStub, messageRepo } = buildService(database);
+    const { svc, providerStub, messageRepo } = await buildService(database);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -683,7 +684,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("thread.goal.clear during an active native Claude turn returns busy cache and keeps mirror", async () => {
-    const { svc, goals, providerStub } = buildService(database);
+    const { svc, goals, providerStub } = await buildService(database);
     const activeGoal: GoalState = {
       threadId: thread.id,
       objective: "wait",
@@ -724,7 +725,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("does not re-enter native Claude goal refresh while its own /goal read is in flight", async () => {
-    const { svc, svc: _svc, goals, providerStub } = buildService(database);
+    const { svc, svc: _svc, goals, providerStub } = await buildService(database);
     const activeGoal: GoalState = {
       threadId: thread.id,
       objective: "wait",
@@ -758,7 +759,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("idle native thread.goal.clear dispatches /goal off and returns authoritative native clear", async () => {
-    const { goals, providerStub } = buildService(database);
+    const { goals, providerStub } = await buildService(database);
     providerStub.hasNativeGoalCommand.mockReturnValue(true);
     providerStub.runNativeGoalCommand.mockResolvedValue({ kind: "cleared", objective: "wait" });
 
@@ -772,7 +773,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("post-turn native refresh emits complete then cleared once when status says no goal set", async () => {
-    const { svc, goals, providerStub } = buildService(database);
+    const { svc, goals, providerStub } = await buildService(database);
     const activeGoal: GoalState = {
       threadId: thread.id,
       objective: "say hi",
@@ -808,7 +809,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("post-turn native refresh runs once a provider turn completes", async () => {
-    const { svc, goals, providerStub } = buildService(database);
+    const { svc, goals, providerStub } = await buildService(database);
     const activeGoal: GoalState = {
       threadId: thread.id,
       objective: "say hi",
@@ -844,7 +845,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("post-turn native refresh does not enqueue /goal if a new turn starts after reading the cache", async () => {
-    const { svc, goals, providerStub } = buildService(database);
+    const { svc, goals, providerStub } = await buildService(database);
     const activeGoal: GoalState = {
       threadId: thread.id,
       objective: "say hi",

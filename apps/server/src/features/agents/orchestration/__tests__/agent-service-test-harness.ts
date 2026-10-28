@@ -127,6 +127,13 @@ export function startAgentServiceIngressForTest(
   publication.start();
 }
 
+/** Resolve once the service's execution worker pool can accept turns, as server bootstrap waits before serving. */
+export async function waitForAgentServiceWorkersForTest(service: AgentService): Promise<void> {
+  const workers = testWorkers.get(service);
+  if (!workers) throw new Error("Agent service was not created by this harness");
+  await workers.whenReady();
+}
+
 /** Resolve after the test service has applied every ingress event already accepted for a thread. */
 export async function waitForAgentServiceIngressForTest(service: AgentService, threadId: string): Promise<void> {
   const ingress = testProviderEventIngresses.get(service);

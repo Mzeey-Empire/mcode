@@ -29,7 +29,7 @@ import { PlanQuestionService } from "../../planning/plan-question-service.js";
 import { PlanRepo } from "../../planning/persistence/plan-repo.js";
 import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../agent-turn-command-port.js";
-import { createAgentServiceForTest, drainAgentServicePersistenceForTest, startAgentServiceIngressForTest, startProviderTurnForTest, waitForAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents } from "./agent-service-test-harness.js";
+import { createAgentServiceForTest, drainAgentServicePersistenceForTest, startAgentServiceIngressForTest, startProviderTurnForTest, waitForAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
@@ -260,6 +260,7 @@ async function buildService(
       environment,
       undefined,
   );
+  await waitForAgentServiceWorkersForTest(service);
   if (progress) registerAgentStorageTestProducer(db, async () => {
     await drainAgentServicePersistenceForTest(service);
     await progress.close();
@@ -955,7 +956,7 @@ describe("AgentService Ended finalization", () => {
   let canonicalSink: CanonicalAgentBoundary;
   let service: AgentService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     db = openAgentStorageTestDatabase();
     threadRepo = new RealThreadRepo(db, agentStorageTestWriter(db));
@@ -1043,6 +1044,7 @@ describe("AgentService Ended finalization", () => {
       undefined,
       new SubagentRosterService(canonicalSink, providerRegistry, narrative, db),
     );
+    await waitForAgentServiceWorkersForTest(service);
     const fixtureService = service;
     registerAgentStorageTestProducer(db, async () => {
       await drainAgentServicePersistenceForTest(fixtureService);

@@ -12,7 +12,7 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { AgentService } from "../agent-service.js";
-import { createAgentServiceForTest, drainAgentServicePersistenceForTest, startAgentServiceIngressForTest, waitForAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents } from "./agent-service-test-harness.js";
+import { createAgentServiceForTest, drainAgentServicePersistenceForTest, startAgentServiceIngressForTest, waitForAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -44,7 +44,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
   let providerStub: NodeEvents.EventEmitter & IAgentProvider;
   let providerEventIngress: ProviderEventIngress;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     database = createOwnedTestDatabase();
     db = database.db;
     threadRepo = new ThreadRepo(db, database.writer);
@@ -137,6 +137,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     undefined,
     database.writer,
   );
+    await waitForAgentServiceWorkersForTest(svc);
     startAgentServiceIngressForTest(svc, );
   });
 

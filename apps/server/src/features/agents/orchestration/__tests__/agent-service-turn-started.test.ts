@@ -13,7 +13,7 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { AgentService } from "../agent-service.js";
-import { createAgentServiceForTest, startAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents } from "./agent-service-test-harness.js";
+import { createAgentServiceForTest, startAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -52,7 +52,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
   let memoryActivation: ReturnType<typeof vi.fn<() => void>>;
   let attachmentGate: Promise<void> | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     pressureListener = undefined;
     attachmentGate = undefined;
     memoryActivation = vi.fn();
@@ -154,6 +154,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       undefined,
       canonicalSink,
     );
+    await waitForAgentServiceWorkersForTest(svc);
     startAgentServiceIngressForTest(svc, (event) => capturedEvents.push({ event }));
   });
 

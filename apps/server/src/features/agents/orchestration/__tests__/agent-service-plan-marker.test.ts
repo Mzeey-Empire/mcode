@@ -11,7 +11,7 @@ import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
-import { createAgentServiceForTest } from "./agent-service-test-harness.js";
+import { createAgentServiceForTest, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
 import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../agent-turn-command-port.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
@@ -36,7 +36,7 @@ import { broadcast } from "../../../../application/transport/push.js";
  * Build an AgentService against a real in-memory SQLite DB so the marker
  * transaction can be exercised end-to-end (FK enforcement + rollback).
  */
-function buildService(db: Database) {
+async function buildService(db: Database) {
   container.reset();
   container.registerInstance("Database", db);
   container.registerInstance(ApplicationDatabaseWriter, agentStorageTestWriter(db));
@@ -121,6 +121,7 @@ function buildService(db: Database) {
       undefined,
       createCanonicalAgentBoundaryStub(db),
   );
+  await waitForAgentServiceWorkersForTest(svc);
   const runtimeCommands = new AgentRuntimeCommandPort();
   runtimeCommands.bind({
     createAndSend: (command) => svc.createAndSend(command),
@@ -149,7 +150,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     db = openAgentStorageTestDatabase();
-    const { workspaceRepo, threadRepo, messageRepo } = buildService(db);
+    const { workspaceRepo, threadRepo, messageRepo } = await buildService(db);
     const ws = await workspaceRepo.create("test-ws", process.cwd(), false);
     thread = await threadRepo.create(ws.id, "thread", "direct", "main");
     // Pre-existing assistant message that contains the plan-questions fence.
@@ -163,7 +164,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   });
 
   it("marks the plan-questions message answered when markPlanAnswerForMessageId is set", async () => {
-    const { svc, planQuestionAnswersRepo } = buildService(db);
+    const { svc, planQuestionAnswersRepo } = await buildService(db);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -179,7 +180,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   });
 
   it("does not mark anything when markPlanAnswerForMessageId is unset (regression guard)", async () => {
-    const { svc, planQuestionAnswersRepo } = buildService(db);
+    const { svc, planQuestionAnswersRepo } = await buildService(db);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -194,7 +195,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   });
 
   it("answerQuestions marks the latest plan-questions message answered", async () => {
-    const { plans, planQuestionAnswersRepo } = buildService(db);
+    const { plans, planQuestionAnswersRepo } = await buildService(db);
 
     await plans.answerQuestions(thread.id, [
       { questionId: "q1", selectedOptionId: "opt1", freeText: null },
@@ -206,7 +207,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   it("answerQuestions still sends when no plan-questions message exists", async () => {
     // Fresh thread/workspace with NO plan-questions assistant message.
     const { plans, workspaceRepo, threadRepo, planQuestionAnswersRepo } =
-      buildService(db);
+      await buildService(db);
     const ws2 = await workspaceRepo.create("plain-ws", `${process.cwd()}#alt`, false);
     const plainThread = await threadRepo.create(ws2.id, "plain", "direct", "main");
 
@@ -220,7 +221,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   });
 
   it("broadcasts plan.answered after the marker tx commits", async () => {
-    const { svc } = buildService(db);
+    const { svc } = await buildService(db);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -239,7 +240,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   });
 
   it("does not broadcast plan.answered when no marker was set", async () => {
-    const { svc } = buildService(db);
+    const { svc } = await buildService(db);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -257,7 +258,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   });
 
   it("does not broadcast plan.answered when the marker tx rolls back", async () => {
-    const { svc } = buildService(db);
+    const { svc } = await buildService(db);
 
     await expect(
       svc.sendMessage({
@@ -278,7 +279,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   });
 
   it("dismissPlanQuestions marks the latest fence answered and broadcasts plan.dismissed", async () => {
-    const { plans, planQuestionAnswersRepo } = buildService(db);
+    const { plans, planQuestionAnswersRepo } = await buildService(db);
 
     await plans.dismissQuestions(thread.id);
 
@@ -296,7 +297,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   });
 
   it("dismissPlanQuestions is idempotent — repeat calls don't fail and re-broadcast", async () => {
-    const { plans, planQuestionAnswersRepo } = buildService(db);
+    const { plans, planQuestionAnswersRepo } = await buildService(db);
 
     await plans.dismissQuestions(thread.id);
     await plans.dismissQuestions(thread.id);
@@ -308,7 +309,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
 
   it("dismissPlanQuestions is a no-op when the thread has no plan-questions fence", async () => {
     const { plans, workspaceRepo, threadRepo, planQuestionAnswersRepo } =
-      buildService(db);
+      await buildService(db);
     const ws2 = await workspaceRepo.create("dismiss-ws", `${process.cwd()}#dismiss`, false);
     const plainThread = await threadRepo.create(ws2.id, "plain", "direct", "main");
 
@@ -324,7 +325,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
   });
 
   it("rolls back the user message when the marker insert fails (FK violation)", async () => {
-    const { svc, messageRepo, planQuestionAnswersRepo } = buildService(db);
+    const { svc, messageRepo, planQuestionAnswersRepo } = await buildService(db);
     const beforeCount =
       messageRepo.listByThread(thread.id, 100).messages.length;
 
@@ -356,7 +357,7 @@ describe("AgentService.sendMessage completed-thread lifecycle", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     db = openAgentStorageTestDatabase();
-    const { workspaceRepo, threadRepo } = buildService(db);
+    const { workspaceRepo, threadRepo } = await buildService(db);
     const workspace = await workspaceRepo.create("test-ws", process.cwd(), false);
     thread = await threadRepo.create(workspace.id, "completed thread", "direct", "main");
     await threadRepo.complete(
@@ -367,7 +368,7 @@ describe("AgentService.sendMessage completed-thread lifecycle", () => {
   });
 
   it("atomically reopens a completed thread when persisting a new user message", async () => {
-    const { svc, threadRepo, messageRepo } = buildService(db);
+    const { svc, threadRepo, messageRepo } = await buildService(db);
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -399,7 +400,7 @@ describe("AgentService.sendMessage completed-thread lifecycle", () => {
         SELECT RAISE(ABORT, 'message persistence rejected');
       END
     `);
-    const { svc, threadRepo } = buildService(db);
+    const { svc, threadRepo } = await buildService(db);
 
     await expect(svc.sendMessage({
       threadId: thread.id,
