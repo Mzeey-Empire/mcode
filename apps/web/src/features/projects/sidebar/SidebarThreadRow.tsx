@@ -1,8 +1,8 @@
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type CSSProperties } from "react";
+import { forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type CSSProperties } from "react";
 import { Check, GitBranch, Laptop, RefreshCw, Undo2 } from "lucide-react";
 import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
 import { MoreIcon } from "@/components/ui/icon-map";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, type TooltipActions, type TooltipChangeDetails } from "@/components/ui/tooltip";
 import { WorktreeModeIcon } from "@/components/icons/WorktreeModeIcon";
 import { ProviderIcon, ProviderIconStack, providerLabel } from "@/components/ui/provider-icon";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import type { SidebarItem } from "./sidebar-model";
 import type { InlineEditState, SidebarProviderAvailability, SidebarRowContext } from "./sidebar-row-context";
 import { PullRequestChip, PullRequestList } from "./PullRequestChip";
 import { useCompletionStore } from "./completion-store";
+import { PreviewScrollGuardContext } from "./preview-scroll-guard";
 import type { CompletionEntry } from "./completion-machine";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
@@ -790,15 +791,35 @@ function ThreadRowPreview({
   workspaceName,
   thread,
 }: { isEditing: boolean; row: React.ReactElement; workspaceName: string; thread: WorkspaceThread }) {
+  const onOpenChange = useScrollGuardedOpenChange();
   if (isEditing) return row;
   return (
-    <Tooltip>
+    <Tooltip onOpenChange={onOpenChange.handle} actionsRef={onOpenChange.actionsRef}>
       <TooltipTrigger render={row} />
       <TooltipContent side="right" align="start" sideOffset={8} className="max-w-none p-3">
         <SidebarThreadPreview workspaceName={workspaceName} thread={thread} />
       </TooltipContent>
     </Tooltip>
   );
+}
+
+/** Rejects hover opens while the list scrolls and lets a scroll close a preview that hover opened. */
+function useScrollGuardedOpenChange() {
+  const guard = useContext(PreviewScrollGuardContext);
+  const actionsRef = useRef<TooltipActions>(null);
+  const untrackRef = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => () => untrackRef.current?.(), []);
+  const handle = useCallback((open: boolean, details: TooltipChangeDetails) => {
+    if (open && guard && !guard.allowsOpen(details.reason)) {
+      details.cancel();
+      return;
+    }
+    untrackRef.current?.();
+    untrackRef.current = open && guard && details.reason === "trigger-hover"
+      ? guard.trackHoverOpen(() => actionsRef.current?.close())
+      : undefined;
+  }, [guard]);
+  return { handle, actionsRef };
 }
 
 function SidebarThreadPreview({
