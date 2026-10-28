@@ -6,7 +6,7 @@ import { writeNarrativeBatch } from "../../conversation/narrative/persistence/na
 
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { ToolCallRecord, ToolCallStatus } from "@mcode/contracts/models/tool-call-record";
 import {
@@ -142,9 +142,13 @@ function rowToToolCallRecord(row: ToolCallRecordRow): ToolCallRecord {
 /** Repository for tool call record creation and retrieval against SQLite. */
 export class ToolCallRecordStore {
   private readonly orm: BunSQLiteDatabase;
+  private readonly insertStatement: ReturnType<ToolCallRecordStore["buildInsertStatement"]>;
+  private readonly replaceStatement: ReturnType<ToolCallRecordStore["buildInsertStatement"]>;
 
   constructor(db: Database) {
     this.orm = drizzle(db);
+    this.insertStatement = this.buildInsertStatement(false);
+    this.replaceStatement = this.buildInsertStatement(true);
   }
 
   /** Create a new tool call record and return the fully-populated record. */
@@ -157,20 +161,85 @@ export class ToolCallRecordStore {
 
   /** Create multiple tool call records in a single transaction. */
   bulkCreate(inputs: CreateToolCallRecordInput[], replaceExisting = false): void {
-    this.orm.transaction((tx) => {
+    this.orm.transaction(() => {
       const now = new Date().toISOString();
       for (const item of inputs) {
         const insert = prepareToolCallRecordInsert(item, now);
-        const { id, ...rest } = this.insertValues(item, insert);
-        const write = tx.insert(toolCallRecords).values({ id, ...rest });
-        if (replaceExisting) write.onConflictDoUpdate({ target: toolCallRecords.id, set: rest }).run();
-        else write.onConflictDoNothing().run();
+        this.writePrepared(item, insert, replaceExisting);
       }
     });
   }
   /** Commit one bounded prefix inside the owner transaction. */
   createBoundedBatch(inputs: readonly CreateToolCallRecordInput[], limits: WriteBatchLimits, replaceExisting: boolean): WriteBatchResult {
-    return writeNarrativeBatch(inputs, limits, item => this.bulkCreate([item], replaceExisting));
+    return writeNarrativeBatch(inputs, limits, item => {
+      const insert = prepareToolCallRecordInsert(item, new Date().toISOString());
+      this.writePrepared(item, insert, replaceExisting);
+    });
+  }
+
+  private buildInsertStatement(replaceExisting: boolean) {
+    const write = this.orm.insert(toolCallRecords).values({
+      id: placeholder("id"),
+      messageId: placeholder("messageId"),
+      parentToolCallId: placeholder("parentToolCallId"),
+      toolName: placeholder("toolName"),
+      displayName: placeholder("displayName"),
+      providerAgentKey: placeholder("providerAgentKey"),
+      subagentIdentityKey: placeholder("subagentIdentityKey"),
+      subagentProviderName: placeholder("subagentProviderName"),
+      subagentPrompt: placeholder("subagentPrompt"),
+      subagentType: placeholder("subagentType"),
+      subagentAgentId: placeholder("subagentAgentId"),
+      subagentDurationMs: placeholder("subagentDurationMs"),
+      model: placeholder("model"),
+      reasoningEffort: placeholder("reasoningEffort"),
+      inputSummary: placeholder("inputSummary"),
+      outputSummary: placeholder("outputSummary"),
+      outputTruncated: placeholder("outputTruncated"),
+      outputTotalBytes: placeholder("outputTotalBytes"),
+      outputArtifactPath: placeholder("outputArtifactPath"),
+      exitCode: placeholder("exitCode"),
+      status: placeholder("status"),
+      background: placeholder("background"),
+      startedAt: placeholder("startedAt"),
+      completedAt: placeholder("completedAt"),
+      sortOrder: placeholder("sortOrder"),
+    });
+    if (!replaceExisting) return write.onConflictDoNothing().prepare();
+    return write.onConflictDoUpdate({
+      target: toolCallRecords.id,
+      set: {
+        messageId: sql`excluded.message_id`,
+        parentToolCallId: sql`excluded.parent_tool_call_id`,
+        toolName: sql`excluded.tool_name`,
+        displayName: sql`excluded.display_name`,
+        providerAgentKey: sql`excluded.provider_agent_key`,
+        subagentIdentityKey: sql`excluded.subagent_identity_key`,
+        subagentProviderName: sql`excluded.subagent_provider_name`,
+        subagentPrompt: sql`excluded.subagent_prompt`,
+        subagentType: sql`excluded.subagent_type`,
+        subagentAgentId: sql`excluded.subagent_agent_id`,
+        subagentDurationMs: sql`excluded.subagent_duration_ms`,
+        model: sql`excluded.model`,
+        reasoningEffort: sql`excluded.reasoning_effort`,
+        inputSummary: sql`excluded.input_summary`,
+        outputSummary: sql`excluded.output_summary`,
+        outputTruncated: sql`excluded.output_truncated`,
+        outputTotalBytes: sql`excluded.output_total_bytes`,
+        outputArtifactPath: sql`excluded.output_artifact_path`,
+        exitCode: sql`excluded.exit_code`,
+        status: sql`excluded.status`,
+        background: sql`excluded.background`,
+        startedAt: sql`excluded.started_at`,
+        completedAt: sql`excluded.completed_at`,
+        sortOrder: sql`excluded.sort_order`,
+      },
+    }).prepare();
+  }
+
+  private writePrepared(input: CreateToolCallRecordInput, insert: ToolCallRecordInsert, replaceExisting: boolean): void {
+    const statement = replaceExisting ? this.replaceStatement : this.insertStatement;
+    statement.run(this.insertValues(input, insert));
   }
 
   private insertValues(

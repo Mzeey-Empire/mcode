@@ -14,7 +14,7 @@ export type SQLiteCacheBudget = "active" | "background";
 
 function assertPragmaValue(
   db: Database,
-  name: "journal_mode" | "busy_timeout" | "mmap_size" | "foreign_keys" | "synchronous" | "cache_size",
+  name: "journal_mode" | "busy_timeout" | "mmap_size" | "foreign_keys" | "synchronous" | "cache_size" | "temp_store",
   expected: string | number,
 ): void {
   const row = db.query(`PRAGMA ${name}`).get() as Record<string, unknown> | null;
@@ -41,6 +41,10 @@ export function applySQLiteConnectionPolicy(
   }
   db.run("PRAGMA foreign_keys = ON");
   db.run("PRAGMA synchronous = FULL");
+  // Savepoints nested in a write transaction spill their sub-journal to a temp
+  // file once it passes 64 KiB. Creating that file costs about 0.4 ms on
+  // Windows and recurs on every provider-event commit during a turn.
+  db.run("PRAGMA temp_store = MEMORY");
 
   if (isFileBacked) {
     assertPragmaValue(db, "journal_mode", "wal");
@@ -49,6 +53,7 @@ export function applySQLiteConnectionPolicy(
   }
   assertPragmaValue(db, "foreign_keys", 1);
   assertPragmaValue(db, "synchronous", 2);
+  assertPragmaValue(db, "temp_store", 2);
 }
 
 /** Apply and assert one bounded SQLite page-cache budget. */

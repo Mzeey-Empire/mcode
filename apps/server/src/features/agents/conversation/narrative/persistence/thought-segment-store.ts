@@ -6,7 +6,7 @@ import { writeNarrativeBatch } from "./narrative-write-batches.js";
 
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, eq, inArray, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { ThoughtSegmentKind, ThoughtSegmentRecord } from "@mcode/contracts/models/thought-segment";
 import {
@@ -49,9 +49,13 @@ function rowToRecord(row: ThoughtSegmentRow): ThoughtSegmentRecord {
 /** Repository for thought segment creation and retrieval against SQLite. */
 export class ThoughtSegmentStore {
   private readonly orm: BunSQLiteDatabase;
+  private readonly insertStatement: ReturnType<ThoughtSegmentStore["buildInsertStatement"]>;
+  private readonly replaceStatement: ReturnType<ThoughtSegmentStore["buildInsertStatement"]>;
 
   constructor(db: Database) {
     this.orm = drizzle(db);
+    this.insertStatement = this.buildInsertStatement(false);
+    this.replaceStatement = this.buildInsertStatement(true);
   }
 
   /** Create a single thought segment record and return the fully-populated record. */
@@ -88,27 +92,55 @@ export class ThoughtSegmentStore {
   /** Insert multiple thought segment records in a single transaction. */
   bulkCreate(inputs: CreateThoughtSegmentInput[], replaceExisting = false): void {
     if (inputs.length === 0) return;
-    this.orm.transaction((tx) => {
+    this.orm.transaction(() => {
       for (const item of inputs) {
-        const { id, ...rest } = {
-          id: item.id ?? NodeCrypto.randomUUID(),
-          messageId: item.messageId,
-          text: item.text,
-          startedAt: item.startedAt,
-          endedAt: item.endedAt,
-          sortOrder: item.sortOrder,
-          isFinalResponse: item.isFinalResponse ?? 0,
-          kind: item.kind ?? "narration",
-        };
-        const write = tx.insert(thoughtSegments).values({ id, ...rest });
-        if (replaceExisting) write.onConflictDoUpdate({ target: thoughtSegments.id, set: rest }).run();
-        else write.onConflictDoNothing().run();
+        this.writePrepared(item, replaceExisting);
       }
     });
   }
   /** Commit one bounded prefix inside the owner transaction. */
   createBoundedBatch(inputs: readonly CreateThoughtSegmentInput[], limits: WriteBatchLimits, replaceExisting: boolean): WriteBatchResult {
-    return writeNarrativeBatch(inputs, limits, item => this.bulkCreate([item], replaceExisting));
+    return writeNarrativeBatch(inputs, limits, item => this.writePrepared(item, replaceExisting));
+  }
+
+  private buildInsertStatement(replaceExisting: boolean) {
+    const write = this.orm.insert(thoughtSegments).values({
+      id: placeholder("id"),
+      messageId: placeholder("messageId"),
+      text: placeholder("text"),
+      startedAt: placeholder("startedAt"),
+      endedAt: placeholder("endedAt"),
+      sortOrder: placeholder("sortOrder"),
+      isFinalResponse: placeholder("isFinalResponse"),
+      kind: placeholder("kind"),
+    });
+    if (!replaceExisting) return write.onConflictDoNothing().prepare();
+    return write.onConflictDoUpdate({
+      target: thoughtSegments.id,
+      set: {
+        messageId: sql`excluded.message_id`,
+        text: sql`excluded.text`,
+        startedAt: sql`excluded.started_at`,
+        endedAt: sql`excluded.ended_at`,
+        sortOrder: sql`excluded.sort_order`,
+        isFinalResponse: sql`excluded.is_final_response`,
+        kind: sql`excluded.kind`,
+      },
+    }).prepare();
+  }
+
+  private writePrepared(item: CreateThoughtSegmentInput, replaceExisting: boolean): void {
+    const statement = replaceExisting ? this.replaceStatement : this.insertStatement;
+    statement.run({
+      id: item.id ?? NodeCrypto.randomUUID(),
+      messageId: item.messageId,
+      text: item.text,
+      startedAt: item.startedAt,
+      endedAt: item.endedAt,
+      sortOrder: item.sortOrder,
+      isFinalResponse: item.isFinalResponse ?? 0,
+      kind: item.kind ?? "narration",
+    });
   }
 
   /** List all thought segments for a message, ordered by sort_order ascending. */

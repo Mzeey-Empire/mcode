@@ -80,6 +80,93 @@ describe("ToolCallRecordStore", () => {
     messageId = fixtures.messageId;
   });
 
+  it.each(["bulkCreate", "createBoundedBatch"])("%s preserves conflicts unless replacement is enabled, then updates every column", (method) => {
+    db.prepare(
+      "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence) SELECT 'msg-2', thread_id, role, content, timestamp, 2 FROM messages WHERE id = ?",
+    ).run(messageId);
+    const write = (input: CreateToolCallRecordInput, replaceExisting: boolean) => {
+      if (method === "bulkCreate") {
+        repo.bulkCreate([input], replaceExisting);
+      } else {
+        db.transaction(() => repo.createBoundedBatch(
+          [input], { maxRows: 1, maxBytes: 10_000, maxElapsedMs: 1_000 }, replaceExisting,
+        ))();
+      }
+    };
+    write({
+      toolCallId: "tool-conflict",
+      messageId,
+      toolName: "Read",
+      inputSummary: "Read file",
+      outputSummary: "",
+      status: "running",
+      startedAt: "2026-05-15T10:00:00Z",
+      sortOrder: 1,
+    }, false);
+    const original = repo.listByMessage(messageId);
+    const replacement: CreateToolCallRecordInput = {
+      toolCallId: "tool-conflict",
+      messageId: "msg-2",
+      parentToolCallId: "parent-tool",
+      toolName: "Agent",
+      displayName: "Reviewer",
+      providerAgentKey: "/root/reviewer",
+      subagentIdentityKey: "native-reviewer",
+      subagentProviderName: "Codex",
+      subagentPrompt: "Review the change",
+      subagentType: "reviewer",
+      subagentAgentId: "agent-2",
+      subagentDurationMs: 250,
+      model: "review-model",
+      reasoningEffort: "high",
+      inputSummary: "Review file",
+      outputSummary: "Review complete",
+      outputTruncated: true,
+      outputTotalBytes: 500,
+      outputArtifactPath: "review-output.txt",
+      exitCode: 0,
+      status: "completed",
+      background: true,
+      startedAt: "2026-05-15T10:01:00Z",
+      completedAt: "2026-05-15T10:01:01Z",
+      sortOrder: 3,
+    };
+
+    write(replacement, false);
+    expect(repo.listByMessage(messageId)).toEqual(original);
+    expect(repo.listByMessage("msg-2")).toEqual([]);
+
+    write(replacement, true);
+    expect(repo.listByMessage(messageId)).toEqual([]);
+    expect(repo.listByMessage("msg-2")).toEqual([{
+      id: "tool-conflict",
+      message_id: "msg-2",
+      parent_tool_call_id: "parent-tool",
+      tool_name: "Agent",
+      display_name: "Reviewer",
+      provider_agent_key: "/root/reviewer",
+      subagent_identity_key: "native-reviewer",
+      subagent_provider_name: "Codex",
+      subagent_prompt: "Review the change",
+      subagent_type: "reviewer",
+      subagent_agent_id: "agent-2",
+      subagent_duration_ms: 250,
+      model: "review-model",
+      reasoning_effort: "high",
+      input_summary: "Review file",
+      output_summary: "Review complete",
+      output_truncated: 1,
+      output_total_bytes: 500,
+      output_artifact_path: "review-output.txt",
+      exit_code: 0,
+      status: "completed",
+      background: true,
+      started_at: "2026-05-15T10:01:00Z",
+      completed_at: "2026-05-15T10:01:01Z",
+      sort_order: 3,
+    }]);
+  });
+
   it("creates and retrieves a tool call record", () => {
     const input: CreateToolCallRecordInput = {
       messageId,

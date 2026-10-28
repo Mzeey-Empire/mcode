@@ -300,6 +300,24 @@ describe("ConversationDisplayMaterializationStore", () => {
       .toEqual([{ id: "assistant-a" }, { id: "assistant-last" }]);
   });
 
+  it.each([
+    { createdAt: "2026-09-21T10:00:00.000Z", expectedContent: "Earlier timestamp" },
+    { createdAt: NOW, expectedContent: "First inserted" },
+  ])("resolves duplicate canonical message IDs by creation time then insertion order ($createdAt)", ({ createdAt, expectedContent }) => {
+    insertItem(db, "z-first-source", {
+      projection: "message", message: { ...message("shared", "assistant", 2), content: "First inserted" },
+    });
+    insertItem(db, "a-second-source", {
+      projection: "message", message: { ...message("shared", "assistant", 2), content: "Earlier timestamp" },
+    }, createdAt);
+    insertItem(db, "thought", directThought("thought-1", "shared"));
+
+    new ConversationDisplayMaterializationStore(db).materializeItems(["thought"]);
+
+    expect(db.prepare("SELECT id, content FROM messages").all()).toEqual([{ id: "shared", content: expectedContent }]);
+    expect(db.prepare("SELECT id, message_id FROM thought_segments").all()).toEqual([{ id: "thought-1", message_id: "shared" }]);
+  });
+
   it("preserves message updates between different resolutions of a shared canonical message ID", () => {
     insertItem(db, "a-explicit-source", {
       projection: "message", message: { ...message("shared", "assistant", 3), content: "Explicit source" },
