@@ -9,7 +9,7 @@ import { MessageSchema } from "@mcode/contracts/models/message";
 import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { type IAgentProvider, type IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
-import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases, createTestParentStartOwner } from "../../__tests__/agent-storage-fixture.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
@@ -49,7 +49,7 @@ afterEach(async () => {
   NodeFS.rmSync(directory, { recursive: true, force: true });
 });
 
-async function fixture(workerOwned: boolean) {
+async function fixture(mode: "store" | "worker") {
   const db = openAgentStorageTestDatabase();
   const writer = agentStorageTestWriter(db);
   const threads = new ThreadRepo(db, writer);
@@ -74,8 +74,13 @@ async function fixture(workerOwned: boolean) {
   const commands = new AgentRuntimeCommandPort();
   const plans = new PlanTurnService(threads, providers, new PlanQuestionService(messages, new PlanQuestionAnswersRepo(db, writer)), new PlanRepo(db, writer), new AgentTurnCommandPort(commands));
   const beforeCommit = { run: async () => {} };
+  const parentOwner = createTestParentStartOwner(db, publish);
   const owner: TurnParentStartOwner = { start: async ({ execution, ownerEpoch, providerId, parentTurn }) => {
     await beforeCommit.run();
+    if (mode === "store") {
+      await parentOwner.start({ execution, ownerEpoch, providerId, parentTurn });
+      return;
+    }
     const receipt = await client.transactSemantic({
       operationId: `${execution.executionId}:1`, execution, ordinal: 1,
       lease: { ownerEpoch, workerIndex: 0, workerGeneration: 1, leaseId: execution.executionId },
@@ -87,7 +92,7 @@ async function fixture(workerOwned: boolean) {
     threads, workspaces, messages, reverts, worktrees, new AttachmentService(), providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, writer, commands, canonical), undefined, undefined,
-    hostRuntime.platform, noModels, workerOwned ? owner : undefined,
+    hostRuntime.platform, noModels, owner,
   );
   const runtime: TurnRuntimeAdmissionAuthority = {
     reserve: () => ({ threadId: thread.id, turnExecutionId: NodeCrypto.randomUUID(), mutationReservationToken: NodeCrypto.randomUUID(), generation: 1 }),
@@ -117,9 +122,9 @@ async function fixture(workerOwned: boolean) {
   return { db, thread, threads, messages, reverts, revert, send, beforeCommit, publishedMessages };
 }
 
-describe.each([false, true])("revert note admission, worker owned = %s", (workerOwned) => {
+describe.each(["store", "worker"] as const)("revert note admission through %s", (mode) => {
   it("sends the literal note once while keeping persisted and published user content clean", async () => {
-    const f = await fixture(workerOwned);
+    const f = await fixture(mode);
     expect((await f.send()).request.message).toBe("What changed?");
     const id = await f.revert(["a.ts", "b.ts"]);
     const messageId = NodeCrypto.randomUUID();
@@ -132,7 +137,7 @@ describe.each([false, true])("revert note admission, worker owned = %s", (worker
   });
 
   it("skips both an undone revert and the Undo row", async () => {
-    const f = await fixture(workerOwned);
+    const f = await fixture(mode);
     const id = await f.revert(["a.ts"]);
     const undo = await f.revert(["a.ts"], { kind: "undo", undoesRevertId: id });
     expect((await f.send()).request.message).toBe("What changed?");
@@ -140,7 +145,7 @@ describe.each([false, true])("revert note admission, worker owned = %s", (worker
   });
 
   it("deduplicates in stable journal order and ignores unfinished, failed, and other-thread rows", async () => {
-    const f = await fixture(workerOwned);
+    const f = await fixture(mode);
     const first = await f.revert(["b.ts", "a.ts"]);
     const second = await f.revert(["a.ts", "c.ts"], { kind: "file" });
     f.db.run("UPDATE turn_reverts SET created_at = ? WHERE id = ?", ["2026-10-01T00:00:00.000Z", first]);
@@ -155,7 +160,7 @@ describe.each([false, true])("revert note admission, worker owned = %s", (worker
   });
 
   it("rolls back the notification and user message when the write fails, then retries", async () => {
-    const f = await fixture(workerOwned);
+    const f = await fixture(mode);
     const id = await f.revert(["a.ts"]);
     const messageId = NodeCrypto.randomUUID();
     f.db.run("CREATE TRIGGER fail_note AFTER UPDATE OF agent_notified_at ON turn_reverts BEGIN SELECT RAISE(ABORT, 'forced note failure'); END");
@@ -168,7 +173,7 @@ describe.each([false, true])("revert note admission, worker owned = %s", (worker
   });
 
   it("includes the note on an existing message resend without changing that message", async () => {
-    const f = await fixture(workerOwned);
+    const f = await fixture(mode);
     const existing = await f.messages.create(f.thread.id, "user", "Queued question", 2);
     await f.revert(["a.ts"]);
     const extra = { content: "Queued question", persistedUserMessage: { id: existing.id, sequence: existing.sequence, attachments: [], persistedAttachments: [] } };
@@ -179,7 +184,7 @@ describe.each([false, true])("revert note admission, worker owned = %s", (worker
   });
 
   it("leaves notices pending on provider-originated turns and includes them on internal wire overrides", async () => {
-    const f = await fixture(workerOwned);
+    const f = await fixture(mode);
     const id = await f.revert(["a.ts"]);
     expect((await f.send({ providerOriginated: true })).request.message).toBe("What changed?");
     expect(f.reverts.get(id)?.agentNotifiedAt).toBeNull();
@@ -192,7 +197,7 @@ describe.each([false, true])("revert note admission, worker owned = %s", (worker
 });
 
 it("stamps only the selected IDs when another revert commits before the parent start", async () => {
-  const f = await fixture(true);
+  const f = await fixture("worker");
   await f.revert(["a.ts"]);
   f.beforeCommit.run = async () => { await f.revert(["b.ts"]); f.beforeCommit.run = async () => {}; };
   expect((await f.send()).request.message).toBe("Note from Mcode: the user reverted your earlier changes to: a.ts (restored to their state before that turn).\nWhat changed?");
@@ -200,7 +205,7 @@ it("stamps only the selected IDs when another revert commits before the parent s
 });
 
 it("rejects an Undo racing the selected notice without saving its user message", async () => {
-  const f = await fixture(true);
+  const f = await fixture("worker");
   const id = await f.revert(["a.ts"]);
   f.beforeCommit.run = async () => { await f.revert(["a.ts"], { kind: "undo", undoesRevertId: id }); f.beforeCommit.run = async () => {}; };
   const messageId = NodeCrypto.randomUUID();

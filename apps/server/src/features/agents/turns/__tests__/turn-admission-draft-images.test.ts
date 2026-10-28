@@ -11,7 +11,7 @@ import type { StagedDraftImage } from "@mcode/contracts/models/next-message-draf
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { resolveThreadPlanFile } from "@mcode/shared";
 import { PlanFileWriter } from "../../planning/plan-file-writer.js";
-import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases, createTestParentStartOwner } from "../../__tests__/agent-storage-fixture.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
@@ -73,7 +73,11 @@ async function fixture(providerId: ProviderId = "codex", beforeCommit: () => Pro
   const canonical = new CanonicalAgentBoundary(db, writer, new CanonicalAgentWriterClient(writer), () => {});
   const commands = new AgentRuntimeCommandPort();
   const plans = new PlanTurnService(threads, providers, new PlanQuestionService(messages, new PlanQuestionAnswersRepo(db, writer)), new PlanRepo(db, writer), new AgentTurnCommandPort(commands));
-  const owner: TurnParentStartOwner = { start: async ({ parentTurn }) => { await beforeCommit(); await canonical.startParentTurn(parentTurn); } };
+  const parentOwner = createTestParentStartOwner(db);
+  const owner: TurnParentStartOwner = { start: async (input) => {
+    await beforeCommit();
+    await parentOwner.start(input);
+  } };
   const admission = new TurnAdmissionDispatchCoordinator(
     threads, workspaces, messages, new TurnRevertStore(db), worktrees, attachments, providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,

@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -13,6 +13,9 @@ import { openDatabase, openMemoryDatabase } from "../../../../../runtime/persist
 import { openReadOnlyDatabase } from "../../../../../runtime/persistence/sqlite/read-only-database.js";
 import { ApplicationDatabaseWriter } from "../../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { CanonicalAgentBoundary } from "../../../canonical/canonical-agent-boundary.js";
+import { CanonicalAgentStore } from "../../../canonical/canonical-agent-store.js";
+import { projectParentUserMessage } from "../../../canonical/canonical-parent-turn-write.js";
+import { MessageStore } from "../../persistence/message-store.js";
 import { CanonicalAgentWriterClient } from "../../../canonical/canonical-agent-writer-client.js";
 import { routePushSubscriptionRpc } from "../../../../../application/transport/push-subscription-rpc.js";
 import { addClient, removeClient } from "../../../../../application/transport/push.js";
@@ -219,11 +222,17 @@ it("upgrades completed history through the production writer and restores a mixe
     await writer.whenReady();
     reader = openReadOnlyDatabase(dbPath);
     const canonical = new CanonicalAgentBoundary(reader, writer, new CanonicalAgentWriterClient(writer), () => undefined);
-    await canonical.startParentTurn({
-      thread: { id: "healthy-thread", workspaceId: "workspace-v1", providerId: "devin", createdAt: "2026-01-01T00:00:00.000Z" },
-      turnId: "healthy-turn", executionId: "00000000-0000-4000-8000-000000000099", permissionMode: "supervised", providerIdentities: [],
-      userMessage: { kind: "create", messageId: "healthy-user", content: "Active ACP request", sequence: 1 },
-    });
+    const startDatabase = new Database(dbPath);
+    try {
+      new CanonicalAgentStore(startDatabase, () => undefined).startParentTurn({
+        thread: { id: "healthy-thread", workspaceId: "workspace-v1", providerId: "devin", createdAt: "2026-01-01T00:00:00.000Z" },
+        turnId: "healthy-turn", executionId: "00000000-0000-4000-8000-000000000099", permissionMode: "supervised", providerIdentities: [],
+        projectUserMessage: () => projectParentUserMessage(new MessageStore(startDatabase), "healthy-thread",
+          { kind: "create", messageId: "healthy-user", content: "Active ACP request", sequence: 1 }),
+      });
+    } finally {
+      startDatabase.close(true);
+    }
     addClient(client);
     const subscribe = () => routePushSubscriptionRpc("push.setThreadSubscriptions",
       { threadIds: ["healthy-thread", "thread-v1"], revisions: { "healthy-thread": { conversationRevision: 9999, rosterRevision: 9999 } } },

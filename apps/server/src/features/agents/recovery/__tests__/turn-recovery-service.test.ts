@@ -145,14 +145,14 @@ describe("TurnRecoveryService", () => {
     async function admit(command: SendMessageCommand): Promise<void> {
       if (!command.sourceTurnId) throw new Error("Retry must assign its returned turn identity");
       const persisted = await attachments.persist(THREAD_ID, command.attachments ?? []);
-      await runtimeSink.startParentTurn({
+      sink.startParentTurn({
         thread: { id: THREAD_ID, workspaceId: "workspace-recovery", providerId: "codex", createdAt: NOW },
         turnId: command.sourceTurnId, executionId: NodeCrypto.randomUUID(),
         permissionMode: "supervised", providerIdentities: [], retryOfExecutionId: command.retryOfExecutionId,
-        userMessage: { kind: "create", content: command.content, sequence: messageRepo.listByThread(THREAD_ID, 100).messages.length + 1,
-          attachments: persisted.stored, replyToMessageId: command.replyToMessageId,
-          quotedText: command.quotedText, mentions: command.mentions, previewAnnotations: command.previewAnnotations,
-          isInternal: command.internalUserMessage },
+        projectUserMessage: () => new MessageStore(db).create(THREAD_ID, "user", command.content,
+          messageRepo.listByThread(THREAD_ID, 100).messages.length + 1, persisted.stored,
+          command.replyToMessageId, command.quotedText, undefined, command.internalUserMessage,
+          command.mentions, command.previewAnnotations),
       });
     }
 

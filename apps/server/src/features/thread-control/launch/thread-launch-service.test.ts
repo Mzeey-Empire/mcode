@@ -19,6 +19,7 @@ import { ModelCacheRepo } from "../../providers/models/persistence/model-cache-r
 import { ModelSightingsRepo } from "../../providers/status/model-sightings-repo.js";
 import { DelegationTargetResolver } from "../../agents/collaboration/delegation-target-resolver.js";
 import { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-boundary.js";
+import { createTestParentStartOwner } from "../../agents/__tests__/agent-storage-fixture.js";
 import { CanonicalAgentWriterClient } from "../../agents/canonical/canonical-agent-writer-client.js";
 import { notifyCommittedCanonicalEvents } from "../../agents/canonical/committed-canonical-events.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
@@ -94,7 +95,7 @@ async function harness(coordinatorMode: "direct" | "worktree" = "direct", setup 
     attachments, providers, new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, runtime.writer, commands, canonical), environment,
     new FileService(workspaces, threads, worktrees, executor, host), host.platform, noModels,
-    { start: async ({ parentTurn }) => { await canonical.startParentTurn(parentTurn); } });
+    createTestParentStartOwner(runtime.database, notifyCommittedCanonicalEvents));
   const projects = new ProjectWorktreeService(threads, workspaces, runtime.writer, worktrees,
     new SandboxWorktreeCleanupPolicy(new WorktreeSafetyService(executor, host), repository, host));
   const threadService = new ThreadService(threads, projects, attachments, new HandoffStorage(), {

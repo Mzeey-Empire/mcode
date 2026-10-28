@@ -11,6 +11,7 @@ import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { CanonicalAgentBoundary } from "../canonical-agent-boundary.js";
 import { CanonicalAgentStore } from "../canonical-agent-store.js";
+import { CanonicalParentTurnWrite } from "../canonical-parent-turn-write.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -27,10 +28,12 @@ const start = { thread: { id: threadId, workspaceId: "workspace-1", providerId: 
   turnId, executionId, permissionMode: "supervised" as const, providerIdentities: [],
   userMessage: { kind: "create" as const, messageId: "user-1", content: "Question", sequence: 1 } };
 
-describe("main canonical operations through the sole writer", () => {
+describe("canonical runtime persistence", () => {
   let directory: string;
   let path: string;
   let reader: Database;
+  let startDatabase: Database;
+  let parents: CanonicalParentTurnWrite;
   let writer: ApplicationDatabaseWriter;
   let canonical: CanonicalAgentBoundary;
   let text: ParentAssistantTextCheckpointService;
@@ -49,20 +52,23 @@ describe("main canonical operations through the sole writer", () => {
     published = [];
     canonical = new CanonicalAgentBoundary(reader, writer, new CanonicalAgentWriterClient(writer),
       (events) => published.push([...events]));
+    startDatabase = new Database(path);
+    parents = new CanonicalParentTurnWrite(startDatabase, (events) => published.push([...events]));
     text = new ParentAssistantTextCheckpointService(reader, writer);
   });
 
   afterEach(async () => {
     await writer.close();
+    startDatabase.close(true);
     reader.close(true);
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
 
   it("commits starts atomically and continues following a rejected user-message projection", async () => {
-    await expect(canonical.startParentTurn({ ...start, userMessage: { kind: "existing", messageId: "missing" } }))
-      .rejects.toThrow("Queued user message not found");
+    expect(() => parents.start({ ...start, userMessage: { kind: "existing", messageId: "missing" } }))
+      .toThrow("Queued user message not found");
     expect(canonical.loadTurn(turnId)).toBeNull();
-    expect(await canonical.startParentTurn(start)).toMatchObject({ outcome: "committed" });
+    expect(parents.start(start)).toMatchObject({ outcome: "committed" });
     expect(canonical.loadCheckpoint(executionId)).toMatchObject({ phase: "running" });
     expect(new MessageRepo(reader, writer).findByIdInThread(threadId, "user-1")).toMatchObject({ content: "Question" });
     expect(() => reader.run("DELETE FROM messages")).toThrow(/readonly/);
@@ -79,7 +85,7 @@ describe("main canonical operations through the sole writer", () => {
       payload: { content: "Use staging" } });
     await steers.settle(steerId, { state: "delivery_unknown" });
     await steers.requeue(steerId, replacementId);
-    const resend = (turn: string, execution: string) => canonical.startParentTurn({ ...start, turnId: turn,
+    const resend = async (turn: string, execution: string) => parents.start({ ...start, turnId: turn,
       executionId: execution, resendOfSteerId: steerId,
       userMessage: { kind: "create", messageId: replacementId, content: "Use staging", sequence: 1 } });
 
@@ -92,7 +98,7 @@ describe("main canonical operations through the sole writer", () => {
   });
 
   it("resumes a partially committed terminal projection and preserves a single durable revision", async () => {
-    await canonical.startParentTurn(start);
+    parents.start(start);
     const messages = new MessageRepo(reader, writer);
     const message = await messages.create(threadId, "assistant", "Answer", 2);
     const narrative: NarrativeEntry[] = Array.from({ length: 100 }, (_, index) => ({
@@ -125,7 +131,7 @@ describe("main canonical operations through the sole writer", () => {
   });
 
   it("keeps a fsynced recovery journal until its import commits", async () => {
-    await canonical.startParentTurn(start);
+    parents.start(start);
     text.recoveryJournal.append([{ executionId, threadId, turnId, sequence: 1, text: "Recover me" }]);
     const journalPath = NodePath.join(directory, "app.sqlite.recovery", "parent-assistant-text", executionId + ".journal");
     await writer.setQueryOnlyForReliability(true);
@@ -145,7 +151,7 @@ describe("main canonical operations through the sole writer", () => {
     await new ConversationDisplayMaterializer(writer).runToCompletion();
     expect(canonical.loadConversationProjection(threadId, 10).messages.map((message) => message.content))
       .toEqual(["Legacy question", "Legacy answer"]);
-    await canonical.startParentTurn({ ...start, userMessage: { kind: "create", content: "New question", sequence: 3 } });
+    parents.start({ ...start, userMessage: { kind: "create", content: "New question", sequence: 3 } });
     published = [];
     await canonical.startCodexChildDelegation({ parentThreadId: threadId, parentTurnId: turnId,
       parentExecutionId: executionId, parentItemId: "toolCall:spawn", receiverThreadIds: ["native-child"], providerIdentities: [] });

@@ -52,6 +52,7 @@ import {
 import { appendSelectedTextComments, appendPlanComments } from "./selected-text-comment-append.js";
 import { ApprovalReviewPolicy, type ApprovalReviewDecision } from "./approval-review-policy.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
+import type { ExecutionParentStartContext } from "../execution/provider-execution-event-state.js";
 import type { ProviderSwitchService, ProviderSwitchTicket } from "./provider-switch-service.js";
 
 
@@ -169,7 +170,7 @@ export interface TurnParentStartOwner {
     readonly ownerEpoch: number;
     readonly providerId: string;
     readonly parentTurn: DataOnlyParentTurnStartInput;
-    readonly parentLive?: import("../execution/provider-execution-event-state.js").ExecutionParentStartContext;
+    readonly parentLive?: ExecutionParentStartContext;
     readonly publishParentStart?: boolean;
   }): Promise<void>;
 }
@@ -196,7 +197,6 @@ export interface PreparedTurnDispatch {
   readonly threadControl: ThreadControlLeaseDirective | null;
   readonly contextSeed: number;
   readonly contextWindow: number | null;
-  readonly workerOwned?: true;
   /** Discard any pooled provider session first, so a fresh-session turn cannot inherit its native history. */
   readonly replaceSession?: true;
   /** A switch whose history cannot fit the target: the turn ends with this error instead of reaching the provider. */
@@ -258,7 +258,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly files: FileService | undefined,
     private readonly platform: NodeJS.Platform,
     private readonly models: TurnModelCatalog,
-    private readonly parentStartOwner?: TurnParentStartOwner,
+    private readonly parentStartOwner: TurnParentStartOwner,
     private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
     private readonly providerSwitch?: ProviderSwitchService,
   ) {}
@@ -629,7 +629,6 @@ export class TurnAdmissionDispatchCoordinator {
       threadControl: this.threadControlDirective(prepared, sourceTurnId),
       contextSeed: prepared.thread.last_context_tokens ?? 0,
       contextWindow: prepared.thread.context_window,
-      ...(this.parentStartOwner ? { workerOwned: true as const } : {}),
       ...this.sessionDirectives(prepared),
     };
   }
@@ -921,18 +920,12 @@ export class TurnAdmissionDispatchCoordinator {
     return prepared.automaticAttachments ?? this.persistCommandAttachments(prepared.command);
   }
 
-  private async startParentTurn(input: DataOnlyParentTurnStartInput): Promise<void> {
-    await this.parentTurns.startParentTurn(input);
-    if (input.reopenThread) broadcast("thread.lifecycleChanged", { thread: this.requireThread(input.thread.id) });
-  }
-
   private async commitParentStart(
     prepared: PreparedCommand,
     lease: TurnRuntimeLease,
     sourceTurnId: string,
     input: DataOnlyParentTurnStartInput,
   ): Promise<void> {
-    if (!this.parentStartOwner) return this.startParentTurn(input);
     const precedingMessageId = input.userMessage.messageId;
     if (!precedingMessageId) throw new Error("Worker-owned turn needs its committed user message identity");
     const planFeature = this.planFeature(prepared.plan);

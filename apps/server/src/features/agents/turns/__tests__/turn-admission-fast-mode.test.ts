@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IAgentProvider, IProviderRegistry, ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
-import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases, createTestParentStartOwner } from "../../__tests__/agent-storage-fixture.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
@@ -80,7 +80,7 @@ async function fixture(providerId: ProviderId, models: TurnModelCatalog = catalo
     threads, workspaces, messages, new TurnRevertStore(db), worktrees, new AttachmentService(), providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, writer, commands, canonical), undefined, undefined,
-    hostRuntime.platform, models,
+    hostRuntime.platform, models, createTestParentStartOwner(db),
   );
   const runtime: TurnRuntimeAdmissionAuthority = {
     reserve: () => ({ threadId: thread.id, turnExecutionId: NodeCrypto.randomUUID(), mutationReservationToken: NodeCrypto.randomUUID(), generation: 1 }),

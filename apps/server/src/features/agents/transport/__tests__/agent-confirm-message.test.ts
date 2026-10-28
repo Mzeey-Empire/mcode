@@ -9,7 +9,7 @@ import * as NodeTimersPromises from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IAgentProvider, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
-import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases, createTestParentStartOwner } from "../../__tests__/agent-storage-fixture.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
@@ -72,7 +72,7 @@ function routerDeps(sendMessage: AgentRouterDeps["agentService"]["sendMessage"],
 
 async function fixture(
   beforeCommit: () => Promise<void> = async () => {},
-  startParentTurn: (commit: () => Promise<unknown>) => Promise<unknown> = (commit) => commit(),
+  startParentTurn?: TurnParentStartOwner["start"],
 ) {
   const db = openAgentStorageTestDatabase();
   const writer = agentStorageTestWriter(db);
@@ -94,9 +94,10 @@ async function fixture(
   const canonical = new CanonicalAgentBoundary(db, writer, new CanonicalAgentWriterClient(writer), () => {});
   const commands = new AgentRuntimeCommandPort();
   const plans = new PlanTurnService(threads, providers, new PlanQuestionService(messages, new PlanQuestionAnswersRepo(db, writer)), new PlanRepo(db, writer), new AgentTurnCommandPort(commands));
-  const owner: TurnParentStartOwner = { start: async ({ parentTurn }) => {
+  const parentOwner = createTestParentStartOwner(db);
+  const owner: TurnParentStartOwner = { start: async (input) => {
     await beforeCommit();
-    await startParentTurn(() => canonical.startParentTurn(parentTurn));
+    await (startParentTurn ?? parentOwner.start)(input);
   } };
   const admission = new TurnAdmissionDispatchCoordinator(
     threads, workspaces, messages, new TurnRevertStore(db), worktrees, new AttachmentService(), providers,
@@ -187,9 +188,18 @@ describe("agent.confirmMessage", () => {
     const failure = new Error("Execution worker lost");
     const write = Promise.withResolvers<unknown>();
     const outcome = write.promise.then(() => "committed", () => "failed");
-    const f = await fixture(undefined, async (commit) => {
+    const f = await fixture(undefined, async ({ execution, ownerEpoch, providerId, parentTurn }) => {
       f.db.run("BEGIN IMMEDIATE");
       if (!committed) f.db.run("DELETE FROM threads WHERE id = ?", [f.params.threadId]);
+      const commit = async () => {
+        const receipt = await new CanonicalAgentWriterClient(f.writer).transactSemantic({
+          operationId: `${execution.executionId}:1`, execution, ordinal: 1,
+          lease: { ownerEpoch, workerIndex: 0, workerGeneration: 1, leaseId: execution.executionId },
+          mutation: { kind: "begin", providerId, input: parentTurn },
+        }, () => {});
+        if (receipt.kind !== "committed") throw new Error(`Parent start ${receipt.kind}`);
+        return receipt;
+      };
       void commit().then(write.resolve, write.reject);
       throw failure;
     });

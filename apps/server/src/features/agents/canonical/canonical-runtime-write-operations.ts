@@ -1,10 +1,5 @@
 import { z } from "zod";
 import { AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CanonicalAgentEventEnvelopeSchema, CollaborationActionSchema, ProviderIdentitySchema, InterruptionCauseSchema } from "@mcode/contracts/compat/agent-model";
-import { MessageMentionSchema } from "@mcode/contracts/models/mention";
-import { PreviewAnnotationBundleSchema } from "@mcode/contracts/models/browser-preview";
-import { SelectedTextCommentsSchema } from "@mcode/contracts/models/selected-text-comment";
-import { StoredAttachmentSchema } from "@mcode/contracts/models/attachment";
-import { SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
 import { TurnOutcomeSchema } from "@mcode/contracts/models/turn-outcome";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 
@@ -36,34 +31,8 @@ export const CanonicalRuntimeCommitResultSchema = z.object({
   events: z.array(CanonicalAgentEventEnvelopeSchema),
 });
 
-/** Data-only parent start, including the user-message projection in the same transaction. */
-export const CanonicalRuntimeParentStartSchema = z.object({
-  thread: z.object({ id: identity, workspaceId: identity, providerId: identity, createdAt: z.string() }),
-  turnId: identity, executionId: identity, permissionMode: z.enum(["supervised", "full"]),
-  approvalReviewMode: z.enum(["manual", "automatic"]).optional(), approvalReviewReason: z.string().optional(),
-  providerIdentities: z.array(ProviderIdentitySchema), retryOfExecutionId: identity.optional(),
-  resendOfSteerId: z.string().uuid().optional(),
-  revertNoticeIds: z.array(z.string().uuid()).optional(),
-  reopenThread: z.boolean().optional(), answeredPlanQuestionMessageId: identity.optional(),
-  planImplement: z.object({ requestId: z.string().uuid() }).optional(),
-  planCommentIds: z.array(z.string().uuid()).max(128).optional(),
-  userMessage: z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("existing"), messageId: identity }),
-    z.object({ kind: z.literal("create"), messageId: identity.optional(), content: z.string(),
-      sequence: z.number().int().nonnegative(), attachments: z.array(StoredAttachmentSchema()).optional(),
-      replyToMessageId: z.string().optional(), quotedText: z.string().optional(),
-      mentions: z.array(MessageMentionSchema()).optional(), previewAnnotations: PreviewAnnotationBundleSchema().optional(),
-      origin: z.discriminatedUnion("type", [z.object({ type: z.literal("composer") }),
-        z.object({ type: z.literal("thread"), sourceThreadId: identity, sourceTurnId: identity,
-          sourceProviderId: identity })]).optional(),
-      selectedTextComments: SelectedTextCommentsSchema().optional(),
-      systemNotice: SystemNoticeMetadataSchema().optional(), isInternal: z.boolean().optional() }),
-  ]),
-});
-
 /** Main runtime mutations whose complete transaction executes on the writer connection. */
 export const canonicalRuntimeWriteOperations = {
-  parentStart: runtimeOperation("canonical.parentStart", CanonicalRuntimeParentStartSchema, CanonicalRuntimeCommitResultSchema),
   interruptLostExecution: runtimeOperation("canonical.interruptLostExecution", z.object({
     threadId: identity, turnId: identity, executionId: identity, reason: z.string(), cause: InterruptionCauseSchema,
     recoveryIncidentId: identity, assignedMessageId: identity.optional(), endedAt: z.string().datetime().optional(),

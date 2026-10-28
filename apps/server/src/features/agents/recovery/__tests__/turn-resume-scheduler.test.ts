@@ -30,7 +30,7 @@ import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../../orchestration/agent-turn-command-port.js";
 import { ThreadService } from "../../../thread-control/lifecycle/thread-service.js";
 import { HandoffStorage } from "../../../handoff/persistence/handoff-storage.js";
-import { agentStorageTestWriter, closeAgentStorageTestDatabases, openAgentStorageTestDatabase } from "../../__tests__/agent-storage-fixture.js";
+import { agentStorageTestWriter, closeAgentStorageTestDatabases, openAgentStorageTestDatabase, createTestParentStartOwner } from "../../__tests__/agent-storage-fixture.js";
 import { CanonicalAgentStore } from "../../canonical/canonical-agent-store.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
@@ -150,9 +150,9 @@ describe("TurnResumeScheduler", () => {
       expect(published.at(-1)).toEqual({ threadId: THREAD_ID, resume: null });
       await scheduler.unschedule(command.threadId);
       if (!command.sourceTurnId) throw new Error("Resume requires an attempt identity");
-      await boundary.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-resume", providerId: "codex", createdAt: NOW },
+      sink.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-resume", providerId: "codex", createdAt: NOW },
         turnId: command.sourceTurnId, executionId: NodeCrypto.randomUUID(), permissionMode: "supervised", providerIdentities: [],
-        retryOfExecutionId: command.retryOfExecutionId, userMessage: { kind: "create", content: command.content, sequence: 2 } });
+        retryOfExecutionId: command.retryOfExecutionId, projectUserMessage: () => messages.create(THREAD_ID, "user", command.content, 2) });
     });
     scheduler = new TurnResumeScheduler(store, recovery, dispatch, (event) => published.push(event), clock);
   });
@@ -255,13 +255,14 @@ describe("TurnResumeScheduler", () => {
     const commands = new AgentRuntimeCommandPort();
     const plans = new PlanTurnService(threads, providers,
       new PlanQuestionService(messageRepo, new PlanQuestionAnswersRepo(db, writer)), new PlanRepo(db, writer), new AgentTurnCommandPort(commands));
+    const parentOwner = createTestParentStartOwner(db);
     const admission = new TurnAdmissionDispatchCoordinator(threads, workspaces, messageRepo, new TurnRevertStore(db),
       new GitWorktreeService(workspaces, new FakeGitExecutor(), hostRuntime), new AttachmentService(), providers,
       new ProviderAvailabilityService(settings, providers), boundary, settings, plans,
       new GoalLifecycleService(threads, providers, writer, commands, boundary), undefined, undefined, hostRuntime.platform, noModels,
-      { start: async ({ parentTurn }) => {
+      { start: async (start) => {
         if (reschedule) await scheduler.schedule(input("2026-10-11T12:02:00.000Z"));
-        await boundary.startParentTurn(parentTurn);
+        await parentOwner.start(start);
       } }, scheduler);
     const runtime: TurnRuntimeAdmissionAuthority = {
       reserve: () => ({ threadId: THREAD_ID, turnExecutionId: NodeCrypto.randomUUID(), mutationReservationToken: NodeCrypto.randomUUID(), generation: 1 }),

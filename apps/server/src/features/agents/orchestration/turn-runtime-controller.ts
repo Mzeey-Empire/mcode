@@ -1683,10 +1683,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       return this.providerTurnAdmissionFailure(request.threadId, error);
     }
     if (admitted.kind !== "dispatch") return { kind: "declined", reason: "unavailable" };
-    if (!admitted.workerOwned) {
-      await this.failPreparedTurnDispatch(admitted, new Error("Provider-started turns require the worker event route"));
-      return { kind: "declined", reason: "unavailable" };
-    }
     try {
       await this.prepareRuntimeDispatch(admitted);
       await this.activatePreparedCommandEffect(admitted);

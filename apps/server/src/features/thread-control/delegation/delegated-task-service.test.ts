@@ -39,6 +39,8 @@ import { AgentService } from "../../agents/orchestration/agent-service.js";
 import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../../agents/orchestration/agent-turn-command-port.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
 import { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-boundary.js";
+import { createTestParentStartOwner } from "../../agents/__tests__/agent-storage-fixture.js";
+import { MessageStore } from "../../agents/conversation/persistence/message-store.js";
 import { CanonicalAgentStore } from "../../agents/canonical/canonical-agent-store.js";
 import { CanonicalAgentWriterClient } from "../../agents/canonical/canonical-agent-writer-client.js";
 import { notifyCommittedCanonicalEvents, subscribeCommittedCanonicalEvents } from "../../agents/canonical/committed-canonical-events.js";
@@ -131,7 +133,7 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
     attachments, providers, new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, runtime.writer, commands, canonical), environment,
     new FileService(workspaces, threads, worktrees, executor, host), host.platform, noModels,
-    { start: async ({ parentTurn }) => { await canonical.startParentTurn(parentTurn); } });
+    createTestParentStartOwner(runtime.database, notifyCommittedCanonicalEvents));
   const projects = new ProjectWorktreeService(threads, workspaces, runtime.writer, worktrees,
     new SandboxWorktreeCleanupPolicy(new WorktreeSafetyService(executor, host), repository, host));
   const threadService = new ThreadService(threads, projects, attachments, new HandoffStorage(), {
@@ -228,10 +230,10 @@ type Fixture = Awaited<ReturnType<typeof harness>>;
 
 async function startCoordinator(f: Fixture) {
   const turnId = NodeCrypto.randomUUID();
-  await f.canonical.startParentTurn({
+  f.canonicalStore.startParentTurn({
     thread: { id: f.coordinator.id, workspaceId: f.workspace.id, providerId: "codex", createdAt: new Date().toISOString() },
     turnId, executionId: NodeCrypto.randomUUID(), permissionMode: "full", providerIdentities: [],
-    userMessage: { kind: "create", messageId: NodeCrypto.randomUUID(), content: "Human turn", sequence: 1 },
+    projectUserMessage: () => new MessageStore(f.runtime.database).create(f.coordinator.id, "user", "Human turn", 1),
   });
   f.active.add(f.coordinator.id);
   return turnId;
@@ -385,11 +387,12 @@ describe("Coordinator task notices", { timeout: 30_000 }, () => {
     const original = f.canonical.loadTurn(task.taskId);
     if (!original?.executionId) throw new Error("Expected original execution");
     const attemptId = NodeCrypto.randomUUID();
-    await f.canonical.startParentTurn({
+    const childThreadId = task.threadId;
+    f.canonicalStore.startParentTurn({
       thread: { id: task.threadId, workspaceId: f.workspace.id, providerId: "codex", createdAt: new Date().toISOString() },
       turnId: attemptId, executionId: NodeCrypto.randomUUID(), retryOfExecutionId: original.executionId,
       permissionMode: "full", providerIdentities: [],
-      userMessage: { kind: "create", messageId: NodeCrypto.randomUUID(), content: "Resume", sequence: 3 },
+      projectUserMessage: () => new MessageStore(f.runtime.database).create(childThreadId, "user", "Resume", 3),
     });
     await finish(f, task.threadId, attemptId, "completed", { by: "user" }, "Replacement complete");
     w.wake.nudge(f.coordinator.id);
@@ -809,11 +812,12 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
       providerId: "codex", providerIdentities: [], outcome: "interrupted", projectTurn: () => ({ message: null, narrative: [] }),
     });
     const attemptId = NodeCrypto.randomUUID();
-    await f.canonical.startParentTurn({
+    const childThreadId = task.threadId;
+    f.canonicalStore.startParentTurn({
       thread: { id: task.threadId, workspaceId: f.workspace.id, providerId: "codex", createdAt: new Date().toISOString() },
       turnId: attemptId, executionId: NodeCrypto.randomUUID(), retryOfExecutionId: original.executionId,
       permissionMode: "full", providerIdentities: [],
-      userMessage: { kind: "create", messageId: NodeCrypto.randomUUID(), content: "Continue", sequence: 2 },
+      projectUserMessage: () => new MessageStore(f.runtime.database).create(childThreadId, "user", "Continue", 2),
     });
     expect(requireTask(await f.service.status(f.source, { taskId: task.taskId })).state)
       .toEqual({ status: "working", phase: "running" });
@@ -945,10 +949,11 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
       providerId: "codex", providerIdentities: [], outcome: "completed", projectTurn: () => ({ message, narrative: [] }),
     });
     const laterTurnId = NodeCrypto.randomUUID();
-    await f.canonical.startParentTurn({
+    const childThreadId = task.threadId;
+    f.canonicalStore.startParentTurn({
       thread: { id: task.threadId, workspaceId: f.workspace.id, providerId: "codex", createdAt: new Date().toISOString() },
       turnId: laterTurnId, executionId: NodeCrypto.randomUUID(), permissionMode: "full", providerIdentities: [],
-      userMessage: { kind: "create", messageId: NodeCrypto.randomUUID(), content: "Another task", sequence: 3 },
+      projectUserMessage: () => new MessageStore(f.runtime.database).create(childThreadId, "user", "Another task", 3),
     });
     const completed = { status: "finished", outcome: "completed", summary: "Review complete" };
     expect(await f.service.status(f.source, { taskId: task.taskId }))
@@ -997,10 +1002,10 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     const f = await harness();
     const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
     const executionId = NodeCrypto.randomUUID();
-    await f.canonical.startParentTurn({
+    f.canonicalStore.startParentTurn({
       thread: { id: f.coordinator.id, workspaceId: f.workspace.id, providerId: "codex", createdAt: new Date().toISOString() },
       turnId: f.source.sourceTurnId, executionId, permissionMode: "full", providerIdentities: [],
-      userMessage: { kind: "create", messageId: NodeCrypto.randomUUID(), content: "Review", sequence: 1 },
+      projectUserMessage: () => new MessageStore(f.runtime.database).create(f.coordinator.id, "user", "Review", 1),
     });
     const message = await f.messages.create(f.coordinator.id, "assistant", "Delegating", 2);
     const record = new ToolCallRecordStore(f.runtime.database).create({
@@ -1064,10 +1069,10 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
   it("keeps native children on the native stop path when there is no delegated receipt", async () => {
     const f = await harness();
     const executionId = NodeCrypto.randomUUID();
-    await f.canonical.startParentTurn({
+    f.canonicalStore.startParentTurn({
       thread: { id: f.coordinator.id, workspaceId: f.workspace.id, providerId: "codex", createdAt: new Date().toISOString() },
       turnId: f.source.sourceTurnId, executionId, permissionMode: "full", providerIdentities: [],
-      userMessage: { kind: "create", messageId: NodeCrypto.randomUUID(), content: "Start native child", sequence: 1 },
+      projectUserMessage: () => new MessageStore(f.runtime.database).create(f.coordinator.id, "user", "Start native child", 1),
     });
     const child = await f.canonical.startCodexChildDelegation({
       parentThreadId: f.coordinator.id, parentTurnId: f.source.sourceTurnId, parentExecutionId: executionId,

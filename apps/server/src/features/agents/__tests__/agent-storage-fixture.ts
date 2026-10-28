@@ -5,8 +5,24 @@ import type { Database } from "bun:sqlite";
 import { openMigratedTestDatabase } from "../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { leaseWriterWorker } from "../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
+import type { CanonicalAgentEventPublisher } from "../canonical/canonical-agent-store.js";
+import { CanonicalParentTurnWrite } from "../canonical/canonical-parent-turn-write.js";
+import type { TurnParentStartOwner } from "../turns/turn-admission-dispatch-coordinator.js";
 
 const fixtures = new Map<Database, { writer: ApplicationDatabaseWriter; directory: string; producers: Set<() => Promise<void>> }>();
+
+/** Commit parent starts on the fixture database without an execution worker. */
+export function createTestParentStartOwner(
+  db: Database,
+  publish: CanonicalAgentEventPublisher = () => {},
+): TurnParentStartOwner {
+  const parents = new CanonicalParentTurnWrite(db, publish);
+  return {
+    start: async ({ parentTurn }) => {
+      parents.start(parentTurn);
+    },
+  };
+}
 
 /** Temporary full-schema database with a real asynchronous writer for service integration tests. */
 export function openAgentStorageTestDatabase(): Database {

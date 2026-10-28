@@ -9,7 +9,7 @@ import { CanonicalAgentStore, publishCanonicalAgentEvents, type CanonicalAgentEv
 import { canonicalRuntimeWriteOperations } from "./canonical-runtime-write-operations.js";
 import { ConversationDisplayMaterializer } from "../conversation/migrations/conversation-display-materializer.js";
 import type { CanonicalProviderWriteInput } from "./canonical-agent-writer-protocol.js";
-import type { DataOnlyParentTurnStartInput, LostParentExecutionInput } from "./canonical-parent-turn-write.js";
+import type { LostParentExecutionInput } from "./canonical-parent-turn-write.js";
 
 export * from "./canonical-agent-store.js";
 
@@ -59,11 +59,6 @@ export class CanonicalAgentBoundary {
     const receipt = await this.canonicalWriter.classifyParentNarrativeRecovery(operationId, input);
     await this.canonicalWriter.acknowledgeOperation(input.executionId, operationId);
     return receipt;
-  }
-
-  /** Commit user-message and lifecycle data together without caller callbacks. */
-  async startParentTurn(input: DataOnlyParentTurnStartInput) {
-    return this.mutate(canonicalRuntimeWriteOperations.parentStart, input);
   }
 
   /** Reconstruct and terminalize one lost execution on the writer's connection. */
