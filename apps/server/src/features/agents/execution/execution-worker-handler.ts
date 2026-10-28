@@ -1,5 +1,6 @@
 import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
 import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { resolveBrowserNarrativeTool } from "@mcode/contracts/models/browser-narrative";
 import { type AgentProgressPosition } from "@mcode/contracts/compat/agent-model";
 import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { type PlanQuestion } from "@mcode/contracts/models/plan-questions";
@@ -17,6 +18,7 @@ import type {
 import type { CodexSystemWriterIntent } from "../canonical/canonical-codex-system-error-projection.js";
 import type { CanonicalAgentCommitResult } from "../canonical/canonical-agent-boundary.js";
 import type { ProviderEventIngressEvent } from "../../providers/composition/provider-event-ingress.js";
+import { BrowserNarrativeEventSanitizer } from "../../browser-automation/index.js";
 import type {
   ParentAssistantTextCheckpointInput,
   ParentAssistantTextCheckpointResult,
@@ -203,6 +205,7 @@ interface ExecutionState {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
   readonly providerId: string;
+  readonly browserToolNames: Map<string, string>;
   parentEvents?: ProviderExecutionEventState;
   nextOrdinal: number;
   phase: "running" | "stopping" | "finalized" | "poisoned";
@@ -224,6 +227,9 @@ interface PreparedExecutionRequest {
  */
 export class ExecutionWorkerHandler {
   private readonly states = new Map<string, ExecutionState>();
+  private readonly browserNarrativeEvents = new BrowserNarrativeEventSanitizer(
+    (threadId, toolCallId) => this.states.get(threadId)?.browserToolNames.get(toolCallId),
+  );
 
   constructor(private readonly writer: ExecutionSemanticWriter, private readonly files = new ExecutionWorkerFileEvidence()) {}
 
@@ -362,6 +368,7 @@ export class ExecutionWorkerHandler {
   }
 
   private prepareRequest(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): PreparedExecutionRequest | undefined {
+    request = this.sanitizeRequest(request, state);
     const command = request.command;
     if (command.kind === "finish-from-state") return this.prepareSyntheticFinish(request, command, state);
     if (!state.parentEvents || command.kind !== "event") return { request };
@@ -381,6 +388,37 @@ export class ExecutionWorkerHandler {
       parentLive: effects, livePublication: [parentEvent.publication] } }, parentEvent, candidate };
   }
 
+  private sanitizeRequest(
+    request: ExecutionWorkerRequest<WorkerCommand>,
+    state: ExecutionState,
+  ): ExecutionWorkerRequest<WorkerCommand> {
+    const command = request.command;
+    if (command.kind === "event") {
+      const events = command.events.map((draft) => this.sanitizeProviderDraft(draft, state));
+      return { ...request, command: { ...command, events } };
+    }
+    if ((command.kind === "finish-live-event" || command.kind === "post-terminal-event") && command.providerEvent) {
+      const events = command.providerEvent.events.map((draft) => this.sanitizeProviderDraft(draft, state));
+      return { ...request, command: { ...command, providerEvent: { ...command.providerEvent, events } } };
+    }
+    return request;
+  }
+
+  private sanitizeProviderDraft(draft: ProviderEventDraft, state: ExecutionState): ProviderEventDraft {
+    const payload = draft.payload;
+    if (payload.type !== "item.recorded" || payload.item.payload.projection !== "providerRuntimeEvent") return draft;
+    const runtime = ProviderRuntimeEventSchema().safeParse(payload.item.payload.runtimeEvent);
+    if (!runtime.success) return draft;
+    const event = runtime.data.event;
+    if (event.type === "toolUse" && resolveBrowserNarrativeTool(event.toolName)) {
+      state.browserToolNames.set(event.toolCallId, event.toolName);
+    }
+    const sanitized = this.browserNarrativeEvents.sanitize(event);
+    if (sanitized === event) return draft;
+    return { ...draft, payload: { ...payload, item: { ...payload.item,
+      payload: { ...payload.item.payload, runtimeEvent: { ...runtime.data, event: sanitized } },
+    } } };
+  }
 
   private prepareSyntheticFinish(
     request: ExecutionWorkerRequest<WorkerCommand>,
@@ -515,6 +553,7 @@ export class ExecutionWorkerHandler {
       execution: request.execution,
       lease: request.lease,
       providerId: command.providerId,
+      browserToolNames: new Map(),
       ...parent,
       nextOrdinal: 2,
       phase: "running",

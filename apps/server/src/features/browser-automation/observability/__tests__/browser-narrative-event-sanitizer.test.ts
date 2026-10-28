@@ -46,7 +46,7 @@ describe("BrowserNarrativeEventSanitizer", () => {
   });
 
   it("preserves unrelated tool events", () => {
-    const sanitizer = new BrowserNarrativeEventSanitizer();
+    const sanitizer = new BrowserNarrativeEventSanitizer(() => undefined);
     const event = {
       type: AgentEventType.ToolUse,
       threadId: "thread-1",
