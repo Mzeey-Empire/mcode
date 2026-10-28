@@ -1914,11 +1914,18 @@ function isCompletedOutcome(outcome) {
   return outcome === undefined || outcome === "completed";
 }
 
-function hasSharedStopResult(stopResults, threadId) {
+/** Whether two concurrent agent.stop results describe one cancelled stop of the same execution. */
+export function hasSharedStopResult(stopResults, threadId) {
   if (!Array.isArray(stopResults) || stopResults.length !== 2) return false;
   const cancelled = cancelledStopResult(stopResults, threadId);
   return cancelled !== null
-    && stopResults.every((result) => result === cancelled || isTerminalStopPeer(result, cancelled, threadId));
+    && stopResults.every((result) => isSharedStopPeer(result, cancelled, threadId) || isTerminalStopPeer(result, cancelled, threadId));
+}
+
+// The server shares one in-flight stop per thread, so a caller that arrives while it runs
+// receives its own copy of the same cancelled result.
+function isSharedStopPeer(result, cancelled, threadId) {
+  return isCancelledStopResult(result, threadId) && result.turnExecutionId === cancelled.turnExecutionId;
 }
 
 function cancelledStopResult(stopResults, threadId) {
@@ -1926,8 +1933,7 @@ function cancelledStopResult(stopResults, threadId) {
   return stopResults.find((result) => isCancelledStopResult(result, threadId)) ?? null;
 }
 
-// agent.stop terminalizes the turn synchronously, so a concurrent peer can only
-// observe the same execution as already terminal rather than win the same stop.
+// A caller that arrives after the shared stop settles observes the execution as already terminal.
 function isTerminalStopPeer(result, cancelled, threadId) {
   return result?.status === "already-terminal"
     && result.threadId === threadId
