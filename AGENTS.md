@@ -86,6 +86,24 @@ Before calling frontend or feature work done, verify all applicable dimensions:
 - **Timeline**: Check that narrative indicators, typing state, and turn footers transition cleanly. See **[docs/internals/conversation/narrative-pipeline.md](docs/internals/conversation/narrative-pipeline.md)**.
 - **Docs**: Check whether the change makes existing docs inaccurate. Apply the [documentation rules](#documentation) before adding anything.
 
+## Rules and what enforces them
+
+Mcode must feel snappy and look like one product. Where a rule can be checked, `bun run lint` checks it, and the lint message names the fix.
+
+| Rule | Enforced by |
+| --- | --- |
+| Paint first: an input's direct feedback (hover, press, selection) paints in the next frame; heavier work it causes follows on a later frame. | Judgment and evidence: count the React work done synchronously in the input's event and record a live pointer sweep. No automated check exists. |
+| One overlay per list: rows render `TooltipTrigger handle={...}` against one shared root, because a root per row builds its popup inside the hover. | `mcode/no-row-overlay-root` on row files, with a per-file baseline for existing rows. |
+| Use Mcode tooltips, not native `title`, so tooltips share one look and delay. | `mcode/no-native-title-tooltip` |
+| Truncate with a fade, not an ellipsis. | `mcode/no-ellipsis-truncation` |
+| Use semantic colour roles and elevation tokens, so themes stay consistent. | `mcode/no-raw-color`, `mcode/no-raw-shadow` |
+| Stack with `z-(--layer-*)` tokens, so layers do not fight. | `mcode/no-numeric-z-index` |
+| Size text with type roles. | `mcode/no-arbitrary-text-size` |
+| Build contract objects in tests with the shared builders, so a new field changes one file. | `mcode/use-test-builder` |
+| Mock the web transport through its shared fake. | `mcode/no-inline-module-mock` |
+| Test behaviour, not source text. | `mcode/no-source-text-test` |
+| Use fake timers instead of real sleeps in web tests. | `mcode/no-real-timer-sleep` |
+
 ## Dev servers & Runtime contract
 
 - Run `bun install` before `bun run agent:setup`. Setup creates an empty `.dev/db/app.sqlite` when none exists, creates or validates `.dev/fixture-repo`, and builds runtime bundles. Run it only when those artifacts are absent or stale.
