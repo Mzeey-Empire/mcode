@@ -1,5 +1,3 @@
-import { createContext } from "react";
-
 /** How long the list must stay still after its last scroll event before hover may open a preview. */
 export const PREVIEW_SCROLL_SETTLE_MS = 150;
 
@@ -74,6 +72,3 @@ export class PreviewScrollGuard {
     this.blocked = false;
   };
 }
-
-/** The sidebar list's guard. Null outside a list, where nothing scrolls the rows. */
-export const PreviewScrollGuardContext = createContext<PreviewScrollGuard | null>(null);

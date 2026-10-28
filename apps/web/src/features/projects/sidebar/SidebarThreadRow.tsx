@@ -1,8 +1,8 @@
 import { forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type CSSProperties } from "react";
-import { Check, GitBranch, Laptop, RefreshCw, Undo2 } from "lucide-react";
+import { Check, Laptop, RefreshCw, Undo2 } from "lucide-react";
 import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
 import { MoreIcon } from "@/components/ui/icon-map";
-import { Tooltip, TooltipContent, TooltipTrigger, type TooltipActions, type TooltipChangeDetails } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorktreeModeIcon } from "@/components/icons/WorktreeModeIcon";
 import { ProviderIcon, ProviderIconStack, providerLabel } from "@/components/ui/provider-icon";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ import type { SidebarItem } from "./sidebar-model";
 import type { InlineEditState, SidebarProviderAvailability, SidebarRowContext } from "./sidebar-row-context";
 import { PullRequestChip, PullRequestList } from "./PullRequestChip";
 import { useCompletionStore } from "./completion-store";
-import { PreviewScrollGuardContext } from "./preview-scroll-guard";
+import { ThreadPreviewHandleContext } from "./SidebarThreadPreview";
 import type { CompletionEntry } from "./completion-machine";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
@@ -791,106 +791,8 @@ function ThreadRowPreview({
   workspaceName,
   thread,
 }: { isEditing: boolean; row: React.ReactElement; workspaceName: string; thread: WorkspaceThread }) {
-  const onOpenChange = useScrollGuardedOpenChange();
-  if (isEditing) return row;
-  return (
-    <Tooltip onOpenChange={onOpenChange.handle} actionsRef={onOpenChange.actionsRef}>
-      <TooltipTrigger render={row} />
-      <TooltipContent side="right" align="start" sideOffset={8} className="max-w-none p-3">
-        <SidebarThreadPreview workspaceName={workspaceName} thread={thread} />
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-/** Rejects hover opens while the list scrolls and lets a scroll close a preview that hover opened. */
-function useScrollGuardedOpenChange() {
-  const guard = useContext(PreviewScrollGuardContext);
-  const actionsRef = useRef<TooltipActions>(null);
-  const untrackRef = useRef<(() => void) | undefined>(undefined);
-  useEffect(() => () => untrackRef.current?.(), []);
-  const handle = useCallback((open: boolean, details: TooltipChangeDetails) => {
-    if (open && guard && !guard.allowsOpen(details.reason)) {
-      details.cancel();
-      return;
-    }
-    untrackRef.current?.();
-    untrackRef.current = open && guard && details.reason === "trigger-hover"
-      ? guard.trackHoverOpen(() => actionsRef.current?.close())
-      : undefined;
-  }, [guard]);
-  return { handle, actionsRef };
-}
-
-function SidebarThreadPreview({
-  workspaceName,
-  thread,
-}: {
-  workspaceName: string;
-  thread: WorkspaceThread;
-}) {
-  const checkoutLabel = resolveThreadCheckoutLabel(thread);
-
-  return (
-    <div
-      data-testid={`thread-preview-${thread.id}`}
-      className="w-64 space-y-2 text-ink"
-    >
-      <div className="min-w-0 font-medium text-xs leading-5">
-        {thread.title}
-      </div>
-      <div className="grid gap-1.5">
-        <div className="text-xs text-muted">
-          Updated {formatLifecycleDate(thread.updated_at)}
-        </div>
-        {thread.user_completed_at !== null ? (
-          <>
-            <div className="text-xs text-muted">
-              Completed {formatLifecycleDate(thread.user_completed_at)}
-            </div>
-            {thread.cleanup_state === "blocked" ? (
-              <div className="text-xs text-destructive" role="status">
-                Cleanup blocked: {thread.cleanup_reason ?? "User action is required."}
-              </div>
-            ) : thread.cleanup_state === "queued" ? (
-              <div className="text-xs text-muted" role="status">
-                Cleanup queued
-              </div>
-            ) : thread.cleanup_state === "retrying" ? (
-              <div className="text-xs text-muted" role="status">
-                Retrying cleanup
-              </div>
-            ) : (
-              <div className="text-xs text-muted">
-                {thread.scheduled_deletion_at
-                  ? `Deletes ${formatLifecycleDate(thread.scheduled_deletion_at)}`
-                  : "Automatic deletion disabled"}
-              </div>
-            )}
-          </>
-        ) : null}
-        <div
-          aria-label={`Project, ${workspaceName}`}
-          className="flex min-w-0 items-center gap-2"
-        >
-          <ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} />
-          <span className="text-fade text-xs">{workspaceName}</span>
-        </div>
-        <div
-          aria-label={`Branch, ${checkoutLabel}`}
-          className="flex min-w-0 items-center gap-2"
-        >
-          <GitBranch size={13} aria-hidden className="shrink-0 opacity-75" />
-          <span className="text-fade font-mono text-xs">{checkoutLabel}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function formatLifecycleDate(iso: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(iso));
+  const handle = useContext(ThreadPreviewHandleContext);
+  const payload = useMemo(() => ({ thread, workspaceName }), [thread, workspaceName]);
+  if (isEditing || !handle) return row;
+  return <TooltipTrigger handle={handle} payload={payload} render={row} />;
 }
