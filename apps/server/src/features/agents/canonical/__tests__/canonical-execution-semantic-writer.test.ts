@@ -19,7 +19,7 @@ import { ExecutionWorkerHandler } from "../../execution/execution-worker-handler
 import { ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-store.js";
 import { CodexParentMessageProjection } from "../../turns/codex-parent-message-projection.js";
 import { NarrativeRecoveryDelta } from "../../turns/narrative-recovery-delta.js";
-import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agent-store.js";
+import { CanonicalAgentStore } from "../canonical-agent-store.js";
 import type { CodexSystemWriterIntent } from "../canonical-codex-system-error-projection.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
 import { CanonicalAcceptedEventWrite } from "../canonical-accepted-write.js";
@@ -261,7 +261,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect((await send(7, { kind: "event", phase: "running", nativeCursor: null,
       events: [runtimeEvent(7, { ...bound, type: "turnComplete", reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 })],
       terminalInput: finish.input })).kind).toBe("committed");
-    const messageId = new CanonicalAgentBoundary(db).loadTerminalProjection(TURN_ID).message?.id;
+    const messageId = new CanonicalAgentStore(db).loadTerminalProjection(TURN_ID).message?.id;
     expect(db.prepare("SELECT message_id, sort_order FROM approval_receipts").all()).toEqual([{ message_id: messageId, sort_order: 1 }]);
     expect(db.prepare("SELECT id, sort_order FROM tool_call_records ORDER BY sort_order").all()).toEqual([
       { id: "before", sort_order: 0 }, { id: "after", sort_order: 2 },
@@ -302,7 +302,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     const input = startInput(); input.thread.providerId = "copilot";
     expect(await writer.transact(operation(1, { kind: "begin", providerId: "copilot", input }))).toMatchObject({ kind: "committed" });
     const owner = new OtherProviderLiveEventEffects("copilot", execution, "user-1");
-    const canonical = new CanonicalAgentBoundary(db);
+    const canonical = new CanonicalAgentStore(db);
     const accepted = new CanonicalAcceptedEventWrite(db, canonical, writer);
     for (const [index, subtype] of ["copilot_native:session.start", "copilot_native:session.info", "copilot_idle"].entries()) {
       const ordinal = index + 2;
@@ -354,7 +354,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     const released: AgentEvent[] = [];
     new ExecutionLivePublicationRelease({ isBound: () => true, publish: (event) => released.push(event) }).release(completedOperation, receipt);
     expect(released).toEqual([expect.objectContaining({ type: "hookCompleted", persistedHookId: expect.any(String), persistedMessageId: expect.any(String) })]);
-    const canonical = new CanonicalAgentBoundary(db);
+    const canonical = new CanonicalAgentStore(db);
     const message = canonical.loadTerminalProjection(TURN_ID).message;
     expect(db.prepare("SELECT message_id, hook_name, duration_ms FROM hook_executions").all())
       .toEqual([{ message_id: message?.id, hook_name: "Save", duration_ms: 12 }]);
@@ -386,7 +386,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     new ExecutionLivePublicationRelease({ isBound: () => true, publish: (event) => released.push(event) }).release(input, receipt);
     expect(released).toEqual([expect.objectContaining({ ...notice, messageId: expect.any(String) })]);
     expect(await writer.transact(input)).toEqual(receipt);
-    expect(new CanonicalAgentBoundary(db).loadCheckpoint(EXECUTION_ID)?.terminalOutcome).toBe("completed");
+    expect(new CanonicalAgentStore(db).loadCheckpoint(EXECUTION_ID)?.terminalOutcome).toBe("completed");
     expect(db.prepare("SELECT status FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ status: "completed" });
   });
 
@@ -411,7 +411,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect((await writer.transact({ ...input, lease: { ...lease, workerGeneration: 2 } })).kind).toBe("conflict");
     expect((await writer.transact({ ...input, ordinal: 4 })).kind).toBe("conflict");
     expect(published).toEqual([]);
-    expect(new CanonicalAgentBoundary(db).loadCheckpoint(EXECUTION_ID)?.terminalOutcome).toBe("completed");
+    expect(new CanonicalAgentStore(db).loadCheckpoint(EXECUTION_ID)?.terminalOutcome).toBe("completed");
     expect((await writer.transact(input)).kind).toBe("committed");
   });
 
@@ -466,7 +466,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       settledMessage: { id: "user-1", sequence: 1 },
     } });
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant'").get()).toEqual({ count: 0 });
-    expect(new CanonicalAgentBoundary(db).loadTerminalProjection(TURN_ID)).toEqual({ message: null, toolCallCount: 0 });
+    expect(new CanonicalAgentStore(db).loadTerminalProjection(TURN_ID)).toEqual({ message: null, toolCallCount: 0 });
     const { livePublication, ...mutation } = empty;
     expect(await writer.transact({ ...operation(2, mutation), livePublication })).toEqual(terminal);
     db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES (?, ?, 'user', 'Later prompt', 2)")
@@ -506,7 +506,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
         events: command.providerEvent.events.map((event) => ({ ...event, sourceProviderId: providerId })) },
     })).toMatchObject({ kind: "committed" });
     const expected = { providerId, scope, value: "latest-session", provenance: "native" };
-    const canonical = new CanonicalAgentBoundary(db);
+    const canonical = new CanonicalAgentStore(db);
     expect(canonical.loadThread(THREAD_ID)?.providerIdentities).toEqual([expected]);
     expect(canonical.loadCheckpoint(EXECUTION_ID)?.nativeCursor).toEqual(expected);
   });
@@ -555,7 +555,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       expect(await writer.transact(candidate)).toEqual({ kind: "conflict", operationId: "lease-1:2" });
     }
     expect(await writer.transact(input)).toMatchObject({ kind: "committed" });
-    expect(new CanonicalAgentBoundary(db).loadTurn(TURN_ID)?.ending).toEqual({ outcome: "errored", failure });
+    expect(new CanonicalAgentStore(db).loadTurn(TURN_ID)?.ending).toEqual({ outcome: "errored", failure });
   });
 
   it("resumes a compound terminal operation after final receipt failure and database reopen", async () => {
@@ -769,8 +769,8 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     const text = new ParentAssistantTextCheckpointService(db);
     expect(text.appendChunk([{ ...execution, sequence: 1, text: "Partial answer" }]).outcome).toBe("committed");
     text.recoveryJournal.append([{ ...execution, sequence: 2, text: " from journal" }]);
-    const { CanonicalAgentStore: CanonicalAgentBoundary } = await import("../canonical-agent-store.js");
-    const canonical = new CanonicalAgentBoundary(db, () => {});
+    const { CanonicalAgentStore } = await import("../canonical-agent-store.js");
+    const canonical = new CanonicalAgentStore(db, () => {});
     expect(canonical.recordParentNarrativeRecovery({
       executionId: EXECUTION_ID, items: toolNarrative("", 1),
     })).toBe(true);
@@ -1013,7 +1013,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
 
   it("replays narrative changes and discards, then recovers only the saved narrative after worker loss", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
-    const canonical = new CanonicalAgentBoundary(db, () => {});
+    const canonical = new CanonicalAgentStore(db, () => {});
     const reducer = new NarrativeRecoveryDelta();
     const publicationCount = published.length;
     const initialDelta = reducer.prepare(toolNarrative("", 1));
@@ -1110,7 +1110,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("unknown draft");
     expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?")
       .get(THREAD_ID)).toEqual({ last_sequence: 1 });
-    expect(new CanonicalAgentBoundary(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
+    expect(new CanonicalAgentStore(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
     // The committed publication envelope stays durable; the rolled-back reclassification added nothing.
     expect(published).toHaveLength(publicationCount + 1);
     expect(published).toContain(`publication:${THREAD_ID}:1`);
@@ -1120,7 +1120,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       { publicationId: "2", event: boundary },
     ] });
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("");
-    expect(new CanonicalAgentBoundary(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([thought]);
+    expect(new CanonicalAgentStore(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([thought]);
 
     db.close(true);
     db = openDatabase({ dbPath: path });
@@ -1138,7 +1138,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       livePublication: [{ publicationId: "3", event: finalBoundary }],
     });
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("final thought");
-    expect(new CanonicalAgentBoundary(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
+    expect(new CanonicalAgentStore(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
     expect(writer.interruptWorkerLoss(loss).kind).toBe("committed");
     expect(new MessageRepo(db).listIncludingInternal(THREAD_ID)).toContainEqual(expect.objectContaining({
       role: "assistant", content: "final thought", outcome: "interrupted",
@@ -1271,7 +1271,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(receipt).toMatchObject({ kind: "committed", livePublication: [{ event: cursor }] });
     expect(db.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get(THREAD_ID))
       .toEqual({ sdk_session_id: "native-cursor" });
-    expect(new CanonicalAgentBoundary(db, () => {}).loadCheckpoint(EXECUTION_ID))
+    expect(new CanonicalAgentStore(db, () => {}).loadCheckpoint(EXECUTION_ID))
       .toMatchObject({ nativeCursor: { providerId: "codex", scope: "thread", value: "native-cursor" } });
   });
 

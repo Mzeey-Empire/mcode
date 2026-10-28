@@ -29,7 +29,7 @@ import type {
   ParentLiveEffects,
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventDraft, CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
-import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
+import { CanonicalAgentStore } from "./canonical-agent-store.js";
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { APPEND_GROUP_LIMITS, isGroupableAppend } from "./canonical-append-group.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
@@ -218,7 +218,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private readonly threads: ThreadRepo;
   private readonly hooks: HookExecutionRepo;
   private readonly assistantText: ParentAssistantTextCheckpointService;
-  private readonly canonical: CanonicalAgentBoundary;
+  private readonly canonical: CanonicalAgentStore;
   private readonly findOperation: ReturnType<Database["prepare"]>;
   private readonly listPublicationChunks: ReturnType<Database["prepare"]>;
   private readonly acknowledgePublication: ReturnType<Database["prepare"]>;
@@ -243,7 +243,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     });
     // Compound terminal batches publish from their durable sequence log only after the final receipt commits.
     this.compoundTurns = new CanonicalParentTurnWrite(db, () => {});
-    const codexBoundary = new CanonicalAgentBoundary(db, (events) => {
+    const codexBoundary = new CanonicalAgentStore(db, (events) => {
       if (!this.bufferedPublication) throw new Error("Codex projection requires a semantic transaction");
       this.bufferPublication(events);
     });
@@ -1855,7 +1855,7 @@ function committed(
 }
 
 function matchesCommittedTerminalMessage(
-  message: NonNullable<ReturnType<CanonicalAgentBoundary["loadTerminalProjection"]>["message"]>,
+  message: NonNullable<ReturnType<CanonicalAgentStore["loadTerminalProjection"]>["message"]>,
   execution: ExecutionIdentity,
   outcome: TurnOutcome,
 ): boolean {

@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { CanonicalAgentStore as CanonicalAgentBoundary } from "../../canonical/canonical-agent-store.js";
+import { CanonicalAgentStore } from "../../canonical/canonical-agent-store.js";
 import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
 import {
   ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService,
@@ -29,7 +29,7 @@ function seedParentAssistantTurn(db: Database): void {
     "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(THREAD_ID, "workspace-1522", "Durability", "main", "claude", "active", NOW, NOW);
   const messages = new MessageRepo(db);
-  new CanonicalAgentBoundary(db, () => {}).startParentTurn({
+  new CanonicalAgentStore(db, () => {}).startParentTurn({
     thread: { id: THREAD_ID, workspaceId: "workspace-1522", providerId: "claude", createdAt: NOW },
     turnId: TURN_ID,
     executionId: EXECUTION_ID,

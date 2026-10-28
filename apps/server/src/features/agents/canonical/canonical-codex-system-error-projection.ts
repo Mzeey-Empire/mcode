@@ -9,7 +9,7 @@ import { MessageStore as MessageRepo } from "../conversation/persistence/message
 import type { CodexLiveReduction, CodexLiveWriterIntent } from "../execution/codex-live-event-reducer.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import type { DataOnlyParentTerminalProjectionInput } from "./canonical-parent-turn-write.js";
-import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
+import { CanonicalAgentStore } from "./canonical-agent-store.js";
 import { matchesCodexSystemIntents, type CodexSystemWriterIntent } from "./codex-system-intents.js";
 export type { CodexSystemWriterIntent } from "./codex-system-intents.js";
 
@@ -43,12 +43,12 @@ function isSystemWriterIntent(intent: CodexLiveWriterIntent): intent is CodexSys
 export class CanonicalCodexSystemErrorProjection {
   private readonly threads: ThreadRepo;
   private readonly messages: MessageRepo;
-  private readonly canonical: CanonicalAgentBoundary;
+  private readonly canonical: CanonicalAgentStore;
 
   constructor(private readonly db: Database) {
     this.threads = new ThreadRepo(db);
     this.messages = new MessageRepo(db);
-    this.canonical = new CanonicalAgentBoundary(db, () => {});
+    this.canonical = new CanonicalAgentStore(db, () => {});
   }
 
   /** Call inside the canonical append transaction, before its receipt and publication. Errors still require terminal staging and finish. */

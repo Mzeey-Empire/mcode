@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
 import { CodexLiveEventReducer } from "../../execution/codex-live-event-reducer.js";
-import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agent-store.js";
+import { CanonicalAgentStore } from "../canonical-agent-store.js";
 import { CanonicalCodexSystemErrorProjection } from "../canonical-codex-system-error-projection.js";
 import { CanonicalParentTurnWrite } from "../canonical-parent-turn-write.js";
 
@@ -115,7 +115,7 @@ describe("CanonicalCodexSystemErrorProjection", () => {
     expect(saved).toMatchObject({ kind: "system", event: { subtype: "sdk_session_id:native-thread" } });
     expect(db.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get(THREAD_ID))
       .toEqual({ sdk_session_id: "native-thread" });
-    expect(new CanonicalAgentBoundary(db, () => {}).loadCheckpoint(EXECUTION_ID))
+    expect(new CanonicalAgentStore(db, () => {}).loadCheckpoint(EXECUTION_ID))
       .toMatchObject({ nativeCursor: { providerId: "codex", scope: "thread", value: "native-thread", provenance: "native" } });
     expect(projection.project(reducer.reduce(boundSystem("sdk_session_invalidated")))).toMatchObject({ kind: "system" });
     expect(db.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get(THREAD_ID))
@@ -140,7 +140,7 @@ describe("CanonicalCodexSystemErrorProjection", () => {
         .toMatchObject({ kind: "system", event: { subtype: "sdk_session_id:native-session" } });
       expect(providerDb.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get(THREAD_ID))
         .toEqual({ sdk_session_id: "native-session" });
-      expect(new CanonicalAgentBoundary(providerDb, () => {}).loadCheckpoint(EXECUTION_ID))
+      expect(new CanonicalAgentStore(providerDb, () => {}).loadCheckpoint(EXECUTION_ID))
         .toMatchObject({ nativeCursor: { providerId, scope: "session", value: "native-session", provenance: "native" } });
     } finally {
       providerDb.close(true);
