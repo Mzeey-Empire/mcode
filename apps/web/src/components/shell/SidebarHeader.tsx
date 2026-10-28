@@ -12,7 +12,7 @@ const SHOW_WORDMARK = windowChromeKind(
 export function SidebarHeader() {
   const collapseSidebar = useUiStore((s) => s.collapseSidebar);
   return (
-    <header data-testid="sidebar-header" className="window-drag flex h-row-comfortable shrink-0 items-center gap-1 px-3 select-none">
+    <header data-testid="sidebar-header" className="window-drag flex h-row-comfortable shrink-0 items-center gap-1 px-1.5 select-none">
       <TrafficLightsReserve />
       <SidebarToggleButton label="Collapse sidebar" onClick={() => collapseSidebar()} />
       <McodeLogo markOnly={!SHOW_WORDMARK} />

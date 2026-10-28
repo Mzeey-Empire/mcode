@@ -3,9 +3,18 @@ import { Button } from "@/components/ui/button";
 import { executeCommand } from "@/lib/command-registry";
 import { useShellChrome } from "./shell-chrome-context";
 
-/** Empty slot under the macOS traffic lights; 0 wide everywhere else and in full screen. */
+/**
+ * Empty slot under the macOS traffic lights. It leaves the layout everywhere else and in full
+ * screen, because a 0-wide flex item still takes a gap and pushes the next control inward.
+ */
 export function TrafficLightsReserve() {
-  return <div aria-hidden className="h-full shrink-0" style={{ width: "var(--traffic-lights-reserve)" }} />;
+  return (
+    <div
+      aria-hidden
+      className="hidden h-full shrink-0 [:root[data-window-chrome=traffic-lights]:not([data-full-screen])_&]:block"
+      style={{ width: "var(--traffic-lights-reserve)" }}
+    />
+  );
 }
 
 /** Sidebar toggle in a window header. */

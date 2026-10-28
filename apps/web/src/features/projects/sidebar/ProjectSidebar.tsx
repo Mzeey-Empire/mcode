@@ -21,7 +21,7 @@ function SidebarProjectsHeader() {
   const toggleView = useSidebarUiStore((s) => s.toggleView);
   const ViewIcon = view === "projects" ? List : ListTree;
   return (
-    <div className="mx-1.5 flex h-8 shrink-0 items-center gap-1 pl-2">
+    <div className="flex h-8 shrink-0 items-center gap-1 pl-2">
       <span className="min-w-0 flex-1 text-label text-muted">{view === "projects" ? "Projects" : "Threads"}</span>
       <IconButton aria-label={view === "projects" ? "Show as one list" : "Group by project"} onClick={toggleView}>
         <ViewIcon aria-hidden />
@@ -68,9 +68,9 @@ export function ProjectSidebar() {
         olderIds={model.olderIds}
         ctx={ctx}
         flip={cause === "push"}
-        overlay={hasProjects ? null : <div className="absolute inset-x-1.5 inset-y-0"><ProjectDropWell /></div>}
+        overlay={hasProjects ? null : <div className="absolute inset-y-0 right-1.5 left-0"><ProjectDropWell /></div>}
       />
-      {error && <p className="px-3 py-1 text-xs text-destructive">{error}</p>}
+      {error && <p className="px-1.5 py-1 text-xs text-destructive">{error}</p>}
       {overlays}
     </div>
   );

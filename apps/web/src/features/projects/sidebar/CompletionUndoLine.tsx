@@ -39,7 +39,7 @@ export function CompletionUndoLine({ onOpen, flying }: CompletionUndoLineProps) 
     onOpen(thread.workspace_id, thread.id);
   };
   return (
-    <div data-testid="completion-undo-line" className="mx-1.5 flex h-7 shrink-0 items-center gap-2 pl-2.5 pr-1 text-caption text-muted">
+    <div data-testid="completion-undo-line" className="flex h-7 shrink-0 items-center gap-2 pl-2.5 pr-1 text-caption text-muted">
       <ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} className="shrink-0" />
       <button type="button" onClick={open} className="text-fade min-w-0 flex-1 text-left text-ink hover:underline hover:underline-offset-2">
         {thread.title}
