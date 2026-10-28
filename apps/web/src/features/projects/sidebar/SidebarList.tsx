@@ -390,7 +390,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
     const dropEdge = item.kind === "project" && dropIndicator?.id === item.workspaceId ? dropIndicator.edge : null;
     const isClosing = closing.has(item.key);
     return (
-      <div className={cn("px-1.5", isClosing && "sidebar-row-closing", arriving.has(item.key) && "sidebar-row-rise")} inert={isClosing || undefined}>
+      <div className={cn(isClosing && "sidebar-row-closing", arriving.has(item.key) && "sidebar-row-rise")} inert={isClosing || undefined}>
         <div className={cn(isClosing && "min-h-0 overflow-hidden")}><SidebarRow item={item} ctx={rowCtx} dropEdge={dropEdge} /></div>
       </div>
     );
@@ -398,7 +398,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
 
   const dragged = drag.activeDragId === null ? undefined : itemsByKey.get(`project:${drag.activeDragId}`);
   return (
-    <div className="relative isolate min-h-0 flex-1" onPointerEnter={freezeOnEnter} onPointerLeave={unfreezeOnLeave}>
+    <div className="relative isolate -mr-1.5 min-h-0 flex-1 [&_.project-tree-viewport]:[scrollbar-gutter:stable]" onPointerEnter={freezeOnEnter} onPointerLeave={unfreezeOnLeave}>
       <div ref={containerRef} data-testid="thread-list" className="h-full" />
       <DndContext
         sensors={drag.sensors}
@@ -417,7 +417,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
           </ThreadPreviewHandleContext.Provider>
         </SortableContext>
         <DragOverlay>
-          {dragged?.kind === "project" ? <div className="px-1.5"><ProjectHeader item={dragged} ctx={rowCtx} /></div> : null}
+          {dragged?.kind === "project" ? <ProjectHeader item={dragged} ctx={rowCtx} /> : null}
         </DragOverlay>
       </DndContext>
       <ThreadPreviewTooltip handle={previewHandle} guard={previewGuard} />
