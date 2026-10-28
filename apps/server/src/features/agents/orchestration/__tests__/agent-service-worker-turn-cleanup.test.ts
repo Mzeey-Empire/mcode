@@ -306,7 +306,6 @@ describe("AgentService cleanup through production worker composition", { timeout
     let retiredDuringStop: number;
     try {
       await endedReady;
-      // Let the accepted Ended's deferred release run while Stop still owns its fence.
       await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
       retiredDuringStop = retire.mock.calls.length;
     } finally {

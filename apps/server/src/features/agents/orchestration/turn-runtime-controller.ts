@@ -138,12 +138,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private initialized = false;
   /** Set once graceful shutdown begins; the process exits afterward, so it never resets. */
   private shuttingDown = false;
-  /** Keep pooled-session teardown from ending the replacement turn. */
   private readonly endedSuppressionThreads = new Set<string>();
   /** Callbacks keyed by turn execution that run once that runtime releases its active slot, so follow-up turns can admit. */
   private readonly runtimeReleaseCallbacks = new Map<string, (cause?: RuntimeReleaseCause) => void>();
   private readonly runtimeReleaseListeners = new Set<(threadId: string) => void>();
-  /** Dispatch state retained until the provider turn releases its runtime slot. */
   private readonly turnDispatchByThread = new Map<
     string,
     {
@@ -159,9 +157,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       turnRequest: TurnRequest;
       /** Shared mutation token required for every provider dispatch and release. */
       mutationReservationToken: string;
-      /** Monotonic turn generation used to reject stale dispatch callbacks. */
       generation: number;
-      /** Opaque command-effect receipt retained until the turn releases its runtime slot. */
       commandEffect: CommandEffectReceipt | null;
     }
   >();
@@ -169,7 +165,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private readonly activeMutationReservations = new Map<string, string>();
   /** Single-flight user stop operation per thread. */
   private readonly stopOperationsByThread = new Map<string, Promise<AgentStopResult>>();
-  /** Stop cause for a turn stopped before dispatch, so a parent start that commits afterwards finishes cancelled. */
   private readonly unsentStopsByThread = new Map<string, { executionId: string; stop: TurnStopCause }>();
   /** Monotonic turn generation per thread, including turns that failed setup. */
   private readonly turnGenerations = new Map<string, number>();
@@ -471,7 +466,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
   }
 
-  /** The recorded pre-dispatch stop for this exact lease, if a stop landed before its provider send. */
   private unsentStopFor(lease: TurnRuntimeLease): TurnStopCause | undefined {
     const stopped = this.unsentStopsByThread.get(lease.threadId);
     return stopped?.executionId === lease.turnExecutionId ? stopped.stop : undefined;
@@ -754,7 +748,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
   }
 
-  /** Free a turn whose provider stream was lost, leaving its durable turn Running for recovery. */
   private async releaseProviderLostWorkerTurn(active: WorkerOwnedTurn, receipt: ExecutionAcceptedReceipt): Promise<void> {
     const { execution, provider, deliveryAttempt } = active;
     if (this.workerTurns.get(execution.threadId) !== active || active.releaseStarted
@@ -823,7 +816,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
   }
 
-  /** Register dispatch state and send the prepared provider turn. */
   private async startPreparedProviderDispatch(prepared: PreparedTurnDispatch): Promise<void> {
     if (!this.ownsTurnAdmission(prepared.lease)) return;
     this.applyThreadControlLease(prepared.threadControl);
@@ -863,7 +855,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   }
 
-  /** Construct runtime-owned dispatch state from an immutable dispatch package. */
   private createTurnDispatch(prepared: PreparedTurnDispatch) {
     return {
       sendTurnInFlight: false,
@@ -884,7 +875,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (directive) this.threadControlMcp?.activate(directive);
   }
 
-  /** Send the provider turn and terminalize dispatch failures. */
   private async sendPreparedDispatch(
     threadId: string,
     dispatch: ReturnType<TurnRuntimeController["createTurnDispatch"]>,
@@ -1509,7 +1499,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       && this.mutationReservations.owns(threadId, reservationToken, "activeTurn");
   }
 
-  /** Return a dispatch only while its token and generation still own the thread. */
   private getCurrentTurnDispatch(
     threadId: string,
     identity?: TurnDispatchIdentity,
@@ -1527,7 +1516,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return dispatch;
   }
 
-  /** Snapshot the identity used to fence delayed dispatch work from a replacement turn. */
   private turnDispatchIdentity(dispatch: {
     mutationReservationToken: string;
     generation: number;
@@ -1550,7 +1538,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return this.endedSuppressionThreads.has(threadId);
   }
 
-  /** Clear dispatch bookkeeping and complete its command effect when ownership matches. */
   private clearTurnDispatch(
     threadId: string,
     identity?: TurnDispatchIdentity,
@@ -1691,12 +1678,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return { kind: "declined", reason: "stopping" };
   }
 
-  /** Map an admission refusal to the decline the provider acts on; a pending mutation or terminal thread also stops the session. */
   private providerTurnAdmissionFailure(threadId: string, error: unknown): Extract<ProviderTurnOpening, { kind: "declined" }> {
     const message = error instanceof Error ? error.message : String(error);
     if (/already has an active agent session/.test(message)) return { kind: "declined", reason: "busy" };
     if (/already has a pending mutation/.test(message)) {
-      // The active-session refusal is the runtime's own turn; a pending mutation owns the thread, so the provider stream has nothing to join.
       this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "provider turn during pending mutation");
       return { kind: "declined", reason: "busy" };
     }
