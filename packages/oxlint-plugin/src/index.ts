@@ -8,6 +8,7 @@ import { noGlobalHostRuntime } from "./rules/no-global-host-runtime.ts";
 import { noNativeTitleTooltip } from "./rules/no-native-title-tooltip.ts";
 import { noRawColor } from "./rules/no-raw-color.ts";
 import { noRawShadow } from "./rules/no-raw-shadow.ts";
+import { noRowOverlayRoot } from "./rules/no-row-overlay-root.ts";
 import { noRealTimerSleep } from "./rules/no-real-timer-sleep.ts";
 import { noInlineModuleMock } from "./rules/no-inline-module-mock.ts";
 import { noSourceTextTest } from "./rules/no-source-text-test.ts";
@@ -28,6 +29,7 @@ export const mcodePlugin = definePlugin({
     "no-raw-color": noRawColor,
     "no-raw-shadow": noRawShadow,
     "no-real-timer-sleep": noRealTimerSleep,
+    "no-row-overlay-root": noRowOverlayRoot,
     "no-inline-module-mock": noInlineModuleMock,
     "no-source-text-test": noSourceTextTest,
     "require-lazy-nontrivial-schema": requireLazyNontrivialSchema,
