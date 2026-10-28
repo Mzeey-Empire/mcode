@@ -17,7 +17,7 @@ import {
   type PointerSensorOptions,
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { VirtualRows } from "@/components/ui/VirtualRows";
@@ -51,12 +51,14 @@ function provisionalHeight(item: SidebarItem): number {
   return item.kind === "thread" ? PROVISIONAL_THREAD_HEIGHT[item.layout] : PROVISIONAL_HEIGHT[item.kind];
 }
 
-const PROJECT_DND_MODIFIERS = [restrictToVerticalAxis];
-// The virtual list mounts project droppables only near the viewport, so they must be measured as
-// they register rather than once before the drag starts. Rows never displace during a project
-// drag; the indicator line marks the landing boundary instead.
+// Clamping to the list scroller keeps the overlay from floating over the scope bar and header.
+const PROJECT_DND_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
+// The virtual list mounts project droppables only near the viewport, so during a drag they must be
+// measured as they register rather than once at drag start. Outside a drag nothing reads them, and
+// measuring each one as it mounts would add layout reads to every expand and scroll. Rows never
+// displace during a project drag; the indicator line marks the landing boundary instead.
 const STATIC_SORT_STRATEGY = () => null;
-const PROJECT_DND_MEASURING = { droppable: { strategy: MeasuringStrategy.Always } } as const;
+const PROJECT_DND_MEASURING = { droppable: { strategy: MeasuringStrategy.WhileDragging } } as const;
 // The pointerup that ends a drag still fires click on whatever row it lands on.
 const POST_DRAG_CLICK_GRACE_MS = 250;
 
