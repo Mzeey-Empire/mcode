@@ -70,11 +70,12 @@ export class ExecutionMailboxOwner {
     this.active.delete(execution.threadId);
   }
 
-  /** Release one rejected execution only after the writer has durably settled that exact lease. */
+  /** Release an execution using writer evidence validated by its exact worker lease. */
   async releaseRecovered(execution: ExecutionIdentity, recovery: ExecutionRecoveryReceipt): Promise<void> {
     const owner = this.requireOwner(execution);
-    if (recovery.operationId !== `${owner.lease.leaseId}:worker-lost`
-      || recovery.kind === "conflict" && recovery.recoveryState !== "already-terminal") {
+    const acceptedEvent = recovery.kind === "accepted" && recovery.operationId.startsWith(`${owner.lease.leaseId}:`);
+    if (!acceptedEvent && (recovery.operationId !== `${owner.lease.leaseId}:worker-lost`
+      || recovery.kind === "conflict" && recovery.recoveryState !== "already-terminal")) {
       throw new Error("Recovered release has no matching durable evidence");
     }
     const result = await this.submitOwned(owner, { kind: "release", recovery });

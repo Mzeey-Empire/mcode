@@ -208,6 +208,7 @@ interface ExecutionState {
   phase: "running" | "stopping" | "finalized" | "poisoned";
   durableRevision: number;
   fileAttempt?: number;
+  providerLostOperationId?: string;
 }
 
 interface PreparedExecutionRequest {
@@ -352,6 +353,7 @@ export class ExecutionWorkerHandler {
     state.nextOrdinal += 1;
     if (receipt.kind === "committed") state.durableRevision = receipt.durableRevision;
     if (prepared.candidate) state.parentEvents = prepared.candidate;
+    state.providerLostOperationId = providerLostOperationId(prepared, receipt);
     if (request.command.kind === "stop") state.phase = "stopping";
     if (request.command.kind === "finish-live-event") {
       state.phase = "finalized";
@@ -534,7 +536,8 @@ export class ExecutionWorkerHandler {
   }
 
   private release(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): ExecutionWorkerResult {
-    if (state.phase !== "finalized" && !validRecoveryRelease(request.command, state.lease)) {
+    if (state.phase !== "finalized" && !validRecoveryRelease(request.command, state.lease)
+      && !validProviderLostRelease(request.command, state)) {
       return { kind: "rejected", reason: "invalid-transition" };
     }
     if (state.fileAttempt !== undefined) this.files.retire(state.execution, state.fileAttempt);
@@ -725,6 +728,18 @@ function validRecoveryRelease(command: WorkerCommand, lease: ExecutionLease): bo
   return command.recovery.kind === "committed" && Number.isSafeInteger(command.recovery.durableRevision)
     || command.recovery.kind === "accepted" && Number.isSafeInteger(command.recovery.progressPosition.sequence)
     || command.recovery.kind === "conflict" && command.recovery.recoveryState === "already-terminal";
+}
+
+function validProviderLostRelease(command: WorkerCommand, state: ExecutionState): boolean {
+  return state.phase === "running" && command.kind === "release" && command.recovery?.kind === "accepted"
+    && command.recovery.operationId === state.providerLostOperationId;
+}
+
+function providerLostOperationId(prepared: PreparedExecutionRequest, receipt: ExecutionWriteReceipt): string | undefined {
+  const event = prepared.parentEvent?.publication.event;
+  if (receipt.kind !== "accepted" || event?.type !== "ended") return undefined;
+  if (event.outcome === undefined && event.reason === "provider_lost") return receipt.operationId;
+  return undefined;
 }
 
 function invalidReason(request: ExecutionWorkerRequest<WorkerCommand>): Extract<ExecutionWorkerResult, { kind: "rejected" }>["reason"] {

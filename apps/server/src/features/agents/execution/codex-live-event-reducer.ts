@@ -517,7 +517,7 @@ export class CodexLiveEventReducer {
         assistant: this.assistant.materializationInput(null), narrative: this.narrative.terminalSnapshot(event.threadId) });
     }
     writer.push({ kind: "turn-ended" });
-    this.phase = "ended";
+    if (event.outcome !== undefined || event.reason !== "provider_lost") this.phase = "ended";
     return writer;
   }
 

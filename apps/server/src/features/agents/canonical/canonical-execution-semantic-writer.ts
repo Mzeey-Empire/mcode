@@ -1366,7 +1366,7 @@ function validLivePublicationIntent(
     && intent.event.turnExecutionId === operation.execution.executionId
     && (operation.mutation.kind !== "begin" || intent.event.type === "turnStarted")
     && validTurnStartedPublication(intent.event, operation.mutation)
-    && (barrier === "terminal" || !isTerminalLiveEvent(intent.event.type));
+    && (barrier === "terminal" || !isTerminalLiveEvent(intent.event.type) || isOutcomeLessProviderLost(intent.event));
 }
 
 function isTerminalLiveEvent(type: ExecutionLivePublicationIntent["event"]["type"]): boolean {
@@ -1728,7 +1728,12 @@ function validFinish(
 
 function unchangedTextEvent(event: ExecutionLivePublicationIntent["event"]): boolean {
   return ["system", "turnStarted", "generatedAttachment", "contextEstimate", "compacting", "compactSummary"].includes(event.type)
+    || isOutcomeLessProviderLost(event)
     || validNarrativeEvent(event);
+}
+
+function isOutcomeLessProviderLost(event: ExecutionLivePublicationIntent["event"]): boolean {
+  return event.type === "ended" && event.outcome === undefined && event.reason === "provider_lost";
 }
 
 function isFinishMutation(mutation: ExecutionSemanticOperation["mutation"]): mutation is Extract<

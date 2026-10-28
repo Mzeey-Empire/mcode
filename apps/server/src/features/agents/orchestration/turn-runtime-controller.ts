@@ -35,7 +35,7 @@ import type { TurnOutcome } from "../turns/turn-outcome.js";
 import { ProviderEventIngress } from "../../providers/composition/provider-event-ingress.js";
 import { ExecutionFileEvidenceCoordinator } from "../execution/execution-file-evidence-coordinator.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
-import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution/execution-worker-handler.js";
+import type { ExecutionAcceptedReceipt, ExecutionWorkCommand, ExecutionWorkerResult } from "../execution/execution-worker-handler.js";
 import { WorkerOwnedTurnRuntime } from "../execution/worker-owned-turn-runtime.js";
 import type { WorkerOwnedProviderEventBatch } from "../../providers/composition/provider-host-ports.js";
 import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
@@ -239,7 +239,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     publicationRuntime: AgentEventPublicationRuntimePort,
     @inject(AgentEventPublicationRegistry)
     private readonly eventPublication: AgentEventPublicationRegistry,
-    @inject(TurnDiffService) turnDiffs: TurnDiffService,
+    @inject(TurnDiffService) private readonly turnDiffs: TurnDiffService,
     @inject(TurnSteerRuntimePort) steering: TurnSteerRuntimePort,
     @inject(ProviderSwitchService) providerSwitch: ProviderSwitchService,
     @inject("WorkerOwnedTurnRuntime", { isOptional: true })
@@ -702,7 +702,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (event.type === "ended") {
       // The callback still belongs to the route's pending set. Release on the next task.
       active.terminalRelease = new Promise<void>((resolve) => { setTimeout(resolve, 0); })
-        .then(() => this.releaseWorkerTurn(active));
+        .then(() => {
+          if (event.outcome === undefined && event.reason === "provider_lost" && result.kind === "accepted" && !active.terminalCommitted) {
+            return this.releaseProviderLostWorkerTurn(active, result);
+          }
+          return this.releaseWorkerTurn(active);
+        });
       active.terminalRelease.catch((error: unknown) => {
         logger.error("Worker-owned terminal release failed", { threadId: execution.threadId,
           error: error instanceof Error ? error.message : String(error) });
@@ -784,6 +789,25 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       await this.requireWorkerRuntime().recoverRejected(execution);
       throw error;
     }
+  }
+
+  /** Free a turn whose provider stream was lost, leaving its durable turn Running for recovery as the legacy route did. */
+  private async releaseProviderLostWorkerTurn(active: WorkerOwnedTurn, receipt: ExecutionAcceptedReceipt): Promise<void> {
+    const { execution, provider, deliveryAttempt } = active;
+    if (this.workerTurns.get(execution.threadId) !== active || active.releaseStarted
+      || active.stopInProgress || active.terminalCommitted) return;
+    active.releaseStarted = true;
+    await this.fenceWorkerProvider(provider, execution, deliveryAttempt);
+    await this.retireWorkerProvider(provider, execution, deliveryAttempt);
+    await this.requireWorkerRuntime().providerEvents.retire(execution);
+    await this.requireWorkerRuntime().owner.releaseRecovered(execution, receipt);
+    this.requireWorkerFiles().retire(execution.threadId, execution.executionId, deliveryAttempt);
+    this.workerTurns.delete(execution.threadId);
+    this.turnRuntime.release(execution.threadId, execution.executionId);
+    this.turnDiffs.clearExecution(execution.threadId, execution.executionId);
+    this.trackSessionEnded(execution.threadId, execution.executionId);
+    this.disarmTurnRetryWindow(execution.threadId);
+    this.clearTurnEndedState(execution.threadId);
   }
 
   /** Git work must not hold the thread after release; pin failures are logged, never thrown. */
