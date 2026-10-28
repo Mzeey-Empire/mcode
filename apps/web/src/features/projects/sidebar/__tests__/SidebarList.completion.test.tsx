@@ -54,7 +54,7 @@ function closingRow(): Element | null {
 
 function completedCount(): string | null {
   const bar = screen.queryByTestId("sidebar-scope-bar");
-  return bar ? within(bar).getByRole("radio", { name: /Completed/ }).textContent : null;
+  return bar ? within(bar).getByRole("radio", { name: /Closed/ }).textContent : null;
 }
 
 function renderSidebar(): void {
@@ -86,7 +86,7 @@ describe("SidebarList completion", () => {
     vi.mocked(mockTransport.completeThread).mockReturnValue(replyAfter(3000, { ok: true, thread: COMPLETED_TARGET }));
     renderSidebar();
 
-    fireEvent.click(screen.getByRole("button", { name: "Complete Title target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Title target" }));
 
     expect(renderedThreadIds()).toEqual(["newer", "target", "older"]);
     expect(within(targetRow()).getByText("Title target")).toHaveClass("sidebar-strike");
@@ -96,35 +96,35 @@ describe("SidebarList completion", () => {
   it("keeps the strike when the row remounts during the hold", () => {
     vi.mocked(mockTransport.completeThread).mockReturnValue(replyAfter(3000, { ok: true, thread: COMPLETED_TARGET }));
     renderSidebar();
-    fireEvent.click(screen.getByRole("button", { name: "Complete Title target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Title target" }));
 
     fireEvent.click(screen.getByTestId("project-row-ws-1"));
     expect(renderedThreadIds()).toEqual([]);
     fireEvent.click(screen.getByTestId("project-row-ws-1"));
 
     expect(within(targetRow()).getByText("Title target")).toHaveClass("sidebar-strike");
-    expect(screen.getByRole("button", { name: "Undo completing Title target" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo closing Title target" })).toBeInTheDocument();
   });
 
   it("restores the row on Undo within the hold", async () => {
     vi.mocked(mockTransport.completeThread).mockReturnValue(replyAfter(3000, { ok: false, refusal: "cancelled" }));
     renderSidebar();
-    fireEvent.click(screen.getByRole("button", { name: "Complete Title target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Title target" }));
 
     await act(() => vi.advanceTimersByTimeAsync(2900));
-    fireEvent.click(screen.getByRole("button", { name: "Undo completing Title target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo closing Title target" }));
     await act(() => vi.advanceTimersByTimeAsync(100));
 
     expect(mockTransport.reopenThread).toHaveBeenCalledWith("target");
     expect(renderedThreadIds()).toEqual(["newer", "target", "older"]);
-    expect(screen.getByRole("button", { name: "Complete Title target" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close Title target" })).toBeInTheDocument();
     expect(within(targetRow()).getByText("Title target")).not.toHaveClass("sidebar-strike");
   });
 
   it("moves the row out of Active and raises the count when the hold ends", async () => {
     vi.mocked(mockTransport.completeThread).mockReturnValue(replyAfter(3000, { ok: true, thread: COMPLETED_TARGET }));
     renderSidebar();
-    fireEvent.click(screen.getByRole("button", { name: "Complete Title target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Title target" }));
     expect(completedCount()).toBeNull();
 
     await act(() => vi.advanceTimersByTimeAsync(3000));
@@ -138,21 +138,21 @@ describe("SidebarList completion", () => {
   it("returns a refused row with the reason and Retry", async () => {
     vi.mocked(mockTransport.completeThread).mockReturnValue(replyAfter(3000, { ok: false, refusal: "running" }));
     renderSidebar();
-    fireEvent.click(screen.getByRole("button", { name: "Complete Title target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Title target" }));
 
     await act(() => vi.advanceTimersByTimeAsync(3000));
 
     expect(renderedThreadIds()).toEqual(["newer", "target", "older"]);
     expect(within(targetRow()).getByRole("status")).toHaveTextContent("The thread is running");
     vi.mocked(mockTransport.completeThread).mockReturnValue(replyAfter(3000, { ok: true, thread: COMPLETED_TARGET }));
-    fireEvent.click(screen.getByRole("button", { name: "Retry completing Title target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry closing Title target" }));
     expect(mockTransport.completeThread).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a hovered row at hold end until the pointer leaves", async () => {
     vi.mocked(mockTransport.completeThread).mockReturnValue(replyAfter(3000, { ok: true, thread: COMPLETED_TARGET }));
     renderSidebar();
-    fireEvent.click(screen.getByRole("button", { name: "Complete Title target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Title target" }));
     fireEvent.mouseEnter(targetRow());
 
     await act(() => vi.advanceTimersByTimeAsync(3000));
@@ -171,7 +171,7 @@ describe("SidebarList completion", () => {
     useWorkspaceStore.setState({ setActiveThread });
     vi.mocked(mockTransport.completeThread).mockReturnValue(replyAfter(3000, { ok: true, thread: COMPLETED_TARGET }));
     renderSidebar();
-    fireEvent.click(screen.getByRole("button", { name: "Complete Title target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Title target" }));
     await act(() => vi.advanceTimersByTimeAsync(3000));
 
     fireEvent.click(within(screen.getByTestId("completion-undo-line")).getByRole("button", { name: "Title target" }));

@@ -80,7 +80,7 @@ function SidebarThreadPreview({
         {thread.user_completed_at !== null ? (
           <>
             <div className="text-xs text-muted">
-              Completed {formatLifecycleDate(thread.user_completed_at)}
+              Closed {formatLifecycleDate(thread.user_completed_at)}
             </div>
             {thread.cleanup_state === "blocked" ? (
               <div className="text-xs text-destructive" role="status">

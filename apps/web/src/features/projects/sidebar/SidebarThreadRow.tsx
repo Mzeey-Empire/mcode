@@ -644,8 +644,8 @@ function ThreadRowStatus({ thread, presentation, lifecycle }: Pick<ThreadRowVisu
   if (presentation.completing) {
     return (
       <>
-        <StatusMark state="success" label="Completed" />
-        <ThreadRowCaption className="text-success">Completed</ThreadRowCaption>
+        <StatusMark state="success" label="Closed" />
+        <ThreadRowCaption className="text-success">Closed</ThreadRowCaption>
       </>
     );
   }
@@ -707,10 +707,10 @@ function ThreadRowActions({
 }
 
 const LIFECYCLE_ACTION: Record<ThreadLifecycleKind, { readonly verb: string; readonly tooltip: string }> = {
-  complete: { verb: "Complete", tooltip: "Complete thread" },
-  undo: { verb: "Undo completing", tooltip: "Undo" },
-  retry: { verb: "Retry completing", tooltip: "Retry" },
-  reopen: { verb: "Reopen", tooltip: "Undo completion" },
+  complete: { verb: "Close", tooltip: "Close thread" },
+  undo: { verb: "Undo closing", tooltip: "Undo" },
+  retry: { verb: "Retry closing", tooltip: "Retry" },
+  reopen: { verb: "Reopen", tooltip: "Reopen thread" },
 };
 
 function ThreadLifecycleAction({ thread, presentation, lifecycle }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {

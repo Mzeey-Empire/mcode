@@ -166,7 +166,7 @@ function ProjectEmptyNote({ item, scope }: { item: ProjectItem; scope: SidebarSc
   if (item.collapsed || item.count > 0 || item.section !== "recent" || (scope === "active" && hasDrafts)) return null;
   return (
     <p data-testid={`project-empty-${item.workspaceId}`} className="px-9 py-1 font-mono text-xs text-muted/70">
-      {scope === "completed" ? "No completed threads" : "No active threads"}
+      {scope === "completed" ? "No closed threads" : "No open threads"}
     </p>
   );
 }

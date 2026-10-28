@@ -81,7 +81,7 @@ describe("SidebarThreadRow", () => {
     act(() => threadAttentionStore.getState().apply(finished("t1")));
     const row = renderThread();
     const label = within(screen.getByTestId("thread-status")).getByText("Finished");
-    const complete = screen.getByRole("button", { name: "Complete Row title" });
+    const complete = screen.getByRole("button", { name: "Close Row title" });
     expect(label).toBeVisible();
     expect(complete).not.toBeVisible();
 

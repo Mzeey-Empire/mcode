@@ -121,7 +121,7 @@ checkout. See "Direct mode" below.
 Mcode removes a worktree in its sandbox when cleanup starts only if no active
 thread links to it. It then removes every linked thread that is not active.
 If an active thread links to the worktree, Mcode keeps both. It removes only the
-selected completed thread. Mcode keeps a checkout outside its
+selected closed thread. Mcode keeps a checkout outside its
 sandbox or on the repository default branch, then removes only the selected
 thread data. When a user deletes a thread manually, they can choose whether
 to schedule worktree cleanup.
@@ -261,6 +261,17 @@ is a reasoning tier.
 A single chat conversation between a user and an AI agent. Threads belong to
 workspaces and run against a provider. Distinct from a git branch even though
 threads can be associated with a worktree.
+
+### Open thread / closed thread
+The user's own mark on a thread. A user closes a thread when they are done
+with it, and the sidebar's scope bar splits threads into Open and Closed.
+Mcode may also close a thread when its pull requests merge, and it deletes
+closed threads after the retention period in settings. Reopen removes the
+mark. The mark is separate from the agent's run status (active, completed,
+errored, interrupted, paused), which search filters by; a closed thread can
+still show an active run status. Code keeps the older `completed` names for
+the mark: `user_completed_at`, the completion machine, and the `"completed"`
+scope value.
 
 ### Thread conversation residency
 The renderer's single client authority for a selected Thread's conversation.
