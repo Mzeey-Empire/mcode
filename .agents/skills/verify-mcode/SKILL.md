@@ -65,7 +65,7 @@ bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs desktop codex-protocol-
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs desktop selected-text-comments <setup|proof|cleanup>
 ```
 
-Runtime live proof requires `--confirm-provider-call`. It creates and normally deletes one direct thread. Thread-lifecycle proof and cleanup require `--confirm-cleanup`. The selected-text-comments setup and cleanup require a stopped Electron session.
+Runtime inspect and live proof use the registered `.dev/fixture-repo` workspace. The `opencode-resume` live scenario creates its own temporary workspace. Runtime live proof requires `--confirm-provider-call`. It creates and normally deletes one direct thread. Thread-lifecycle proof and cleanup require `--confirm-cleanup`. The selected-text-comments setup and cleanup require a stopped Electron session.
 
 Codex protocol-notices `setup` writes only an owned `.cmd` wrapper under `.dev/verification`. It does not start Mcode or Electron, change settings, create a thread, or call a provider. Set the returned path as the Codex CLI path only in the owned Electron runtime. Start a fresh direct thread because an existing Codex session retains its process. One fixture process supports one turn and repeats its config and reroute notifications to prove deduplication. Run `cleanup --confirm-cleanup` only after the coordinator restores the prior CLI path.
 

@@ -120,9 +120,9 @@ Commands:
       a visible console window there means a child spawn missed windowsHide.
       --watch polls while the runtime starts or stops to catch transient flashes.
   inspect
-      Read active runtime and workspace summaries through the authenticated WebSocket RPC API.
+      Read active runtime and workspace summaries and require the registered .dev/fixture-repo workspace.
   live --provider <codex|claude|cursor|opencode|devin> --model <id> --scenario <completion|stop|subagent|opencode-resume|opencode-attach|devin-permission> --confirm-provider-call [--keep-thread] [--allow-enable-devin]
-      Make one confirmed provider call in an owned or registered workspace. Does not start a runtime.
+      Make one confirmed provider call in .dev/fixture-repo, except opencode-resume uses an owned temporary workspace. Does not start a runtime.
       Devin defaults to disabled; --allow-enable-devin enables it for the proof and restores the original setting.
       The devin-permission scenario runs supervised: it answers Devin's real permission prompt
       with the project-scoped always-allow option, records the .devin config file it writes, and
@@ -462,9 +462,13 @@ async function inspect(repoRoot) {
     if (!Array.isArray(running) || !Array.isArray(workspaces) || !Number.isInteger(activeCount) || activeCount < 0) {
       throw actionable("Runtime RPC returned an unexpected active-agent, running-turn, or workspace summary", "Run bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime diagnostics, then retry inspect.");
     }
-    const currentWorktreeRegistered = workspaces.some((workspace) => workspace && pathsMatch(workspace.path, repoRoot));
-    if (!currentWorktreeRegistered) {
-      throw actionable("workspace.list does not contain the current repository path", "Register this repository as a workspace in Mcode, then retry inspect.");
+    const fixtureRepo = getRuntimePaths(repoRoot).fixtureRepoDir;
+    const fixtureWorkspaceRegistered = workspaces.some((workspace) => workspace && pathsMatch(workspace.path, fixtureRepo));
+    if (!fixtureWorkspaceRegistered) {
+      throw actionable(
+        "The disposable fixture workspace is not registered",
+        "Restart this worktree runtime with bun run --shell system agent:down and bun run --shell system agent:up.",
+      );
     }
     return {
       command: "inspect",
@@ -476,7 +480,7 @@ async function inspect(repoRoot) {
       },
       workspaces: {
         count: workspaces.length,
-        currentWorktreeRegistered,
+        fixtureWorkspaceRegistered,
       },
     };
   } finally {
@@ -1368,7 +1372,7 @@ async function prepareLiveRun(repoRoot, options, run) {
   run.proofDeadline = Date.now() + LIVE_TIMEOUT_MS;
   const workspace = await findLiveWorkspace(run.socket, repoRoot, options.scenario, run);
   run.workspace = workspace;
-  run.threadId = await createLiveThread(run.socket, workspace, repoRoot, options, run.proofDeadline);
+  run.threadId = await createLiveThread(run.socket, workspace, options, run.proofDeadline);
   trackLiveThread(run, run.threadId);
   run.report.thread = fingerprint(run.threadId);
   const subscription = await subscribeToLiveThread(run.socket, run.threadId, run.proofDeadline);
@@ -1378,24 +1382,14 @@ async function prepareLiveRun(repoRoot, options, run) {
   }
 }
 
-async function findCurrentWorkspace(socket, repoRoot) {
-  const workspaces = await socket.rpc("workspace.list", {});
-  if (!Array.isArray(workspaces)) {
-    throw actionable("workspace.list returned an unexpected value", "Run bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime inspect, then retry live verification.");
-  }
-  const workspace = workspaces.find((candidate) => candidate && pathsMatch(candidate.path, repoRoot));
-  if (workspace) return workspace;
-  throw actionable("The current worktree is not registered as a workspace", "Add this repository in Mcode, then retry live verification.");
-}
-
-async function createLiveThread(socket, workspace, repoRoot, options, deadline) {
+async function createLiveThread(socket, workspace, options, deadline) {
   const created = await socket.rpc("agent.createAndSend", {
     workspaceId: workspace.id,
     content: FIXED_PROMPTS[options.scenario],
     model: options.model,
     provider: options.provider,
     mode: "direct",
-    branch: resolveOptionalBranch(repoRoot),
+    branch: resolveOptionalBranch(workspace.path),
     // devin-permission needs a prompting access mode; every other scenario runs
     // bypass. `accept-edits` is used because live sessions do not advertise `normal`.
     ...(options.scenario === "devin-permission"
@@ -1421,7 +1415,7 @@ function trackLiveThread(run, threadId) {
 }
 
 async function proveLiveScenario(repoRoot, scenario, run) {
-  if (scenario === "devin-permission") return proveDevinPermission(repoRoot, run);
+  if (scenario === "devin-permission") return proveDevinPermission(run);
   if (scenario === "completion") return proveCompletion(run);
   if (scenario === "subagent") return proveSubagent(run);
   if (scenario === "opencode-resume") return proveOpenCodeResume(repoRoot, run);
@@ -1429,9 +1423,9 @@ async function proveLiveScenario(repoRoot, scenario, run) {
   return proveStop(run);
 }
 
-async function findLiveWorkspace(socket, repoRoot, scenario, run) {
+/** Selects the fixture workspace or creates the owned OpenCode resume workspace. */
+export async function findLiveWorkspace(socket, repoRoot, scenario, run) {
   if (scenario === "opencode-resume") return createOpenCodeResumeWorkspace(socket, repoRoot, run);
-  if (scenario !== "subagent" && scenario !== "opencode-attach") return findCurrentWorkspace(socket, repoRoot);
   const fixtureRepo = getRuntimePaths(repoRoot).fixtureRepoDir;
   const workspaces = await socket.rpc("workspace.list", {});
   const workspace = Array.isArray(workspaces)
@@ -1510,8 +1504,8 @@ async function proveCompletion(run) {
  * the project-scoped always-allow option, then records which `.devin/` config
  * file the CLI wrote so the adapter's allow_always target is verified live.
  */
-async function proveDevinPermission(repoRoot, run) {
-  const devinDir = NodePath.join(repoRoot, ".devin");
+async function proveDevinPermission(run) {
+  const devinDir = NodePath.join(run.workspace.path, ".devin");
   const existedBefore = NodeFS.existsSync(devinDir);
   const filesBefore = existedBefore ? NodeFS.readdirSync(devinDir) : [];
   const proof = {
@@ -1591,7 +1585,7 @@ async function proveOpenCodeResume(repoRoot, run) {
   const primaryInitialOutcome = await requireThreadCompletion(run, primaryThreadId, 0, run.proofDeadline);
   await requireDurableAssistant(run.socket, primaryThreadId, run.report, run.proofDeadline);
   const primaryInitialSession = await requireOpenCodeSessionId(run.socket, workspace.id, primaryThreadId, run.proofDeadline);
-  const otherThreadId = await createLiveThread(run.socket, workspace, repoRoot, run.report, run.proofDeadline);
+  const otherThreadId = await createLiveThread(run.socket, workspace, run.report, run.proofDeadline);
   trackLiveThread(run, otherThreadId);
   await subscribeToLiveThreads(run.socket, run.ownedThreadIds, run.proofDeadline);
   const otherInitialOutcome = await requireThreadCompletion(run, otherThreadId, 0, run.proofDeadline);
