@@ -79,6 +79,7 @@ export class VirtualViewport {
   private pinnedAnchor: { key: string; top: number } | undefined;
   private insets: ViewportInsets = { top: 0, bottom: 0 };
   private flow: { prefix: HTMLDivElement; host: HTMLDivElement; suffix: HTMLDivElement } | undefined;
+  private flowFill = 0;
   private readonly layoutListeners = new Set<() => void>();
   private layoutFramePending = false;
 
@@ -100,7 +101,9 @@ export class VirtualViewport {
       item: {
         height: (index) => {
           const row = this.rows[index];
-          return row ? this.heights.get(row.id) ?? row.height : 80;
+          if (!row) return 80;
+          const height = this.heights.get(row.id) ?? row.height;
+          return row.id === this.options.flowHostId ? height + this.flowFill : height;
         },
         template: () => "",
       },
@@ -318,13 +321,30 @@ export class VirtualViewport {
     if (!(entry.target instanceof HTMLElement)) return false;
     const key = entry.target.getAttribute(`data-${this.prefix}-key`);
     const height = entry.borderBoxSize[0]?.blockSize ?? entry.target.getBoundingClientRect().height;
-    if (!key || !this.rowIndexes.has(key) || height <= 0 || this.heights.get(key) === height) return false;
-    this.heights.set(key, height);
+    // The fill is padding the host carries, not content, so the cache keeps the natural height.
+    const natural = key === this.options.flowHostId ? height - this.flowFill : height;
+    if (!key || !this.rowIndexes.has(key) || natural <= 0 || this.heights.get(key) === natural) return false;
+    this.heights.set(key, natural);
     return true;
+  }
+
+  // Sticky only lifts a host that would fall below the bottom edge, so a short list pads above the
+  // host until the host and every row after it end on that edge. Computed from the total without
+  // the current fill, the fill cannot feed back into itself.
+  private fitFlowFill(): void {
+    if (!this.flow || this.options.flowHostId === undefined) return;
+    const natural = this.context.sizeCache.getTotalSize() - this.flowFill;
+    const available = this.viewport.clientHeight - this.insets.top - this.insets.bottom;
+    const fill = this.rowIndexes.has(this.options.flowHostId) ? Math.max(0, available - natural) : 0;
+    if (fill === this.flowFill) return;
+    this.flowFill = fill;
+    this.flow.host.style.paddingTop = `${fill}px`;
+    this.context.rebuildSizeCache();
   }
 
   private applyPosition(correctAnchor = false): void {
     if (this.disposed || !this.viewport) return;
+    this.fitFlowFill();
     const anchor = correctAnchor ? this.readingAnchorHost() : undefined;
     const target = Math.max(0, this.targetScrollTop());
     // A short initial page needs its trailing space retained when history is prepended.

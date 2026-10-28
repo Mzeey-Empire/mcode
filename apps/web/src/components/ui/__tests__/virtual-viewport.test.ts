@@ -131,6 +131,25 @@ describe("VirtualViewport additions", () => {
     expect(wrappers.map((wrapper) => wrapper.style.position)).toEqual(["absolute", "absolute", "absolute"]);
   });
 
+  it("fills above the flow host so a short list ends on the bottom edge, and drops the fill once it overflows", async () => {
+    view.destroy();
+    const container = document.createElement("div");
+    document.body.append(container);
+    view = new VirtualViewport(container, (next) => { hosts = next; }, () => {}, { ariaLabel: "Rows", flowHostId: "bar" });
+    view.setRows([rows[0]!, { id: "bar", height: 32 }, rows[1]!]);
+    await nextFrame();
+
+    expect(view.rowBottom("r1")).toBe(200);
+    expect(view.rowBottom("bar")).toBe(160);
+    expect(view.rowTop("r0")).toBe(0);
+
+    view.setRows([...rows.slice(0, 10), { id: "bar", height: 32 }, rows[10]!]);
+    await nextFrame();
+
+    expect(view.rowBottom("bar")).toBe(432);
+    expect(view.rowBottom("r10")).toBe(472);
+  });
+
   it("hands a released move back to the reading row so later row changes stop chasing the target", () => {
     view.destroy();
     const container = document.createElement("div");
