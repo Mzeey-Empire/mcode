@@ -1,8 +1,9 @@
-import { createContext, useCallback, useEffect, useRef } from "react";
+import { createContext, useCallback, useDeferredValue, useEffect, useRef } from "react";
 import { GitBranch } from "lucide-react";
 import { Tooltip, TooltipContent, type TooltipChangeDetails, type TooltipHandle } from "@/components/ui/tooltip";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
+import { cn } from "@/lib/utils";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import type { PreviewScrollGuard } from "./preview-scroll-guard";
 
@@ -32,12 +33,26 @@ export function ThreadPreviewTooltip({ handle, guard }: { handle: TooltipHandle<
   }, [guard, handle]);
   return (
     <Tooltip handle={handle} onOpenChange={onOpenChange}>
-      {({ payload }) => payload ? (
-        <TooltipContent side="right" align="start" sideOffset={8} className="max-w-none p-3">
-          <SidebarThreadPreview workspaceName={payload.workspaceName} thread={payload.thread} />
-        </TooltipContent>
-      ) : null}
+      {({ payload }) => payload ? <ThreadPreviewContent payload={payload} /> : null}
     </Tooltip>
+  );
+}
+
+/**
+ * With a preview open, Base UI switches the payload synchronously inside the next row's
+ * mouseenter, before that row's hover highlight can paint. Deferring the body keeps that event
+ * to moving the anchor, so the highlight paints first and the new body renders after. Until the
+ * body catches up the popup is empty and invisible, so it never shows one row's details beside
+ * another. A push for the same thread keeps the body visible, so an open preview of a running
+ * thread doesn't blank on every update.
+ */
+function ThreadPreviewContent({ payload }: { payload: ThreadPreviewPayload }) {
+  const shown = useDeferredValue<ThreadPreviewPayload | null>(payload, null);
+  const body = shown?.thread.id === payload.thread.id ? shown : null;
+  return (
+    <TooltipContent side="right" align="start" sideOffset={8} className={cn("max-w-none p-3", !body && "invisible")}>
+      {body ? <SidebarThreadPreview workspaceName={body.workspaceName} thread={body.thread} /> : null}
+    </TooltipContent>
   );
 }
 

@@ -199,6 +199,47 @@ describe("SidebarThreadRow", () => {
       expect(preview()).not.toBeNull();
     });
 
+    it("moves an open preview to the next row after that row's hover commits, never showing the old row's details", async () => {
+      const first = createMockThread({ id: "t1", workspace_id: "ws-1", title: "First", provider: "claude", mode: "worktree" });
+      const second = createMockThread({ id: "t2", workspace_id: "ws-1", title: "Second", provider: "claude", mode: "worktree" });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [first, second], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      const row = (title: string) => screen.getByRole("button", { name: new RegExp(`^Provider, Claude ${title}`) });
+      await hoverOpen(row("First"));
+      expect(preview()).not.toBeNull();
+
+      let duringEnter: { first: boolean; second: boolean } | undefined;
+      act(() => {
+        fireEvent.mouseLeave(row("First"));
+        fireEvent.pointerOver(row("Second"), { pointerType: "mouse" });
+        fireEvent.mouseEnter(row("Second"), { clientX: 40, clientY: 60 });
+        duringEnter = { first: preview() !== null, second: screen.queryByTestId("thread-preview-t2") !== null };
+      });
+      expect(duringEnter).toEqual({ first: false, second: false });
+      expect(screen.queryByTestId("thread-preview-t2")).not.toBeNull();
+    });
+
+    it("keeps an open preview on screen while its thread updates", async () => {
+      const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Before", provider: "claude", mode: "worktree" });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      await hoverOpen(screen.getByRole("button", { name: /^Provider, Claude Before/ }));
+      expect(preview()).not.toBeNull();
+
+      const removed: Node[] = [];
+      const observer = new MutationObserver((records) => records.forEach((record) => removed.push(...record.removedNodes)));
+      observer.observe(document.body, { childList: true, subtree: true });
+      await act(async () => {
+        useWorkspaceStore.setState({ threads: [{ ...thread, title: "After" }] });
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      observer.takeRecords().forEach((record) => removed.push(...record.removedNodes));
+      observer.disconnect();
+
+      expect(removed.some((node) => node instanceof Element && node.matches("[data-testid='thread-preview-t1']"))).toBe(false);
+      expect(within(preview() ?? document.body).getByText("After")).toBeTruthy();
+    });
+
     it("still opens a preview on keyboard focus during a scroll", async () => {
       const row = renderThread();
       fireEvent.scroll(scroller());
