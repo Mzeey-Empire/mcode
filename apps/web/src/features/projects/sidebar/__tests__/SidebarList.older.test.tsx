@@ -1,6 +1,6 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 
@@ -39,7 +39,7 @@ function Harness() {
   const { ctx, overlays } = useProjectTreeMenus();
   return (
     <>
-      <SidebarList items={model.items} ctx={ctx} />
+      <SidebarList items={model.items} ctx={ctx} olderIds={model.olderIds} />
       {overlays}
     </>
   );
@@ -94,5 +94,28 @@ describe("SidebarList Older section", () => {
     render(<Harness />);
     expect(olderBars()[0]).toHaveAttribute("aria-expanded", "false");
     expect(renderedThreadIds()).toEqual(["recent", "stale-2"]);
+  });
+
+  it("opens Older when an Older thread becomes active from elsewhere, and lets the user close it again", () => {
+    seed([threadAt("recent", 1), threadAt("stale-1", 20), threadAt("stale-2", 30)]);
+    render(<Harness />);
+
+    act(() => useWorkspaceStore.setState({ activeThreadId: "stale-2" }));
+
+    expect(olderBars()[0]).toHaveAttribute("aria-expanded", "true");
+    expect(renderedThreadIds()).toEqual(["recent", "stale-1", "stale-2"]);
+
+    fireEvent.click(olderBars()[0]!);
+
+    expect(olderBars()[0]).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("leaves Older closed when a recent thread becomes active", () => {
+    seed([threadAt("recent", 1), threadAt("stale-1", 20)]);
+    render(<Harness />);
+
+    act(() => useWorkspaceStore.setState({ activeThreadId: "recent" }));
+
+    expect(olderBars()[0]).toHaveAttribute("aria-expanded", "false");
   });
 });

@@ -235,23 +235,94 @@ function toVirtualRows(items: readonly SidebarItem[]): VirtualRow[] {
 }
 
 /**
- * Publishes the rows and owns the Older bar's open-and-rise: opening the section scrolls once the
- * new rows land so the bar rises to the top with the Older threads below it.
+ * Shows a row in full. A row cut at an edge shifts only that far, so a click on it does not pull the
+ * list from under the pointer; a row out of view centres.
  */
-function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, items: readonly SidebarItem[], rows: readonly VirtualRow[], flip: boolean) {
+function revealRow(viewport: VirtualViewport, key: string): void {
+  const top = viewport.rowTop(key);
+  const bottom = viewport.rowBottom(key);
+  const height = viewport.clientHeight;
+  const smooth = !prefersReducedMotion();
+  if (top === undefined || bottom === undefined || bottom <= 0 || top >= height) {
+    viewport.moveTo({ kind: "target", key, align: "center" }, smooth, { release: true });
+    return;
+  }
+  const shift = top < 0 ? top : Math.max(0, bottom - height);
+  if (shift !== 0) viewport.moveTo({ kind: "offset", top: viewport.viewport.scrollTop + shift }, smooth, { release: true });
+}
+
+function publishRows(viewport: VirtualViewport, rows: readonly VirtualRow[], flip: boolean): void {
+  viewport.setRows(rows, { flip });
+  if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordCounter?.("sidebar.setRows");
+}
+
+interface RevealState {
+  readonly threadId: string | null;
+  /** Older was just opened for this thread; reveal its row once the next rows land. */
+  readonly awaitingOlder: boolean;
+}
+
+interface ActiveThreadFacts {
+  readonly threadId: string | null;
+  readonly olderOpen: boolean;
+  readonly olderIds: ReadonlySet<string>;
+}
+
+/** Reveals a newly active thread's row, first opening a closed Older section that hides it. */
+function revealActiveThread(viewport: VirtualViewport, rows: readonly VirtualRow[], previous: RevealState, active: ActiveThreadFacts): RevealState {
+  const changed = previous.threadId !== active.threadId;
+  if ((!changed && !previous.awaitingOlder) || active.threadId === null) return { threadId: active.threadId, awaitingOlder: false };
+  // A selected Older thread stays listed under the closed bar, so it opens Older before revealing.
+  if (changed && !active.olderOpen && active.olderIds.has(active.threadId)) {
+    useSidebarUiStore.getState().openOlder();
+    return { threadId: active.threadId, awaitingOlder: true };
+  }
+  const key = `thread:${active.threadId}`;
+  if (rows.some((row) => row.id === key)) revealRow(viewport, key);
+  return { threadId: active.threadId, awaitingOlder: false };
+}
+
+/**
+ * Publishes the rows and owns the scroll moves that follow a publish: a scope or view switch starts
+ * at the top, opening Older rises its bar to the top, and a newly active thread hidden in a closed
+ * Older section opens it and scrolls to its row. Other layout changes keep the reading anchor.
+ */
+function usePublishRows(
+  controllerRef: React.RefObject<VirtualViewport | null>,
+  items: readonly SidebarItem[],
+  rows: readonly VirtualRow[],
+  flip: boolean,
+  olderIds: ReadonlySet<string>,
+) {
   const olderOpen = useSidebarUiStore((state) => state.olderOpen);
+  const scope = useSidebarUiStore((state) => state.scope);
+  const view = useSidebarUiStore((state) => state.view);
   const toggleOlderSection = useSidebarUiStore((state) => state.toggleOlder);
+  const activeThreadId = useWorkspaceStore((state) => state.activeThreadId);
   const riseRef = useRef(false);
+  const publishedRef = useRef<{ viewport: VirtualViewport; rows: readonly VirtualRow[] } | null>(null);
+  const shapeRef = useRef({ scope, view });
+  // Only a change of the active thread reveals it, so closing Older afterwards is not overridden.
+  const revealRef = useRef<RevealState>({ threadId: activeThreadId, awaitingOlder: false });
   const olderBar = useMemo(() => items.find((item): item is Extract<SidebarItem, { kind: "older-bar" }> => item.kind === "older-bar"), [items]);
   useLayoutEffect(() => {
     const viewport = controllerRef.current;
     if (!viewport) return;
-    viewport.setRows(rows, { flip });
-    if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordCounter?.("sidebar.setRows");
-    if (!riseRef.current) return;
-    riseRef.current = false;
-    viewport.moveTo({ kind: "target", key: OLDER_BAR_KEY, align: "start" }, !prefersReducedMotion(), { release: true });
-  }, [controllerRef, rows, flip]);
+    // The reveal inputs re-run this effect without new rows; republishing them would be wasted work.
+    if (publishedRef.current?.viewport !== viewport || publishedRef.current.rows !== rows) {
+      publishedRef.current = { viewport, rows };
+      publishRows(viewport, rows, flip);
+    }
+    if (shapeRef.current.scope !== scope || shapeRef.current.view !== view) {
+      shapeRef.current = { scope, view };
+      viewport.moveTo({ kind: "offset", top: 0 });
+    }
+    if (riseRef.current) {
+      riseRef.current = false;
+      viewport.moveTo({ kind: "target", key: OLDER_BAR_KEY, align: "start" }, !prefersReducedMotion(), { release: true });
+    }
+    revealRef.current = revealActiveThread(viewport, rows, revealRef.current, { threadId: activeThreadId, olderOpen, olderIds });
+  }, [controllerRef, rows, flip, scope, view, activeThreadId, olderOpen, olderIds]);
   const toggleOlder = useCallback(() => {
     riseRef.current = !olderOpen;
     toggleOlderSection();
@@ -286,6 +357,8 @@ interface SidebarListProps {
   readonly closing?: ReadonlySet<string>;
   /** Row keys rising back out of Older. */
   readonly arriving?: ReadonlySet<string>;
+  /** Threads in the Older section, so a newly active one there can open Older to show its row. */
+  readonly olderIds?: ReadonlySet<string>;
 }
 
 const NO_KEYS: ReadonlySet<string> = new Set();
@@ -298,7 +371,7 @@ const unfreezeOnLeave = () => useSidebarUiStore.getState().unfreeze();
  * filters, sorts or caps: the model already did. Project headers in the recent list drag to
  * reorder projects.
  */
-export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KEYS, arriving = NO_KEYS }: SidebarListProps) {
+export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KEYS, arriving = NO_KEYS, olderIds = NO_KEYS }: SidebarListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { controllerRef, hosts, previewGuard } = useSidebarViewport(containerRef);
   const [previewHandle] = useState(() => createTooltipHandle<ThreadPreviewPayload>());
@@ -310,7 +383,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
   const entrance = useEntranceKeys(items);
   usePreparingRowEntrance(containerRef, entrance.rowKeys, entrance.preparing);
 
-  const { olderBar, toggleOlder } = useOlderRise(controllerRef, items, rows, flip);
+  const { olderBar, toggleOlder } = usePublishRows(controllerRef, items, rows, flip, olderIds);
 
   const { dropIndicator } = drag;
   const renderRow = useCallback((item: SidebarItem): ReactNode => {

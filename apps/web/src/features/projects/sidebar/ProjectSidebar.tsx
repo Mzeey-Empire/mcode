@@ -65,6 +65,7 @@ export function ProjectSidebar() {
         items={shown.items}
         closing={shown.closing}
         arriving={shown.arriving}
+        olderIds={model.olderIds}
         ctx={ctx}
         flip={cause === "push"}
         overlay={hasProjects ? null : <div className="absolute inset-x-1.5 inset-y-0"><ProjectDropWell /></div>}
