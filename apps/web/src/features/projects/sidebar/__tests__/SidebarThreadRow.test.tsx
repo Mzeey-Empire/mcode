@@ -24,6 +24,8 @@ import { useSidebarUiStore } from "../sidebar-ui-store";
 import { useProjectTreeMenus } from "../../ProjectTree";
 import { SidebarList } from "../SidebarList";
 import { useSidebarModel } from "../use-sidebar-model";
+import { PREVIEW_SCROLL_SETTLE_MS } from "../preview-scroll-guard";
+import { FakeVirtualViewport } from "./fake-virtual-viewport";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
@@ -150,5 +152,60 @@ describe("SidebarThreadRow", () => {
     expect(resolveNavigation).toHaveBeenCalledWith(PR_URL(42), expect.anything());
     expect(openExternalUrl).not.toHaveBeenCalled();
     expect(setActiveThread).not.toHaveBeenCalled();
+  });
+
+  describe("row preview while the list scrolls", () => {
+    const preview = () => screen.queryByTestId("thread-preview-t1");
+    const scroller = () => {
+      const viewport = FakeVirtualViewport.latest?.viewport;
+      if (!viewport) throw new Error("no viewport");
+      return viewport;
+    };
+    const hoverOpen = async (row: HTMLElement) => {
+      fireEvent.pointerOver(row, { pointerType: "mouse" });
+      fireEvent.mouseEnter(row, { clientX: 40, clientY: 40 });
+      fireEvent.mouseMove(row, { clientX: 41, clientY: 40 });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+    };
+
+    it("closes a hover-opened preview when a scroll starts", async () => {
+      const row = renderThread();
+      await hoverOpen(row);
+      expect(preview()).not.toBeNull();
+
+      fireEvent.wheel(scroller());
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(preview()).toBeNull();
+    });
+
+    it("rejects hover opens until the list settles and the pointer moves", async () => {
+      const row = renderThread();
+      fireEvent.pointerMove(window, { clientX: 40, clientY: 40 });
+      fireEvent.scroll(scroller());
+      fireEvent.pointerOver(row, { pointerType: "mouse" });
+      fireEvent.mouseEnter(row, { clientX: 40, clientY: 40 });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(preview()).toBeNull();
+
+      fireEvent.mouseLeave(row);
+      fireEvent.pointerMove(window, { clientX: 40, clientY: 40 });
+      await hoverOpen(row);
+      expect(preview()).toBeNull();
+
+      fireEvent.mouseLeave(row);
+      await act(() => vi.advanceTimersByTimeAsync(PREVIEW_SCROLL_SETTLE_MS));
+      fireEvent.pointerMove(window, { clientX: 40, clientY: 52 });
+      await hoverOpen(row);
+      expect(preview()).not.toBeNull();
+    });
+
+    it("still opens a preview on keyboard focus during a scroll", async () => {
+      const row = renderThread();
+      fireEvent.scroll(scroller());
+      act(() => row.focus());
+      fireEvent.keyDown(row, { key: "Tab" });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(preview()).not.toBeNull();
+    });
   });
 });

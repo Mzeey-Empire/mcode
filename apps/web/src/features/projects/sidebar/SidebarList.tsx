@@ -33,6 +33,7 @@ import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import { freezeOrder, useSidebarUiStore } from "./sidebar-ui-store";
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
+import { PreviewScrollGuard, PreviewScrollGuardContext } from "./preview-scroll-guard";
 import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 
 /** Provisional heights until the ResizeObserver measures; they only shape the first frame. */
@@ -98,17 +99,20 @@ function noopViewportPosition(_position: ViewportPosition): void {}
 function useSidebarViewport(containerRef: React.RefObject<HTMLDivElement | null>) {
   const controllerRef = useRef<VirtualViewport | null>(null);
   const [hosts, setHosts] = useState<readonly VirtualHost[]>([]);
+  const [previewGuard] = useState(() => new PreviewScrollGuard());
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const view = new VirtualViewport(container, setHosts, noopViewportPosition, { classPrefix: "project-tree", ariaLabel: "Projects", flowHostId: OLDER_BAR_KEY });
     controllerRef.current = view;
+    const detachGuard = previewGuard.attach(view.viewport);
     return () => {
+      detachGuard();
       view.destroy();
       controllerRef.current = null;
     };
-  }, [containerRef]);
-  return { controllerRef, hosts };
+  }, [containerRef, previewGuard]);
+  return { controllerRef, hosts, previewGuard };
 }
 
 interface DropIndicator {
@@ -284,7 +288,7 @@ const unfreezeOnLeave = () => useSidebarUiStore.getState().unfreeze();
  */
 export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KEYS, arriving = NO_KEYS }: SidebarListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { controllerRef, hosts } = useSidebarViewport(containerRef);
+  const { controllerRef, hosts, previewGuard } = useSidebarViewport(containerRef);
   const drag = useProjectDrag(controllerRef);
   const rowCtx = useDragSafeContext(ctx, drag.isClickSuppressed);
   const rows = useMemo(() => toVirtualRows(items), [items]);
@@ -322,7 +326,9 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
         onDragCancel={drag.onDragCancel}
       >
         <SortableContext items={sortableIds} strategy={STATIC_SORT_STRATEGY}>
-          <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={renderRow} />
+          <PreviewScrollGuardContext.Provider value={previewGuard}>
+            <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={renderRow} />
+          </PreviewScrollGuardContext.Provider>
         </SortableContext>
         <DragOverlay>
           {dragged?.kind === "project" ? <div className="px-1.5"><ProjectHeader item={dragged} ctx={rowCtx} /></div> : null}

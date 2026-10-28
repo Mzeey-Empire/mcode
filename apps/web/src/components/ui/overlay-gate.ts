@@ -14,6 +14,10 @@ interface GatedOpenProps<Details> {
   readonly onOpenChange?: ((open: boolean, details: Details) => void) | undefined;
 }
 
+function isCanceled(details: unknown): boolean {
+  return typeof details === "object" && details !== null && "isCanceled" in details && details.isCanceled === true;
+}
+
 /**
  * Open state for a popup root under an overlay gate. The gate overrides both
  * controlled and uncontrolled popups; an uncontrolled one also forgets it was
@@ -25,8 +29,9 @@ export function useGatedOpen<Details>({ open, defaultOpen = false, onOpenChange 
   if (!gateOpen && uncontrolledOpen) setUncontrolledOpen(false);
   const handleOpenChange = useCallback(
     (next: boolean, details: Details) => {
-      setUncontrolledOpen(next);
       onOpenChange?.(next, details);
+      // A caller that cancels the change keeps the popup in its current state.
+      if (!isCanceled(details)) setUncontrolledOpen(next);
     },
     [onOpenChange],
   );
