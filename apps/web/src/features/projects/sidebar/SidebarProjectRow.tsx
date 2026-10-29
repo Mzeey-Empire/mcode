@@ -3,7 +3,7 @@ import { useShallow } from "zustand/shallow";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { KeyboardCode, useDndContext, type DraggableSyntheticListeners } from "@dnd-kit/core";
-import { ChevronRight, FolderOpen, GitBranchMinus, Pencil, SquarePen, Trash2 } from "lucide-react";
+import { ChevronRight, GitBranchMinus, SquarePen } from "lucide-react";
 import type { ChecksStatus } from "@mcode/contracts/github";
 import { Button } from "@/components/ui/button";
 import { MoreIcon } from "@/components/ui/icon-map";
@@ -406,10 +406,10 @@ function ProjectRowActions({
       <DropdownMenu>
         <DropdownMenuTrigger aria-label={`Project options for ${workspace.name}`} onClick={(event) => event.stopPropagation()} className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted opacity-0 outline-none transition-colors hover:bg-background/60 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100"><MoreIcon size={13} /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={4} className="min-w-40">
-          <DropdownMenuItem label="Open in Explorer" icon={<FolderOpen />} onClick={onOpenInExplorer} />
-          <DropdownMenuItem label="Rename project" icon={<Pencil />} onClick={onRename} />
+          <DropdownMenuItem label="Open in Explorer" onClick={onOpenInExplorer} />
+          <DropdownMenuItem label="Rename project" onClick={onRename} />
           <DropdownMenuSeparator />
-          <DropdownMenuItem label="Delete project" icon={<Trash2 />} destructive onClick={onDelete} />
+          <DropdownMenuItem label="Delete project" destructive onClick={onDelete} />
         </DropdownMenuContent>
       </DropdownMenu>
       <Tooltip>
