@@ -23,6 +23,8 @@ interface SidebarUiActions {
   setScope(scope: SidebarScope): void;
   toggleView(): void;
   toggleOlder(): void;
+  /** Opens Older without the rise, for revealing a thread selected from outside the sidebar. */
+  openOlder(): void;
   toggleProject(workspaceId: string, section: "recent" | "older"): void;
   toggleShowMore(workspaceId: string): void;
   freeze(snapshot: FrozenOrder): void;
@@ -90,6 +92,7 @@ export const useSidebarUiStore = create<SidebarUiState & SidebarUiActions>()(
       setScope: (scope) => set({ scope }),
       toggleView: () => set((state) => ({ view: state.view === "projects" ? "threads" : "projects" })),
       toggleOlder: () => set((state) => ({ olderOpen: !state.olderOpen })),
+      openOlder: () => set({ olderOpen: true }),
       toggleProject: (workspaceId, section) =>
         set((state) => section === "older"
           ? { collapsedOlderProjects: toggled(state.collapsedOlderProjects, workspaceId) }
