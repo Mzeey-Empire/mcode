@@ -23,7 +23,7 @@ function openPullRequest(pr: ThreadPullRequest, threadId: string, event: React.M
 
 function StateIcon({ pr }: { pr: ThreadPullRequest }) {
   const { Icon, color } = getPullRequestStateVisual(pr.state);
-  return <Icon size={13} aria-hidden className={cn("shrink-0", color)} />;
+  return <Icon size={12} aria-hidden className={cn("shrink-0", color)} />;
 }
 
 const CHIP_CLASS = "flex h-5 shrink-0 items-center gap-1 rounded-md px-1 text-caption tabular-nums text-muted outline-none transition-colors hover:bg-selected/60 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70";

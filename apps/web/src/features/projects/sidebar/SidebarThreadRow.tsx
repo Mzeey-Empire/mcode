@@ -587,8 +587,10 @@ function ThreadRowBranchLine({ thread, presentation, children }: Pick<ThreadRowV
       >
         {checkoutLabel}
       </div>
-      {children}
-      <div className="w-6 shrink-0 text-right tabular-nums">{age}</div>
+      <div className="flex shrink-0 items-center gap-1">
+        {children}
+        <div className="tabular-nums">{age}</div>
+      </div>
     </div>
   );
 }
