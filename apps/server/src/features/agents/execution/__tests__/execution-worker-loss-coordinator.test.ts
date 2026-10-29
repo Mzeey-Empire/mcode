@@ -4,12 +4,15 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { ProviderEventDraft } from "@mcode/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 import { CanonicalExecutionWriterPort } from "../../canonical/canonical-execution-writer-port.js";
+import { ExecutionLivePublicationRelease } from "../../canonical/execution-live-publication-release.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import type { ExecutionIdentity, ExecutionWorkerPort, ExecutionWorkerReply, ExecutionWorkerRequest } from "../execution-mailbox-protocol.js";
@@ -72,6 +75,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
   let coordinator: ExecutionWorkerLossCoordinator;
   let workers: CrashingPort[];
   let published: string[];
+  let liveEvents: AgentEvent[];
   let recoveryIncidentIds: string[];
   let recoveredAssignments: ExecutionLostAssignment[];
 
@@ -85,9 +89,13 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     owner = new ApplicationDatabaseWriter(NodePath.join(directory, "app.sqlite"));
     writer = new CanonicalAgentWriterClient(owner);
     published = [];
+    liveEvents = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
-    });
+    }, new ExecutionLivePublicationRelease({
+      isBound: () => true,
+      publish: (event) => liveEvents.push(event),
+    }));
     recoveryIncidentIds = [];
     recoveredAssignments = [];
     workers = [];
@@ -244,6 +252,84 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
       kind: "checkpoint", phase: "running", nativeCursor: null,
     }, byteLength: 100 })).toEqual({ kind: "stale-execution" });
     expect(coordinator.scheduler.claim({ ...execution, executionId: "new-execution" }, 2).kind).toBe("claimed");
+  });
+
+  it("interrupts a Browser execution and never stores or publishes its late result after worker recovery", async () => {
+    const claim = coordinator.scheduler.claim(execution, 1);
+    if (claim.kind !== "claimed") throw new Error(`Claim failed: ${claim.kind}`);
+    const send = async (command: ExecutionWorkCommand) => {
+      const admitted = coordinator.scheduler.submit({ execution, lease: claim.lease, command,
+        byteLength: Buffer.byteLength(JSON.stringify(command), "utf8") });
+      if (admitted.kind !== "admitted") throw new Error(`Command not admitted: ${admitted.kind}`);
+      expect(await admitted.completion).toMatchObject({ kind: "reply", result: { kind: "committed" } });
+    };
+    const draft = (sequence: number, event: AgentEvent): ProviderEventDraft => ({
+      eventId: `${execution.executionId}:browser-${sequence}`,
+      routing: { ...execution, itemId: `browser-${sequence}` },
+      sourceProviderId: "codex", sourceIdentities: [], sourceSequence: sequence,
+      payload: { type: "item.recorded", item: {
+        id: `browser-${sequence}`, threadId: execution.threadId, turnId: execution.turnId,
+        kind: "system", providerIdentities: [],
+        payload: { projection: "providerRuntimeEvent", runtimeEvent: { event } },
+        createdAt: NOW, updatedAt: NOW,
+      } },
+    });
+    await send({
+      kind: "start", providerId: "codex",
+      input: {
+        thread: { id: execution.threadId, workspaceId: "lost-worker-workspace", providerId: "codex", createdAt: NOW },
+        turnId: execution.turnId, executionId: execution.executionId,
+        permissionMode: "supervised", providerIdentities: [],
+        userMessage: { kind: "create", messageId: `${execution.threadId}-user`, content: "Question", sequence: 1 },
+      },
+      parentLive: { planFeature: "none", precedingMessageId: `${execution.threadId}-user` },
+      publishParentStart: true,
+    });
+    await send({ kind: "event", phase: "running", nativeCursor: null, events: [draft(1, {
+      type: "toolUse", threadId: execution.threadId, turnExecutionId: execution.executionId,
+      toolCallId: "browser-call", toolName: "mcp__mcode-browser__browser_evaluate",
+      toolInput: { expression: "globalThis.SECRET_SOURCE", observationRef: "observation-1" },
+    })] });
+    const storedUse = db.query<{ payload_json: string }, [string]>(
+      "SELECT payload_json FROM canonical_agent_items WHERE id = ?",
+    ).get("browser-1");
+    expect(JSON.parse(storedUse?.payload_json ?? "null"))
+      .toEqual({ projection: "providerRuntimeEvent", runtimeEvent: { event: {
+        type: "toolUse", threadId: execution.threadId, turnExecutionId: execution.executionId,
+        toolCallId: "browser-call", toolName: "mcp__mcode-browser__browser_evaluate",
+        toolInput: { operation: "browser_evaluate" },
+      } } });
+    expect(liveEvents).toContainEqual(expect.objectContaining({
+      type: "toolUse", toolCallId: "browser-call", toolInput: { operation: "browser_evaluate" },
+    }));
+    expect(published).toContain(`${execution.executionId}:browser-1`);
+
+    workers[0]?.crash();
+    expect(await coordinator.waitForRecovery(0)).toEqual({ kind: "recovered", workerIndex: 0 });
+    expect(workers).toHaveLength(2);
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(execution.executionId)).toEqual({ terminal_outcome: "interrupted" });
+    const storedBeforeResult = db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE execution_id = ? ORDER BY accepted_sequence")
+      .all(execution.executionId);
+    const publishedBeforeResult = [...published];
+    const liveBeforeResult = [...liveEvents];
+    expect(coordinator.scheduler.submit({ execution, lease: claim.lease, byteLength: 1_000,
+      command: { kind: "event", phase: "running", nativeCursor: null, events: [draft(2, {
+        type: "toolResult", threadId: execution.threadId, turnExecutionId: execution.executionId,
+        toolCallId: "browser-call", output: '{"valueJson":"SECRET_RESULT"}', isError: false,
+        outputTruncated: true, outputTotalBytes: 999, outputArtifactPath: "C:\\secret-result.txt",
+        toolInput: { expression: "globalThis.SECRET_SOURCE" },
+      })] },
+    })).toEqual({ kind: "stale-execution" });
+    expect(db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE execution_id = ? ORDER BY accepted_sequence")
+      .all(execution.executionId)).toEqual(storedBeforeResult);
+    expect(db.prepare("SELECT payload_json FROM canonical_agent_items WHERE id = ?").get("browser-2")).toBeNull();
+    expect(published).toEqual(publishedBeforeResult);
+    expect(liveEvents).toEqual(liveBeforeResult);
+    expect(JSON.stringify(storedBeforeResult)).not.toContain("SECRET_SOURCE");
+    expect(JSON.stringify(liveEvents)).not.toContain("SECRET_SOURCE");
+    expect(JSON.stringify(storedBeforeResult)).not.toContain("SECRET_RESULT");
+    expect(JSON.stringify(liveEvents)).not.toContain("SECRET_RESULT");
   });
 
   it("writes and pins the snapshot of an attempt whose worker was lost", async () => {
