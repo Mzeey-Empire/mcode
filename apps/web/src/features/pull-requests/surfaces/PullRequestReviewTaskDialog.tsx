@@ -136,9 +136,9 @@ async function openReviewTask(reviewLink: PullRequestReviewLink): Promise<void> 
   );
 
   if (workspace.activeWorkspaceId !== reviewLink.workspaceId) {
-    workspace.setActiveWorkspace(reviewLink.workspaceId, undefined, false);
+    workspace.setActiveWorkspace(reviewLink.workspaceId);
   }
-  await useWorkspaceStore.getState().loadThreads(reviewLink.workspaceId);
+  if (!workspace.threads.some((thread) => thread.id === reviewLink.threadId)) await workspace.hydrateThreads();
   await useWorkspaceStore.getState().loadWorktrees(reviewLink.workspaceId);
   const loadedWorkspace = useWorkspaceStore.getState();
   const linkedThread = loadedWorkspace.threads.find(

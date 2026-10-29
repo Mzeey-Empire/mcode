@@ -65,34 +65,33 @@ describe("thread status refresh after reconnect", () => {
     vi.clearAllMocks();
   });
 
-  it("replaces stale 'active' status with 'interrupted' from the server after loadThreads", async () => {
+  it("replaces stale 'active' status with 'interrupted' from the server after hydrateThreads", async () => {
     // Simulate pre-restart client state: thread is active
     const thread = createMockThread({ workspace_id: ws.id, status: "active" });
     useWorkspaceStore.setState({ threads: [thread] });
 
     // Server returns the same thread marked interrupted (set during graceful shutdown)
     const interruptedThread = { ...thread, status: "interrupted" as const };
-    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValue([interruptedThread]);
+    (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValue([interruptedThread]);
 
     // This is what ws-transport.ts calls in the ws.onopen handler after reconnect
-    await useWorkspaceStore.getState().loadThreads(ws.id);
+    await useWorkspaceStore.getState().hydrateThreads();
 
     const updated = useWorkspaceStore.getState().threads.find((t) => t.id === thread.id);
     expect(updated?.status).toBe("interrupted");
   });
 
-  it("loadThreads on reconnect does not clobber threads from other workspaces", async () => {
+  it("hydrateThreads on reconnect does not clobber threads from other workspaces", async () => {
     const otherWs = createMockWorkspace();
     const myThread = createMockThread({ workspace_id: ws.id, status: "active" });
     const otherThread = createMockThread({ workspace_id: otherWs.id, status: "active" });
 
     useWorkspaceStore.setState({ threads: [myThread, otherThread] });
 
-    // Server returns only the active workspace's threads
     const fresh = { ...myThread, status: "interrupted" as const };
-    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValue([fresh]);
+    (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValue([fresh, otherThread]);
 
-    await useWorkspaceStore.getState().loadThreads(ws.id);
+    await useWorkspaceStore.getState().hydrateThreads();
 
     const threads = useWorkspaceStore.getState().threads;
     expect(threads.find((t) => t.id === myThread.id)?.status).toBe("interrupted");
@@ -124,7 +123,7 @@ describe("thread status refresh after reconnect", () => {
     expect(useThreadStore.getState().records.get(thread.id)?.messages[0]?.content).toBe("Kept");
   });
 
-  it("refreshes the selected conversation on every reconnect while throttling thread lists", async () => {
+  it("hydrates the whole index on every connection and reconnect", async () => {
     vi.useFakeTimers();
     const sockets: ReconnectWebSocket[] = [];
     vi.stubGlobal(
@@ -143,26 +142,26 @@ describe("thread status refresh after reconnect", () => {
       activeWorkspaceId: ws.id,
       activeThreadId: thread.id,
     });
-    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValue([thread]);
+    (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValue([thread]);
     const transport = createWsTransport("ws://localhost:1234");
 
     try {
       sockets[0]?.open();
       await vi.waitFor(() => {
-        expect(mockTransport.listThreads).toHaveBeenCalledTimes(1);
+        expect(mockTransport.listAllThreads).toHaveBeenCalledTimes(1);
       });
 
       sockets[0]?.disconnect();
       await vi.advanceTimersByTimeAsync(1_000);
       sockets[1]?.open();
       await vi.waitFor(() => {
-        expect(mockTransport.listThreads).toHaveBeenCalledTimes(1);
+        expect(mockTransport.listAllThreads).toHaveBeenCalledTimes(2);
       });
       sockets[1]?.disconnect();
       await vi.advanceTimersByTimeAsync(1_000);
       sockets[2]?.open();
       await vi.waitFor(() => {
-        expect(mockTransport.listThreads).toHaveBeenCalledTimes(1);
+        expect(mockTransport.listAllThreads).toHaveBeenCalledTimes(3);
       });
     } finally {
       transport.close();

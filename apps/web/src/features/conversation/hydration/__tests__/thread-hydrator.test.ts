@@ -2282,7 +2282,7 @@ describe("ThreadHydrator", () => {
     const activeHydrate = hydrator.hydrate(THREAD_A, "active");
     await vi.waitFor(() => expect(mockTransport.loadConversationPage).toHaveBeenCalledTimes(1));
 
-    useWorkspaceStore.getState().setActiveWorkspace("workspace-b", undefined, false);
+    useWorkspaceStore.getState().setActiveWorkspace("workspace-b");
     resolvePage({ messages: [staleMessage], hasMore: false, narrativeByMessage: {} });
     await activeHydrate;
 

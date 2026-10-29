@@ -125,6 +125,22 @@ describe("ws-events thread.lifecycleChanged", () => {
     vi.restoreAllMocks();
   });
 
+  it("advances activity pushes without allowing an older push to regress the clock", () => {
+    useWorkspaceStore.setState({ threads: [makeThread({ last_activity_at: "2026-01-01T00:00:00.000Z" })] });
+    startPushListeners();
+    pushEmitter.emit("thread.activity", { threadId: "thread-1", at: "2026-01-03T00:00:00.000Z" });
+    pushEmitter.emit("thread.activity", { threadId: "thread-1", at: "2026-01-02T00:00:00.000Z" });
+    expect(useWorkspaceStore.getState().threads[0].last_activity_at).toBe("2026-01-03T00:00:00.000Z");
+  });
+
+  it("adds an externally created thread without opening its workspace", () => {
+    useWorkspaceStore.setState({ threads: [], activeWorkspaceId: null });
+    startPushListeners();
+    pushEmitter.emit("thread.created", { thread: makeThread({ id: "external", workspace_id: "unopened" }) });
+    expect(useWorkspaceStore.getState().threads.map((thread) => [thread.id, thread.workspace_id]))
+      .toEqual([["external", "unopened"]]);
+  });
+
   it("applies a server-authoritative completion push", () => {
     useWorkspaceStore.setState({ threads: [makeThread()] });
     startPushListeners();

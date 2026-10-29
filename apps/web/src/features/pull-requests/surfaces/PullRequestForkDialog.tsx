@@ -284,7 +284,7 @@ export function PullRequestForkDialog({
     const workspace = useWorkspaceStore.getState();
     workspace.setPendingNewThread(false);
     if (workspace.activeWorkspaceId !== previous.workspaceId) {
-      workspace.setActiveWorkspace(previous.workspaceId, undefined, false);
+      workspace.setActiveWorkspace(previous.workspaceId);
     }
     workspace.setActiveThread(previous.threadId);
   }, []);

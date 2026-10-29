@@ -104,11 +104,6 @@ const HEARTBEAT_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * HEARTBEAT_MAX_MISSED_CHECKS
 /** Deadline for `agent.send` so a composer submit cannot park forever on a dead socket. */
 const SEND_MESSAGE_TIMEOUT_MS = 20_000;
 
-/** Last thread-list refresh timestamp per workspace, triggered on WS reconnect. */
-const lastLoadThreadsAtByWorkspace = new Map<string, number>();
-/** Minimum interval between reconnect-triggered thread-list fetches to avoid rapid-reconnect storms. */
-const LOAD_THREADS_RECONNECT_COOLDOWN_MS = 5_000;
-
 /** Minimum interval between desktop ensure-server-running requests. */
 const ENSURE_SERVER_THROTTLE_MS = 15_000;
 /** Timestamp of the last ensure-server-running request (module-level: one server per app). */
@@ -582,25 +577,12 @@ export function createWsTransport(
         });
       }
 
-      // Re-fetch the thread list after reconnect so thread statuses are not
-      // stale. A server restart marks active threads "interrupted" in the DB
-      // but the client still holds the pre-restart status in memory.
-      // Throttled to avoid hammering the API during rapid reconnect cycles
-      // (e.g. flaky networks, server restarts causing multiple reconnect attempts).
       // Deferred import avoids a circular dependency at module evaluation time.
-      const nowForThreads = Date.now();
       import("@/features/projects/state/workspaceStore").then(({ useWorkspaceStore }) => {
         if (reconnecting) void useWorkspaceStore.getState().loadWorkspaces();
-        const { activeWorkspaceId, loadThreads, refreshActiveConversation, recoverPreparingThreads } = useWorkspaceStore.getState();
+        const { hydrateThreads, refreshActiveConversation, recoverPreparingThreads } = useWorkspaceStore.getState();
         void recoverPreparingThreads();
-        if (!activeWorkspaceId) return;
-        const last = lastLoadThreadsAtByWorkspace.get(activeWorkspaceId) ?? 0;
-        if (nowForThreads - last <= LOAD_THREADS_RECONNECT_COOLDOWN_MS) {
-          void refreshActiveConversation().catch(() => {});
-          return;
-        }
-        lastLoadThreadsAtByWorkspace.set(activeWorkspaceId, nowForThreads);
-        loadThreads(activeWorkspaceId)
+        hydrateThreads()
           .then(() => refreshActiveConversation())
           .catch(() => {});
       });
@@ -1079,7 +1061,7 @@ export function createWsTransport(
     // Thread
     createThread: (workspaceId, title, mode, branch) =>
       rpc<Thread>("thread.create", { workspaceId, title, mode, branch }),
-    listThreads: (workspaceId) => rpc<Thread[]>("thread.list", { workspaceId }),
+    listAllThreads: () => rpc<Thread[]>("thread.listAll", {}),
     listRecentThreads: (limit) =>
       rpc<import("./types").RecentThread[]>("thread.recent", limit !== undefined ? { limit } : {}),
     searchThreads: (opts) =>

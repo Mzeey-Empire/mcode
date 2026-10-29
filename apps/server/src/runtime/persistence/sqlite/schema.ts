@@ -90,6 +90,7 @@ export const threads = sqliteTable(
     seenAt: text("seen_at"),
     lastTurnOutcome: text("last_turn_outcome"),
     lastTurnEndedAt: text("last_turn_ended_at"),
+    lastActivityAt: text("last_activity_at"),
     lastTurnSequence: integer("last_turn_sequence"),
     mode: text("mode").notNull().default("direct"),
     worktreePath: text("worktree_path"),

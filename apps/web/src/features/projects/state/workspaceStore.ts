@@ -54,6 +54,47 @@ function unboundStartupResolution(state: ThreadStartup["state"]): "unbound" | "t
 const SYNC_THROTTLE_MS = 30_000;
 /** Tracks the last syncThreadPrs request time per workspace. */
 const lastSyncTime = new Map<string, number>();
+let hydrationRequest = 0;
+
+async function syncWorkspaceThreadPrs(workspaceId: string): Promise<void> {
+  const now = Date.now();
+  if (now - (lastSyncTime.get(workspaceId) ?? 0) < SYNC_THROTTLE_MS) return;
+  lastSyncTime.set(workspaceId, now);
+  const before = new Map(useWorkspaceStore.getState().threads.map((thread) => [thread.id, thread]));
+  try {
+    const results = await getTransport().syncThreadPrs(workspaceId);
+    const byId = new Map(results.map((result) => [result.threadId, result]));
+    useWorkspaceStore.setState((state) => ({
+      threads: state.threads.map((thread) => {
+        const result = byId.get(thread.id);
+        if (!result || thread !== before.get(thread.id)) return thread;
+        return { ...thread, pr_number: result.prNumber, pr_status: result.prStatus };
+      }),
+    }));
+  } catch (error) {
+    console.warn("[threads] PR sync failed", error);
+  }
+}
+
+function mergeThreadSnapshot(incoming: Thread[], before: ReadonlyMap<string, WorkspaceThread>, current: WorkspaceThread[]): WorkspaceThread[] {
+  const currentById = new Map(current.map((thread) => [thread.id, thread]));
+  const merged = new Map<string, WorkspaceThread>();
+  for (const thread of incoming) {
+    const existing = currentById.get(thread.id);
+    const atStart = before.get(thread.id);
+    if (existing !== atStart) {
+      if (existing) merged.set(thread.id, existing);
+    } else {
+      merged.set(thread.id, thread);
+    }
+  }
+  for (const thread of current) {
+    if (thread.clientPreparing || thread.clientError != null || thread !== before.get(thread.id)) {
+      merged.set(thread.id, thread);
+    }
+  }
+  return [...merged.values()].filter((thread) => !isDelegatedSubagent(thread));
+}
 
 async function clearPreviewResources(workspaceId: string, threadId: string): Promise<void> {
   await usePreviewTabsStore.getState().clearScope(workspaceId, threadId);
@@ -185,26 +226,6 @@ function createdDevinMode(
     ?? null;
 }
 
-/**
- * Bumped immediately before applying local additions/removals that must win over
- * in-flight {@link WorkspaceState.loadThreads} responses. Without this, a slow
- * `thread.list` that started before branching (for example) can finish after the
- * new thread was merged and overwrite the sidebar with an older snapshot.
- */
-const threadListMutationEpochByWorkspace = new Map<string, number>();
-
-function bumpThreadListMutationEpoch(workspaceId: string): void {
-  threadListMutationEpochByWorkspace.set(
-    workspaceId,
-    (threadListMutationEpochByWorkspace.get(workspaceId) ?? 0) + 1,
-  );
-}
-
-/** Clears mutation-epoch bookkeeping. Used by Vitest only. */
-export function __resetThreadListMutationEpochForTests(): void {
-  threadListMutationEpochByWorkspace.clear();
-}
-
 /** RPC payload remembered so a failed placeholder can retry. Used by Vitest only. */
 export function __clearPendingThreadCreationsForTests(): void {
   pendingThreadCreationByPlaceholderId.clear();
@@ -213,7 +234,6 @@ export function __clearPendingThreadCreationsForTests(): void {
 
 /**
  * Startup identity retained while a thread's startup lifecycle is unresolved.
- * Kept outside thread rows so a `loadThreads` refresh can never strip it.
  */
 export interface PendingStartup {
   /** Client-generated identity matching `ThreadStartup.startupId`. */
@@ -638,7 +658,6 @@ interface WorkspaceState {
   setActiveWorkspace: (
     id: string | null,
     call?: WorkspaceRpcCall,
-    loadThreads?: boolean,
   ) => void;
   /** Pin or unpin a workspace. Optimistically updates local state; reverts on RPC failure. */
   pinWorkspace: (id: string, pinned: boolean, call?: WorkspaceRpcCall) => Promise<void>;
@@ -648,7 +667,10 @@ interface WorkspaceState {
   reorderWorkspace: (id: string, newIndex: number, call?: WorkspaceRpcCall) => Promise<void>;
 
   // Thread actions
-  loadThreads: (workspaceId: string) => Promise<void>;
+  /** Hydrate the whole index while retaining mutations received during the request. */
+  hydrateThreads: () => Promise<void>;
+  /** Add a server-created thread even when its project has never been opened. */
+  applyThreadCreated: (thread: Thread) => void;
   /** Revalidate the selected conversation after reconnect. */
   refreshActiveConversation: () => Promise<void>;
   createThread: (
@@ -706,6 +728,7 @@ interface WorkspaceState {
   retryThreadCleanup: (threadId: string) => Promise<void>;
   /** Apply a server-authoritative completion lifecycle push. */
   applyThreadLifecycle: (thread: Thread) => void;
+  applyThreadActivity: (threadId: string, at: string) => void;
   /** Remove a thread after server-authoritative automatic cleanup. */
   applyThreadDeleted: (threadId: string) => void;
   /** Record a thread's committed resume schedule, or its removal. */
@@ -814,7 +837,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       return;
     }
     const pending = pendingThreadCreationByPlaceholderId.get(placeholderId);
-    bumpThreadListMutationEpoch(workspaceId);
     pendingThreadCreationByPlaceholderId.delete(placeholderId);
     const draftStore = useComposerDraftStore.getState();
     const draft = draftStore.getDraft(placeholderId);
@@ -897,7 +919,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       placeholderId,
       attempt,
     );
-    bumpThreadListMutationEpoch(attempt.workspaceId);
     pendingThreadCreationByPlaceholderId.set(placeholderId, attempt);
     if (attempt.composerDraft) {
       useComposerDraftStore.getState().saveDraft(placeholderId, attempt.composerDraft);
@@ -953,7 +974,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     const draftStore = useComposerDraftStore.getState();
     const draft = draftStore.getDraft(placeholderId);
     const editedDraft = draftChangedSinceSubmission(pending, draft) ? draft : undefined;
-    bumpThreadListMutationEpoch(pending.workspaceId);
     pendingThreadCreationByPlaceholderId.delete(placeholderId);
     draftStore.removeDraftAfterAttachmentTransfer(placeholderId);
     // Without the create response, the server snapshot is the only source of the
@@ -995,11 +1015,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const startup = useThreadStartupStore.getState().recordsByStartupId[pending.startupId];
       if (!startup) return "missing";
       if (!startup.threadId) return unboundStartupResolution(startup.state);
-      const [threads, runtimes] = await Promise.all([
-        getTransport().listThreads(pending.workspaceId),
+      const [, runtimes] = await Promise.all([
+        get().hydrateThreads(),
         getTransport().listRunning(),
       ]);
-      const thread = threads.find((candidate) => candidate.id === startup.threadId);
+      const thread = get().threads.find((candidate) => candidate.id === startup.threadId);
       if (!thread) return "unbound";
       applyRecoveredCreation(placeholderId, thread, runtimes.find((runtime) => runtime.threadId === thread.id));
       return thread;
@@ -1071,7 +1091,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     if (!workspaceId) return;
     releaseBrowserAutomationThreadScope(workspaceId, threadId);
     await clearPreviewResources(workspaceId, threadId);
-    bumpThreadListMutationEpoch(workspaceId);
   };
 
   const deletePersistedThread = async (
@@ -1083,7 +1102,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     await getTransport().deleteThread(threadId, cleanupWorktree);
     if (!workspaceId) return;
     releaseBrowserAutomationThreadScope(workspaceId, threadId);
-    bumpThreadListMutationEpoch(workspaceId);
   };
 
   const removeThreadFromWorkspace = (threadId: string) => {
@@ -1193,7 +1211,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       await Promise.all(deletedThreadIds.map((tid) => clearPreviewResources(id, tid)));
       await getTransport().deleteWorkspace(id);
       releaseBrowserAutomationWorkspaceScopes(id);
-      bumpThreadListMutationEpoch(id);
       abandonPendingThreadCreationsForWorkspace(id);
       useThreadDraftStore.getState().removeWorkspaceDrafts(id);
       const diffStore = useDiffStore.getState();
@@ -1261,7 +1278,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     });
   },
 
-  setActiveWorkspace: (id, call, loadThreads = true) => {
+  setActiveWorkspace: (id, call) => {
     if (id === get().activeWorkspaceId) return;
     // Only clear activeThreadId if the current thread belongs to a different workspace
     const currentThread = get().threads.find(
@@ -1284,7 +1301,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     });
     reconcileSelectedConversation();
     if (id) {
-      if (loadThreads) get().loadThreads(id);
+      void syncWorkspaceThreadPrs(id);
       // Optimistically bump the local last_opened_at so the project selector
       // re-sorts immediately. Without this the row only moves to the top of
       // "Recent" after the next workspace list refresh, which feels laggy.
@@ -1383,67 +1400,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }
   },
 
-  loadThreads: async (workspaceId) => {
-    const epochAtStart = threadListMutationEpochByWorkspace.get(workspaceId) ?? 0;
-    // Stale-while-revalidate: only show loading spinner if there are NO
-    // existing threads for this workspace. If threads are already in state
-    // (from a prior load), keep showing them while the refresh runs.
-    const hasStaleThreads = get().threads.some((t) => t.workspace_id === workspaceId);
-    set({ loading: !hasStaleThreads, error: null });
+  hydrateThreads: async () => {
+    const request = ++hydrationRequest;
+    const before = new Map(get().threads.map((thread) => [thread.id, thread]));
     try {
-      const newThreads = await getTransport().listThreads(workspaceId);
-      if ((threadListMutationEpochByWorkspace.get(workspaceId) ?? 0) !== epochAtStart) {
-        set({ loading: false });
-        return;
-      }
-      // Replace threads for this workspace; keep threads from other workspaces intact.
-      // Retain optimistic placeholder rows until the server confirms the real thread.
-      set((state) => {
-        const placeholders = state.threads.filter(
-          (t) =>
-            t.workspace_id === workspaceId &&
-            (t.clientPreparing === true || t.clientError != null),
-        );
-        const incomingIds = new Set(newThreads.map((t) => t.id));
-        const extraPlaceholders = placeholders.filter((p) => !incomingIds.has(p.id));
-        const mergedForWorkspace = [...extraPlaceholders, ...newThreads];
-        return {
-          threads: [
-            ...state.threads.filter((t) => t.workspace_id !== workspaceId),
-            ...mergedForWorkspace,
-          ],
-          loading: false,
-        };
-      });
-
-      const epochForPrSync = epochAtStart;
-
-      // Background PR sync: scanned for new PRs and refreshed stale PR states (throttled)
-      const now = Date.now();
-      const lastSync = lastSyncTime.get(workspaceId) ?? 0;
-      if (now - lastSync >= SYNC_THROTTLE_MS) {
-        lastSyncTime.set(workspaceId, now);
-        getTransport().syncThreadPrs(workspaceId).then((results) => {
-          if (results.length === 0) return;
-          // Discard results if the workspace changed while the request was in flight
-          if (get().activeWorkspaceId !== workspaceId) return;
-          if ((threadListMutationEpochByWorkspace.get(workspaceId) ?? 0) !== epochForPrSync) {
-            return;
-          }
-          const resultMap = new Map(results.map((r) => [r.threadId, r]));
-          set((state) => ({
-            threads: state.threads.map((t) => {
-              const match = resultMap.get(t.id);
-              if (!match) return t;
-              // null prNumber means the stale PR was cleared server-side
-              return { ...t, pr_number: match.prNumber, pr_status: match.prStatus };
-            }),
-          }));
-        }).catch(() => {});
-      }
-    } catch (e) {
-      set({ error: String(e), loading: false });
+      const incoming = await getTransport().listAllThreads();
+      if (request !== hydrationRequest) return;
+      set((state) => ({ threads: mergeThreadSnapshot(incoming, before, state.threads), loading: false, error: null }));
+      const workspaceId = get().activeWorkspaceId;
+      if (workspaceId) void syncWorkspaceThreadPrs(workspaceId);
+    } catch (error) {
+      if (request === hydrationRequest) set({ error: String(error), loading: false });
     }
+  },
+
+  applyThreadCreated: (thread) => {
+    if (isDelegatedSubagent(thread)) return;
+    set((state) => {
+      if (state.threads.some((existing) => existing.id === thread.id)) return state;
+      return { threads: [thread, ...state.threads] };
+    });
   },
 
   refreshActiveConversation: async () => {
@@ -1462,8 +1438,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         mode,
         branch,
       );
-      bumpThreadListMutationEpoch(activeWorkspaceId);
-      set((state) => ({ threads: [thread, ...state.threads] }));
+      get().applyThreadCreated(thread);
       return thread;
     } catch (e) {
       set({ error: String(e) });
@@ -1726,7 +1701,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         return { threads: state.threads.filter((candidate) => candidate.id !== thread.id) };
       }
       const existing = state.threads.find((candidate) => candidate.id === thread.id);
-      const nextThread = existing ? { ...existing, ...thread } : thread;
+      const lastActivity = existing && Date.parse(existing.last_activity_at) > Date.parse(thread.last_activity_at)
+        ? existing.last_activity_at
+        : thread.last_activity_at;
+      const nextThread = { ...existing, ...thread, last_activity_at: lastActivity };
       return {
         threads: existing
           ? state.threads.map((candidate) => candidate.id === thread.id ? nextThread : candidate)
@@ -1741,11 +1719,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }
   },
 
+  applyThreadActivity: (threadId, at) => {
+    set((state) => {
+      const existing = state.threads.find((thread) => thread.id === threadId);
+      if (!existing || Date.parse(existing.last_activity_at) >= Date.parse(at)) return state;
+      return { threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, last_activity_at: at } : thread) };
+    });
+  },
+
   applyScheduledResume: (threadId, resume) => {
     const existing = get().threads.find((thread) => thread.id === threadId);
     if (!existing) return;
     // A thread list fetched before this change would otherwise restore the old schedule.
-    bumpThreadListMutationEpoch(existing.workspace_id);
     set((state) => ({
       threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, scheduled_resume: resume } : thread),
     }));
@@ -1756,7 +1741,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     if (!existing) return;
     releaseBrowserAutomationThreadScope(existing.workspace_id, threadId);
     void clearPreviewResources(existing.workspace_id, threadId);
-    bumpThreadListMutationEpoch(existing.workspace_id);
     useTerminalStore.getState().clearThread(threadId);
     useQueueStore.getState().clearQueue(threadId);
     useComposerDraftStore.getState().clearDraft(threadId);

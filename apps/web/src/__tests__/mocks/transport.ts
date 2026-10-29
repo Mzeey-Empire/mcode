@@ -47,7 +47,7 @@ const transportDefaults: Partial<McodeTransport> = {
   removeRecent: vi.fn().mockResolvedValue(undefined),
   enrichWorkspaces: vi.fn().mockResolvedValue({ items: [] }),
   filesystemBrowse: vi.fn().mockResolvedValue({ path: "/", parent: null, entries: [], requestedPath: "folder", isTooBroad: false }),
-  listThreads: vi.fn().mockResolvedValue([]),
+  listAllThreads: vi.fn().mockResolvedValue([]),
   listRecentThreads: vi.fn().mockResolvedValue([]),
   searchThreads: vi.fn().mockResolvedValue({ threads: [], workspaces: [] }),
   deleteThread: vi.fn().mockResolvedValue(true),

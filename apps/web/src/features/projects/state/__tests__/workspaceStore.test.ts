@@ -172,8 +172,8 @@ describe("workspaceStore new-thread panel transition", () => {
     const touch = vi.fn().mockResolvedValue(undefined) as unknown as WorkspaceRpcCall;
     useWorkspaceStore.setState({ activeWorkspaceId: null, activeThreadId: null });
 
-    useWorkspaceStore.getState().setActiveWorkspace("ws-1", touch, false);
-    useWorkspaceStore.getState().setActiveWorkspace(null, touch, false);
+    useWorkspaceStore.getState().setActiveWorkspace("ws-1", touch);
+    useWorkspaceStore.getState().setActiveWorkspace(null, touch);
 
     expect(activate).not.toHaveBeenCalled();
     await Promise.resolve();
@@ -196,13 +196,13 @@ describe("workspaceStore new-thread panel transition", () => {
       ],
     });
 
-    useWorkspaceStore.getState().setActiveWorkspace("ws-1", touch, false);
+    useWorkspaceStore.getState().setActiveWorkspace("ws-1", touch);
     useWorkspaceStore.getState().setActiveThread("thread-b");
 
     expect(activate).toHaveBeenCalledOnce();
     expect(activate).toHaveBeenLastCalledWith("thread-b", expect.any(Array));
 
-    useWorkspaceStore.getState().setActiveWorkspace(null, touch, false);
+    useWorkspaceStore.getState().setActiveWorkspace(null, touch);
     await Promise.resolve();
 
     expect(activate).toHaveBeenCalledTimes(2);
@@ -562,5 +562,67 @@ describe("workspaceStore.deleteThread", () => {
     await useWorkspaceStore.getState().deleteThread("t1", false);
 
     expect(useWorkspaceStore.getState().prUrlsByThreadId["t1"]).toBeUndefined();
+  });
+});
+
+describe("workspaceStore whole thread hydration", () => {
+  beforeEach(() => {
+    useWorkspaceStore.setState({ threads: [], activeThreadId: null });
+    vi.mocked(mockTransport.listAllThreads).mockReset();
+  });
+
+  it("loads a thread from a project that has never been expanded", async () => {
+    vi.mocked(mockTransport.listAllThreads).mockResolvedValue([
+      createMockThread({ id: "unopened", workspace_id: "never-expanded" }),
+    ]);
+    await useWorkspaceStore.getState().hydrateThreads();
+    expect(useWorkspaceStore.getState().threads.map((thread) => [thread.id, thread.workspace_id]))
+      .toEqual([["unopened", "never-expanded"]]);
+  });
+
+  it("does not duplicate a creation pushed before its RPC response", async () => {
+    const thread = createMockThread({ id: "created", workspace_id: "ws-1" });
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-1" });
+    vi.mocked(mockTransport.createThread).mockImplementationOnce(async () => {
+      useWorkspaceStore.getState().applyThreadCreated(thread);
+      return thread;
+    });
+    await useWorkspaceStore.getState().createThread("Created", "direct", "main");
+    expect(useWorkspaceStore.getState().threads.map((candidate) => candidate.id)).toEqual(["created"]);
+  });
+
+  it("retains a newer lifecycle push when an earlier snapshot arrives", async () => {
+    const original = createMockThread({ id: "racing", title: "Old title" });
+    useWorkspaceStore.setState({ threads: [original] });
+    let finish: (threads: Thread[]) => void = () => { throw new Error("Request has not started"); };
+    vi.mocked(mockTransport.listAllThreads).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const loading = useWorkspaceStore.getState().hydrateThreads();
+    useWorkspaceStore.getState().applyThreadLifecycle({ ...original, title: "Pushed title" });
+    finish([original]);
+    await loading;
+    expect(useWorkspaceStore.getState().threads.map((thread) => thread.title)).toEqual(["Pushed title"]);
+  });
+
+  it("preserves preparing placeholders while replacing an obsolete server snapshot", async () => {
+    useWorkspaceStore.setState({ threads: [
+      createMockThread({ id: "obsolete" }),
+      { ...createMockThread({ id: "placeholder" }), clientPreparing: true },
+    ] });
+    vi.mocked(mockTransport.listAllThreads).mockResolvedValue([createMockThread({ id: "persisted" })]);
+    await useWorkspaceStore.getState().hydrateThreads();
+    expect(useWorkspaceStore.getState().threads.map((thread) => thread.id).sort()).toEqual(["persisted", "placeholder"]);
+  });
+
+  it("keeps creations and deletions pushed during hydration", async () => {
+    const deleted = createMockThread({ id: "deleted", workspace_id: "ws-1" });
+    useWorkspaceStore.setState({ threads: [deleted] });
+    let finish: (threads: Thread[]) => void = () => { throw new Error("Request has not started"); };
+    vi.mocked(mockTransport.listAllThreads).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const loading = useWorkspaceStore.getState().hydrateThreads();
+    useWorkspaceStore.getState().applyThreadCreated(createMockThread({ id: "pushed" }));
+    useWorkspaceStore.getState().applyThreadDeleted("deleted");
+    finish([deleted]);
+    await loading;
+    expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual(["pushed"]);
   });
 });

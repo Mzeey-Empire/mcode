@@ -44,6 +44,8 @@ export const ThreadSchema = lazySchema(() =>
   sdk_session_id: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
+  /** Latest admitted or settled turn, with creation as the read-side floor. */
+  last_activity_at: z.string(),
   model: z.string().nullable(),
   /** The AI provider used by this thread (e.g. "claude", "codex"). */
   provider: z.string().default("claude"),
