@@ -81,7 +81,7 @@ function DropdownMenuGroup({ className, ...props }: MenuPrimitive.Group.Props) {
   return (
     <MenuPrimitive.Group
       data-slot="dropdown-menu-group"
-      className={cn("flex flex-col gap-1", className)}
+      className={cn("flex flex-col", className)}
       {...props}
     />
   )

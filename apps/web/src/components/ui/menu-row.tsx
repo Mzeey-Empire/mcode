@@ -6,17 +6,17 @@ import { ShortcutCombo } from "./shortcut-keys"
 import { FOCUS_RING_CLASS } from "./focus-ring"
 
 /**
- * Paper's menu row (HZI-0): 40px tall, 12px inline padding, 8px radius and gap, body-small ink
- * text. Highlight state is left to each surface because Base UI menus and selects mark it with
- * `data-highlighted`, while the plain context menu relies on `:hover`.
+ * Paper's compact menu row (161H-0): 32px tall, 12px inline padding, 6px radius, 8px gap,
+ * body-small ink text. Highlight state is left to each surface because Base UI menus and
+ * selects mark it with `data-highlighted`, while the plain context menu relies on `:hover`.
  */
 export const MENU_ROW_CLASS = cn(
-  "relative flex h-row-default w-full min-w-0 shrink-0 cursor-pointer select-none items-center gap-2 rounded-menu px-3 text-left text-body-small text-ink outline-none",
+  "relative flex h-row-compact w-full min-w-0 shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-3 text-left text-body-small text-ink outline-none",
   FOCUS_RING_CLASS,
 )
 
-/** Menu surface (I6X-0) spacing: 8px padding and a 4px gap between rows. */
-export const MENU_LIST_CLASS = "flex flex-col gap-1 p-2"
+/** Menu surface (I6X-0) spacing: 4px padding, with rows sitting flush. */
+export const MENU_LIST_CLASS = "flex flex-col p-1"
 
 /**
  * A disabled row stays listed and dimmed. It keeps pointer events so hovering it still shows

@@ -71,7 +71,7 @@ function ThreadOverviewUsage({
       <div
         data-testid="thread-overview-usage"
         aria-label={`Usage, ${summary}`}
-        className="flex h-row-default w-full items-center justify-between gap-3 px-3 text-body-small text-muted"
+        className="flex h-row-compact w-full items-center justify-between gap-3 px-3 text-body-small text-muted"
       >
         <span className="font-medium">Usage</span>
         <span className="shrink-0 tabular-nums">{summary}</span>
