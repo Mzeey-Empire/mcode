@@ -3370,30 +3370,34 @@ export class CanonicalAgentStore {
     threadId: string,
     events: readonly CanonicalAgentEventEnvelope[],
   ): void {
-    const written = new Set<string>();
-    const writeWhole = (item: AgentItem) => {
-      if (written.has(item.id)) return;
-      written.add(item.id);
-      this.persistItem(item);
-    };
-    for (const event of events) {
-      if (event.payload.type === "turn.response-bound") {
-        for (const item of Object.values(state.items)) {
-          if (item.threadId === threadId && item.turnId === event.routing.turnId) writeWhole(item);
-        }
-        continue;
-      }
-      if (event.payload.type !== "item.recorded") continue;
-      const item = state.items[event.payload.item.id];
-      if (item?.threadId === threadId) writeWhole(item);
-    }
+    const whole = this.itemsWrittenWhole(state, threadId, events);
+    for (const item of whole.values()) this.persistItem(item);
     // A whole write already holds the batch's appends, so only append-only items grow their tail.
     for (const [itemId, base] of this.appendBases) {
-      if (!written.has(itemId)) this.contentTail.persistAppends(base, events);
+      if (!whole.has(itemId)) this.contentTail.persistAppends(base, events);
     }
     for (const event of events) {
       if (this.isTerminalPayload(event.payload) && event.routing.turnId) this.foldTurnContentTails(event.routing.turnId);
     }
+  }
+
+  private itemsWrittenWhole(
+    state: AgentModelState,
+    threadId: string,
+    events: readonly CanonicalAgentEventEnvelope[],
+  ): Map<string, AgentItem> {
+    const whole = new Map<string, AgentItem>();
+    const add = (item: AgentItem | undefined) => {
+      if (item?.threadId === threadId) whole.set(item.id, item);
+    };
+    for (const event of events) {
+      if (event.payload.type === "turn.response-bound") {
+        for (const item of Object.values(state.items)) if (item.turnId === event.routing.turnId) add(item);
+      } else if (event.payload.type === "item.recorded") {
+        add(state.items[event.payload.item.id]);
+      }
+    }
+    return whole;
   }
 
   private persistRecordedActions(

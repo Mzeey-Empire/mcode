@@ -265,6 +265,42 @@ function randomText(random: () => number, codePoints: number): string {
   return Array.from({ length: codePoints }, () => CODE_POINTS[Math.floor(random() * CODE_POINTS.length)]).join("");
 }
 
+/** Streams one answer as random appends, broken up by resets, closes, and corrections. */
+class RandomAnswerStream {
+  content = "";
+  // Chunks are code-unit slices of this source, so they split surrogate pairs.
+  private source: string;
+  private cursor = 0;
+
+  constructor(private readonly random: () => number, private readonly itemId: string) {
+    this.source = randomText(random, 400);
+  }
+
+  next(batch: number): CanonicalAgentEvent | null {
+    const roll = this.random();
+    if (roll < 0.8) return this.append(batch);
+    if (roll < 0.87) return this.replace("");
+    if (roll < 0.94) return answer(this.content, false, this.itemId);
+    this.source = randomText(this.random, 400);
+    this.cursor = 0;
+    return this.replace(`Corrected ${randomText(this.random, 3)}`);
+  }
+
+  private replace(content: string): CanonicalAgentEvent {
+    this.content = content;
+    return answer(content, true, this.itemId);
+  }
+
+  private append(batch: number): CanonicalAgentEvent | null {
+    const text = this.source.slice(this.cursor, this.cursor + 1 + Math.floor(this.random() * 5));
+    if (text.length === 0) return null;
+    const event = append(this.content.length, text, `2026-10-29T12:${String(batch).padStart(2, "0")}:00.000Z`);
+    this.content += text;
+    this.cursor += text.length;
+    return event;
+  }
+}
+
 describe.each(CACHE_MODES)("canonical item content tail property (writer cache $cache)", ({ cache }) => {
   let directory: string;
   let db: Database;
@@ -291,10 +327,7 @@ describe.each(CACHE_MODES)("canonical item content tail property (writer cache $
       const random = mulberry32(seed);
       const itemId = `answer-${seed}`;
       let reduced: AgentModelState = createAgentModelState();
-      let content = "";
-      // Chunks are code-unit slices of this source, so they split surrogate pairs.
-      let source = randomText(random, 400);
-      let cursor = 0;
+      const stream = new RandomAnswerStream(random, itemId);
       const step = (payloads: CanonicalAgentEvent[]) => {
         const events = accept(store, db, payloads, itemId);
         const reduction = reduceAgentEventBatch(reduced, events);
@@ -303,33 +336,13 @@ describe.each(CACHE_MODES)("canonical item content tail property (writer cache $
         const expected = reduced.items[itemId];
         expect(store.loadItem(itemId), `seed ${seed} store`).toEqual(expected);
         expect(new CanonicalAgentStore(reader, () => {}).loadItem(itemId), `seed ${seed} fresh reader`).toEqual(expected);
-        expect(expected?.payload.content).toBe(content);
+        expect(expected?.payload.content).toBe(stream.content);
       };
       step([answer("", true, itemId)]);
       for (let batch = 0; batch < 25; batch += 1) {
-        const payloads: CanonicalAgentEvent[] = [];
         const operations = 1 + Math.floor(random() * 4);
-        for (let operation = 0; operation < operations; operation += 1) {
-          const roll = random();
-          if (roll < 0.8) {
-            const length = 1 + Math.floor(random() * 5);
-            const text = source.slice(cursor, cursor + length);
-            if (text.length === 0) continue;
-            payloads.push(append(content.length, text, `2026-10-29T12:${String(batch).padStart(2, "0")}:00.000Z`));
-            content += text;
-            cursor += text.length;
-          } else if (roll < 0.87) {
-            content = "";
-            payloads.push(answer(content, true, itemId));
-          } else if (roll < 0.94) {
-            payloads.push(answer(content, false, itemId));
-          } else {
-            content = `Corrected ${randomText(random, 3)}`;
-            source = randomText(random, 400);
-            cursor = 0;
-            payloads.push(answer(content, true, itemId));
-          }
-        }
+        const payloads = Array.from({ length: operations }, () => stream.next(batch))
+          .filter((payload): payload is CanonicalAgentEvent => payload !== null);
         if (payloads.length > 0) step(payloads);
       }
     }
