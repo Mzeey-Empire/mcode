@@ -83,6 +83,7 @@ import { ConversationDisplayMaterializationStore as ConversationDisplayMateriali
 import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { notifyCommittedCanonicalEvents } from "./committed-canonical-events.js";
 import { interruptionReason, withTurnEnding, type TurnEndingCause } from "./turn-ending.js";
+import { CanonicalItemContentTail, canonicalItemRowSelection, foldItemContentTail, type CanonicalItemContentTailOptions } from "./canonical-item-content-tail.js";
 
 /** Capacity held back so volatile input cannot consume every semantic batch slot. */
 export const CANONICAL_AGENT_CONTROL_EVENT_RESERVE = 16;
@@ -392,12 +393,17 @@ export class CanonicalAgentStore {
   private readonly reads: CanonicalAgentReadRepository;
   private readonly codexCollaboration: CanonicalCodexCollaborationCoordinator;
   private readonly displayMaterializer: ConversationDisplayMaterializer;
+  private readonly contentTail: CanonicalItemContentTail;
+  // Folded items the current commit's appends extend, captured when its state loads.
+  private readonly appendBases = new Map<string, AgentItem>();
 
   constructor(
     private readonly db: Database,
     private readonly publish: CanonicalAgentEventPublisher = publishCanonicalAgentEvents,
+    options: { readonly contentTail?: CanonicalItemContentTailOptions } = {},
   ) {
     this.orm = drizzle(db);
+    this.contentTail = new CanonicalItemContentTail(db, options.contentTail);
     this.persistThreadStatement = this.buildPersistThreadStatement();
     this.persistTurnStatement = this.buildPersistTurnStatement();
     this.persistItemStatement = this.buildPersistItemStatement();
@@ -979,7 +985,7 @@ export class CanonicalAgentStore {
 
   /** Load one canonical semantic item. */
   loadItem(itemId: string): AgentItem | null {
-    const row = this.orm.select().from(canonicalAgentItems).where(eq(canonicalAgentItems.id, itemId)).get();
+    const row = this.orm.select(canonicalItemRowSelection).from(canonicalAgentItems).where(eq(canonicalAgentItems.id, itemId)).get();
     return row ? this.itemFromRow(row) : null;
   }
 
@@ -1431,7 +1437,7 @@ export class CanonicalAgentStore {
   private loadSubagentRosterItemRows(threads: readonly AgentThread[]): Array<Record<string, unknown>> {
     const threadIds = threads.map((thread) => thread.id);
     if (threadIds.length === 0) return [];
-    return this.orm.select().from(canonicalAgentItems)
+    return this.orm.select(canonicalItemRowSelection).from(canonicalAgentItems)
       .where(inArray(canonicalAgentItems.threadId, threadIds))
       .all() as Array<Record<string, unknown>>;
   }
@@ -1461,7 +1467,7 @@ export class CanonicalAgentStore {
       .filter((value): value is string => typeof value === "string" && value.length > 0))];
     const sourceItemsById = new Map<string, AgentItem>();
     if (sourceItemIds.length === 0) return sourceItemsById;
-    const sourceRows = this.orm.select().from(canonicalAgentItems)
+    const sourceRows = this.orm.select(canonicalItemRowSelection).from(canonicalAgentItems)
       .where(inArray(canonicalAgentItems.id, sourceItemIds))
       .all() as Array<Record<string, unknown>>;
     for (const row of sourceRows) {
@@ -2391,6 +2397,7 @@ export class CanonicalAgentStore {
     this.persistParentTerminalBatchState(state, input);
     this.persistParentTerminalBatchCheckpoint(state, input);
     if (state.terminal) {
+      this.foldTurnContentTails(input.turnId);
       this.displayMaterializer.materializeItems(this.assistantItemIds(input));
       this.retireParentNarrativeRecovery(input.turnId);
     }
@@ -2400,6 +2407,15 @@ export class CanonicalAgentStore {
       terminal: state.terminal,
     });
     state.latest = this.committedParentTerminalBatchResult(state, input.threadId, terminalRevision);
+  }
+
+  /** A closed turn keeps no content tail: each appended item is written whole once. */
+  private foldTurnContentTails(turnId: string): void {
+    const rows = this.orm.select(canonicalItemRowSelection).from(canonicalAgentItems)
+      .where(and(eq(canonicalAgentItems.turnId, turnId), sql`EXISTS (SELECT 1 FROM canonical_agent_item_content_appends tail
+        WHERE tail.item_id = ${canonicalAgentItems.id})`))
+      .all();
+    for (const row of rows) this.persistItem(this.itemFromRow(row));
   }
 
   private parentTerminalBatchModelState(state: ParentTerminalBatchState): AgentModelState {
@@ -3021,7 +3037,18 @@ export class CanonicalAgentStore {
     checkpoint: CanonicalAgentEventStoreCheckpoint | null,
     events: readonly CanonicalAgentEventEnvelope[],
   ): AgentModelState {
-    if (events.some((event) => event.payload.type === "collaboration.observed")) return this.loadState(threadId, checkpoint?.executionId);
+    const state = events.some((event) => event.payload.type === "collaboration.observed")
+      ? this.loadState(threadId, checkpoint?.executionId)
+      : this.loadNarrowCommitState(threadId, checkpoint, events);
+    this.addCommitAppendBases(state, events);
+    return state;
+  }
+
+  private loadNarrowCommitState(
+    threadId: string,
+    checkpoint: CanonicalAgentEventStoreCheckpoint | null,
+    events: readonly CanonicalAgentEventEnvelope[],
+  ): AgentModelState {
     const state = createAgentModelState();
     const thread = this.loadThread(threadId);
     if (thread) state.threads[thread.id] = thread;
@@ -3029,8 +3056,25 @@ export class CanonicalAgentStore {
     this.addCommitTurnState(state, events);
     if (events.some((event) => event.payload.type === "turn.response-bound")) this.addItemState(state, threadId);
     // Item and action reducers replace their records, so prior rows cannot affect this batch.
+    // Content appends are the exception; addCommitAppendBases loads their targets.
     this.addCommitSequenceState(state, checkpoint, events);
     return state;
+  }
+
+  /** Content appends extend stored text, so only the items they target load, folded. */
+  private addCommitAppendBases(state: AgentModelState, events: readonly CanonicalAgentEventEnvelope[]): void {
+    this.appendBases.clear();
+    const recorded = new Set<string>();
+    for (const event of events) {
+      if (event.payload.type === "item.recorded") recorded.add(event.payload.item.id);
+      const itemId = event.payload.type === "item.content-appended" ? event.routing.itemId : undefined;
+      // After a whole write earlier in the batch, the row is rewritten whole and needs no stored base.
+      if (!itemId || recorded.has(itemId) || this.appendBases.has(itemId)) continue;
+      const base = state.items[itemId] ?? this.contentTail.appendBase(itemId, (id) => this.loadItem(id));
+      if (!base) continue;
+      state.items[itemId] = base;
+      this.appendBases.set(itemId, base);
+    }
   }
 
   private addCommitChildThreadState(
@@ -3184,7 +3228,7 @@ export class CanonicalAgentStore {
   }
 
   private addItemState(state: AgentModelState, threadId: string): void {
-    const rows = this.orm.select().from(canonicalAgentItems)
+    const rows = this.orm.select(canonicalItemRowSelection).from(canonicalAgentItems)
       .where(eq(canonicalAgentItems.threadId, threadId))
       .all();
     for (const row of rows) {
@@ -3326,16 +3370,29 @@ export class CanonicalAgentStore {
     threadId: string,
     events: readonly CanonicalAgentEventEnvelope[],
   ): void {
+    const written = new Set<string>();
+    const writeWhole = (item: AgentItem) => {
+      if (written.has(item.id)) return;
+      written.add(item.id);
+      this.persistItem(item);
+    };
     for (const event of events) {
       if (event.payload.type === "turn.response-bound") {
         for (const item of Object.values(state.items)) {
-          if (item.threadId === threadId && item.turnId === event.routing.turnId) this.persistItem(item);
+          if (item.threadId === threadId && item.turnId === event.routing.turnId) writeWhole(item);
         }
         continue;
       }
       if (event.payload.type !== "item.recorded") continue;
       const item = state.items[event.payload.item.id];
-      if (item?.threadId === threadId) this.persistItem(item);
+      if (item?.threadId === threadId) writeWhole(item);
+    }
+    // A whole write already holds the batch's appends, so only append-only items grow their tail.
+    for (const [itemId, base] of this.appendBases) {
+      if (!written.has(itemId)) this.contentTail.persistAppends(base, events);
+    }
+    for (const event of events) {
+      if (this.isTerminalPayload(event.payload) && event.routing.turnId) this.foldTurnContentTails(event.routing.turnId);
     }
   }
 
@@ -3592,6 +3649,8 @@ export class CanonicalAgentStore {
       createdAt: parsed.createdAt,
       updatedAt: parsed.updatedAt,
     });
+    // The row now holds the whole content, so a tail left behind would double it on read.
+    this.contentTail.clear(parsed);
   }
 
   private persistAction(action: CollaborationAction): void {
@@ -3811,7 +3870,12 @@ export class CanonicalAgentStore {
     });
   }
 
+  /** Every item read folds its content tail here, so no caller sees a truncated answer. */
   private itemFromRow(row: Record<string, unknown>): AgentItem {
+    return foldItemContentTail(this.storedItemFromRow(row), row.contentAppendsJson);
+  }
+
+  private storedItemFromRow(row: Record<string, unknown>): AgentItem {
     return AgentItemSchema.parse({
       id: row.id,
       threadId: row.threadId,
