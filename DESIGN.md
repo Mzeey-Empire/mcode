@@ -329,8 +329,8 @@ components:
     shadow: "{shadows.popover}"
     shadowLight: "{shadows.lightOverlay}"
   menu-row:
-    height: "{sizes.row-default}"
-    rounded: "{rounded.menu}"
+    height: "{sizes.row-compact}"
+    rounded: "{rounded.badge}"
     paddingInline: "1.2rem"
     iconSlot: "2rem"
     iconSize: "{iconography.sizes.compact}"
@@ -722,8 +722,8 @@ Flat by default. Depth begins with **tonal layering**. The signature move: `page
 
 | Token | Value | Use |
 |---|---:|---|
-| `badge` | 6px | Badges, inline code, segmented-control segments. |
-| `menu` | 8px | Menu rows, tooltips, list rows. |
+| `badge` | 6px | Badges, inline code, segmented-control segments, menu rows. |
+| `menu` | 8px | Tooltips, list rows. |
 | `control` | 10px | Buttons, inputs, selects, segmented controls, icon tiles. |
 | `composer` | 14px | The composer, dialogs, menus, popovers, pickers, and floating cards. |
 | `dialog` | 18px | Sheets, toasts, and floating pills. |
@@ -906,9 +906,10 @@ assigned to its semantic role. Feature code never invents a numeric z-index.
 ### Alignment and density
 
 - Pane headers, tabs, filters, and their content use one horizontal axis.
-- Repeated rows use 32px as the compact height and 40px as the default height
-  (menus, pickers, settings rows). Increase height when a second line, status
-  explanation, or direct manipulation needs it.
+- Repeated rows use 32px as the compact height (menus, select lists, and the
+  thread overview) and 40px as the default height (pickers, settings rows).
+  Increase height when a second line, status explanation, or direct
+  manipulation needs it.
 - Use 8px internal gaps for tightly related controls, 16px within a group,
   24px for panel insets, and 32px between task stages. These are applications
   of the four-point scale, not new tokens.
@@ -1029,7 +1030,7 @@ counts.
 - **Shadow strategy:** Tonal separation first. Transient panels use the
   recipe for their role.
 - **Border:** Quiet hairlines are allowed for dense internal structure. Never a colored side-stripe.
-- **Internal Padding:** 8px inside menus and pickers, 16px inside popovers,
+- **Internal Padding:** 4px inside menus, 8px inside pickers, 16px inside popovers,
   20px inside dialogs, 24px inside panels. Repeated list rows may use less, while
   writing, reading, and decision surfaces should preserve comfortable
   structure.
@@ -1187,10 +1188,10 @@ are provider-native, so they show the parent thread's provider.
 - Escape closes the frontmost transient surface and restores focus to its
   trigger.
 
-**Menus.** A floating card with 8px padding and 40px rows (`menu` radius,
-12px inset). A row holds the name in Body small and, only when it improves
-scanning, a 16px `muted` icon in a 20px slot. Shortcuts sit right-aligned in
-`muted` caption. Rows show names only: no descriptions, counts, operands, or
+**Menus.** A floating card with 4px padding and 32px rows that sit flush
+against each other (`badge` radius, 12px inset). A row holds the name in Body
+small and, only when it improves scanning, a 16px `muted` icon in a 20px slot.
+Shortcuts sit right-aligned in `muted` caption. Rows show names only: no descriptions, counts, operands, or
 group labels. Groups are separated by 1px dividers. The highlighted row takes
 the `hover` fill. A checked row shows a check. Destructive rows use `error`
 for icon and label. An unavailable row stays listed and dimmed, and its reason
