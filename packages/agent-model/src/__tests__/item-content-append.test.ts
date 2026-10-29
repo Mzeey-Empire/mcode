@@ -44,7 +44,6 @@ function reduceAll(events: ReturnType<typeof envelope>[]): AgentModelState {
   return reduction.state;
 }
 
-/** The server forgets event identity after every accept but keeps the sequence watermark. */
 function compactIdentity(state: AgentModelState): AgentModelState {
   return { ...state, appliedEventIds: {}, acceptedInputEventIds: {} };
 }

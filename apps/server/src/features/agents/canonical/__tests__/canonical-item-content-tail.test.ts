@@ -94,7 +94,6 @@ function storedRowContent(db: Database, itemId = ANSWER_ID): unknown {
   return (JSON.parse(row.payloadJson) as { content?: unknown }).content;
 }
 
-/** Counts every insert or update of an item row on this connection. */
 function recordItemWrites(db: Database): () => number {
   db.exec(`CREATE TEMP TABLE IF NOT EXISTS observed_item_writes (item_id TEXT NOT NULL);
     DELETE FROM observed_item_writes;
@@ -204,7 +203,6 @@ describe.each(CACHE_MODES)("canonical item content tail (writer cache $cache)", 
     expect(newStore(db, cache).loadItem(ANSWER_ID)?.payload.content).toBe("Partial");
     expect(tailRows(db)).toEqual([{ offset: 4, text: "ial" }]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE event_id = ?").get(events[0]!.eventId)).toEqual({ count: 1 });
-    // The store that saw the rolled-back write must not extend its uncommitted copy.
     accept(store, db, [append(7, "ly")]);
     expect(newStore(db, cache).loadItem(ANSWER_ID)?.payload.content).toBe("Partially");
   });
@@ -243,12 +241,10 @@ describe("canonical item content tail bytes", () => {
     const longBytes = appendedBytes(long);
 
     expect(longBytes.tail).toBe(shortBytes.tail);
-    // Only the decimal offset grows with the answer.
     expect(longBytes.event - shortBytes.event).toBe(String(long.length).length - String(short.length).length);
   });
 });
 
-/** Deterministic PRNG so a failing chunking replays from its seed. */
 function mulberry32(seed: number): () => number {
   let state = seed;
   return () => {
@@ -265,10 +261,8 @@ function randomText(random: () => number, codePoints: number): string {
   return Array.from({ length: codePoints }, () => CODE_POINTS[Math.floor(random() * CODE_POINTS.length)]).join("");
 }
 
-/** Streams one answer as random appends, broken up by resets, closes, and corrections. */
 class RandomAnswerStream {
   content = "";
-  // Chunks are code-unit slices of this source, so they split surrogate pairs.
   private source: string;
   private cursor = 0;
 

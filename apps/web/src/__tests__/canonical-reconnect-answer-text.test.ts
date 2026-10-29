@@ -70,10 +70,6 @@ function acceptedEnvelope(payload: AcceptedCanonicalAgentEventEnvelope["payload"
 
 type AnswerShape = "replace" | "append";
 
-/**
- * Mirrors the server: the answer item, then the undecided Claude delta that carries no answer flag.
- * The answer is either the whole text so far or, after the first line, an append of the new line.
- */
 function streamLine(n: number, shape: AnswerShape): AcceptedCanonicalAgentEventEnvelope[] {
   const item = shape === "append" && n > 1
     ? acceptedEnvelope({ type: "item.content-appended", offset: linesThrough(n - 1).length, text: line(n), updatedAt: NOW })

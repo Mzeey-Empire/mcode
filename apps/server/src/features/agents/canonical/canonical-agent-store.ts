@@ -394,7 +394,6 @@ export class CanonicalAgentStore {
   private readonly codexCollaboration: CanonicalCodexCollaborationCoordinator;
   private readonly displayMaterializer: ConversationDisplayMaterializer;
   private readonly contentTail: CanonicalItemContentTail;
-  // Folded items the current commit's appends extend, captured when its state loads.
   private readonly appendBases = new Map<string, AgentItem>();
 
   constructor(
@@ -2409,7 +2408,6 @@ export class CanonicalAgentStore {
     state.latest = this.committedParentTerminalBatchResult(state, input.threadId, terminalRevision);
   }
 
-  /** A closed turn keeps no content tail: each appended item is written whole once. */
   private foldTurnContentTails(turnId: string): void {
     const rows = this.orm.select(canonicalItemRowSelection).from(canonicalAgentItems)
       .where(and(eq(canonicalAgentItems.turnId, turnId), sql`EXISTS (SELECT 1 FROM canonical_agent_item_content_appends tail
@@ -3056,19 +3054,16 @@ export class CanonicalAgentStore {
     this.addCommitTurnState(state, events);
     if (events.some((event) => event.payload.type === "turn.response-bound")) this.addItemState(state, threadId);
     // Item and action reducers replace their records, so prior rows cannot affect this batch.
-    // Content appends are the exception; addCommitAppendBases loads their targets.
     this.addCommitSequenceState(state, checkpoint, events);
     return state;
   }
 
-  /** Content appends extend stored text, so only the items they target load, folded. */
   private addCommitAppendBases(state: AgentModelState, events: readonly CanonicalAgentEventEnvelope[]): void {
     this.appendBases.clear();
     const recorded = new Set<string>();
     for (const event of events) {
       if (event.payload.type === "item.recorded") recorded.add(event.payload.item.id);
       const itemId = event.payload.type === "item.content-appended" ? event.routing.itemId : undefined;
-      // After a whole write earlier in the batch, the row is rewritten whole and needs no stored base.
       if (!itemId || recorded.has(itemId) || this.appendBases.has(itemId)) continue;
       const base = state.items[itemId] ?? this.contentTail.appendBase(itemId, (id) => this.loadItem(id));
       if (!base) continue;
@@ -3372,7 +3367,6 @@ export class CanonicalAgentStore {
   ): void {
     const whole = this.itemsWrittenWhole(state, threadId, events);
     for (const item of whole.values()) this.persistItem(item);
-    // A whole write already holds the batch's appends, so only append-only items grow their tail.
     for (const [itemId, base] of this.appendBases) {
       if (!whole.has(itemId)) this.contentTail.persistAppends(base, events);
     }
@@ -3653,7 +3647,6 @@ export class CanonicalAgentStore {
       createdAt: parsed.createdAt,
       updatedAt: parsed.updatedAt,
     });
-    // The row now holds the whole content, so a tail left behind would double it on read.
     this.contentTail.clear(parsed);
   }
 
@@ -3874,7 +3867,6 @@ export class CanonicalAgentStore {
     });
   }
 
-  /** Every item read folds its content tail here, so no caller sees a truncated answer. */
   private itemFromRow(row: Record<string, unknown>): AgentItem {
     return foldItemContentTail(this.storedItemFromRow(row), row.contentAppendsJson);
   }

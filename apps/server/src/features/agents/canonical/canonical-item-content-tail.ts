@@ -39,7 +39,6 @@ export function foldItemContentTail(item: AgentItem, contentAppendsJson: unknown
     if (row.offset !== extent) throw new CanonicalItemContentTailMismatch(item.id, `gap at offset ${row.offset}`);
     extent += row.text.length;
   }
-  // Joining first keeps a long tail one string copy rather than one item copy per row.
   const text = rows.map((row) => row.text).join("");
   const result = appendItemContent(item, { offset: first.offset, text, updatedAt: last.updatedAt });
   if (result.kind !== "appended") {
@@ -81,15 +80,6 @@ interface CachedItem {
 
 const MAX_CACHED_ITEMS = 64;
 
-/**
- * Folded items the writer extends, shared by every store on one connection so
- * that a write through one store invalidates what another cached.
- *
- * An entry is used only while its token is still in a TEMP table written in the
- * same transaction as its tail rows. A rolled-back transaction reverts the token,
- * so only committed entries count. The cached content length must also equal the
- * stored tail extent, read with one seek on the last tail row.
- */
 class CommittedItemCache {
   private readonly entries = new Map<string, CachedItem>();
   private lastToken = 0;
@@ -140,10 +130,6 @@ class CommittedItemCache {
 
 const committedItemCaches = new WeakMap<Database, CommittedItemCache | null>();
 
-/**
- * A query-only connection never writes a tail, and a temp table created inside a
- * transaction disappears if that transaction rolls back, so neither gets a cache.
- */
 function committedItemCache(db: Database): CommittedItemCache | null {
   const existing = committedItemCaches.get(db);
   if (existing !== undefined) return existing;
@@ -153,12 +139,7 @@ function committedItemCache(db: Database): CommittedItemCache | null {
   return cache;
 }
 
-/**
- * Append-only storage for streamed item content.
- *
- * Without the committed-item cache, each batch that appends would fold the whole
- * stored answer again, which is quadratic over a turn on the single writer.
- */
+/** Append-only storage for streamed item content. */
 export class CanonicalItemContentTail {
   private readonly cache: CommittedItemCache | null;
   private readonly readsCache: boolean;
