@@ -32,6 +32,19 @@ export const ThreadAttentionSchema = lazySchema(() => z.object({
 /** Durable attention facts plus the current live wait, if any. */
 export type ThreadAttention = z.infer<ReturnType<typeof ThreadAttentionSchema>>;
 
+/** True when the user has acknowledged this turn or a later one. */
+export function isTurnSeen(turnSequence: number, seenSequence: number | null | undefined): boolean {
+  return seenSequence !== null && seenSequence !== undefined && seenSequence >= turnSequence;
+}
+
+/** Whether attention prevents a thread from becoming quiet or completing automatically. */
+export function threadAttentionNeedsUser(attention: ThreadAttention | null | undefined): boolean {
+  if (!attention) return false;
+  if (attention.waiting || attention.hasUnfinishedDelegatedTasks) return true;
+  const turn = attention.lastTurn;
+  return turn !== null && turn.outcome !== "cancelled" && !isTurnSeen(turn.sequence, attention.seen.sequence);
+}
+
 /** Atomic old and new markers returned by a seen acknowledgement. */
 export const AcknowledgeSeenResultSchema = lazySchema(() => z.object({
   previous: SeenMarkSchema(), current: SeenMarkSchema(),

@@ -13,6 +13,14 @@ export { MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 /** Read-only queries and committed mutations for ThreadRepo. */
 @injectable()
 export class ThreadRepo {
+  private readonly overrideListeners = new Set<(threadId: string) => void>();
+
+  /** Observe committed merge-completion override writes from every caller. */
+  onAutoCompleteOverrideChanged(listener: (threadId: string) => void): () => void {
+    this.overrideListeners.add(listener);
+    return () => { this.overrideListeners.delete(listener); };
+  }
+
   /** Read-model invalidation connected by the application composition root. */
   attention?: Pick<ThreadAttentionService, "invalidate">;
   /** Committed checkout link clears are published by the same PR funnel as observations. */
@@ -161,6 +169,9 @@ export class ThreadRepo {
   async updateSettings(id: Parameters<ThreadStore["updateSettings"]>[0], settings: Parameters<ThreadStore["updateSettings"]>[1]): Promise<ReturnType<ThreadStore["updateSettings"]>> {
     const changed = await this.writer.execute(threadWriteOperations.updateSettings, [id, settings]);
     if (changed && settings.interaction_mode !== undefined) this.publishPlanPhase(id);
+    if (changed && settings.auto_complete_on_merge !== undefined) {
+      for (const listener of this.overrideListeners) listener(id);
+    }
     return changed;
   }
 

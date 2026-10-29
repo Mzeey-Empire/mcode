@@ -52,7 +52,7 @@ function legacySettingsPatch(value: unknown): DeepPartial<Settings> {
  * is set so this runs only once.
  */
 async function migrateFromLocalStorage(
-  update: (partial: DeepPartial<Settings>) => Promise<void>,
+  update: (partial: DeepPartial<Settings>) => Promise<string | void>,
 ): Promise<void> {
   if (localStorage.getItem(MIGRATION_FLAG)) return;
 
@@ -67,7 +67,8 @@ async function migrateFromLocalStorage(
     const patch = legacySettingsPatch(parsed);
 
     if (Object.keys(patch).length > 0) {
-      await update(patch);
+      const failure = await update(patch);
+      if (failure) return;
     }
 
     // Only clean up after a successful migration so we can retry on failure.
@@ -87,8 +88,8 @@ interface SettingsState {
   loaded: boolean;
   /** Fetch full settings from server. */
   fetch: () => Promise<void>;
-  /** Update settings via server (deep merge). */
-  update: (partial: DeepPartial<Settings>) => Promise<void>;
+  /** Update settings via server, returning the reason when the write fails. */
+  update: (partial: DeepPartial<Settings>) => Promise<string | void>;
   /** Apply the server result of a safe Terminal preference update. */
   _applyTerminalPreferences: (terminal: Pick<TerminalSettings, "presentation" | "behavior" | "accessibility">) => void;
   /**
@@ -148,8 +149,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const settings = await transport.updateSettings(partial as PartialSettings);
       updateGeneration++;
       set({ settings });
-    } catch {
-      // Best-effort: server-side state is unchanged, local state stays as-is.
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
     }
   },
 

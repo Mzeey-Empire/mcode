@@ -644,6 +644,9 @@ export const FilesystemBrowseResultSchema = lazySchema(() => z.object({
 /** Result of browsing a folder in the add-project folder picker. */
 export type FilesystemBrowseResult = z.infer<ReturnType<typeof FilesystemBrowseResultSchema>>;
 
+// TS7056: without an explicit type, tsc refuses to serialize the registry's inferred declaration.
+const threadResultSchema: () => z.ZodType<import("../models/thread.js").Thread, z.ZodTypeDef, z.input<ReturnType<typeof ThreadSchema>>> = lazySchema(() => ThreadSchema());
+
 /** All WebSocket methods with runtime-validating parameter and result schemas. */
 export const WS_METHODS = lazySchema(() => ({
   /** Registers this WebSocket as a visible-browser automation host. */
@@ -795,7 +798,7 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "thread.listAll": {
     params: z.object({}),
-    result: z.array(ThreadSchema()),
+    result: z.array(threadResultSchema()),
   },
   /**
    * List the most recently active threads across ALL workspaces. Joined with
@@ -808,7 +811,7 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "thread.create": {
     params: CreateThreadSchema(),
-    result: ThreadSchema(),
+    result: threadResultSchema(),
   },
   "thread.delete": {
     params: z.object({
@@ -861,6 +864,8 @@ export const WS_METHODS = lazySchema(() => ({
        * the override so the thread inherits the global default.
        */
       defaultOpenInApp: z.string().nullable().optional(),
+      /** Null restores the global merge completion preference. */
+      autoCompleteOnMerge: z.boolean().nullable().optional(),
     }).refine(
       (data) =>
         data.reasoningLevel !== undefined ||
@@ -871,7 +876,8 @@ export const WS_METHODS = lazySchema(() => ({
         data.thinking !== undefined ||
         data.fastMode !== undefined ||
         data.devinMode !== undefined ||
-        data.defaultOpenInApp !== undefined,
+        data.defaultOpenInApp !== undefined ||
+        data.autoCompleteOnMerge !== undefined,
       { message: "Must provide at least one setting to update" },
     ),
     result: z.boolean(),
@@ -913,7 +919,7 @@ export const WS_METHODS = lazySchema(() => ({
       limit: z.number().int().positive().max(200).optional(),
     }),
     result: z.object({
-      threads: z.array(ThreadSchema()),
+      threads: z.array(threadResultSchema()),
       workspaces: z.array(z.object({
         id: z.string(),
         name: z.string(),

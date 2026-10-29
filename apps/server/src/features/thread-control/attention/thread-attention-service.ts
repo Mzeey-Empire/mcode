@@ -32,6 +32,7 @@ type AttentionRow = {
 
 /** Combines durable outcomes and acknowledgements with live waiting sources. */
 export class ThreadAttentionService {
+  private readonly listeners = new Set<(threadId: string) => void>();
   private readonly lastSent = new Map<string, string>();
   private readonly sources: readonly ThreadWaitingSource[];
 
@@ -43,6 +44,12 @@ export class ThreadAttentionService {
     private readonly publish: (attention: ThreadAttention) => void,
   ) {
     this.sources = waitingPrecedence.flatMap((kind) => sources.filter((source) => source.kind === kind));
+  }
+
+  /** Observe changed attention after it has been published to clients. */
+  onPublished(listener: (threadId: string) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
   /** Read attention for a live thread, including one whose outcome is already seen. */
@@ -69,6 +76,7 @@ export class ThreadAttentionService {
     if (this.lastSent.get(threadId) === serialized) return;
     this.lastSent.set(threadId, serialized);
     this.publish(attention);
+    for (const listener of this.listeners) listener(threadId);
   }
 
   /** Atomically acknowledge a rendered server sequence up to a settled turn boundary. */

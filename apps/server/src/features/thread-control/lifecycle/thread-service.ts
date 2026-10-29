@@ -180,6 +180,7 @@ export class ThreadService {
       thinking?: boolean | null;
       fast_mode?: boolean | null;
       default_open_in_app?: string | null;
+      auto_complete_on_merge?: boolean | null;
     },
   ): Promise<boolean> {
     return this.threadRepo.updateSettings(threadId, {
@@ -191,6 +192,7 @@ export class ThreadService {
       ...("thinking" in settings && { thinking: settings.thinking }),
       ...("fast_mode" in settings && { fast_mode: settings.fast_mode }),
       ...("default_open_in_app" in settings && { default_open_in_app: settings.default_open_in_app }),
+      ...("auto_complete_on_merge" in settings && { auto_complete_on_merge: settings.auto_complete_on_merge }),
     });
   }
 

@@ -15,6 +15,7 @@ const settings = z.object({
   thinking: z.boolean().nullable().optional(), fast_mode: z.boolean().nullable().optional(),
   devin_mode: z.string().nullable().optional(),
   default_open_in_app: z.string().nullable().optional(),
+  auto_complete_on_merge: z.boolean().nullable().optional(),
 });
 const deadlineUpdate = z.object({ id: z.string(), userCompletedAt: z.string(), scheduledDeletionAt: z.string().nullable(), nextScheduledDeletionAt: z.string().nullable() });
 const thread = ThreadSchema();

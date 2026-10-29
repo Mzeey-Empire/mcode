@@ -145,6 +145,8 @@ export function buildPlaceholderWorkspaceThread(
     ...resolveProviderFields(params),
     deleted_at: null,
     user_completed_at: null,
+    auto_complete_on_merge: null,
+    auto_complete_paused_at: null,
     scheduled_deletion_at: null,
     scheduled_resume: null,
     cleanup_state: null,

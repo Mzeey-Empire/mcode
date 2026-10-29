@@ -1,4 +1,4 @@
-import type { ThreadAttention } from "@mcode/contracts/models/thread-attention";
+import { isTurnSeen, type ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 /** Third-line label for a thread that is blocked on the user. */
@@ -30,11 +30,6 @@ export interface ThreadRowFacts {
 }
 
 const needsYou = (label: NeedsYouLabel): ThreadRowState => ({ kind: "needs-you", label });
-
-/** True when the user has acknowledged the turn at `turnSequence` or a later one. */
-export function isTurnSeen(turnSequence: number, seenSequence: number | null | undefined): boolean {
-  return seenSequence !== null && seenSequence !== undefined && seenSequence >= turnSequence;
-}
 
 /**
  * Picks the row state. A blocking question outranks a running turn because

@@ -108,6 +108,8 @@ function rowToThread(row: ThreadRow): Thread {
     scheduled_resume: schedule ? ScheduledTurnResumeSchema().parse({ turnId: schedule.turnId, at: schedule.runAt }) : null,
     last_activity_at: lastActivityAt(row),
     pull_requests: linkedPullRequests(row),
+    auto_complete_on_merge: row.autoCompleteOnMerge === null ? null : row.autoCompleteOnMerge === 1,
+    auto_complete_paused_at: row.autoCompletePausedAt,
     ...rowToThreadIdentity(row),
     ...rowToThreadLifecycle(row),
     ...rowToThreadPreferences(row),
@@ -254,6 +256,8 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     last_activity_at: input.now,
     deleted_at: null,
     user_completed_at: null,
+    auto_complete_on_merge: null,
+    auto_complete_paused_at: null,
     scheduled_deletion_at: null,
     scheduled_resume: null,
     cleanup_state: null,
@@ -380,6 +384,7 @@ type ThreadSettings = {
   context_window_mode?: ContextWindowMode | null;
   thinking?: boolean | null;
   fast_mode?: boolean | null;
+  auto_complete_on_merge?: boolean | null;
   devin_mode?: string | null;
   default_open_in_app?: string | null;
 };
@@ -399,6 +404,7 @@ const TEXT_SETTING_COLUMNS = [
 const BOOLEAN_SETTING_COLUMNS = [
   ["thinking", "thinking"],
   ["fast_mode", "fastMode"],
+  ["auto_complete_on_merge", "autoCompleteOnMerge"],
 ] as const satisfies readonly (readonly [keyof ThreadSettings, keyof typeof threads.$inferInsert])[];
 
 function buildSettingsSet(settings: ThreadSettings): Partial<typeof threads.$inferInsert> {
@@ -756,6 +762,7 @@ export class ThreadStore {
       const result = runChanges(tx.update(threads)
         .set({
           userCompletedAt: null,
+          autoCompletePausedAt: reopenedAt,
           scheduledDeletionAt: null,
           cleanupState: null,
           cleanupReason: null,
@@ -1190,6 +1197,7 @@ export class ThreadStore {
   /** Persist model, provider, and supplied composer settings in one atomic update. */
   updateSettings(id: string, settings: ThreadSettings): boolean {
     const set = buildSettingsSet(settings);
+    if (settings.auto_complete_on_merge !== undefined) set.autoCompletePausedAt = null;
     if (Object.keys(set).length === 0) return false;
     const sessionAfterProviderChange = settings.provider === undefined
       ? {}

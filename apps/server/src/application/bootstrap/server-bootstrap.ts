@@ -119,6 +119,7 @@ import { TerminalDiagnosticsService } from "../../features/terminal/diagnostics/
 import { MessageRepo } from "../../features/agents/conversation/persistence/message-repo.js";
 import { ThreadRepo } from "../../features/thread-control/persistence/thread-repo.js";
 import { invalidateAttentionOnSettledTurns, notifyTasksOnSettledTurns, ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
+import { ThreadAutoCompleteService } from "../../features/thread-control/lifecycle/thread-auto-complete.js";
 import { subscribeCommittedCanonicalEvents } from "../../features/agents/canonical/committed-canonical-events.js";
 import { approvalWaitingSource } from "../../features/thread-control/attention/approval-waiting-source.js";
 import { planWaitingSource } from "../../features/thread-control/attention/plan-waiting-source.js";
@@ -601,6 +602,9 @@ if (workerOwnedTurnRuntime.progress) {
 }
 const cleanupWorker = container.resolve(CleanupWorker);
 const threadCompletionService = container.resolve(ThreadCompletionService);
+const threadAutoCompleteService = new ThreadAutoCompleteService(
+  threadRepo, threadAttentionService, threadCompletionService, pullRequestLinkFunnel, settingsService,
+);
 const pullRequestCompletionEffect = new TurnPullRequestCompletionEffect(
   threadRepo,
   workspaceRepo,
@@ -646,6 +650,7 @@ threadCompletionService.onDeadlineChanges((threads) => {
   }
 });
 threadCompletionService.start();
+threadAutoCompleteService.start();
 gitWatcherService.setThreadCheckoutChangedListener((threadId) => {
   ciWatcherService.unwatch(threadId);
 });
@@ -1197,6 +1202,7 @@ async function shutdown(): Promise<void> {
       shutdownFailure ??= error;
     }
   };
+  threadAutoCompleteService.dispose();
   await captureCleanupFailure(() => agentService.stopAll());
 
   settingsService.dispose();

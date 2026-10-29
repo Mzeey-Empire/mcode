@@ -404,3 +404,14 @@ describe("agent command transport", () => {
     transport.close();
   });
 });
+
+describe("thread settings transport", () => {
+  it.each([true, false, null])("sends the merge completion override %s to the server", async (autoCompleteOnMerge) => {
+    const transport = createWsTransport("ws://localhost:1234");
+    mockWs.simulateOpen();
+    void transport.updateThreadSettings("thread-1", { autoCompleteOnMerge });
+    await vi.waitFor(() => expect(mockWs.sent.some((row) => parseRequest(row).method === "thread.updateSettings")).toBe(true));
+    const request = mockWs.sent.map(parseRequest).find((candidate) => candidate.method === "thread.updateSettings");
+    expect(request?.params).toMatchObject({ threadId: "thread-1", autoCompleteOnMerge });
+  });
+});

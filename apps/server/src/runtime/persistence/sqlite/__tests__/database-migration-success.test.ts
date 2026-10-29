@@ -125,6 +125,24 @@ describe("successful database migration recovery", () => {
     }
   });
 
+  it("adds nullable merge completion preferences without changing existing threads", () => {
+    const current = NodePath.join(process.cwd(), "drizzle");
+    const previous = NodePath.join(directory, "drizzle-through-0101");
+    copyMigrationsThrough(current, previous, "0102_flashy_randall_flagg");
+    const db = new Database(databasePath, { strict: true });
+    try {
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(previous) });
+      db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run("ws", "Workspace", "/fixture");
+      db.prepare("INSERT INTO threads (id, workspace_id, title, branch) VALUES (?, ?, ?, ?)").run("thread", "ws", "Thread", "main");
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
+      expectColumns(db, "threads", { present: ["auto_complete_on_merge", "auto_complete_paused_at"] });
+      expect(db.prepare("SELECT auto_complete_on_merge, auto_complete_paused_at FROM threads WHERE id = ?").get("thread"))
+        .toEqual({ auto_complete_on_merge: null, auto_complete_paused_at: null });
+    } finally {
+      db.close(true);
+    }
+  });
+
   it("removes the obsolete Copilot selection without rebuilding or cascading thread history", () => {
     const current = NodePath.join(process.cwd(), "drizzle");
     const previous = NodePath.join(directory, "drizzle-through-0067");
