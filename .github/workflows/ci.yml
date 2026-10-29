@@ -3,9 +3,6 @@ name: CI
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**/*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,6 +12,40 @@ env:
   SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
 
 jobs:
+  # A workflow-level paths filter never starts the run, so Markdown-only PRs had
+  # no Test or Typecheck to satisfy branch protection. This job decides instead,
+  # and the heavy jobs skip, which counts as passing, only when every changed
+  # file is Markdown at the root or under docs/. If it fails, its output is
+  # empty and everything runs.
+  changes:
+    name: Changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      pull-requests: read
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          expected="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.changed_files')"
+          # Old names too, so moving code into docs/ still counts as a code change.
+          files="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[] | .filename, (.previous_filename // empty)')"
+          listed="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' | wc -l)"
+          docs_only=false
+          # The files API stops at 3000 entries, so a short list proves nothing.
+          if [ "$expected" -gt 0 ] && [ "$listed" -eq "$expected" ] \
+            && ! printf '%s\n' "$files" | grep -Eqv '^[^/]+\.md$|^docs/.+\.md$'; then
+            docs_only=true
+          fi
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "Markdown-only change: $docs_only ($listed of $expected files listed)" >> "$GITHUB_STEP_SUMMARY"
+
   # Splits PR checks between paid Blacksmith runners and free GitHub-hosted
   # runners by PR number parity, so each PR stays on one provider and keeps
   # warm caches. Set the CI_LINUX_RUNNER repository variable to `blacksmith`
@@ -65,9 +96,9 @@ jobs:
 
   typecheck:
     name: Typecheck
-    needs: pick-runner
-    # Skipped required checks count as passing, so run and fail instead.
-    if: ${{ !cancelled() }}
+    needs: [changes, pick-runner]
+    # Skipped required checks count as passing, so skip only for Markdown-only changes and otherwise run and fail.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ${{ needs.pick-runner.outputs.small || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
@@ -115,9 +146,9 @@ jobs:
 
   lint:
     name: Lint
-    needs: pick-runner
-    # Skipped required checks count as passing, so run and fail instead.
-    if: ${{ !cancelled() }}
+    needs: [changes, pick-runner]
+    # Skipped required checks count as passing, so skip only for Markdown-only changes and otherwise run and fail.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ${{ needs.pick-runner.outputs.small || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
@@ -161,9 +192,9 @@ jobs:
   # on its own runner instead of after the other on one.
   test-suite:
     name: Test ${{ matrix.suite }}
-    needs: pick-runner
-    # Skipped required checks count as passing, so run and fail instead.
-    if: ${{ !cancelled() }}
+    needs: [changes, pick-runner]
+    # Skipped required checks count as passing, so skip only for Markdown-only changes and otherwise run and fail.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ${{ needs.pick-runner.outputs[matrix.size] || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
@@ -238,7 +269,7 @@ jobs:
   # this job turns them into the single required check.
   test:
     name: Test
-    needs: test-suite
+    needs: [changes, test-suite]
     # `always()`: a cancelled or skipped suite must still produce a failing check.
     if: ${{ always() }}
     # A few seconds of work is billed as a full Blacksmith minute.
@@ -248,7 +279,12 @@ jobs:
       - name: Require every test suite to pass
         env:
           RESULT: ${{ needs.test-suite.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
         run: |
+          if [ "$DOCS_ONLY" = true ] && [ "$RESULT" = skipped ]; then
+            echo "Markdown-only change, so the test suites were skipped."
+            exit 0
+          fi
           if [ "$RESULT" != success ]; then
             echo "::error::Test suites finished with result '$RESULT'."
             exit 1
@@ -256,9 +292,9 @@ jobs:
 
   build-check:
     name: Build Check
-    needs: pick-runner
-    # Skipped required checks count as passing, so run and fail instead.
-    if: ${{ !cancelled() }}
+    needs: [changes, pick-runner]
+    # Skipped required checks count as passing, so skip only for Markdown-only changes and otherwise run and fail.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ${{ needs.pick-runner.outputs.small || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
