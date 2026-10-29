@@ -24,6 +24,7 @@ import { CanonicalWriterAcknowledgementCapacity, type CanonicalAgentWriterClient
 import type { CanonicalAcceptedWriteReceipt } from "./canonical-agent-writer-protocol.js";
 import type { CanonicalAcceptedWriteInput } from "./canonical-accepted-write.js";
 import { AcceptedSaveScheduler } from "./accepted-save-scheduler.js";
+import { SavingStatusPublisher, type SavingStatusTimer } from "./saving-status-publisher.js";
 import { prepareAcceptedParentEvents } from "./accepted-parent-events.js";
 import { acceptedNarrative, advanceAcceptedExecution, seedAcceptedExecution, type AcceptedExecutionState } from "./accepted-execution-state.js";
 import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
@@ -115,6 +116,7 @@ export class CanonicalAcceptedProgress {
     reservedControlEvents: MAX_OWNERS * LOCAL_LIMITS.reservedControlEvents,
     reservedControlBytes: MAX_OWNERS * LOCAL_LIMITS.reservedControlBytes });
   private readonly saves: AcceptedSaveScheduler<AcceptedExecutionWriteIntent>;
+  private readonly savingPublisher: SavingStatusPublisher;
   private onPermanentFailure: ((execution: ExecutionIdentity, error: Error) => Promise<void>) | undefined;
   private pendingSaved: readonly CanonicalAcceptedWriteReceipt[] = [];
   private closing = false;
@@ -123,7 +125,9 @@ export class CanonicalAcceptedProgress {
   private readonly steerSaves = new Map<string, { threadId: string; resolve(): void; reject(error: Error): void }>();
 
   constructor(private readonly canonical: CanonicalAgentBoundary, private readonly writer: CanonicalAgentWriterClient,
-    private readonly planFiles?: PlanFileWriter, private readonly completedTurns?: CompletedTurnWatermark) {
+    private readonly planFiles?: PlanFileWriter, private readonly completedTurns?: CompletedTurnWatermark,
+    savingStatusTimer?: SavingStatusTimer) {
+    this.savingPublisher = new SavingStatusPublisher((status) => broadcast("turn.savingStatus", status), savingStatusTimer);
     this.saves = new AcceptedSaveScheduler({ writer: { append: (batch) => this.save(batch) },
       maxAttempts: 6, retryDelayMs: 1_000, retryable: isTransientSaveFailure,
       onSaved: async (batch, receipt) => this.saved(batch, receipt),
@@ -813,6 +817,7 @@ export class CanonicalAcceptedProgress {
     this.rejectSteerSaves(new Error("Accepted conversation was deleted"), threadId);
     thread.waiters.clear();
     await this.saves.discardThread(ownerId);
+    this.savingPublisher.flushThread(ownerId);
     thread.owner.discard();
     this.threads.delete(ownerId);
   }
@@ -833,7 +838,7 @@ export class CanonicalAcceptedProgress {
   finishThreadDeletion(threadId: string): void { this.deletingThreads.delete(threadId); }
 
   /** Stop admission before waiting for the single active storage write. */
-  close(): Promise<void> {
+  async close(): Promise<void> {
     this.closing = true;
     const error = new Error("Accepted progress is closing before the durable command completed");
     for (const thread of this.threads.values()) {
@@ -842,7 +847,11 @@ export class CanonicalAcceptedProgress {
       thread.waiters.clear();
     }
     this.rejectSteerSaves(error);
-    return this.saves.close();
+    try {
+      await this.saves.close();
+    } finally {
+      this.savingPublisher.close();
+    }
   }
 
   private assertOpen(): void {
@@ -884,6 +893,7 @@ export class CanonicalAcceptedProgress {
     for (const [id, thread] of this.threads) {
       if (!thread.commandPending && thread.owner.recoveryCut().retained.length === 0
         && !Object.values(thread.state.turns).some((turn) => turn.status === "Running" || turn.status === "Pending")) {
+        this.savingPublisher.flushThread(id);
         this.threads.delete(id); return;
       }
     }
@@ -1054,8 +1064,7 @@ export class CanonicalAcceptedProgress {
     for (const executionId of executions) {
       const status = this.savingStatus(threadId, executionId, thread);
       thread.statuses.set(executionId, status);
-      broadcast("turn.savingStatus", status);
-      for (const childId of this.familyTargets(threadId, thread)) broadcast("turn.savingStatus", { ...status, threadId: childId });
+      this.savingPublisher.publish(status, this.familyTargets(threadId, thread));
       if (status.mode === "durable") thread.statuses.delete(executionId);
     }
   }

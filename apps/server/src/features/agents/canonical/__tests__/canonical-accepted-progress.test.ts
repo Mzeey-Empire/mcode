@@ -40,6 +40,7 @@ import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message
 import { ProgressAdmissionError } from "../../execution/execution-writer-failure.js";
 import { persistTurnFailure } from "../turn-ending.js";
 import { TurnSteerStore } from "../../steering/persistence/turn-steer-store.js";
+import { TurnSavingStatusSchema, type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -93,11 +94,15 @@ function acceptedMessage(event: Pick<AcceptedCanonicalAgentEventEnvelope, "paylo
   return MessageSchema().parse(payload.item.payload.message);
 }
 
-const pushes = vi.hoisted(() => ({ frames: [] as unknown[], turns: [] as { channel: string; data: unknown }[] }));
+const pushes = vi.hoisted(() => {
+  const saving: TurnSavingStatus[] = [];
+  return { frames: [] as unknown[], turns: [] as { channel: string; data: unknown }[], saving, subscriptions: new Set<string>() };
+});
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: (channel: string, frame: unknown) => {
   if (channel === "agent.canonical") pushes.frames.push(frame);
   if (channel === "thread.status" || channel === "turn.persisted") pushes.turns.push({ channel, data: frame });
-},subscribedThreadIds: () => new Set<string>() }));
+  if (channel === "turn.savingStatus") pushes.saving.push(TurnSavingStatusSchema().parse(frame));
+},subscribedThreadIds: () => pushes.subscriptions }));
 const NOW = "2026-09-30T10:00:00.000Z";
 const execution = { threadId: "live-thread", turnId: "live-turn", executionId: "00000000-0000-4000-8000-000000000123" };
 const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "live-lease" };
@@ -156,6 +161,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
   beforeEach(() => {
     pushes.frames.length = 0;
     pushes.turns.length = 0;
+    pushes.saving.length = 0;
+    pushes.subscriptions.clear();
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-live-progress-"));
     const dbPath = NodePath.join(directory, "app.sqlite");
     db = openMigratedTestDatabase(dbPath);
@@ -174,6 +181,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     release?.();
     release = undefined;
     await progress.close();
+    vi.useRealTimers();
     await writer.close();
     await databaseWriter.close();
     reader.close(true);
@@ -188,10 +196,10 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
   }
   const send = (ordinal: number, command: ExecutionWorkCommand, identity = execution, activeLease = lease) =>
     handler.handle({ requestId: ordinal, execution: identity, lease: activeLease, ordinal, command });
-  function holdWrites() {
+  function holdWrites(onAppend?: () => void) {
     const append = writer.appendAccepted.bind(writer);
     const held = new Promise<void>((resolve) => { release = resolve; });
-    const heldAppend: typeof writer.appendAccepted = async (...args) => { await held; return append(...args); };
+    const heldAppend: typeof writer.appendAccepted = async (...args) => { onAppend?.(); await held; return append(...args); };
     vi.spyOn(writer, "appendAccepted").mockImplementation(heldAppend);
     return heldAppend;
   }
@@ -211,6 +219,105 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       narrativeStore: new NarrativeReadStore(new ToolCallRecordStore(reader), new ThoughtSegmentStore(reader), new HookExecutionStore(reader)),
       planQuestionAnswersRepo: new PlanQuestionAnswersStore(reader) }, { threadId: execution.threadId, limit: 20 });
   }
+
+  describe("saving status publication", () => {
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }); });
+
+    async function settle(threadId = execution.threadId) {
+      await progress.beforeDurableCommand(threadId);
+      progress.cancelDurableCommand(threadId);
+    }
+
+    it("coalesces accepted and saved bursts while snapshots remain current", async () => {
+      await send(1, start("codex"));
+      await settle();
+      for (let index = 1; index <= 10; index += 1) {
+        holdWrites();
+        await send(index + 1, { kind: "event", phase: "running", nativeCursor: null,
+          events: [draft("codex", index, "textDelta", { delta: "text", isFinalResponse: true })] });
+        expect(progress.savingStatuses(execution.threadId).map(({ mode }) => mode)).toEqual(["saving"]);
+        release?.();
+        await settle();
+        vi.mocked(writer.appendAccepted).mockRestore();
+        expect(progress.savingStatuses(execution.threadId)).toEqual([]);
+        vi.advanceTimersByTime(20);
+      }
+      expect(pushes.saving).toEqual([]);
+      vi.advanceTimersByTime(49);
+      expect(pushes.saving).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(pushes.saving).toEqual([{ threadId: execution.threadId, executionId: execution.executionId, mode: "durable" }]);
+    });
+
+    it("sends failure and recovery immediately without a stale family durable", async () => {
+      await send(1, start("codex"));
+      await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [familyDraft(1, "toolUse", { toolCallId: "spawn", toolName: "Agent", toolInput: {} },
+          { collaboration: { kind: "spawnAgent", receiverThreadIds: ["native-child"], prompt: "Child task" } })] });
+      await send(3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [familyDraft(2, "turnStarted", {}, { child: { nativeThreadId: "native-child", nativeTurnId: "native-turn", parentCollaborationItemId: "spawn" } })] });
+      await settle();
+      const child = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId, limit: 100 })?.active[0];
+      if (!child) throw new Error("Expected accepted child");
+      pushes.subscriptions.add(child.id);
+      await send(4, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 3, "textDelta", { delta: "saved", isFinalResponse: true })] });
+      await settle();
+      vi.spyOn(writer, "appendAccepted").mockRejectedValueOnce(new Error("Disk full"));
+      await send(5, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 4, "textDelta", { delta: "pending", isFinalResponse: true })] });
+      await expect(settle()).rejects.toThrow();
+      const ownerFailure = pushes.saving.filter((status) => status.executionId === execution.executionId);
+      expect(ownerFailure.map(({ threadId, mode }) => ({ threadId, mode }))).toEqual([
+        { threadId: execution.threadId, mode: "saving-failed" }, { threadId: child.id, mode: "saving-failed" },
+      ]);
+      vi.advanceTimersByTime(250);
+      expect(pushes.saving.filter((status) => status.executionId === execution.executionId)).toEqual(ownerFailure);
+      expect(progress.retry(execution.threadId)).toBe(true);
+      expect(pushes.saving.filter((status) => status.executionId === execution.executionId).slice(-2).map(({ threadId, mode }) => ({ threadId, mode }))).toEqual([
+        { threadId: execution.threadId, mode: "save-retrying" }, { threadId: child.id, mode: "save-retrying" },
+      ]);
+      await settle();
+    });
+
+    it.each(["close", "discardThread", "evictSavedThread"])("flushes a final durable on %s", async (action) => {
+      await send(1, start("codex"));
+      await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 1, "turnComplete")], terminalInput: { ...execution, providerId: "codex", providerIdentities: [],
+          outcome: "completed", projection: { kind: "writer-staged" } } });
+      await settle();
+      expect(pushes.saving).toEqual([]);
+      if (action === "close") await progress.close();
+      else if (action === "discardThread") await progress.discardThread(execution.threadId);
+      else {
+        for (let index = 0; index < 8; index += 1) {
+          const threadId = `extra-thread-${index}`;
+          insertThread(threadId);
+          await progress.beforeDurableCommand(threadId);
+          progress.cancelDurableCommand(threadId);
+        }
+      }
+      expect(pushes.saving).toEqual([{ threadId: execution.threadId, executionId: execution.executionId, mode: "durable" }]);
+      vi.advanceTimersByTime(1_000);
+      expect(pushes.saving).toHaveLength(1);
+    });
+
+    it("flushes a durable published by the in-flight save after close starts", async () => {
+      await send(1, start("codex"));
+      await settle();
+      const started = new Promise<void>((resolve) => { holdWrites(resolve); });
+      await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 1, "textDelta", { delta: "final save", isFinalResponse: true })] });
+      await started;
+      const closing = progress.close();
+      expect(pushes.saving).toEqual([]);
+      release?.();
+      await closing;
+      expect(pushes.saving).toEqual([{ threadId: execution.threadId, executionId: execution.executionId, mode: "durable" }]);
+      vi.advanceTimersByTime(1_000);
+      expect(pushes.saving).toHaveLength(1);
+    });
+  });
 
   it.each([true, false])("reloads a visual before the final reply with staged assistant = %s", async (staged) => {
     await send(1, start("codex"));
