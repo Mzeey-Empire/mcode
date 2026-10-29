@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { VirtualViewport, type VirtualHost, type VirtualRow } from "../virtual-viewport";
+import { VirtualViewport, type ViewportPosition, type VirtualHost, type VirtualRow } from "../virtual-viewport";
 
 class SilentObserver implements ResizeObserver {
   observe(): void {}
@@ -148,6 +148,43 @@ describe("VirtualViewport additions", () => {
 
     expect(view.rowBottom("bar")).toBe(432);
     expect(view.rowBottom("r10")).toBe(472);
+  });
+
+  it("hands a released move back to the reading row so later row changes stop chasing the target", () => {
+    view.destroy();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const positions: ViewportPosition[] = [];
+    view = new VirtualViewport(container, (next) => { hosts = next; }, (position) => positions.push(position), { ariaLabel: "Rows" });
+    view.setRows(rows);
+
+    view.moveTo({ kind: "target", key: "r10", align: "start" }, false, { release: true });
+    view.setRows(rows.slice(1));
+
+    expect(positions.at(-1)?.kind).toBe("reading");
+  });
+
+  it("keeps an unreleased target across row changes", () => {
+    view.destroy();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const positions: ViewportPosition[] = [];
+    view = new VirtualViewport(container, (next) => { hosts = next; }, (position) => positions.push(position), { ariaLabel: "Rows" });
+    view.setRows(rows);
+
+    view.moveTo({ kind: "target", key: "r10", align: "center" });
+    view.setRows(rows.slice(1));
+
+    expect(positions.at(-1)).toEqual({ kind: "target", key: "r10", align: "center" });
+  });
+
+  it("shrinks the scroller back to its rows when rows below the reading row go away", () => {
+    const content = () => view.viewport.querySelector<HTMLElement>(".virtual-content");
+    view.moveTo({ kind: "reading", key: "r30", offset: 0 });
+
+    view.setRows(rows.slice(0, 32));
+
+    expect(content()?.style.height).toBe("1280px");
   });
 
   it("reports the scroller's visible height", () => {
