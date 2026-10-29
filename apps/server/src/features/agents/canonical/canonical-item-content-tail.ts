@@ -80,6 +80,11 @@ interface CachedItem {
 
 const MAX_CACHED_ITEMS = 64;
 
+/**
+ * Keeps the writer from re-folding the whole stored answer on every append batch.
+ * An entry counts only while its token is in a TEMP table written in the same
+ * transaction as its tail rows, so a rollback reverts the token and voids it.
+ */
 class CommittedItemCache {
   private readonly entries = new Map<string, CachedItem>();
   private lastToken = 0;
@@ -130,6 +135,7 @@ class CommittedItemCache {
 
 const committedItemCaches = new WeakMap<Database, CommittedItemCache | null>();
 
+/** A TEMP table created inside a transaction vanishes if it rolls back, so that connection gets no cache. */
 function committedItemCache(db: Database): CommittedItemCache | null {
   const existing = committedItemCaches.get(db);
   if (existing !== undefined) return existing;
