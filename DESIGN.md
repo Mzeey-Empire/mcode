@@ -339,7 +339,7 @@ components:
     highlighted: "{colors.hover}"
     shortcutColor: "{colors.muted}"
     destructiveColor: "{colors.error}"
-    divider: "1px {colors.border}, 0.8rem inset"
+    divider: "1px {colors.border}, full row width"
   tooltip:
     backgroundColor: "{colors.panel}"
     borderColor: "{colors.border}"
