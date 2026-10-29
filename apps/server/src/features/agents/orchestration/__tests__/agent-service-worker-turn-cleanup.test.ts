@@ -14,6 +14,7 @@ import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-st
 import { ThreadControlMutationReservationService } from "../../../thread-control/index.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
+import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 import { appendPreviewAnnotations, sendRecoveryAttempt } from "../../transport/turn-message-dispatch.js";
 import { openWorkerServiceFixture } from "./worker-turn-fixture.js";
 
@@ -295,6 +296,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     const endedReady = new Promise<void>((resolve) => { ended = resolve; });
     vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementationOnce(() => fenceReady);
     const retire = vi.spyOn(fixture.provider, "retireCanonicalTurnEvents");
+    const releaseRecovered = vi.spyOn(fixture.workers.owner, "releaseRecovered");
     fixture.provider.stopSession.mockImplementation(async () => {
       try {
         await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
@@ -303,17 +305,13 @@ describe("AgentService cleanup through production worker composition", { timeout
       }
     });
     const stopping = fixture.service.stopSession(fixture.thread.id, { by: "user" });
-    let retiredDuringStop: number;
     try {
       await endedReady;
-      await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
-      retiredDuringStop = retire.mock.calls.length;
     } finally {
       releaseFence();
     }
     expect((await stopping).status).toBe("cancelled");
     await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
-    expect(retiredDuringStop).toBe(0);
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Cancelled");
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "cancelled", stop: { by: "user" } });
     fixture.provider.stopSession.mockResolvedValue(undefined);
@@ -321,6 +319,42 @@ describe("AgentService cleanup through production worker composition", { timeout
       threadId: fixture.thread.id, content: "replacement", permissionMode: "default", model: "gpt-5", provider: "codex",
     })).resolves.toBeUndefined();
     expect(fixture.sent.map((sent) => sent.message)).toEqual(["Do the work", "replacement"]);
+    expect(releaseRecovered).not.toHaveBeenCalled();
+    expect(retire).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps raw teardown Ended from the evicted pooled session from ending the replacement turn", async () => {
+    const fixture = await openFixture();
+    const previous = await sendTurn(fixture);
+    await fixture.emit(turnComplete(fixture.thread.id, previous.turnExecutionId));
+    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: previous.turnExecutionId });
+    await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
+    const publication = container.resolve(AgentEventPublicationRegistry);
+    Object.assign(fixture.provider, {
+      discardSession: async () => {
+        publication.publish({ type: "ended", threadId: fixture.thread.id,
+          turnExecutionId: previous.turnExecutionId, outcome: "completed" });
+        await publication.drain();
+        expect(fixture.threads.findById(fixture.thread.id)?.status).toBe("active");
+      },
+    });
+
+    await fixture.service.sendMessage({
+      threadId: fixture.thread.id, content: "replacement", permissionMode: "default",
+      model: "gpt-5", provider: "codex", forceFreshSession: true,
+    });
+
+    const replacement = fixture.sent.at(-1);
+    if (!replacement) throw new Error("Provider did not receive the replacement turn");
+    expect(fixture.sent.map((sent) => sent.message)).toEqual(["Do the work", "replacement"]);
+    expect(fixture.service.runtimeAccess().runtimeSnapshots()).toContainEqual(expect.objectContaining({
+      threadId: fixture.thread.id, turnExecutionId: replacement.turnExecutionId, phase: "running",
+    }));
+    expect(fixture.canonical.loadTurnByExecution(replacement.turnExecutionId)?.status).toBe("Running");
+    await fixture.emit(turnComplete(fixture.thread.id, replacement.turnExecutionId));
+    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: replacement.turnExecutionId });
+    await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+    expect(fixture.canonical.loadTurnByExecution(replacement.turnExecutionId)?.status).toBe("Completed");
   });
 
   it("maps provider-cancelled Ended to the recoverable interrupted outcome", async () => {

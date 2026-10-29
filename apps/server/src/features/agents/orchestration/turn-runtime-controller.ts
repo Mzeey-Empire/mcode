@@ -40,7 +40,7 @@ import type { WorkerOwnedProviderEventBatch } from "../../providers/composition/
 import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import { SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pins.js";
 import type { DataOnlyParentTurnFinishInput } from "../canonical/canonical-parent-turn-write.js";
-import { observedProviderRetries, persistTurnFailure, providerFailureTerminal, type ObservedProviderRetries, type TurnEndingCause } from "../canonical/turn-ending.js";
+import { observedProviderRetries, persistTurnFailure, providerFailureTerminal, type TurnEndingCause } from "../canonical/turn-ending.js";
 import { TurnEventPipeline, type TurnLifecycleControl } from "../turns/turn-event-pipeline.js";
 import { TurnDiffService } from "../turns/turn-diff-service.js";
 import { ProviderSwitchService } from "../turns/provider-switch-service.js";
@@ -74,6 +74,7 @@ import type { TurnRuntimeEventControl } from "./turn-runtime-event-control.js";
 import { TurnSteerRuntimePort, type SteerableTurn } from "../steering/turn-steer-runtime-port.js";
 import { isLostProviderStream } from "../events/provider-event-publication.js";
 import { TurnAdmissionError, turnAdmissionFailureReason } from "@mcode/shared/turn-admission";
+import { TurnLifecycles, type WorkerOwnedTurn } from "./turn-lifecycle.js";
 
 /**
  * Bounded wait for `provider.stopSession` before the turn is force-finalized.
@@ -99,24 +100,6 @@ type PreparedStop = {
 
 type UnsentWorkerTerminal = { outcome: "errored" } | { outcome: "cancelled"; stop: TurnStopCause };
 
-interface WorkerOwnedTurn {
-  readonly execution: ExecutionIdentity;
-  readonly prepared: PreparedTurnDispatch;
-  readonly provider: IAgentProvider;
-  deliveryAttempt: number;
-  terminalCommitted: boolean;
-  persistedPublished: boolean;
-  terminalOutcome?: TurnOutcome;
-  releaseStarted: boolean;
-  /** The release scheduled by the committed Ended; a provider can start its next turn before it finishes. */
-  terminalRelease?: Promise<void>;
-  deliveryFailed?: boolean;
-  deliveryFailureHandling?: Promise<void>;
-  stopInProgress?: boolean;
-  stopRequested?: boolean;
-  lastRetries?: ObservedProviderRetries;
-}
-
 /** Read-only runtime state available to server-owned diagnostics and recovery infrastructure. */
 export interface AgentRuntimeAccess {
   /** Return the number of active agent sessions. */
@@ -139,7 +122,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private initialized = false;
   /** Set once graceful shutdown begins; the process exits afterward, so it never resets. */
   private shuttingDown = false;
-  private readonly endedSuppressionThreads = new Set<string>();
   /** Callbacks keyed by turn execution that run once that runtime releases its active slot, so follow-up turns can admit. */
   private readonly runtimeReleaseCallbacks = new Map<string, (cause?: RuntimeReleaseCause) => void>();
   private readonly runtimeReleaseListeners = new Set<(threadId: string) => void>();
@@ -166,12 +148,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private readonly activeMutationReservations = new Map<string, string>();
   /** Single-flight user stop operation per thread. */
   private readonly stopOperationsByThread = new Map<string, Promise<AgentStopResult>>();
-  private readonly unsentStopsByThread = new Map<string, { executionId: string; stop: TurnStopCause }>();
   /** Monotonic turn generation per thread, including turns that failed setup. */
   private readonly turnGenerations = new Map<string, number>();
   /** Single ordered pipeline for validated provider envelopes and terminal materialization. */
   private readonly turnEventPipeline: TurnEventPipeline;
-  private readonly workerTurns = new Map<string, WorkerOwnedTurn>();
+  private readonly lifecycles = new TurnLifecycles();
   constructor(
     @inject(TURN_RUNTIME_PERSISTENCE)
     private readonly runtimePersistence: TurnRuntimePersistence,
@@ -248,7 +229,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** The running worker turn a steer may join. A stopping or finishing turn takes no new messages. */
   private steerableTurn(threadId: string): SteerableTurn | null {
-    const owned = this.workerTurns.get(threadId);
+    const owned = this.lifecycles.worker(threadId);
     if (!owned || !this.acceptsNewInput(threadId, owned)) return null;
     const provider = owned.provider;
     const turn = { sessionId: owned.prepared.request.sessionId, threadId, turnExecutionId: owned.execution.executionId };
@@ -380,10 +361,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       this.activeSessionIds.delete(command.threadId);
       throw new TurnAdmissionError("pending_mutation", `Thread ${command.threadId} already has a pending mutation`);
     }
-    this.unsentStopsByThread.delete(command.threadId);
     const generation = (this.turnGenerations.get(command.threadId) ?? 0) + 1;
     this.turnGenerations.set(command.threadId, generation);
     const turnExecutionId = this.turnRuntime.start(command.threadId).turnExecutionId!;
+    this.lifecycles.admit(command.threadId, turnExecutionId);
     this.activeMutationReservations.set(command.threadId, token);
     if (command.onRuntimeReleased) this.runtimeReleaseCallbacks.set(turnExecutionId, command.onRuntimeReleased);
     command.onTurnStarted?.({ threadId: command.threadId, turnExecutionId, phase: "running" });
@@ -410,8 +391,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Release a failed admission without disturbing a replacement turn that won the lease. */
   private releaseTurnAdmission(lease: TurnRuntimeLease): void {
-    const wasStopped = this.unsentStopFor(lease) !== undefined;
-    if (wasStopped) this.unsentStopsByThread.delete(lease.threadId);
+    const wasStopped = this.lifecycles.releaseAdmission(lease) !== undefined;
     const ownsRuntime = this.turnRuntime.snapshot(lease.threadId)?.turnExecutionId === lease.turnExecutionId;
     const ownsMutation = this.activeMutationReservations.get(lease.threadId) === lease.mutationReservationToken;
     if ((ownsRuntime || ownsMutation) && this.activeSessionIds.delete(lease.threadId)) {
@@ -448,7 +428,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Set up generic turn tracking, apply a stable command receipt, then send through the provider. */
   private async dispatchPreparedTurn(prepared: PreparedTurnDispatch): Promise<void> {
     if (!this.ownsTurnAdmission(prepared.lease)) {
-      const stop = this.unsentStopFor(prepared.lease);
+      const stop = this.lifecycles.stopBeforeSend(prepared.lease);
       const terminal: UnsentWorkerTerminal = stop
         ? { outcome: "cancelled", stop }
         : { outcome: "errored" };
@@ -465,11 +445,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         error: error instanceof Error ? error.message : String(error) });
       await this.failPreparedTurnDispatch(prepared, error);
     }
-  }
-
-  private unsentStopFor(lease: TurnRuntimeLease): TurnStopCause | undefined {
-    const stopped = this.unsentStopsByThread.get(lease.threadId);
-    return stopped?.executionId === lease.turnExecutionId ? stopped.stop : undefined;
   }
 
   /** Bind file evidence and the exact provider route after the parent start receipt. */
@@ -499,7 +474,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (began.kind !== "committed" && began.kind !== "accepted") throw new Error("Worker file handoff was not committed");
     this.markProviderTurnActive(execution.threadId);
     await worker.providerEvents.bind(execution, 1);
-    this.workerTurns.set(execution.threadId, {
+    this.lifecycles.bind(execution, {
       execution, prepared, provider, deliveryAttempt: 1,
       terminalCommitted: false, persistedPublished: false, releaseStarted: false,
     });
@@ -579,9 +554,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   private requireActiveWorkerTurn(execution: ExecutionIdentity, attempt: number): WorkerOwnedTurn {
-    const active = this.workerTurns.get(execution.threadId);
-    if (!active || active.execution.executionId !== execution.executionId
-      || active.deliveryAttempt !== attempt) {
+    const active = this.lifecycles.workerFor(execution);
+    if (!active || active.deliveryAttempt !== attempt) {
       throw new Error("Provider event has no matching worker-owned turn");
     }
     return active;
@@ -645,8 +619,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     execution: ExecutionIdentity,
     result: Extract<ExecutionWorkerResult, { kind: "committed" | "accepted" }>,
   ): Promise<void> {
-    const active = this.workerTurns.get(execution.threadId);
-    if (!active || active.execution.executionId !== execution.executionId) return;
+    const active = this.lifecycles.workerFor(execution);
+    if (!active) return;
     const event = result.parentEvent?.publication.event;
     if (!event) return;
     this.applyWorkerTerminalReceipt(active, event);
@@ -736,7 +710,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       await this.requireWorkerRuntime().providerEvents.retire(execution);
       await this.requireWorkerRuntime().owner.release(execution);
       this.requireWorkerFiles().retire(execution.threadId, execution.executionId, deliveryAttempt);
-      if (this.workerTurns.get(execution.threadId) === active) this.workerTurns.delete(execution.threadId);
+      this.lifecycles.end(execution, active);
       this.trackSessionEnded(execution.threadId, execution.executionId);
       if (active.terminalOutcome === "completed") this.featureEffects.refreshAfterTurn(execution.threadId);
       this.clearTurnDispatch(execution.threadId);
@@ -751,7 +725,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   private async releaseProviderLostWorkerTurn(active: WorkerOwnedTurn, receipt: ExecutionAcceptedReceipt): Promise<void> {
     const { execution, provider, deliveryAttempt } = active;
-    if (this.workerTurns.get(execution.threadId) !== active || active.releaseStarted
+    if (this.lifecycles.workerFor(execution) !== active || active.releaseStarted
       || active.stopInProgress || active.terminalCommitted) return;
     active.releaseStarted = true;
     await this.fenceWorkerProvider(provider, execution, deliveryAttempt);
@@ -759,7 +733,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await this.requireWorkerRuntime().providerEvents.retire(execution);
     await this.requireWorkerRuntime().owner.releaseRecovered(execution, receipt);
     this.requireWorkerFiles().retire(execution.threadId, execution.executionId, deliveryAttempt);
-    this.workerTurns.delete(execution.threadId);
+    this.lifecycles.end(execution);
     this.turnRuntime.release(execution.threadId, execution.executionId);
     this.turnDiffs.clearExecution(execution.threadId, execution.executionId);
     this.trackSessionEnded(execution.threadId, execution.executionId);
@@ -777,9 +751,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     // Recovery has committed the interruption, so the baseline can become the attempt's snapshot.
     this.settlePinsInBackground(execution);
     if (this.turnRuntime.snapshot(execution.threadId)?.turnExecutionId !== execution.executionId) return;
-    const active = this.workerTurns.get(execution.threadId);
-    if (active && active.execution.executionId !== execution.executionId) return;
-    if (active) this.workerTurns.delete(execution.threadId);
+    const active = this.lifecycles.workerFor(execution);
+    if (this.lifecycles.worker(execution.threadId) !== active) return;
+    this.lifecycles.end(execution);
     if (active) this.recoverWorkerProvider(active);
     this.turnRuntime.terminalize(execution.threadId, execution.executionId, "interrupted");
     this.trackSessionEnded(execution.threadId, execution.executionId);
@@ -830,13 +804,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Evict the pooled session while suppressing its teardown `Ended`, which would otherwise end the new turn. */
   private async replacePooledSession(prepared: PreparedTurnDispatch): Promise<void> {
-    const threadId = prepared.lease.threadId;
-    this.endedSuppressionThreads.add(threadId);
-    try {
-      await this.evictPooledSession(prepared.provider, prepared.request.sessionId);
-    } finally {
-      this.endedSuppressionThreads.delete(threadId);
-    }
+    await this.lifecycles.withPooledEviction(this.executionFor(prepared),
+      () => this.evictPooledSession(prepared.provider, prepared.request.sessionId));
   }
 
   private bindClaudeCanonicalDelivery(provider: IAgentProvider): void {
@@ -852,7 +821,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       || (dispatch.turnRequest.deliveryAttempt ?? 1) !== routing.deliveryAttempt) return;
     const identity = this.turnDispatchIdentity(dispatch);
     if (!this.getCurrentTurnDispatch(routing.threadId, identity)) return;
-    if (this.workerTurns.has(routing.threadId)) return this.handleWorkerDeliveryFailure(routing, error);
+    if (this.lifecycles.worker(routing.threadId)) return this.handleWorkerDeliveryFailure(routing, error);
 
   }
 
@@ -922,7 +891,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     error: unknown,
   ): Promise<void> {
     if (!this.mutationReservations.owns(threadId, dispatch.mutationReservationToken, "activeTurn")) return;
-    const workerTurn = this.workerTurns.get(threadId);
+    const workerTurn = this.lifecycles.worker(threadId);
     if (workerTurn) {
       try {
         await this.failWorkerDispatch(workerTurn, error);
@@ -972,9 +941,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     routing: { threadId: string; turnId: string; executionId: string; deliveryAttempt: number },
     error: Error,
   ): Promise<void> {
-    const active = this.workerTurns.get(routing.threadId);
+    const active = this.lifecycles.workerFor(routing);
     if (!active || active.execution.turnId !== routing.turnId
-      || active.execution.executionId !== routing.executionId
       || active.deliveryAttempt !== routing.deliveryAttempt || active.deliveryFailureHandling) return;
     // Stop intentionally closes this exact route before the provider's final callbacks settle.
     if ((active.stopInProgress || active.stopRequested) && isRetiredWorkerDelivery(error)) return;
@@ -1037,7 +1005,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const worker = this.workerRuntime;
     const owned = worker?.owner.current(threadId);
     if (!worker || !owned?.started || owned.execution.executionId !== executionId) return false;
-    const active = this.workerTurns.get(threadId);
+    const active = this.lifecycles.workerFor(owned.execution);
     const execution = owned.execution;
     const result = await this.submitUnsentWorkerFinish(worker, execution, active, terminal);
     if (!result) return true;
@@ -1046,7 +1014,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await worker.providerEvents.retire(execution);
     await worker.owner.release(execution);
     if (active) this.requireWorkerFiles().retire(execution.threadId, execution.executionId, active.deliveryAttempt);
-    this.workerTurns.delete(execution.threadId);
+    this.lifecycles.end(execution);
     return true;
   }
 
@@ -1149,7 +1117,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private async stopSessionInternal(threadId: string, stop: TurnStopCause): Promise<AgentStopResult> {
     const prepared = this.prepareStop(threadId, stop);
     if (isRunningRuntime(prepared.runtime) && prepared.dispatchState === "not-dispatched") {
-      this.unsentStopsByThread.set(threadId, { executionId: prepared.runtime.turnExecutionId!, stop: prepared.stop });
+      this.lifecycles.recordStopBeforeSend(threadId, prepared.runtime.turnExecutionId!, prepared.stop);
     }
     const owned = this.workerRuntime?.owner.current(threadId);
     if (owned?.started && owned.execution.executionId === prepared.runtime.turnExecutionId) {
@@ -1168,7 +1136,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   private async stopWorkerSession(prepared: PreparedStop): Promise<AgentStopResult> {
     const executionId = prepared.runtime.turnExecutionId!;
-    const active = this.workerTurns.get(prepared.threadId);
+    const active = this.lifecycles.worker(prepared.threadId);
     if (!active || !this.turnDispatchByThread.get(prepared.threadId)?.dispatchStarted) {
       await this.finishUnsentWorkerTurn(prepared.threadId, executionId, { outcome: "cancelled", stop: prepared.stop });
       this.turnRuntime.terminalize(prepared.threadId, executionId, "cancelled");
@@ -1364,7 +1332,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       if (prepared.reservationToken) {
         this.mutationReservations.transition(prepared.threadId, prepared.reservationToken, "stopping", "activeTurn");
       }
-      this.endedSuppressionThreads.delete(prepared.threadId);
+      this.lifecycles.clearPooledEviction(prepared.threadId);
       logger.warn("Provider stopSession failed", { threadId: prepared.threadId, providerId: prepared.providerId, error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
@@ -1529,14 +1497,14 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Keep teardown private during pooled-session replacement or an explicit stop. */
   shouldSuppressTurnEnded(threadId: string): boolean {
-    if (this.endedSuppressionThreads.has(threadId)) return true;
+    if (this.lifecycles.evictingPooledSession(threadId)) return true;
     if (this.mutationReservations.get(threadId)?.state === "stopping") return true;
     return false;
   }
 
   /** Keep the previous pooled session's completion from ending the replacement turn. */
   shouldSuppressTurnComplete(threadId: string): boolean {
-    return this.endedSuppressionThreads.has(threadId);
+    return this.lifecycles.evictingPooledSession(threadId);
   }
 
   private clearTurnDispatch(
@@ -1550,7 +1518,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       || dispatch.generation !== identity.generation)) {
       return false;
     }
-    this.endedSuppressionThreads.delete(threadId);
+    this.lifecycles.clearPooledEviction(threadId);
     this.turnDispatchByThread.delete(threadId);
     if (!preserveCommandEffect) this.turnAdmissions.completeCommandEffect(dispatch?.commandEffect ?? null);
     return true;
@@ -1665,7 +1633,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    * instead of declining as busy. A failed release is logged where it runs; admission then reports the thread as held.
    */
   private async awaitEndedTurnRelease(threadId: string): Promise<void> {
-    const active = this.workerTurns.get(threadId);
+    const active = this.lifecycles.worker(threadId);
     if (!active?.terminalCommitted) return;
     await active.terminalRelease?.catch(() => undefined);
   }
