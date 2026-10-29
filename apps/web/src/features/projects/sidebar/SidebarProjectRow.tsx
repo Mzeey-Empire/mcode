@@ -241,7 +241,7 @@ function ProjectWorkspaceRow({
       data-testid={`project-row-${workspace.id}`}
       onClick={actions.toggle}
       className={cn(
-        "group/ws relative flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-body-small touch-none outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "group/ws relative flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-body-small touch-none outline-none focus-visible:ring-2 focus-visible:ring-focus/70 has-[[data-project-title]:focus-visible]:ring-2 has-[[data-project-title]:focus-visible]:ring-focus/70",
         isProjectDragging && "cursor-grabbing",
         isActive ? "text-ink" : "text-muted hover:bg-selected/40 hover:text-ink",
       )}
@@ -360,7 +360,7 @@ function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: (
   return (
     <Tooltip disabled={dragging}>
       <TooltipTrigger render={
-        <Button type="button" variant="ghost" size="compact" aria-label={`Open project ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left hover:bg-transparent group-hover/ws:pr-24 group-focus-within/ws:pr-24 dark:hover:bg-transparent">
+        <Button data-project-title type="button" variant="ghost" size="compact" aria-label={`Open project ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left hover:bg-transparent group-hover/ws:pr-24 group-focus-within/ws:pr-24 active:inset-ring-0 focus-visible:outline-none dark:hover:bg-transparent">
           <span className="flex-1 text-fade font-medium tracking-tight">{workspace.name}</span>
         </Button>
       } />
