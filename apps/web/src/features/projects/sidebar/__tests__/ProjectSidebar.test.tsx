@@ -234,7 +234,7 @@ function makeThread(
 }
 
 function selectCompletedScope(): void {
-  fireEvent.click(screen.getByRole("radio", { name: /^Completed/ }));
+  fireEvent.click(screen.getByRole("radio", { name: /^Closed/ }));
 }
 
 function rowIndent(row: HTMLElement | undefined): string | undefined {
@@ -433,7 +433,7 @@ describe("ProjectSidebar thread interactions", () => {
       reopenThread,
     });
     render(<ProjectSidebar />);
-    const completedScope = screen.getByRole("radio", { name: /^Completed/ });
+    const completedScope = screen.getByRole("radio", { name: /^Closed/ });
     expect(completedScope).toHaveAttribute("aria-checked", "false");
     completedScope.focus();
     expect(completedScope).toHaveFocus();
@@ -511,8 +511,8 @@ describe("ProjectSidebar thread interactions", () => {
     view.rerender(<ProjectSidebar />);
 
     const bar = screen.getByRole("radiogroup", { name: "Thread scope" });
-    expect(within(bar).getByRole("radio", { name: "Active" })).toHaveAttribute("aria-checked", "true");
-    expect(within(bar).getByRole("radio", { name: /^Completed/ })).toHaveTextContent("Completed1");
+    expect(within(bar).getByRole("radio", { name: "Open" })).toHaveAttribute("aria-checked", "true");
+    expect(within(bar).getByRole("radio", { name: /^Closed/ })).toHaveTextContent("Closed1");
   });
 
   it.each([
@@ -593,7 +593,7 @@ describe("ProjectSidebar thread interactions", () => {
     expect(screen.getByRole("button", { name: "Reopen Completed work" })).toBeInTheDocument();
     screen.getByRole("button", { name: /^Provider, Claude Completed work/i }).focus();
     const preview = await screen.findByTestId("thread-preview-thread-1");
-    expect(preview).toHaveTextContent("Completed");
+    expect(preview).toHaveTextContent("Closed");
     const exactDeadline = new Intl.DateTimeFormat(undefined, {
       dateStyle: "medium",
       timeStyle: "short",
@@ -875,7 +875,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
 
-    expect(screen.getByText("No active threads", { exact: true })).toBeVisible();
+    expect(screen.getByText("No open threads", { exact: true })).toBeVisible();
   });
 
   it("keeps a Delegated thread at the root even when its Coordinator is listed", () => {
@@ -1396,14 +1396,14 @@ describe("ProjectSidebar action-required indicator", () => {
 
     expect(screen.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeInTheDocument();
     expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
-    expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Close My Thread" })).toBeDisabled();
   });
 
   it("blocks completion while a permission is waiting", () => {
     applyAttention(attention("thread-pending", waitingOn("approval")));
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("button", { name: "Complete My Thread" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Close My Thread" })).toBeDisabled();
   });
 
   it("shows a running setup as running", async () => {

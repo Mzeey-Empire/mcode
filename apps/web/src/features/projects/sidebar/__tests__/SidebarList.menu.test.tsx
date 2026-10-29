@@ -46,7 +46,7 @@ function setGlobalCompleteOnMerge(value: boolean): void {
 function openThreadMenu(): HTMLElement {
   render(<ProjectSidebar />);
   fireEvent.contextMenu(screen.getByRole("button", { name: /^Provider, .* Menu thread/ }));
-  return screen.getByRole("menuitemcheckbox", { name: /Complete when PRs merge/ });
+  return screen.getByRole("menuitemcheckbox", { name: /Close when PRs merge/ });
 }
 
 describe("SidebarList thread menu switch", () => {
@@ -69,7 +69,7 @@ describe("SidebarList thread menu switch", () => {
 
     act(() => seedThread({ auto_complete_on_merge: false }));
 
-    expect(screen.getByRole("menuitemcheckbox", { name: /Complete when PRs merge/ })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("menuitemcheckbox", { name: /Close when PRs merge/ })).toHaveAttribute("aria-checked", "false");
   });
 
   it("toggles the override and keeps the menu open", async () => {
@@ -81,7 +81,7 @@ describe("SidebarList thread menu switch", () => {
 
     expect(mockTransport.updateThreadSettings).toHaveBeenCalledWith("t1", { autoCompleteOnMerge: false });
     expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(screen.getByRole("menuitemcheckbox", { name: /Complete when PRs merge/ })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("menuitemcheckbox", { name: /Close when PRs merge/ })).toHaveAttribute("aria-checked", "false");
   });
 
   it("is disabled with the reason No linked PRs when the thread has none", async () => {
@@ -107,7 +107,7 @@ describe("SidebarList thread menu switch", () => {
     fireEvent.click(item);
     await act(() => vi.advanceTimersByTimeAsync(0));
 
-    const restored = screen.getByRole("menuitemcheckbox", { name: /Complete when PRs merge/ });
+    const restored = screen.getByRole("menuitemcheckbox", { name: /Close when PRs merge/ });
     expect(restored).toHaveAttribute("aria-checked", "true");
     expect(restored).toHaveTextContent('Unrecognized key: "autoCompleteOnMerge"');
     expect(restored).not.toHaveTextContent("unrecognized_keys");

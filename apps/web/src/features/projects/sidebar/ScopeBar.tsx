@@ -50,8 +50,8 @@ export function ScopeBar({ visible, completedCount, scope }: ScopeBarProps) {
 
   if (!visible && !collapsing) return null;
   const options: readonly SegmentedOption[] = [
-    { value: "active", label: "Active" },
-    { value: "completed", label: "Completed", count: lastCount.current },
+    { value: "active", label: "Open" },
+    { value: "completed", label: "Closed", count: lastCount.current },
   ];
   return (
     <AnimatedCollapsible

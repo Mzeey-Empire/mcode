@@ -41,7 +41,7 @@ function RetentionDaysControl({
     <div className="flex flex-wrap items-center gap-3">
       <div className="flex items-center gap-2">
         <Input
-          aria-label="Completed thread retention days"
+          aria-label="Closed thread retention days"
           aria-describedby={error ? "completed-thread-retention-error" : undefined}
           aria-invalid={error ? true : undefined}
           type="number"
@@ -88,7 +88,7 @@ function RetentionDaysControl({
           className="text-sm text-ink"
         >
           <span aria-hidden>Never</span>
-          <span className="sr-only">Never delete completed threads automatically</span>
+          <span className="sr-only">Never delete closed threads automatically</span>
         </label>
       </div>
       {error ? (
@@ -123,10 +123,10 @@ export function ThreadsSection() {
   return (
     <div>
       <SectionHeading>Threads</SectionHeading>
-      <SettingRow label="Complete threads when their PRs merge" configKey="thread.completion.completeOnPrMerge">
+      <SettingRow label="Close threads when their PRs merge" configKey="thread.completion.completeOnPrMerge">
         <div className="flex flex-wrap items-center gap-3">
           <Switch
-            aria-label="Complete threads when their PRs merge"
+            aria-label="Close threads when their PRs merge"
             checked={completeOnPrMerge}
             onCheckedChange={async (checked) => {
               const failure = await update({ thread: { completion: { completeOnPrMerge: checked } } });
@@ -157,9 +157,9 @@ export function ThreadsSection() {
         </div>
       </SettingRow>
       <SettingRow
-        label="Completed thread retention"
+        label="Closed thread retention"
         configKey="thread.completion.retentionDays"
-        hint="Changes apply to existing completed threads. A shorter period gives newly overdue threads 24 hours before cleanup."
+        hint="Changes apply to existing closed threads. A shorter period gives newly overdue threads 24 hours before cleanup."
       >
         <RetentionDaysControl
           key={retentionDays ?? "disabled"}

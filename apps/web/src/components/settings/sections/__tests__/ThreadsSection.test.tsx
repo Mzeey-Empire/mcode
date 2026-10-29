@@ -19,7 +19,7 @@ describe("ThreadsSection", () => {
   it("shows the default and saves a whole-day retention value", () => {
     render(<ThreadsSection />);
     const input = screen.getByRole("spinbutton", {
-      name: "Completed thread retention days",
+      name: "Closed thread retention days",
     });
 
     expect(input).toHaveValue(3);
@@ -34,7 +34,7 @@ describe("ThreadsSection", () => {
   it.each(["0", "-1", "1.5", "366"])("rejects invalid draft %s", (draft) => {
     render(<ThreadsSection />);
     const input = screen.getByRole("spinbutton", {
-      name: "Completed thread retention days",
+      name: "Closed thread retention days",
     });
 
     fireEvent.change(input, { target: { value: draft } });
@@ -51,7 +51,7 @@ describe("ThreadsSection", () => {
 
     fireEvent.click(
       screen.getByRole("switch", {
-        name: "Never delete completed threads automatically",
+        name: "Never delete closed threads automatically",
       }),
     );
 
@@ -76,11 +76,11 @@ describe("ThreadsSection", () => {
 
     expect(
       screen.getByRole("switch", {
-        name: "Never delete completed threads automatically",
+        name: "Never delete closed threads automatically",
       }),
     ).toBeChecked();
     expect(
-      screen.getByRole("spinbutton", { name: "Completed thread retention days" }),
+      screen.getByRole("spinbutton", { name: "Closed thread retention days" }),
     ).toBeDisabled();
     expect(screen.queryByText("Unsafe worktree cleanup")).not.toBeInTheDocument();
   });
@@ -88,7 +88,7 @@ describe("ThreadsSection", () => {
   it("shows a failed merge setting write beside the switch", async () => {
     update.mockResolvedValueOnce("Settings file is read-only");
     render(<ThreadsSection />);
-    const control = screen.getByRole("switch", { name: "Complete threads when their PRs merge" });
+    const control = screen.getByRole("switch", { name: "Close threads when their PRs merge" });
     fireEvent.click(control);
     expect(await screen.findByRole("alert")).toHaveTextContent("Settings file is read-only");
     expect(control).toBeChecked();

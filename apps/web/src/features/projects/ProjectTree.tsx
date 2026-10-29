@@ -415,7 +415,7 @@ function useAutoCompleteSwitch(threadId: string | null): SwitchMenuItem | null {
   if (!thread) return null;
   return {
     kind: "switch",
-    label: "Complete when PRs merge",
+    label: "Close when PRs merge",
     icon: <GitMerge />,
     checked: effectiveAutoCompleteOnMerge(thread, globalValue),
     disabledReason: thread.pull_requests.length === 0 ? "No linked PRs" : null,
