@@ -39,4 +39,29 @@ describe("ContextMenu", () => {
     fireEvent.pointerDown(document.body);
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("closes when a scroller holding its anchor scrolls, not when an unrelated one does", () => {
+    const onClose = vi.fn();
+    render(
+      <>
+        <div data-testid="list"><div data-testid="row" /></div>
+        <div data-testid="transcript" />
+      </>,
+    );
+    render(
+      <ContextMenu
+        x={100}
+        y={100}
+        anchor={screen.getByTestId("row")}
+        items={[{ label: "Rename", onClick: vi.fn() }]}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.scroll(screen.getByTestId("transcript"));
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.scroll(screen.getByTestId("list"));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

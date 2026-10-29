@@ -30,6 +30,7 @@ import { PullRequestChip, PullRequestList } from "./PullRequestChip";
 import { useCompletionStore } from "./completion-store";
 import { ThreadPreviewHandleContext } from "./SidebarThreadPreview";
 import type { CompletionEntry } from "./completion-machine";
+import { ThreadOptionsMenu, type ThreadMenuActions } from "./thread-menu";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
 
@@ -41,6 +42,8 @@ interface ThreadRowHandlers {
   onThreadDoubleClick: (threadId: string) => void;
   onSelectThread: (id: string) => void;
   onThreadContextMenu: (e: React.MouseEvent, thread: Thread) => void;
+  threadMenuActions: ThreadMenuActions;
+  workspacePath: string;
 }
 
 /**
@@ -63,6 +66,8 @@ function useThreadRowHandlers(ctx: SidebarRowContext, workspaceId: string, works
     onThreadDoubleClick: ctx.onThreadDoubleClick,
     onSelectThread: (threadId: string) => ctx.onSelectThread(workspaceId, threadId),
     onThreadContextMenu: (event: React.MouseEvent, clicked: Thread) => ctx.onThreadContextMenu(event, clicked, workspacePath),
+    threadMenuActions: ctx.threadMenuActions,
+    workspacePath,
   }), [ctx, workspaceId, workspacePath]);
 }
 
@@ -169,6 +174,8 @@ interface ThreadRowVisualProps {
   onThreadDoubleClick: (threadId: string) => void;
   onSelectThread: (id: string) => void;
   onThreadContextMenu: (event: React.MouseEvent, thread: Thread) => void;
+  threadMenuActions: ThreadMenuActions;
+  workspacePath: string;
   isActive: boolean;
   presentation: ThreadRowPresentation;
   lifecycle: ThreadRowLifecycleActions;
@@ -324,6 +331,8 @@ function ThreadRowVisual({
   onThreadDoubleClick,
   onSelectThread,
   onThreadContextMenu,
+  threadMenuActions,
+  workspacePath,
   isActive,
   presentation,
   lifecycle,
@@ -362,7 +371,8 @@ function ThreadRowVisual({
             presentation={presentation}
             lifecycle={lifecycle}
             revealed={revealed}
-            onThreadContextMenu={onThreadContextMenu}
+            threadMenuActions={threadMenuActions}
+            workspacePath={workspacePath}
           />
         </ThreadRowTitleLine>
         <ThreadRowBranchLine thread={thread} presentation={presentation}>
@@ -621,8 +631,9 @@ function ThreadRowTrailingSlot({
   presentation,
   lifecycle,
   revealed,
-  onThreadContextMenu,
-}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "presentation" | "lifecycle" | "onThreadContextMenu"> & { revealed: boolean }) {
+  threadMenuActions,
+  workspacePath,
+}: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "presentation" | "lifecycle" | "threadMenuActions" | "workspacePath"> & { revealed: boolean }) {
   if (isEditing) return null;
   return (
     <div className="grid max-w-[55%] shrink-0 items-center justify-items-end">
@@ -630,7 +641,7 @@ function ThreadRowTrailingSlot({
         <ThreadRowStatus thread={thread} presentation={presentation} lifecycle={lifecycle} />
       </div>
       <div style={revealed ? undefined : HIDDEN_LAYER} className="col-start-1 row-start-1 flex items-center gap-0.5 transition-opacity">
-        <ThreadRowActions thread={thread} presentation={presentation} lifecycle={lifecycle} onThreadContextMenu={onThreadContextMenu} />
+        <ThreadRowActions thread={thread} presentation={presentation} lifecycle={lifecycle} threadMenuActions={threadMenuActions} workspacePath={workspacePath} />
       </div>
     </div>
   );
@@ -689,19 +700,33 @@ function ThreadRowActions({
   thread,
   presentation,
   lifecycle,
-  onThreadContextMenu,
-}: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle" | "onThreadContextMenu">) {
+  threadMenuActions,
+  workspacePath,
+}: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle" | "threadMenuActions" | "workspacePath">) {
+  const target = { threadId: thread.id, threadTitle: thread.title, workspacePath, worktreePath: thread.worktree_path };
   return (
     <>
       {presentation.cleanupBlocked ? <ThreadCleanupRetry thread={thread} lifecycle={lifecycle} /> : null}
       <ThreadLifecycleAction thread={thread} presentation={presentation} lifecycle={lifecycle} />
-      <ThreadRowAction
-        label={`Thread options for ${thread.title}`}
-        tooltip="More"
-        onClick={(event) => onThreadContextMenu(event, thread)}
-      >
-        <MoreIcon size={14} />
-      </ThreadRowAction>
+      <ThreadOptionsMenu
+        target={target}
+        actions={threadMenuActions}
+        trigger={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-compact"
+            aria-label={`Thread options for ${thread.title}`}
+            // Only click and double-click stop here, so the row neither selects nor renames. Key and
+            // pointer events must reach the document, where Base UI dismisses open menus.
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            className={THREAD_ROW_ACTION_CLASS}
+          >
+            <MoreIcon size={14} />
+          </Button>
+        }
+      />
     </>
   );
 }
@@ -747,6 +772,8 @@ function ThreadCleanupRetry({ thread, lifecycle }: Pick<ThreadRowVisualProps, "t
   );
 }
 
+const THREAD_ROW_ACTION_CLASS = "size-5 shrink-0 rounded-md p-0 text-muted shadow-none hover:bg-transparent hover:text-ink disabled:cursor-not-allowed";
+
 function ThreadRowAction({
   label,
   tooltip,
@@ -775,7 +802,7 @@ function ThreadRowAction({
             event.stopPropagation();
             onClick(event);
           }}
-          className="size-5 shrink-0 rounded-md p-0 text-muted shadow-none hover:bg-transparent hover:text-ink disabled:cursor-not-allowed"
+          className={THREAD_ROW_ACTION_CLASS}
         >
           {children}
         </Button>

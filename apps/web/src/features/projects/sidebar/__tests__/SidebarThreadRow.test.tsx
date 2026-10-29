@@ -154,6 +154,85 @@ describe("SidebarThreadRow", () => {
     expect(setActiveThread).not.toHaveBeenCalled();
   });
 
+  describe("thread menu", () => {
+    const menu = () => screen.queryByRole("menu");
+    const optionsButton = (title = "Row title") => screen.getByRole("button", { name: `Thread options for ${title}` });
+    const settle = () => act(() => vi.advanceTimersByTimeAsync(500));
+    const clickOptions = async (button: HTMLElement) => {
+      act(() => button.focus());
+      fireEvent.click(button);
+      await settle();
+    };
+
+    it("closes the options menu on Escape pressed where the click left focus", async () => {
+      renderThread();
+      await clickOptions(optionsButton());
+      expect(menu()).not.toBeNull();
+
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      await settle();
+      expect(menu()).toBeNull();
+    });
+
+    it("closes the options menu on a second click of its button", async () => {
+      renderThread();
+      await clickOptions(optionsButton());
+      expect(menu()).not.toBeNull();
+
+      const button = optionsButton();
+      fireEvent.pointerDown(button, { pointerType: "mouse" });
+      fireEvent.mouseDown(button);
+      fireEvent.pointerUp(button, { pointerType: "mouse" });
+      fireEvent.mouseUp(button);
+      fireEvent.click(button);
+      await settle();
+      expect(menu()).toBeNull();
+    });
+
+    it("moves focus onto a menu item on ArrowDown", async () => {
+      renderThread();
+      await clickOptions(optionsButton());
+
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowDown" });
+      await settle();
+      expect(document.activeElement?.getAttribute("role")).toMatch(/^menuitem/);
+    });
+
+    it("does not select the thread when its options button is clicked", async () => {
+      renderThread();
+      await clickOptions(optionsButton());
+      expect(useWorkspaceStore.getState().activeThreadId).toBeNull();
+    });
+
+    it("closes the right-click menu when the list scrolls", async () => {
+      const row = renderThread();
+      fireEvent.contextMenu(row, { clientX: 40, clientY: 40 });
+      expect(menu()).not.toBeNull();
+
+      const viewport = FakeVirtualViewport.latest?.viewport;
+      if (!viewport) throw new Error("no viewport");
+      fireEvent.scroll(viewport);
+      await settle();
+      expect(menu()).toBeNull();
+    });
+
+    it("keeps another thread's hover preview shut while a thread menu is open", async () => {
+      const first = createMockThread({ id: "t1", workspace_id: "ws-1", title: "First", provider: "claude", mode: "worktree" });
+      const second = createMockThread({ id: "t2", workspace_id: "ws-1", title: "Second", provider: "claude", mode: "worktree" });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [first, second], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      await clickOptions(optionsButton("First"));
+      expect(menu()).not.toBeNull();
+
+      const secondRow = screen.getByRole("button", { name: /^Provider, Claude Second/ });
+      fireEvent.pointerOver(secondRow, { pointerType: "mouse" });
+      fireEvent.mouseEnter(secondRow, { clientX: 40, clientY: 60 });
+      fireEvent.mouseMove(secondRow, { clientX: 41, clientY: 60 });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(screen.queryByTestId("thread-preview-t2")).toBeNull();
+    });
+  });
+
   describe("row preview while the list scrolls", () => {
     const preview = () => screen.queryByTestId("thread-preview-t1");
     const scroller = () => {

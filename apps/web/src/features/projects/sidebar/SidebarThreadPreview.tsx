@@ -6,6 +6,7 @@ import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { cn } from "@/lib/utils";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import type { PreviewScrollGuard } from "./preview-scroll-guard";
+import { isAnyThreadMenuOpen, useAnyThreadMenuOpen } from "./thread-menu";
 
 /** What a thread row hands the shared preview tooltip when it becomes the active trigger. */
 export interface ThreadPreviewPayload {
@@ -18,13 +19,18 @@ export const ThreadPreviewHandleContext = createContext<TooltipHandle<ThreadPrev
 
 /**
  * The one thread preview the sidebar list renders. Rows only mount a trigger bound to `handle`, so
- * mounting a row never mounts a tooltip root.
+ * mounting a row never mounts a tooltip root. It stays shut while any thread menu is open.
  */
 export function ThreadPreviewTooltip({ handle, guard }: { handle: TooltipHandle<ThreadPreviewPayload>; guard: PreviewScrollGuard }) {
   const untrackRef = useRef<(() => void) | undefined>(undefined);
   useEffect(() => () => untrackRef.current?.(), []);
+  // A preview drawn over an open thread menu hides the menu's rows, so a menu shuts the preview.
+  const menuOpen = useAnyThreadMenuOpen();
+  useEffect(() => {
+    if (menuOpen) handle.close();
+  }, [menuOpen, handle]);
   const onOpenChange = useCallback((open: boolean, details: TooltipChangeDetails) => {
-    if (open && !guard.allowsOpen(details.reason)) {
+    if (open && (isAnyThreadMenuOpen() || !guard.allowsOpen(details.reason))) {
       details.cancel();
       return;
     }
