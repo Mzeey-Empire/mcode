@@ -405,7 +405,7 @@ function ProjectRowActions({
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger aria-label={`Project options for ${workspace.name}`} onClick={(event) => event.stopPropagation()} className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted opacity-0 outline-none transition-colors hover:bg-background/60 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100"><MoreIcon size={13} /></DropdownMenuTrigger>
-        <DropdownMenuContent align="end" sideOffset={4} className="min-w-40">
+        <DropdownMenuContent align="end" sideOffset={4}>
           <DropdownMenuItem label="Open in Explorer" onClick={onOpenInExplorer} />
           <DropdownMenuItem label="Rename project" onClick={onRename} />
           <DropdownMenuSeparator />
