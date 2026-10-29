@@ -21,9 +21,11 @@ const NOW = "2026-08-11T12:00:00.000Z";
 const line = (n: number) => `${n}: Sentence about ${n}.\n`;
 const linesThrough = (n: number) => Array.from({ length: n }, (_, index) => line(index + 1)).join("");
 
+const ANSWER_ID = `assistant-response-text:${EXECUTION_ID}`;
+
 function answerItem(content: string): AgentItem {
   return {
-    id: `assistant-response-text:${EXECUTION_ID}`, threadId: THREAD_ID, turnId: TURN_ID, kind: "message",
+    id: ANSWER_ID, threadId: THREAD_ID, turnId: TURN_ID, kind: "message",
     providerIdentities: [], createdAt: NOW, updatedAt: NOW,
     payload: { projection: "assistantText", content, isStreaming: true },
   };
@@ -37,6 +39,7 @@ function durableEnvelope(sequence: number, payload: CanonicalAgentEventEnvelope[
       ...(payload.type === "thread.recorded" ? {} : { turnId: TURN_ID }),
       executionId: EXECUTION_ID,
       ...(payload.type === "item.recorded" ? { itemId: payload.item.id } : {}),
+      ...(payload.type === "item.content-appended" ? { itemId: ANSWER_ID } : {}),
     },
     sourceProviderId: "claude",
     sourceIdentities: [],
@@ -65,9 +68,16 @@ function acceptedEnvelope(payload: AcceptedCanonicalAgentEventEnvelope["payload"
   return { ...semantic, progressPosition: { epoch: EPOCH, sequence: progressSequence } };
 }
 
-/** Mirrors the server: the full answer item, then the undecided Claude delta that carries no answer flag. */
-function streamLine(n: number): AcceptedCanonicalAgentEventEnvelope[] {
-  const item = acceptedEnvelope({ type: "item.recorded", item: answerItem(linesThrough(n)) });
+type AnswerShape = "replace" | "append";
+
+/**
+ * Mirrors the server: the answer item, then the undecided Claude delta that carries no answer flag.
+ * The answer is either the whole text so far or, after the first line, an append of the new line.
+ */
+function streamLine(n: number, shape: AnswerShape): AcceptedCanonicalAgentEventEnvelope[] {
+  const item = shape === "append" && n > 1
+    ? acceptedEnvelope({ type: "item.content-appended", offset: linesThrough(n - 1).length, text: line(n), updatedAt: NOW })
+    : acceptedEnvelope({ type: "item.recorded", item: answerItem(linesThrough(n)) });
   const delta = acceptedEnvelope({ type: "publication.recorded", publicationId: String(progressSequence + 1),
     event: { type: "textDelta", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, delta: line(n) } });
   return [item, delta];
@@ -99,8 +109,8 @@ const SESSION_START_HOOK: AgentItem = {
 };
 
 /** Lines `from..through` are accepted by the server while the client is away; the recovery hands back the cursor. */
-function reconnectAfterMissing(from: number, through: number, narrative: readonly AgentItem[]): void {
-  for (let n = from; n <= through; n += 1) streamLine(n);
+function reconnectAfterMissing(from: number, through: number, narrative: readonly AgentItem[], shape: AnswerShape): void {
+  for (let n = from; n <= through; n += 1) streamLine(n, shape);
   const items = [...narrative, answerItem(linesThrough(through))];
   const base = 100 + progressSequence - items.length;
   const recorded = items.map((item, index) => durableEnvelope(base + index + 1, { type: "item.recorded", item }));
@@ -131,22 +141,39 @@ describe("canonical reconnect answer text", () => {
   });
 
   it.each([
-    { server: "no narrative items", narrative: [] },
-    { server: "a hook but no narration segments", narrative: [SESSION_START_HOOK] },
-  ])("keeps the whole answer across a reconnect when the server has $server", ({ narrative }) => {
+    { server: "no narrative items", narrative: [], shape: "replace" as const },
+    { server: "a hook but no narration segments", narrative: [SESSION_START_HOOK], shape: "replace" as const },
+    { server: "no narrative items", narrative: [], shape: "append" as const },
+    { server: "a hook but no narration segments", narrative: [SESSION_START_HOOK], shape: "append" as const },
+  ])("keeps the whole answer across a reconnect when the server has $server and streams by $shape", ({ narrative, shape }) => {
     for (let n = 1; n <= 37; n += 1) {
-      deliver(streamLine(n));
+      deliver(streamLine(n, shape));
       drainFrames();
     }
     expect(liveTimeline()).toEqual([{ type: "hook" }, { type: "delta", text: linesThrough(37) }]);
 
-    reconnectAfterMissing(38, 58, narrative);
+    reconnectAfterMissing(38, 58, narrative, shape);
     expect(liveTimeline()).toEqual([{ type: "hook" }, { type: "delta", text: linesThrough(58) }]);
 
     for (let n = 59; n <= 60; n += 1) {
-      deliver(streamLine(n));
+      deliver(streamLine(n, shape));
       drainFrames();
     }
     expect(liveTimeline()).toEqual([{ type: "hook" }, { type: "delta", text: linesThrough(60) }]);
+  });
+
+  it("resyncs the streamed answer from a saved batch that only appends to it", () => {
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [
+      durableEnvelope(4, { type: "item.recorded", item: answerItem(linesThrough(1)) }),
+    ]);
+    drainFrames();
+    expect(liveTimeline()).toEqual([{ type: "hook" }, { type: "delta", text: linesThrough(1) }]);
+
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [
+      durableEnvelope(5, { type: "item.content-appended", offset: linesThrough(1).length, text: line(2), updatedAt: NOW }),
+    ]);
+    drainFrames();
+
+    expect(liveTimeline()).toEqual([{ type: "hook" }, { type: "delta", text: linesThrough(2) }]);
   });
 });

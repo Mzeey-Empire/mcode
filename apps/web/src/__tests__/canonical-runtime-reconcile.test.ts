@@ -654,6 +654,30 @@ describe("canonical runtime reconciliation", () => {
     expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("");
   });
 
+  it("keeps a saved answer append once when the earlier accepted copy arrives later", () => {
+    seedRuntime("running", EXECUTION_ID, true);
+    const answerId = `assistant-response-text:${EXECUTION_ID}`;
+    const answer = envelope("answer-start", 4, EXECUTION_ID, { type: "item.recorded", item: {
+      id: answerId, threadId: THREAD_ID, turnId: TURN_ID, kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+      payload: { projection: "assistantText", content: "Part", isStreaming: true } } });
+    const appended = envelope("answer-append", 5, EXECUTION_ID, { type: "item.content-appended", offset: 4, text: "ial", updatedAt: NOW });
+    const all = [...turnEvents(EXECUTION_ID), answer, { ...appended, routing: { ...appended.routing, itemId: answerId } }]
+      .map((event) => ({ ...event, progressPosition: { epoch: "runtime-1", sequence: event.acceptedSequence } }));
+    useThreadStore.getState().handleCanonicalProgress({ phase: "saved", threadId: THREAD_ID, epoch: "runtime-1", through: 5,
+      revision: { conversationRevision: 5, rosterRevision: 0 }, events: all });
+    expect(readThreadField(THREAD_ID, (record) => record.canonicalAgent.durableState.items[answerId]?.payload.content)).toBe("Partial");
+
+    useThreadStore.getState().handleCanonicalProgress({ phase: "accepted", threadId: THREAD_ID, epoch: "runtime-1", from: 0, through: 5,
+      events: all.map(({ durableRevision: _durableRevision, ...event }) => event) });
+
+    const record = useThreadStore.getState().records.get(THREAD_ID);
+    if (!record) throw new Error("missing reconciled thread");
+    expect(record.canonicalAgent.state.items[answerId]?.payload.content).toBe("Partial");
+    expect(record.canonicalAgent.durableState.items[answerId]?.payload.content).toBe("Partial");
+    expect(record.canonicalAgent.recoveryRequired).toBe(false);
+    expect(record.canonicalAgent.progress?.acceptedThrough).toBe(5);
+  });
+
   it("preserves newer accepted progress when a delayed recovery response has an earlier cut", () => {
     seedRuntime("running", EXECUTION_ID, true);
     useThreadStore.setState({ currentThreadId: THREAD_ID });

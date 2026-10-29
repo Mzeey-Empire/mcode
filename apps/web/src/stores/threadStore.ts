@@ -334,11 +334,13 @@ function canonicalItemMatchesToolCall(
 /** True when a canonical batch mutates a parent narrative recovery item. */
 function batchTouchesParentNarrative(events: Parameters<typeof reduceAgentEventBatch>[1]): boolean {
   return events.some((event) =>
-    event.payload.type === "item.recorded"
-    && (event.payload.item.payload.projection === "narrativeRecovery"
-      || event.payload.item.payload.projection === "narrativeRecoveryDiscarded"
-      || event.payload.item.payload.projection === "assistantText"
-      || event.payload.item.payload.projection === "message"));
+    // Only assistant text is appended today, and a delta recovery must resync streaming text.
+    event.payload.type === "item.content-appended"
+    || (event.payload.type === "item.recorded"
+      && (event.payload.item.payload.projection === "narrativeRecovery"
+        || event.payload.item.payload.projection === "narrativeRecoveryDiscarded"
+        || event.payload.item.payload.projection === "assistantText"
+        || event.payload.item.payload.projection === "message")));
 }
 
 /**
