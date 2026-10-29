@@ -443,7 +443,17 @@ function InlineMarkdownCode({ children, rawContent, isUser, workspacePath }: Inl
     return <EntityToken kind="file" label={text} filePath={text} tone={isUser ? "user" : "assistant"} />;
   }
 
-  return <code className={codeClass}>{children}</code>;
+  return <code className={codeClass} onMouseDown={selectWholeSpanOnDoubleClick}>{children}</code>;
+}
+
+// Runs on mousedown rather than dblclick because dblclick fires after the native
+// word highlight has painted, so one word would flash before the span is selected.
+function selectWholeSpanOnDoubleClick(event: React.MouseEvent<HTMLElement>): void {
+  if (event.detail !== 2 || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+  const selection = window.getSelection();
+  if (!selection) return;
+  event.preventDefault();
+  selection.selectAllChildren(event.currentTarget);
 }
 
 function FencedMarkdownCode({
