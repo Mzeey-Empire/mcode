@@ -291,7 +291,7 @@ NodeTest.describe("frontend performance runner", () => {
   });
 
   NodeTest.it("requires explicit selection for opt-in renderer probes", () => {
-    NodeAssertStrict.default.deepEqual(FRONTEND_RENDERER_EXPLICIT_WORKLOADS, ["vlistLifecycle", "subagentDetailExpand"]);
+    NodeAssertStrict.default.deepEqual(FRONTEND_RENDERER_EXPLICIT_WORKLOADS, ["vlistLifecycle", "subagentDetailExpand", "sidebarStream", "sidebarScroll", "sidebarHydration"]);
     NodeAssertStrict.default.deepEqual(normalizeFrontendRendererWorkloads(null), FRONTEND_RENDERER_WORKLOADS);
     NodeAssertStrict.default.deepEqual(normalizeFrontendRendererWorkloads("vlistLifecycle"), ["vlistLifecycle"]);
     NodeAssertStrict.default.throws(

@@ -54,6 +54,13 @@ Use this sequence for a performance change:
 4. Save the candidate result with the same sample count and environment.
 5. Compare accepted raw samples and summary statistics from both files.
 
+The sidebar workloads `sidebarStream`, `sidebarScroll`, and `sidebarHydration`
+run only by explicit selection and without chat workloads. Pass
+`--sidebar-threads <0-5000>` to seed that many synthetic threads across six
+projects under `.dev/fixture-repo`. The runner removes them afterwards. Commit
+data comes from the `sidebar` Profiler in the sidebar shell, so the workloads
+keep working when the project tree beneath it is replaced.
+
 Do not compare results when the viewport, fixture order, warmup, sample count,
 source mode, hardware-acceleration state, or device changed. Store task results
 under `.dev/verification/performance/`.

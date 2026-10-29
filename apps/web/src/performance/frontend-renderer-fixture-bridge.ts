@@ -21,6 +21,8 @@ import {
   resetMessageListPerformanceObservations,
 } from "./message-list-performance";
 import { runVListReactAdapterLifecycleProbe } from "./vlist-react-adapter-prototype";
+import { pushEmitter } from "@/transport/ws-transport";
+import { createAgentModelState, reduceAgentEventBatch } from "@mcode/contracts/compat/agent-model";
 
 function resetShikiPerformanceWorker(): void {
   resetWorkerForPerformance();
@@ -57,6 +59,13 @@ declare global {
         readonly forget: typeof forgetScrollTop;
         readonly recall: typeof recallScrollPosition;
       };
+      /** Delivers a recorded server push through the same listeners a live socket frame reaches. */
+      readonly push: (channel: string, data: unknown) => void;
+      /** Builds the durable snapshot a recorded turn's recovery frame carries. */
+      readonly agentModel: {
+        readonly create: typeof createAgentModelState;
+        readonly reduce: typeof reduceAgentEventBatch;
+      };
     };
   }
 }
@@ -91,5 +100,7 @@ export function installFrontendRendererFixtureBridge(): void {
       forget: forgetScrollTop,
       recall: recallScrollPosition,
     },
+    push: (channel, data) => pushEmitter.emit(channel, data),
+    agentModel: { create: createAgentModelState, reduce: reduceAgentEventBatch },
   };
 }

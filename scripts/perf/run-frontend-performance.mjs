@@ -10,6 +10,8 @@ import {
   normalizeFrontendRendererRuntimes,
   normalizeFrontendRendererWorkloads,
 } from "./frontend-renderer-fixture.mjs";
+import { SIDEBAR_RENDERER_WORKLOADS } from "./sidebar-renderer-workloads.mjs";
+import { parseSidebarThreadCount } from "./sidebar-thread-fixture-plan.mjs";
 
 const POLL_INTERVAL_MS = 250;
 
@@ -38,6 +40,17 @@ export function parsePerformanceMode() {
 /** Parses the optional frontend workload filter. */
 export function parseFrontendPerformanceWorkloads() {
   return normalizeFrontendRendererWorkloads(readArgument("--workload"));
+}
+
+/** Parses the synthetic sidebar thread count, or null when no sidebar workload is selected. */
+export function parseSidebarThreads(workloads) {
+  const value = readArgument("--sidebar-threads");
+  const sidebarSelected = workloads.some((workload) => SIDEBAR_RENDERER_WORKLOADS.includes(workload));
+  if (!sidebarSelected) {
+    if (value !== null) throw new Error("--sidebar-threads needs a sidebar workload");
+    return null;
+  }
+  return parseSidebarThreadCount(value ?? "0");
 }
 
 /** Parses the optional frontend runtime filter. */
@@ -212,7 +225,21 @@ function printResult(result, outputFile) {
   }
 }
 
+function printSidebarResult(workload, metric) {
+  const median = metric.summary ? `${metric.summary.medianMs.toFixed(1)} ms` : "n/a";
+  const stream = metric.sidebarStream?.all;
+  const detail = stream
+    ? `, commit p50=${stream.commitDurationP50Ms?.toFixed(2) ?? "n/a"} ms p95=${stream.commitDurationP95Ms?.toFixed(2) ?? "n/a"} ms, commits=${stream.totalCommits}`
+    : "";
+  process.stdout.write(`  ${workload}: median=${median}${detail}, rejected=${metric.correctness.rejectedSamples}
+`);
+}
+
 function printWorkloadResult(workload, metric) {
+  if (SIDEBAR_RENDERER_WORKLOADS.includes(workload)) {
+    printSidebarResult(workload, metric);
+    return;
+  }
   if (workload === "vlistLifecycle") {
     printVListLifecycleResult(metric);
     return;
@@ -249,6 +276,7 @@ export async function runFrontendPerformance(repoRoot = process.cwd()) {
     rendererServer: null,
     subagentDetailFixture: false,
     electronSubagentDetailFixture: null,
+    sidebarFixtureDbPaths: [],
   };
   let result;
   let primaryError = null;
@@ -280,10 +308,12 @@ function readFrontendPerformanceOptions(root) {
   const mode = parsePerformanceMode();
   const outputFile = resolveOutputFile(root);
   const failureFile = NodePath.resolve(root, ".dev", "verification", "performance", "frontend-worker-error.json");
+  const workloads = parseFrontendPerformanceWorkloads();
   const options = {
     sampleCount: parseSampleCount(),
     mode,
-    workloads: parseFrontendPerformanceWorkloads(),
+    workloads,
+    sidebarThreads: parseSidebarThreads(workloads),
     runtimes: parseFrontendPerformanceRuntimes(),
     outputFile,
     failureFile,
@@ -298,6 +328,10 @@ async function startFrontendPerformanceResources(root, options, state) {
   if (options.workloads.includes("subagentDetailExpand") && options.runtimes.includes("standalone-web")) {
     seedSubagentDetailFixture(root);
     state.subagentDetailFixture = true;
+  }
+  if (options.sidebarThreads !== null && options.runtimes.includes("standalone-web")) {
+    state.sidebarFixtureDbPaths.push(null);
+    seedSidebarThreadFixture(root, options.sidebarThreads, "sidebar-thread-fixture.json");
   }
   ensurePlaywright(root);
   await buildFrontendPerformanceApp(root, options.mode);
@@ -316,6 +350,11 @@ async function startFrontendPerformanceResources(root, options, state) {
     );
     seedSubagentDetailFixture(root, "subagent-detail-fixture-electron.json", electronDbPath);
     state.electronSubagentDetailFixture = { dbPath: electronDbPath };
+  }
+  if (options.sidebarThreads !== null) {
+    const electronDbPath = electronPerformanceDbPath(root, options.sessionFileName);
+    state.sidebarFixtureDbPaths.push(electronDbPath);
+    seedSidebarThreadFixture(root, options.sidebarThreads, "sidebar-thread-fixture-electron.json", electronDbPath);
   }
   const record = await startElectron(root, {
     performanceMode: options.mode,
@@ -407,6 +446,9 @@ async function stopFrontendPerformanceResources(root, options, state) {
   await clean(() => {
     if (state.subagentDetailFixture) cleanupSubagentDetailFixture(root);
   });
+  for (const dbPath of state.sidebarFixtureDbPaths) {
+    await clean(() => cleanupSidebarThreadFixture(root, dbPath));
+  }
   await clean(async () => {
     if (state.startedRuntime) await agentDown(root);
   });
@@ -430,6 +472,33 @@ function seedSubagentDetailFixture(root, descriptor, dbPath) {
 
 function cleanupSubagentDetailFixture(root, descriptor, dbPath) {
   runSubagentDetailFixture(root, "cleanup", descriptor, dbPath);
+}
+
+function electronPerformanceDbPath(root, sessionFileName) {
+  return NodePath.join(root, ".dev", sessionFileName.slice(0, -".json".length), "runtime", "db", "app.sqlite");
+}
+
+function runSidebarThreadFixture(root, args, dbPath) {
+  const dbArgs = dbPath ? ["--db-path", NodePath.relative(root, dbPath)] : [];
+  return NodeChildProcess.execFileSync(
+    "bun",
+    [NodePath.join(root, "scripts", "perf", "sidebar-thread-fixture.ts"), ...args, ...dbArgs],
+    { cwd: root, encoding: "utf8" },
+  );
+}
+
+function seedSidebarThreadFixture(root, threads, descriptor, dbPath) {
+  JSON.parse(runSidebarThreadFixture(root, [
+    "--action", "seed", "--threads", String(threads),
+    "--descriptor", `.dev/verification/performance/${descriptor}`,
+  ], dbPath));
+}
+
+function cleanupSidebarThreadFixture(root, dbPath) {
+  const descriptor = dbPath ? "sidebar-thread-fixture-electron.json" : "sidebar-thread-fixture.json";
+  runSidebarThreadFixture(root, [
+    "--action", "cleanup", "--descriptor", `.dev/verification/performance/${descriptor}`,
+  ], dbPath);
 }
 
 if (import.meta.main) {
