@@ -7,7 +7,7 @@ import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
 import { findOpenCodeSession, parseOpenCodeHealth, resolveUpstreamOpenCode } from "./opencode-serve.mjs";
-import { CHECK_PHASES, FOCUSED_TEST_FILES, assertRuntimeFreshness, canonicalFrameToLiveEvents, createOpenCodeAttachReport, findLiveWorkspace, hasSharedStopResult, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openCodeAttachPassed, openVerificationSocketUrl, parseArguments, runBun } from "./runtime.mjs";
+import { CHECK_PHASES, FOCUSED_TEST_FILES, assertRuntimeFreshness, canonicalFrameToLiveEvents, createOpenCodeAttachReport, findLiveWorkspace, hasSharedStopResult, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openCodeAttachPassed, openVerificationSocketUrl, parseArguments, runBun, stopOutcomesAgree } from "./runtime.mjs";
 
 const CLI = NodePath.join(import.meta.dirname, "verify-mcode.mjs");
 const BROWSER_PROOF = NodePath.join(import.meta.dirname, "browser-opencode-proof.mjs");
@@ -80,6 +80,50 @@ NodeTest.test("accepts concurrent stops that joined one cancelled stop of the sa
   NodeAssertStrict.equal(hasSharedStopResult([cancelled("exec-1"), alreadyTerminal], "thread-1"), true);
   NodeAssertStrict.equal(hasSharedStopResult([cancelled("exec-1"), cancelled("exec-2")], "thread-1"), false);
   NodeAssertStrict.equal(hasSharedStopResult([cancelled("exec-1"), { ...alreadyTerminal, turnExecutionId: "exec-2" }], "thread-1"), false);
+});
+
+NodeTest.test("accepts matching published and stored cancelled stop outcomes", () => {
+  const events = [{ kind: "agent", type: "ended", turnExecutionId: "exec-1", outcome: "cancelled" }];
+  NodeAssertStrict.equal(stopOutcomesAgree(events, "exec-1", "cancelled"), true);
+});
+
+NodeTest.test("rejects a published interruption when the stored stop outcome is cancelled", () => {
+  const events = [{ kind: "agent", type: "ended", turnExecutionId: "exec-1", outcome: "interrupted" }];
+  NodeAssertStrict.equal(stopOutcomesAgree(events, "exec-1", "cancelled"), false);
+});
+
+NodeTest.test("rejects contradictory Ended outcomes for the same stopped execution", () => {
+  const events = [
+    { kind: "agent", type: "ended", turnExecutionId: "exec-1", outcome: "interrupted" },
+    { kind: "agent", type: "ended", turnExecutionId: "exec-1", outcome: "cancelled" },
+  ];
+  NodeAssertStrict.equal(stopOutcomesAgree(events, "exec-1", "cancelled"), false);
+});
+
+NodeTest.test("ignores outcome-less Ended and other executions when checking cancelled stop outcomes", () => {
+  const events = [
+    { kind: "agent", type: "ended", turnExecutionId: "exec-1" },
+    { kind: "agent", type: "ended", turnExecutionId: "exec-2", outcome: "interrupted" },
+    { kind: "agent", type: "ended", turnExecutionId: "exec-1", outcome: "cancelled" },
+  ];
+  NodeAssertStrict.equal(stopOutcomesAgree(events, "exec-1", "cancelled"), true);
+});
+
+NodeTest.test("rejects a stop without a published Ended even when the thread status is interrupted", () => {
+  const events = [{ kind: "status", status: "interrupted" }];
+  NodeAssertStrict.equal(stopOutcomesAgree(events, "exec-1", "cancelled"), false);
+});
+
+NodeTest.test("ignores a cancelled Ended for another execution", () => {
+  const events = [{ kind: "agent", type: "ended", turnExecutionId: "exec-2", outcome: "cancelled" }];
+  NodeAssertStrict.equal(stopOutcomesAgree(events, "exec-1", "cancelled"), false);
+});
+
+NodeTest.test("rejects a cancelled Ended without a stored cancelled outcome", () => {
+  const events = [{ kind: "agent", type: "ended", turnExecutionId: "exec-1", outcome: "cancelled" }];
+  for (const storedOutcome of [undefined, null, "interrupted"]) {
+    NodeAssertStrict.equal(stopOutcomesAgree(events, "exec-1", storedOutcome), false);
+  }
 });
 
 NodeTest.test("lists every runtime command through the public wrapper help", async () => {

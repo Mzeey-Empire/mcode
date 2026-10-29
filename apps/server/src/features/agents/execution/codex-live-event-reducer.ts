@@ -188,7 +188,7 @@ export class CodexLiveEventReducer {
   finishFromState(input: SyntheticTerminalInput): CodexLiveReduction {
     const event: AgentEvent = input.outcome === "errored"
       ? { type: "error", threadId: this.execution.threadId, turnExecutionId: this.execution.executionId, error: input.error, failure: input.failure }
-      : { type: "ended", threadId: this.execution.threadId, turnExecutionId: this.execution.executionId, outcome: "interrupted" };
+      : { type: "ended", threadId: this.execution.threadId, turnExecutionId: this.execution.executionId, outcome: input.outcome };
     if (this.phase === "completed" || this.phase === "ended") return this.unsupported(event, "execution already terminal");
     this.phase = "completed";
     const writer: CodexLiveWriterIntent[] = [{ kind: "terminal-projection",

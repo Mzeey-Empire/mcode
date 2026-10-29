@@ -158,7 +158,7 @@ function finishLiveCommand(outcome: "completed" | "errored" | "cancelled" | "int
   const terminal: AgentEvent = outcome === "completed"
     ? { ...identity, type: "turnComplete", reason: "end_turn", costUsd: null, tokensIn: 20, tokensOut: 5 }
     : outcome === "errored" ? { ...identity, type: "error", error: "Provider failed", failure: { kind: "auth", status: 401 } }
-      : { ...identity, type: "ended", outcome: "interrupted" };
+      : { ...identity, type: "ended", outcome };
   return {
     kind: "finish-live-event", outcome,
     projection: { threadId: THREAD_ID, executionId: EXECUTION_ID, outcome, endedAt: NOW,
@@ -481,7 +481,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       command: { kind: "stop", requestId: "stop-1" } });
     expect(stop.result.kind).toBe("committed");
     expect(await send(3, finishLiveCommand("cancelled"))).toMatchObject({ kind: "committed",
-      livePublication: [{ event: { type: "ended", outcome: "interrupted" } }] });
+      livePublication: [{ event: { type: "ended", outcome: "cancelled" } }] });
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
       .get(EXECUTION_ID)).toEqual({ terminal_outcome: "cancelled" });
     expect(db.prepare("SELECT status FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ status: "interrupted" });
