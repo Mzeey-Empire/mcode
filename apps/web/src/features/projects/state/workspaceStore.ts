@@ -604,6 +604,7 @@ interface WorkspaceState {
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
   threads: WorkspaceThread[];
+  threadSnapshotEpoch: number;
   activeThreadId: string | null;
   /** Startup identity retained per thread until its startup lifecycle resolves. */
   pendingStartupByThreadId: Readonly<Record<string, PendingStartup>>;
@@ -790,6 +791,11 @@ interface WorkspaceState {
 }
 
 /** Zustand store for workspace, thread, branch, and PR state management. */
+/** True only for the active-to-completed transition, so snapshots and replayed pushes release nothing. */
+function isConfirmedCompletion(previous: Thread | undefined, next: Thread): boolean {
+  return previous?.user_completed_at === null && next.user_completed_at !== null;
+}
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   let activationQueued = false;
   let activationGeneration = 0;
@@ -1115,6 +1121,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   workspaces: [],
   activeWorkspaceId: null,
   threads: [],
+  threadSnapshotEpoch: 0,
   activeThreadId: null,
   pendingStartupByThreadId: {},
   activeDraftId: null,
@@ -1400,7 +1407,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     try {
       const incoming = await getTransport().listAllThreads();
       if (request !== hydrationRequest) return;
-      set((state) => ({ threads: mergeThreadSnapshot(incoming, before, state.threads), loading: false, error: null }));
+      set((state) => ({ threads: mergeThreadSnapshot(incoming, before, state.threads), threadSnapshotEpoch: state.threadSnapshotEpoch + 1, loading: false, error: null }));
       void get().syncThreadPrs();
     } catch (error) {
       if (request === hydrationRequest) set({ error: String(error), loading: false });
@@ -1690,6 +1697,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   applyThreadLifecycle: (thread) => {
+    const confirmsCompletion = isConfirmedCompletion(get().threads.find((candidate) => candidate.id === thread.id), thread);
     set((state) => {
       if (isDelegatedSubagent(thread)) {
         return { threads: state.threads.filter((candidate) => candidate.id !== thread.id) };
@@ -1705,7 +1713,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           : [nextThread, ...state.threads],
       };
     });
-    if (thread.user_completed_at !== null) {
+    if (confirmsCompletion) {
       releaseBrowserAutomationThreadScope(thread.workspace_id, thread.id);
       void clearPreviewResources(thread.workspace_id, thread.id);
       useTerminalStore.getState().clearThread(thread.id);

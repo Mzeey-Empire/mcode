@@ -18,6 +18,8 @@ export interface SegmentedOption {
   readonly title?: string;
   /** Draws a small primary dot after the label, flagging an option that holds content. */
   readonly marker?: boolean;
+  /** Plain count drawn after the label. */
+  readonly count?: number;
 }
 
 /**
@@ -197,6 +199,7 @@ export function SegmentedControl({
                   {option.icon}
                   {option.label}
                   {option.marker ? <span aria-hidden className="size-[5px] shrink-0 rounded-full bg-primary" /> : null}
+                  {option.count === undefined ? null : <span className="font-mono text-caption font-normal tabular-nums opacity-60">{option.count}</span>}
                 </>
               )}
             </button>

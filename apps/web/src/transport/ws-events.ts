@@ -11,6 +11,7 @@ import { startThreadAttentionTracking } from "@/features/thread-attention/thread
 import { startThreadEventDetector } from "@/features/thread-attention/thread-event-detector";
 import { pushEmitter } from "./ws-transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useCompletionStore } from "@/features/projects/sidebar/completion-store";
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { refreshTurnSnapshotsAfterPersist } from "@/lib/turn-snapshot-refresh";
@@ -276,6 +277,7 @@ export function startPushListeners(): void {
       const parsed = WS_CHANNELS["thread.lifecycleChanged"].safeParse(data);
       if (!parsed.success) return;
       useWorkspaceStore.getState().applyThreadLifecycle(parsed.data.thread);
+      useCompletionStore.getState().observeServerLifecycle(parsed.data.thread.id, parsed.data.thread.user_completed_at !== null);
     }),
   );
 
