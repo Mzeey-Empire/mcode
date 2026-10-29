@@ -357,6 +357,19 @@ describe("AgentService cleanup through production worker composition", { timeout
     expect(fixture.canonical.loadTurnByExecution(replacement.turnExecutionId)?.status).toBe("Completed");
   });
 
+  it("publishes a cancelled Ended that matches the stored turn when the user stops", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    await fixture.service.stopSession(fixture.thread.id, { by: "user" });
+    await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+    expect(fixture.published).toContainEqual(expect.objectContaining({
+      type: "ended", turnExecutionId: turn.turnExecutionId, outcome: "cancelled",
+    }));
+    const storedTurn = fixture.canonical.loadTurnByExecution(turn.turnExecutionId);
+    expect(storedTurn?.status).toBe("Cancelled");
+    expect(storedTurn?.ending).toEqual({ outcome: "cancelled", stop: { by: "user" } });
+  });
+
   it("maps provider-cancelled Ended to the recoverable interrupted outcome", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);

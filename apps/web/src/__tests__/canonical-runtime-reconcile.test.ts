@@ -129,6 +129,85 @@ describe("canonical runtime reconciliation", () => {
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
+  it.each(["cancelled", "interrupted"] as const)("reconciles a user stop with queued progress and a %s Ended", (outcome) => {
+    seedRuntime("running", EXECUTION_ID, true);
+    useThreadStore.setState({ currentThreadId: THREAD_ID });
+    const frames = new Map<number, FrameRequestCallback>();
+    let frameId = 0;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frameId += 1;
+      frames.set(frameId, callback);
+      return frameId;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.delete(id); });
+    const drainFrames = () => {
+      while (frames.size > 0) {
+        const next = frames.entries().next().value;
+        if (!next) break;
+        frames.delete(next[0]);
+        next[1](performance.now());
+      }
+    };
+    const epoch = "user-stop";
+    const events = turnEvents(EXECUTION_ID);
+    let receivedThrough = 0;
+    const deliver = () => {
+      const fresh = events.slice(receivedThrough).map(({ durableRevision: _revision, ...event }) => ({
+        ...event, progressPosition: { epoch, sequence: event.acceptedSequence },
+      }));
+      useThreadStore.getState().handleCanonicalProgress({ phase: "accepted", threadId: THREAD_ID,
+        epoch, from: receivedThrough, through: events.length, events: fresh });
+      receivedThrough = events.length;
+    };
+    deliver();
+    let content = "";
+    for (let number = 1; number <= 54; number += 1) {
+      const delta = `${number}\n`;
+      content += delta;
+      events.push(envelope(`text-${number}`, events.length + 1, EXECUTION_ID, { type: "item.recorded", item: {
+        id: `assistant-response-text:${EXECUTION_ID}`, threadId: THREAD_ID, turnId: TURN_ID, kind: "message",
+        providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+        payload: { projection: "assistantText", content, isStreaming: true },
+      } }));
+      events.push(envelope(`delta-${number}`, events.length + 1, EXECUTION_ID, { type: "publication.recorded",
+        publicationId: String(number), event: { type: "textDelta", threadId: THREAD_ID,
+          turnExecutionId: EXECUTION_ID, delta, isFinalResponse: true } }));
+      deliver();
+      if (number <= 26) drainFrames();
+    }
+    const response = createMockMessage({ id: "stopped-answer", thread_id: THREAD_ID, role: "assistant",
+      content: "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54",
+      sequence: 2, outcome: "cancelled", outcomeExecutionId: EXECUTION_ID });
+    const terminalPayloads: CanonicalAgentEventEnvelope["payload"][] = [
+      { type: "execution.checkpoint", operationKind: "stop-requested" },
+      { type: "item.recorded", item: { id: `message:${response.id}`, threadId: THREAD_ID, turnId: TURN_ID,
+        kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+        payload: { projection: "message", message: response } } },
+      { type: "turn.response-bound", messageId: response.id, outcome: "cancelled", endedAt: NOW },
+      { type: "turn.cancelled", endedAt: NOW, reason: "Turn cancelled", stop: { by: "user" } },
+      { type: "publication.recorded", publicationId: "55", event: { type: "ended", threadId: THREAD_ID,
+        turnExecutionId: EXECUTION_ID, outcome } },
+    ];
+    for (const payload of terminalPayloads) events.push(envelope(`stop-${events.length}`, events.length + 1, EXECUTION_ID, payload));
+    deliver();
+    useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, phase: "cancelled" });
+    useThreadStore.getState().handleCanonicalProgress({ phase: "saved", threadId: THREAD_ID, epoch,
+      through: events.length, revision: { conversationRevision: events.length, rosterRevision: 0 },
+      events: events.map((event) => ({ ...event, progressPosition: { epoch, sequence: event.acceptedSequence } })) });
+    useThreadStore.getState().handleTurnPersisted({ threadId: THREAD_ID, messageId: response.id,
+      settledMessage: { id: response.id, sequence: 2 }, executionId: EXECUTION_ID, outcome: "cancelled",
+      toolCallCount: 0, filesChanged: [] });
+    drainFrames();
+
+    const record = readThreadField(THREAD_ID, (current) => current);
+    expect(record.messages.filter((message) => message.role === "assistant")).toEqual([expect.objectContaining({
+      content: response.content, outcome: "cancelled", outcomeExecutionId: EXECUTION_ID,
+    })]);
+    expect(record.streaming).toBe("");
+    expect(record.streamingPreview).toBe("");
+    expect(record.responseTextIsStreaming).toBe(false);
+  });
+
   it("restores partial final text and a closed full answer while its native turn remains active", () => {
     const textSlot = (content: string, isStreaming: boolean) => ({ id: `assistant-response-text:${EXECUTION_ID}`,
       threadId: THREAD_ID, turnId: TURN_ID, kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,

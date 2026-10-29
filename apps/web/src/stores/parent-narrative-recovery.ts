@@ -215,7 +215,13 @@ function recoveredResponse(threadId: string, turn: AgentTurn, state: AgentModelS
   const previous = record.messages.find((message) => message.id === id);
   const message = persisted ?? terminalMessage(threadId, turn, record, text, id, previous);
   const responseKey = `canonical-turn-response:${turn.id}`;
-  const replaced = new Set([id, ...(record.pendingTurnPersistMessageIds.includes(record.currentTurnMessageId) ? [record.currentTurnMessageId] : [])]);
+  // Persistence can acknowledge a local row before queued canonical progress recovers its server row.
+  const mappedMessageIds = Object.keys(record.serverMessageIds).filter((localId) => record.serverMessageIds[localId] === id);
+  const replaced = new Set([
+    id,
+    ...mappedMessageIds,
+    ...(record.pendingTurnPersistMessageIds.includes(record.currentTurnMessageId) ? [record.currentTurnMessageId] : []),
+  ]);
   return {
     messages: [...record.messages.filter((candidate) => !replaced.has(candidate.id)), message],
     ...(responseTextIsOpen(turn, state)

@@ -92,7 +92,7 @@ describe("execution worker parent event ownership", () => {
     expect(writer.operations[5]).toMatchObject({ mutation: { kind: "finish-live-event", outcome: "cancelled",
       projection: { assistant: { content: "Partial unclassified answer" }, narrative: [
         expect.objectContaining({ kind: "narrationSegment", record: expect.objectContaining({ text: "Checking files" }) }),
-      ] } }, livePublication: [{ after: "terminal", event: { type: "ended", outcome: "interrupted" } }] });
+      ] } }, livePublication: [{ after: "terminal", event: { type: "ended", outcome: "cancelled" } }] });
     expect(writer.operations[5]?.mutation).not.toHaveProperty("providerEvent");
     expect((await send(7, { kind: "release" })).result).toEqual({ kind: "released" });
   });

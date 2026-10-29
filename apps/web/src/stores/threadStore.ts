@@ -2616,10 +2616,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   /**
-   * Reset ephemeral turn state for a terminal runtime snapshot. A user stop
-   * suppresses the provider's terminal event server-side, so the snapshot can
-   * be the only terminal signal — materialize the streaming buffer into an
-   * assistant row instead of dropping it.
+   * A Stop response can overtake queued terminal progress, so preserve the
+   * streaming buffer until canonical recovery reconciles the assistant row.
    */
   const terminalSnapshotReset = (
     record: ThreadRecord,
@@ -3061,9 +3059,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     payload: TurnPersistedPayload,
     localMessageId: string,
   ): Message[] | undefined => {
-    // A user stop suppresses the provider's terminal event server-side, so a
-    // terminal persist is the last chance to materialize the streaming buffer
-    // before the terminal runtime patch clears it.
+    // Persistence can arrive before terminal progress, so preserve buffered
+    // text before the terminal runtime patch clears it.
     const unflushedStreaming = payload.outcome !== undefined && record.streaming.length > 0;
     const ensured = payload.filesChanged.length > 0 || payload.toolCallCount > 0 || unflushedStreaming
       ? ensureAssistantMessageForTurnPersist(record, payload.threadId, localMessageId, unflushedStreaming ? record.streaming : "")

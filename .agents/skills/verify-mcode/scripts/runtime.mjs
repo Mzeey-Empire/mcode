@@ -1890,7 +1890,7 @@ async function proveStop(run) {
   if (!run.report.sharedStopResult) {
     throw actionable("Concurrent agent.stop calls did not return one shared cancelled outcome", "Run bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime diagnostics, then inspect the receipt and retry stop verification.");
   }
-  await requireStoppedOutcome(run.report, run.proofDeadline);
+  await requireStopOutcomesAgree(run);
   await requireCancelledRuntimeState(run.socket, run.threadId, run.report, run.proofDeadline);
 }
 
@@ -1900,15 +1900,34 @@ async function requireTurnStarted(report, deadline) {
   throw actionable("No turnStarted event arrived before the 120-second live deadline", "Run bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime diagnostics, then inspect the receipt and retry stop verification.");
 }
 
-async function requireStoppedOutcome(report, deadline) {
-  const stopped = await waitFor(() => hasStoppedStatus(report.events), deadline);
-  if (stopped) return;
-  throw actionable("Concurrent agent.stop calls did not produce a cancelled, interrupted, or paused outcome", "Run bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime diagnostics, then inspect the receipt and retry stop verification.");
+async function requireStopOutcomesAgree(run) {
+  const turnExecutionId = cancelledStopResult(run.report.stopResults, run.threadId).turnExecutionId;
+  let storedOutcome;
+  const agreed = await waitForAsync(async () => {
+    const recovery = await run.socket.rpc("push.setThreadSubscriptions", {
+      threadIds: run.ownedThreadIds,
+      revisions: Object.fromEntries(run.ownedThreadIds.map((threadId) => [threadId, {
+        conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER,
+      }])),
+    }, run.proofDeadline);
+    const durable = recovery.canonicalRecoveries.find((frame) => frame.threadId === run.threadId)?.durable;
+    const turns = durable?.mode === "snapshot" ? Object.values(durable.snapshot.state.turns) : [];
+    const turn = turns.find((candidate) => candidate.threadId === run.threadId && candidate.executionId === turnExecutionId);
+    storedOutcome = turn?.ending?.outcome;
+    return stopOutcomesAgree(run.report.events, turnExecutionId, storedOutcome);
+  }, run.proofDeadline);
+  if (agreed) return;
+  const published = run.report.events.filter((event) => event.kind === "agent" && event.type === "ended"
+    && event.turnExecutionId === turnExecutionId).map((event) => event.outcome ?? "missing");
+  throw actionable(`Stop outcomes disagree for ${turnExecutionId}: published ${published.join(", ") || "missing"}, stored ${storedOutcome ?? "missing"}; expected both cancelled`, "Run bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime diagnostics, then inspect the receipt and retry stop verification.");
 }
 
-function hasStoppedStatus(events) {
-  return events.some((event) => (event.kind === "status" && ["paused", "interrupted", "cancelled"].includes(event.status))
-    || (event.kind === "agent" && event.type === "ended" && ["interrupted", "cancelled"].includes(event.outcome)));
+/** Whether the stopped execution's published Ended and durable ending both say cancelled. */
+export function stopOutcomesAgree(events, turnExecutionId, storedOutcome) {
+  const ended = events.filter((event) => event.kind === "agent" && event.type === "ended"
+    && event.turnExecutionId === turnExecutionId && event.outcome !== undefined);
+  return storedOutcome === "cancelled" && ended.length > 0
+    && ended.every((event) => event.outcome === "cancelled");
 }
 
 function isCompletedOutcome(outcome) {
@@ -2096,6 +2115,7 @@ function liveEventsFromPush(run, push) {
     return unseen.map((event) => ({
       kind: "agent",
       type: event.type,
+      turnExecutionId: event.turnExecutionId,
       subtype: event.subtype === OPENCODE_SESSION_INVALIDATED_SUBTYPE ? event.subtype : undefined,
       outcome: event.outcome,
       elapsedMs: Date.now(),
