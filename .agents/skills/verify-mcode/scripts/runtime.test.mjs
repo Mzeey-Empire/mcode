@@ -7,11 +7,29 @@ import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
 import { findOpenCodeSession, parseOpenCodeHealth, resolveUpstreamOpenCode } from "./opencode-serve.mjs";
-import { assertRuntimeFreshness, canonicalFrameToLiveEvents, createOpenCodeAttachReport, findLiveWorkspace, hasSharedStopResult, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openCodeAttachPassed, openVerificationSocketUrl, parseArguments, runBun } from "./runtime.mjs";
+import { CHECK_PHASES, FOCUSED_TEST_FILES, assertRuntimeFreshness, canonicalFrameToLiveEvents, createOpenCodeAttachReport, findLiveWorkspace, hasSharedStopResult, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openCodeAttachPassed, openVerificationSocketUrl, parseArguments, runBun } from "./runtime.mjs";
 
 const CLI = NodePath.join(import.meta.dirname, "verify-mcode.mjs");
 const BROWSER_PROOF = NodePath.join(import.meta.dirname, "browser-opencode-proof.mjs");
 const BUN = process.env.BUN_EXE || "bun";
+
+NodeTest.test("focused test files exist in each phase's workspace", () => {
+  const repoRoot = NodePath.resolve(import.meta.dirname, "../../../..");
+  const missingFiles = [];
+  for (const phase of CHECK_PHASES) {
+    const workspace = phase.args[phase.args.indexOf("--cwd") + 1];
+    const testFiles = phase.args.slice(phase.args.indexOf("--") + 1);
+    if (phase.selector === "runtime") {
+      testFiles.push(...FOCUSED_TEST_FILES);
+    }
+    for (const testFile of new Set(testFiles)) {
+      if (!NodeFS.existsSync(NodePath.resolve(repoRoot, workspace, testFile))) {
+        missingFiles.push(NodePath.join(workspace, testFile));
+      }
+    }
+  }
+  NodeAssertStrict.deepEqual(missingFiles, [], `Missing focused test files:\n${missingFiles.join("\n")}`);
+});
 
 function runBunCommand(args) {
   return new Promise((resolve, reject) => {
