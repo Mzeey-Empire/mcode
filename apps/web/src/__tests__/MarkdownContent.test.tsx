@@ -543,3 +543,27 @@ describe("mermaid code blocks", () => {
     });
   });
 });
+
+describe("MarkdownContent inline code double-click", () => {
+  afterEach(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it("selects the whole inline code span on double-click", () => {
+    render(<MarkdownContent content={"Run `migration-gate` caught it"} />);
+    const code = screen.getByText("migration-gate");
+
+    fireEvent.mouseDown(code, { detail: 2 });
+
+    expect(window.getSelection()?.toString()).toBe("migration-gate");
+  });
+
+  it("leaves native selection alone when a modifier is held", () => {
+    render(<MarkdownContent content={"Run `migration-gate` caught it"} />);
+    const code = screen.getByText("migration-gate");
+
+    fireEvent.mouseDown(code, { detail: 2, shiftKey: true });
+
+    expect(window.getSelection()?.toString()).not.toBe("migration-gate");
+  });
+});
