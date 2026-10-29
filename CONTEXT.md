@@ -539,6 +539,22 @@ A live condition waiting for the user's input, such as an approval.
 Viewing the thread acknowledges settled outcomes but does not resolve
 the pending request.
 
+### Activity time
+The last time work happened on a thread: when a turn was admitted or settled.
+It only moves forward. Renames, settings, pull request changes, completion and
+reopen do not move it. The sidebar sorts by it and starts the Older clock from
+it.
+_Avoid_: Updated time, which also moves on metadata writes; recordable
+activity, which describes a single turn
+
+### Older
+The sidebar section for active threads that have had no activity time for the
+user's threshold (7, 14 or 30 days, or never). A thread that needs the user
+never ages into Older. Opening a thread does not move it there; only the clock
+does, counted from the later of its activity time and the moment it stopped
+needing the user. New activity brings it back.
+_Avoid_: Archived, stale
+
 ### Recovery incident
 The exact set of active turns that one backend restart interrupted. The server
 creates the incident at startup and stamps each affected turn with its
