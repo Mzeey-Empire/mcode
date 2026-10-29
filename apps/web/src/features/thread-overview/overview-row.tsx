@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { type ReactElement } from "react";
 
 /**
- * Overview rows share the menu row anatomy (see `MENU_ROW_CLASS`): 40px tall, 12px inline padding,
+ * Overview rows share the menu row anatomy (see `MENU_ROW_CLASS`): 32px tall, 12px inline padding,
  * 8px gap and body-small text, with the leading icon in {@link OverviewRowIcon}'s 20px lane.
  * The card's sections bleed 12px into the card padding so that lane lines up with the title.
  */
