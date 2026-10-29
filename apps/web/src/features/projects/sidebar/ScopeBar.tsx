@@ -1,4 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
+import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import { SegmentedControl, type SegmentedOption } from "@/components/ui/segmented-control";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { effectiveSidebarScope, useSidebarUiStore, type SidebarScope } from "./sidebar-ui-store";
@@ -24,33 +26,82 @@ function isSidebarScope(value: string): value is SidebarScope {
   return value === "active" || value === "completed";
 }
 
-/** Shows Active / Completed while completed threads exist; resets to Active when none remain. */
-export function ScopeBar() {
-  const completedCount = useCompletedThreadCount();
-  const scope = useSidebarScope();
+interface ScopeBarProps {
+  /** True once any thread is completed, even while the first one is still flying in. */
+  readonly visible: boolean;
+  /** The count to show, which may trail the model while a completed row is still on its way. */
+  readonly completedCount: number;
+  readonly scope: SidebarScope;
+}
+
+/**
+ * Shows Active / Completed while completed threads exist; resets to Active when none remain.
+ * Animates live visibility changes; hydration applies immediately.
+ */
+export function ScopeBar({ visible, completedCount, scope }: ScopeBarProps) {
   const setScope = useSidebarUiStore((state) => state.setScope);
+  const { animate, entering, collapsing, collapsed } = useBarEntrance(visible);
+  const lastCount = useRef(completedCount);
+  if (visible) lastCount.current = completedCount;
 
   useEffect(() => {
-    if (completedCount === 0 && useSidebarUiStore.getState().scope !== "active") setScope("active");
-  }, [completedCount, setScope]);
+    if (!visible && useSidebarUiStore.getState().scope !== "active") setScope("active");
+  }, [visible, setScope]);
 
-  if (completedCount === 0) return null;
+  if (!visible && !collapsing) return null;
   const options: readonly SegmentedOption[] = [
     { value: "active", label: "Active" },
-    { value: "completed", label: "Completed", count: completedCount },
+    { value: "completed", label: "Completed", count: lastCount.current },
   ];
   return (
-    <div data-testid="sidebar-scope-bar" className="mx-1.5 shrink-0">
-      <SegmentedControl
-        aria-label="Thread scope"
-        size="compact"
-        fill
-        options={options}
-        value={scope}
-        onChange={(value) => {
-          if (isSidebarScope(value)) setScope(value);
-        }}
-      />
-    </div>
+    <AnimatedCollapsible
+      open={visible}
+      onTransitionEnd={(event) => {
+        if (event.target === event.currentTarget && !visible) collapsed();
+      }}
+      className={cn(
+        "mx-1.5 shrink-0 transition-[grid-template-rows,opacity] duration-[220ms] ease-[cubic-bezier(.2,.7,.2,1)]",
+        !animate && "transition-none",
+        visible ? "opacity-100" : "opacity-0",
+        entering && "starting:grid-rows-[0fr] starting:opacity-0",
+      )}
+    >
+      <div data-testid={visible ? "sidebar-scope-bar" : undefined}>
+        <SegmentedControl
+          aria-label="Thread scope"
+          size="compact"
+          fill
+          options={options}
+          value={scope}
+          onChange={(value) => {
+            if (isSidebarScope(value)) setScope(value);
+          }}
+        />
+      </div>
+    </AnimatedCollapsible>
   );
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function barTransition(seen: { visible: boolean; epoch: number }, visible: boolean, epoch: number) {
+  const animate = seen.epoch === epoch && !prefersReducedMotion();
+  return { animate, entering: animate && !seen.visible && visible, hiding: animate && seen.visible && !visible };
+}
+
+function useBarEntrance(visible: boolean) {
+  const epoch = useWorkspaceStore((state) => state.threadSnapshotEpoch);
+  const seen = useRef({ visible, epoch });
+  const [collapsing, setCollapsing] = useState(false);
+  const { animate, entering, hiding } = barTransition(seen.current, visible, epoch);
+  const nextCollapsing = hiding || (collapsing && !visible);
+  if (nextCollapsing !== collapsing) setCollapsing(nextCollapsing);
+
+  useEffect(() => {
+    seen.current = { visible, epoch };
+  }, [visible, epoch]);
+
+  return { animate, entering, collapsing: nextCollapsing, collapsed: () => setCollapsing(false) };
 }

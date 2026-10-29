@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { getDefaultSettings, SettingsSchema, type Settings, type PartialSettings } from "@mcode/contracts/models/settings";
 import { type TerminalSettings } from "@mcode/contracts/models/terminal-settings";
 import { getTransport } from "@/transport";
+import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 
 /**
  * Recursive deep-partial utility type.
@@ -150,7 +151,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       updateGeneration++;
       set({ settings });
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      return rpcFailureMessage(error);
     }
   },
 

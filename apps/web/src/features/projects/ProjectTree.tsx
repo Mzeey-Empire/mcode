@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/shallow";
-import { GitBranch } from "lucide-react";
-import { ContextMenu } from "@/components/ui/context-menu";
+import { GitBranch, GitMerge } from "lucide-react";
+import { effectiveAutoCompleteOnMerge } from "@mcode/contracts/models/thread";
+import { ContextMenu, type SwitchMenuItem } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,12 +10,14 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useUiStore } from "@/stores/uiStore";
 import type { Thread, Workspace } from "@/transport/types";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useSidebarUiStore } from "./sidebar/sidebar-ui-store";
 import type { InlineEditState, SidebarRowContext } from "./sidebar/sidebar-row-context";
+import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 
 /** Time window in ms during which a second click on the same thread row is treated as a double-click. */
 const DOUBLE_CLICK_THRESHOLD_MS = 250;
@@ -286,7 +289,6 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
   const actions = useThreadAndDraftActions();
   const toggleProject = useSidebarUiStore((s) => s.toggleProject);
   const toggleShowMore = useSidebarUiStore((s) => s.toggleShowMore);
-  const completeThread = useWorkspaceStore((s) => s.completeThread);
   const reopenThread = useWorkspaceStore((s) => s.reopenThread);
   const retryThreadCleanup = useWorkspaceStore((s) => s.retryThreadCleanup);
   useLoadActiveWorkspaceWorktrees();
@@ -310,7 +312,6 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
     onThreadDoubleClick: clicks.doubleClick,
     onSelectThread: clicks.select,
     onThreadContextMenu: menus.openThreadMenu,
-    onCompleteThread: completeThread,
     onReopenThread: reopenThread,
     onRetryThreadCleanup: retryThreadCleanup,
     onOpenDraft: actions.openDraft,
@@ -321,7 +322,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
     rename.inlineEdit, rename.change, rename.commit, rename.cancel,
     toggleProject, toggleShowMore, actions.createThread, actions.openDraft, actions.discardDraft,
     projects.openDelete, projects.openRename, clicks.click, clicks.doubleClick, clicks.select,
-    menus.openThreadMenu, menus.openDraftMenu, completeThread, reopenThread, retryThreadCleanup,
+    menus.openThreadMenu, menus.openDraftMenu, reopenThread, retryThreadCleanup,
   ]);
 
   const overlays = (
@@ -409,6 +410,28 @@ function WorkspaceRenameDialog({ dialog, value, isRenaming, onChange, onClose, o
   );
 }
 
+function useAutoCompleteSwitch(threadId: string | null): SwitchMenuItem | null {
+  const thread = useWorkspaceStore((s) => (threadId === null ? undefined : s.threads.find((candidate) => candidate.id === threadId)));
+  const globalValue = useSettingsStore((s) => s.settings.thread.completion.completeOnPrMerge);
+  const setOverride = useWorkspaceStore((s) => s.setAutoCompleteOverride);
+  const [failure, setFailure] = useState<{ threadId: string; message: string } | null>(null);
+  if (!thread) return null;
+  return {
+    kind: "switch",
+    label: "Complete when PRs merge",
+    icon: <GitMerge />,
+    checked: effectiveAutoCompleteOnMerge(thread, globalValue),
+    disabledReason: thread.pull_requests.length === 0 ? "No linked PRs" : null,
+    description: failure?.threadId === thread.id ? failure.message : undefined,
+    onCheckedChange: (next) => {
+      setFailure(null);
+      setOverride(thread.id, next).catch((error: unknown) => {
+        setFailure({ threadId: thread.id, message: rpcFailureMessage(error) });
+      });
+    },
+  };
+}
+
 function ThreadContextMenuOverlay({
   contextMenu,
   onClose,
@@ -420,6 +443,7 @@ function ThreadContextMenuOverlay({
   onStartRename: (state: InlineEditState) => void;
   onDeleteThread: (state: DeleteDialogState) => void;
 }) {
+  const autoComplete = useAutoCompleteSwitch(contextMenu?.threadId ?? null);
   if (!contextMenu) return null;
   return (
     <ContextMenu
@@ -446,6 +470,7 @@ function ThreadContextMenuOverlay({
           onClick: () => navigator.clipboard.writeText(contextMenu.threadId),
         },
         { label: "", onClick: () => {}, divider: true },
+        ...(autoComplete ? [autoComplete, { label: "", onClick: () => {}, divider: true }] : []),
         {
           label: "Delete",
           destructive: true,

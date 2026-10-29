@@ -25,6 +25,7 @@ import { pushEmitter } from "./ws-transport";
 import { openActionPreview } from "@/features/preview/navigation/open-url-in-preview";
 import { startPushListeners, stopPushListeners } from "./ws-events";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useCompletionStore } from "@/features/projects/sidebar/completion-store";
 import { useProviderCatalogStore } from "@/stores/providerCatalogStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
@@ -158,6 +159,38 @@ describe("ws-events thread.lifecycleChanged", () => {
         scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
       }),
     ]);
+  });
+
+  it.each([
+    [{ completedBy: "auto" }, "thread-1"],
+    [{}, null],
+  ] as const)("offers the Undo line for a remote completion only when it is automatic (%o)", (marker, undoLineThreadId) => {
+    useWorkspaceStore.setState({ threads: [makeThread()] });
+    useCompletionStore.setState({ undoLineThreadId: null });
+    startPushListeners();
+
+    pushEmitter.emit("thread.lifecycleChanged", { thread: makeThread({ user_completed_at: "2026-08-12T08:00:00.000Z" }), ...marker });
+
+    expect(useCompletionStore.getState().undoLineThreadId).toBe(undoLineThreadId);
+  });
+
+  it.each([
+    ["an activity push", (id: string) => pushEmitter.emit("thread.activity", { threadId: id, at: "2026-01-03T00:00:00.000Z" })],
+    ["a lifecycle push", (id: string) => pushEmitter.emit("thread.lifecycleChanged", { thread: makeThread({ id }) })],
+  ])("clears a refused completion on %s for its thread, but keeps a retryable failure", (_push, push) => {
+    useWorkspaceStore.setState({ threads: [makeThread(), makeThread({ id: "thread-2" })] });
+    useCompletionStore.setState({
+      entries: new Map([
+        ["thread-1", { phase: "failed", failure: { kind: "refused", refusal: "running", message: "The thread is running" } }],
+        ["thread-2", { phase: "failed", failure: { kind: "retryable", message: "socket closed" } }],
+      ]),
+    });
+    startPushListeners();
+
+    push("thread-1");
+    push("thread-2");
+
+    expect([...useCompletionStore.getState().entries.keys()]).toEqual(["thread-2"]);
   });
 
   it("removes a thread after an automatic deletion push", () => {

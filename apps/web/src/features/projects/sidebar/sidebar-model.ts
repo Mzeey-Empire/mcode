@@ -88,6 +88,8 @@ export interface SidebarModel {
   readonly olderBar: { readonly count: number; readonly open: boolean } | null;
   /** Thread ids in Older, for the motion layer's clock-crossing diff. */
   readonly olderIds: ReadonlySet<string>;
+  /** Server-confirmed completed thread ids. */
+  readonly completedIds: ReadonlySet<string>;
   /** Earliest future time an Active thread crosses into Older, or null. */
   readonly nextBoundaryAt: number | null;
 }
@@ -389,6 +391,7 @@ export function deriveSidebarModel(inputs: SidebarInputs): SidebarModel {
     items: [...body, { kind: "end-spacer", key: "end-spacer" }],
     olderBar: active && parts.older.length > 0 ? { count: parts.older.length, open: inputs.ui.olderOpen } : null,
     olderIds: new Set(active ? parts.older.map((entry) => entry.fact.id) : []),
+    completedIds: new Set(parts.completed.map((entry) => entry.fact.id)),
     nextBoundaryAt: nextBoundary(parts, inputs),
   };
 }
@@ -436,7 +439,7 @@ export function reconcileItems(prev: readonly SidebarItem[], next: readonly Side
 
 /**
  * What made the model change. `snapshot` (hydration, reconnect) places without motion, `layout`
- * (scope, view, threshold, Older open) re-lays out without FLIP, `clock` is time alone, and
+ * (scope, view, threshold, Older open, project reorder) re-lays out without FLIP, `clock` is time alone, and
  * `push` is live data, the only cause that animates.
  */
 export type ModelCause = "snapshot" | "layout" | "clock" | "push";

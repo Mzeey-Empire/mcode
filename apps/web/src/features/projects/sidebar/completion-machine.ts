@@ -29,7 +29,9 @@ export type CompletionEvent =
   | { readonly type: "connection-failed"; readonly attempt: number; readonly message: string }
   | { readonly type: "pointer-left" }
   /** The server record turned completed or active by itself (auto-complete, another client, a send). */
-  | { readonly type: "server-lifecycle"; readonly completed: boolean };
+  | { readonly type: "server-lifecycle"; readonly completed: boolean }
+  /** The server advanced the thread's activity clock: a turn started or ended. */
+  | { readonly type: "server-activity" };
 
 export type CompletionEffect =
   | { readonly type: "send-complete"; readonly attempt: number }
@@ -83,12 +85,18 @@ function fromLingering(entry: CompletionEntry, event: CompletionEvent): Completi
   return unchanged(entry);
 }
 
-function fromFailed(entry: CompletionEntry, event: CompletionEvent): CompletionTransition {
+// A refusal names the thread's state at refusal time, so any later push for the thread makes it stale.
+function refusalOutdated(entry: Extract<CompletionEntry, { phase: "failed" }>, event: CompletionEvent): boolean {
+  return entry.failure.kind === "refused" && (event.type === "server-activity" || event.type === "server-lifecycle");
+}
+
+function fromFailed(entry: Extract<CompletionEntry, { phase: "failed" }>, event: CompletionEvent): CompletionTransition {
   if (event.type === "retry") {
     return { next: { phase: "holding", attempt: event.attempt }, effects: [{ type: "send-complete", attempt: event.attempt }] };
   }
   if (event.type === "undo") return unchanged(undefined);
   if (event.type === "server-lifecycle" && event.completed) return unchanged(undefined);
+  if (refusalOutdated(entry, event)) return unchanged(undefined);
   return unchanged(entry);
 }
 

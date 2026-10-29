@@ -277,7 +277,11 @@ export function startPushListeners(): void {
       const parsed = WS_CHANNELS["thread.lifecycleChanged"].safeParse(data);
       if (!parsed.success) return;
       useWorkspaceStore.getState().applyThreadLifecycle(parsed.data.thread);
-      useCompletionStore.getState().observeServerLifecycle(parsed.data.thread.id, parsed.data.thread.user_completed_at !== null);
+      useCompletionStore.getState().observeServerLifecycle(
+        parsed.data.thread.id,
+        parsed.data.thread.user_completed_at !== null,
+        parsed.data.completedBy === "auto",
+      );
     }),
   );
 
@@ -286,6 +290,7 @@ export function startPushListeners(): void {
       const parsed = WS_CHANNELS["thread.activity"].safeParse(data);
       if (!parsed.success) return;
       useWorkspaceStore.getState().applyThreadActivity(parsed.data.threadId, parsed.data.at);
+      useCompletionStore.getState().observeServerActivity(parsed.data.threadId);
     }),
   );
 

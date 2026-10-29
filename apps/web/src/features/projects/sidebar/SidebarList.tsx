@@ -17,18 +17,19 @@ import {
 import { SortableContext, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { VirtualRows } from "@/components/ui/VirtualRows";
 import { VirtualViewport, type VirtualHost, type VirtualRow, type ViewportPosition } from "@/components/ui/virtual-viewport";
 import { usePreparingRowEntrance } from "@/features/thread-startup";
 import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { selectThreadIndex } from "../state/thread-index";
+import { selectSidebarFacts, selectThreadIndex } from "../state/thread-index";
 import type { SidebarItem } from "./sidebar-model";
 import type { SidebarRowContext } from "./sidebar-row-context";
 import { ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProjectRow";
 import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
-import { useSidebarUiStore } from "./sidebar-ui-store";
+import { freezeOrder, useSidebarUiStore } from "./sidebar-ui-store";
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
 
 /**
@@ -221,7 +222,7 @@ function toVirtualRows(items: readonly SidebarItem[]): VirtualRow[] {
  * Publishes the rows and owns the Older bar's open-and-rise: opening the section scrolls once the
  * new rows land so the bar rises to the top with the Older threads below it.
  */
-function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, items: readonly SidebarItem[], rows: readonly VirtualRow[]) {
+function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, items: readonly SidebarItem[], rows: readonly VirtualRow[], flip: boolean) {
   const olderOpen = useSidebarUiStore((state) => state.olderOpen);
   const toggleOlderSection = useSidebarUiStore((state) => state.toggleOlder);
   const riseRef = useRef(false);
@@ -229,11 +230,11 @@ function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, it
   useLayoutEffect(() => {
     const viewport = controllerRef.current;
     if (!viewport) return;
-    viewport.setRows(rows);
+    viewport.setRows(rows, { flip });
     if (!riseRef.current) return;
     riseRef.current = false;
     viewport.moveTo({ kind: "target", key: OLDER_BAR_KEY, align: "start" }, !prefersReducedMotion(), { release: true });
-  }, [controllerRef, rows]);
+  }, [controllerRef, rows, flip]);
   const toggleOlder = useCallback(() => {
     riseRef.current = !olderOpen;
     toggleOlderSection();
@@ -263,14 +264,25 @@ interface SidebarListProps {
   readonly ctx: SidebarRowContext;
   /** Rendered over the list when it has nothing to show, such as the empty-projects drop well. */
   readonly overlay?: ReactNode;
+  /** Slide rows that moved. True only for live pushes, never for hydration or layout changes. */
+  readonly flip?: boolean;
+  /** Row keys folding away after they left the model. */
+  readonly closing?: ReadonlySet<string>;
+  /** Row keys rising back out of Older. */
+  readonly arriving?: ReadonlySet<string>;
 }
+
+const NO_KEYS: ReadonlySet<string> = new Set();
+
+const freezeOnEnter = () => useSidebarUiStore.getState().freeze(freezeOrder(selectSidebarFacts(useWorkspaceStore.getState().threads), Date.now()));
+const unfreezeOnLeave = () => useSidebarUiStore.getState().unfreeze();
 
 /**
  * Renders the derived sidebar items into one virtual list, one virtual row per item. It never
  * filters, sorts or caps: the model already did. Project headers in the recent list drag to
  * reorder projects.
  */
-export function SidebarList({ items, ctx, overlay }: SidebarListProps) {
+export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KEYS, arriving = NO_KEYS }: SidebarListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { controllerRef, hosts } = useSidebarViewport(containerRef);
   const drag = useProjectDrag(controllerRef);
@@ -281,17 +293,22 @@ export function SidebarList({ items, ctx, overlay }: SidebarListProps) {
   const entrance = useEntranceKeys(items);
   usePreparingRowEntrance(containerRef, entrance.rowKeys, entrance.preparing);
 
-  const { olderBar, toggleOlder } = useOlderRise(controllerRef, items, rows);
+  const { olderBar, toggleOlder } = useOlderRise(controllerRef, items, rows, flip);
 
   const { dropIndicator } = drag;
   const renderRow = useCallback((item: SidebarItem): ReactNode => {
     const dropEdge = item.kind === "project" && dropIndicator?.id === item.workspaceId ? dropIndicator.edge : null;
-    return <div className="px-1.5"><SidebarRow item={item} ctx={rowCtx} dropEdge={dropEdge} /></div>;
-  }, [rowCtx, dropIndicator]);
+    const isClosing = closing.has(item.key);
+    return (
+      <div className={cn("px-1.5", isClosing && "sidebar-row-closing", arriving.has(item.key) && "sidebar-row-rise")} inert={isClosing || undefined}>
+        <div className={cn(isClosing && "min-h-0 overflow-hidden")}><SidebarRow item={item} ctx={rowCtx} dropEdge={dropEdge} /></div>
+      </div>
+    );
+  }, [rowCtx, dropIndicator, closing, arriving]);
 
   const dragged = drag.activeDragId === null ? undefined : itemsByKey.get(`project:${drag.activeDragId}`);
   return (
-    <div className="relative isolate min-h-0 flex-1">
+    <div className="relative isolate min-h-0 flex-1" onPointerEnter={freezeOnEnter} onPointerLeave={unfreezeOnLeave}>
       <div ref={containerRef} data-testid="thread-list" className="h-full" />
       <DndContext
         sensors={drag.sensors}

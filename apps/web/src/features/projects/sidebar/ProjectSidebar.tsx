@@ -6,11 +6,13 @@ import { useWorkspaceStartupRecovery } from "@/features/thread-startup/state/thr
 import { ProjectDropWell } from "../ProjectDropWell";
 import { useProjectTreeMenus } from "../ProjectTree";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { CompletionUndoLine } from "./CompletionUndoLine";
 import { ScopeBar } from "./ScopeBar";
 import { SidebarList } from "./SidebarList";
 import { useRowLifecycleStore } from "./row-lifecycle-store";
 import { useSidebarUiStore } from "./sidebar-ui-store";
 import { useSidebarModel } from "./use-sidebar-model";
+import { useSidebarMotion } from "./sidebar-motion";
 
 function SidebarProjectsHeader() {
   // The palette's folder-browse view works across Electron and standalone web without the desktop bridge.
@@ -47,7 +49,9 @@ function useWorkspaceLoading(): void {
  * menus and dialogs its rows open.
  */
 export function ProjectSidebar() {
-  const { model } = useSidebarModel();
+  const { model, cause } = useSidebarModel();
+  const selectedThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const shown = useSidebarMotion(model, cause, selectedThreadId);
   const { ctx, overlays } = useProjectTreeMenus();
   const hasProjects = useWorkspaceStore((s) => s.workspaces.length > 0);
   const error = useWorkspaceStore((s) => s.error);
@@ -55,10 +59,14 @@ export function ProjectSidebar() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
       <SidebarProjectsHeader />
-      <ScopeBar />
+      <ScopeBar visible={model.scopeBar.visible} completedCount={shown.completedCount} scope={model.scope} />
+      <CompletionUndoLine onOpen={ctx.onSelectThread} flying={shown.flying} />
       <SidebarList
-        items={model.items}
+        items={shown.items}
+        closing={shown.closing}
+        arriving={shown.arriving}
         ctx={ctx}
+        flip={cause === "push"}
         overlay={hasProjects ? null : <div className="absolute inset-x-1.5 inset-y-0"><ProjectDropWell /></div>}
       />
       {error && <p className="px-3 py-1 text-xs text-destructive">{error}</p>}

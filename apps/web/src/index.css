@@ -494,6 +494,33 @@
     animation: none;
   }
 }
+/* The strike is a background so it can grow from the left instead of appearing at once. */
+.sidebar-strike {
+  background: linear-gradient(currentColor, currentColor) 0 55% / 100% 1px no-repeat;
+  animation: sidebar-strike var(--duration-overlay) var(--ease-standard) both;
+}
+@keyframes sidebar-strike {
+  from { background-size: 0 1px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-strike {
+    animation: none;
+  }
+}
+.sidebar-row-closing {
+  display: grid;
+  animation: sidebar-row-close var(--duration-overlay) var(--ease-standard) both;
+}
+@keyframes sidebar-row-close {
+  from { grid-template-rows: 1fr; opacity: 1; }
+  to { grid-template-rows: 0fr; opacity: 0; }
+}
+.sidebar-row-rise {
+  animation: sidebar-row-rise var(--duration-standard) var(--ease-standard) both;
+}
+@keyframes sidebar-row-rise {
+  from { opacity: 0; transform: translateY(6px); }
+}
 /* Toasts slide down from under the conversation header. Close and auto-hide
    play the same motion in reverse; reduced motion keeps only a short fade. */
 @keyframes toast-enter {
