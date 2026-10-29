@@ -68,7 +68,6 @@ function parseTailRows(itemId: string, json: string): TailRow[] {
   });
 }
 
-
 /** Writer options; correctness never depends on the cache. */
 export interface CanonicalItemContentTailOptions {
   /** False makes this store fold every append base from SQLite. */
@@ -174,11 +173,6 @@ export class CanonicalItemContentTail {
     this.readsCache = options.cache ?? true;
   }
 
-  /** Only string content can be extended, so only such items can hold a tail. */
-  static canHaveTail(item: AgentItem): boolean {
-    return typeof item.payload.content === "string";
-  }
-
   /** The folded item an append extends: a validated committed cache entry, else `loadFolded`. */
   appendBase(itemId: string, loadFolded: (itemId: string) => AgentItem | null): AgentItem | null {
     const cached = this.readsCache ? this.cache?.get(itemId) : undefined;
@@ -206,6 +200,6 @@ export class CanonicalItemContentTail {
   /** Deletes the tail of an item whose row was just written whole. */
   clear(item: AgentItem): void {
     this.cache?.forget(item.id);
-    if (CanonicalItemContentTail.canHaveTail(item)) this.deleteAppends.run(item.id);
+    this.deleteAppends.run(item.id);
   }
 }
