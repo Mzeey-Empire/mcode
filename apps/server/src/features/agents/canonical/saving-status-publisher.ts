@@ -5,6 +5,9 @@ export interface SavingStatusTimer {
   schedule(callback: () => void, delayMs: number): () => void;
 }
 
+/** Renderers only act on failures; progress positions may lag by this much. */
+const TRAILING_PUBLISH_MS = 250;
+
 const defaultTimer: SavingStatusTimer = {
   schedule(callback, delayMs) {
     const timer = setTimeout(callback, delayMs);
@@ -53,7 +56,7 @@ export class SavingStatusPublisher {
     } else {
       const publication = execution;
       execution.pending = { status, targets,
-        cancel: this.timer.schedule(() => this.flush(publication), 250) };
+        cancel: this.timer.schedule(() => this.flush(publication), TRAILING_PUBLISH_MS) };
     }
   }
 
@@ -79,6 +82,14 @@ export class SavingStatusPublisher {
   private send(execution: ExecutionPublication, status: TurnSavingStatus, targets: readonly string[]): void {
     execution.lastBroadcast = status;
     for (const threadId of targets) this.broadcast({ ...status, threadId });
+    if (status.mode === "durable" && !execution.pending) this.forget(status);
+  }
+
+  /** A drained execution needs no baseline: its next status starts from "no failure broadcast". */
+  private forget(status: TurnSavingStatus): void {
+    const executions = this.threads.get(status.threadId);
+    executions?.delete(status.executionId);
+    if (executions?.size === 0) this.threads.delete(status.threadId);
   }
 }
 
