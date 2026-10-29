@@ -5,7 +5,6 @@ export interface SavingStatusTimer {
   schedule(callback: () => void, delayMs: number): () => void;
 }
 
-/** Renderers only act on failures; progress positions may lag by this much. */
 const TRAILING_PUBLISH_MS = 250;
 
 const defaultTimer: SavingStatusTimer = {
@@ -85,7 +84,6 @@ export class SavingStatusPublisher {
     if (status.mode === "durable" && !execution.pending) this.forget(status);
   }
 
-  /** A drained execution needs no baseline: its next status starts from "no failure broadcast". */
   private forget(status: TurnSavingStatus): void {
     const executions = this.threads.get(status.threadId);
     executions?.delete(status.executionId);
