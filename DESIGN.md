@@ -260,7 +260,7 @@ components:
     heights: "{sizes.control-compact} / {sizes.control-default} / {sizes.control-comfortable}"
     paddingInline: "1.2rem / 1.6rem / 2rem"
     iconSize: "1.6rem / 2rem / 2rem"
-    pressed: "inset 0 0 0 2px <variant foreground>"
+    pressed: "inset 0 0 0 2px <variant foreground>; ghost: {colors.selected} fill, no ring"
     focus: "{shadows.focusRing}"
     disabledOpacity: "{opacity.disabled}"
   button-primary:
@@ -971,7 +971,9 @@ Paper's "04 · Components" page holds the full state matrix for every variant.
   shortcuts. A split button is amber only when its action is the state's
   primary.
 - **States:** Hover changes the fill. Pressed draws a 2px inset ring in the
-  variant's foreground color; no translation. Focus draws the focus ring
+  variant's foreground color; no translation. A ghost button, or a row that
+  acts like one, has no resting fill, so a ring would hug bare icons and text:
+  pressed takes the selected fill instead and draws no ring. Focus draws the focus ring
   outside the control. Disabled drops to 50% opacity. Loading keeps the width,
   swaps the leading icon for a spinner, and blocks repeat activation.
 - **Inline row actions:** per-file and per-row actions inside a row, such as
@@ -1327,7 +1329,7 @@ Every interactive component defines the following states before implementation:
 | Default | Clear affordance without decorative emphasis. |
 | Hover | One fill or foreground shift; never the only indication of action. |
 | Focus-visible | A 2px focus ring with a 2px offset in the surface color, outside the control. |
-| Active or pressed | A 2px inset ring in the variant's foreground color. No translation. |
+| Active or pressed | A 2px inset ring in the variant's foreground color. Ghost controls take the selected fill instead, with no ring. No translation. |
 | Selected or current | The selected fill plus a check marker or semantic state. |
 | Disabled | 50% opacity, unavailable cursor behavior, and a reason when the cause is not obvious. |
 | Loading | Stable geometry, a spinner in place of the leading icon, and repeat-action prevention. |

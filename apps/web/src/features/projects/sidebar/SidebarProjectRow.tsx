@@ -360,7 +360,7 @@ function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: (
   return (
     <Tooltip disabled={dragging}>
       <TooltipTrigger render={
-        <Button data-project-title type="button" variant="ghost" size="compact" aria-label={`Open project ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left hover:bg-transparent group-hover/ws:pr-24 group-focus-within/ws:pr-24 active:inset-ring-0 focus-visible:outline-none dark:hover:bg-transparent">
+        <Button data-project-title type="button" variant="ghost" size="compact" aria-label={`Open project ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left hover:bg-transparent group-hover/ws:pr-24 group-focus-within/ws:pr-24 focus-visible:outline-none dark:hover:bg-transparent">
           <span className="flex-1 text-fade font-medium tracking-tight">{workspace.name}</span>
         </Button>
       } />
