@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { rankPullRequests, type ThreadPullRequest, type ThreadPullRequestState } from "@mcode/contracts/models/thread-pull-request";
 import type { Workspace, Thread, PermissionMode, WorktreeInfo, AttachmentMeta } from "@/transport";
 import {
   type WorkspaceThread,
@@ -50,28 +51,18 @@ function unboundStartupResolution(state: ThreadStartup["state"]): "unbound" | "t
   return state === "failed" || state === "cancelled" ? "terminal" : "unbound";
 }
 
-/** Minimum interval between syncThreadPrs calls per workspace. */
 const SYNC_THROTTLE_MS = 30_000;
-/** Tracks the last syncThreadPrs request time per workspace. */
-const lastSyncTime = new Map<string, number>();
+let lastPrSyncTime: number | null = null;
 let hydrationRequest = 0;
 
-async function syncWorkspaceThreadPrs(workspaceId: string): Promise<void> {
+async function syncThreadPrs(): Promise<void> {
   const now = Date.now();
-  if (now - (lastSyncTime.get(workspaceId) ?? 0) < SYNC_THROTTLE_MS) return;
-  lastSyncTime.set(workspaceId, now);
-  const before = new Map(useWorkspaceStore.getState().threads.map((thread) => [thread.id, thread]));
+  if (lastPrSyncTime !== null && now - lastPrSyncTime < SYNC_THROTTLE_MS) return;
+  lastPrSyncTime = now;
   try {
-    const results = await getTransport().syncThreadPrs(workspaceId);
-    const byId = new Map(results.map((result) => [result.threadId, result]));
-    useWorkspaceStore.setState((state) => ({
-      threads: state.threads.map((thread) => {
-        const result = byId.get(thread.id);
-        if (!result || thread !== before.get(thread.id)) return thread;
-        return { ...thread, pr_number: result.prNumber, pr_status: result.prStatus };
-      }),
-    }));
+    await getTransport().syncThreadPrs();
   } catch (error) {
+    lastPrSyncTime = null;
     console.warn("[threads] PR sync failed", error);
   }
 }
@@ -669,6 +660,8 @@ interface WorkspaceState {
   // Thread actions
   /** Hydrate the whole index while retaining mutations received during the request. */
   hydrateThreads: () => Promise<void>;
+  /** Refresh all projects’ PR links, throttled across hydration and focus. */
+  syncThreadPrs: () => Promise<void>;
   /** Add a server-created thread even when its project has never been opened. */
   applyThreadCreated: (thread: Thread) => void;
   /** Revalidate the selected conversation after reconnect. */
@@ -729,6 +722,7 @@ interface WorkspaceState {
   /** Apply a server-authoritative completion lifecycle push. */
   applyThreadLifecycle: (thread: Thread) => void;
   applyThreadActivity: (threadId: string, at: string) => void;
+  applyThreadPullRequests: (threadId: string, prs: ThreadPullRequest[]) => void;
   /** Remove a thread after server-authoritative automatic cleanup. */
   applyThreadDeleted: (threadId: string) => void;
   /** Record a thread's committed resume schedule, or its removal. */
@@ -780,9 +774,7 @@ interface WorkspaceState {
   setBranchWorktreePath: (path: string) => void;
 
   /**
-   * Record a PR that was just created from the dialog. Updates `pr_number` and
-   * `pr_status` on the thread immediately and caches the URL so the header can
-   * link without waiting for the next background poll.
+   * Cache a newly created PR until the committed push reaches this client.
    */
   recordPrCreated: (threadId: string, prNumber: number, prUrl: string) => void;
   /**
@@ -793,7 +785,7 @@ interface WorkspaceState {
     threadId: string,
     prNumber: number,
     prUrl: string,
-    prStatus: string,
+    prStatus: ThreadPullRequestState,
   ) => void;
 }
 
@@ -1301,7 +1293,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     });
     reconcileSelectedConversation();
     if (id) {
-      void syncWorkspaceThreadPrs(id);
+      void get().syncThreadPrs();
       // Optimistically bump the local last_opened_at so the project selector
       // re-sorts immediately. Without this the row only moves to the top of
       // "Recent" after the next workspace list refresh, which feels laggy.
@@ -1400,6 +1392,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }
   },
 
+  syncThreadPrs,
+
   hydrateThreads: async () => {
     const request = ++hydrationRequest;
     const before = new Map(get().threads.map((thread) => [thread.id, thread]));
@@ -1407,8 +1401,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const incoming = await getTransport().listAllThreads();
       if (request !== hydrationRequest) return;
       set((state) => ({ threads: mergeThreadSnapshot(incoming, before, state.threads), loading: false, error: null }));
-      const workspaceId = get().activeWorkspaceId;
-      if (workspaceId) void syncWorkspaceThreadPrs(workspaceId);
+      void get().syncThreadPrs();
     } catch (error) {
       if (request === hydrationRequest) set({ error: String(error), loading: false });
     }
@@ -1720,6 +1713,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }
   },
 
+  applyThreadPullRequests: (threadId, prs) => {
+    set((state) => {
+      const previous = state.threads.find((thread) => thread.id === threadId);
+      const checksById = { ...state.checksById };
+      if (rankPullRequests(previous?.pull_requests ?? [])[0]?.number !== rankPullRequests(prs)[0]?.number) {
+        delete checksById[threadId];
+      }
+      return {
+        threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, pull_requests: prs } : thread),
+        checksById,
+      };
+    });
+  },
+
   applyThreadActivity: (threadId, at) => {
     set((state) => {
       const existing = state.threads.find((thread) => thread.id === threadId);
@@ -1929,23 +1936,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   setBranchWorktreePath: (path) => set({ branchWorktreePath: path }),
 
   recordPullRequestLink: (threadId, prNumber, prUrl, prStatus) => {
-    set((state) => {
-      const thread = state.threads.find((t) => t.id === threadId);
-      return {
-        threads: thread
-          ? state.threads.map((candidate) =>
-              candidate.id === threadId
-                ? { ...candidate, pr_number: prNumber, pr_status: prStatus }
-                : candidate,
-            )
-          : state.threads,
-        prUrlsByThreadId: { ...state.prUrlsByThreadId, [threadId]: prUrl },
-      };
-    });
+    set((state) => ({
+      threads: state.threads.map((thread) => {
+        if (thread.id !== threadId) return thread;
+        const previous = thread.pull_requests.find((pr) => pr.number === prNumber);
+        const link: ThreadPullRequest = {
+          number: prNumber,
+          state: previous?.state === "merged" ? "merged" : prStatus,
+          title: previous?.title ?? null,
+          url: prUrl,
+        };
+        return { ...thread, pull_requests: [...thread.pull_requests.filter((pr) => pr.number !== prNumber), link] };
+      }),
+      prUrlsByThreadId: { ...state.prUrlsByThreadId, [threadId]: prUrl },
+    }));
   },
   recordPrCreated: (threadId, prNumber, prUrl) => {
     if (!get().threads.some((thread) => thread.id === threadId)) return;
-    get().recordPullRequestLink(threadId, prNumber, prUrl, "OPEN");
+    const thread = get().threads.find((candidate) => candidate.id === threadId);
+    const existing = thread?.pull_requests.find((pr) => pr.number === prNumber);
+    get().recordPullRequestLink(threadId, prNumber, prUrl, existing?.state ?? "open");
   },
 };
 });

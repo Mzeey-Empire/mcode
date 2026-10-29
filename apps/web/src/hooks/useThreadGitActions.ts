@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type MouseEvent } from "react";
+import { useCallback, useState, type MouseEvent } from "react";
 import { useBranchPr } from "@/hooks/useBranchPr";
 import { useHasCommitsAhead } from "@/hooks/useHasCommitsAhead";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -8,16 +8,19 @@ import { isPrable } from "@/lib/is-prable";
 import { resolveThreadDirPath } from "@/lib/worktree";
 import { openGitHubUrl } from "@/features/preview/navigation/open-url-in-preview";
 import type { Thread } from "@/transport";
+import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
 
 function resolveStoredPr(
   thread: Thread,
   cachedPrUrl: string | undefined,
 ): { number: number; url: string; state: string } | null {
-  if (thread.pr_number === null || !cachedPrUrl) return null;
+  const primary = rankPullRequests(thread.pull_requests)[0];
+  const url = primary?.url ?? cachedPrUrl;
+  if (!primary || !url) return null;
   return {
-    number: thread.pr_number,
-    url: cachedPrUrl,
-    state: thread.pr_status ?? "OPEN",
+    number: primary.number,
+    url,
+    state: primary.state,
   };
 }
 
@@ -26,6 +29,7 @@ function resolveCurrentPr<T extends { number: number; url: string; state: string
   storePr: { number: number; url: string; state: string } | null,
 ): T | { number: number; url: string; state: string } | null {
   if (storePr && polledPr?.url && polledPr.number !== storePr.number) return storePr;
+  if (storePr && polledPr?.url) return { ...polledPr, ...storePr };
   return polledPr?.url ? polledPr : storePr;
 }
 
@@ -45,25 +49,6 @@ function useThreadPrState(thread: Thread) {
   const pr = resolveCurrentPr(polledPr, storePr);
   // Only a polled PR carries a title; one this client just created shows none until the next poll.
   const openPrDetail = pr && "title" in pr ? { title: pr.title } : null;
-
-  useEffect(() => {
-    if (!pr) return;
-    useWorkspaceStore.setState((workspaceState) => {
-      const stored = workspaceState.threads.find((candidate) => candidate.id === thread.id);
-      if (!stored) return workspaceState;
-      const stateChanged = stored.pr_status?.toLowerCase() !== pr.state.toLowerCase();
-      const numberChanged = stored.pr_number !== pr.number;
-      if (!stateChanged && !numberChanged) return workspaceState;
-      return {
-        threads: workspaceState.threads.map((candidate) =>
-          candidate.id === thread.id
-            ? { ...candidate, pr_number: pr.number, pr_status: pr.state }
-            : candidate,
-        ),
-      };
-    });
-  }, [pr, thread.id]);
-
   return {
     workspace,
     prable,
@@ -73,14 +58,7 @@ function useThreadPrState(thread: Thread) {
   };
 }
 
-/**
- * Shared commit / create-PR orchestration for a thread, so the chat
- * header and the Review toolbar surface the same actions and PR state from one
- * place. Polls the branch PR + commits-ahead, derives the live PR (preferring a
- * freshly-created store entry over a stale poll), and syncs PR state back to the
- * workspace store. "Commit…" opens the Commit sheet over Review. "Create PR" opens
- * `CreatePrDialog`, which the consumer renders with `createPrOpen`.
- */
+/** Provide shared commit and PR actions, PR state, and creation-dialog state for a thread. */
 export function useThreadGitActions(thread: Thread) {
   const [createPrOpen, setCreatePrOpen] = useState(false);
   const { workspace, prable, pr, checks, openPrDetail } = useThreadPrState(thread);

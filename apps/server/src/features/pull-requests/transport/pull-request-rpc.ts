@@ -11,7 +11,8 @@ import type { WorkspaceService } from "../../projects/lifecycle/workspace-servic
 import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import type { ThreadService } from "../../thread-control/lifecycle/thread-service.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import { broadcast } from "../../../application/transport/push.js";
+import type { PullRequestLinkFunnel } from "../links/pull-request-link-funnel.js";
+import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
 import type { PrDraftService } from "../drafts/pr-draft-service.js";
 import type { GithubService } from "../github/github-service.js";
 import type { PullRequestMutationService } from "../mutations/pull-request-mutation-service.js";
@@ -135,6 +136,7 @@ const pullRequestOperationHandlers = {
 
 /** Defines the services required to route validated pull-request RPC calls. */
 export interface PullRequestRouterDeps {
+  pullRequestLinkFunnel: PullRequestLinkFunnel;
   githubService: GithubService;
   pullRequestService: PullRequestService;
   pullRequestMutationService: PullRequestMutationService;
@@ -212,12 +214,15 @@ async function routeCheckStatus(
   params: GithubCheckStatusParams,
 ): Promise<unknown> {
   const stalenessMs = 15_000;
+  const thread = deps.threadRepo.findById(params.threadId);
+  const primary = rankPullRequests(thread?.pull_requests ?? [])[0];
+  if (!primary) return { aggregate: "no_checks", runs: [], fetchedAt: Date.now() };
   if (!params.force) {
-    const fresh = deps.ciWatcherService.getFreshCache(params.threadId, stalenessMs);
+    const fresh = deps.ciWatcherService.getFreshCache(params.threadId, primary.number, stalenessMs);
     if (fresh) return fresh;
   }
 
-  let entry = deps.ciWatcherService.getEntry(params.threadId);
+  let entry = deps.ciWatcherService.getEntry(params.threadId, primary.number);
   if (!entry) {
     const bootstrap = bootstrapCheckStatusWatch(deps, params.threadId);
     if (bootstrap.kind === "terminal") {
@@ -229,7 +234,7 @@ async function routeCheckStatus(
     return { aggregate: "no_checks" as const, runs: [], fetchedAt: Date.now() };
   }
   const checks = await deps.githubService.getCheckRuns(entry.branch, entry.repoPath);
-  deps.ciWatcherService.refresh(params.threadId, checks);
+  deps.ciWatcherService.refresh(params.threadId, primary.number, checks);
   return checks;
 }
 
@@ -238,19 +243,19 @@ function bootstrapCheckStatusWatch(
   threadId: string,
 ): CheckStatusBootstrap {
   const thread = deps.threadRepo.findById(threadId);
-  const prState = thread?.pr_status?.toLowerCase();
-  const isTerminal = prState === "merged" || prState === "closed";
   if (
-    !thread?.pr_number
+    !thread
     || thread.mode !== "worktree"
     || thread.checkout_state !== "named"
   ) {
     return { kind: "entry", entry: null };
   }
+  const primary = rankPullRequests(thread.pull_requests)[0];
+  if (!primary) return { kind: "entry", entry: null };
 
   const workspace = deps.workspaceRepo.findById(thread.workspace_id);
   if (!workspace) return { kind: "entry", entry: null };
-  if (isTerminal) {
+  if (primary.state === "merged" || primary.state === "closed") {
     return {
       kind: "terminal",
       branch: thread.branch,
@@ -259,12 +264,12 @@ function bootstrapCheckStatusWatch(
   }
   deps.ciWatcherService.watch(
     threadId,
-    thread.pr_number,
+    primary.number,
     thread.branch,
     workspace.path,
     { skipInitialFetch: true },
   );
-  return { kind: "entry", entry: deps.ciWatcherService.getEntry(threadId) };
+  return { kind: "entry", entry: deps.ciWatcherService.getEntry(threadId, primary.number) };
 }
 
 type CheckStatusBootstrap =
@@ -287,14 +292,9 @@ async function routeCreatePr(
     isDraft: params.isDraft,
   });
 
-  deps.threadService.linkPr(params.threadId, result.number, "OPEN");
-  broadcast("thread.prLinked", {
-    threadId: params.threadId,
-    prNumber: result.number,
-    prStatus: "OPEN",
-  });
-  deps.ciWatcherService.unwatch(params.threadId);
-  deps.ciWatcherService.watch(params.threadId, result.number, branch, repoPath);
+  await deps.pullRequestLinkFunnel.observe(params.threadId, [{
+    number: result.number, state: params.isDraft ? "draft" : "open", title: params.title, url: result.url,
+  }]);
   deps.ciWatcherService.scheduleBumpAfterPush(params.threadId);
 
   return result;

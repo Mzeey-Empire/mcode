@@ -1,10 +1,12 @@
 import { inject, injectable } from "tsyringe";
+import type { Thread } from "@mcode/contracts/models/thread";
 import type { Database } from "bun:sqlite";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ThreadStore, MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 import { threadWriteOperations } from "./thread-write-operations.js";
 import type { ThreadAttentionService } from "../attention/thread-attention-service.js";
 import { broadcast } from "../../../application/transport/push.js";
+import type { PullRequestLinkFunnel } from "../../pull-requests/links/pull-request-link-funnel.js";
 export type { ActiveWorktreePathSet, CompletedThreadRetentionRecord, CompletedThreadDeadlineUpdate } from "./thread-store.js";
 export { MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 
@@ -13,6 +15,8 @@ export { MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 export class ThreadRepo {
   /** Read-model invalidation connected by the application composition root. */
   attention?: Pick<ThreadAttentionService, "invalidate">;
+  /** Committed checkout link clears are published by the same PR funnel as observations. */
+  pullRequests?: Pick<PullRequestLinkFunnel, "publishCommitted">;
   private readonly reader: ThreadStore;
 
   constructor(@inject("Database") db: Database, @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {
@@ -114,12 +118,16 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.clearWorktreePath, [id]);
   }
 
-  updateCheckoutToNamedBranch(id: Parameters<ThreadStore["updateCheckoutToNamedBranch"]>[0], branch: Parameters<ThreadStore["updateCheckoutToNamedBranch"]>[1]): Promise<ReturnType<ThreadStore["updateCheckoutToNamedBranch"]>> {
-    return this.writer.execute(threadWriteOperations.updateCheckoutToNamedBranch, [id, branch]);
+  async updateCheckoutToNamedBranch(id: Parameters<ThreadStore["updateCheckoutToNamedBranch"]>[0], branch: Parameters<ThreadStore["updateCheckoutToNamedBranch"]>[1]): Promise<Thread | null> {
+    const result = await this.writer.execute(threadWriteOperations.updateCheckoutToNamedBranch, [id, branch]);
+    if (result?.pullRequestsChanged) this.pullRequests?.publishCommitted(id, []);
+    return result?.thread ?? null;
   }
 
-  updateCheckoutFromHead(id: Parameters<ThreadStore["updateCheckoutFromHead"]>[0], branch: Parameters<ThreadStore["updateCheckoutFromHead"]>[1], checkoutState: Parameters<ThreadStore["updateCheckoutFromHead"]>[2], baseBranch: Parameters<ThreadStore["updateCheckoutFromHead"]>[3], headSha: Parameters<ThreadStore["updateCheckoutFromHead"]>[4]): Promise<ReturnType<ThreadStore["updateCheckoutFromHead"]>> {
-    return this.writer.execute(threadWriteOperations.updateCheckoutFromHead, [id, branch, checkoutState, baseBranch, headSha]);
+  async updateCheckoutFromHead(id: Parameters<ThreadStore["updateCheckoutFromHead"]>[0], branch: Parameters<ThreadStore["updateCheckoutFromHead"]>[1], checkoutState: Parameters<ThreadStore["updateCheckoutFromHead"]>[2], baseBranch: Parameters<ThreadStore["updateCheckoutFromHead"]>[3], headSha: Parameters<ThreadStore["updateCheckoutFromHead"]>[4]): Promise<ReturnType<ThreadStore["updateCheckoutFromHead"]>> {
+    const result = await this.writer.execute(threadWriteOperations.updateCheckoutFromHead, [id, branch, checkoutState, baseBranch, headSha]);
+    if (result?.pullRequestsChanged) this.pullRequests?.publishCommitted(id, []);
+    return result;
   }
 
   softDelete(id: Parameters<ThreadStore["softDelete"]>[0]): Promise<ReturnType<ThreadStore["softDelete"]>> {
@@ -144,10 +152,6 @@ export class ThreadRepo {
 
   clearSdkSessionId(id: Parameters<ThreadStore["clearSdkSessionId"]>[0], providerId: Parameters<ThreadStore["clearSdkSessionId"]>[1]): Promise<ReturnType<ThreadStore["clearSdkSessionId"]>> {
     return this.writer.execute(threadWriteOperations.clearSdkSessionId, [id, providerId]);
-  }
-
-  updatePr(id: Parameters<ThreadStore["updatePr"]>[0], prNumber: Parameters<ThreadStore["updatePr"]>[1], prStatus: Parameters<ThreadStore["updatePr"]>[2]): Promise<ReturnType<ThreadStore["updatePr"]>> {
-    return this.writer.execute(threadWriteOperations.updatePr, [id, prNumber, prStatus]);
   }
 
   updateContextUsage(id: Parameters<ThreadStore["updateContextUsage"]>[0], lastContextTokens: Parameters<ThreadStore["updateContextUsage"]>[1], contextWindow?: Parameters<ThreadStore["updateContextUsage"]>[2]): Promise<ReturnType<ThreadStore["updateContextUsage"]>> {

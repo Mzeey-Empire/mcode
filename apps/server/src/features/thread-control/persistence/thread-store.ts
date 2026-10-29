@@ -5,6 +5,8 @@
 
 import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
+import { forgetThreadPullRequests } from "../../pull-requests/links/pull-request-link-funnel.js";
+import { rankPullRequests, ThreadPullRequestSchema } from "@mcode/contracts/models/thread-pull-request";
 import { PROVIDER_CATALOG } from "@mcode/contracts/providers/catalog";
 import { MessageStore } from "../../agents/conversation/persistence/message-store.js";
 import type { Database } from "bun:sqlite";
@@ -36,9 +38,23 @@ import { advanceThreadActivity } from "./thread-activity.js";
 
 type ThreadRow = typeof threads.$inferSelect & {
   scheduledResume: typeof turnResumeSchedules.$inferSelect | null;
+  pullRequests: string;
 };
 
-const threadSelection = { ...getTableColumns(threads), scheduledResume: turnResumeSchedules };
+const threadSelection = {
+  ...getTableColumns(threads), scheduledResume: turnResumeSchedules,
+  pullRequests: sql<string>`(SELECT json_group_array(json_object(
+    'number', number, 'state', state, 'title', title, 'url', url
+  )) FROM thread_pull_requests WHERE thread_id = threads.id)`,
+};
+
+const linkedPrsSchema = z.array(ThreadPullRequestSchema());
+
+function linkedPullRequests(row: ThreadRow): Thread["pull_requests"] {
+  const prs = linkedPrsSchema.parse(JSON.parse(row.pullRequests));
+  if (prs.length > 0 || row.prNumber === null) return rankPullRequests(prs);
+  return [{ number: row.prNumber, state: "unresolved", title: null, url: null }];
+}
 
 function providerDisplayName(providerId: string): string {
   const provider = PROVIDER_CATALOG.find((entry) => entry.id === providerId);
@@ -91,6 +107,7 @@ function rowToThread(row: ThreadRow): Thread {
   return {
     scheduled_resume: schedule ? ScheduledTurnResumeSchema().parse({ turnId: schedule.turnId, at: schedule.runAt }) : null,
     last_activity_at: lastActivityAt(row),
+    pull_requests: linkedPullRequests(row),
     ...rowToThreadIdentity(row),
     ...rowToThreadLifecycle(row),
     ...rowToThreadPreferences(row),
@@ -100,8 +117,8 @@ function rowToThread(row: ThreadRow): Thread {
 
 function rowToThreadIdentity(row: ThreadRow): Pick<Thread,
   "id" | "workspace_id" | "title" | "status" | "mode" | "worktree_path" | "branch"
-  | "checkout_state" | "base_branch" | "head_sha" | "worktree_managed" | "issue_number" | "pr_number"
-  | "pr_status" | "sdk_session_id" | "model" | "provider" | "providers_used" | "created_at" | "updated_at"
+  | "checkout_state" | "base_branch" | "head_sha" | "worktree_managed" | "issue_number"
+  | "sdk_session_id" | "model" | "provider" | "providers_used" | "created_at" | "updated_at"
 > {
   return {
     id: row.id,
@@ -116,8 +133,6 @@ function rowToThreadIdentity(row: ThreadRow): Pick<Thread,
     head_sha: row.headSha ?? null,
     worktree_managed: row.worktreeManaged === 1,
     issue_number: row.issueNumber,
-    pr_number: row.prNumber,
-    pr_status: row.prStatus,
     sdk_session_id: row.sdkSessionId,
     model: row.model ?? null,
     provider: row.provider,
@@ -230,8 +245,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     head_sha: null,
     worktree_managed: input.worktreeManaged,
     issue_number: null,
-    pr_number: null,
-    pr_status: null,
+    pull_requests: [],
     sdk_session_id: null,
     model: null,
     provider: input.provider,
@@ -870,14 +884,23 @@ export class ThreadStore {
   }
 
   /** Mark a thread as a named-branch checkout after creating a branch in place. */
-  updateCheckoutToNamedBranch(id: string, branch: string): Thread | null {
+  updateCheckoutToNamedBranch(id: string, branch: string): { thread: Thread; pullRequestsChanged: boolean } | null {
+    return this.db.transaction(() => this.persistNamedCheckout(id, branch))();
+  }
+
+  private persistNamedCheckout(id: string, branch: string): { thread: Thread; pullRequestsChanged: boolean } | null {
+    const current = this.findById(id);
+    if (!current) return null;
+    const refChanged = current.branch !== branch || current.checkout_state !== "named";
+    const pullRequestsChanged = refChanged && forgetThreadPullRequests(this.db, id) !== null;
     const now = new Date().toISOString();
     const result = runChanges(this.orm.update(threads)
       .set({ branch, checkoutState: "named", headSha: null, updatedAt: now })
       .where(eq(threads.id, id))
       );
     if (result.changes === 0) return null;
-    return this.findById(id);
+    const thread = this.findById(id);
+    return thread ? { thread, pullRequestsChanged } : null;
   }
 
   /**
@@ -891,7 +914,17 @@ export class ThreadStore {
     checkoutState: "named" | "branchless",
     baseBranch: string | null,
     headSha: string | null,
-  ): { thread: Thread; changed: boolean } | null {
+  ): { thread: Thread; changed: boolean; pullRequestsChanged: boolean } | null {
+    return this.db.transaction(() => this.persistCheckoutFromHead(id, branch, checkoutState, baseBranch, headSha))();
+  }
+
+  private persistCheckoutFromHead(
+    id: string,
+    branch: string,
+    checkoutState: "named" | "branchless",
+    baseBranch: string | null,
+    headSha: string | null,
+  ): { thread: Thread; changed: boolean; pullRequestsChanged: boolean } | null {
     const current = this.findById(id);
     if (!current) return null;
 
@@ -904,10 +937,11 @@ export class ThreadStore {
       !changed &&
       current.base_branch === nextBaseBranch
     ) {
-      return { thread: current, changed: false };
+      return { thread: current, changed: false, pullRequestsChanged: false };
     }
 
     const now = new Date().toISOString();
+    const pullRequestsChanged = refChanged && forgetThreadPullRequests(this.db, id) !== null;
     this.orm
       .update(threads)
       .set({
@@ -915,15 +949,13 @@ export class ThreadStore {
         checkoutState,
         baseBranch: nextBaseBranch,
         headSha,
-        prNumber: sql`CASE WHEN ${refChanged ? 1 : 0} THEN NULL ELSE ${threads.prNumber} END`,
-        prStatus: sql`CASE WHEN ${refChanged ? 1 : 0} THEN NULL ELSE ${threads.prStatus} END`,
         updatedAt: now,
       })
       .where(eq(threads.id, id))
       .run();
 
     const thread = this.findById(id);
-    return thread ? { thread, changed } : null;
+    return thread ? { thread, changed, pullRequestsChanged } : null;
   }
 
   /** Soft-delete a thread by setting deleted_at and status to "deleted". */
@@ -1137,18 +1169,6 @@ export class ThreadStore {
   private recordProviderSession(threadId: string, providerId: string, sessionId: string): void {
     if (this.providerSessions.find(threadId, providerId)?.sessionId === sessionId) return;
     this.providerSessions.upsert({ threadId, providerId, sessionId, lastSeenSequence: 0 });
-  }
-
-  /** Link a GitHub PR to a thread. Returns true if a row was changed. */
-  updatePr(id: string, prNumber: number, prStatus: string): boolean {
-    const now = new Date().toISOString();
-    const result = runChanges(this.orm
-      .update(threads)
-      .set({ prNumber, prStatus, updatedAt: now })
-      .where(eq(threads.id, id))
-      );
-
-    return result.changes > 0;
   }
 
   /** Persist the latest context window usage for a thread.

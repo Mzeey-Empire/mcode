@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ThreadPullRequestSchema } from "../models/thread-pull-request.js";
 import { TurnRevertedEventSchema } from "../models/turn-revert.js";
 import { ThreadAttentionSchema } from "../models/thread-attention.js";
 import { CanonicalAgentProgressFrameSchema } from "../models/canonical-agent-progress.js";
@@ -116,13 +117,13 @@ export const WS_CHANNELS = {
   "thread.deleted": z.object({
     threadId: z.string(),
   }),
-  "thread.prLinked": z.object({
+  "thread.pullRequests": z.object({
     threadId: z.string(),
-    prNumber: z.number(),
-    prStatus: z.string(),
+    pullRequests: z.array(ThreadPullRequestSchema()),
   }),
   "thread.checksUpdated": z.object({
     threadId: z.string(),
+    prNumber: z.number().int().positive(),
     checks: ChecksStatusSchema(),
   }),
   /** Emitted after the thread row's model (and active provider) are persisted for a send. */
@@ -141,8 +142,6 @@ export const WS_CHANNELS = {
       checkoutState: z.enum(["named", "branchless"]),
       baseBranch: z.string().nullable(),
       headSha: z.string().nullable(),
-      prNumber: z.number().nullable(),
-      prStatus: z.string().nullable(),
     }),
   )(),
   "files.changed": z.object({

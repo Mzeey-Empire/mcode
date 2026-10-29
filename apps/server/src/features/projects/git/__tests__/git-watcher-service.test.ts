@@ -1,3 +1,4 @@
+import { createMockThreadPullRequest } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
@@ -88,8 +89,7 @@ describe("GitWatcherService", () => {
           checkout_state: "named",
           base_branch: null,
           head_sha: null,
-          pr_number: null,
-          pr_status: null,
+          pull_requests: [],
         },
       }),
       backfillDetachedHeadSha: vi.fn().mockResolvedValue(null),
@@ -129,8 +129,7 @@ describe("GitWatcherService", () => {
       checkoutState: "named",
       baseBranch: null,
       headSha: null,
-      prNumber: null,
-      prStatus: null,
+
     });
   });
 
@@ -144,8 +143,7 @@ describe("GitWatcherService", () => {
         checkout_state: "branchless",
         base_branch: "main",
         head_sha: "3f9a1c2",
-        pr_number: null,
-        pr_status: null,
+        pull_requests: [],
       },
     });
 
@@ -159,8 +157,7 @@ describe("GitWatcherService", () => {
       checkoutState: "branchless",
       baseBranch: "main",
       headSha: "3f9a1c2",
-      prNumber: null,
-      prStatus: null,
+
     });
   });
 
@@ -191,8 +188,7 @@ describe("GitWatcherService", () => {
       checkoutState: "named",
       baseBranch: null,
       headSha: null,
-      prNumber: null,
-      prStatus: null,
+
     });
   });
 
@@ -207,8 +203,7 @@ describe("GitWatcherService", () => {
         checkout_state: "named",
         base_branch: null,
         head_sha: null,
-        pr_number: 12,
-        pr_status: "OPEN",
+        pull_requests: [createMockThreadPullRequest({ number: 12 })],
       },
     });
     service.setThreadCheckoutChangedListener(listener);

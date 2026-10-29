@@ -1,4 +1,59 @@
 import { z } from "zod";
+import type { ThreadPullRequestState } from "@mcode/contracts/models/thread-pull-request";
+import type { PrInfo } from "@mcode/contracts/github";
+
+const githubThreadPullRequestSchema = z.object({
+  number: z.number().int().positive(),
+  state: z.enum(["OPEN", "CLOSED", "MERGED"]),
+  isDraft: z.boolean(),
+  title: z.string().max(65_536),
+  url: z.string().url().max(4_096),
+});
+
+const githubBranchPullRequestNodeSchema = githubThreadPullRequestSchema.extend({
+  headRepository: z.object({ nameWithOwner: z.string().max(1_024) }).nullable(),
+});
+
+const githubBranchPullRequestsSchema = z.array(z.object({
+  data: z.object({ repository: z.object({
+    pullRequests: z.object({ nodes: z.array(githubBranchPullRequestNodeSchema) }),
+  }) }),
+}));
+
+function normalizeThreadPullRequest(pr: z.infer<typeof githubThreadPullRequestSchema>): PrInfo {
+  return { number: pr.number, title: pr.title.slice(0, 512), url: pr.url,
+    state: normalizeThreadPullRequestState(pr.state, pr.isDraft) };
+}
+
+/** Parse and normalize a branch lookup response at the GitHub boundary. */
+export function parseGithubThreadPullRequest(input: unknown): PrInfo | null {
+  const parsed = githubThreadPullRequestSchema.safeParse(input);
+  return parsed.success ? normalizeThreadPullRequest(parsed.data) : null;
+}
+
+/**
+ * Normalize every page returned by a paginated branch PR discovery, keeping only PRs whose head
+ * branch lives in `headRepository` (`owner/name`).
+ */
+export function parseGithubBranchPullRequests(input: unknown, headRepository: string): PrInfo[] {
+  // GitHub matches `headRefName` across forks, so a fork reusing the branch name would otherwise link to this thread.
+  const head = headRepository.toLowerCase();
+  return githubBranchPullRequestsSchema.parse(input)
+    .flatMap((page) => page.data.repository.pullRequests.nodes)
+    .filter((pr) => pr.headRepository?.nameWithOwner.toLowerCase() === head)
+    .map(normalizeThreadPullRequest);
+}
+
+/** Normalize legacy and GitHub lifecycle observations at the provider boundary. */
+export function normalizeThreadPullRequestState(state: string, isDraft = false): ThreadPullRequestState {
+  switch (state.toLowerCase()) {
+    case "open": return isDraft ? "draft" : "open";
+    case "draft": return "draft";
+    case "merged": return "merged";
+    case "closed": return "closed";
+    default: return "unresolved";
+  }
+}
 import type { PullRequestRelationship, PullRequestState, PullRequestSummary } from "@mcode/contracts/pull-requests";
 
 const githubActorSchema = z.object({

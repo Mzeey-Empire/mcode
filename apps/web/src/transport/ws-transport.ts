@@ -1099,8 +1099,7 @@ export function createWsTransport(
       }),
     listAttention: () => rpc<import("@mcode/contracts/models/thread-attention").ThreadAttention[]>("thread.listAttention", {}),
     acknowledgeSeen: (threadId, throughSequence) => rpc<import("@mcode/contracts/models/thread-attention").AcknowledgeSeenResult>("thread.acknowledgeSeen", { threadId, throughSequence }),
-    syncThreadPrs: (workspaceId) =>
-      rpc<Array<{ threadId: string; prNumber: number; prStatus: string }>>("thread.syncPrs", { workspaceId }),
+    syncThreadPrs: () => rpc<{ checked: number }>("thread.syncPrs", {}),
 
     // Git
     listRefs: (params) => rpc<GitRefsListResult>("git.refs.list", params),

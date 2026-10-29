@@ -1,4 +1,4 @@
-import { createMockThread } from "@mcode/contracts/testing";
+import { createMockThreadPullRequest, createMockThread } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { StrictMode } from "react";
 import { render, screen, act, fireEvent, within } from "@testing-library/react";
@@ -280,8 +280,7 @@ function makeThread(
     checkout_state: "named",
     base_branch: null,
     worktree_managed: false,
-    pr_number: null,
-    pr_status: null,
+    
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     model: null,
@@ -684,8 +683,7 @@ describe("ProjectTree thread interactions", () => {
         title: "Completed work",
         mode: "worktree",
         worktree_path: "C:/test-worktree",
-        pr_number: 42,
-        pr_status: "open",
+        pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })],
         user_completed_at: "2026-08-12T08:00:00.000Z",
         scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
       }),
@@ -1422,8 +1420,6 @@ describe("ProjectTree thread interactions", () => {
 });
 
 describe("ProjectTree action-required indicator", () => {
-  // Holder the tests mutate before calling installWorkspaceMock so they can
-  // swap the rendered thread (e.g. attach a pr_number) and the CI check map.
   let currentThread: TestWorkspaceThread;
   // Shape matches ChecksStatus just enough for sidebar CI aggregation,
   // while keeping the action-required ring tests focused on row state.
@@ -1693,7 +1689,7 @@ describe("ProjectTree action-required indicator", () => {
   });
 
   it("names the wait instead of the PR line when a PR thread needs the user", () => {
-    currentThread = makeThread({ id: "thread-pending", status: "active", mode: "worktree", pr_number: 42, pr_status: "open" });
+    currentThread = makeThread({ id: "thread-pending", status: "active", mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })] });
     currentChecks = {
       "thread-pending": { aggregate: "failing", runs: [{ name: "ci", status: "completed", conclusion: "failure" }] },
     };
@@ -1779,7 +1775,7 @@ describe("ProjectTree action-required indicator", () => {
 
   it("dims only the content of a client scaffold row, not its status lane", () => {
     currentThread = {
-      ...makeThread({ id: "thread-pending", mode: "worktree", pr_number: 42, pr_status: "open" }),
+      ...makeThread({ id: "thread-pending", mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })] }),
       clientPreparing: true,
     } as Thread;
     installWorkspaceMock();
@@ -1844,16 +1840,16 @@ describe("ProjectTree PR-ability gating by mode", () => {
     window.localStorage.clear();
   });
 
-  it("renders no PR icon for a direct-mode thread even when a pr_number is attached", () => {
+  it("renders no PR icon for a direct-mode thread even when a PR is linked", () => {
     renderWithThread(
-      makeThread({ mode: "direct", pr_number: 42, pr_status: "open" }),
+      makeThread({ mode: "direct", pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })] }),
     );
     expect(screen.queryByTitle(/PR #42/)).toBeNull();
   });
 
   it("shows the PR number on the third line, under the title", () => {
     renderWithThread(
-      makeThread({ mode: "worktree", pr_number: 42, pr_status: "open" }),
+      makeThread({ mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })] }),
     );
     const indicator = screen.getByTestId("thread-pr-indicator-thread-1");
     const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
@@ -1869,7 +1865,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
 
   it("renders a merged PR as a violet number, and never words the CI state", () => {
     renderWithThread(
-      makeThread({ mode: "worktree", pr_number: 42, pr_status: "merged" }),
+      makeThread({ mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "merged" })] }),
       {
         "thread-1": {
           aggregate: "failing",
@@ -1884,7 +1880,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
 
   it("shows only the PR number on an open PR with failing checks", () => {
     renderWithThread(
-      makeThread({ mode: "worktree", pr_number: 42, pr_status: "open" }),
+      makeThread({ mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })] }),
       {
         "thread-1": {
           aggregate: "failing",
@@ -1897,7 +1893,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
 
   it("renders no status mark or PR line for a quiet non-PR row", () => {
     renderWithThread(
-      makeThread({ mode: "direct", pr_number: null, status: "paused" }),
+      makeThread({ mode: "direct", pull_requests: [], status: "paused" }),
     );
     expect(screen.getByTestId("thread-status-lane")).toBeEmptyDOMElement();
     expect(screen.queryByTestId("thread-pr-indicator-thread-1")).toBeNull();

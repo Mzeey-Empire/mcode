@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createMockThreadPullRequest } from "@mcode/contracts/testing";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -114,8 +115,7 @@ describe("ThreadOverview branch create and commit", () => {
   it("clears stale PR metadata and caches when creating a named branch", async () => {
     mockWorkspaceState.threads = [
       branchlessThread({
-        pr_number: 42,
-        pr_status: "OPEN",
+        pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })],
         base_branch: "release",
       }),
     ];
@@ -140,8 +140,7 @@ describe("ThreadOverview branch create and commit", () => {
         branch: "feat/issue-801",
         checkout_state: "named",
         base_branch: "release",
-        pr_number: null,
-        pr_status: null,
+        
       });
     });
     expect(mockWorkspaceState.prUrlsByThreadId).toEqual({

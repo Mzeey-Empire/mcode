@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { buildThreadPullRequestWriteHandlers } from "../../../features/pull-requests/links/pull-request-link-funnel.js";
 import { delegatedTaskWriteHandlers } from "../../../features/thread-control/delegation/delegated-task-write-operations.js";
 import { turnResumeScheduleWriteHandlers } from "../../../features/agents/recovery/turn-resume-schedule-store.js";
 import { WorkspaceStore } from "../../../features/projects/persistence/workspace-store.js";
@@ -41,6 +42,7 @@ export function applicationDatabaseHandlers(db: Database): ReadonlyMap<string, (
   const workspace = new WorkspaceStore(db);
   const operations = workspaceWriteOperations;
   return new Map([
+    ...buildThreadPullRequestWriteHandlers(db),
     ...delegatedTaskWriteHandlers(db),
     ...turnResumeScheduleWriteHandlers(db),
     ...sqliteMaintenanceWriteHandlers(db),

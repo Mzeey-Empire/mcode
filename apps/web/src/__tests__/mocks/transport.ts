@@ -116,7 +116,7 @@ const transportDefaults: Partial<McodeTransport> = {
   updateThreadSettings: vi.fn().mockResolvedValue(true),
   listAttention: vi.fn().mockResolvedValue([]),
   acknowledgeSeen: vi.fn().mockResolvedValue({ previous: { sequence: null, at: null }, current: { sequence: null, at: null } }),
-  syncThreadPrs: vi.fn().mockResolvedValue([]),
+  syncThreadPrs: vi.fn().mockResolvedValue({ checked: 0 }),
   discoverConfig: vi.fn().mockResolvedValue({}),
   getVersion: vi.fn().mockResolvedValue("0.1.0"),
   getStage: vi.fn().mockResolvedValue("stable"),

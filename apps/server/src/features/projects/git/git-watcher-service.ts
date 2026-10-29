@@ -232,8 +232,6 @@ export class GitWatcherService {
         checkoutState: thread.checkout_state,
         baseBranch: thread.base_branch,
         headSha: thread.head_sha,
-        prNumber: thread.pr_number,
-        prStatus: thread.pr_status,
       });
     } catch (err) {
       logger.warn("GitWatcherService: failed to sync thread checkout", {

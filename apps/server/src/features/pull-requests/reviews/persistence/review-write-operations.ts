@@ -16,7 +16,7 @@ const storedLink = createLink.extend({ managedRemoteName: z.string().nullable(),
 
 /** Data required to commit a provisioned Review task without crossing a Git callback into SQLite. */
 export const createReviewTaskInputSchema = z.object({
-  identity: PullRequestIdentitySchema(), title: z.string(), baseBranch: z.string(), checkout,
+  identity: PullRequestIdentitySchema(), title: z.string(), pullRequestTitle: z.string().max(512), baseBranch: z.string(), checkout,
   defaults: z.object({
     provider: ProviderIdSchema, model: z.string(), reasoning: ReasoningLevelSchema,
     interactionMode: InteractionModeSchema, permission: PermissionModeSchema,

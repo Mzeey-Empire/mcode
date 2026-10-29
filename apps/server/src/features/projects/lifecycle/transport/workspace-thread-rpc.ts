@@ -1,6 +1,5 @@
 import { WS_METHODS, type WorkspaceCreateResult, type WsMethodName } from "@mcode/contracts/ws/methods";
 import { type Thread } from "@mcode/contracts/models/thread";
-import { type Workspace } from "@mcode/contracts/models/workspace";
 import { logger } from "@mcode/shared";
 import * as NodePerfHooks from "node:perf_hooks";
 import type { z } from "zod";
@@ -8,6 +7,7 @@ import type { GoalLifecycleService } from "../../../agents/goals/goal-lifecycle-
 import { serverWorkTrace } from "../../../agents/diagnostics/server-work-trace.js";
 import { broadcast } from "../../../../application/transport/push.js";
 import type { GithubService } from "../../../pull-requests/github/github-service.js";
+import type { PullRequestLinkFunnel } from "../../../pull-requests/links/pull-request-link-funnel.js";
 import type { CiWatcherService } from "../../../pull-requests/status/ci-watcher.js";
 import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import type { ThreadCompletionService } from "../../../thread-control/lifecycle/thread-completion-service.js";
@@ -44,13 +44,6 @@ type WorkspaceThreadRpcHandlerMap = {
   ) => Promise<unknown> | unknown;
 };
 
-type PrSyncThread = Pick<
-  Thread,
-  "id" | "branch" | "mode" | "checkout_state" | "pr_number" | "pr_status"
->;
-
-type PrSyncResult = { threadId: string; prNumber: number; prStatus: string };
-
 /** Defines the feature services required to route validated Workspace and Thread RPC calls. */
 export interface WorkspaceThreadRouterDeps {
   workspaceService: Pick<WorkspaceService, "create" | "delete" | "findById" | "forceDelete" | "list" | "rename" | "reorder">;
@@ -59,7 +52,7 @@ export interface WorkspaceThreadRouterDeps {
     "beginThreadDeletion" | "beginWorkspaceDeletion" | "cancelSetupForThread" | "cancelSetupForWorkspace" | "removeWorkspaceApprovals" | "read"
   >;
   projectActionService: Pick<ProjectActionService, "beginThreadTeardown" | "beginWorkspaceTeardown" | "reopenThread" | "stopForThread">;
-  threadService: Pick<ThreadService, "create" | "delete" | "findById" | "linkPr" | "list" | "listRecent" | "search" | "updateSettings" | "updateTitle">;
+  threadService: Pick<ThreadService, "create" | "delete" | "findById" | "list" | "listRecent" | "search" | "updateSettings" | "updateTitle">;
   threadAttentionService: Pick<ThreadAttentionService, "listInteresting" | "acknowledgeSeen">;
   goalLifecycleService: Pick<GoalLifecycleService, "clear" | "get">;
   threadCompletionService: Pick<ThreadCompletionService, "cleanupBlockedCount" | "complete" | "reopen" | "retryCleanup">;
@@ -67,7 +60,8 @@ export interface WorkspaceThreadRouterDeps {
   threadRepo: Pick<ThreadRepo, "findById" | "listAllByWorkspace" | "listAll">;
   workspaceRepo: Pick<WorkspaceRepo, "findById" | "removeRecent" | "setPinned" | "touchLastOpened">;
   gitWatcherService: Pick<GitWatcherService, "retryWatch" | "unwatchThreadWorktree" | "unwatchWorkspace" | "watchThreadWorktree" | "watchWorkspace">;
-  githubService: Pick<GithubService, "cancelForRepoPath" | "getBranchPr" | "getPullRequestWatchSnapshots">;
+  githubService: Pick<GithubService, "cancelForRepoPath" | "listBranchPrs" | "getPullRequestWatchSnapshots">;
+  pullRequestLinkFunnel: Pick<PullRequestLinkFunnel, "observe">;
   ciWatcherService: Pick<CiWatcherService, "refresh" | "teardownThread" | "unwatch" | "watch">;
   enricher: Pick<WorkspaceEnricher, "enrich">;
   filesystemBrowser: Pick<FilesystemBrowser, "browse">;
@@ -120,7 +114,7 @@ const workspaceThreadHandlers = {
     sort: params.sort,
     limit: params.limit,
   }),
-  "thread.syncPrs": (deps, params) => syncThreadPullRequests(deps, params.workspaceId),
+  "thread.syncPrs": (deps) => syncThreadPullRequests(deps),
 } satisfies WorkspaceThreadRpcHandlerMap;
 
 /** Checks whether a WebSocket method belongs to the Workspace and Thread RPC families. */
@@ -302,121 +296,66 @@ function updateThreadSettings(
   });
 }
 
-async function syncThreadPullRequests(
-  deps: WorkspaceThreadRouterDeps,
-  workspaceId: string,
-): Promise<PrSyncResult[]> {
-  const syncWorkspace = deps.workspaceService.findById(workspaceId);
-  if (!syncWorkspace?.is_git_repo) return [];
-  const threads = deps.threadService.list(workspaceId).filter(isNamedWorktreeThread);
-  const candidates = threads.filter(needsPullRequestCheck);
-  if (candidates.length === 0) return [];
-  const workspace = deps.workspaceService.findById(workspaceId);
-  if (!workspace) return [];
-  const results: PrSyncResult[] = [];
-  await syncLinkedPullRequests(deps, candidates, workspace, results);
-  await syncUnlinkedPullRequests(deps, candidates, workspace, results);
-  return results;
+type PrSyncDeps = {
+  threadRepo: Pick<ThreadRepo, "listAll" | "findById">;
+  workspaceService: Pick<WorkspaceService, "findById">;
+  githubService: Pick<GithubService, "listBranchPrs" | "getPullRequestWatchSnapshots">;
+  pullRequestLinkFunnel: Pick<PullRequestLinkFunnel, "observe">;
+  ciWatcherService: Pick<CiWatcherService, "refresh">;
+};
+
+/** Refresh linked PRs across the global thread index, publishing through the funnel. */
+export async function syncThreadPullRequests(
+  deps: PrSyncDeps,
+): Promise<{ checked: number }> {
+  const candidates = deps.threadRepo.listAll().filter((thread) =>
+    thread.mode === "worktree" && thread.checkout_state === "named",
+  );
+  const byWorkspace = new Map<string, Thread[]>();
+  for (const thread of candidates) {
+    const group = byWorkspace.get(thread.workspace_id) ?? [];
+    group.push(thread);
+    byWorkspace.set(thread.workspace_id, group);
+  }
+  for (const [workspaceId, threads] of byWorkspace) {
+    const workspace = deps.workspaceService.findById(workspaceId);
+    if (!workspace?.is_git_repo) continue;
+    await syncWorkspacePullRequests(deps, threads, workspace.path);
+  }
+  return { checked: candidates.length };
 }
 
-function isNamedWorktreeThread(thread: Thread): boolean {
-  return thread.mode === "worktree" && thread.checkout_state === "named";
+function unchangedCheckout(deps: PrSyncDeps, previous: Thread): Thread | null {
+  const current = deps.threadRepo.findById(previous.id);
+  return current?.branch === previous.branch && current.checkout_state === previous.checkout_state
+    ? current : null;
 }
 
-/** Returns true if the thread has no linked PR, missing status, or a non-terminal PR state. */
-function needsPullRequestCheck(thread: PrSyncThread): boolean {
-  return thread.pr_number === null || thread.pr_status === null || !isTerminalPullRequestState(thread.pr_status);
-}
-
-function isTerminalPullRequestState(status: string): boolean {
-  const normalized = status.toLowerCase();
-  return normalized === "merged" || normalized === "closed";
-}
-
-async function syncLinkedPullRequests(
-  deps: WorkspaceThreadRouterDeps,
-  candidates: readonly PrSyncThread[],
-  workspace: Workspace,
-  results: PrSyncResult[],
+async function syncWorkspacePullRequests(
+  deps: PrSyncDeps,
+  threads: Thread[],
+  repoPath: string,
 ): Promise<void> {
-  const linkedThreads = candidates.filter(
-    (thread): thread is PrSyncThread & { pr_number: number } => thread.pr_number !== null,
-  );
-  if (linkedThreads.length === 0) return;
-  const linkedThreadsById = new Map(linkedThreads.map((thread) => [thread.id, thread]));
-  const snapshots = await deps.githubService.getPullRequestWatchSnapshots(
-    linkedThreads.map((thread) => ({
-      threadId: thread.id,
-      prNumber: thread.pr_number,
-      repoPath: workspace.path,
-    })),
-  );
+  const byId = new Map(threads.map((thread) => [thread.id, thread]));
+  const targets = threads.flatMap((thread) => thread.pull_requests
+    .filter((pr) => pr.state !== "merged" && pr.state !== "closed")
+    .map((pr) => ({ threadId: thread.id, prNumber: pr.number, repoPath })));
+  const snapshots = targets.length > 0 ? await deps.githubService.getPullRequestWatchSnapshots(targets) : [];
   for (const snapshot of snapshots) {
-    if (!linkedThreadsById.has(snapshot.threadId)) continue;
-    const thread = deps.threadService.findById(snapshot.threadId);
-    if (!thread || thread.pr_number !== snapshot.prNumber) continue;
-    if (thread.pr_status?.toLowerCase() !== snapshot.state.toLowerCase()) {
-      deps.threadService.linkPr(thread.id, snapshot.prNumber, snapshot.state);
-      results.push({ threadId: thread.id, prNumber: snapshot.prNumber, prStatus: snapshot.state });
-    }
-    refreshLinkedPullRequestWatcher(deps, thread, snapshot, workspace.path);
+    const previous = byId.get(snapshot.threadId);
+    if (!previous) continue;
+    const current = unchangedCheckout(deps, previous);
+    if (!current?.pull_requests.some((pr) => pr.number === snapshot.prNumber)) continue;
+    await deps.pullRequestLinkFunnel.observe(current.id, [{
+      number: snapshot.prNumber, state: snapshot.state, title: snapshot.title, url: snapshot.url,
+    }]);
+    deps.ciWatcherService.refresh(current.id, snapshot.prNumber, snapshot.checks);
   }
-}
-
-function refreshLinkedPullRequestWatcher(
-  deps: WorkspaceThreadRouterDeps,
-  thread: Thread,
-  snapshot: Awaited<ReturnType<GithubService["getPullRequestWatchSnapshots"]>>[number],
-  workspacePath: string,
-): void {
-  if (snapshot.state === "OPEN") {
-    deps.ciWatcherService.watch(
-      thread.id,
-      snapshot.prNumber,
-      thread.branch,
-      workspacePath,
-      { skipInitialFetch: true },
-    );
-    deps.ciWatcherService.refresh(thread.id, snapshot.checks);
-    return;
-  }
-  deps.ciWatcherService.unwatch(thread.id);
-}
-
-async function syncUnlinkedPullRequests(
-  deps: WorkspaceThreadRouterDeps,
-  candidates: readonly PrSyncThread[],
-  workspace: Workspace,
-  results: PrSyncResult[],
-): Promise<void> {
-  const unlinkedThreads = candidates.filter((thread) => thread.pr_number === null);
-  await Promise.allSettled(
-    unlinkedThreads.map((thread) => syncUnlinkedPullRequest(deps, thread, workspace.path, results)),
-  );
-}
-
-async function syncUnlinkedPullRequest(
-  deps: WorkspaceThreadRouterDeps,
-  thread: PrSyncThread,
-  workspacePath: string,
-  results: PrSyncResult[],
-): Promise<void> {
-  const pullRequest = await deps.githubService.getBranchPr(thread.branch, workspacePath);
-  if (!pullRequest) return;
-  const numberChanged = thread.pr_number !== pullRequest.number;
-  const statusChanged = thread.pr_status?.toLowerCase() !== pullRequest.state.toLowerCase();
-  if (numberChanged || statusChanged) {
-    deps.threadService.linkPr(thread.id, pullRequest.number, pullRequest.state);
-    results.push({ threadId: thread.id, prNumber: pullRequest.number, prStatus: pullRequest.state });
-  }
-  // Start CI watching if PR is not in terminal state.
-  // Unwatch first when the PR number changed so the watcher targets the new PR.
-  if (!isTerminalPullRequestState(pullRequest.state)) {
-    if (numberChanged) deps.ciWatcherService.unwatch(thread.id);
-    deps.ciWatcherService.watch(thread.id, pullRequest.number, thread.branch, workspacePath);
-    return;
-  }
-  deps.ciWatcherService.unwatch(thread.id);
+  await Promise.all(threads.map(async (thread) => {
+    const prs = await deps.githubService.listBranchPrs(thread.branch, repoPath);
+    if (!unchangedCheckout(deps, thread)) return;
+    await deps.pullRequestLinkFunnel.observe(thread.id, prs);
+  }));
 }
 
 async function teardownWorkspaceThreads(
