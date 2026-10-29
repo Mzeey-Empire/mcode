@@ -287,7 +287,7 @@ async function buildService(
 
 afterEach(closeAgentStorageTestDatabases);
 
-describe("AgentService turn cleanup", () => {
+describe("AgentService turn cleanup through the production execution worker", { timeout: 30_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -943,7 +943,7 @@ describe("AgentService turn cleanup", () => {
   });
 });
 
-describe("AgentService Ended finalization", () => {
+describe("AgentService Ended finalization through the production execution worker", { timeout: 30_000 }, () => {
   let db: Database;
   let threadRepo: RealThreadRepo;
   let workspaceRepo: RealWorkspaceRepo;
