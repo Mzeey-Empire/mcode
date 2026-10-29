@@ -6,7 +6,7 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { useGatedOpen } from "./overlay-gate"
 import { FIELD_SURFACE_CLASS } from "./field-surface"
-import { MENU_LIST_CLASS, MENU_ROW_CLASS, MenuRowCheck } from "./menu-row"
+import { MENU_LIST_CLASS, MENU_ROW_CLASS, MENU_SEPARATOR_CLASS, MenuRowCheck } from "./menu-row"
 import { POPOVER_FADE_CLASS, POPOVER_SURFACE_CLASS } from "./overlay-surface"
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react"
 
@@ -176,7 +176,7 @@ function SelectSeparator({
   return (
     <SelectPrimitive.Separator
       data-slot="select-separator"
-      className={cn("pointer-events-none flex h-[0.9rem] shrink-0 items-center px-2 before:h-px before:flex-1 before:bg-border", className)}
+      className={cn("pointer-events-none", MENU_SEPARATOR_CLASS, className)}
       {...props}
     />
   )

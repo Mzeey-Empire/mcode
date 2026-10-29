@@ -18,6 +18,9 @@ export const MENU_ROW_CLASS = cn(
 /** Menu surface (I6X-0) spacing: 4px padding, with rows sitting flush. */
 export const MENU_LIST_CLASS = "flex flex-col p-1"
 
+/** A 1px divider in a 9px band that spans the full row width, like the thread overview's dividers. */
+export const MENU_SEPARATOR_CLASS = "flex h-[0.9rem] shrink-0 items-center before:h-px before:flex-1 before:bg-border"
+
 /**
  * A disabled row stays listed and dimmed. It keeps pointer events so hovering it still shows
  * the tooltip that explains why it is unavailable.
