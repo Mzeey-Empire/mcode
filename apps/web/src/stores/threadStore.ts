@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
+import { TurnAdmissionError, turnAdmissionFailureReason } from "@mcode/shared/turn-admission";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { AgentModelState, AgentTurn, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { CanonicalAgentProgressFrame, CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
@@ -3140,7 +3141,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const isControlCommand = isGoalControlCommand(content);
     const runningBeforeControl = isControlCommand ? new Set(get().runningThreadIds) : undefined;
     if (!isControlCommand && get().runningThreadIds.has(threadId)) {
-      throw new Error(`Thread ${threadId} already has an active agent session`);
+      throw new TurnAdmissionError("busy", `Thread ${threadId} already has an active agent session`);
     }
     if (!isControlCommand) {
       invalidateDeferredNarrativeEvents(threadId);
@@ -3262,7 +3263,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     alreadySent = false,
   ): boolean => {
     const message = String(error);
-    const activeSessionConflict = !isControlCommand && message.includes("already has an active agent session");
+    const activeSessionConflict = !isControlCommand && turnAdmissionFailureReason(error) === "busy";
     // A resend another window already sent is a normal outcome. Its turn owns the thread now, so
     // like a session conflict the optimistic prompt is dropped and the runtime is left alone.
     const discardPrompt = activeSessionConflict || alreadySent;

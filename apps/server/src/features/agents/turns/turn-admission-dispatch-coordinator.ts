@@ -55,6 +55,7 @@ import { ApprovalReviewPolicy, type ApprovalReviewDecision } from "./approval-re
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import type { ExecutionParentStartContext } from "../execution/provider-execution-event-state.js";
 import type { ProviderSwitchService, ProviderSwitchTicket } from "./provider-switch-service.js";
+import { TurnAdmissionError } from "@mcode/shared/turn-admission";
 
 
 /** Automatic setup dispatch contract exposed to the turn command facade. */
@@ -669,15 +670,17 @@ export class TurnAdmissionDispatchCoordinator {
 
   private requireThread(threadId: string): Exclude<ReturnType<ThreadRepo["findById"]>, null> {
     const thread = this.threads.findById(threadId);
-    if (!thread) throw new Error(`Thread not found: ${threadId}`);
+    if (!thread) throw new TurnAdmissionError("unavailable", `Thread not found: ${threadId}`);
     return thread;
   }
 
   private requireSendableThread(thread: Exclude<ReturnType<ThreadRepo["findById"]>, null>): void {
     if (["failed", "stopped", "archived", "deleted"].includes(thread.status)) {
-      throw new Error(`Cannot send message to terminal thread: ${thread.id}`);
+      throw new TurnAdmissionError("stopped", `Cannot send message to terminal thread: ${thread.id}`);
     }
-    if (thread.deleted_at != null) throw new Error(`Cannot send message to deleted thread: ${thread.id}`);
+    if (thread.deleted_at != null) {
+      throw new TurnAdmissionError("stopped", `Cannot send message to deleted thread: ${thread.id}`);
+    }
   }
 
   private selectProvider(threadProvider: string | null, requested: ProviderId | undefined): ProviderId {

@@ -73,6 +73,7 @@ import { idleRuntime, isActiveRuntimeExecution, isRunningRuntime, ownsStoppedExe
 import type { TurnRuntimeEventControl } from "./turn-runtime-event-control.js";
 import { TurnSteerRuntimePort, type SteerableTurn } from "../steering/turn-steer-runtime-port.js";
 import { isLostProviderStream } from "../events/provider-event-publication.js";
+import { TurnAdmissionError, turnAdmissionFailureReason } from "@mcode/shared/turn-admission";
 
 /**
  * Bounded wait for `provider.stopSession` before the turn is force-finalized.
@@ -372,12 +373,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Reserve one runtime generation and its mutation lease for a new admitted turn. */
   private reserveTurnAdmission(command: SendMessageCommand): TurnRuntimeLease {
     if (!this.reserveTurn(command.threadId)) {
-      throw new Error(`Thread ${command.threadId} already has an active agent session`);
+      throw new TurnAdmissionError("busy", `Thread ${command.threadId} already has an active agent session`);
     }
     const token = this.reserveMutationToken(command);
     if (!token) {
       this.activeSessionIds.delete(command.threadId);
-      throw new Error(`Thread ${command.threadId} already has a pending mutation`);
+      throw new TurnAdmissionError("pending_mutation", `Thread ${command.threadId} already has a pending mutation`);
     }
     this.unsentStopsByThread.delete(command.threadId);
     const generation = (this.turnGenerations.get(command.threadId) ?? 0) + 1;
@@ -1679,18 +1680,21 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   private providerTurnAdmissionFailure(threadId: string, error: unknown): Extract<ProviderTurnOpening, { kind: "declined" }> {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/already has an active agent session/.test(message)) return { kind: "declined", reason: "busy" };
-    if (/already has a pending mutation/.test(message)) {
-      this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "provider turn during pending mutation");
-      return { kind: "declined", reason: "busy" };
+    const reason = turnAdmissionFailureReason(error);
+    switch (reason) {
+      case "busy":
+        return { kind: "declined", reason: "busy" };
+      case "pending_mutation":
+        this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "provider turn during pending mutation");
+        return { kind: "declined", reason: "busy" };
+      case "stopped":
+        this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "provider turn on stopped thread");
+        return { kind: "declined", reason: "stopped" };
+      case "unavailable":
+      case null:
+        logger.warn("Provider turn admission failed", { threadId, error: error instanceof Error ? error.message : String(error) });
+        return { kind: "declined", reason: "unavailable" };
     }
-    if (/Cannot send message to (terminal|deleted) thread/.test(message)) {
-      this.stopUnadmittedTurn(threadId, this.activeProviderId(threadId), "provider turn on stopped thread");
-      return { kind: "declined", reason: "stopped" };
-    }
-    logger.warn("Provider turn admission failed", { threadId, error: message });
-    return { kind: "declined", reason: "unavailable" };
   }
 
   /** Record an adopted turn's dispatch state without sending a prompt the provider never received. */

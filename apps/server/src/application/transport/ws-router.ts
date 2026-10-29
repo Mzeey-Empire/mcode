@@ -163,6 +163,8 @@ import type { ProviderStatusService } from "../../features/providers/status/prov
 
 import type { ModelCacheService } from "../../features/providers/models/model-cache-service.js";
 import type { RecapService } from "../../features/agents/recap/recap-service.js";
+import { TurnAdmissionError } from "@mcode/shared/turn-admission";
+import type { TurnAdmissionFailure } from "@mcode/contracts/models/turn-admission";
 
 type TerminalDiagnosticsMethod =
   | "terminal.diagnostics.report"
@@ -491,6 +493,14 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
   return steerRouteError(id, error, message);
 }
 
+function turnAdmissionRouteError(id: string, error: TurnAdmissionError, message: string): WebSocketResponse {
+  const failure = {
+    code: "TURN_ADMISSION_REJECTED",
+    data: { reason: error.reason },
+  } satisfies TurnAdmissionFailure;
+  return { id, error: { ...failure, message } };
+}
+
 function isPlanCommentAdmissionError(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "plan_comment_invalid";
 }
@@ -509,6 +519,7 @@ function steerRouteError(id: string, error: unknown, message: string): WebSocket
 export function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
   const message = error instanceof Error ? error.message : String(error);
   if (error instanceof HandoffBudgetExhaustedError) return { id: request.id, error: { code: error.code, message } };
+  if (error instanceof TurnAdmissionError) return turnAdmissionRouteError(request.id, error, message);
   const domain = domainRouteError(request.id, error, message);
   if (domain) return domain;
   if (error instanceof TerminalBackendError) {

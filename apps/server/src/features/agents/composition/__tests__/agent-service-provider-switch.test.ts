@@ -356,7 +356,6 @@ describe("provider switch on send", () => {
     const running = send(claude, "long running work");
     await waitFor(() => runtime.owner.current(threadId) !== undefined);
 
-    // AgentService has no error code for a busy thread; callers match this message (thread-control maps it to thread_busy).
     await expect(send(codex, "switch now")).rejects.toThrow(/already has an active agent session/);
     expect(codex.sendTurn).not.toHaveBeenCalled();
     expect(thread().provider).toBe("claude");
@@ -368,6 +367,26 @@ describe("provider switch on send", () => {
 
     expect(lastRequest(codex).message).toContain("long running work");
     await waitFor(() => thread().provider === "codex");
+  });
+
+  it("reports a competing send as busy through the RPC boundary", async () => {
+    const release = deferred();
+    claude.sendTurn.mockImplementationOnce(async (request) => {
+      await release.promise;
+      await answer(claude, "done", "claude-s1")(request);
+    });
+    const running = send(claude, "long running work");
+    await waitFor(() => runtime.owner.current(threadId) !== undefined);
+
+    const response = await send(claude, "competing send").then(
+      () => undefined,
+      (error: unknown) => mapRouteError({ id: "send-request", method: "agent.send", params: {} }, error),
+    );
+    expect(response?.error).toMatchObject({ code: "TURN_ADMISSION_REJECTED", data: { reason: "busy" } });
+
+    release.resolve();
+    await running;
+    await settled(1);
   });
 
   it("leaves provider, model, session and history unchanged when the target fails before its first event", async () => {

@@ -17,6 +17,7 @@ import { useToastStore } from "@/stores/toastStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { mockTransport } from "./mocks/transport";
+import { RpcError } from "@/transport/ws-transport";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
@@ -292,8 +293,7 @@ describe("Thread Lifecycle Behavior", () => {
     expect(getTestThreadMessages(threadId)).toEqual([existing]);
   });
 
-  it("when the server rejects an unknown active turn, the optimistic duplicate is removed", async () => {
-    const threadId = "thread-1";
+  function seedIdleThreadWithFirstTurn(threadId: string) {
     const existing = createMockMessage({
       id: "user-1",
       thread_id: threadId,
@@ -307,15 +307,45 @@ describe("Thread Lifecycle Behavior", () => {
         [threadId, { ...createEmptyThreadRecord(), messages: [existing] }],
       ]),
     });
-    (
-      mockTransport.sendMessage as ReturnType<typeof vi.fn>
-    ).mockRejectedValueOnce(new Error("Thread thread-1 already has an active agent session"));
+    return existing;
+  }
+
+  function rejectNextSend(error: Error) {
+    (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValueOnce(error);
+  }
+
+  it("when the server refuses a send as busy, the optimistic duplicate is removed", async () => {
+    const threadId = "thread-1";
+    const existing = seedIdleThreadWithFirstTurn(threadId);
+    rejectNextSend(new RpcError("Another turn holds this thread", "TURN_ADMISSION_REJECTED", { reason: "busy" }));
 
     await useThreadStore.getState().sendMessage(threadId, "duplicate turn");
 
     expect(useThreadStore.getState().runningThreadIds.has(threadId)).toBe(true);
     expect(getTestThreadMessages(threadId)).toEqual([existing]);
+    expect(getTestThreadError(threadId)).toContain("Another turn holds this thread");
+  });
+
+  it("when an untyped server error mentions an active session, the prompt is kept", async () => {
+    const threadId = "thread-1";
+    seedIdleThreadWithFirstTurn(threadId);
+    rejectNextSend(new RpcError("Thread thread-1 already has an active agent session", "INTERNAL_ERROR"));
+
+    await useThreadStore.getState().sendMessage(threadId, "kept turn");
+
+    expect(getTestThreadMessages(threadId).map((message) => message.content)).toEqual(["first turn", "kept turn"]);
     expect(getTestThreadError(threadId)).toContain("already has an active agent session");
+  });
+
+  it("when the server refuses a send because the thread stopped, the prompt is kept", async () => {
+    const threadId = "thread-1";
+    seedIdleThreadWithFirstTurn(threadId);
+    rejectNextSend(new RpcError("Cannot send message to terminal thread: thread-1", "TURN_ADMISSION_REJECTED", { reason: "stopped" }));
+
+    await useThreadStore.getState().sendMessage(threadId, "kept turn");
+
+    expect(getTestThreadMessages(threadId).map((message) => message.content)).toEqual(["first turn", "kept turn"]);
+    expect(getTestThreadError(threadId)).toContain("terminal thread");
   });
 
   it("when the user stops an agent, the thread is no longer running", async () => {
