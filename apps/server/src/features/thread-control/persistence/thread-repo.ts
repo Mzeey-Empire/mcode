@@ -62,8 +62,12 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.advanceActivity, [id, at]);
   }
 
-  complete(id: Parameters<ThreadStore["complete"]>[0], completedAt: Parameters<ThreadStore["complete"]>[1], scheduledDeletionAt: Parameters<ThreadStore["complete"]>[2]): Promise<ReturnType<ThreadStore["complete"]>> {
-    return this.writer.execute(threadWriteOperations.complete, [id, completedAt, scheduledDeletionAt]);
+  /** Publish completion only after its lifecycle write commits. */
+  async complete(id: Parameters<ThreadStore["complete"]>[0], completedAt: Parameters<ThreadStore["complete"]>[1], scheduledDeletionAt: Parameters<ThreadStore["complete"]>[2]): Promise<ReturnType<ThreadStore["complete"]>> {
+    const previous = this.findById(id);
+    const thread = await this.writer.execute(threadWriteOperations.complete, [id, completedAt, scheduledDeletionAt]);
+    if (thread && previous?.user_completed_at === null) broadcast("thread.lifecycleChanged", { thread });
+    return thread;
   }
 
   listCompletedRetentionRecords(afterId: Parameters<ThreadStore["listCompletedRetentionRecords"]>[0] = null, limit: Parameters<ThreadStore["listCompletedRetentionRecords"]>[1] = 100): ReturnType<ThreadStore["listCompletedRetentionRecords"]> {
@@ -74,8 +78,12 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.updateCompletedThreadDeadlines, [updates]);
   }
 
-  reopen(id: Parameters<ThreadStore["reopen"]>[0], reopenedAt: Parameters<ThreadStore["reopen"]>[1] = new Date().toISOString()): Promise<ReturnType<ThreadStore["reopen"]>> {
-    return this.writer.execute(threadWriteOperations.reopen, [id, reopenedAt]);
+  /** Publish reopen only after its lifecycle write commits. */
+  async reopen(id: Parameters<ThreadStore["reopen"]>[0], reopenedAt: Parameters<ThreadStore["reopen"]>[1] = new Date().toISOString()): Promise<ReturnType<ThreadStore["reopen"]>> {
+    const previous = this.findById(id);
+    const thread = await this.writer.execute(threadWriteOperations.reopen, [id, reopenedAt]);
+    if (thread && previous?.user_completed_at != null) broadcast("thread.lifecycleChanged", { thread });
+    return thread;
   }
 
   claimRetentionCleanup(id: Parameters<ThreadStore["claimRetentionCleanup"]>[0], nowIso: Parameters<ThreadStore["claimRetentionCleanup"]>[1]): Promise<ReturnType<ThreadStore["claimRetentionCleanup"]>> {

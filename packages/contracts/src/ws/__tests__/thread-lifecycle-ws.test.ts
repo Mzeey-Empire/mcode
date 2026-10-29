@@ -41,6 +41,25 @@ describe("thread completion transport", () => {
     expect(WS_CHANNELS["thread.lifecycleChanged"].parse({ thread })).toEqual({ thread });
   });
 
+  it("accepts typed completion outcomes and rejects unknown refusals", () => {
+    const result = WS_METHODS()["thread.complete"].result;
+    const thread = createMockThread();
+
+    expect(result.parse({ ok: true, thread })).toEqual({ ok: true, thread });
+    expect(result.parse({ ok: false, refusal: "running" })).toEqual({ ok: false, refusal: "running" });
+    expect(result.safeParse({ ok: false, refusal: "unknown" }).success).toBe(false);
+    expect(result.safeParse({ ok: true }).success).toBe(false);
+  });
+
+  it("clamps completion holds and rejects negative or fractional durations", () => {
+    const params = WS_METHODS()["thread.complete"].params;
+
+    expect(params.parse({ threadId: "thread-1", holdMs: 9000 })).toEqual({ threadId: "thread-1", holdMs: 5000 });
+    expect(params.parse({ threadId: "thread-1", holdMs: 0 })).toEqual({ threadId: "thread-1", holdMs: 0 });
+    expect(params.safeParse({ threadId: "thread-1", holdMs: -1 }).success).toBe(false);
+    expect(params.safeParse({ threadId: "thread-1", holdMs: 0.5 }).success).toBe(false);
+  });
+
   it("validates automatic deletion pushes", () => {
     expect(WS_CHANNELS["thread.deleted"].parse({ threadId: "thread-1" })).toEqual({
       threadId: "thread-1",

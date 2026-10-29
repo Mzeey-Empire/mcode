@@ -2,6 +2,7 @@ import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import type { CompletedThreadRetentionDays, Settings } from "@mcode/contracts/models/settings";
 import type { Thread } from "@mcode/contracts/models/thread";
+import type { ThreadCompletionRefusal, ThreadCompletionResult } from "@mcode/contracts/ws/methods";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { AgentService } from "../../agents/index.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
@@ -9,6 +10,7 @@ import { SettingsService } from "../../settings/settings-service.js";
 import { ThreadTeardownService } from "./thread-teardown-service.js";
 import { ThreadControlMutationReservationService } from "../authority/thread-control-mutation-reservation-service.js";
 import { CleanupJobRepo } from "../cleanup/persistence/cleanup-job-repo.js";
+import { CompletionHolds } from "./completion-holds.js";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const OVERDUE_SAFETY_MS = DAY_MS;
@@ -32,16 +34,19 @@ export class ThreadCompletionService {
 
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
-    @inject(AgentService) private readonly agentService: AgentService,
-    @inject(ApprovalService) private readonly permissions: ApprovalService,
-    @inject(ThreadTeardownService) private readonly teardownService: ThreadTeardownService,
+    @inject(AgentService) private readonly agentService: {
+      runtimeAccess(): Pick<ReturnType<AgentService["runtimeAccess"]>, "activeThreadIds">;
+    },
+    @inject(ApprovalService) private readonly permissions: Pick<ApprovalService, "listPendingApprovals">,
+    @inject(ThreadTeardownService) private readonly teardownService: Pick<ThreadTeardownService, "teardownThread">,
     @inject(ThreadControlMutationReservationService)
     private readonly mutationReservations: ThreadControlMutationReservationService,
-    @inject(SettingsService) private readonly settingsService: SettingsService,
+    @inject(SettingsService) private readonly settingsService: Pick<SettingsService, "get" | "on">,
     @inject("ThreadCompletionClock", { isOptional: true })
     private readonly clock: (() => Date) | undefined,
     @inject(CleanupJobRepo)
     private readonly cleanupJobRepo: CleanupJobRepo,
+    @inject(CompletionHolds) private readonly completionHolds: CompletionHolds = new CompletionHolds(),
   ) {}
 
   /** Start retention reconciliation for settings changes. */
@@ -70,6 +75,7 @@ export class ThreadCompletionService {
 
   /** Stop retention reconciliation for settings changes. */
   stop(): void {
+    this.completionHolds.stop();
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = null;
     this.retentionRecalculationGeneration += 1;
@@ -95,33 +101,43 @@ export class ThreadCompletionService {
   }
 
   /** Complete an idle thread and release its thread-owned runtime resources. */
-  async complete(threadId: string): Promise<Thread> {
+  complete(threadId: string, holdMs = 0): Promise<ThreadCompletionResult> {
+    return this.completionHolds.complete(threadId, holdMs, () => this.commitCompletion(threadId));
+  }
+
+  private async commitCompletion(threadId: string): Promise<ThreadCompletionResult> {
     const token = this.mutationReservations.reserve(threadId, "completing");
-    if (!token) throw new Error(`Thread has a pending mutation: ${threadId}`);
+    if (!token) return { ok: false, refusal: "busy" };
 
     try {
       const thread = this.requireThread(threadId);
-      if (thread.user_completed_at !== null) return thread;
-      this.assertCompletable(threadId);
-      const { failures, barriers } = await this.releaseThreadResources(threadId);
-      try {
-        this.throwOnCompletionFailures(threadId, failures);
-        return await this.persistCompletion(thread);
-      } finally {
-        for (const release of barriers) release();
-      }
+      if (thread.user_completed_at !== null) return { ok: true, thread };
+      const refusal = this.assertCompletable(threadId);
+      if (refusal) return { ok: false, refusal };
+      const completed = await this.persistCompletion(thread);
+      return { ok: true, thread: await this.releaseResourcesBeforeAdmissionReopens(completed) };
     } finally {
       this.mutationReservations.release(threadId, token);
     }
   }
 
-  private assertCompletable(threadId: string): void {
+  private async releaseResourcesBeforeAdmissionReopens(completed: Thread): Promise<Thread> {
+    const { failures, barriers } = await this.releaseThreadResources(completed.id);
+    try {
+      return await this.reportCleanupFailures(completed, failures);
+    } finally {
+      for (const release of barriers) release();
+    }
+  }
+
+  private assertCompletable(threadId: string): ThreadCompletionRefusal | null {
     if (this.agentService.runtimeAccess().activeThreadIds().includes(threadId)) {
-      throw new Error("Thread cannot be completed while it is running");
+      return "running";
     }
     if (this.permissions.listPendingApprovals(threadId).length > 0) {
-      throw new Error("Thread cannot be completed while permission is pending");
+      return "approval-pending";
     }
+    return null;
   }
 
   private async releaseThreadResources(threadId: string): Promise<{
@@ -142,11 +158,13 @@ export class ThreadCompletionService {
     };
   }
 
-  private throwOnCompletionFailures(threadId: string, failures: PromiseRejectedResult[]): void {
-    if (failures.length === 0) return;
-    throw new Error(
-      `Thread completion failed for ${threadId}: ${failures.map(completionFailureMessage).join("; ")}`,
-    );
+  private async reportCleanupFailures(thread: Thread, failures: PromiseRejectedResult[]): Promise<Thread> {
+    if (failures.length === 0) return thread;
+    const reason = failures.map(completionFailureMessage).join("; ");
+    logger.error("Completed thread resource cleanup failed", { threadId: thread.id, reason });
+    const blocked = await this.threadRepo.blockRetentionCleanup(thread.id, reason);
+    if (!blocked) throw new Error(`Thread not found: ${thread.id}`);
+    return blocked;
   }
 
   private async persistCompletion(thread: Thread): Promise<Thread> {
@@ -162,6 +180,7 @@ export class ThreadCompletionService {
 
   /** Reopen a completed thread and cancel its pending automatic deletion. */
   async reopen(threadId: string): Promise<Thread> {
+    if (this.completionHolds.cancel(threadId)) return this.requireThread(threadId);
     const token = this.mutationReservations.reserve(threadId, "reopening");
     if (!token) throw new Error(`Thread has a pending mutation: ${threadId}`);
 
@@ -169,10 +188,10 @@ export class ThreadCompletionService {
       this.requireThread(threadId);
       const reopened = await this.threadRepo.reopen(threadId, (this.clock?.() ?? new Date()).toISOString());
       if (!reopened) {
-        const current = this.threadRepo.findById(threadId);
+        const current = this.requireThread(threadId);
         if (
-          current?.cleanup_state === "running"
-          || (current?.cleanup_state === "blocked" && this.threadRepo.hasRetentionCleanupJob(threadId))
+          current.cleanup_state === "running"
+          || (current.cleanup_state === "blocked" && this.threadRepo.hasRetentionCleanupJob(threadId))
         ) {
           throw new Error("Thread cleanup has already started");
         }

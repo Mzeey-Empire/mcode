@@ -104,7 +104,7 @@ const workspaceThreadHandlers = {
   "thread.recent": (deps, params) => deps.threadService.listRecent(params.limit),
   "thread.create": createThread,
   "thread.delete": (deps, params) => deleteThread(deps, params),
-  "thread.complete": (deps, params) => completeThread(deps, params.threadId),
+  "thread.complete": (deps, params) => deps.threadCompletionService.complete(params.threadId, params.holdMs),
   "thread.reopen": (deps, params) => reopenThread(deps, params.threadId),
   "thread.cleanupBlockedCount": (deps) => deps.threadCompletionService.cleanupBlockedCount(),
   "thread.retryCleanup": (deps, params) => retryThreadCleanup(deps, params.threadId),
@@ -264,29 +264,9 @@ async function deleteThread(
   return await deps.threadService.delete(params.threadId, params.cleanupWorktree);
 }
 
-async function completeThread(
-  deps: WorkspaceThreadRouterDeps,
-  threadId: string,
-): Promise<Thread> {
-  let lifecyclePublished = false;
-  try {
-    const completed = await deps.threadCompletionService.complete(threadId);
-    broadcast("thread.lifecycleChanged", { thread: completed });
-    lifecyclePublished = true;
-    return completed;
-  } catch (error) {
-    const persisted = deps.threadRepo.findById(threadId);
-    if (!lifecyclePublished && persisted && persisted.user_completed_at !== null) {
-      broadcast("thread.lifecycleChanged", { thread: persisted });
-    }
-    throw error;
-  }
-}
-
 async function reopenThread(deps: WorkspaceThreadRouterDeps, threadId: string): Promise<Thread> {
   const reopened = await deps.threadCompletionService.reopen(threadId);
   deps.projectActionService.reopenThread(threadId);
-  broadcast("thread.lifecycleChanged", { thread: reopened });
   return reopened;
 }
 

@@ -28,6 +28,7 @@ import { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-b
 import { TurnResumeScheduleStore } from "../../agents/recovery/turn-resume-schedule-store.js";
 import { DelegationTargetResolver } from "../../agents/collaboration/delegation-target-resolver.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
+import { CompletionHolds } from "../lifecycle/completion-holds.js";
 import type { CancelThreadStartupDeps } from "../../thread-startup/cancel-thread-startup.js";
 
 /** Register thread-control mutation, approval, authority, and lifecycle services. */
@@ -104,4 +105,5 @@ export function registerThreadControlServices(container: DependencyContainer): v
     { useClass: ThreadCompletionService },
     { lifecycle: Lifecycle.Singleton },
   );
+  container.register(CompletionHolds, { useClass: CompletionHolds }, { lifecycle: Lifecycle.Singleton });
 }
