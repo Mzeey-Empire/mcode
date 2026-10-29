@@ -60,7 +60,7 @@ export function ScopeBar({ visible, completedCount, scope }: ScopeBarProps) {
         if (event.target === event.currentTarget && !visible) collapsed();
       }}
       className={cn(
-        "mx-1.5 shrink-0 transition-[grid-template-rows,opacity] duration-[220ms] ease-[cubic-bezier(.2,.7,.2,1)]",
+        "shrink-0 transition-[grid-template-rows,opacity] duration-[220ms] ease-[cubic-bezier(.2,.7,.2,1)]",
         !animate && "transition-none",
         visible ? "opacity-100" : "opacity-0",
         entering && "starting:grid-rows-[0fr] starting:opacity-0",
