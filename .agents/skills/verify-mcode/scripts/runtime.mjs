@@ -62,7 +62,7 @@ const SCENARIO_REQUIREMENTS = {
   "opencode-resume": { provider: "opencode", model: OPENCODE_RESUME_MODEL },
   "opencode-attach": { provider: "opencode" },
 };
-const FOCUSED_TEST_FILES = [
+export const FOCUSED_TEST_FILES = [
   "src/features/agents/composition/__tests__/agent-service-container.test.ts",
   "src/features/agents/orchestration/__tests__/agent-service-child-stop.test.ts",
   "src/features/agents/orchestration/__tests__/agent-service-existing-worktree.test.ts",
@@ -75,6 +75,7 @@ const FOCUSED_TEST_FILES = [
   "src/features/agents/orchestration/__tests__/agent-service-session-invalidated.test.ts",
   "src/features/agents/orchestration/__tests__/agent-service-turn-cleanup.test.ts",
   "src/features/agents/orchestration/__tests__/agent-service-turn-started.test.ts",
+  "src/features/agents/orchestration/__tests__/subagent-roster-service.test.ts",
   "src/features/agents/transport/__tests__/agent-rpc-route.test.ts",
   "src/features/agents/transport/__tests__/agent-list-running-rpc.test.ts",
   "src/features/agents/turns/__tests__/turn-event-pipeline.test.ts",
@@ -86,12 +87,12 @@ const FOCUSED_TEST_FILES = [
   "src/features/projects/git/__tests__/git-repository-fetch.test.ts",
   "src/features/projects/git/__tests__/git-service-push.test.ts",
 ];
-const CHECK_PHASES = [
+export const CHECK_PHASES = [
   { selector: "runtime", name: "focused-agent-runtime", args: ["run", "--cwd", "apps/server", "test", "--", ...FOCUSED_TEST_FILES] },
   { selector: "provider", name: "codex-subagent-protocol", args: ["run", "--cwd", "packages/providers", "test", "--", "src/__tests__/codex/codex-app-server-handshake.test.ts", "src/__tests__/codex/codex-provider-subagent-turn.test.ts"] },
   { selector: "acp", name: "acp-narrative-mapping", args: ["run", "--cwd", "packages/providers", "test", "--", "src/private/cursor/acp/__tests__/cursor-acp-event-mapper.test.ts", "src/private/devin/__tests__/devin-acp-event-mapper.test.ts", "src/private/protocols/acp/__tests__/acp-session-runtime.test.ts"] },
   { selector: "contract", name: "subagent-presentation-contract", args: ["run", "--cwd", "packages/contracts", "test", "--", "src/__tests__/subagent-presentation.test.ts"] },
-  { selector: "ui", name: "subagent-ui", args: ["run", "--cwd", "apps/web", "test", "--", "src/features/conversation/narrative/__tests__/build-persisted-narrative.test.ts", "src/features/conversation/narrative/__tests__/SubagentRow.test.tsx", "src/features/subagents/roster/__tests__/subagent-projection.test.ts", "src/features/subagents/roster/__tests__/SubagentsPanel.test.tsx"] },
+  { selector: "ui", name: "subagent-ui", args: ["run", "--cwd", "apps/web", "test", "--", "src/features/conversation/narrative/__tests__/build-persisted-narrative.test.ts", "src/features/conversation/narrative/__tests__/SubagentRow.test.tsx", "src/features/subagents/list/__tests__/SubagentList.test.tsx", "src/features/subagents/roster/__tests__/SubagentsPanel.real-store.test.tsx"] },
 ];
 const FIXED_PROMPTS = {
   completion: "Reply with exactly: Agent runtime verification complete. Do not edit files or invoke tools.",
