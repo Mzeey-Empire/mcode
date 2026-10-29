@@ -32,7 +32,7 @@ export function appendItemContent(item: AgentItem, append: ItemContentAppend): I
       item: { ...item, updatedAt: append.updatedAt, payload: { ...item.payload, content: content + append.text } },
     };
   }
-  if (content.length >= append.offset + append.text.length && content.startsWith(append.text, append.offset)) {
+  if (content.startsWith(append.text, append.offset)) {
     return { kind: "already-applied" };
   }
   return { kind: "base-mismatch" };
