@@ -164,6 +164,73 @@ describe("queued follow-ups after a turn ends", () => {
     await expectQueueHeld();
   });
 
+  describe("when the authoritative ending follows a provider_lost notice", () => {
+    const REPLACEMENT_EXECUTION_ID = "00000000-0000-4000-8000-000000000002";
+
+    const loseProvider = (): void => {
+      useThreadStore.getState().handleAgentEvent({ type: "ended", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, reason: "provider_lost" });
+    };
+
+    const persistInterrupted = (executionId: string): void => {
+      useThreadStore.getState().handleTurnPersisted({
+        threadId: THREAD_ID,
+        messageId: null,
+        settledMessage: null,
+        executionId,
+        outcome: "interrupted",
+        toolCallCount: 0,
+        filesChanged: [],
+      });
+    };
+
+    const record = (): ThreadRecord | undefined => useThreadStore.getState().records.get(THREAD_ID);
+    const workspaceStatus = (): string | undefined => useWorkspaceStore.getState().threads.find((thread) => thread.id === THREAD_ID)?.status;
+
+    it("settles the turn as interrupted when the live ending arrives", async () => {
+      loseProvider();
+      useThreadStore.getState().handleAgentEvent(ended("interrupted"));
+
+      expect(record()?.runtimePhase).toBe("interrupted");
+      expect(workspaceStatus()).toBe("interrupted");
+      await expectQueueHeld();
+    });
+
+    it("settles once when the persisted outcome arrives before the live ending", async () => {
+      loseProvider();
+      const messagesBefore = record()?.messages.length;
+      persistInterrupted(EXECUTION_ID);
+      expect(record()?.runtimePhase).toBe("interrupted");
+
+      useThreadStore.getState().handleAgentEvent(ended("interrupted"));
+
+      expect(record()?.runtimePhase).toBe("interrupted");
+      expect(record()?.messages.length).toBe(messagesBefore);
+      await expectQueueHeld();
+    });
+
+    it("settles once when the live ending is delivered twice", async () => {
+      loseProvider();
+      useThreadStore.getState().handleAgentEvent(ended("interrupted"));
+      const settledMessages = record()?.messages;
+      useThreadStore.getState().handleAgentEvent(ended("interrupted"));
+
+      expect(record()?.runtimePhase).toBe("interrupted");
+      expect(record()?.messages).toBe(settledMessages);
+      await expectQueueHeld();
+    });
+
+    it("leaves a replacement execution running when the old execution's ending arrives late", () => {
+      loseProvider();
+      useThreadStore.getState().handleAgentEvent({ type: "turnStarted", threadId: THREAD_ID, turnExecutionId: REPLACEMENT_EXECUTION_ID });
+
+      useThreadStore.getState().handleAgentEvent(ended("interrupted"));
+      persistInterrupted(EXECUTION_ID);
+
+      expect(record()?.turnExecutionId).toBe(REPLACEMENT_EXECUTION_ID);
+      expect(record()?.runtimePhase).toBe("running");
+    });
+  });
+
   it("drains the first follow-up after a completion", async () => {
     useThreadStore.getState().handleAgentEvent(ended("completed"));
     await vi.advanceTimersByTimeAsync(1_000);

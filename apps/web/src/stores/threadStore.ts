@@ -1208,6 +1208,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     { generation: number; events: AgentEvent[]; bytes: number }
   >();
   const deferredNarrativeGenerations = new Map<string, number>();
+  const lostExecutionAwaitingEndingByThread = new Map<string, string>();
   const MAX_DEFERRED_NARRATIVE_BYTES = 256 * 1024;
 
   const getRec = (threadId: string) => getThreadRecord(get().records, threadId);
@@ -2705,7 +2706,18 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       runtimePhase: "idle",
       savingStatus: null,
     });
+    const executionId = getRec(threadId).turnExecutionId;
+    if (executionId) lostExecutionAwaitingEndingByThread.set(threadId, executionId);
   };
+
+  const awaitsProviderLostEnding = (
+    threadId: string,
+    record: ThreadRecord,
+    incomingExecutionId: string | undefined,
+  ): boolean => record.runtimePhase === "idle"
+    && incomingExecutionId !== undefined
+    && record.turnExecutionId === incomingExecutionId
+    && lostExecutionAwaitingEndingByThread.get(threadId) === incomingExecutionId;
 
   const runtimeOwnsTerminalEvent = (
     runtime: { incomingExecutionId: string | undefined; runtimeActive: boolean; runtimeRecord: ThreadRecord },
@@ -2750,12 +2762,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (releaseProviderLostTerminal(event, runtime)) return;
     if (event.type === "ended" && event.outcome === undefined) return;
     const guardrail = suppressGuardrailQueueDrain(event, runtime);
-    if (!runtimeOwnsTerminalEvent(runtime)) {
+    const settlesProviderLost = awaitsProviderLostEnding(event.threadId, runtime.runtimeRecord, runtime.incomingExecutionId);
+    if (!runtimeOwnsTerminalEvent(runtime) && !settlesProviderLost) {
       schedulePersistedCompletionDrain(event, runtime, guardrail);
       return;
     }
     const phase = terminalPhaseFor(event);
     if (!phase) return;
+    lostExecutionAwaitingEndingByThread.delete(event.threadId);
     patchRec(event.threadId, (record) => appendTerminalMessages(record, event, phase, guardrail));
     conversationResidency.retainInactiveConversation(event.threadId);
     if (event.type === "turnComplete") updateTurnContext(event);
@@ -3087,9 +3101,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     record: ThreadRecord,
     payload: TurnPersistedPayload,
   ): ThreadRecord["runtimePhase"] | undefined => {
+    const settlesProviderLost = awaitsProviderLostEnding(payload.threadId, record, payload.executionId ?? undefined);
     if (payload.outcome === undefined
       || payload.executionId !== record.turnExecutionId
-      || (record.runtimePhase !== "running" && record.runtimePhase !== "finalizing")) return undefined;
+      || (record.runtimePhase !== "running" && record.runtimePhase !== "finalizing" && !settlesProviderLost)) return undefined;
     if (payload.outcome === "completed") return "completed";
     if (payload.outcome === "errored") return "errored";
     return payload.outcome === "cancelled" ? "cancelled" : "interrupted";
@@ -4492,6 +4507,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     flushPendingTextDeltas();
     conversationResidency.invalidateConversation(payload.threadId);
     const terminalPhase = persistedTerminalPhase(getRec(payload.threadId), payload);
+    if (terminalPhase) lostExecutionAwaitingEndingByThread.delete(payload.threadId);
 
     set((state) => {
       return {

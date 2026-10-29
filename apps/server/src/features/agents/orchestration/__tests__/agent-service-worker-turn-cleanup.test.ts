@@ -275,16 +275,149 @@ describe("AgentService cleanup through production worker composition", { timeout
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
   });
 
-  it("releases an exact provider_lost Ended without terminalizing its durable turn", async () => {
+  it("ends an exact provider_lost turn Interrupted and releases it", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);
+    await fixture.emit({ type: "message", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
+      content: "partial answer before stream loss", tokens: null });
     await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
-    await vi.waitFor(() => expect(fixture.service.runtimeAccess().activeThreadIds()).not.toContain(fixture.thread.id));
-    expect(fixture.service.runtimeAccess().runtimeSnapshots().find((snapshot) => snapshot.threadId === fixture.thread.id)).toBeUndefined();
-    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Running");
-    expect(fixture.canonical.loadCheckpoint(turn.turnExecutionId)).toMatchObject({ phase: "running", terminalOutcome: null });
-    expect(fixture.threads.findById(fixture.thread.id)?.status).toBe("active");
+    await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
+    expect(fixture.service.runtimeAccess().activeThreadIds()).not.toContain(fixture.thread.id);
+    expect(fixture.service.runtimeAccess().runtimeSnapshots()).toContainEqual(expect.objectContaining({
+      threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, phase: "interrupted",
+    }));
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Interrupted");
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "interrupted", cause: "provider_exited" });
+    expect(fixture.canonical.loadCheckpoint(turn.turnExecutionId)).toMatchObject({ phase: "finalized", terminalOutcome: "interrupted" });
+    expect(fixture.threads.findById(fixture.thread.id)?.status).toBe("interrupted");
+    expect(fixture.assistant()).toMatchObject({ content: "partial answer before stream loss", outcome: "interrupted", outcomeExecutionId: turn.turnExecutionId });
     expect(fixture.published).toContainEqual(expect.objectContaining({ type: "ended", turnExecutionId: turn.turnExecutionId, reason: "provider_lost" }));
+    expect(fixture.published.find((event) => event.type === "ended" && event.reason === "provider_lost")).not.toHaveProperty("outcome");
+    expect(fixture.published).toContainEqual(expect.objectContaining({ type: "ended", turnExecutionId: turn.turnExecutionId, outcome: "interrupted" }));
+    await expect(fixture.service.sendMessage({
+      threadId: fixture.thread.id, content: "replacement", permissionMode: "default", model: "gpt-5", provider: "codex",
+    })).resolves.toBeUndefined();
+    expect(fixture.sent.map((sent) => sent.message)).toEqual(["Do the work", "replacement"]);
+  });
+
+  it("ends a provider_lost turn during graceful stopAll with app_closed", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    let releaseFence!: () => void;
+    const fenceReady = new Promise<void>((resolve) => { releaseFence = resolve; });
+    const fence = vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementation(() => fenceReady);
+    fixture.provider.stopSession.mockImplementation(() => fixture.emit({
+      type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost",
+    }));
+    const stopping = fixture.service.stopAll();
+    let completed = false;
+    void stopping.then(() => { completed = true; });
+    try {
+      await vi.waitFor(() => expect(fence).toHaveBeenCalled());
+      expect(completed).toBe(false);
+    } finally {
+      releaseFence();
+      await stopping;
+    }
+    await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
+      status: "Interrupted", ending: { outcome: "interrupted", cause: "app_closed" },
+    });
+  });
+
+  it("a stop arriving during a lost-stream finish joins it", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    let releaseFence!: () => void;
+    const fenceReady = new Promise<void>((resolve) => { releaseFence = resolve; });
+    const fence = vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementationOnce(() => fenceReady);
+    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
+    await vi.waitFor(() => expect(fence).toHaveBeenCalledTimes(1));
+    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
+    const stopping = fixture.service.stopSession(fixture.thread.id, { by: "user" });
+    try {
+      releaseFence();
+      expect(await stopping).toMatchObject({ status: "already-terminal", snapshot: { phase: "interrupted", turnExecutionId: turn.turnExecutionId } });
+    } finally {
+      releaseFence();
+    }
+    await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
+      status: "Interrupted", ending: { outcome: "interrupted", cause: "provider_exited" },
+    });
+    expect(fixture.canonicalEvents.filter((event) => event.routing.executionId === turn.turnExecutionId
+      && event.payload.type === "turn.interrupted")).toHaveLength(1);
+    expect(fixture.published.filter((event) => event.type === "ended" && event.turnExecutionId === turn.turnExecutionId
+      && event.outcome !== undefined)).toEqual([expect.objectContaining({ outcome: "interrupted" })]);
+  });
+
+  it("recovers a failed lost-stream drain and admits a replacement", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    const recover = vi.spyOn(fixture.workers, "recoverRejected");
+    vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockRejectedValueOnce(new Error("Provider fence failed"));
+    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
+    await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
+    expect(recover).toHaveBeenCalledWith(expect.objectContaining({ executionId: turn.turnExecutionId }));
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
+      status: "Interrupted", ending: { outcome: "interrupted", cause: "saving_stopped" },
+    });
+    await expect(fixture.service.sendMessage({
+      threadId: fixture.thread.id, content: "replacement", permissionMode: "default", model: "gpt-5", provider: "codex",
+    })).resolves.toBeUndefined();
+    expect(fixture.sent.map((sent) => sent.message)).toEqual(["Do the work", "replacement"]);
+  });
+
+  it("recovers a failed lost-stream release once and preserves the committed ending", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    const recover = vi.spyOn(fixture.workers, "recoverRejected");
+    const releaseError = new Error("Provider retirement failed");
+    let releaseRetirement!: () => void;
+    const retirementReady = new Promise<void>((resolve) => { releaseRetirement = resolve; });
+    const retire = vi.spyOn(fixture.provider, "retireCanonicalTurnEvents").mockImplementationOnce(async () => {
+      await retirementReady;
+      throw releaseError;
+    });
+    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
+    try {
+      await vi.waitFor(() => expect(retire).toHaveBeenCalledTimes(1));
+      const stopping = expect(fixture.service.stopSession(fixture.thread.id, { by: "user" })).rejects.toBe(releaseError);
+      releaseRetirement();
+      await stopping;
+    } finally {
+      releaseRetirement();
+    }
+    expect(recover).toHaveBeenCalledTimes(1);
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
+      status: "Interrupted", ending: { outcome: "interrupted", cause: "provider_exited" },
+    });
+    await expect(fixture.service.sendMessage({
+      threadId: fixture.thread.id, content: "replacement", permissionMode: "default", model: "gpt-5", provider: "codex",
+    })).resolves.toBeUndefined();
+    expect(fixture.sent.map((sent) => sent.message)).toEqual(["Do the work", "replacement"]);
+  });
+
+  it("keeps a provider terminal committed during the lost-stream drain", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    const recover = vi.spyOn(fixture.workers, "recoverRejected");
+    let releaseFence!: () => void;
+    const fenceReady = new Promise<void>((resolve) => { releaseFence = resolve; });
+    const fence = vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementationOnce(() => fenceReady);
+    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
+    await vi.waitFor(() => expect(fence).toHaveBeenCalledTimes(1));
+    try {
+      await fixture.emit(turnComplete(fixture.thread.id, turn.turnExecutionId));
+      await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, outcome: "completed" });
+    } finally {
+      releaseFence();
+    }
+    await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed");
+    expect(recover).not.toHaveBeenCalled();
+    expect(fixture.published.filter((event) => event.type === "ended" && event.turnExecutionId === turn.turnExecutionId
+      && event.outcome !== undefined)).toEqual([expect.objectContaining({ outcome: "completed" })]);
   });
 
   it("keeps a user stop in control when the provider emits an outcome-less provider_lost Ended", async () => {

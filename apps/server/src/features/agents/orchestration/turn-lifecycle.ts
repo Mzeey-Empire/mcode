@@ -19,6 +19,8 @@ export interface WorkerOwnedTurn {
   terminalRelease?: Promise<void>;
   deliveryFailed?: boolean;
   deliveryFailureHandling?: Promise<void>;
+  /** A stop arriving after stream loss joins this finaliser instead of writing another terminal. */
+  lostStreamFinish?: Promise<void>;
   stopInProgress?: boolean;
   stopRequested?: boolean;
   lastRetries?: ObservedProviderRetries;
