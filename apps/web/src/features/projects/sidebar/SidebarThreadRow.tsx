@@ -542,7 +542,7 @@ function ThreadRowTitleLine({
             autoFocus
             onFocus={(event) => event.currentTarget.select()}
             onClick={(event) => event.stopPropagation()}
-            className="flex-1 border-focus"
+            className="-mx-1 h-5 flex-1 rounded-sm px-1 text-label border-focus hover:border-focus focus-visible:outline-0"
           />
         ) : (
           <div
