@@ -3,6 +3,7 @@ import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { selectSidebarFacts, selectThreadIndex } from "@/features/projects/state/thread-index";
 import { resetWorkerForPerformance } from "@/lib/shiki-worker-client";
 import { resetChatHighlightCoordinator } from "@/lib/chat-highlight-coordinator";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
@@ -48,6 +49,11 @@ declare global {
         readonly drain: typeof drainMessageListPerformanceObservations;
         readonly reset: typeof resetMessageListPerformanceObservations;
       };
+      /** The sidebar's memoized selectors, so a heap probe can hold the caches they return. */
+      readonly sidebarCaches: {
+        readonly facts: typeof selectSidebarFacts;
+        readonly index: typeof selectThreadIndex;
+      };
       readonly vlistLifecycle: {
         readonly run: typeof runVListReactAdapterLifecycleProbe;
       };
@@ -89,6 +95,7 @@ export function installFrontendRendererFixtureBridge(): void {
       drain: drainMessageListPerformanceObservations,
       reset: resetMessageListPerformanceObservations,
     },
+    sidebarCaches: { facts: selectSidebarFacts, index: selectThreadIndex },
     vlistLifecycle: {
       run: runVListReactAdapterLifecycleProbe,
     },

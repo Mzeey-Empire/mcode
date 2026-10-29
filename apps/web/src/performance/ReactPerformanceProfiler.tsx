@@ -11,6 +11,8 @@ export interface ReactPerformanceSink {
     readonly commitTimeMs: number;
   }): void;
   recordRowRender(rowId: string): void;
+  /** Counts a named performance event. */
+  recordCounter?(name: string): void;
 }
 
 declare global {

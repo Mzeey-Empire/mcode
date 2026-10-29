@@ -1,5 +1,5 @@
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type CSSProperties } from "react";
-import { Check, GitBranch, Laptop, RefreshCw, Undo2 } from "lucide-react";
+import { forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type CSSProperties } from "react";
+import { Check, Laptop, RefreshCw, Undo2 } from "lucide-react";
 import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
 import { MoreIcon } from "@/components/ui/icon-map";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -16,6 +16,7 @@ import type { ThreadRowState } from "@/features/thread-attention/thread-row-stat
 import { isPrable } from "@/lib/is-prable";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { useRelativeTime } from "@/lib/time";
+import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 import { cn } from "@/lib/utils";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
@@ -27,6 +28,7 @@ import type { SidebarItem } from "./sidebar-model";
 import type { InlineEditState, SidebarProviderAvailability, SidebarRowContext } from "./sidebar-row-context";
 import { PullRequestChip, PullRequestList } from "./PullRequestChip";
 import { useCompletionStore } from "./completion-store";
+import { ThreadPreviewHandleContext } from "./SidebarThreadPreview";
 import type { CompletionEntry } from "./completion-machine";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
@@ -65,6 +67,7 @@ function useThreadRowHandlers(ctx: SidebarRowContext, workspaceId: string, works
 }
 
 function ThreadRow({ thread, workspace, depth, showProject, ctx }: { thread: WorkspaceThread; workspace: Workspace | undefined; depth: number; showProject: boolean; ctx: SidebarRowContext }) {
+  if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordRowRender(`sidebar-thread:${thread.id}`);
   const isEditing = ctx.inlineEdit?.threadId === thread.id;
   const handlers = useThreadRowHandlers(ctx, thread.workspace_id, workspace?.path ?? "");
   const isActive = useWorkspaceStore((s) => s.activeThreadId === thread.id);
@@ -440,7 +443,7 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
         onTriggerBlur?.(event);
       }}
       className={cn(
-        "group/row relative flex min-h-16 items-start gap-2 rounded-lg py-3 pr-2 cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "group/row relative flex min-h-16 items-start gap-2 rounded-lg py-3 pr-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         "has-[[data-status-mark=running]]:opacity-55",
         isActive ? "bg-selected" : "hover:bg-selected/40",
         triggerClassName,
@@ -563,6 +566,7 @@ function handleInlineEditKeyDown(
 function ThreadRowBranchLine({ thread, presentation, children }: Pick<ThreadRowVisualProps, "thread" | "presentation"> & { children: React.ReactNode }) {
   const checkoutLabel = resolveThreadCheckoutLabel(thread);
   const age = useRelativeTime(threadActivityAt(thread));
+  if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordRowRender(`sidebar-age:${thread.id}`);
   const stale = presentation.isStaleWorktree;
   return (
     <div className={cn("flex h-4 min-w-0 items-center gap-2 text-caption text-muted", presentation.scaffoldDim)}>
@@ -787,86 +791,8 @@ function ThreadRowPreview({
   workspaceName,
   thread,
 }: { isEditing: boolean; row: React.ReactElement; workspaceName: string; thread: WorkspaceThread }) {
-  if (isEditing) return row;
-  return (
-    <Tooltip>
-      <TooltipTrigger render={row} />
-      <TooltipContent side="right" align="start" sideOffset={8} className="max-w-none p-3">
-        <SidebarThreadPreview workspaceName={workspaceName} thread={thread} />
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function SidebarThreadPreview({
-  workspaceName,
-  thread,
-}: {
-  workspaceName: string;
-  thread: WorkspaceThread;
-}) {
-  const checkoutLabel = resolveThreadCheckoutLabel(thread);
-
-  return (
-    <div
-      data-testid={`thread-preview-${thread.id}`}
-      className="w-64 space-y-2 text-ink"
-    >
-      <div className="min-w-0 font-medium text-xs leading-5">
-        {thread.title}
-      </div>
-      <div className="grid gap-1.5">
-        <div className="text-xs text-muted">
-          Updated {formatLifecycleDate(thread.updated_at)}
-        </div>
-        {thread.user_completed_at !== null ? (
-          <>
-            <div className="text-xs text-muted">
-              Completed {formatLifecycleDate(thread.user_completed_at)}
-            </div>
-            {thread.cleanup_state === "blocked" ? (
-              <div className="text-xs text-destructive" role="status">
-                Cleanup blocked: {thread.cleanup_reason ?? "User action is required."}
-              </div>
-            ) : thread.cleanup_state === "queued" ? (
-              <div className="text-xs text-muted" role="status">
-                Cleanup queued
-              </div>
-            ) : thread.cleanup_state === "retrying" ? (
-              <div className="text-xs text-muted" role="status">
-                Retrying cleanup
-              </div>
-            ) : (
-              <div className="text-xs text-muted">
-                {thread.scheduled_deletion_at
-                  ? `Deletes ${formatLifecycleDate(thread.scheduled_deletion_at)}`
-                  : "Automatic deletion disabled"}
-              </div>
-            )}
-          </>
-        ) : null}
-        <div
-          aria-label={`Project, ${workspaceName}`}
-          className="flex min-w-0 items-center gap-2"
-        >
-          <ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} />
-          <span className="text-fade text-xs">{workspaceName}</span>
-        </div>
-        <div
-          aria-label={`Branch, ${checkoutLabel}`}
-          className="flex min-w-0 items-center gap-2"
-        >
-          <GitBranch size={13} aria-hidden className="shrink-0 opacity-75" />
-          <span className="text-fade font-mono text-xs">{checkoutLabel}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function formatLifecycleDate(iso: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(iso));
+  const handle = useContext(ThreadPreviewHandleContext);
+  const payload = useMemo(() => ({ thread, workspaceName }), [thread, workspaceName]);
+  if (isEditing || !handle) return row;
+  return <TooltipTrigger handle={handle} payload={payload} render={row} />;
 }

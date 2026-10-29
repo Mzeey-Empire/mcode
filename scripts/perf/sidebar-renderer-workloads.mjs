@@ -1,3 +1,4 @@
+import { measureSidebarRetained } from "./heap-snapshot-retained.mjs";
 import {
   createModeSignalCollector,
   createPageSignalCollector,
@@ -9,6 +10,10 @@ export const SIDEBAR_RENDERER_WORKLOADS = Object.freeze([
   "sidebarStream",
   "sidebarScroll",
   "sidebarHydration",
+  "sidebarCompleteFlight",
+  "sidebarOlderCrossing",
+  "sidebarIdleTick",
+  "sidebarRetainedHeap",
 ]);
 
 const SIDEBAR_PROFILER_ID = "sidebar";
@@ -17,6 +22,17 @@ const WHEEL_STEP_PX = 100;
 const MAX_WHEEL_STEPS = 4_000;
 const REFRESH_PROBE_FRAMES = 120;
 const HYDRATION_TIMEOUT_MS = 60_000;
+const FLIGHT_TIMEOUT_MS = 20_000;
+const CROSSING_THREAD_COUNT = 5;
+const CROSSING_LEAD_MS = 1_500;
+const OLDER_AFTER_DAYS = 14;
+const DAY_MS = 86_400_000;
+const IDLE_WINDOW_MS = 61_000;
+const ROW_RENDER_PREFIX = "sidebar-thread:";
+const AGE_RENDER_PREFIX = "sidebar-age:";
+const SET_ROWS_COUNTER = "sidebar.setRows";
+const HEAP_PROBE = "__mcodeSidebarHeapProbe";
+const LOCAL_CHECKS_CHANNEL = "local.checksById";
 
 /** Returns the nearest-rank percentile of finite values, or null when there are none. */
 export function percentile(values, quantile) {
@@ -25,38 +41,66 @@ export function percentile(values, quantile) {
   return sorted[Math.max(0, Math.ceil(sorted.length * quantile) - 1)];
 }
 
+// Fixed 120 Hz and 60 Hz budgets, so runs on displays with different refresh rates compare like for like.
+const FIXED_FRAME_BUDGETS_MS = Object.freeze({ "8.3": 1000 / 120, "16.7": 1000 / 60 });
+
 /** Summarizes rAF intervals against a frame budget. A frame is over budget when it spans at least half a missed vsync. */
 export function summarizeFrameIntervals(intervalsMs, budgetMs) {
   const intervals = intervalsMs.filter(Number.isFinite);
+  const overBudget = (budget) => intervals.filter((interval) => interval > budget * 1.5).length;
   return {
     frameCount: intervals.length,
     p50Ms: percentile(intervals, 0.5),
     p95Ms: percentile(intervals, 0.95),
     maxMs: intervals.length > 0 ? Math.max(...intervals) : null,
     budgetMs,
-    overBudgetFrames: intervals.filter((interval) => interval > budgetMs * 1.5).length,
+    overBudgetFrames: overBudget(budgetMs),
+    overBudgetFramesAtFixedBudgets: Object.fromEntries(
+      Object.entries(FIXED_FRAME_BUDGETS_MS).map(([label, budget]) => [label, overBudget(budget)]),
+    ),
   };
+}
+
+const STREAM_BUCKET_FIELDS = [
+  ["durations", "commitDurationMs"],
+  ["commits", "commitCount"],
+  ["rowRenders", "rowRenderCount"],
+  ["rowsRendered", "rowsRendered"],
+  ["setRows", "setRowsCount"],
+];
+
+function emptyStreamBucket() {
+  return Object.fromEntries(STREAM_BUCKET_FIELDS.map(([field]) => [field, []]));
+}
+
+function finiteMax(values) {
+  const finite = values.filter(Number.isFinite);
+  return finite.length > 0 ? Math.max(...finite) : null;
 }
 
 /** Aggregates per-event sidebar commit records from accepted stream samples, split by push channel. */
 export function summarizeSidebarStreamEvents(samples) {
   const byChannel = {};
   for (const event of samples.flat()) {
-    const bucket = byChannel[event.channel] ?? (byChannel[event.channel] = { durations: [], commits: [] });
-    bucket.durations.push(event.commitDurationMs);
-    bucket.commits.push(event.commitCount);
+    const bucket = byChannel[event.channel] ?? (byChannel[event.channel] = emptyStreamBucket());
+    for (const [field, key] of STREAM_BUCKET_FIELDS) bucket[field].push(event[key] ?? null);
   }
-  const summarize = ({ durations, commits }) => ({
+  const summarize = ({ durations, commits, rowRenders, rowsRendered, setRows }) => ({
     eventCount: durations.length,
     commitDurationP50Ms: percentile(durations, 0.5),
     commitDurationP95Ms: percentile(durations, 0.95),
     commitsPerEventP50: percentile(commits, 0.5),
-    commitsPerEventMax: commits.length > 0 ? Math.max(...commits) : null,
-    totalCommits: commits.reduce((total, count) => total + count, 0),
+    commitsPerEventMax: finiteMax(commits),
+    totalCommits: commits.reduce((total, count) => total + (count ?? 0), 0),
+    rowRendersPerEventP50: percentile(rowRenders, 0.5),
+    rowRendersPerEventMax: finiteMax(rowRenders),
+    rowsRenderedPerEventMax: finiteMax(rowsRendered),
+    setRowsPerEventP50: percentile(setRows, 0.5),
+    setRowsPerEventMax: finiteMax(setRows),
   });
   const all = Object.values(byChannel).reduce(
-    (merged, bucket) => ({ durations: [...merged.durations, ...bucket.durations], commits: [...merged.commits, ...bucket.commits] }),
-    { durations: [], commits: [] },
+    (merged, bucket) => Object.fromEntries(STREAM_BUCKET_FIELDS.map(([field]) => [field, [...merged[field], ...bucket[field]]])),
+    emptyStreamBucket(),
   );
   return {
     all: summarize(all),
@@ -84,6 +128,22 @@ export function buildSidebarStreamEvents(capture, targetThreadId, sampleKey, exe
     { channel: "agent.canonical", data: null, recoveryBase: { admission, start } },
     ...[start, ...rest].map((frame) => ({ channel: "agent.canonical", data: frame })),
     { channel: "thread.status", data: { threadId: targetThreadId, status: "interrupted" } },
+  ];
+}
+
+/** Builds activity, pull-request, and checks updates for the target thread. */
+export function buildSidebarSignalPushes(targetThreadId, atIso, prNumber) {
+  return [
+    { channel: "thread.activity", data: { threadId: targetThreadId, at: atIso } },
+    {
+      channel: "thread.pullRequests",
+      data: {
+        threadId: targetThreadId,
+        pullRequests: [{ number: prNumber, state: "open", title: "Sidebar perf PR", url: `https://example.com/pull/${prNumber}` }],
+      },
+    },
+    // Checks arrive by polling, not a push, so this one writes the store the poller writes.
+    { channel: LOCAL_CHECKS_CHANNEL, data: { threadId: targetThreadId, checks: { aggregate: "failing", fetchedAt: Date.parse(atIso), runs: [] } } },
   ];
 }
 
@@ -117,6 +177,33 @@ async function scrollSidebarTo(page, position) {
   await nextFrames(page, 2);
 }
 
+function threadRowLocator(page, title) {
+  return page.locator('[data-testid="thread-item"]', { has: page.getByText(title, { exact: true }) }).locator('[role="button"]');
+}
+
+async function scrollSidebarByPage(page) {
+  const moved = await page.evaluate(() => {
+    const body = document.querySelector('[data-testid="sidebar-body"]');
+    const scroller = [...(body?.querySelectorAll("*") ?? [])].find((element) =>
+      /(auto|scroll)/.test(getComputedStyle(element).overflowY) && element.scrollHeight > element.clientHeight);
+    if (!scroller || scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) return false;
+    scroller.scrollTop += scroller.clientHeight * 0.8;
+    return true;
+  });
+  await nextFrames(page, 2);
+  return moved;
+}
+
+async function revealThreadRow(page, title) {
+  await scrollSidebarTo(page, "top");
+  const row = threadRowLocator(page, title);
+  for (let step = 0; step < MAX_WHEEL_STEPS; step += 1) {
+    if ((await row.count()) > 0) return row.first();
+    if (!(await scrollSidebarByPage(page))) break;
+  }
+  return (await row.count()) > 0 ? row.first() : null;
+}
+
 async function expandProject(page, name) {
   const toggle = projectToggle(page, name);
   for (const position of ["top", "bottom"]) {
@@ -132,7 +219,7 @@ async function readSidebarState(page, workspaceIds) {
     const state = window.__mcodeFrontendPerformanceModules?.workspaceStore.getState();
     const owned = new Set(ids);
     const body = document.querySelector('[data-testid="sidebar-body"]');
-    const mountedRows = [...(body?.querySelectorAll('[role="button"]') ?? [])]
+    const mountedRows = [...(body?.querySelectorAll('[data-testid="thread-item"]') ?? [])]
       .filter((element) => element.textContent?.includes(prefix)).length;
     return { loadedThreads: state?.threads.filter((thread) => owned.has(thread.workspace_id)).length ?? 0, mountedRows };
   }, { ids: workspaceIds, prefix: THREAD_TITLE_PREFIX });
@@ -159,6 +246,9 @@ async function waitForStableThreadCount(page, workspaceIds) {
 async function prepareSidebar(page, fixture) {
   await page.waitForFunction(() => Boolean(window.__mcodeFrontendPerformanceModules), null, { timeout: 30_000 });
   const names = fixture.workspaces.map((workspace) => workspace.name);
+  // The view persists in the profile; a run that failed mid-flight can leave the flat list behind.
+  await page.getByTestId("sidebar-body").waitFor({ state: "attached", timeout: 30_000 });
+  await setSidebarView(page, "grouped");
   await page.getByRole("button", { name: `Open project ${names[0]}`, exact: true })
     .waitFor({ state: "attached", timeout: 30_000 });
   for (const name of [...names].reverse()) await expandProject(page, name);
@@ -167,9 +257,8 @@ async function prepareSidebar(page, fixture) {
 
 /** Opens the stream target through its sidebar row, because the store only applies canonical progress for an open thread. */
 async function openStreamTarget(page, fixture) {
-  await scrollSidebarTo(page, "top");
-  const row = page.getByRole("button", { name: fixture.streamTarget.title });
-  if ((await row.count()) === 0) return false;
+  const row = await revealThreadRow(page, fixture.streamTarget.title);
+  if (!row) return false;
   await row.first().click();
   await page.waitForFunction(
     (threadId) => window.__mcodeFrontendPerformanceModules?.threadStore.getState().currentThreadId === threadId,
@@ -181,9 +270,11 @@ async function openStreamTarget(page, fixture) {
 }
 
 async function replayStreamEvents(page, events, profiling) {
-  return page.evaluate(async ({ events: pushes, profilerId, profiling: enabled }) => {
+  return page.evaluate(async ({ events: pushes, profilerId, profiling: enabled, rowPrefix, setRowsCounter, checksChannel }) => {
     const modules = window.__mcodeFrontendPerformanceModules;
     const commits = () => window.__mcodePerformanceAttribution?.commits ?? [];
+    const rowRenders = () => ({ ...window.__mcodePerformanceAttribution?.rowRenders });
+    const setRows = () => window.__mcodePerformanceAttribution?.counters?.[setRowsCounter] ?? 0;
     const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
     const recoveryFrame = ({ admission, start }) => {
       const reduced = modules.agentModel.reduce(modules.agentModel.create(), [...admission.events, ...start.events]);
@@ -197,18 +288,30 @@ async function replayStreamEvents(page, events, profiling) {
     for (const push of pushes) {
       const data = push.recoveryBase ? recoveryFrame(push.recoveryBase) : push.data;
       const before = commits().length;
-      modules.push(push.channel, data);
+      const rendersBefore = rowRenders();
+      const setRowsBefore = setRows();
+      if (push.channel === checksChannel) {
+        modules.workspaceStore.setState((state) => ({ checksById: { ...state.checksById, [data.threadId]: data.checks } }));
+      } else {
+        modules.push(push.channel, data);
+      }
       await frame();
       await frame();
       const sidebar = commits().slice(before).filter((commit) => commit.profilerId === profilerId);
+      const rendered = Object.entries(rowRenders())
+        .filter(([rowId, count]) => rowId.startsWith(rowPrefix) && count > (rendersBefore[rowId] ?? 0))
+        .map(([rowId, count]) => count - (rendersBefore[rowId] ?? 0));
       records.push({
         channel: push.recoveryBase ? "agent.canonical.recovery" : push.channel,
         commitCount: enabled ? sidebar.length : null,
         commitDurationMs: enabled ? sidebar.reduce((total, commit) => total + commit.actualDurationMs, 0) : null,
+        rowRenderCount: enabled ? rendered.reduce((total, count) => total + count, 0) : null,
+        rowsRendered: enabled ? rendered.length : null,
+        setRowsCount: enabled ? setRows() - setRowsBefore : null,
       });
     }
     return records;
-  }, { events, profilerId: SIDEBAR_PROFILER_ID, profiling });
+  }, { events, profilerId: SIDEBAR_PROFILER_ID, profiling, rowPrefix: ROW_RENDER_PREFIX, setRowsCounter: SET_ROWS_COUNTER, checksChannel: LOCAL_CHECKS_CHANNEL });
 }
 
 async function readAppliedTurnStatus(page, threadId, executionId) {
@@ -219,11 +322,14 @@ async function readAppliedTurnStatus(page, threadId, executionId) {
   }, { thread: threadId, execution: executionId });
 }
 
-async function runStreamSample(context, sampleKey) {
+async function runStreamSample(context, sampleKey, sampleIndex) {
   const { page, fixture, capture, mode } = context;
   const targetVisible = await openStreamTarget(page, fixture);
   const executionId = crypto.randomUUID();
-  const events = buildSidebarStreamEvents(capture, fixture.streamTarget.id, sampleKey, executionId);
+  const events = [
+    ...buildSidebarStreamEvents(capture, fixture.streamTarget.id, sampleKey, executionId),
+    ...buildSidebarSignalPushes(fixture.streamTarget.id, new Date().toISOString(), 1_001 + sampleIndex),
+  ];
   const records = await replayStreamEvents(page, events, mode === "profiling");
   const total = records.reduce((sum, record) => sum + (record.commitDurationMs ?? 0), 0);
   return {
@@ -238,13 +344,15 @@ async function runStreamSample(context, sampleKey) {
   };
 }
 
-async function readFrameIndex(page) {
-  return page.evaluate(() => window.__mcodePerformanceAttribution?.frameTimes.length ?? 0);
+/** Marks the rAF buffer and returns the absolute index of the next frame. */
+export async function readFrameIndex(page) {
+  return page.evaluate(() => window.__mcodePerformanceAttribution?.markFrames() ?? 0);
 }
 
-async function readFrameIntervals(page, fromIndex) {
+/** Returns the rAF intervals recorded since an index from `readFrameIndex`. */
+export async function readFrameIntervals(page, fromIndex) {
   return page.evaluate((index) => {
-    const times = window.__mcodePerformanceAttribution?.frameTimes.slice(index) ?? [];
+    const times = window.__mcodePerformanceAttribution?.framesSince(index) ?? [];
     return times.slice(1).map((time, offset) => time - times[offset]);
   }, fromIndex);
 }
@@ -254,10 +362,30 @@ async function readScrollPosition(page) {
     const body = document.querySelector('[data-testid="sidebar-body"]');
     const scroller = [...(body?.querySelectorAll("*") ?? [])].find((element) =>
       /(auto|scroll)/.test(getComputedStyle(element).overflowY) && element.scrollHeight > element.clientHeight);
+    const prefix = scroller instanceof HTMLElement ? scroller.dataset.testid?.replace(/-viewport$/, "") : undefined;
+    const content = prefix ? scroller.querySelector(`.${prefix}-content`) : null;
     return scroller
-      ? { scrollTop: scroller.scrollTop, maxScrollTop: scroller.scrollHeight - scroller.clientHeight }
-      : { scrollTop: 0, maxScrollTop: 0 };
+      ? {
+        scrollTop: scroller.scrollTop,
+        maxScrollTop: scroller.scrollHeight - scroller.clientHeight,
+        listHeight: {
+          scrollHeightPx: scroller.scrollHeight,
+          clientHeightPx: scroller.clientHeight,
+          contentHeightPx: content instanceof HTMLElement ? Number.parseFloat(content.style.height) : Number.NaN,
+        },
+      }
+      : { scrollTop: 0, maxScrollTop: 0, listHeight: null };
   });
+}
+
+/**
+ * True when the scroller is exactly as tall as the content height vlist set. A stray in-flow
+ * element (a doubled list, for one) makes the scroll longer than the list and skews scroll timing.
+ */
+export function listHeightMatchesContent(listHeight) {
+  if (!listHeight || !Number.isFinite(listHeight.contentHeightPx)) return false;
+  const expected = Math.max(listHeight.contentHeightPx, listHeight.clientHeightPx);
+  return Math.abs(listHeight.scrollHeightPx - expected) <= 1;
 }
 
 async function wheelToBottom(page) {
@@ -294,6 +422,7 @@ async function runScrollSample(context) {
       scrollHeightPx: position.maxScrollTop,
       scrollable,
       reachedBottom: position.scrollTop >= position.maxScrollTop - 2,
+      listHeight: position.listHeight,
       frames,
       ...rows,
     },
@@ -303,8 +432,16 @@ async function runScrollSample(context) {
 /** Installs a pre-navigation sink that records sidebar commits and the first painted seeded thread row during boot. */
 async function installBootProbe(page) {
   await page.addInitScript(({ profilerId, prefix }) => {
-    const boot = { sidebarCommits: [], firstThreadRowMs: null };
+    const boot = { sidebarCommits: [], firstThreadRowMs: null, firstSocketMs: null };
     window.__mcodeSidebarBoot = boot;
+    // M6 starts when the app constructs its socket, so the handshake the user waits through counts.
+    const NativeWebSocket = window.WebSocket;
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(...args) {
+        boot.firstSocketMs ??= performance.now();
+        super(...args);
+      }
+    };
     window.__mcodeReactPerformanceSink = {
       recordCommit(commit) {
         if (commit.profilerId === profilerId) boot.sidebarCommits.push(commit);
@@ -323,6 +460,9 @@ async function installBootProbe(page) {
   }, { profilerId: SIDEBAR_PROFILER_ID, prefix: THREAD_TITLE_PREFIX });
 }
 
+// `thread.listAll` replaced the per-project `thread.list` pages; count either so baseline and head compare.
+const THREAD_LIST_METHODS = new Set(["thread.list", "thread.listAll"]);
+
 function createThreadListByteCounter(page) {
   const state = { requests: new Set(), responses: 0, bytes: 0, socketSeen: false };
   const parse = (payload) => {
@@ -332,7 +472,7 @@ function createThreadListByteCounter(page) {
     state.socketSeen = true;
     socket.on("framesent", ({ payload }) => {
       const message = parse(payload);
-      if (message?.method === "thread.list") state.requests.add(message.id);
+      if (THREAD_LIST_METHODS.has(message?.method)) state.requests.add(message.id);
     });
     socket.on("framereceived", ({ payload }) => {
       const message = parse(payload);
@@ -362,11 +502,14 @@ async function readHeapAfterGc(page) {
 
 async function readBootProbe(page) {
   return page.evaluate(() => {
-    const boot = window.__mcodeSidebarBoot;
-    const commits = boot?.sidebarCommits ?? [];
+    const { sidebarCommits: commits = [], firstThreadRowMs = null, firstSocketMs = null } = window.__mcodeSidebarBoot ?? {};
+    const firstSidebarCommitMs = commits[0]?.commitTimeMs ?? null;
+    const since = (time) => (firstSocketMs === null || time === null ? null : time - firstSocketMs);
     return {
-      firstThreadRowMs: boot?.firstThreadRowMs ?? null,
-      firstSidebarCommitMs: commits[0]?.commitTimeMs ?? null,
+      firstThreadRowMs,
+      socketToFirstRowMs: since(firstThreadRowMs),
+      socketToFirstSidebarCommitMs: since(firstSidebarCommitMs),
+      firstSidebarCommitMs,
       sidebarCommitsBeforeSettle: commits.length,
       sidebarCommitDurationMs: commits.reduce((total, commit) => total + commit.actualDurationMs, 0),
     };
@@ -390,6 +533,244 @@ async function runHydrationSample(context) {
   };
 }
 
+async function takeHeapSnapshot(page) {
+  const session = await page.context().newCDPSession(page);
+  const chunks = [];
+  const onChunk = ({ chunk }) => chunks.push(chunk);
+  session.on("HeapProfiler.addHeapSnapshotChunk", onChunk);
+  try {
+    await session.send("HeapProfiler.enable");
+    await session.send("HeapProfiler.collectGarbage");
+    await session.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+    return chunks.join("");
+  } finally {
+    session.off("HeapProfiler.addHeapSnapshotChunk", onChunk);
+    await session.detach();
+  }
+}
+
+async function runRetainedHeapSample(context) {
+  const { page, fixture } = context;
+  const threadCount = await page.evaluate((probeName) => {
+    const modules = window.__mcodeFrontendPerformanceModules;
+    const threads = modules.workspaceStore.getState().threads;
+    window[probeName] = { threads, facts: modules.sidebarCaches.facts(threads), index: modules.sidebarCaches.index(threads) };
+    return threads.length;
+  }, HEAP_PROBE);
+  let text;
+  try {
+    text = await takeHeapSnapshot(page);
+  } finally {
+    await page.evaluate((probeName) => { delete window[probeName]; }, HEAP_PROBE);
+  }
+  const retained = measureSidebarRetained(JSON.parse(text), HEAP_PROBE);
+  const rows = await readSidebarState(page, fixture.workspaces.map((workspace) => workspace.id));
+  return {
+    durationMs: retained.threadsAndCachesBytes ?? Number.NaN,
+    check: { ...retained, storeThreads: threadCount, snapshotBytes: text.length, ...rows },
+  };
+}
+
+/** Summarizes rAF intervals ending in `(startMs, endMs]` against the frame budget. */
+export function summarizeFramesInWindow(frameTimes, startMs, endMs, budgetMs) {
+  const intervals = [];
+  for (let index = 1; index < frameTimes.length; index += 1) {
+    if (frameTimes[index] > startMs && frameTimes[index] <= endMs) intervals.push(frameTimes[index] - frameTimes[index - 1]);
+  }
+  return summarizeFrameIntervals(intervals, budgetMs);
+}
+
+async function installFlightObserver(page) {
+  await page.evaluate(() => {
+    window.__mcodeSidebarFlights?.observer.disconnect();
+    const log = { added: [], removed: [], observer: null };
+    const isCopy = (node) => node instanceof HTMLElement && node.getAttribute("aria-hidden") === "true" && node.style.position === "fixed";
+    log.observer = new MutationObserver((mutations) => {
+      const now = performance.now();
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) if (isCopy(node)) log.added.push(now);
+        for (const node of mutation.removedNodes) if (isCopy(node)) log.removed.push(now);
+      }
+    });
+    log.observer.observe(document.body, { childList: true });
+    window.__mcodeSidebarFlights = log;
+  });
+}
+
+async function waitForFlightsLanded(page, expectRowsGone) {
+  await page.waitForFunction(({ ids }) => {
+    const log = window.__mcodeSidebarFlights;
+    const gone = ids.every((id) => !document.querySelector(`[data-testid="thread-item"][data-thread-id="${CSS.escape(id)}"]`));
+    return gone && log && log.added.length > 0 && log.removed.length === log.added.length;
+  }, { ids: expectRowsGone }, { timeout: FLIGHT_TIMEOUT_MS });
+  await nextFrames(page, 3);
+  return page.evaluate(() => {
+    const log = window.__mcodeSidebarFlights;
+    log.observer.disconnect();
+    return { flights: log.added.length, firstFlightMs: Math.min(...log.added), landedMs: Math.max(...log.removed) };
+  });
+}
+
+async function moveMouseOutOfSidebar(page) {
+  await page.mouse.move(1_200, 500);
+  await nextFrames(page, 2);
+}
+
+async function setSidebarView(page, view) {
+  const toggle = page.getByRole("button", { name: view === "flat" ? "Show as one list" : "Group by project", exact: true });
+  if ((await toggle.count()) > 0) await toggle.click();
+  await nextFrames(page, 30);
+}
+
+async function readVisibleThreadRows(page, excludeIds) {
+  return page.evaluate((excluded) => {
+    const body = document.querySelector('[data-testid="sidebar-body"]');
+    const scroller = [...(body?.querySelectorAll("*") ?? [])].find((element) =>
+      /(auto|scroll)/.test(getComputedStyle(element).overflowY) && element.scrollHeight > element.clientHeight) ?? body;
+    const view = scroller.getBoundingClientRect();
+    const olderTop = document.querySelector('[data-testid="older-bar"]')?.getBoundingClientRect().top ?? view.bottom;
+    return [...document.querySelectorAll('[data-testid="thread-item"]')]
+      .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+      .filter(({ element, rect }) => !excluded.includes(element.dataset.threadId) && rect.height > 0
+        && rect.top >= view.top && rect.bottom <= Math.min(view.bottom, olderTop))
+      .sort((left, right) => left.rect.top - right.rect.top)
+      .map(({ element }) => ({ id: element.dataset.threadId, title: element.querySelector('[data-testid="thread-title"]')?.textContent?.trim() ?? "" }));
+  }, excludeIds);
+}
+
+async function readPageNow(page) {
+  return page.evaluate(() => performance.now());
+}
+
+async function measureFlightFrames(context, startMs, landing) {
+  const { page, frameBudgetMs } = context;
+  const frameTimes = await page.evaluate(() => [...(window.__mcodePerformanceAttribution?.frameTimes ?? [])]);
+  return {
+    clickToLanding: summarizeFramesInWindow(frameTimes, startMs, landing.landedMs, frameBudgetMs),
+    flight: summarizeFramesInWindow(frameTimes, landing.firstFlightMs, landing.landedMs, frameBudgetMs),
+  };
+}
+
+async function runCompletionFlightSample(context) {
+  const { page, fixture } = context;
+  await setSidebarView(page, "grouped");
+  await scrollSidebarTo(page, "top");
+  await moveMouseOutOfSidebar(page);
+  const [candidate] = await readVisibleThreadRows(page, [fixture.streamTarget.id]);
+  if (!candidate) return { durationMs: Number.NaN, check: { candidate: null } };
+  await installFlightObserver(page);
+  await threadRowLocator(page, candidate.title).first().hover();
+  const clickedMs = await readPageNow(page);
+  await page.getByRole("button", { name: `Complete ${candidate.title}`, exact: true }).click();
+  await moveMouseOutOfSidebar(page);
+  const landing = await waitForFlightsLanded(page, [candidate.id]);
+  const frames = await measureFlightFrames(context, clickedMs, landing);
+  return {
+    durationMs: landing.landedMs - landing.firstFlightMs,
+    check: { candidate, ...landing, clickToLandingMs: landing.landedMs - clickedMs, frames, ...(await readSidebarState(page, fixture.workspaces.map((workspace) => workspace.id))) },
+  };
+}
+
+/**
+ * Ages the five lowest Recent rows on screen to just short of the Older boundary in the client
+ * store, so the sidebar's own boundary timer moves them into Older. Rows already at the bottom
+ * of Recent keep their order, so nothing reorders before the crossing.
+ */
+async function ageThreadsToBoundary(page, ids) {
+  return page.evaluate(({ threadIds, days, dayMs, leadMs }) => {
+    const store = window.__mcodeFrontendPerformanceModules.workspaceStore;
+    const crossAt = Date.now() + leadMs;
+    const at = new Date(crossAt - days * dayMs).toISOString();
+    const owned = new Set(threadIds);
+    store.setState((state) => ({ threads: state.threads.map((thread) => owned.has(thread.id) ? { ...thread, last_activity_at: at } : thread) }));
+    return performance.now() + leadMs;
+  }, { threadIds: ids, days: OLDER_AFTER_DAYS, dayMs: DAY_MS, leadMs: CROSSING_LEAD_MS });
+}
+
+/** The five oldest Recent threads in the fixture: the last rows of the flat Active list. */
+async function readOldestRecentThreads(page, workspaceIds, excludeId) {
+  return page.evaluate(({ ids, excluded, days, dayMs, count }) => {
+    const owned = new Set(ids);
+    const cutoff = Date.now() - days * dayMs;
+    return window.__mcodeFrontendPerformanceModules.workspaceStore.getState().threads
+      .filter((thread) => owned.has(thread.workspace_id) && thread.id !== excluded && !thread.user_completed_at
+        && Date.parse(thread.last_activity_at) >= cutoff)
+      .sort((left, right) => Date.parse(left.last_activity_at) - Date.parse(right.last_activity_at))
+      .slice(0, count)
+      .map((thread) => thread.id);
+  }, { ids: workspaceIds, excluded: excludeId, days: OLDER_AFTER_DAYS, dayMs: DAY_MS, count: CROSSING_THREAD_COUNT });
+}
+
+async function alignRowToTop(page, threadId) {
+  const moved = await page.evaluate((id) => {
+    const body = document.querySelector('[data-testid="sidebar-body"]');
+    const scroller = [...(body?.querySelectorAll("*") ?? [])].find((element) =>
+      /(auto|scroll)/.test(getComputedStyle(element).overflowY) && element.scrollHeight > element.clientHeight);
+    const row = document.querySelector(`[data-testid="thread-item"][data-thread-id="${CSS.escape(id)}"]`);
+    if (!scroller || !row) return false;
+    const delta = row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    if (delta < 1) return false;
+    scroller.scrollTop += delta;
+    return true;
+  }, threadId);
+  await nextFrames(page, 2);
+  return moved;
+}
+
+async function revealThreadIds(page, ids, excludeId) {
+  await scrollSidebarTo(page, "top");
+  for (let step = 0; step < MAX_WHEEL_STEPS; step += 1) {
+    const visible = await readVisibleThreadRows(page, [excludeId]);
+    const shown = visible.filter((row) => ids.includes(row.id));
+    if (shown.length === ids.length) return shown;
+    const moved = shown.length > 0 ? await alignRowToTop(page, shown[0].id) : await scrollSidebarByPage(page);
+    if (!moved) return shown;
+  }
+  return [];
+}
+
+async function runOlderCrossingSample(context) {
+  const { page, fixture } = context;
+  await setSidebarView(page, "flat");
+  await moveMouseOutOfSidebar(page);
+  const workspaceIds = fixture.workspaces.map((workspace) => workspace.id);
+  const oldest = await readOldestRecentThreads(page, workspaceIds, fixture.streamTarget.id);
+  const crossing = await revealThreadIds(page, oldest, fixture.streamTarget.id);
+  if (oldest.length < CROSSING_THREAD_COUNT || crossing.length < CROSSING_THREAD_COUNT) {
+    await setSidebarView(page, "grouped");
+    return { durationMs: Number.NaN, check: { crossing } };
+  }
+  await installFlightObserver(page);
+  const crossAtMs = await ageThreadsToBoundary(page, crossing.map((row) => row.id));
+  const landing = await waitForFlightsLanded(page, crossing.map((row) => row.id));
+  const frames = await measureFlightFrames(context, crossAtMs, landing);
+  const rows = await readSidebarState(page, fixture.workspaces.map((workspace) => workspace.id));
+  await setSidebarView(page, "grouped");
+  return { durationMs: landing.landedMs - landing.firstFlightMs, check: { crossing, ...landing, frames, ...rows } };
+}
+
+// The minute ticker re-renders only each row's age line, so idle renders count the row and its age line.
+async function readRowRenderTotal(page) {
+  return page.evaluate((prefixes) => Object.entries(window.__mcodePerformanceAttribution?.rowRenders ?? {})
+    .filter(([rowId]) => prefixes.some((prefix) => rowId.startsWith(prefix)))
+    .reduce((total, [, count]) => total + count, 0), [ROW_RENDER_PREFIX, AGE_RENDER_PREFIX]);
+}
+
+async function runIdleTickSample(context) {
+  const { page, fixture } = context;
+  await moveMouseOutOfSidebar(page);
+  const before = await readRowRenderTotal(page);
+  const startedAt = Date.now();
+  await page.waitForTimeout(IDLE_WINDOW_MS);
+  const elapsedMs = Date.now() - startedAt;
+  const renders = (await readRowRenderTotal(page)) - before;
+  const rowsPerMinute = (renders * 60_000) / elapsedMs;
+  return {
+    durationMs: rowsPerMinute,
+    check: { renders, elapsedMs, rowsPerMinute, profiling: context.mode === "profiling", ...(await readSidebarState(page, fixture.workspaces.map((workspace) => workspace.id))) },
+  };
+}
+
 const SIDEBAR_CHECKS = {
   sidebarStream: (check) => [
     [check.targetVisible, "the stream target row was not in the sidebar"],
@@ -399,10 +780,27 @@ const SIDEBAR_CHECKS = {
   sidebarScroll: (check) => [
     [check.reachedBottom, "the wheel did not reach the bottom of the sidebar"],
     [!check.scrollable || check.frames.frameCount > 0, "no frames were recorded during the scroll"],
+    // A list that fits has no scroller to compare, and no scroll to skew.
+    [!check.scrollable || listHeightMatchesContent(check.listHeight), "the list's scroll height differs from the content height vlist set"],
   ],
   sidebarHydration: (check, mode) => [
     [Number.isFinite(check.firstThreadRowMs), "no seeded thread row painted after reload"],
     [mode !== "profiling" || check.sidebarCommitsBeforeSettle > 0, "the sidebar Profiler recorded no commits"],
+  ],
+  sidebarCompleteFlight: (check) => [
+    [check.candidate != null, "no thread row besides the stream target was on screen"],
+    [check.candidate == null || check.flights >= 1, "the completed row did not fly"],
+  ],
+  sidebarOlderCrossing: (check) => [
+    [check.crossing.length === CROSSING_THREAD_COUNT, "fewer than five Recent rows were on screen"],
+    [check.crossing.length < CROSSING_THREAD_COUNT || check.flights >= 1, "no row flew to the Older bar"],
+  ],
+  sidebarRetainedHeap: (check) => [
+    [Object.values(check.found).every(Boolean), "the heap snapshot lacks the store threads or a sidebar cache"],
+  ],
+  sidebarIdleTick: (check) => [
+    [check.profiling, "row renders are only counted in a profiling build"],
+    [check.elapsedMs >= 60_000, "the idle window was shorter than one minute tick"],
   ],
 };
 
@@ -412,17 +810,35 @@ export function validateSidebarCheck(workload, check, mode) {
 }
 
 const SIDEBAR_SAMPLE_RUNNERS = {
-  sidebarStream: (context, index) => runStreamSample(context, `${context.runtime}-${index + 1}`),
+  sidebarStream: (context, index) => runStreamSample(context, `${context.runtime}-${index + 1}`, index + 1),
   sidebarScroll: (context) => runScrollSample(context),
   sidebarHydration: (context) => runHydrationSample(context),
+  sidebarCompleteFlight: (context) => runCompletionFlightSample(context),
+  sidebarOlderCrossing: (context) => runOlderCrossingSample(context),
+  sidebarIdleTick: (context) => runIdleTickSample(context),
+  sidebarRetainedHeap: (context) => runRetainedHeapSample(context),
 };
+
+const TRACED_SIDEBAR_WORKLOADS = new Set(["sidebarCompleteFlight", "sidebarOlderCrossing"]);
+
+/** Returns first-sample flight trace or requested CPU-profile options when a trace directory is set. */
+export function sampleMeasureOptions(context, workload, index) {
+  const traced = TRACED_SIDEBAR_WORKLOADS.has(workload) || context.cpuProfile === true;
+  if (!traced || index !== 0 || !context.traceDirectory) return {};
+  const stem = `${context.traceDirectory}/${context.runtime}-${context.mode}-${context.fixture.requestedThreadCount}-${workload}`;
+  return {
+    trace: true,
+    traceFile: `${stem}.trace.json`,
+    ...(context.cpuProfile === true ? { cpuProfileFile: `${stem}.cpuprofile` } : {}),
+  };
+}
 
 async function runSidebarWorkload(context, workload) {
   const run = SIDEBAR_SAMPLE_RUNNERS[workload];
   await run(context, -1);
   const rawSamples = [];
   for (let index = 0; index < context.sampleCount; index += 1) {
-    const { result, attribution } = await context.modeCollector.measure(() => run(context, index));
+    const { result, attribution } = await context.modeCollector.measure(() => run(context, index), sampleMeasureOptions(context, workload, index));
     const failures = validateSidebarCheck(workload, result.check, context.mode);
     rawSamples.push({
       sampleIndex: index,
@@ -451,7 +867,7 @@ function buildSidebarMetric(workload, rawSamples) {
 
 /** Runs the selected sidebar workloads against the seeded sidebar fixture in one runtime. */
 export async function runSidebarMatrix(page, runtime, sampleCount, mode, options) {
-  const { sidebarFixture: fixture, canonicalCapture: capture, workloads } = options;
+  const { sidebarFixture: fixture, canonicalCapture: capture, workloads, traceDirectory = null, cpuProfile = false } = options;
   if (!fixture || !capture) throw new Error("Sidebar workloads need the sidebar thread fixture and the canonical capture.");
   await installBootProbe(page);
   const byteCounter = createThreadListByteCounter(page);
@@ -462,7 +878,7 @@ export async function runSidebarMatrix(page, runtime, sampleCount, mode, options
     const refresh = await measureRefreshRate(page);
     const context = {
       page, runtime, sampleCount, mode, fixture, capture, byteCounter, modeCollector, signalCollector,
-      frameBudgetMs: refresh.medianFrameIntervalMs,
+      frameBudgetMs: refresh.medianFrameIntervalMs, traceDirectory, cpuProfile,
     };
     const metrics = {};
     for (const workload of workloads) metrics[workload] = await runSidebarWorkload(context, workload);

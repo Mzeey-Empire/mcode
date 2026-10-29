@@ -13,9 +13,11 @@ import {
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
+  type KeyboardSensorOptions,
+  type PointerSensorOptions,
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { VirtualRows } from "@/components/ui/VirtualRows";
@@ -23,7 +25,7 @@ import { VirtualViewport, type VirtualHost, type VirtualRow, type ViewportPositi
 import { usePreparingRowEntrance } from "@/features/thread-startup";
 import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { selectSidebarFacts, selectThreadIndex } from "../state/thread-index";
+import { selectPreparingThreadIds, selectSidebarFacts } from "../state/thread-index";
 import type { SidebarItem } from "./sidebar-model";
 import type { SidebarRowContext } from "./sidebar-row-context";
 import { ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProjectRow";
@@ -31,6 +33,10 @@ import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import { freezeOrder, useSidebarUiStore } from "./sidebar-ui-store";
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
+import { PreviewScrollGuard } from "./preview-scroll-guard";
+import { ThreadPreviewHandleContext, ThreadPreviewTooltip, type ThreadPreviewPayload } from "./SidebarThreadPreview";
+import { createTooltipHandle } from "@/components/ui/tooltip";
+import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 
 /**
  * Provisional heights until the ResizeObserver measures; they shape the first frame, so they match
@@ -45,12 +51,14 @@ function provisionalHeight(item: SidebarItem): number {
   return item.kind === "thread" ? PROVISIONAL_THREAD_HEIGHT[item.layout] : PROVISIONAL_HEIGHT[item.kind];
 }
 
-const PROJECT_DND_MODIFIERS = [restrictToVerticalAxis];
-// The virtual list mounts project droppables only near the viewport, so they must be measured as
-// they register rather than once before the drag starts. Rows never displace during a project
-// drag; the indicator line marks the landing boundary instead.
+// Clamping to the list scroller keeps the overlay from floating over the scope bar and header.
+const PROJECT_DND_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
+// The virtual list mounts project droppables only near the viewport, so during a drag they must be
+// measured as they register rather than once at drag start. Outside a drag nothing reads them, and
+// measuring each one as it mounts would add layout reads to every expand and scroll. Rows never
+// displace during a project drag; the indicator line marks the landing boundary instead.
 const STATIC_SORT_STRATEGY = () => null;
-const PROJECT_DND_MEASURING = { droppable: { strategy: MeasuringStrategy.Always } } as const;
+const PROJECT_DND_MEASURING = { droppable: { strategy: MeasuringStrategy.WhileDragging } } as const;
 // The pointerup that ends a drag still fires click on whatever row it lands on.
 const POST_DRAG_CLICK_GRACE_MS = 250;
 
@@ -103,17 +111,20 @@ function noopViewportPosition(_position: ViewportPosition): void {}
 function useSidebarViewport(containerRef: React.RefObject<HTMLDivElement | null>) {
   const controllerRef = useRef<VirtualViewport | null>(null);
   const [hosts, setHosts] = useState<readonly VirtualHost[]>([]);
+  const [previewGuard] = useState(() => new PreviewScrollGuard());
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const view = new VirtualViewport(container, setHosts, noopViewportPosition, { classPrefix: "project-tree", ariaLabel: "Projects", flowHostId: OLDER_BAR_KEY });
     controllerRef.current = view;
+    const detachGuard = previewGuard.attach(view.viewport);
     return () => {
+      detachGuard();
       view.destroy();
       controllerRef.current = null;
     };
-  }, [containerRef]);
-  return { controllerRef, hosts };
+  }, [containerRef, previewGuard]);
+  return { controllerRef, hosts, previewGuard };
 }
 
 interface DropIndicator {
@@ -125,13 +136,18 @@ function sameIndicator(a: DropIndicator | null, b: DropIndicator | null): boolea
   return a === b || (a !== null && b !== null && a.id === b.id && a.edge === b.edge);
 }
 
+// useSensor memoizes on its options object, so inline options would rebuild every sortable's
+// listeners on each list render and re-render every memoized project header.
+const POINTER_SENSOR_OPTIONS: PointerSensorOptions = { activationConstraint: { distance: 5 } };
+const KEYBOARD_SENSOR_OPTIONS: KeyboardSensorOptions = { coordinateGetter: sortableKeyboardCoordinates };
+
 function useProjectDrag(controllerRef: React.RefObject<VirtualViewport | null>) {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
   const suppressClickUntil = useRef(0);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(PointerSensor, POINTER_SENSOR_OPTIONS),
+    useSensor(KeyboardSensor, KEYBOARD_SENSOR_OPTIONS),
   );
   const endDrag = useCallback(() => {
     setActiveDragId(null);
@@ -231,6 +247,7 @@ function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, it
     const viewport = controllerRef.current;
     if (!viewport) return;
     viewport.setRows(rows, { flip });
+    if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordCounter?.("sidebar.setRows");
     if (!riseRef.current) return;
     riseRef.current = false;
     viewport.moveTo({ kind: "target", key: OLDER_BAR_KEY, align: "start" }, !prefersReducedMotion(), { release: true });
@@ -244,19 +261,18 @@ function useOlderRise(controllerRef: React.RefObject<VirtualViewport | null>, it
 
 /** Thread and draft row keys plus the preparing threads among them, for the first-send entrance. */
 function useEntranceKeys(items: readonly SidebarItem[]): { rowKeys: string[]; preparing: string[] } {
-  const threads = useWorkspaceStore((state) => state.threads);
+  const preparingIds = useWorkspaceStore((state) => selectPreparingThreadIds(state.threads));
   return useMemo(() => {
-    const index = selectThreadIndex(threads);
     const rowKeys: string[] = [];
     const preparing: string[] = [];
     for (const item of items) {
       if (item.kind === "draft") rowKeys.push(`draft:${item.draftId}`);
       if (item.kind !== "thread") continue;
       rowKeys.push(item.threadId);
-      if (index.get(item.threadId)?.clientPreparing === true) preparing.push(item.threadId);
+      if (preparingIds.has(item.threadId)) preparing.push(item.threadId);
     }
     return { rowKeys, preparing };
-  }, [items, threads]);
+  }, [items, preparingIds]);
 }
 
 interface SidebarListProps {
@@ -284,7 +300,8 @@ const unfreezeOnLeave = () => useSidebarUiStore.getState().unfreeze();
  */
 export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KEYS, arriving = NO_KEYS }: SidebarListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { controllerRef, hosts } = useSidebarViewport(containerRef);
+  const { controllerRef, hosts, previewGuard } = useSidebarViewport(containerRef);
+  const [previewHandle] = useState(() => createTooltipHandle<ThreadPreviewPayload>());
   const drag = useProjectDrag(controllerRef);
   const rowCtx = useDragSafeContext(ctx, drag.isClickSuppressed);
   const rows = useMemo(() => toVirtualRows(items), [items]);
@@ -322,12 +339,15 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
         onDragCancel={drag.onDragCancel}
       >
         <SortableContext items={sortableIds} strategy={STATIC_SORT_STRATEGY}>
-          <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={renderRow} />
+          <ThreadPreviewHandleContext.Provider value={previewHandle}>
+            <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={renderRow} />
+          </ThreadPreviewHandleContext.Provider>
         </SortableContext>
         <DragOverlay>
           {dragged?.kind === "project" ? <div className="px-1.5"><ProjectHeader item={dragged} ctx={rowCtx} /></div> : null}
         </DragOverlay>
       </DndContext>
+      <ThreadPreviewTooltip handle={previewHandle} guard={previewGuard} />
       {olderBar && controllerRef.current && <OlderBar item={olderBar} viewport={controllerRef.current} onToggle={toggleOlder} />}
       {overlay}
     </div>

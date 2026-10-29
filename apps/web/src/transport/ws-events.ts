@@ -232,11 +232,15 @@ export function startPushListeners(): void {
         threadId: string;
         status: string;
       };
-      useWorkspaceStore.setState((ws) => ({
-        threads: ws.threads.map((t) =>
-          t.id === threadId ? { ...t, status: status as typeof t.status } : t,
-        ),
-      }));
+      useWorkspaceStore.setState((ws) => {
+        const index = ws.threads.findIndex((t) => t.id === threadId);
+        const current = ws.threads[index];
+        // A repeated or unknown status must not replace the array every subscriber compares.
+        if (!current || current.status === status) return ws;
+        const threads = ws.threads.slice();
+        threads[index] = { ...current, status: status as typeof current.status };
+        return { threads };
+      });
 
       const isTerminal =
         status === "paused" || status === "interrupted" || status === "errored";

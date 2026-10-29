@@ -17,14 +17,19 @@ function TooltipProvider({
   )
 }
 
-function Tooltip({ open, defaultOpen, onOpenChange, ...props }: TooltipPrimitive.Root.Props) {
+function Tooltip<Payload = unknown>({ open, defaultOpen, onOpenChange, ...props }: TooltipPrimitive.Root.Props<Payload>) {
   const gated = useGatedOpen({ open, defaultOpen, onOpenChange })
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} {...gated} />
+  return <TooltipPrimitive.Root<Payload> data-slot="tooltip" {...props} {...gated} />
 }
 
-function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
+function TooltipTrigger<Payload = unknown>({ ...props }: TooltipPrimitive.Trigger.Props<Payload>) {
+  return <TooltipPrimitive.Trigger<Payload> data-slot="tooltip-trigger" {...props} />
 }
+
+/** A handle that lets one tooltip root serve triggers rendered anywhere, each with its own payload. */
+type TooltipHandle<Payload> = TooltipPrimitive.Handle<Payload>
+/** Creates a {@link TooltipHandle}. Keep one per shared tooltip for the life of its triggers. */
+const createTooltipHandle = TooltipPrimitive.createHandle
 
 type TooltipContentProps = TooltipPrimitive.Popup.Props &
   Pick<
@@ -97,4 +102,7 @@ function TooltipContent({
   )
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
+/** Details Base UI passes to a tooltip's `onOpenChange`, including its reason and `cancel()`. */
+type TooltipChangeDetails = TooltipPrimitive.Root.ChangeEventDetails
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, createTooltipHandle, type TooltipChangeDetails, type TooltipHandle }

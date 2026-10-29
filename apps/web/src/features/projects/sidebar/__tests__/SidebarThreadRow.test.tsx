@@ -24,6 +24,8 @@ import { useSidebarUiStore } from "../sidebar-ui-store";
 import { useProjectTreeMenus } from "../../ProjectTree";
 import { SidebarList } from "../SidebarList";
 import { useSidebarModel } from "../use-sidebar-model";
+import { PREVIEW_SCROLL_SETTLE_MS } from "../preview-scroll-guard";
+import { FakeVirtualViewport } from "./fake-virtual-viewport";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
@@ -150,5 +152,101 @@ describe("SidebarThreadRow", () => {
     expect(resolveNavigation).toHaveBeenCalledWith(PR_URL(42), expect.anything());
     expect(openExternalUrl).not.toHaveBeenCalled();
     expect(setActiveThread).not.toHaveBeenCalled();
+  });
+
+  describe("row preview while the list scrolls", () => {
+    const preview = () => screen.queryByTestId("thread-preview-t1");
+    const scroller = () => {
+      const viewport = FakeVirtualViewport.latest?.viewport;
+      if (!viewport) throw new Error("no viewport");
+      return viewport;
+    };
+    const hoverOpen = async (row: HTMLElement) => {
+      fireEvent.pointerOver(row, { pointerType: "mouse" });
+      fireEvent.mouseEnter(row, { clientX: 40, clientY: 40 });
+      fireEvent.mouseMove(row, { clientX: 41, clientY: 40 });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+    };
+
+    it("closes a hover-opened preview when a scroll starts", async () => {
+      const row = renderThread();
+      await hoverOpen(row);
+      expect(preview()).not.toBeNull();
+
+      fireEvent.wheel(scroller());
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(preview()).toBeNull();
+    });
+
+    it("rejects hover opens until the list settles and the pointer moves", async () => {
+      const row = renderThread();
+      fireEvent.pointerMove(window, { clientX: 40, clientY: 40 });
+      fireEvent.scroll(scroller());
+      fireEvent.pointerOver(row, { pointerType: "mouse" });
+      fireEvent.mouseEnter(row, { clientX: 40, clientY: 40 });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(preview()).toBeNull();
+
+      fireEvent.mouseLeave(row);
+      fireEvent.pointerMove(window, { clientX: 40, clientY: 40 });
+      await hoverOpen(row);
+      expect(preview()).toBeNull();
+
+      fireEvent.mouseLeave(row);
+      await act(() => vi.advanceTimersByTimeAsync(PREVIEW_SCROLL_SETTLE_MS));
+      fireEvent.pointerMove(window, { clientX: 40, clientY: 52 });
+      await hoverOpen(row);
+      expect(preview()).not.toBeNull();
+    });
+
+    it("moves an open preview to the next row after that row's hover commits, never showing the old row's details", async () => {
+      const first = createMockThread({ id: "t1", workspace_id: "ws-1", title: "First", provider: "claude", mode: "worktree" });
+      const second = createMockThread({ id: "t2", workspace_id: "ws-1", title: "Second", provider: "claude", mode: "worktree" });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [first, second], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      const row = (title: string) => screen.getByRole("button", { name: new RegExp(`^Provider, Claude ${title}`) });
+      await hoverOpen(row("First"));
+      expect(preview()).not.toBeNull();
+
+      let duringEnter: { first: boolean; second: boolean } | undefined;
+      act(() => {
+        fireEvent.mouseLeave(row("First"));
+        fireEvent.pointerOver(row("Second"), { pointerType: "mouse" });
+        fireEvent.mouseEnter(row("Second"), { clientX: 40, clientY: 60 });
+        duringEnter = { first: preview() !== null, second: screen.queryByTestId("thread-preview-t2") !== null };
+      });
+      expect(duringEnter).toEqual({ first: false, second: false });
+      expect(screen.queryByTestId("thread-preview-t2")).not.toBeNull();
+    });
+
+    it("keeps an open preview on screen while its thread updates", async () => {
+      const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Before", provider: "claude", mode: "worktree" });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      await hoverOpen(screen.getByRole("button", { name: /^Provider, Claude Before/ }));
+      expect(preview()).not.toBeNull();
+
+      const removed: Node[] = [];
+      const observer = new MutationObserver((records) => records.forEach((record) => removed.push(...record.removedNodes)));
+      observer.observe(document.body, { childList: true, subtree: true });
+      await act(async () => {
+        useWorkspaceStore.setState({ threads: [{ ...thread, title: "After" }] });
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      observer.takeRecords().forEach((record) => removed.push(...record.removedNodes));
+      observer.disconnect();
+
+      expect(removed.some((node) => node instanceof Element && node.matches("[data-testid='thread-preview-t1']"))).toBe(false);
+      expect(within(preview() ?? document.body).getByText("After")).toBeTruthy();
+    });
+
+    it("still opens a preview on keyboard focus during a scroll", async () => {
+      const row = renderThread();
+      fireEvent.scroll(scroller());
+      act(() => row.focus());
+      fireEvent.keyDown(row, { key: "Tab" });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(preview()).not.toBeNull();
+    });
   });
 });

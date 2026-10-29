@@ -1,5 +1,7 @@
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 function percentile(sortedSamples, quantile) {
   return sortedSamples[Math.ceil(sortedSamples.length * quantile) - 1] ?? Number.NaN;
@@ -128,6 +130,18 @@ async function installAttributionRuntime(page) {
       longTasks: [],
       longTaskTimestampsSupported: PerformanceObserver.supportedEntryTypes?.includes("longtask") === true,
       rowRenders: {},
+      counters: {},
+      droppedFrames: 0,
+      keepFramesFrom: 0,
+      /** Returns the absolute index of the next frame and keeps every frame from it in the buffer. */
+      markFrames() {
+        state.keepFramesFrom = state.droppedFrames + state.frameTimes.length;
+        return state.keepFramesFrom;
+      },
+      /** Returns the frame times recorded since an absolute index from `markFrames`. */
+      framesSince(index) {
+        return state.frameTimes.slice(Math.max(0, index - state.droppedFrames));
+      },
     };
     window.__mcodePerformanceAttribution = state;
     window.__mcodeReactPerformanceSink = {
@@ -136,6 +150,9 @@ async function installAttributionRuntime(page) {
       },
       recordRowRender(rowId) {
         state.rowRenders[rowId] = (state.rowRenders[rowId] ?? 0) + 1;
+      },
+      recordCounter(name) {
+        state.counters[name] = (state.counters[name] ?? 0) + 1;
       },
     };
     if (state.longTaskTimestampsSupported) {
@@ -148,7 +165,13 @@ async function installAttributionRuntime(page) {
     }
     const recordFrame = (timestamp) => {
       state.frameTimes.push(timestamp);
-      if (state.frameTimes.length > 10_000) state.frameTimes.splice(0, 5_000);
+      // Trimming shifts array positions, so readers hold absolute indexes and the trim never
+      // drops a frame at or after the newest mark; a long sample grows the buffer instead.
+      const removable = Math.min(5_000, state.keepFramesFrom - state.droppedFrames);
+      if (state.frameTimes.length > 10_000 && removable > 0) {
+        state.frameTimes.splice(0, removable);
+        state.droppedFrames += removable;
+      }
       requestAnimationFrame(recordFrame);
     };
     requestAnimationFrame(recordFrame);
@@ -161,8 +184,9 @@ async function resetAttributionRuntime(page) {
     if (!state) throw new Error("Performance attribution runtime is not installed");
     state.commits = [];
     state.rowRenders = {};
+    state.counters = {};
     return {
-      frameIndex: state.frameTimes.length,
+      frameIndex: state.markFrames(),
       longTaskIndex: state.longTasks.length,
     };
   });
@@ -174,10 +198,11 @@ async function readAttributionRuntime(page, indexes) {
     if (!state) throw new Error("Performance attribution runtime is not installed");
     return {
       commits: [...state.commits],
-      frameTimes: state.frameTimes.slice(frameIndex),
+      frameTimes: state.framesSince(frameIndex),
       longTasks: state.longTasks.slice(longTaskIndex),
       longTaskTimestampsSupported: state.longTaskTimestampsSupported,
       rowRenders: { ...state.rowRenders },
+      counters: { ...state.counters },
     };
   }, indexes);
 }
@@ -241,6 +266,28 @@ async function startTrace(session) {
   return { session, traceEvents, onTraceData };
 }
 
+const CPU_PROFILE_SAMPLING_INTERVAL_US = 100;
+
+async function startCpuProfile(session) {
+  if (!session) return false;
+  await session.send("Profiler.enable");
+  await session.send("Profiler.setSamplingInterval", { interval: CPU_PROFILE_SAMPLING_INTERVAL_US });
+  await session.send("Profiler.start");
+  return true;
+}
+
+async function stopCpuProfile(session, file) {
+  const { profile } = await session.send("Profiler.stop");
+  await session.send("Profiler.disable");
+  await NodeFSPromises.mkdir(NodePath.dirname(file), { recursive: true });
+  await NodeFSPromises.writeFile(file, JSON.stringify(profile));
+}
+
+async function writeTraceFile(file, traceEvents) {
+  await NodeFSPromises.mkdir(NodePath.dirname(file), { recursive: true });
+  await NodeFSPromises.writeFile(file, JSON.stringify({ traceEvents }));
+}
+
 async function stopTrace(trace) {
   if (!trace) return;
   const completed = new Promise((resolveComplete) => {
@@ -249,6 +296,20 @@ async function stopTrace(trace) {
   await trace.session.send("Tracing.end");
   await completed;
   trace.session.off("Tracing.dataCollected", trace.onTraceData);
+}
+
+async function runCaptured(session, options, operation) {
+  const trace = await startTrace(session);
+  const profiling = options.cpuProfileFile ? await startCpuProfile(session) : false;
+  let result;
+  try {
+    result = await operation();
+  } finally {
+    if (profiling) await stopCpuProfile(session, options.cpuProfileFile);
+    await stopTrace(trace);
+  }
+  if (options.traceFile && trace) await writeTraceFile(options.traceFile, trace.traceEvents);
+  return { result, trace };
 }
 
 function buildChromiumAttribution(mode, traceEnabled, before, after, signals, traceEvents) {
@@ -272,7 +333,7 @@ function buildChromiumAttribution(mode, traceEnabled, before, after, signals, tr
 }
 
 function buildReactAttribution(mode, signals) {
-  return mode === "profiling" ? { commits: signals.commits, rowRenders: signals.rowRenders } : null;
+  return mode === "profiling" ? { commits: signals.commits, rowRenders: signals.rowRenders, counters: signals.counters } : null;
 }
 
 /** Creates the mode-specific React, Chromium, and Electron process collector. */
@@ -300,13 +361,7 @@ export async function createModeSignalCollector(page, mode) {
       const activeSession = traceEnabled ? await ensureSession() : null;
       const before = await readChromiumMetrics(activeSession, mode);
       const processBefore = await readModeProcessMetrics(page, mode);
-      const trace = await startTrace(activeSession);
-      let result;
-      try {
-        result = await operation();
-      } finally {
-        await stopTrace(trace);
-      }
+      const { result, trace } = await runCaptured(activeSession, options, operation);
       const processAfter = await readModeProcessMetrics(page, mode);
       const after = await readChromiumMetrics(activeSession, mode);
       const signals = await readAttributionRuntime(page, indexes);

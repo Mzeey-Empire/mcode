@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 /** Formats elapsed seconds into a compact duration label. */
 export function formatDuration(totalSeconds: number): string {
@@ -66,14 +66,8 @@ function subscribeToMinute(listener: () => void): () => void {
   };
 }
 
-// The snapshot changes once a minute, so labels re-render on the tick and never in between.
-function currentMinute(): number {
-  return Math.floor(Date.now() / MINUTE_MS);
-}
-
-/** {@link relativeTime} that stays current, re-rendering on a shared minute ticker. */
+/** {@link relativeTime} that stays current, re-rendering on a shared minute ticker only when its text changes. */
 export function useRelativeTime(dateStr: string): string {
-  // The minute only schedules the re-render; the label reads the real clock so it never lags.
-  useSyncExternalStore(subscribeToMinute, currentMinute, currentMinute);
-  return relativeTime(dateStr);
+  const label = useCallback(() => relativeTime(dateStr), [dateStr]);
+  return useSyncExternalStore(subscribeToMinute, label, label);
 }
