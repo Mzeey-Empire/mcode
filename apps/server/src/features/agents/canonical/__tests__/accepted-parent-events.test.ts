@@ -133,7 +133,10 @@ describe("prepareAcceptedParentEvents", () => {
     expect(slot.payload).toEqual({ projection: "assistantText", content: "Part", isStreaming: true });
     const second = prepare({ ...append, operationId: "lease:3", mutation: { kind: "live-event",
       text: { kind: "append", inputs: [{ ...execution, sequence: 2, text: "ial" }] } } }, { [slot.id]: slot });
-    const streamed = projectedItems(second.events)[0];
+    expect(second.events).toEqual([{ eventId: "lease:3:assistant-text", routing: { ...execution, itemId: slot.id },
+      sourceProviderId: "codex", sourceIdentities: [], payload: { type: "item.content-appended",
+        offset: 4, text: "ial", updatedAt: ACCEPTED_AT } }]);
+    const streamed = applyPrepared(second.events, { [slot.id]: slot }).items[slot.id];
     if (!streamed) throw new Error("Missing updated recovery");
     expect(streamed.id).toBe(slot.id);
     expect(streamed.payload).toEqual({ projection: "assistantText", content: "Partial", isStreaming: true });
@@ -154,6 +157,63 @@ describe("prepareAcceptedParentEvents", () => {
     expect(Object.values(projected.items).find((item) => item.payload.projection === "message")?.payload.message).toMatchObject({ id: "answer", content: "Corrected" });
     const newAttempt = prepare({ ...append, operationId: "lease:6" }, projected.items);
     expect(projectedItems(newAttempt.events)[0]?.payload).toEqual({ projection: "assistantText", content: "Part", isStreaming: true });
+  });
+
+  it("replaces an open slot when the append sequence starts again at one", () => {
+    const op = operation({ kind: "live-event", text: { kind: "append", inputs: [{ ...execution, sequence: 1, text: "Part" }] } });
+    const initial = applyPrepared(prepare(op).events);
+    const result = prepare({ ...op, operationId: "lease:3", mutation: { kind: "live-event",
+      text: { kind: "append", inputs: [{ ...execution, sequence: 1, text: "New" }] } } }, initial.items);
+
+    expect(projectedItems(result.events).map((item) => item.payload)).toEqual([
+      { projection: "assistantText", content: "New", isStreaming: true },
+    ]);
+    expect(applyPrepared(result.events, initial.items).items[`assistant-response-text:${execution.executionId}`]?.payload.content).toBe("New");
+  });
+
+  it("appends promoted text to an open slot without whole-writing it", () => {
+    const initial = applyPrepared(prepare(operation({ kind: "live-event",
+      text: { kind: "append", inputs: [{ ...execution, sequence: 1, text: "Part" }] } })).events);
+    const result = prepare({ ...operation({ kind: "live-event",
+      text: { kind: "promote", input: { ...execution, sequence: 2, text: "ial" } } }), operationId: "lease:3" }, initial.items);
+
+    expect(result.events.map((event) => event.payload)).toEqual([
+      { type: "item.content-appended", offset: 4, text: "ial", updatedAt: ACCEPTED_AT },
+    ]);
+    expect(applyPrepared(result.events, initial.items).items[`assistant-response-text:${execution.executionId}`]?.payload.content).toBe("Partial");
+  });
+
+  it("whole-writes an open slot when promoted text is empty", () => {
+    const initial = applyPrepared(prepare(operation({ kind: "live-event",
+      text: { kind: "append", inputs: [{ ...execution, sequence: 1, text: "Part" }] } })).events);
+    const result = prepare({ ...operation({ kind: "live-event",
+      text: { kind: "promote", input: { ...execution, sequence: 2, text: "" } } }), operationId: "lease:3" }, initial.items);
+
+    expect(projectedItems(result.events).map((item) => item.payload)).toEqual([
+      { projection: "assistantText", content: "Part", isStreaming: true },
+    ]);
+  });
+
+  it.each(["append", "promote"] as const)("keeps the prefix when %s reopens a closed slot", (kind) => {
+    const initial = applyPrepared(prepare(operation({ kind: "live-event",
+      text: { kind: "append", inputs: [{ ...execution, sequence: 1, text: "Part" }] } })).events);
+    const close = prepare({ ...operation({ kind: "live-event", text: { kind: "unchanged" } }), operationId: "lease:3",
+      livePublication: [{ after: "writer", event: { type: "assistantMessageBoundary", threadId: thread.id,
+        turnExecutionId: execution.executionId, isFinalResponse: true } }],
+    }, initial.items);
+    expect(projectedItems(close.events).map((item) => item.payload)).toEqual([
+      { projection: "assistantText", content: "Part", isStreaming: false },
+    ]);
+    const closed = applyPrepared(close.events, initial.items);
+    const input = { ...execution, sequence: 2, text: "ial" };
+    const reopened = prepare({ ...operation({ kind: "live-event", text: kind === "append"
+      ? { kind, inputs: [input] } : { kind, input } }), operationId: "lease:4" }, closed.items);
+
+    expect(projectedItems(reopened.events).map((item) => item.payload)).toEqual([
+      { projection: "assistantText", content: "Partial", isStreaming: true },
+    ]);
+    expect(applyPrepared(reopened.events, closed.items).items[`assistant-response-text:${execution.executionId}`]?.payload)
+      .toEqual({ projection: "assistantText", content: "Partial", isStreaming: true });
   });
 
   it("assigns a new recovery identity for a late child target and retains it through repeat preparation and terminal binding", () => {

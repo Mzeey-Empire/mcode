@@ -89,13 +89,31 @@ function assistantTextEvents(input: PreparationInput, effects: ParentLiveEffects
   if (effects.text.kind === "unchanged" && !effects.message && !closed) return [];
   const id = `assistant-response-text:${input.operation.execution.executionId}`;
   const previous = input.items[id];
+  const event = { eventId: `${input.operation.operationId}:assistant-text`, routing: { ...input.operation.execution, itemId: id },
+    sourceProviderId: input.thread.providerId, sourceIdentities: [] };
+  const append = assistantTextAppend(previous, effects, closed);
+  if (append) return [{ ...event, payload: { type: "item.content-appended", ...append, updatedAt: input.acceptedAt } }];
   const item: AgentItem = {
     id, threadId: input.thread.id, turnId: input.turn.id, kind: "message", providerIdentities: [],
     payload: assistantTextPayload(previous, effects, closed),
     createdAt: previous?.createdAt ?? input.acceptedAt, updatedAt: input.acceptedAt,
   };
-  return [{ eventId: `${input.operation.operationId}:assistant-text`, routing: { ...input.operation.execution, itemId: id },
-    sourceProviderId: input.thread.providerId, sourceIdentities: [], payload: { type: "item.recorded", item } }];
+  return [{ ...event, payload: { type: "item.recorded", item } }];
+}
+
+function assistantTextAppend(previous: AgentItem | undefined, effects: ParentLiveEffects, closed: AgentEvent | undefined) {
+  if (previous?.payload.isStreaming !== true || typeof previous.payload.content !== "string" || effects.message || closed) return undefined;
+  const text = appendedAssistantText(effects.text);
+  // The event schema rejects empty text, so an empty delta keeps today's whole write.
+  return text ? { offset: previous.payload.content.length, text } : undefined;
+}
+
+function appendedAssistantText(text: ParentLiveEffects["text"]): string | undefined {
+  switch (text.kind) {
+    case "append": return text.inputs[0]?.sequence === 1 ? undefined : text.inputs.map((input) => input.text).join("");
+    case "promote": return text.input.text;
+    default: return undefined;
+  }
 }
 
 function assistantTextPayload(previous: AgentItem | undefined, effects: ParentLiveEffects, closed: AgentEvent | undefined) {

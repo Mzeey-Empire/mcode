@@ -314,8 +314,10 @@ are never promoted, tagged final, or matched against the answer:
    fired this turn. May be absent on tool-free turns; boundary event wins.
 3. **Client segment routing** — `threadStore` retracts or closes the open
    thought segment on `session.assistantMessageBoundary`. Final response text
-   stays in the thread streaming buffer and renders via a provisional
-   assistant message item, not `thoughtSegmentsByThread`.
+   renders as a provisional assistant message. Open-slot deltas use
+   `item.content-appended`, stored in `canonical_agent_item_content_appends`,
+   to avoid rewriting the growing answer. Whole writes clear the tail;
+   closes fold it into the item, and reopening keeps the prefix.
 4. **Persist suffix match** — `narrative-store.ts` `persistNarrative` tags the
    last matching thought row `is_final_response` before DB insert as a safety
    net for older rows or reconnect gaps.
