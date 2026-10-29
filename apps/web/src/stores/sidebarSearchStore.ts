@@ -31,9 +31,15 @@ const VALID_THREAD_STATUSES = new Set([
   "completed",
   "deleted",
 ]);
+/** Direction each sort field starts in: names read A to Z, dates newest first. */
+const DEFAULT_SORT_DIRECTION: Record<ThreadSortField, SortDirection> = {
+  title: "asc",
+  updated_at: "desc",
+  created_at: "desc",
+};
 const DEFAULT_PREFS: PersistedPrefs = {
   sortField: "updated_at",
-  sortDirection: "desc",
+  sortDirection: DEFAULT_SORT_DIRECTION.updated_at,
   filters: { status: [], provider: [] },
 };
 
@@ -153,8 +159,9 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
     },
 
     setSortField: (field) => {
-      set({ sortField: field });
-      const { sortDirection, filters } = get();
+      const sortDirection = DEFAULT_SORT_DIRECTION[field];
+      set({ sortField: field, sortDirection });
+      const { filters } = get();
       savePrefs({ sortField: field, sortDirection, filters });
       if (get().query.trim()) {
         if (debounceTimer) clearTimeout(debounceTimer);
