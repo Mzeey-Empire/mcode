@@ -8,7 +8,7 @@ import { type ReactElement } from "react";
  * The card's sections bleed 12px into the card padding so that lane lines up with the title.
  */
 export const OVERVIEW_ROW_CLASS =
-  "group h-row-default w-full gap-2 px-3 text-left text-body-small transition-[background-color,color,box-shadow] duration-150 ease-out active:inset-ring-2 active:inset-ring-ink";
+  "group h-row-default w-full gap-2 px-3 text-left text-body-small transition-[background-color,color] duration-150 ease-out";
 
 /** The leading icon lane of an overview row: a 16px icon centred in a fixed 20px slot. */
 export function OverviewRowIcon({ className, children }: { className?: string; children: React.ReactNode }) {

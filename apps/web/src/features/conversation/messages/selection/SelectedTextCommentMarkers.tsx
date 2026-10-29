@@ -222,7 +222,7 @@ export function SelectedTextCommentMarkers({
               data-testid="selected-text-comment-marker"
               data-selected-text-comment-marker-id={marker.commentId}
               aria-label={`Open comment ${marker.displayNumber}`}
-              className="group/marker pointer-events-auto absolute flex size-8 rounded-full p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent active:inset-ring-0"
+              className="group/marker pointer-events-auto absolute flex size-8 rounded-full p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
               style={{ top: marker.top, left: marker.left }}
               onMouseEnter={() => setHoveredCommentId(marker.commentId)}
               onMouseLeave={() => setHoveredCommentId((current) => current === marker.commentId ? null : current)}

@@ -8,7 +8,8 @@ import { Spinner, type SpinnerSize } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
-// Pressed is a 2px inset ring in the variant's foreground colour, never a translation.
+// Pressed is a 2px inset ring in the variant's foreground colour, never a translation. Ghost has no
+// resting fill, so a ring would hug bare icons and text; it shows the press with the selected fill alone.
 // Focus is a 2px ring 2px outside the control; an outline keeps the gap transparent on any surface.
 const buttonVariants = cva(
   "group/button relative inline-flex shrink-0 items-center justify-center border border-transparent text-button whitespace-nowrap transition-colors duration-(--duration-fast) ease-(--ease-standard) select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus disabled:pointer-events-none disabled:opacity-50 aria-busy:cursor-progress aria-invalid:border-error [&_svg]:pointer-events-none [&_svg]:shrink-0",
@@ -22,7 +23,7 @@ const buttonVariants = cva(
         secondary:
           "bg-button-secondary text-ink hover:bg-button-secondary-hover aria-expanded:bg-button-secondary-hover active:bg-button-secondary-hover active:inset-ring-2 active:inset-ring-ink",
         ghost:
-          "text-ink hover:bg-hover aria-expanded:bg-hover aria-pressed:bg-selected active:bg-selected active:inset-ring-2 active:inset-ring-ink",
+          "text-ink hover:bg-hover aria-expanded:bg-hover aria-pressed:bg-selected active:bg-selected",
         destructive:
           "bg-destructive text-destructive-ink hover:bg-button-destructive-hover active:bg-button-destructive-hover active:inset-ring-2 active:inset-ring-destructive-ink",
         link: "text-link underline underline-offset-4 hover:text-focus active:text-ink",

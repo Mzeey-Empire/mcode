@@ -542,7 +542,7 @@ function ThreadRowTitleLine({
             autoFocus
             onFocus={(event) => event.currentTarget.select()}
             onClick={(event) => event.stopPropagation()}
-            className="flex-1 border-focus"
+            className="-mx-1 h-5 flex-1 rounded-sm px-1 text-label border-focus hover:border-focus focus-visible:outline-0"
           />
         ) : (
           <div
@@ -587,8 +587,10 @@ function ThreadRowBranchLine({ thread, presentation, children }: Pick<ThreadRowV
       >
         {checkoutLabel}
       </div>
-      {children}
-      <div className="w-6 shrink-0 text-right tabular-nums">{age}</div>
+      <div className="flex shrink-0 items-center gap-1">
+        {children}
+        <div className="tabular-nums">{age}</div>
+      </div>
     </div>
   );
 }
@@ -620,10 +622,11 @@ function ThreadModeIcon({ thread, stale }: { thread: WorkspaceThread; stale: boo
 
 // Hidden layers stay in the accessibility tree and the tab order; only the eye loses them.
 const HIDDEN_LAYER: CSSProperties = { opacity: 0, pointerEvents: "none" };
+const HIDDEN_ACTIONS: CSSProperties = { ...HIDDEN_LAYER, position: "absolute", insetInlineEnd: 0 };
 
 /**
- * One fixed cell at the end of the title line. The status and the row actions overlap in it, so
- * the cell is as wide as the wider of the two and swapping them on hover never moves the title.
+ * The status and the row actions overlap in this cell. Hidden actions take no width, so an idle
+ * title fades at the row edge instead of short of an empty gap.
  */
 function ThreadRowTrailingSlot({
   thread,
@@ -636,11 +639,11 @@ function ThreadRowTrailingSlot({
 }: Pick<ThreadRowVisualProps, "thread" | "isEditing" | "presentation" | "lifecycle" | "threadMenuActions" | "workspacePath"> & { revealed: boolean }) {
   if (isEditing) return null;
   return (
-    <div className="grid max-w-[55%] shrink-0 items-center justify-items-end">
+    <div className="relative grid max-w-[55%] shrink-0 items-center justify-items-end">
       <div data-testid="thread-status" style={revealed ? HIDDEN_LAYER : undefined} className="col-start-1 row-start-1 flex min-w-0 max-w-full items-center gap-1 transition-opacity">
         <ThreadRowStatus thread={thread} presentation={presentation} lifecycle={lifecycle} />
       </div>
-      <div style={revealed ? undefined : HIDDEN_LAYER} className="col-start-1 row-start-1 flex items-center gap-0.5 transition-opacity">
+      <div style={revealed ? undefined : HIDDEN_ACTIONS} className="col-start-1 row-start-1 flex items-center gap-0.5 transition-opacity">
         <ThreadRowActions thread={thread} presentation={presentation} lifecycle={lifecycle} threadMenuActions={threadMenuActions} workspacePath={workspacePath} />
       </div>
     </div>
