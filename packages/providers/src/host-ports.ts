@@ -5,6 +5,7 @@ import type {
 } from "@mcode/agent-model";
 import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { type InteractionMode } from "@mcode/contracts/models/enums";
+import type { TurnAdmissionFailureReason } from "@mcode/contracts/models/turn-admission";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type { McodeAttachedToolkits } from "@mcode/thread-orchestration";
 
@@ -188,8 +189,11 @@ export interface ProviderTurnRouting {
   deliveryAttempt: number;
 }
 
-/** Why the server did not admit a provider-started turn. */
-export type ProviderTurnDeclineReason = "busy" | "stopping" | "stopped" | "unavailable";
+/**
+ * Why the server did not admit a provider-started turn. A pending mutation is
+ * reported as busy; stopping comes from the reservation state, not an admission error.
+ */
+export type ProviderTurnDeclineReason = Exclude<TurnAdmissionFailureReason, "pending_mutation"> | "stopping";
 
 /** Server decision for a provider-started turn. */
 export type ProviderTurnOpening =

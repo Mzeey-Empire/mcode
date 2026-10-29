@@ -4,6 +4,7 @@ import { ApprovalService } from "../../../agents/approvals/approval-service.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PendingThreadCreateApproval, PendingThreadSendApproval, PendingThreadStopApproval } from "../persistence/thread-control-approval-repo.js";
 import { THREAD_GET_TRANSCRIPT_MAX_BYTES } from "@mcode/contracts/thread-control";
+import { TurnAdmissionError } from "@mcode/shared/turn-admission";
 
 const { mockBroadcast } = vi.hoisted(() => ({ mockBroadcast: vi.fn() }));
 
@@ -1200,6 +1201,22 @@ describe("ThreadControlService", () => {
       originSourceTurnId: authority.sourceTurnId,
       sourceProviderId: authority.sourceProviderId,
     }));
+  });
+
+  it.each([
+    ["busy", { code: "thread_busy", message: "Thread is already running", retryable: true }],
+    ["pending_mutation", { code: "thread_busy", message: "Thread mutation is already pending", retryable: true }],
+    ["stopped", { code: "conflict", message: "Thread is terminal", retryable: false }],
+    ["unavailable", { code: "internal_error", message: "Thread send failed", retryable: true }],
+  ] as const)("rejects a send refused at admission as %s by its reason", async (reason, expected) => {
+    const service = createService();
+    const target = { ...createdThread, id: "target-thread", model: "claude-exact", deleted_at: null };
+    threads.findById.mockReturnValue(target);
+    agentService.sendMessage.mockRejectedValueOnce(new TurnAdmissionError(reason, "Admission refused"));
+
+    await expect(service.threadSend({ ...authority, permissionMode: "full" }, { threadId: target.id, message: "Continue." }))
+      .resolves.toMatchObject({ status: "rejected", error: expected });
+    expect(mutationReservations.get(target.id)).toBeUndefined();
   });
 
   it("persists supervised send approval and excludes the source thread", async () => {

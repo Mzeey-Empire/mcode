@@ -46,6 +46,8 @@ import { DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite
 import { DelegatedTaskService, type ObservedNotice } from "../delegation/delegated-task-service.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { cancelThreadStartup, type CancelThreadStartupDeps } from "../../thread-startup/cancel-thread-startup.js";
+import { turnAdmissionFailureReason } from "@mcode/shared/turn-admission";
+import type { TurnAdmissionFailureReason } from "@mcode/contracts/models/turn-admission";
 
 type ThreadApprovalDecision = "allow" | "deny" | "cancelled";
 
@@ -457,8 +459,8 @@ export class ThreadControlService {
     } catch (error) {
       requireKnownDatabaseOutcome(error);
       this.mutationReservations.release(target.id, reservationToken);
-      const code = error instanceof Error && /already has an active agent session/.test(error.message) ? "thread_busy" : "internal_error";
-      return (await this.rejectSendTarget(authority, target, code, code === "thread_busy" ? "Thread is already running" : "Thread send failed", true));
+      const failure = threadSendAdmissionFailure(turnAdmissionFailureReason(error));
+      return (await this.rejectSendTarget(authority, target, failure.code, failure.message, failure.retryable));
     }
     (await this.auditMutation(authority, "thread_send", "accepted", target.id, target.workspace_id));
     return { status: "accepted", workspaceId: target.workspace_id, threadId: target.id, turnId, execution, state: { status: "starting" } };
@@ -1716,4 +1718,20 @@ export class ThreadControlService {
 /** A missing commit reply cannot authorize a retry or a compensating provider effect. */
 function requireKnownDatabaseOutcome(error: unknown): void {
   if (error instanceof DatabaseWriteOutcomeUnknown) throw error;
+}
+
+function threadSendAdmissionFailure(
+  reason: TurnAdmissionFailureReason | null,
+): Pick<ThreadControlError, "code" | "message" | "retryable"> {
+  switch (reason) {
+    case "busy":
+      return { code: "thread_busy", message: "Thread is already running", retryable: true };
+    case "pending_mutation":
+      return { code: "thread_busy", message: "Thread mutation is already pending", retryable: true };
+    case "stopped":
+      return { code: "conflict", message: "Thread is terminal", retryable: false };
+    case "unavailable":
+    case null:
+      return { code: "internal_error", message: "Thread send failed", retryable: true };
+  }
 }

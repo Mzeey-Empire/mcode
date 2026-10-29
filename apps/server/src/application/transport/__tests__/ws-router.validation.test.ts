@@ -7,7 +7,10 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { WebSocket } from "ws";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
-import { routeMessage, type RouterDeps } from "../ws-router.js";
+import { logger } from "@mcode/shared";
+import { TurnAdmissionError } from "@mcode/shared/turn-admission";
+import { mapRouteError, routeMessage, type RouterDeps } from "../ws-router.js";
+import { ProviderDisabledError } from "../../../features/providers/availability/provider-availability-errors.js";
 import { DraftImageMissingError } from "../../../features/attachments/storage/draft-image-missing-error.js";
 import { CodexCatalogService } from "../../../features/providers/catalog/codex-catalog-service.js";
 import { ProviderCatalogService } from "../../../features/providers/catalog/provider-catalog-service.js";
@@ -1809,5 +1812,41 @@ describe("routeMessage github.checkStatus", () => {
       { skipInitialFetch: true },
     );
     expect(getCheckRuns).toHaveBeenCalledWith("feat/named", "C:/repo");
+  });
+});
+
+describe("mapRouteError for refused turn admission", () => {
+  const request = { id: "send-request", method: "agent.send", params: {} };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("types a refused admission and does not log it as a handler error", () => {
+    const error = vi.spyOn(logger, "error").mockImplementation(() => logger);
+
+    const response = mapRouteError(request, new TurnAdmissionError("stopped", "Cannot send message to terminal thread: thread-1"));
+
+    expect(response.error).toEqual({
+      code: "TURN_ADMISSION_REJECTED",
+      data: { reason: "stopped" },
+      message: "Cannot send message to terminal thread: thread-1",
+    });
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("still logs an unknown failure as an internal error", () => {
+    const error = vi.spyOn(logger, "error").mockImplementation(() => logger);
+
+    const response = mapRouteError(request, new Error("Thread thread-1 already has an active agent session"));
+
+    expect(response.error?.code).toBe("INTERNAL_ERROR");
+    expect(error).toHaveBeenCalledWith("RPC handler error", expect.objectContaining({ method: "agent.send" }));
+  });
+
+  it("keeps a provider availability failure's own code and provider", () => {
+    const response = mapRouteError(request, new ProviderDisabledError("codex"));
+
+    expect(response.error).toMatchObject({ code: "PROVIDER_DISABLED", data: { providerId: "codex" } });
   });
 });
