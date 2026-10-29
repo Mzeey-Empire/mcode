@@ -8,9 +8,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-/** Paper's turn menu rows (161H-0) are 32px tall with a 6px radius, tighter than the default menu row. */
-const TURN_MENU_ROW_CLASS = "h-row-compact rounded-sm";
-
 /** Props for {@link TurnMenu}. */
 export interface TurnMenuProps {
   /** Opens Review on this turn. */
@@ -39,17 +36,15 @@ export function TurnMenu({ onReviewChanges, onCopyFilePaths, onRevertTurn, rever
       >
         <Ellipsis aria-hidden size={14} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" sideOffset={4} className="w-[24rem] gap-0 p-1">
+      <DropdownMenuContent align="end" sideOffset={4} className="w-[24rem]">
         <DropdownMenuItem
           label="Review changes"
           icon={<Diff />}
-          className={TURN_MENU_ROW_CLASS}
           onClick={onReviewChanges}
         />
         <DropdownMenuItem
           label="Copy file paths"
           icon={<Copy />}
-          className={TURN_MENU_ROW_CLASS}
           onClick={onCopyFilePaths}
         />
         <DropdownMenuItem
@@ -57,7 +52,6 @@ export function TurnMenu({ onReviewChanges, onCopyFilePaths, onRevertTurn, rever
           icon={<Undo />}
           destructive
           disabledReason={revertDisabledReason}
-          className={TURN_MENU_ROW_CLASS}
           onClick={onRevertTurn}
         />
       </DropdownMenuContent>

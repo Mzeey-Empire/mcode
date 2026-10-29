@@ -3,12 +3,12 @@ import { cn } from "@/lib/utils";
 import { type ReactElement } from "react";
 
 /**
- * Overview rows share the menu row anatomy (see `MENU_ROW_CLASS`): 40px tall, 12px inline padding,
+ * Overview rows share the menu row anatomy (see `MENU_ROW_CLASS`): 32px tall, 12px inline padding,
  * 8px gap and body-small text, with the leading icon in {@link OverviewRowIcon}'s 20px lane.
  * The card's sections bleed 12px into the card padding so that lane lines up with the title.
  */
 export const OVERVIEW_ROW_CLASS =
-  "group h-row-default w-full gap-2 px-3 text-left text-body-small transition-[background-color,color] duration-150 ease-out";
+  "group h-row-compact w-full gap-2 px-3 text-left text-body-small transition-[background-color,color] duration-150 ease-out";
 
 /** The leading icon lane of an overview row: a 16px icon centred in a fixed 20px slot. */
 export function OverviewRowIcon({ className, children }: { className?: string; children: React.ReactNode }) {

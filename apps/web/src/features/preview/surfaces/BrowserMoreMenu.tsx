@@ -68,7 +68,7 @@ function ZoomRow({ zoom }: { readonly zoom: BrowserZoom }) {
   const stepper = { shape: "round", size: "inline", disabled: stepperDisabled, tooltip: reason ?? undefined } as const;
   return (
     // A plain row, not a menu item, so the popup stays open while the steppers are pressed repeatedly.
-    <div className="flex h-row-default items-center justify-between gap-2 px-3 text-body-small">
+    <div className="flex h-row-compact items-center justify-between gap-2 px-3 text-body-small">
       <span className={reason === null ? "text-ink" : "text-muted"}>Zoom</span>
       <span className="flex items-center gap-1">
         <IconButton aria-label="Zoom out" {...stepper} onClick={() => step(-ZOOM_STEP)}>

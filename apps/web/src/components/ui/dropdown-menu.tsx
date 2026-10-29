@@ -10,6 +10,7 @@ import {
   MENU_LIST_CLASS,
   MENU_ROW_CLASS,
   MENU_ROW_DISABLED_CLASS,
+  MENU_SEPARATOR_CLASS,
   MenuRowBody,
   MenuRowCheck,
   type MenuRowContent,
@@ -81,7 +82,7 @@ function DropdownMenuGroup({ className, ...props }: MenuPrimitive.Group.Props) {
   return (
     <MenuPrimitive.Group
       data-slot="dropdown-menu-group"
-      className={cn("flex flex-col gap-1", className)}
+      className={cn("flex flex-col", className)}
       {...props}
     />
   )
@@ -211,15 +212,12 @@ function DropdownMenuCheckboxItem({
   )
 }
 
-/** Paper's separator (I78-0): a 1px line inside a 9px band, inset 8px. */
+/** Divides groups of rows with a line as wide as the rows. */
 function DropdownMenuSeparator({ className, ...props }: MenuPrimitive.Separator.Props) {
   return (
     <MenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn(
-        "flex h-[0.9rem] shrink-0 items-center px-2 before:h-px before:flex-1 before:bg-border",
-        className,
-      )}
+      className={cn(MENU_SEPARATOR_CLASS, className)}
       {...props}
     />
   )

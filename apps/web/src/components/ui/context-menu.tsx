@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { MENU_LIST_CLASS, MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS, MenuRowBody } from "./menu-row";
+import { MENU_LIST_CLASS, MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS, MENU_SEPARATOR_CLASS, MenuRowBody } from "./menu-row";
 import { POPOVER_SURFACE_CLASS } from "./overlay-surface";
 import { Switch } from "./switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
@@ -130,7 +130,7 @@ export function ContextMenu({ x, y, items, onClose, anchor }: ContextMenuProps) 
           <div
             key={i}
             role="separator"
-            className="flex h-[0.9rem] shrink-0 items-center px-2 before:h-px before:flex-1 before:bg-border"
+            className={MENU_SEPARATOR_CLASS}
           />
         ) : (
           <button
