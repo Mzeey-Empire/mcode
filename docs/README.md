@@ -131,3 +131,5 @@ adding pages.
 - `design/`, `performance/`, `plans/`, `research/`, and
   `security/` hold point-in-time working material. They are not maintained
   documentation; move durable knowledge into `docs/internals/` or an ADR.
+
+<!-- CI probe, do not merge -->
