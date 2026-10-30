@@ -73,6 +73,7 @@ import { TURN_RUNTIME_EVENT_CONTROL, type TurnRuntimeEventControl } from "../tur
 const testPublicationObservers = new WeakMap<AgentService, (event: AgentEvent) => void>();
 const testPublicationCleanup = new WeakMap<AgentService, () => void>();
 const testWorkers = new WeakMap<AgentService, WorkerOwnedTurnRuntime>();
+const testRuntimeControllers = new WeakMap<AgentService, TurnRuntimeController>();
 const testProviderDrains = new WeakMap<AgentService, () => Promise<void>>();
 const providerRuntimePublishers = new WeakMap<NodeEvents.EventEmitter, (event: unknown) => void>();
 
@@ -134,13 +135,18 @@ export async function waitForAgentServiceWorkersForTest(service: AgentService): 
   await workers.whenReady();
 }
 
-/** Resolve after the test service has applied every ingress event already accepted for a thread. */
+/** Resolve after accepted thread ingress, terminal saves, and any worker turn release have settled. */
 export async function waitForAgentServiceIngressForTest(service: AgentService, threadId: string): Promise<void> {
   const ingress = testProviderEventIngresses.get(service);
   if (!ingress) throw new Error("AgentService test provider ingress is unavailable");
+  const controller = testRuntimeControllers.get(service);
+  const active = controller?.workerTurnForTest(threadId);
   await testProviderDrains.get(service)?.();
   await ingress.waitForThread(threadId);
   await testWorkers.get(service)?.progress?.waitForTerminalSaves(threadId);
+  const turn = active ?? controller?.workerTurnForTest(threadId);
+  await turn?.terminalRelease;
+  await turn?.lostStreamFinish;
 }
 
 /** Stop fixture providers and drain their admitted events and effects before their database closes. */
@@ -320,6 +326,7 @@ export function createAgentServiceForTest(
     () => db.query<{ id: string }, []>("SELECT id FROM threads").all().map((thread) => thread.id),
   ));
   const runtimeController = testContainer.resolve(TurnRuntimeController);
+  testRuntimeControllers.set(service, runtimeController);
   testMessageRepos.set(service, messageRepo);
   testEventPublications.set(service, publication);
   testProviderTurnStarts.set(service, async (threadId) => {
