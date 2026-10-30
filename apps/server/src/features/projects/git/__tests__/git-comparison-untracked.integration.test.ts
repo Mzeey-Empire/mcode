@@ -466,6 +466,36 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     expect(temporaryIndexes()).toEqual([]);
   });
 
+  it.each([false, true])("keeps same-stat tracked edits in selected diffs (untracked: %s)", async (includeUntracked) => {
+    git("config", "core.trustctime", "false");
+    const timestamp = new Date("2000-01-01T00:00:00Z");
+    const tracked = NodePath.join(cwd, "tracked.ts");
+    write("tracked.ts", "one\n");
+    NodeFS.utimesSync(tracked, timestamp, timestamp);
+    commit();
+    // Preserve a racily clean entry without depending on filesystem clock resolution.
+    NodeFS.utimesSync(NodePath.join(cwd, ".git/index"), timestamp, timestamp);
+    write("tracked.ts", "two\n");
+    NodeFS.utimesSync(tracked, timestamp, timestamp);
+    if (includeUntracked) write("[new].md", "fresh\n");
+    const before = indexHash();
+    expect(git("diff", "HEAD", "--", "tracked.ts")).toContain("+two");
+    // Linux copies get a new mtime; Windows copies can preserve the source mtime.
+    vi.mocked(NodeFSPromises.copyFile).mockImplementationOnce(async (source, destination) => {
+      NodeFS.copyFileSync(source, destination);
+      const copiedAt = new Date();
+      NodeFS.utimesSync(destination, copiedAt, copiedAt);
+    });
+
+    const diff = await service.readSelectedPathsDiff(cwd, includeUntracked ? ["tracked.ts", "[new].md"] : ["tracked.ts"]);
+
+    expect(diff.stat).toContain("tracked.ts");
+    expect(diff.patch).toContain("-one\n+two");
+    if (includeUntracked) expect(diff.patch).toContain("+fresh");
+    expect(indexHash()).toBe(before);
+    expect(temporaryIndexes()).toEqual([]);
+  });
+
   it("diffs only the selected paths from HEAD, untracked included, without touching the real index", async () => {
     write("tracked.ts", "one\n");
     write("other.ts", "one\n");

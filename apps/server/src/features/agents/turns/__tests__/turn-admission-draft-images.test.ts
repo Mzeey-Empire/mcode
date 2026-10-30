@@ -32,8 +32,7 @@ import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../../orchestration/agent-turn-command-port.js";
 import { TurnAdmissionDispatchCoordinator, type SendMessageCommand, type TurnParentStartOwner, type TurnRuntimeAdmissionAuthority } from "../turn-admission-dispatch-coordinator.js";
 
-// No catalog model declares Fast, so these turns never carry `fastMode`.
-const noModels = { listModels: async () => [] };
+import { testModelCatalog } from "../../__tests__/provider-model-fixture.js";
 
 const day = 24 * 60 * 60 * 1000;
 let directory: string;
@@ -65,7 +64,7 @@ async function fixture(providerId: ProviderId = "codex", beforeCommit: () => Pro
     id: providerId, descriptor: { id: providerId, capabilities: [] }, supportsCompletion: false,
      maxInputCharactersPerTurn: 100_000,
 
-    sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: async () => [],
+    sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: testModelCatalog.listModels,
   });
   const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
   const git = new FakeGitExecutor();
@@ -82,7 +81,7 @@ async function fixture(providerId: ProviderId = "codex", beforeCommit: () => Pro
     threads, workspaces, messages, new TurnRevertStore(db), worktrees, attachments, providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, writer, commands, canonical), undefined,
-    new FileService(workspaces, threads, worktrees, git, hostRuntime), hostRuntime.platform, noModels, owner,
+    new FileService(workspaces, threads, worktrees, git, hostRuntime), hostRuntime.platform, testModelCatalog, owner,
   );
   const runtime: TurnRuntimeAdmissionAuthority = {
     reserve: () => ({ threadId: thread.id, turnExecutionId: NodeCrypto.randomUUID(), mutationReservationToken: NodeCrypto.randomUUID(), generation: 1 }),

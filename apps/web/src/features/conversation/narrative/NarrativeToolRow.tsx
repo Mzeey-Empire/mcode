@@ -103,7 +103,7 @@ export function NarrativeToolRowDetail({ kind, children, fullText }: {
   );
 }
 
-/** Duration or exit status, such as `0:02` or `exit 1 · 0:03`. */
+/** Duration or outcome, such as `0:02` or `failed · 0:03`. */
 export function NarrativeToolRowMeta({ children }: { children: ReactNode }) {
   return <span className="shrink-0 font-mono text-xs tabular-nums text-muted">{children}</span>;
 }
