@@ -64,6 +64,7 @@ import {
 } from "./codex-input-mapper.js";
 import { traceCodexIngest } from "./codex-trace.js";
 import type {
+  AskForApproval,
   CodexNotification,
   CodexTurnInput,
   CodexTurnOptions,
@@ -347,7 +348,7 @@ interface CodexSpawnContext {
   cwd: string;
   resumeFrom: string | undefined;
   sandbox: SandboxMode;
-  approvalPolicy: "never" | "on-request";
+  approvalPolicy: AskForApproval;
   pendingSpawn: { input: CodexTurnInput; turnOptions: CodexTurnOptions; turnExecutionId: string; resumeRequired: boolean } | undefined;
   stagedExecutionId: string | undefined;
   browserAccess: { stage: BrowserAutomationSessionLeaseStage; workspaceId: string; permissionCapability: "observe" | "interact" | "privileged" } | undefined;
@@ -1167,7 +1168,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       threadId,
       input,
       cliPath: settings.cliPath,
-      sandbox: request.permissionMode === "full" ? "danger-full-access" : "workspace-write",
+      sandbox: this.codexSandbox(request.permissionMode, request.approvalReviewMode === "automatic" ? "auto_review" : "user"),
       browserPermissionCapability: providerBrowserPermissionCapability(request.permissionMode, request.interactionMode),
       turnOptions: this.codexTurnOptions(request, nativePlan),
     };
@@ -1175,6 +1176,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private threadIdForSession(sessionId: string): string {
     return sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
+  }
+
+  private codexSandbox(permissionMode: string, reviewer: CodexTurnOptions["approvalsReviewer"]): SandboxMode {
+    if (permissionMode === "full") return "danger-full-access";
+    return permissionMode === "supervised" && reviewer !== "auto_review" ? "read-only" : "workspace-write";
   }
 
   private async resolveCodexTurnInput(request: TurnRequest<"codex">, threadId: string): Promise<CodexTurnInput | undefined> {
@@ -1447,6 +1453,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async prepareCodexSpawn(args: SpawnArgs): Promise<CodexSpawnContext> {
     const settings = await this.codexPorts.settings.get();
     const pendingSpawn = this.pendingSpawnTurns.get(args.sessionId);
+    const sandbox = this.codexSandbox(args.permissionMode, pendingSpawn?.turnOptions.approvalsReviewer);
     const browserAccess = this.pendingBrowserAccess.get(args.sessionId);
     const issuedGrant = browserAccess ? this.host.browser.issue(browserAccess.stage) : null;
     this.pendingBrowserAccess.delete(args.sessionId);
@@ -1462,8 +1469,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       threadId: args.threadId,
       cwd: args.cwd,
       resumeFrom: args.resumeFrom,
-      sandbox: args.permissionMode === "full" ? "danger-full-access" : "workspace-write",
-      approvalPolicy: args.permissionMode === "full" ? "never" : "on-request",
+      sandbox,
+      approvalPolicy: args.permissionMode === "full" ? "never" : sandbox === "read-only" ? "untrusted" : "on-request",
       pendingSpawn,
       stagedExecutionId: pendingSpawn?.turnExecutionId,
       browserAccess,
@@ -1549,7 +1556,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
         if (!nativeThreadId || !nativeTurnId) return request.cancel();
         await this.planQuestions.request(context.sessionId, context.threadId, nativeThreadId, nativeTurnId, request);
       },
-      approvalHandler: context.approvalPolicy === "on-request"
+      approvalHandler: context.approvalPolicy !== "never"
         ? (request) => this.handleApprovalRequest(context.sessionId, context.threadId, request)
         : undefined,
       processAttachment: this.host.processes,
@@ -2418,7 +2425,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** A pooled session must be discarded before reuse if process, cwd, or sandbox changed. */
   isStale(state: CodexSessionState, args: { cwd: string; permissionMode: string }): boolean {
     if (!state.server.isAlive) return true;
-    const sandbox = args.permissionMode === "full" ? "danger-full-access" : "workspace-write";
+    const sandbox = this.codexSandbox(args.permissionMode, this.pendingSpawnTurns.get(state.sessionId)?.turnOptions.approvalsReviewer);
     return state.sandboxMode !== sandbox || state.cwd !== args.cwd;
   }
 
