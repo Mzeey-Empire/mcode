@@ -1058,11 +1058,10 @@ describe("Workspace delete - zero-worktree fast path", () => {
     const ws = (await workspaceRepo.create("Fast", "/tmp/fast"));
     (await threadRepo.create(ws.id, "T", "direct", "main"));
 
-    const before = Date.now();
     await workspaceService.delete(ws.id);
-    const elapsed = Date.now() - before;
 
-    expect(elapsed).toBeLessThan(100);
+    // Resolving with no queued cleanup job is what proves no worker was needed; a wall-clock bound only measures the CI host.
+    expect(db.prepare("SELECT COUNT(*) AS c FROM workspaces WHERE id = ?").get(ws.id)).toEqual({ c: 0 });
     expect(cleanupJobRepo.countByWorkspacePath("/tmp/fast")).toBe(0);
   });
 });
