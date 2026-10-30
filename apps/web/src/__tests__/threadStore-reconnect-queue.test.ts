@@ -586,7 +586,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
     { location: "foreground", activeThreadId: THREAD_ID, toastCount: 1 },
     { location: "background", activeThreadId: "another-thread", toastCount: 0 },
   ])("uses the shared toast for a $location Stop failure without changing lifecycle", async ({ activeThreadId, toastCount }) => {
-    vi.useFakeTimers();
     useWorkspaceStore.setState({ activeThreadId });
     useThreadStore.getState().applyThreadRuntimeSnapshot({
       threadId: THREAD_ID, turnExecutionId: "execution-1", phase: "running",
@@ -599,9 +598,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
     if (toastCount) expect(useToastStore.getState().toasts[0]).toMatchObject({
       kind: "failed", title: "Couldn't stop this turn", meta: "Try Stop again. Connection unavailable",
     });
-    // Failed toasts stay until the user closes them.
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(useToastStore.getState().toasts).toHaveLength(toastCount);
   });
 
   it("cancels a scheduled drain when a Stop snapshot arrives first", async () => {

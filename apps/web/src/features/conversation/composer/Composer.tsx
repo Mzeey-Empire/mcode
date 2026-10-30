@@ -603,6 +603,12 @@ export function Composer({
   return (
     <div className="relative px-4 py-4 sm:px-[var(--chat-gutter,--spacing(8))]">
       <ComposerQueueToast toast={toast} />
+      {/* The transcript scrolls under the composer. This card-wide strip fills the gap below the card and
+          its rounded bottom corners, while the gutters beside it stay see-through. It comes first so the
+          positioned card paints over it. */}
+      <div aria-hidden className="absolute inset-x-4 bottom-0 sm:inset-x-[var(--chat-gutter,--spacing(8))]">
+        <div className={`${PRIMARY_CONTENT_RAIL_CLASS} h-10 bg-background`} />
+      </div>
 
       <ComposerOverlayLayout className={PRIMARY_CONTENT_RAIL_CLASS}>
         <ComposerProviderNoticeSurface

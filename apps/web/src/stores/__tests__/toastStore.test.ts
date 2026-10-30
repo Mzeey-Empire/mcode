@@ -20,18 +20,21 @@ describe("toastStore", () => {
     expect(titles()).toEqual(["four", "three", "two"]);
   });
 
-  it("hides finished and info toasts after 8s and keeps needs-you and failed", () => {
-    for (const kind of ["finished", "needs-you", "failed", "info"] as const) store().show({ kind, title: kind });
+  it("hides finished, info and failed toasts after 8s and keeps needs-you", () => {
+    for (const kind of ["finished", "needs-you", "failed"] as const) store().show({ kind, title: kind });
 
     vi.advanceTimersByTime(TOAST_LIFETIME_MS - 1);
-    expect(store().toasts).toHaveLength(3);
-    expect(titles()).toEqual(["info", "failed", "needs-you"]);
+    expect(titles()).toEqual(["failed", "needs-you", "finished"]);
 
     vi.advanceTimersByTime(1);
-    expect(titles()).toEqual(["failed", "needs-you"]);
+    expect(titles()).toEqual(["needs-you"]);
+
+    store().show({ kind: "info", title: "info" });
+    vi.advanceTimersByTime(TOAST_LIFETIME_MS);
+    expect(titles()).toEqual(["needs-you"]);
 
     vi.advanceTimersByTime(60_000);
-    expect(titles()).toEqual(["failed", "needs-you"]);
+    expect(titles()).toEqual(["needs-you"]);
   });
 
   it("keeps a finished toast while hovered and hides it after the remaining time", () => {
@@ -63,10 +66,10 @@ describe("toastStore", () => {
   it("gives a replaced toast the lifetime of its new kind", () => {
     store().show({ kind: "finished", title: "a", dedupeKey: "thread-a" });
     vi.advanceTimersByTime(7_000);
-    store().show({ kind: "failed", title: "a", dedupeKey: "thread-a" });
+    store().show({ kind: "needs-you", title: "a", dedupeKey: "thread-a" });
     vi.advanceTimersByTime(60_000);
 
-    expect(store().toasts).toMatchObject([{ kind: "failed" }]);
+    expect(store().toasts).toMatchObject([{ kind: "needs-you" }]);
   });
 
   it("keeps a toast replaced under the pointer paused", () => {
@@ -103,7 +106,7 @@ describe("toastStore", () => {
   it("dismiss cancels the toast's timer", () => {
     const id = store().show({ kind: "finished", title: "a" });
     store().dismiss(id);
-    const later = store().show({ kind: "failed", title: "b" });
+    const later = store().show({ kind: "needs-you", title: "b" });
     vi.advanceTimersByTime(TOAST_LIFETIME_MS);
 
     expect(store().toasts.map((toast) => toast.id)).toEqual([later]);

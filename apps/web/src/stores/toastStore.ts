@@ -23,18 +23,21 @@ export interface Toast extends ToastInput {
   readonly id: string;
 }
 
-/** How long finished and info toasts stay before hiding. */
+/** How long finished, info and failed toasts stay before hiding. */
 export const TOAST_LIFETIME_MS = 8_000;
 
 /** Toasts beyond this are dropped, oldest first; thread events have no log to fall back to. */
 const MAX_TOASTS = 3;
 
-/** Needs-you and failed toasts stay until the user opens or closes them. */
+/**
+ * Needs-you toasts stay until the user opens or closes them, because the request waits on the user.
+ * A failure has already happened, so its toast hides like any other report.
+ */
 const LIFETIME_BY_KIND: Record<ToastKind, number | null> = {
   finished: TOAST_LIFETIME_MS,
   info: TOAST_LIFETIME_MS,
   "needs-you": null,
-  failed: null,
+  failed: TOAST_LIFETIME_MS,
 };
 
 interface ToastState {
