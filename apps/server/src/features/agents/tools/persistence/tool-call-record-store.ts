@@ -9,7 +9,7 @@ import type { Database } from "bun:sqlite";
 import { and, asc, eq, inArray, isNull, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { ToolCallRecord, ToolCallStatus } from "@mcode/contracts/models/tool-call-record";
-import { isToolCallActive } from "@mcode/contracts/models/tool-call-record";
+import { isToolCallActive, ToolCallStatusSchema, ToolCallPhaseSchema } from "@mcode/contracts/models/tool-call-record";
 import {
   type WriteBatchLimits,
   type WriteBatchResult,
@@ -43,6 +43,7 @@ export interface CreateToolCallRecordInput {
   outputArtifactPath?: string;
   exitCode?: number;
   status: ToolCallStatus;
+  phase?: ToolCallRecord["phase"];
   /** ISO timestamp captured when the provider started the tool call. */
   startedAt?: string;
   /** ISO timestamp captured when the tool call reached a terminal status. */
@@ -103,6 +104,7 @@ function toolCallRecordFromInsert(
     output_artifact_path: nullIfUndefined(input.outputArtifactPath),
     exit_code: nullIfUndefined(input.exitCode),
     status: input.status,
+    ...(input.phase ? { phase: input.phase } : {}),
     ...(input.background === true ? { background: true } : {}),
     started_at: insert.startedAt,
     completed_at: insert.completedAt,
@@ -132,7 +134,8 @@ function rowToToolCallRecord(row: ToolCallRecordRow): ToolCallRecord {
     output_total_bytes: row.outputTotalBytes,
     output_artifact_path: row.outputArtifactPath,
     exit_code: row.exitCode,
-    status: row.status as ToolCallStatus,
+    status: ToolCallStatusSchema.parse(row.status),
+    ...(row.phase ? { phase: ToolCallPhaseSchema.parse(row.phase) } : {}),
     ...(row.background ? { background: true } : {}),
     started_at: row.startedAt,
     completed_at: row.completedAt,
@@ -201,6 +204,7 @@ export class ToolCallRecordStore {
       outputArtifactPath: placeholder("outputArtifactPath"),
       exitCode: placeholder("exitCode"),
       status: placeholder("status"),
+      phase: placeholder("phase"),
       background: placeholder("background"),
       startedAt: placeholder("startedAt"),
       completedAt: placeholder("completedAt"),
@@ -230,6 +234,7 @@ export class ToolCallRecordStore {
         outputArtifactPath: sql`excluded.output_artifact_path`,
         exitCode: sql`excluded.exit_code`,
         status: sql`excluded.status`,
+        phase: sql`excluded.phase`,
         background: sql`excluded.background`,
         startedAt: sql`excluded.started_at`,
         completedAt: sql`excluded.completed_at`,
@@ -269,6 +274,7 @@ export class ToolCallRecordStore {
       outputArtifactPath: nullIfUndefined(input.outputArtifactPath),
       exitCode: nullIfUndefined(input.exitCode),
       status: input.status,
+      phase: nullIfUndefined(input.phase),
       background: input.background === true,
       startedAt: insert.startedAt,
       completedAt: insert.completedAt,

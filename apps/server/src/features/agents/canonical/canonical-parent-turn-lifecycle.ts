@@ -385,7 +385,7 @@ export class CanonicalParentTurnLifecycle {
       record: {
         ...item.record,
         message_id: messageId,
-        ...(settles ? { status: "failed", completed_at: endedAt } : {}),
+        ...(settles ? { status: "failed", phase: undefined, completed_at: endedAt } : {}),
       },
     };
   }

@@ -68,7 +68,7 @@ export function recordToToolCall(record: ToolCallRecord): ToolCall {
   const cached = toolCallCache.get(record);
   if (cached) return cached;
 
-  const durationMs = record.status === "denied" ? undefined : persistedDurationMs(record.started_at, record.completed_at);
+  const durationMs = record.phase === "denied" ? undefined : persistedDurationMs(record.started_at, record.completed_at);
   const lifecycleInput = isSubagentLifecycleRecord(record)
     ? parseSubagentLifecycleInput(record.input_summary)
     : undefined;
@@ -80,7 +80,7 @@ export function recordToToolCall(record: ToolCallRecord): ToolCall {
     ...(subagentPresentation ? { subagentPresentation } : {}),
     output: record.output_summary || null,
     isError: record.status === "failed",
-    status: record.status,
+    status: record.phase ?? record.status,
     isComplete: !isToolCallActive(record.status),
     ...persistedToolCallOptionalFields(record, durationMs),
     parentToolCallId: record.parent_tool_call_id ?? undefined,
@@ -314,7 +314,7 @@ function persistedToolCallOptionalFields(
   durationMs: number | undefined,
 ): Partial<Pick<ToolCall, "isCancelled" | "background" | "outputTruncated" | "outputTotalBytes" | "outputArtifactPath" | "durationMs" | "exitCode">> {
   const fields: Partial<Pick<ToolCall, "isCancelled" | "background" | "outputTruncated" | "outputTotalBytes" | "outputArtifactPath" | "durationMs" | "exitCode">> = {};
-  if (record.status === "cancelled") fields.isCancelled = true;
+  if (record.status === "cancelled" && record.phase !== "denied") fields.isCancelled = true;
   if (record.background === true) fields.background = true;
   if (record.output_truncated === 1) fields.outputTruncated = true;
   if (typeof record.output_total_bytes === "number") fields.outputTotalBytes = record.output_total_bytes;

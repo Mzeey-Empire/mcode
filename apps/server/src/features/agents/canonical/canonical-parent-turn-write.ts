@@ -699,6 +699,7 @@ function settleToolCall(
     ...item.record,
     message_id: messageId,
     status: settles ? terminalToolStatus(outcome) : item.record.status,
+    phase: settles ? undefined : item.record.phase,
     completed_at: settles ? endedAt : item.record.completed_at,
   } };
 }

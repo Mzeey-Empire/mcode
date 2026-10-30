@@ -260,22 +260,25 @@ export function mergeSubagentPresentation(
 }
 
 /** Execution states before a tool produces its result. */
-export const ToolExecutionStatusSchema = z.enum(["queued", "waiting", "running"]);
+export const ToolExecutionStatusSchema = z.enum(["running"]);
+
+/** Approval detail carried separately so older builds can still parse persisted statuses. */
+export const ToolCallPhaseSchema = z.enum(["queued", "waiting", "denied"]);
 
 /** Status of a persisted tool call record. */
-export const ToolCallStatusSchema = z.enum(["queued", "waiting", "running", "completed", "failed", "cancelled", "denied"]);
+export const ToolCallStatusSchema = z.enum(["running", "completed", "failed", "cancelled"]);
 
 /** Status of a persisted tool call record. */
 export type ToolCallStatus = z.infer<typeof ToolCallStatusSchema>;
 
-/** True while a queued, waiting, or running invocation still needs a result. */
+/** True while an invocation still needs a result, including approval waits. */
 export function isToolCallActive(status: ToolCallStatus): boolean {
-  return status === "queued" || status === "waiting" || status === "running";
+  return status === "running";
 }
 
 /** Permission refusal and cancellation have their own outcomes, separate from tool errors. */
 export function toolCallResultStatus(result: { denied?: boolean; cancelled?: boolean; isError: boolean }): ToolCallStatus {
-  if (result.denied) return "denied";
+  if (result.denied) return "cancelled";
   if (result.cancelled) return "cancelled";
   return result.isError ? "failed" : "completed";
 }
@@ -303,6 +306,7 @@ export const ToolCallRecordSchema = lazySchema(() => z.object({
   output_artifact_path: z.string().nullable().optional(),
   exit_code: z.number().int().nullable().optional(),
   status: ToolCallStatusSchema,
+  phase: ToolCallPhaseSchema.optional(),
   /**
    * True when the provider keeps running this call after its turn ends. Turn settlement
    * leaves such a running call open; only its own late result or a stop settles it.

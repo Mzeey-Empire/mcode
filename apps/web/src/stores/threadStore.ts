@@ -2071,6 +2071,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     projectTaskToolUse(event.threadId, event.toolCallId, toolName, mergedInput, getRec(event.threadId).toolCalls, parentToolCallId);
   };
 
+  const toolUseStatus = (event: Extract<AgentEvent, { type: "toolUse" }>): ToolCall["status"] => event.phase ?? event.status;
+
   const newToolCall = (
     event: Extract<AgentEvent, { type: "toolUse" }>,
     toolName: string,
@@ -2086,7 +2088,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       isError: false,
       isComplete: false,
       parentToolCallId: event.parentToolCallId || undefined,
-      status: event.status ?? "running",
+      status: toolUseStatus(event) ?? "running",
       startedAt: Date.now(),
       lastActivityAt: Date.now(),
     };
@@ -2107,9 +2109,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const toolName = event.toolName || "unknown";
     const toolInput = event.toolInput ?? {};
     const existing = getRec(event.threadId).toolCalls.find((toolCall) => toolCall.id === event.toolCallId);
-    if (existing && event.status && !existing.isComplete) {
+    const status = toolUseStatus(event);
+    if (existing && status && !existing.isComplete) {
       patchRec(event.threadId, (record) => ({ toolCalls: record.toolCalls.map((call) => call.id === event.toolCallId
-        ? { ...call, status: event.status, ...(event.status === "running" && call.status !== "running" ? { startedAt: Date.now() } : {}) }
+        ? { ...call, status, ...(status === "running" && call.status !== "running" ? { startedAt: Date.now() } : {}) }
         : call) }));
       return;
     }
@@ -2191,7 +2194,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       output: event.output,
       isError: event.isError,
       isComplete: true,
-      status: toolCallResultStatus(event),
+      status: event.denied ? "denied" : toolCallResultStatus(event),
       lastActivityAt: Date.now(),
       ...toolResultOptionalFields(event),
       durationMs: event.denied ? undefined : durationMs,

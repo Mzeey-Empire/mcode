@@ -79,8 +79,8 @@ describe("CodexLiveEventReducer", () => {
       const reducer = new CodexLiveEventReducer(execution);
       reduceEvent(reducer, "turnStarted");
       const command = { toolCallId: "allowed", toolName: "Bash", toolInput: { command: "echo alpha" } };
-      reduceEvent(reducer, "toolUse", { ...command, status: "waiting" });
-      reduceEvent(reducer, "toolUse", { ...command, toolCallId: "denied", status: "queued" });
+      reduceEvent(reducer, "toolUse", { ...command, status: "running", phase: "waiting" });
+      reduceEvent(reducer, "toolUse", { ...command, toolCallId: "denied", status: "running", phase: "queued" });
       vi.advanceTimersByTime(20_000);
       reduceEvent(reducer, "toolUse", { ...command, status: "running" });
       vi.advanceTimersByTime(1_000);
@@ -89,10 +89,10 @@ describe("CodexLiveEventReducer", () => {
       const terminal = reduceEvent(reducer, "turnComplete", { reason: "stop", costUsd: 0, tokensIn: 0, tokensOut: 0 });
       const projection = terminal.writer.find((intent) => intent.kind === "terminal-projection");
       expect(projection?.narrative.filter((item) => item.kind === "toolCall").map(({ record }) => ({
-        id: record.id, status: record.status, started: record.started_at, completed: record.completed_at,
+        id: record.id, status: record.status, phase: record.phase, started: record.started_at, completed: record.completed_at,
       }))).toEqual([
-        { id: "allowed", status: "completed", started: "2026-10-30T12:00:20.000Z", completed: "2026-10-30T12:00:21.000Z" },
-        { id: "denied", status: "denied", started: "2026-10-30T12:00:00.000Z", completed: "2026-10-30T12:00:21.000Z" },
+        { id: "allowed", status: "completed", phase: undefined, started: "2026-10-30T12:00:20.000Z", completed: "2026-10-30T12:00:21.000Z" },
+        { id: "denied", status: "cancelled", phase: "denied", started: "2026-10-30T12:00:00.000Z", completed: "2026-10-30T12:00:21.000Z" },
       ]);
     } finally {
       vi.useRealTimers();

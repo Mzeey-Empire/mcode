@@ -9,7 +9,7 @@ export function recordToToolCall(record: ToolCallRecord): ToolCall {
     toolInput: { summary: record.input_summary },
     output: record.output_summary || null,
     isError: record.status === "failed",
-    status: record.status,
+    status: record.phase ?? record.status,
     isComplete: !isToolCallActive(record.status),
     ...(record.output_truncated === 1 ? { outputTruncated: true } : {}),
     ...(typeof record.output_total_bytes === "number" ? { outputTotalBytes: record.output_total_bytes } : {}),

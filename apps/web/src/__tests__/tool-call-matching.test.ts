@@ -35,8 +35,8 @@ describe("Tool Call Matching", () => {
   it("starts command duration after approval and settles only the denied command", () => {
     const send = useThreadStore.getState().handleAgentEvent;
     const first = { type: "toolUse", threadId: "thread-1", toolCallId: "first", toolName: "Bash", toolInput: { command: "echo alpha" } } satisfies AgentEvent;
-    send({ ...first, status: "waiting" });
-    send({ ...first, toolCallId: "second", status: "queued" });
+    send({ ...first, status: "running", phase: "waiting" });
+    send({ ...first, toolCallId: "second", status: "running", phase: "queued" });
     vi.advanceTimersByTime(20_000);
     send({ ...first, status: "running" });
     vi.advanceTimersByTime(1_000);

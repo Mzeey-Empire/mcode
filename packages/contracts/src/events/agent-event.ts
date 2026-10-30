@@ -5,7 +5,7 @@ import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderBillingModeSchema, QuotaCategorySchema } from "../providers/usage.js";
 import { StoredAttachmentSchema } from "../models/attachment.js";
 import { GoalStateSchema } from "../models/goal.js";
-import { SubagentPresentationSchema, ToolExecutionStatusSchema } from "../models/tool-call-record.js";
+import { SubagentPresentationSchema, ToolExecutionStatusSchema, ToolCallPhaseSchema } from "../models/tool-call-record.js";
 import { TurnOutcomeSchema } from "../models/turn-outcome.js";
 import { TurnFailureSchema } from "../models/turn-failure.js";
 import { ApprovalDecidedPayloadSchema } from "../models/approval-receipt.js";
@@ -99,6 +99,7 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       toolInput: z.record(z.unknown()),
       /** An explicit update for this invocation; omission retains the usual running default. */
       status: ToolExecutionStatusSchema.optional(),
+      phase: ToolCallPhaseSchema.exclude(["denied"]).optional(),
       parentToolCallId: z.string().optional(),
       subagentPresentation: SubagentPresentationSchema().optional(),
     }),

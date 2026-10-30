@@ -73,9 +73,9 @@ describe("Claude approval origin", () => {
     await provider.resolveApproval(requests[1].requestId, { choiceId: "deny" });
     expect(await second).toMatchObject({ behavior: "deny" });
     expect(events.map(({ event }) => event).filter((event) => event.type === "toolUse")).toMatchObject([
-      { toolCallId: "first", status: "queued" }, { toolCallId: "second", status: "queued" },
-      { toolCallId: "first", status: "waiting" }, { toolCallId: "first", status: "running" },
-      { toolCallId: "second", status: "waiting" },
+      { toolCallId: "first", status: "running", phase: "queued" }, { toolCallId: "second", status: "running", phase: "queued" },
+      { toolCallId: "first", status: "running", phase: "waiting" }, { toolCallId: "first", status: "running", phase: undefined },
+      { toolCallId: "second", status: "running", phase: "waiting" },
     ]);
     await vi.waitFor(() => expect(events.map(({ event }) => event).filter((event) => event.type === "toolResult")).toMatchObject([
       { toolCallId: "second", denied: true, isError: false },

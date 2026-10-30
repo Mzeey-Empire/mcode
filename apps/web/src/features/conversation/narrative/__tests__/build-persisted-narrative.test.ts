@@ -29,7 +29,7 @@ function makeTool(over: Partial<ToolCallRecord> = {}): ToolCallRecord {
 }
 
 it("restores a denied command as terminal without an execution duration", () => {
-  const call = recordToToolCall(makeTool({ tool_name: "Bash", status: "denied" }));
+  const call = recordToToolCall(makeTool({ tool_name: "Bash", status: "cancelled", phase: "denied" }));
   expect({ status: call.status, complete: call.isComplete, error: call.isError, duration: call.durationMs }).toEqual({
     status: "denied", complete: true, error: false, duration: undefined,
   });

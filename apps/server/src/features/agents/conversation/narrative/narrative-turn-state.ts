@@ -82,6 +82,7 @@ export interface StagedNarrationSegment {
 /** Tool-use event shape consumed by {@link NarrativeTurnState.bufferToolCall}. */
 export interface BufferToolCallEvent {
   status?: Extract<AgentEvent, { type: "toolUse" }>["status"];
+  phase?: Extract<AgentEvent, { type: "toolUse" }>["phase"];
   toolCallId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
@@ -552,9 +553,9 @@ export class NarrativeTurnState {
     parentToolCallId: string | undefined,
   ): string | undefined {
     const shouldMergeDuplicate = this.shouldMergeDuplicateToolCall(existing, event);
-    if (event.status && isToolCallActive(existing.status)) {
-      if (event.status === "running" && existing.status !== "running") existing.startedAt = new Date().toISOString();
-      existing.status = event.status;
+    if ((event.status || event.phase) && isToolCallActive(existing.status)) {
+      if (event.status === "running" && !event.phase && existing.phase) existing.startedAt = new Date().toISOString();
+      existing.phase = event.phase;
     }
     if (shouldMergeDuplicate) {
       this.mergeDuplicateToolCall(existing, event);
@@ -683,6 +684,7 @@ export class NarrativeTurnState {
       inputSummary: "",
       outputSummary: "",
       status: event.status ?? "running",
+      phase: event.phase,
       startedAt: new Date().toISOString(),
       sortOrder,
       parentToolCallId,
@@ -801,6 +803,7 @@ export class NarrativeTurnState {
     toolCall.outputTruncated = outputMeta?.outputTruncated === true;
     this.applyOutputMetadata(toolCall, outputMeta);
     toolCall.status = toolCallResultStatus({ ...outputMeta, isError });
+    toolCall.phase = outputMeta?.denied ? "denied" : undefined;
     toolCall.completedAt = new Date().toISOString();
   }
 
@@ -986,6 +989,7 @@ export class NarrativeTurnState {
   private toolCallRecoveryStateFields(toolCall: BufferedToolCall) {
     return {
       status: toolCall.status,
+      ...(toolCall.phase ? { phase: toolCall.phase } : {}),
       started_at: this.requireRecoveryString(toolCall.startedAt, "tool call start time"),
       completed_at: toolCall.completedAt ?? null,
       sort_order: toolCall.sortOrder,
@@ -1291,6 +1295,7 @@ export class NarrativeTurnState {
   ): void {
     if (!isToolCallActive(toolCall.status)) return;
     toolCall.status = this.settledToolCallStatus(outcome);
+    toolCall.phase = undefined;
     toolCall.completedAt = settledAt;
   }
 

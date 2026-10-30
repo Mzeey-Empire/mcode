@@ -380,7 +380,7 @@ export class ClaudeEventMapper {
 
   private emitCommandUse(event: Extract<AgentEvent, { type: "toolUse" }>): void {
     if (event.toolName === "Bash") {
-      if (this.callbacks.getSession()?.permissionMode === "supervised") event = { ...event, status: "queued" };
+      if (this.callbacks.getSession()?.permissionMode === "supervised") event = { ...event, status: "running", phase: "queued" };
       this.commandCalls.set(event.toolCallId, event);
     }
     this.emit(event);
@@ -412,8 +412,9 @@ export class ClaudeEventMapper {
 
   private updateCommandStatus(toolCallId: string, status: "waiting" | "running"): void {
     const call = this.commandCalls.get(toolCallId);
-    if (!call || call.status === status || this.deniedCommands.has(toolCallId)) return;
-    const updated = { ...call, status };
+    const phase = status === "waiting" ? "waiting" : undefined;
+    if (!call || (call.status === "running" && call.phase === phase) || this.deniedCommands.has(toolCallId)) return;
+    const updated: Extract<AgentEvent, { type: "toolUse" }> = { ...call, status: "running", phase };
     this.commandCalls.set(toolCallId, updated);
     const source = this.nativeSource;
     this.nativeSource = {};
@@ -846,8 +847,8 @@ export class ClaudeEventMapper {
   private toolProgress(message: Message): ClaudeMapOutcome {
     const toolCallId = stringValue(message.tool_use_id);
     const command = this.commandCalls.get(toolCallId);
-    if (this.deniedCommands.has(toolCallId) || command?.status === "waiting") return "none";
-    if (command?.status === "queued") this.updateCommandStatus(toolCallId, "running");
+    if (this.deniedCommands.has(toolCallId) || command?.phase === "waiting") return "none";
+    if (command?.phase === "queued") this.updateCommandStatus(toolCallId, "running");
     if (toolCallId)
       this.emit({
         type: AgentEventType.ToolProgress,
