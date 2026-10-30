@@ -75,9 +75,12 @@ describe("ShellToolCallRow automatic expansion", () => {
     expect(screen.getByRole("button", { name: /^Ran command/ })).toHaveTextContent(/^Ran command2secho hello$/);
   });
 
-  it("reads a failed command as command then exit and duration", () => {
-    render(<ShellToolCallRow toolCall={{ ...call, isComplete: true, isError: true, exitCode: 1, durationMs: 3_000 }} />);
-    expect(screen.getByRole("button", { name: /^Ran command/ })).toHaveTextContent(/^Ran commandecho helloexit 1 · 3s$/);
+  it.each(["Bash", "command_execution"])("labels a failed %s command and preserves its exit code in the transcript", (toolName) => {
+    render(<ShellToolCallRow toolCall={{ ...call, toolName, isComplete: true, isError: true, exitCode: 3, durationMs: 3_000 }} />);
+    const toggle = screen.getByRole("button", { name: /^Ran command/ });
+    expect(toggle).toHaveTextContent(/^Ran commandecho hellofailed · 3s$/);
+    fireEvent.click(toggle);
+    expect(within(screen.getByRole("region", { name: "Shell output" })).getByText("exit code 3", { exact: true })).toBeVisible();
   });
 
   it("shows no duration for a running command", () => {
