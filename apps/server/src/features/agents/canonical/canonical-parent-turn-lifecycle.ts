@@ -12,6 +12,7 @@ import { TurnRecoveryError } from "../recovery/turn-recovery-error.js";
 import type { AgentThread, AgentTurn } from "@mcode/contracts/compat/agent-model";
 import type { Message } from "@mcode/contracts/models/message";
 import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
+import { isToolCallActive } from "@mcode/contracts/models/tool-call-record";
 import type {
   ParentTurnFinishInput as CanonicalParentTurnFinishInput,
   ParentTurnInterruptionInput,
@@ -378,13 +379,13 @@ export class CanonicalParentTurnLifecycle {
   ): ParentNarrativeRecoveryItem {
     // A background call and the steps under it may still finish after their parent turn is
     // lost. Its late result settles them, or the startup sweep does when no provider survives.
-    const settles = item.record.status === "running" && !held.has(item.record.id);
+    const settles = isToolCallActive(item.record.status) && !held.has(item.record.id);
     return {
       kind: "toolCall",
       record: {
         ...item.record,
         message_id: messageId,
-        ...(settles ? { status: "failed", completed_at: endedAt } : {}),
+        ...(settles ? { status: "failed", phase: undefined, completed_at: endedAt } : {}),
       },
     };
   }

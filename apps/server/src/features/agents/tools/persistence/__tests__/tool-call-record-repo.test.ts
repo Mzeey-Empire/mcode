@@ -4,6 +4,10 @@ import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
 import { ToolCallRecordStore } from "../tool-call-record-store.js";
 import type { CreateToolCallRecordInput } from "../tool-call-record-store.js";
+import { z } from "zod";
+import { ToolCallRecordSchema } from "@mcode/contracts/models/tool-call-record";
+import { ClaudeEventMapper } from "../../../../../../../../packages/providers/src/private/claude/claude-event-mapper.js";
+import { CodexLiveEventReducer } from "../../../execution/codex-live-event-reducer.js";
 
 /** Seed a workspace, thread, and message so foreign keys are satisfied. */
 function seedFixtures(db: Database): {
@@ -78,6 +82,65 @@ describe("ToolCallRecordStore", () => {
     repo = new ToolCallRecordStore(db);
     const fixtures = seedFixtures(db);
     messageId = fixtures.messageId;
+  });
+
+  it.each(["waiting", "denied"])("keeps a Claude %s command readable by older builds", async (phase) => {
+    // Main's enum is intentionally frozen here: stable must read rows written by nightly.
+    const olderReader = ToolCallRecordSchema().extend({
+      status: z.enum(["running", "completed", "failed", "cancelled"]),
+    });
+    const reducer = new CodexLiveEventReducer({ threadId: "thread-1", turnId: "turn-1", executionId: "execution-1" });
+    reducer.reduce({ type: "turnStarted", threadId: "thread-1", turnExecutionId: "execution-1" });
+    const records: unknown[] = [];
+    const mapper = new ClaudeEventMapper("session-1", "thread-1", {
+      emit: (event) => {
+        const result = reducer.reduce({ ...event, turnExecutionId: "execution-1" });
+        if (result.kind !== "reduced") throw new Error(result.reason);
+        for (const intent of result.writer) {
+          if (intent.kind === "narrative-recovery") {
+            for (const item of intent.items) {
+              if (item.kind === "toolCall") records.push(item.record);
+            }
+          }
+        }
+      },
+      getSession: () => undefined,
+      captureSdkSessionId: () => true,
+      observeNativeGoalCommands: () => {},
+      applyNativeGoalCommandResult: () => {},
+      invalidateSdkSession: () => {},
+      markSessionPoisoned: () => {},
+      updateUsage: () => ({}),
+      invalidateUsage: () => {},
+      resolveBillingMode: async () => "unknown",
+      isSessionStartHookSuppressed: () => false,
+      clearSessionStartHookSuppression: () => {},
+      liveExecutionId: () => "execution-1",
+      settleBackgroundTool: () => {},
+    });
+    await mapper.map({ type: "tool_use", id: "command-1", name: "Bash", input: { command: "echo alpha" } });
+    mapper.commandApprovalRequested("command-1");
+    if (phase === "denied") mapper.commandApprovalResolved("command-1", false);
+    const record = ToolCallRecordSchema().parse(records.at(-1));
+    expect(olderReader.parse(record).status).toBe(phase === "waiting" ? "running" : "cancelled");
+    repo.create({
+      ...record, messageId, toolCallId: record.id, toolName: record.tool_name,
+      inputSummary: record.input_summary, outputSummary: record.output_summary,
+      startedAt: record.started_at, completedAt: record.completed_at ?? undefined, sortOrder: record.sort_order,
+    });
+    const saved = repo.listByMessage(messageId)[0];
+    expect(olderReader.parse(saved).status).toBe(phase === "waiting" ? "running" : "cancelled");
+    expect(saved?.completed_at === null).toBe(phase === "waiting");
+  });
+
+  it("reads a row whose phase came from a newer build by its status", () => {
+    repo.create({ messageId, toolCallId: "tc-newer", toolName: "Bash", inputSummary: "ls", outputSummary: "", status: "running", sortOrder: 0 });
+    db.prepare("UPDATE tool_call_records SET phase = 'escalated' WHERE id = 'tc-newer'").run();
+
+    const [saved] = repo.listByMessage(messageId);
+
+    expect(saved?.status).toBe("running");
+    expect(saved?.phase).toBeUndefined();
   });
 
   it.each(["bulkCreate", "createBoundedBatch"])("%s preserves conflicts unless replacement is enabled, then updates every column", (method) => {

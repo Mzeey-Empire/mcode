@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
+import { toolCallResultStatus } from "@mcode/contracts/models/tool-call-record";
 import { TurnAdmissionError, turnAdmissionFailureReason } from "@mcode/shared/turn-admission";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { AgentModelState, AgentTurn, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
@@ -2094,6 +2095,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     projectTaskToolUse(event.threadId, event.toolCallId, toolName, mergedInput, getRec(event.threadId).toolCalls, parentToolCallId);
   };
 
+  const toolUseStatus = (event: Extract<AgentEvent, { type: "toolUse" }>): ToolCall["status"] => event.phase ?? event.status;
+
   const newToolCall = (
     event: Extract<AgentEvent, { type: "toolUse" }>,
     toolName: string,
@@ -2109,6 +2112,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       isError: false,
       isComplete: false,
       parentToolCallId: event.parentToolCallId || undefined,
+      status: toolUseStatus(event) ?? "running",
       startedAt: Date.now(),
       lastActivityAt: Date.now(),
     };
@@ -2129,6 +2133,13 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const toolName = event.toolName || "unknown";
     const toolInput = event.toolInput ?? {};
     const existing = getRec(event.threadId).toolCalls.find((toolCall) => toolCall.id === event.toolCallId);
+    const status = toolUseStatus(event);
+    if (existing && status && !existing.isComplete) {
+      patchRec(event.threadId, (record) => ({ toolCalls: record.toolCalls.map((call) => call.id === event.toolCallId
+        ? { ...call, status, ...(status === "running" && call.status !== "running" ? { startedAt: Date.now() } : {}) }
+        : call) }));
+      return;
+    }
     if (existing && shouldMergeToolUse(existing, toolName)) {
       mergeToolUse(event, existing, toolName, toolInput);
       return;
@@ -2207,9 +2218,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       output: event.output,
       isError: event.isError,
       isComplete: true,
+      status: event.denied ? "denied" : toolCallResultStatus(event),
       lastActivityAt: Date.now(),
       ...toolResultOptionalFields(event),
-      ...(durationMs != null ? { durationMs } : {}),
+      durationMs: event.denied ? undefined : durationMs,
     };
   };
 

@@ -134,9 +134,11 @@ function ToolGroupRow({ calls, open, onToggle, listsChildren }: {
 }) {
   const firstCall = calls[0];
   const LeadingIcon = firstCall ? (TOOL_ICONS[resolveToolName(firstCall.toolName)] ?? DEFAULT_ICON) : DEFAULT_ICON;
+  const executedCalls = calls.filter((call) => call.status !== "denied");
+  const summary = executedCalls.length > 0 ? buildToolSummaryText(executedCalls) : "Commands";
   return (
     <>
-      <NarrativeToolRow icon={LeadingIcon} label={<GroupSummaryLabel text={buildToolSummaryText(calls)} calls={calls} />} disclosure={{ open, onToggle }} />
+      <NarrativeToolRow icon={LeadingIcon} label={<GroupSummaryLabel text={summary} calls={calls} />} disclosure={{ open, onToggle }} />
       {open && listsChildren ? (
         <AnimatedCollapsible open>
           <ul className="mt-1 min-w-0 max-w-full space-y-1 pb-2 pl-6">
