@@ -205,15 +205,11 @@ describe("Cleanup integration", () => {
        VALUES (?, ?, ?, ?, 'worktree', 'active', ?, 1, ?, ?)`,
     ).run("thread-perf", ws.id, "Perf Thread", "mcode/perf", NodePath.join(WT_BASE, "perf-wt"), now, now);
 
-    const start = performance.now();
     const result = await threadService.delete("thread-perf", true);
-    const elapsed = performance.now() - start;
 
     expect(result).toBe(true);
-    // Delete should be sub-millisecond (just DB writes, no I/O or subprocess calls)
-    expect(elapsed).toBeLessThan(50);
-
-    // No subprocess/git calls happened - they're deferred to the worker
+    // Delete hands session and git work to the worker instead of awaiting it. A wall-clock bound
+    // here only measured CI runner load.
     expect(mockClaudeProvider.waitForSessionExit).not.toHaveBeenCalled();
     expect(mockGitWorktrees.removeWorktree).not.toHaveBeenCalled();
   });
