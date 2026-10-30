@@ -101,6 +101,10 @@ export class VirtualViewport {
     this.prefix = options.classPrefix ?? "virtual";
     this.position = options.initialPosition ?? { kind: "offset", top: 0 };
     this.observer = new ResizeObserver((entries) => this.measure(entries));
+    // vlist reads its viewport height once, inside createVList, before the root below gets its height. A grid
+    // container stretches that root to full height already, so the first rows render on the mounting commit
+    // instead of after vlist's deferred resize observer.
+    container.style.display = "grid";
     this.list = createVList<VirtualRow>({
       container,
       classPrefix: this.prefix,
