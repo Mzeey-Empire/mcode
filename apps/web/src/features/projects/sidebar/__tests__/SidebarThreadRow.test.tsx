@@ -43,7 +43,7 @@ function Harness() {
 }
 
 function renderThread(overrides: Partial<Thread> = {}): HTMLElement {
-  const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title", provider: "claude", mode: "worktree", ...overrides });
+  const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString(), ...overrides });
   useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
   render(<Harness />);
   return screen.getByRole("button", { name: /^Provider, Claude Row title/ });
@@ -217,8 +217,8 @@ describe("SidebarThreadRow", () => {
     });
 
     it("keeps another thread's hover preview shut while a thread menu is open", async () => {
-      const first = createMockThread({ id: "t1", workspace_id: "ws-1", title: "First", provider: "claude", mode: "worktree" });
-      const second = createMockThread({ id: "t2", workspace_id: "ws-1", title: "Second", provider: "claude", mode: "worktree" });
+      const first = createMockThread({ id: "t1", workspace_id: "ws-1", title: "First", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString() });
+      const second = createMockThread({ id: "t2", workspace_id: "ws-1", title: "Second", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString() });
       useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [first, second], activeWorkspaceId: "ws-1", activeThreadId: null });
       render(<Harness />);
       await clickOptions(optionsButton("First"));
@@ -279,8 +279,8 @@ describe("SidebarThreadRow", () => {
     });
 
     it("moves an open preview to the next row after that row's hover commits, never showing the old row's details", async () => {
-      const first = createMockThread({ id: "t1", workspace_id: "ws-1", title: "First", provider: "claude", mode: "worktree" });
-      const second = createMockThread({ id: "t2", workspace_id: "ws-1", title: "Second", provider: "claude", mode: "worktree" });
+      const first = createMockThread({ id: "t1", workspace_id: "ws-1", title: "First", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString() });
+      const second = createMockThread({ id: "t2", workspace_id: "ws-1", title: "Second", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString() });
       useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [first, second], activeWorkspaceId: "ws-1", activeThreadId: null });
       render(<Harness />);
       const row = (title: string) => screen.getByRole("button", { name: new RegExp(`^Provider, Claude ${title}`) });
@@ -299,7 +299,7 @@ describe("SidebarThreadRow", () => {
     });
 
     it("keeps an open preview on screen while its thread updates", async () => {
-      const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Before", provider: "claude", mode: "worktree" });
+      const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Before", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString() });
       useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
       render(<Harness />);
       await hoverOpen(screen.getByRole("button", { name: /^Provider, Claude Before/ }));
