@@ -390,17 +390,16 @@ function hasConversationTransition(state: ChatViewState): boolean {
 
 /** Checks whether a hydration failure replaces the transcript stage. */
 function hasFullConversationError(state: ChatViewState): boolean {
-  return conversationErrorLabel(state) === LOAD_ERROR_LABEL
+  return hasConversationLoadError(state)
     && state.messageCount === 0
     && !state.isAgentRunning;
 }
 
-const LOAD_ERROR_LABEL = "Could not refresh conversation";
-
-/** Names the failed action for a conversation error; turn errors already render in the transcript. */
-function conversationErrorLabel(state: ChatViewState): string | null {
-  if (!isConversationError(state.sessionError) || state.sessionErrorSource === "turn") return null;
-  return state.sessionErrorSource === "send" ? "Could not send message" : LOAD_ERROR_LABEL;
+/** Checks for a hydration failure; turn errors render in the transcript and send failures raise a toast. */
+function hasConversationLoadError(state: ChatViewState): boolean {
+  return isConversationError(state.sessionError)
+    && state.sessionErrorSource !== "turn"
+    && state.sessionErrorSource !== "send";
 }
 
 /** Checks whether an error belongs in the conversation rather than the CLI banner. */
@@ -627,7 +626,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
     handedOff,
   } = props;
   const thread = state.activeThread!;
-  const conversationErrorBanner = state.messageCount > 0 || state.isAgentRunning ? conversationErrorLabel(state) : null;
+  const showConversationLoadError = (state.messageCount > 0 || state.isAgentRunning) && hasConversationLoadError(state);
   const showCliError = isVisibleCliError(state.sessionError, dismissedError);
   const paneRef = useRef<HTMLDivElement>(null);
   const paneWidth = useElementWidth(paneRef, thread.id);
@@ -646,7 +645,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
         <div ref={topChromeRef} className="relative z-(--layer-sticky)">
           <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} paneWidth={paneWidth} />
           <ActiveThreadBanners state={state} />
-          {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
+          {showConversationLoadError ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">Could not refresh conversation: {state.sessionError}</p></div> : null}
           <TurnSavingNotice lostProgress={state.lostProgress} />
         </div>
         <ChatMessageStage state={state} interactions={interactions} contentPaddingRight={overviewReserve} chromeInsets={chromeInsets} entrance={!handedOff} startupTrail={startup && startup.state !== "completed" ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />

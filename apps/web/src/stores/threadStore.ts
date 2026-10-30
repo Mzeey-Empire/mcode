@@ -795,6 +795,26 @@ function pauseRejectedQueuedSend(threadId: string, error: unknown): void {
   useQueueStore.getState().suppressAutoDrain(threadId, reason ? pauseReasons[reason] : "Could not send");
 }
 
+/** Reduces a rejected send to the message a user can act on, without the error class prefix. */
+function sendFailureDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Returns the error a rejected send left on its thread, if the latest error came from a send. */
+export function threadSendFailureDetail(threadId: string): string | null {
+  const record = getThreadRecord(useThreadStore.getState().records, threadId);
+  return record.errorSource === "send" ? record.error : null;
+}
+
+/** Raises the one notice a failed send shows; the transcript keeps no inline send error. */
+export function showSendFailureToast(detail: string | null): void {
+  useToastStore.getState().show({
+    kind: "failed",
+    title: "Could not send message",
+    meta: detail ?? "Message dispatch failed",
+  });
+}
+
 /**
  * Sends a claimed queue item and settles its lease. A resend reuses the replacement id the
  * server issued, so admission can claim the held steer it replaces. An entry holding draft
@@ -830,9 +850,15 @@ export async function sendQueuedMessage(threadId: string, message: QueuedMessage
       resendOfSteerId,
     );
     if (sent) admitQueuedDraftHold(message.id);
+    else {
+      // A resend another window already sent leaves no send error; that outcome is not a failure.
+      const detail = threadSendFailureDetail(threadId);
+      if (detail) showSendFailureToast(detail);
+    }
     useQueueStore.getState().settleQueuedDispatch(threadId, message.id, sent);
   } catch (error) {
     pauseRejectedQueuedSend(threadId, error);
+    showSendFailureToast(sendFailureDetail(error));
     useQueueStore.getState().settleQueuedDispatch(threadId, message.id, false);
   }
 }
@@ -3319,7 +3345,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     responseKey: string, executionId: string | null, userMessageId: string,
     alreadySent = false,
   ): boolean => {
-    const message = String(error);
+    const message = sendFailureDetail(error);
     const activeSessionConflict = !isControlCommand && turnAdmissionFailureReason(error) === "busy";
     // A resend another window already sent is a normal outcome. Its turn owns the thread now, so
     // like a session conflict the optimistic prompt is dropped and the runtime is left alone.
@@ -4274,10 +4300,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       set((s) => ({
         records: patchThreadRecord(s.records, threadId, {
           planQuestionsStatus: "pending",
-          error: String(e),
+          error: sendFailureDetail(e),
           errorSource: "send",
         }),
       }));
+      showSendFailureToast(sendFailureDetail(e));
     }
   },
 

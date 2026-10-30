@@ -3,7 +3,7 @@ import type { DevinMode, OrchestrationMode } from "@mcode/contracts/models/enums
 import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
-import { useThreadStore } from "@/stores/threadStore";
+import { threadSendFailureDetail, useThreadStore } from "@/stores/threadStore";
 import { requestTranscriptFollow } from "@/features/conversation/messages/transcript-follow-request";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
@@ -69,7 +69,7 @@ export async function sendComposerThreadMessage(
     undefined,
     payload.planCommentIds,
   );
-  if (!sent) throw new Error("Message dispatch failed");
+  if (!sent) throw new Error(threadSendFailureDetail(threadId) ?? "Message dispatch failed");
 }
 
 /** Adapts a prepared submit for existing-thread transport. */

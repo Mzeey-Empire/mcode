@@ -1138,13 +1138,13 @@ describe("Composer checkout confirmation", () => {
     await user.type(screen.getByLabelText("Message Mcode"), "Retry this message");
     await user.click(screen.getByLabelText("Send message"));
 
-    await waitFor(() => expect(useToastStore.getState().toasts).toContainEqual(
+    await waitFor(() => expect(useToastStore.getState().toasts).toEqual([
       expect.objectContaining({
         kind: "failed",
         title: "Could not send message",
-        meta: "Message dispatch failed",
+        meta: "transport unavailable",
       }),
-    ));
+    ]));
     expect(lastComposerText).toBe("Retry this message");
   });
 

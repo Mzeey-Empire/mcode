@@ -18,6 +18,7 @@ import {
 } from "@/lib/attachment-url";
 
 beforeEach(() => {
+  useToastStore.setState({ toasts: [] });
   usePlanStore.setState({ plansByThread: {}, activeVersionByThread: {} });
   resetThreadStoreForTests({ records: new Map([["thread-1", {
     ...createEmptyThreadRecord(),
@@ -120,6 +121,9 @@ describe("hidden plan messages", () => {
     const { getByRole } = render(<MessageBubble message={message} />);
     await userEvent.click(getByRole("button", { name: "Continue planning" }));
     await waitFor(() => expect(useThreadStore.getState().records.get("thread-1")).toMatchObject({ errorSource: "send", planQuestionsStatus: "pending" }));
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ kind: "failed", title: "Could not send message", meta: "Provider unavailable" }),
+    ]);
     expect(getByRole("button", { name: "Continue planning" }).hasAttribute("disabled")).toBe(false);
   });
 
