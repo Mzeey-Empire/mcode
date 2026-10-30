@@ -41,7 +41,8 @@ export function PlanImplementSplit({ threadId, viewed, executing }: PlanImplemen
       loading={busy}
       onClick={implement}
       menuLabel="More ways to implement"
-      actionProps={{ "data-testid": "plan-implement" }}
+      // The label fades rather than running under the header's expand button.
+      actionProps={{ "data-testid": "plan-implement", "aria-label": label, className: "shrink @max-[224px]:px-2" }}
       menuTriggerProps={{ "data-testid": "plan-implement-menu" }}
       menu={
         <>
@@ -55,7 +56,10 @@ export function PlanImplementSplit({ threadId, viewed, executing }: PlanImplemen
         </>
       }
     >
-      {label}
+      {/* The picker beside it already names the version, so a narrow header drops it here first. */}
+      <span className="text-fade min-w-0">
+        Implement<span className="@max-[224px]:hidden"> v{viewed.version}</span>
+      </span>
     </SplitButton>
   );
 }
