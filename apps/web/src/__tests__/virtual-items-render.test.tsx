@@ -51,8 +51,8 @@ describe("virtual item render isolation", () => {
       turnEndingsByMessageId: { answer: { turnId: "turn-1", providerId: "claude" as const,
         view: { foldLabel: "Stopped", notice: { style: "quiet" as const, title: "You stopped" } } } },
     };
-    const position = (exiting: boolean) => projectTranscript({ ...input,
-      holdingSignals: { stopPending: exiting, compacting: false, ...(exiting ? { exiting: "turn" as const } : {}) },
+    const position = (stopPending: boolean) => projectTranscript({ ...input,
+      holdingSignals: { stopPending, compacting: false },
     }).filter((item) => item.type === "message" || item.type === "turn-end-notice" || item.type === "narrative-indicator")
       .map((item) => item.type === "message" ? `message:${item.message.id}` : item.type);
     expect(position(true)).toEqual(["message:prompt", "message:answer", "turn-end-notice"]);
