@@ -1192,10 +1192,15 @@ type PendingTextChunk = {
 
 const MAX_DEFERRED_NARRATIVE_EVENTS = 2048;
 
-function projectChunkSegments(segments: ThreadRecord["thoughtSegments"], chunk: PendingTextChunk) {
+function projectChunkSegments(segments: ThreadRecord["thoughtSegments"], chunk: PendingTextChunk, streaming: string) {
   if (chunk.deferNarrative) return segments;
   if (chunk.reasoning) return appendReasoningSegment(segments, { delta: chunk.delta, ...chunk.reasoning });
   if (chunk.isFinalResponse) return closeOpenReasoningSegment(segments);
+  // A fresh reload can restore the answer before its unclassified text tape exists.
+  if (chunk.isFinalResponse === undefined && streaming.length > 0
+    && !segments.some((segment) => segment.kind !== "reasoning" && segment.text.length > 0)) {
+    segments = appendThoughtSegment(segments.filter((segment) => segment.kind === "reasoning"), streaming, false);
+  }
   const isExplicitNonFinal = chunk.isFinalResponse === false;
   return appendThoughtSegment(segments, chunk.delta, isExplicitNonFinal, isExplicitNonFinal ? chunk.textItemId : undefined);
 }
@@ -1224,7 +1229,7 @@ function projectPendingTextChunks(record: ThreadRecord, chunks: readonly Pending
   let bytes = previousBytes;
   for (const chunk of chunks) {
     if (!chunk.delta && !chunk.reasoning) continue;
-    segments = projectChunkSegments(segments, chunk);
+    segments = projectChunkSegments(segments, chunk, streaming);
     if (isNarrativeOnlyChunk(chunk)) continue;
     responseTextIsStreaming = chunk.isFinalResponse !== false || responseTextIsStreaming;
     streaming += chunk.delta;
