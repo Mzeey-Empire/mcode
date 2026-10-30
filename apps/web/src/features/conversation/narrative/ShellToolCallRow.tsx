@@ -32,7 +32,7 @@ function formatToolDuration(durationMs: number | undefined): string | null {
 
 interface ShellToolCallStatus {
   duration: string | null;
-  /** Short outcome for the row meta, such as `exit 1`. */
+  /** Short outcome for the row meta, such as `failed`. */
   failureMeta: string | null;
   /** Outcome for the transcript footer, such as `exit code 1`. */
   failureLabel: string | null;
@@ -61,8 +61,7 @@ function shellFailureLabel(toolCall: ToolCall, isCancelled: boolean): string | n
 function shellFailureMeta(toolCall: ToolCall, isCancelled: boolean): string | null {
   if (isCancelled) return "cancelled";
   if (!toolCall.isError) return null;
-  const exitCode = shellExitCode(toolCall);
-  return exitCode === null ? "failed" : `exit ${exitCode}`;
+  return "failed";
 }
 
 function shellToolCallStatus(toolCall: ToolCall): ShellToolCallStatus {
@@ -77,7 +76,7 @@ function shellToolCallStatus(toolCall: ToolCall): ShellToolCallStatus {
 
 /**
  * A finished command reads duration then command; a failed one reads command
- * then `exit 1 · 0:03`, so the outcome sits where the eye lands last.
+ * then `failed · 3s`, so the outcome sits where the eye lands last.
  */
 function ShellToolCallHeader({ command, detail, status, disclosure }: {
   command: string;
