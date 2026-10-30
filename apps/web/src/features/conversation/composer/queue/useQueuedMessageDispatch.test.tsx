@@ -78,6 +78,7 @@ describe("useQueuedMessageDispatch", () => {
       toast: null,
       editingThreadId: null,
     });
+    useToastStore.setState({ toasts: [] });
     useWorkspaceStore.setState({
       activeThreadId: THREAD_ID,
       threads: [createMockThread({ id: THREAD_ID })],
@@ -109,6 +110,9 @@ describe("useQueuedMessageDispatch", () => {
         content: "final queued follow-up",
         browserCaptureSpillPaths: ["browser-capture-spill/workspace/capture.json"],
       }),
+    ]);
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ kind: "failed", title: "Could not send message", meta: "transport unavailable" }),
     ]);
   });
 
@@ -367,6 +371,7 @@ describe("useQueuedMessageDispatch", () => {
     expect(queuedContents()).toEqual([]);
     expect(useQueueStore.getState().inFlightQueuedMessages[THREAD_ID]).toBeUndefined();
     expect(getThreadRecord(useThreadStore.getState().records, THREAD_ID).error).toBeNull();
+    expect(useToastStore.getState().toasts).toEqual([]);
   });
 
   it("sends a rejected steer as the next turn when its turn ended meanwhile", async () => {

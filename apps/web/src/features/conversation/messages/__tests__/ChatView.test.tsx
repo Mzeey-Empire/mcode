@@ -1520,7 +1520,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     render(<ChatView />);
 
-    expect(screen.getByTestId("conversation-error-banner")).toHaveTextContent("Conversation refresh failed");
+    expect(screen.getByTestId("conversation-error-banner")).toHaveTextContent("Could not refresh conversation: Conversation refresh failed");
     expect(screen.getByTestId("message-list")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-error")).not.toBeInTheDocument();
   });
@@ -1541,7 +1541,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByTestId("message-list")).toBeInTheDocument();
   });
 
-  it("labels a rejected send as a send failure", () => {
+  it("leaves a rejected send to its toast instead of a conversation banner", () => {
     chatViewThreadMockRef.current = defaultThreadState({
       activeRecord: {
         ...createEmptyThreadRecord(),
@@ -1553,9 +1553,9 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     render(<ChatView />);
 
-    expect(screen.getByTestId("conversation-error-banner")).toHaveTextContent(
-      "Could not send message: Thread thread-1 already has an active agent session",
-    );
+    expect(screen.queryByTestId("conversation-error-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("conversation-error")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-list")).toBeInTheDocument();
   });
 
   it("keeps running threads subscribed while another thread is selected", async () => {
