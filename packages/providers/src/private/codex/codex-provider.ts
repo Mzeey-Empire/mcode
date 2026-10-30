@@ -95,6 +95,12 @@ const STOP_SETTLE_TIMEOUT_MS = 10_000;
 /** Bound on a follow-up send's wait for a user-stop drain before it respawns instead. */
 const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
 const USAGE_WARMUP_RETRY_MS = 60_000;
+/** A read-only sandbox is Ask me, so only Codex's trusted commands run without asking. */
+const CODEX_APPROVAL_POLICY_BY_SANDBOX: Record<SandboxMode, AskForApproval> = {
+  "read-only": "untrusted",
+  "workspace-write": "on-request",
+  "danger-full-access": "never",
+};
 const CODEX_MIN_VERSION = "0.135.0";
 /** S07-00 captured native plan items and question responses on this CLI version. */
 const CODEX_NATIVE_PLAN_MIN_VERSION = "0.161.0";
@@ -1470,7 +1476,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       cwd: args.cwd,
       resumeFrom: args.resumeFrom,
       sandbox,
-      approvalPolicy: args.permissionMode === "full" ? "never" : sandbox === "read-only" ? "untrusted" : "on-request",
+      approvalPolicy: CODEX_APPROVAL_POLICY_BY_SANDBOX[sandbox],
       pendingSpawn,
       stagedExecutionId: pendingSpawn?.turnExecutionId,
       browserAccess,
