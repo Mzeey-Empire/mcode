@@ -66,11 +66,12 @@ function resolveCanonicalActivity(
     toolCalls: ToolCall[];
     thoughtSegments: ThoughtSegment[];
   },
+  summaryProjection: CanonicalMessageProjection | undefined,
 ) {
   return {
     toolCalls: preferCanonical(projection?.toolCalls, legacy.toolCalls),
     thoughtSegments: preferCanonical(projection?.thoughtSegments, legacy.thoughtSegments),
-    turnSummariesByMessageId: projection?.turnSummariesByMessageId,
+    turnSummariesByMessageId: summaryProjection?.turnSummariesByMessageId,
   };
 }
 
@@ -173,7 +174,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const canonicalActivity = resolveCanonicalActivity(canonicalLifecycleProjection, {
     toolCalls: legacyToolCalls ?? EMPTY_TOOL_CALLS,
     thoughtSegments: legacyThoughtSegments,
-  });
+  }, canonicalProjection);
   const canonicalResponseText = canonicalLifecycleProjection
     ? { streamingText: canonicalLifecycleProjection.streamingText, responseTextIsStreaming: false }
     : { streamingText: canonicalProjection?.streamingText ?? streamingText, responseTextIsStreaming };

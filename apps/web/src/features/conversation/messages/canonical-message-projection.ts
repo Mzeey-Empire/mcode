@@ -1,4 +1,5 @@
 import { ToolCallRecordSchema } from "@mcode/contracts/models/tool-call-record";
+import { ThoughtSegmentRecordSchema } from "@mcode/contracts/models/thought-segment";
 import { isTaskListToolName } from "@mcode/contracts/models/task-list-tools";
 import { type AgentItem, type AgentModelState, type AgentTurn } from "@mcode/contracts/compat/agent-model";
 import { type Message } from "@mcode/contracts/models/message";
@@ -128,7 +129,9 @@ function summaryToolCalls(items: readonly AgentItem[]): ToolCall[] {
 
 function canonicalTurnSummary(turn: AgentTurn, items: readonly AgentItem[]): TurnSummary {
   const topLevelTools = summaryToolCalls(items);
-  const reasoningItems = items.filter((item) => item.payload.projection === "codexChildReasoning");
+  const reasoningItems = items.filter((item) => item.payload.projection === "codexChildReasoning"
+    || (item.payload.projection === "narrationSegment" && !ThoughtSegmentRecordSchema().parse(item.payload.record).is_final_response));
+  const isProviderContinuation = items.some((item) => canonicalMessage(item.payload)?.systemNotice?.kind === "provider-turn");
   const activityItems = items.filter((item) =>
     item.payload.projection === "codexChildToolCall"
     || item.payload.projection === "codexChildToolResult"
@@ -143,6 +146,7 @@ function canonicalTurnSummary(turn: AgentTurn, items: readonly AgentItem[]): Tur
       subagents: topLevelTools.filter(isSubagentLaunchCall).length,
     },
     durationMs: canonicalTurnDuration(turn, activityItems),
+    ...(isProviderContinuation ? { isProviderContinuation: true } : {}),
     ...(outcome !== undefined && outcome !== "completed" ? { outcome } : {}),
     ...(outcomeExecutionId !== undefined ? { outcomeExecutionId } : {}),
     ...(turn.permissionMode !== "full" && { approvalReview: { mode: turn.approvalReviewMode, reason: turn.approvalReviewReason } }),

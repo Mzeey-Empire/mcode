@@ -423,7 +423,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     useMessageListItems({ ...data, expandedFolds: expandedGroups, expandedGroups: presentGroups, leadingContent: props.leadingContent, afterFirstUserContent: props.afterFirstUserContent });
   const itemsByKey = useMemo(() => new Map(items.map((item) => [item.key, item])), [items]);
   const userRows = useMemo(() => items.filter((item) =>
-    item.type === "message" && item.message.role === "user" && !item.message.is_internal,
+    item.type === "message" && item.message.role === "user" && !item.message.is_internal && !item.message.systemNotice,
   ), [items]);
   const stickyItem = stickyKey ? itemsByKey.get(stickyKey) : undefined;
   const stickyMessage = stickyItem?.type === "message" ? stickyItem.message : undefined;

@@ -590,7 +590,7 @@ interface ClaudeStreamLoopState {
   resumedTurnStarted: boolean;
   suppressEnded: boolean;
   endedTurnExecutionId?: string;
-  /** Opening line for the next turn Claude starts without a prompt, from its task notification. */
+  /** Opening line for the next turn Claude starts after a task notification. */
   providerTurnNotice?: string;
   /** Drops a declined self-started turn's output until its SDK result. */
   discardingProviderTurn: boolean;
@@ -601,11 +601,10 @@ interface ClaudeStreamLoopState {
   mapper: ClaudeEventMapper;
 }
 
-/** Keeps a finished background task summary as the opening line of the turn Claude starts next. */
+/** Explains the wake without turning the subagent's report into a user prompt. */
 function rememberProviderTurnNotice(state: ClaudeStreamLoopState, message: Record<string, unknown>): void {
-  if (message.subtype !== "task_notification" || typeof message.summary !== "string") return;
-  const summary = message.summary.trim();
-  if (summary) state.providerTurnNotice = summary.slice(0, 500);
+  if (message.type !== "system" || message.subtype !== "task_notification") return;
+  state.providerTurnNotice = "Claude continued after a background task finished";
 }
 
 /** Claude Agent SDK adapter implementing IAgentProvider with prompt queue pattern. */
@@ -2165,6 +2164,7 @@ export class ClaudeProvider
     }
     state.mapper.captureSessionIdentity(message, state.sessionInitialized);
     this.trackClaudeApprovalTask(state, message);
+    rememberProviderTurnNotice(state, message);
     state.mapper.settleBackgroundTask(message);
     if (await this.skipUnownedClaudeOutput(sessionId, state, message)) return true;
     const isResumeFailure = this.isFailedClaudeResume(message, state.sessionInitialized);
@@ -2245,10 +2245,7 @@ export class ClaudeProvider
     const unowned = state.endedTurnExecutionId === state.currentTurnExecutionId
       && state.pendingPromptExecutionIds.length === 0;
     if (!unowned) return false;
-    if (message.type === "system") {
-      rememberProviderTurnNotice(state, message);
-      return true;
-    }
+    if (message.type === "system") return true;
     // A background subagent's steps are not a turn. Opening one for them would start a turn
     // nobody prompted, and a declined one discards the reply Claude starts after the task notification.
     if (message.type === "result" || state.mapper.isBackgroundTaskOutput(message)) return true;
@@ -2358,6 +2355,7 @@ export class ClaudeProvider
     state: ClaudeStreamLoopState,
     executionId: string,
   ): Promise<void> {
+    state.providerTurnNotice = undefined;
     const nextRouting = this.getCanonicalRoutings().get(executionId);
     if (!nextRouting) throw new Error("Claude queued execution routing is missing");
     await this.waitForCanonicalExecution(state.currentRouting);

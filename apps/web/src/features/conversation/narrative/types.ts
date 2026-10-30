@@ -112,6 +112,8 @@ export interface TurnSummary {
   counts: NarrativeCounts;
   /** Elapsed structured-activity time, or null when no complete boundary exists. */
   durationMs: number | null;
+  /** The provider resumed work without a new user prompt. */
+  isProviderContinuation?: boolean;
   /** Explicit terminal outcome. Omitted for legacy rows with no durable outcome. */
   outcome?: TurnOutcome | null;
   /** Exact execution identity used by the existing retry command. */

@@ -36,6 +36,15 @@ function createMapper(captureSdkSessionId = vi.fn(() => true)) {
 }
 
 describe("ClaudeEventMapper native dispatch", () => {
+  it("keeps a subagent report out of the parent turn's final response", async () => {
+    const { mapper, events } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: "Waiting for both reports." }] } });
+    await mapper.map({ type: "assistant", parent_tool_use_id: "AGENT_1", message: { stop_reason: "end_turn", content: [{ type: "text", text: "## Subagent A\n- Read README.md" }] } });
+    await mapper.map({ type: "result", is_error: false, usage: { output_tokens: 3 } });
+    expect(events.filter((event) => event.type === AgentEventType.Message))
+      .toEqual([{ type: AgentEventType.Message, threadId: "test", content: "Waiting for both reports.", tokens: 3 }]);
+  });
+
   it("captures first-init session metadata with its own root and replay identity", () => {
     const { mapper, evidence } = createMapper();
     mapper.captureSessionIdentity({ type: "system", subtype: "init", session_id: "SESSION_1", parent_tool_use_id: null, uuid: "INIT_1" }, true);

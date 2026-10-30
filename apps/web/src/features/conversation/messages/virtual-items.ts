@@ -352,6 +352,8 @@ export type ChatVirtualItem =
       messageId: string;
       steps: number;
       subagents: number;
+      /** Tool-free provider continuations still show their elapsed work. */
+      durationMs?: number;
     }
   | {
       key: string;
@@ -500,8 +502,9 @@ function workFoldItem(message: Message, input: StableItemInput, summary: TurnSum
 
 function turnMetaLineItem(message: Message, summary: TurnSummary): ChatVirtualItem | undefined {
   const { steps, subagents } = summary.counts;
-  return steps > 0 || subagents > 0
-    ? { key: `turn-meta-line:${message.id}`, type: "turn-meta-line", messageId: message.id, steps, subagents }
+  const durationMs = summary.isProviderContinuation && steps === 0 ? summary.durationMs : null;
+  return steps > 0 || subagents > 0 || durationMs !== null
+    ? { key: `turn-meta-line:${message.id}`, type: "turn-meta-line", messageId: message.id, steps, subagents, ...(durationMs !== null ? { durationMs } : {}) }
     : undefined;
 }
 
@@ -669,7 +672,7 @@ function sameWorkFoldItem(left: ChatVirtualItem, right: ChatVirtualItem): boolea
 }
 
 function sameTurnMetaLineItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "turn-meta-line" && right.type === "turn-meta-line" && left.messageId === right.messageId && left.steps === right.steps && left.subagents === right.subagents;
+  return left.type === "turn-meta-line" && right.type === "turn-meta-line" && left.messageId === right.messageId && left.steps === right.steps && left.subagents === right.subagents && left.durationMs === right.durationMs;
 }
 
 function sameTurnEndNoticeItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
