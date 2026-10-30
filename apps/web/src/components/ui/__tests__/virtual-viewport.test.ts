@@ -191,3 +191,47 @@ describe("VirtualViewport additions", () => {
     expect(view.clientHeight).toBe(200);
   });
 });
+
+describe("VirtualViewport first paint", () => {
+  const CONTAINER_HEIGHT = 200;
+  let container: HTMLElement;
+
+  // Block layout without a stylesheet: an element is as tall as its container only when it asks for 100% or
+  // its parent is a grid that stretches it; an empty auto-height block is 0px tall. vlist reads the viewport's
+  // height once while it builds the list, so this decides whether the first commit has any rows.
+  function laidOutHeight(element: HTMLElement): number {
+    if (element === container) return CONTAINER_HEIGHT;
+    const parent = element.parentElement;
+    if (!parent) return 0;
+    const fillsParent = element.style.height === "100%" || parent.style.display === "grid";
+    return fillsParent ? laidOutHeight(parent) : 0;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "setTimeout"] });
+    vi.stubGlobal("ResizeObserver", SilentObserver);
+    stubReducedMotion(false);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return laidOutHeight(this);
+    });
+    container = document.createElement("div");
+    document.body.append(container);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("publishes the visible rows on the commit that creates it, before any resize observation", () => {
+    let hosts: readonly VirtualHost[] = [];
+    const view = new VirtualViewport(container, (next) => { hosts = next; }, () => {}, { ariaLabel: "Rows" });
+
+    view.setRows(rows);
+
+    expect(hosts.map((host) => host.id)).toContain("r0");
+    view.destroy();
+  });
+});
