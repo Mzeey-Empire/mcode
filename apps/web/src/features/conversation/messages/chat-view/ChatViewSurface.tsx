@@ -248,7 +248,7 @@ function PreparingThreadSurface({
   return (
     <div ref={paneRef} className={cn("relative flex h-full flex-col bg-background", overviewDocked && "[--chat-gutter:--spacing(6)]")} data-testid="thread-preparing-shell" data-thread-view>
       <OverviewLayer>
-        <ThreadHeader state={state} actions={<NewThreadOverview scope={overviewScope} overview={overview} />} />
+        <ThreadHeader state={state} actions={<NewThreadOverview scope={overviewScope} overview={overview} readOnly />} />
         <div className="min-h-0 flex-1 overflow-y-auto pt-4" style={{ paddingRight: overviewReserve }}>
           <PreparingTranscriptRow ref={motion.message}>
             <MessageBubble message={preparingUserMessage(thread, echoedStartup)} />
