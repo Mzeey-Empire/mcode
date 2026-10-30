@@ -1357,6 +1357,20 @@ describe("MessageList thread switch", () => {
     expect(screen.queryByTestId("sticky-user-message")).not.toBeInTheDocument();
   });
 
+  it("keeps a provider continuation notice out of the pinned user prompt", async () => {
+    fakeAnimationFrames();
+    messagesValue = transcriptRows().map((message, index) => {
+      if (index === 0) return { ...message, role: "user", content: "Inspect the fixture" };
+      if (index === 6) return { ...message, role: "user", content: "Claude continued after a background task finished", systemNotice: { kind: "provider-turn", presentation: "timeline" } };
+      return message;
+    });
+    const { container } = render(<MessageList />);
+    await measureRows(container, 200);
+    readAt(screen.getByTestId("transcript-viewport"), 1500);
+    expect(screen.getByTestId("sticky-user-message")).toHaveTextContent("Inspect the fixture");
+    expect(screen.getByTestId("sticky-user-message")).not.toHaveTextContent("Claude continued");
+  });
+
   it("does not apply the sticky prompt inset twice on a cached restore", async () => {
     fakeAnimationFrames();
     const history = [

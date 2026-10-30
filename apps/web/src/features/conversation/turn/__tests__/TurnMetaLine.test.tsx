@@ -16,6 +16,10 @@ describe("turnMetaLabel", () => {
 });
 
 describe("TurnMetaLine", () => {
+  it("shows the duration and zero steps for a tool-free continuation", () => {
+    const { getByTestId } = render(<TurnMetaLine steps={0} subagents={0} durationMs={3_000} />);
+    expect(getByTestId("turn-meta-line").textContent).toBe("Worked for 3s · 0 steps");
+  });
   it("shows only the counts", () => {
     const { getByTestId } = render(<TurnMetaLine steps={4} subagents={1} />);
     expect(getByTestId("turn-meta-line").textContent).toBe("4 steps · 1 sub-agent");

@@ -238,12 +238,11 @@ export class ClaudeEventMapper {
   }
 
   /**
-   * True for a step of a held background call's subagent. The subagent keeps
-   * streaming after its launching turn ends, but its steps are not a turn Claude started.
+   * Child frames cannot open a parent turn, including final frames delivered
+   * after the task notification has settled the background call.
    */
   isBackgroundTaskOutput(message: Message): boolean {
-    const parent = parentId(message);
-    return parent !== undefined && this.backgroundTools.has(parent);
+    return parentId(message) !== undefined;
   }
 
   /** Stops every held call because the SDK process that runs them is gone. */
@@ -302,7 +301,7 @@ export class ClaudeEventMapper {
       .map((block) => stringValue(block.text))
       .join("");
     if (text) {
-      this.lastAssistantText = text;
+      if (!parentToolCallId) this.lastAssistantText = text;
       this.classifyAssistantText(assistant?.stop_reason ?? null, parentToolCallId);
     }
     this.emitToolUses(content, parentToolCallId);

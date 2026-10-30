@@ -148,6 +148,8 @@ export interface TranscriptProjectionInput {
   turnSummariesByMessageId?: Record<string, TurnSummary>;
   /** Server-timed turn durations keyed by assistant message id, for every canonical turn. */
   turnDurationsByMessageId?: Readonly<Record<string, number | null>>;
+  /** Answers produced by a provider wake rather than a user prompt. */
+  providerContinuationMessageIds?: ReadonlySet<string>;
   /** Settled turn endings keyed by the message each notice follows. */
   turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>;
   /** In-memory tool calls for the active turn. */
@@ -226,6 +228,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       persistedNarrativeByMessage: input.persistedNarrativeByMessage,
       turnSummariesByMessageId: input.turnSummariesByMessageId,
       turnDurationsByMessageId: input.turnDurationsByMessageId,
+      providerContinuationMessageIds: input.providerContinuationMessageIds,
       turnEndingsByMessageId: input.turnEndingsByMessageId,
       currentTurnLiveNarrative: settledLiveNarrative(input),
     };
@@ -243,6 +246,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
         stableInput.currentTurnLiveNarrative,
         stableInput.turnEndingsByMessageId,
         stableInput.turnDurationsByMessageId,
+        stableInput.providerContinuationMessageIds,
       );
     previousStableInput = stableInput;
     previousStableItems = stableItems;
@@ -268,7 +272,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
 type StableTranscriptInput = Pick<TranscriptProjectionInput,
   "messages" | "persistedFilesChanged" | "latestTurnWithChanges" | "currentTurn" | "agentDisplayState"
   | "responseTextIsStreaming" | "persistedNarrativeByMessage" | "turnSummariesByMessageId"
-  | "turnDurationsByMessageId" | "turnEndingsByMessageId"> & {
+  | "turnDurationsByMessageId" | "providerContinuationMessageIds" | "turnEndingsByMessageId"> & {
   currentTurnLiveNarrative: SettledLiveNarrative | undefined;
 };
 
@@ -276,6 +280,7 @@ const STABLE_TRANSCRIPT_KEYS = [
   "messages", "persistedFilesChanged", "latestTurnWithChanges", "currentTurn", "agentDisplayState",
   "responseTextIsStreaming", "persistedNarrativeByMessage", "turnSummariesByMessageId", "turnDurationsByMessageId",
   "turnEndingsByMessageId", "currentTurnLiveNarrative",
+  "providerContinuationMessageIds",
 ] as const satisfies readonly (keyof StableTranscriptInput)[];
 
 function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, current: StableTranscriptInput): boolean {
@@ -357,6 +362,8 @@ export type ChatVirtualItem =
       messageId: string;
       steps: number;
       subagents: number;
+      /** Tool-free provider continuations still show their elapsed work. */
+      durationMs?: number;
     }
   | {
       key: string;
@@ -399,13 +406,15 @@ export function buildStableItems(
   currentTurnLiveNarrative?: SettledLiveNarrative,
   turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>,
   turnDurationsByMessageId?: Readonly<Record<string, number | null>>,
+  providerContinuationMessageIds?: ReadonlySet<string>,
 ): ChatVirtualItem[] {
   return messages.flatMap((message) => isRoutineProviderNotice(message) ? [] : stableItemsForMessage(message, {
-    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId, turnDurationsByMessageId,
+    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId, turnDurationsByMessageId, providerContinuationMessageIds,
   }));
 }
 
 interface StableItemInput {
+  providerContinuationMessageIds?: ReadonlySet<string>;
   persistedFilesChanged?: Record<string, string[]>;
   latestTurnWithChanges?: string | null;
   currentTurn?: CurrentTurnResponseIdentity;
@@ -504,10 +513,11 @@ function workFoldItem(message: Message, input: StableItemInput, summary: TurnSum
   };
 }
 
-function turnMetaLineItem(message: Message, summary: TurnSummary): ChatVirtualItem | undefined {
+function turnMetaLineItem(message: Message, summary: TurnSummary, providerContinuationMessageIds: ReadonlySet<string> | undefined): ChatVirtualItem | undefined {
   const { steps, subagents } = summary.counts;
-  return steps > 0 || subagents > 0
-    ? { key: `turn-meta-line:${message.id}`, type: "turn-meta-line", messageId: message.id, steps, subagents }
+  const durationMs = providerContinuationMessageIds?.has(message.id) && steps === 0 ? summary.durationMs : null;
+  return steps > 0 || subagents > 0 || durationMs !== null
+    ? { key: `turn-meta-line:${message.id}`, type: "turn-meta-line", messageId: message.id, steps, subagents, ...(durationMs !== null ? { durationMs } : {}) }
     : undefined;
 }
 
@@ -535,7 +545,7 @@ function stableItemsForMessage(message: Message, input: StableItemInput): ChatVi
   return definedItems([
     summary && showFold ? workFoldItem(message, input, summary) : undefined,
     messageVirtualItem(message, input),
-    summary && turnMetaLineItem(message, summary),
+    summary && turnMetaLineItem(message, summary, input.providerContinuationMessageIds),
     turnChangesItem(message, input),
     turnEndNoticeItem(message, ending),
   ]);
@@ -677,7 +687,7 @@ function sameWorkFoldItem(left: ChatVirtualItem, right: ChatVirtualItem): boolea
 }
 
 function sameTurnMetaLineItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "turn-meta-line" && right.type === "turn-meta-line" && left.messageId === right.messageId && left.steps === right.steps && left.subagents === right.subagents;
+  return left.type === "turn-meta-line" && right.type === "turn-meta-line" && left.messageId === right.messageId && left.steps === right.steps && left.subagents === right.subagents && left.durationMs === right.durationMs;
 }
 
 function sameTurnEndNoticeItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
