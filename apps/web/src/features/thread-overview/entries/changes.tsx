@@ -233,6 +233,14 @@ function selectDisplayedChangeSummary({
   return fallback;
 }
 
+/**
+ * Without known changed files the row would appear only to show the loading bar, then vanish when
+ * the load finds nothing; it appears once the load finds changes instead.
+ */
+function hasKnownChanges(hasChanges: boolean, loaded: LoadedChangeSummary | null, threadId: string): boolean {
+  return hasChanges || (loaded?.threadId === threadId && loaded.summary.files > 0);
+}
+
 function useChangesState(thread: Thread) {
   const { open } = useOverviewContext();
   const isRunning = useThreadStore((s) => s.runningThreadIds.has(thread.id));
@@ -278,11 +286,8 @@ function useChangesState(thread: Thread) {
   // Renames, binary edits and empty files change files without changing line totals.
   const hasChanges = showChangeSummary || changeSummary.files > 0;
   const isSettledResolvePending = !isRunning && !hasCurrentChangeSummary;
-  const hadLoadedChanges = loadedChangeSummary?.threadId === thread.id && loadedChangeSummary.summary.files > 0;
-  // Without known changed files the row would appear only to show the bar, then vanish when the
-  // load finds nothing; it appears once the load finds changes instead.
   const isChangeSummaryLoading = open && isSettledResolvePending && !showChangeSummary
-    && (hasChanges || hadLoadedChanges) && changeSummaryStatus !== "error";
+    && hasKnownChanges(hasChanges, loadedChangeSummary, thread.id) && changeSummaryStatus !== "error";
   // The fallback summary has no line totals, so a failed load must say so rather than show nothing.
   const isChangeSummaryFailed = isSettledResolvePending && changeSummaryStatus === "error";
   useEffect(() => {
