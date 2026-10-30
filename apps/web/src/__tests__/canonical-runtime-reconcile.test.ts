@@ -127,7 +127,7 @@ describe("canonical runtime reconciliation", () => {
     vi.clearAllMocks();
     vi.mocked(mockTransport.sendMessage).mockReset();
   });
-  afterEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
   it.each(["cancelled", "interrupted"] as const)("reconciles a user stop with queued progress and a %s Ended", (outcome) => {
     seedRuntime("running", EXECUTION_ID, true);
@@ -530,6 +530,35 @@ describe("canonical runtime reconciliation", () => {
     useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, wake.filter((event) => eventIds.includes(event.eventId)));
 
     expect(readThreadField(THREAD_ID, (r) => [r.turnExecutionId, r.toolCalls, r.thoughtSegments])).toEqual([OTHER_EXECUTION_ID, [], []]);
+  });
+
+  // Plan Implement starts its turn on the server, so no optimistic send or turnStarted resets the
+  // record. Keeping the settled answer as the current response drew the new rows above the new prompt.
+  it("gives a newer live turn the client did not start its own response and clock", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-08-11T12:00:00.000Z"), toFake: ["Date"] });
+    seedRuntime("running", EXECUTION_ID, true);
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, turnEvents(EXECUTION_ID, "completed"));
+    useThreadStore.setState({ records: seedThreadRecord(THREAD_ID, {
+      currentTurnMessageId: "plan-answer", currentTurnResponseKey: "plan-response", agentStartTime: Date.now(),
+    }) });
+    vi.setSystemTime(Date.parse("2026-08-11T12:02:00.000Z"));
+
+    const second = (eventId: string, sequence: number, payload: CanonicalAgentEventEnvelope["payload"]) => {
+      const event = envelope(eventId, sequence, OTHER_EXECUTION_ID, payload);
+      return { ...event, routing: { ...event.routing, turnId: "turn-2" } };
+    };
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [
+      second("p1", 5, { type: "turn.created", turn: { id: "turn-2", threadId: THREAD_ID, status: "Pending", trigger: { kind: "user" },
+        permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null, providerIdentities: [],
+        startedAt: null, providerStartedAt: null, ending: null, endedAt: null, createdAt: NOW, updatedAt: NOW } }),
+      second("p2", 6, { type: "turn.started", startedAt: NOW }),
+    ]);
+
+    const record = readThreadField(THREAD_ID, (r) => r);
+    expect(record.runtimePhase).toBe("running");
+    expect(record.currentTurnMessageId).toBe("");
+    expect(record.currentTurnResponseKey).not.toBe("plan-response");
+    expect(record.agentStartTime).toBe(Date.parse("2026-08-11T12:02:00.000Z"));
   });
 
   it("ignores a canonical turn carrying a different execution identity", () => {

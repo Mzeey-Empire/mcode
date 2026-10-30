@@ -869,6 +869,17 @@ function succeedingTurnReset(record: ThreadRecord, executionId: string | undefin
   return { toolCalls: [], thoughtSegments: [], hooks: [], approvals: [], turnExecutionId: executionId };
 }
 
+/**
+ * A live turn the client did not start, such as Plan Implement, also needs its own response and
+ * clock. Otherwise the settled turn's answer stays the current response, so the new rows render
+ * above the new prompt and the timer counts from the settled turn's start.
+ */
+function succeedingTurnClaim(threadId: string, record: ThreadRecord, turn: AgentTurn | undefined): Partial<ThreadRecord> {
+  const reset = succeedingTurnReset(record, turn?.executionId);
+  if (reset.turnExecutionId === undefined || activeCanonicalExecutionId(turn) !== reset.turnExecutionId) return reset;
+  return { ...reset, currentTurnMessageId: "", currentTurnResponseKey: createTurnResponseKey(threadId), agentStartTime: Date.now() };
+}
+
 function shouldFlushCanonicalText(frame: CanonicalAgentProgressFrame, state: AgentModelState): boolean {
   return frame.phase === "recovery" || Object.values(state.turns).some((turn) =>
     turn.threadId === frame.threadId && turn.status !== "Pending" && turn.status !== "Running");
@@ -3318,7 +3329,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     let nextRecords = records;
     const patch: Partial<ThreadRecord> = {};
     if (record.runtimePhase !== phase) patch.runtimePhase = phase;
-    Object.assign(patch, succeedingTurnReset(record, turn?.executionId));
+    Object.assign(patch, succeedingTurnClaim(threadId, record, turn));
     // Stamp the execution identity on live claims so later reconciles and the
     // child lifecycle gate can keep correlating this turn to the record.
     const executionId = activeCanonicalExecutionId(turn);
