@@ -22,7 +22,7 @@ export function ThoughtBlock({ segment, isActive }: ThoughtBlockProps) {
     <div className="pt-1">
       {/* No caret: once the agent moves on, its live text renders in the response
           slot, so a caret here would stack one per earlier segment. */}
-      <DeltaBlock text={segment.text} isStreaming={isActive} showCursor={false} />
+      <DeltaBlock text={segment.text} isStreaming={isActive} />
     </div>
   );
 }

@@ -439,7 +439,7 @@ and `hooksByThread` being non-empty. With them cleared, the
 
 ---
 
-## Trap 4: do NOT mutate the React-owned DOM tree for the typing cursor
+## Trap 4: do NOT mutate the React-owned DOM tree
 
 **Symptom.** Random `NotFoundError: Failed to execute 'insertBefore' on
 'Node': The node before which the new node is to be inserted is not a child
@@ -447,34 +447,24 @@ of this node.` crashing the whole `NarrativeFlow` subtree mid-stream. The
 visible artifact is that sub-agent rows render but their bodies stay empty,
 because the commit phase aborted before reconciling them.
 
-**Root cause.** An earlier version of `DeltaBlock.tsx` tried to inject the
-typing cursor inline at the end of the last text node by calling
-`target.appendChild(cursor)` inside `useLayoutEffect`. React's fiber tree
-still thought the cursor was a direct child of the root `<div>`. When the
-markdown content changed mid-stream, React's commit phase called
-`insertBefore` on the root's children list — the cursor wasn't where it
-expected, so the call threw, and the commit was aborted.
-
-A naive cleanup function that restored the cursor to root on unmount
-**did not fix this** — React's mid-render reconciliation can run
-`insertBefore` *before* the cleanup gets a chance to fire.
+**Root cause.** An earlier version of `DeltaBlock.tsx` moved a typing cursor
+inline to the end of the last text node by calling `target.appendChild(cursor)`
+inside `useLayoutEffect`. React's fiber tree still thought the cursor was a
+direct child of the root `<div>`. When the markdown content changed
+mid-stream, React's commit phase called `insertBefore` on the root's children
+list, the cursor wasn't where it expected, and the commit was aborted. A
+cleanup that restored the node on unmount did not help, because
+reconciliation can run `insertBefore` before the cleanup fires.
 
 **The rule.** Never `appendChild`, `insertBefore`, `removeChild`, or
 `replaceChild` against a node that lives inside a React-managed subtree.
 React owns the children list of every element it rendered, and any mutation
 that contradicts the fiber tree's expectation throws.
 
-**The fix used in `DeltaBlock.tsx`:** keep the cursor as a permanent sibling
-inside the root div (React-managed, never moved). After every render, a
-`useLayoutEffect` measures the bounding rect of the END of the last
-text-bearing element via `document.createRange()` + `collapse(false)`, and
-sets `left` / `top` / `height` inline styles on the cursor (which uses
-`position: absolute`). The DOM tree React rendered is left untouched.
-
 **Don't break this:** if you need to overlay something visually inside a
 React subtree, either:
 
-1. Position absolutely against a measured rect (this pattern).
+1. Position it absolutely against a measured rect, setting only its styles.
 2. Use `ReactDOM.createPortal` to render into a node React knows about.
 3. Render the overlay element as a sibling at the root level and use CSS
    to position it.
@@ -538,9 +528,8 @@ before reporting the change done:
   chronological order.
 - **Reasoning:** each reasoning block shows as a collapsed `Thought` row
   between the tools around it, and opens to show its text.
-- **Streaming response:** text appears a paragraph at a time, and the typing
-  cursor sits inline after the last word of the last finished paragraph, not
-  on its own line below it.
+- **Streaming response:** text appears a paragraph at a time, with no typing
+  caret; open code blocks and tables show an "assembling" skeleton.
 - **Turn completion:** the activity folds under "Worked for <duration>" above
   the answer, fork and copy show at rest, and the meta line shows the
   step and sub-agent counts.

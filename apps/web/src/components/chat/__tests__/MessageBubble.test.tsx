@@ -89,7 +89,6 @@ describe("MessageBubble", () => {
 
     expect(mockDeltaBlock).toHaveBeenCalledWith(expect.objectContaining({
       isStreaming: true,
-      showCursor: true,
     }));
     expect(mockDeltaBlock.mock.calls[0]?.[0]).not.toHaveProperty("chatHighlighting");
     expect(mockDeltaBlock.mock.calls[0]?.[0]).not.toHaveProperty("threadId");

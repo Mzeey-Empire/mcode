@@ -999,12 +999,11 @@ describe("MessageBubble assistant plan-questions suppression", () => {
 });
 
 
-it("closes the response caret independently of a still-running native turn", async () => {
+it("settles the response text independently of a still-running native turn", async () => {
   const message = { ...makeMessage("Finished response"), role: "assistant" } satisfies Message;
   const { container, rerender } = render(<MessageBubble message={message} agentDisplayState={{ phase: "streaming" }} textIsStreaming />);
-  expect(container.querySelector(".typing-cursor")).not.toBeNull();
+  expect(container).not.toHaveTextContent("Finished response");
   rerender(<MessageBubble message={message} agentDisplayState={{ phase: "streaming" }} textIsStreaming={false} />);
-  expect(container.querySelector(".typing-cursor")).toBeNull();
   await waitFor(() => expect(container).toHaveTextContent("Finished response"));
   expect(container.querySelector("[data-testid='assistant-response-text']")?.getAttribute("data-selected-text-eligible")).toBe("false");
   rerender(<MessageBubble message={message} agentDisplayState={{ phase: "completed" }} />);
