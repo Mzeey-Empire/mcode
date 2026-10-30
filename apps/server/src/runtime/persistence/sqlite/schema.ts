@@ -795,6 +795,24 @@ export const canonicalAgentItems = sqliteTable(
   ],
 );
 
+/**
+ * Streamed text appended to a canonical item since its row was last written whole.
+ * Rows are only inserted, so a delta costs O(delta) on disk; a whole write of the item
+ * folds them into its row and deletes them. `text_json` holds `JSON.stringify(text)`,
+ * because bun:sqlite turns a lone surrogate bound as TEXT into U+FFFD and a delta can
+ * split a surrogate pair. The migration declares the table WITHOUT ROWID.
+ */
+export const canonicalAgentItemContentAppends = sqliteTable(
+  "canonical_agent_item_content_appends",
+  {
+    itemId: text("item_id").notNull().references(() => canonicalAgentItems.id, { onDelete: "cascade" }),
+    offset: integer("offset").notNull(),
+    textJson: text("text_json").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.itemId, table.offset] })],
+);
+
 /** Resumable startup materialization position for canonical conversation items. */
 export const conversationDisplayMaterializationState = sqliteTable(
   "conversation_display_materialization_state",

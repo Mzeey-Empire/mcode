@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { bindResponseItems } from "./response-binding.js";
 import { applyCollaborationObservation } from "./collaboration-observation.js";
+import { appendItemContent } from "./item-content-append.js";
 import { CanonicalAgentSemanticEnvelopeSchema } from "./events.js";
 import {
   AgentItemSchema,
@@ -110,6 +111,8 @@ const AGENT_EVENT_REDUCERS: Record<AgentEventType, AgentEventReducer> = {
     reduceVolatileTruncation(state, acceptedInputState),
   "item.recorded": (state, event, acceptedInputState) =>
     reduceItemRecorded(state, event as AgentEventFor<"item.recorded">, acceptedInputState),
+  "item.content-appended": (state, event, acceptedInputState) =>
+    reduceItemContentAppended(state, event as AgentEventFor<"item.content-appended">, acceptedInputState),
   "collaboration-action.recorded": (state, event, acceptedInputState) =>
     reduceCollaborationActionRecorded(
       state,
@@ -438,6 +441,29 @@ function reduceItemRecorded(
     state: { ...state, items: { ...state.items, [item.id]: item }, ...acceptedInputState },
     outcome: "applied",
   };
+}
+
+function reduceItemContentAppended(
+  state: AgentModelState,
+  event: AgentEventFor<"item.content-appended">,
+  acceptedInputState: AcceptedInputState,
+): AgentReducerResult {
+  const item = event.routing.itemId ? state.items[event.routing.itemId] : undefined;
+  if (!item || item.threadId !== event.routing.threadId || item.turnId !== event.routing.turnId) {
+    return { state, outcome: "routing-conflict" };
+  }
+  const result = appendItemContent(item, event.payload);
+  switch (result.kind) {
+    case "appended":
+      return {
+        state: { ...state, items: { ...state.items, [item.id]: result.item }, ...acceptedInputState },
+        outcome: "applied",
+      };
+    case "already-applied":
+      return { state: { ...state, ...acceptedInputState }, outcome: "duplicate" };
+    case "base-mismatch":
+      return { state, outcome: "routing-conflict" };
+  }
 }
 
 function reduceCollaborationActionRecorded(
