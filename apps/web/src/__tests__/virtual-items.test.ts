@@ -1149,9 +1149,9 @@ describe("provider retry status", () => {
     expect(findIndicator(items)?.status).toEqual({ label: "Stopping", icon: "spinner" });
   });
 
-  it("removes the live line immediately when a stopped turn settles, even during its exit hold", () => {
+  it("removes the live line immediately when a stopped turn settles, even while Stop is pending", () => {
     const items = buildVolatileItems([makeToolCall({ isComplete: true })], { phase: "cancelled" }, 1000, "", [], [],
-      undefined, undefined, undefined, { stopPending: true, compacting: false, exiting: "turn" });
+      undefined, undefined, undefined, { stopPending: true, compacting: false });
     expect(items.map((item) => item.type)).toEqual(["narrative-flow"]);
   });
 
