@@ -9,6 +9,8 @@ export const PLAN_EDITOR_CLASS = {
   label: "cm-plan-label",
   listMarker: "cm-plan-list-marker",
   code: "cm-plan-code",
+  codeBlock: "cm-plan-code-block",
+  rule: "cm-plan-rule",
   // `text-fade` is the app's 24px right-edge fade utility; a path line never wraps.
   pathItem: "cm-plan-path-item text-fade",
   pathName: "cm-plan-path-name",
@@ -20,6 +22,7 @@ export type PlanDecorationRange =
   | { readonly kind: "line"; readonly from: number; readonly className: string }
   | { readonly kind: "mark"; readonly from: number; readonly to: number; readonly className: string }
   | { readonly kind: "hide"; readonly from: number; readonly to: number }
+  | { readonly kind: "replace"; readonly from: number; readonly to: number; readonly text: string; readonly className: string }
   | { readonly kind: "widget"; readonly from: number; readonly text: string; readonly className: string };
 
 /** A document span covering whole lines, in document offsets. */
@@ -30,8 +33,9 @@ export interface PlanLineSpan {
 
 /**
  * Computes the read-view decorations for a plan's markdown: the first H1 is the
- * title, the paragraph right after it is the summary, H2s are labels, ordered
- * list markers sit in a mono column, and markdown syntax marks are hidden.
+ * title, the paragraph right after it is the summary, later headings are
+ * labels, list markers sit in a mono column with bullets drawn as dots, fenced
+ * code reads as a code block, and markdown syntax marks are hidden.
  * Sorted by position so the result is stable and easy to compare.
  */
 export function planEditorDecorations(markdown: string): PlanDecorationRange[] {
@@ -49,10 +53,12 @@ const PREVIEW_ONLY_CLASSES: ReadonlySet<string> = new Set([
   PLAN_EDITOR_CLASS.pathItem,
   PLAN_EDITOR_CLASS.pathName,
   PLAN_EDITOR_CLASS.pathFolder,
+  PLAN_EDITOR_CLASS.rule,
 ]);
 
 function isPreviewOnly(range: PlanDecorationRange): boolean {
-  return range.kind === "hide" || range.kind === "widget" || PREVIEW_ONLY_CLASSES.has(range.className);
+  if (range.kind === "line" || range.kind === "mark") return PREVIEW_ONLY_CLASSES.has(range.className);
+  return true;
 }
 
 /**
@@ -75,7 +81,7 @@ function blockDecorations(text: string, doc: PlanSyntaxNode): PlanDecorationRang
   let summaryPending = false;
   for (let block = doc.firstChild; block; block = block.nextSibling) {
     const className = blockClass(block.name, { titleSeen, summaryPending });
-    if (block.name === "ATXHeading1" && !titleSeen) titleSeen = true;
+    if (className === PLAN_EDITOR_CLASS.title) titleSeen = true;
     summaryPending = className === PLAN_EDITOR_CLASS.title;
     if (className) ranges.push(...lineClasses(text, block.from, block.to, className));
   }
@@ -86,9 +92,11 @@ function blockClass(
   name: string,
   position: { titleSeen: boolean; summaryPending: boolean },
 ): string | null {
-  if (name === "ATXHeading1" && !position.titleSeen) return PLAN_EDITOR_CLASS.title;
+  const h1 = name === "ATXHeading1" || name === "SetextHeading1";
+  if (h1 && !position.titleSeen) return PLAN_EDITOR_CLASS.title;
   if (name === "Paragraph" && position.summaryPending) return PLAN_EDITOR_CLASS.summary;
-  if (name === "ATXHeading2") return PLAN_EDITOR_CLASS.label;
+  // Agents often write later sections as H1s, so every heading after the title is a label.
+  if (h1 || /^(ATXHeading[2-6]|SetextHeading2)$/.test(name)) return PLAN_EDITOR_CLASS.label;
   return null;
 }
 
@@ -118,6 +126,10 @@ function nodeDecorations(text: string, node: PlanSyntaxNode): PlanDecorationRang
       return [{ kind: "hide", from: node.from, to: node.to }];
     case "InlineCode":
       return inlineCodeDecorations(node);
+    case "FencedCode":
+      return fenceDecorations(text, node);
+    case "HorizontalRule":
+      return [...lineClasses(text, node.from, node.to, PLAN_EDITOR_CLASS.rule), { kind: "hide", from: node.from, to: node.to }];
     case "ListMark":
       return listMarkDecorations(text, node);
     case "ListItem":
@@ -136,9 +148,26 @@ function inlineCodeDecorations(node: PlanSyntaxNode): PlanDecorationRange[] {
   return ranges;
 }
 
+// Fence lines cannot be removed from a plugin (a replaced line break must come
+// from a state field), so the fence and its info string are hidden in place and
+// the empty lines pad the block. Fences nested in list items count too.
+function fenceDecorations(text: string, node: PlanSyntaxNode): PlanDecorationRange[] {
+  const ranges = lineClasses(text, node.from, node.to, PLAN_EDITOR_CLASS.codeBlock);
+  for (let child = node.firstChild; child; child = child.nextSibling) {
+    if (child.name === "CodeMark" || child.name === "CodeInfo") ranges.push({ kind: "hide", from: child.from, to: child.to });
+  }
+  return ranges;
+}
+
 // The marker column has a fixed width, so the space after the marker is hidden.
+// A bullet's "-", "*" or "+" is drawn as a dot; ordered markers keep their number.
 function listMarkDecorations(text: string, node: PlanSyntaxNode): PlanDecorationRange[] {
-  const ranges: PlanDecorationRange[] = [{ kind: "mark", from: node.from, to: node.to, className: PLAN_EDITOR_CLASS.listMarker }];
+  const bullet = node.parent?.parent?.name === "BulletList";
+  const ranges: PlanDecorationRange[] = [
+    bullet
+      ? { kind: "replace", from: node.from, to: node.to, text: "•", className: PLAN_EDITOR_CLASS.listMarker }
+      : { kind: "mark", from: node.from, to: node.to, className: PLAN_EDITOR_CLASS.listMarker },
+  ];
   const textStart = skipSpaces(text, node.to);
   if (textStart > node.to) ranges.push({ kind: "hide", from: node.to, to: textStart });
   return ranges;
