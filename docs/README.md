@@ -110,6 +110,7 @@ Point-in-time decisions. New ADRs take the next free number below. Numbers
 - [0031: Handoff v2, one budgeted transcript selection for switch, fork, and recovery](adr/0031-handoff-v2-budgeted-transcript-selection.md)
 - [0032: Delegation wakes the Coordinator and stays within its Permission mode](adr/0032-delegation-wakes-the-coordinator-within-its-permission-mode.md)
 - [0033: Delegated threads are sub-agents](adr/0033-delegated-threads-are-sub-agents.md)
+- [0034: Ask me gates writes, network, and commands outside the project](adr/0034-ask-me-gates-writes-network-and-outside-commands.md)
 
 ## Agent runbooks
 

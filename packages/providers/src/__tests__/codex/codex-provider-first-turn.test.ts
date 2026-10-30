@@ -167,6 +167,66 @@ function makeProvider(
  */
 describe("CodexProvider first turn on new session", () => {
   it.each([
+    { permissionMode: "supervised", approvalReviewMode: "manual", sandbox: "read-only", approvalPolicy: "untrusted" },
+    { permissionMode: "supervised", approvalReviewMode: "automatic", sandbox: "workspace-write", approvalPolicy: "on-request" },
+    { permissionMode: "auto", approvalReviewMode: "manual", sandbox: "workspace-write", approvalPolicy: "on-request" },
+    { permissionMode: "full", approvalReviewMode: "manual", sandbox: "danger-full-access", approvalPolicy: "never" },
+  ] satisfies Array<{
+    permissionMode: TurnRequest<"codex">["permissionMode"];
+    approvalReviewMode: "manual" | "automatic";
+    sandbox: string;
+    approvalPolicy: string;
+  }>)("starts $permissionMode/$approvalReviewMode with the intended native permissions", async ({ permissionMode, approvalReviewMode, sandbox, approvalPolicy }) => {
+    const provider = makeProvider();
+    try {
+      await provider.sendTurn({
+        turnId: "access-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+        threadId, message: "hello", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+        providerOptions: {}, permissionMode, approvalReviewMode,
+      });
+      await vi.waitFor(() => expect(sendTurnMock.mock.calls.length).toBe(1));
+      expect(appServers[0]?.options).toMatchObject({ sandbox, approvalPolicy });
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
+  it.each([
+    { choiceId: "allow", decision: "accept" },
+    { choiceId: "deny", decision: "decline" },
+  ])("routes Ask me approvals through the canonical UI path and returns $decision", async ({ choiceId, decision }) => {
+    const provider = makeProvider();
+    const approvals: ApprovalRequestEnvelope[] = [];
+    provider.on("approval_request", request => approvals.push(request));
+    try {
+      await provider.sendTurn({
+        turnId: "access-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+        threadId, message: "edit", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+        providerOptions: {}, permissionMode: "supervised", approvalReviewMode: "manual",
+      });
+      await vi.waitFor(() => expect(sendTurnMock.mock.calls.length).toBe(1));
+      const handler = appServers[0]?.options.approvalHandler;
+      assert(handler);
+      const request: CodexApprovalRequest = {
+        rpcId: 15, method: "item/commandExecution/requestApproval",
+        params: { command: "curl -I https://example.com", cwd: process.cwd(), threadId: "sdk-thread-1", turnId: "turn-test-id" },
+      };
+      const response = handler(request);
+      expect(approvals).toHaveLength(1);
+      const approval = approvals[0];
+      assert(approval);
+      expect(approval.body.subject).toMatchObject({ kind: "command", command: "curl -I https://example.com" });
+      const delivery = provider.resolveApproval(approval.requestId, { choiceId });
+      expect(await response).toEqual({ decision });
+      request.responseWritten?.(true);
+      expect(await delivery).toEqual({ status: "resolved" });
+      expect(provider.listPendingApprovals(threadId)).toEqual([]);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
+  it.each([
     [{ fastMode: true }, { serviceTier: "priority" }],
     [{ fastMode: false }, {}],
     [{}, {}],
