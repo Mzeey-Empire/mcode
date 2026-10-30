@@ -65,6 +65,49 @@ function item(
 }
 
 describe("projectCanonicalMessageList", () => {
+  it("projects a long streaming turn without sorting its private provider history", () => {
+    const state = createAgentModelState();
+    state.turns[TURN_ID] = turn("Completed", "2026-08-18T12:00:05.000Z");
+    const prompt = message();
+    const answer = message({ id: "answer", role: "assistant", content: "Repository summary", sequence: 1 });
+    state.items.prompt = item("prompt", "message", { projection: "message", message: prompt }, STARTED_AT);
+    state.items.answer = item("answer", "message", { projection: "message", message: answer }, STARTED_AT);
+    for (let index = 0; index < 8_000; index += 1) {
+      const id = `provider-${index}`;
+      state.items[id] = item(id, "message", { projection: "providerRuntimeEvent", event: { type: "text-delta", text: "xy" } }, STARTED_AT);
+    }
+    const startedAt = performance.now();
+    for (let index = 0; index < 200; index += 1) {
+      const projection = projectCanonicalMessageList({ threadId: THREAD_ID, state, messages: [], toolCalls: [], thoughtSegments: [] });
+      expect(projection?.messages.map(entry => entry.id)).toEqual(["child-prompt", "answer"]);
+      expect(projection?.turnSummariesByMessageId.answer?.counts).toEqual({ steps: 0, thoughts: 0, subagents: 0 });
+    }
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+  }, 30_000);
+
+  it("still ends child reasoning when a later private provider record arrives", () => {
+    const state = createAgentModelState();
+    state.turns[TURN_ID] = turn("Running");
+    state.items.reasoning = item("reasoning", "reasoning", { projection: "codexChildReasoning", content: "Checking the repository" }, STARTED_AT, "2026-08-18T12:00:01.000Z");
+    state.items.private = item("private", "message", { projection: "providerRuntimeEvent" }, "2026-08-18T12:00:02.000Z");
+    const projection = projectCanonicalMessageList({ threadId: THREAD_ID, state, messages: [], toolCalls: [], thoughtSegments: [] });
+
+    expect(projection?.thoughtSegments).toEqual([{ text: "Checking the repository", startedAt: 1787054400000,
+      endedAt: 1787054401000, isExplicitNonFinal: true, kind: "reasoning" }]);
+    expect(projection?.messages).toEqual([]);
+  });
+
+  it("does not end current reasoning because another turn has a later private record", () => {
+    const state = createAgentModelState();
+    state.turns[TURN_ID] = turn("Running");
+    state.items.reasoning = item("reasoning", "reasoning", { projection: "codexChildReasoning", content: "Checking the repository" }, STARTED_AT);
+    state.items.private = item("private", "message", { projection: "providerRuntimeEvent" }, "2026-08-18T12:00:02.000Z", undefined, "other-turn");
+    const projection = projectCanonicalMessageList({ threadId: THREAD_ID, state, messages: [], toolCalls: [], thoughtSegments: [] });
+
+    expect(projection?.thoughtSegments).toEqual([{ text: "Checking the repository", startedAt: 1787054400000,
+      isExplicitNonFinal: true, kind: "reasoning" }]);
+  });
+
   it("counts provider-neutral tools only within the displayed thread and turn", () => {
     const state = createAgentModelState();
     state.turns[TURN_ID] = turn("Completed", "2026-08-18T12:00:05.000Z");

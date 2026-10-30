@@ -279,13 +279,13 @@ function visibleToolCalls(toolCalls: readonly ToolCall[], projectedCalls: Iterab
     : visible.slice(-CANONICAL_VISIBLE_TOOL_CALL_LIMIT);
 }
 
-function projectedThoughtSegments(items: readonly AgentItem[], terminal: boolean): ThoughtSegment[] {
+function projectedThoughtSegments(items: readonly AgentItem[], terminal: boolean, activityItems: readonly AgentItem[]): ThoughtSegment[] {
   const thoughts: ThoughtSegment[] = [];
   for (const item of items.filter((candidate) => candidate.payload.projection === "codexChildReasoning")) {
     const text = payloadString(item.payload, "content");
     const startedAt = timestamp(item.createdAt);
     if (text === undefined || startedAt === undefined) continue;
-    const hasLaterItem = items.some((candidate) => compareItems(candidate, item) > 0);
+    const hasLaterItem = activityItems.some((candidate) => candidate.turnId === item.turnId && compareItems(candidate, item) > 0);
     const endedAt = terminal || hasLaterItem ? timestamp(item.updatedAt) ?? startedAt : undefined;
     thoughts.push({ text, startedAt, ...(endedAt === undefined ? {} : { endedAt }), isExplicitNonFinal: true, kind: "reasoning" });
   }
@@ -324,13 +324,14 @@ export function projectCanonicalMessageList({
   const terminal = isTerminalTurn(latestTurn);
   const agentDisplayState = agentDisplayStateFromCanonicalTurnStatus(latestTurn.status);
   const threadItems = Object.values(state.items).filter((item) => item.threadId === threadId);
-  const items = threadItems
+  const displayItems = threadItems.filter((item) => item.payload.projection !== "providerRuntimeEvent");
+  const items = displayItems
     .filter((item) => item.turnId === latestTurn.id)
     .sort(compareItems);
 
   const projected = projectedMessages(items);
   const projectedCalls = projectedToolCalls(items);
-  const projectedThoughts = projectedThoughtSegments(items, terminal);
+  const projectedThoughts = projectedThoughtSegments(items, terminal, threadItems);
   const response = projectedResponse(messages, projected);
   const responseKey = `canonical-turn-response:${latestTurn.id}`;
 
@@ -346,6 +347,6 @@ export function projectCanonicalMessageList({
     currentTurnMessageId: response.assistantMessage?.id ?? "",
     currentTurnResponseKey: responseKey,
     assistantResponseKeys: response.assistantMessage ? { [response.assistantMessage.id]: responseKey } : {},
-    ...settledTurnProjection(threadTurns, threadItems),
+    ...settledTurnProjection(threadTurns, displayItems),
   };
 }
