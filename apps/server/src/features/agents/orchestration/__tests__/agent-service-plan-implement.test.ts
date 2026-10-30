@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { testModelCatalog } from "../../__tests__/provider-model-fixture.js";
 import { ProjectActionService } from "../../../projects/environment/project-action-service.js";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -114,7 +115,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
         sent.push(request);
         atDispatch.push({ text: NodeFS.readFileSync(files.path(threadId), "utf8"), status: plans.getById(ready.id)?.status });
       },
-      stopSession: async () => undefined, shutdown: () => undefined, listModels: async () => [],
+      stopSession: async () => undefined, shutdown: () => undefined, listModels: testModelCatalog.listModels,
       setCanonicalTurnDeliveryFailureHandler: () => undefined,
       fenceCanonicalTurnEvents: async () => undefined, retireCanonicalTurnEvents: async () => undefined,
     });
