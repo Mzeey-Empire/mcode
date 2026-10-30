@@ -1117,20 +1117,36 @@ export function createWsTransport(
     listWorktrees: (workspaceId) => rpc<WorktreeInfo[]>("git.listWorktrees", { workspaceId }),
 
     // Agent
-    sendMessage: (input: SendMessageInput) => {
+    sendMessage: async (input: SendMessageInput) => {
       const state = useSettingsStore.getState();
       const guardrails = state.loaded
         ? { maxBudgetUsd: state.settings.agent.guardrails.maxBudgetUsd, maxTurns: state.settings.agent.guardrails.maxTurns }
         : {};
       const { replyToMessageId, quotedText, ...command } = input;
       const stagedDraftImageIds = stagedSnapshotIds(input.previewAnnotations);
-      return rpc<void>("agent.send", {
-        ...command,
-        ...(stagedDraftImageIds.length > 0 && { stagedDraftImageIds }),
-        ...(replyToMessageId && { replyToMessageId }),
-        ...(quotedText && { quotedText }),
-        ...guardrails,
-      }, { timeoutMs: SEND_MESSAGE_TIMEOUT_MS });
+      try {
+        await rpc<void>("agent.send", {
+          ...command,
+          ...(stagedDraftImageIds.length > 0 && { stagedDraftImageIds }),
+          ...(replyToMessageId && { replyToMessageId }),
+          ...(quotedText && { quotedText }),
+          ...guardrails,
+        }, { timeoutMs: SEND_MESSAGE_TIMEOUT_MS });
+      } catch (error) {
+        if (!input.messageId || error instanceof RpcError) throw error;
+        // A lost acknowledgement does not undo admission. Confirm this exact
+        // prompt after reconnect rather than rolling it back or sending it twice.
+        let admission: { admitted: boolean };
+        try {
+          admission = await rpc<{ admitted: boolean }>("agent.confirmMessage", {
+            threadId: input.threadId,
+            messageId: input.messageId,
+          }, { timeoutMs: CONFIRM_MESSAGE_TIMEOUT_MS });
+        } catch {
+          throw error;
+        }
+        if (!admission.admitted) throw error;
+      }
     },
     steerTurn: (params) => rpc<import("@mcode/contracts/models/turn-steer").TurnSteerResult>("agent.steer", params),
     listHeldSteers: () => rpc<import("@mcode/contracts/models/turn-steer").ListHeldSteersResult>("agent.listHeldSteers", {}),

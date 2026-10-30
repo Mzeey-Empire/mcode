@@ -62,9 +62,8 @@ function RunStatusIcon({ icon }: { icon: RunStatus["icon"] }) {
  *   5 steps · Running bun run lint 38s
  *   Stopping 1m 4s
  *
- * It renders only while the turn is live. The transcript drops its item in the
- * same render that settles the turn, so the bar never shares a frame with the
- * settled footer.
+ * The transcript drops the turn's item in the same render that settles it.
+ * Unfinished delegated tasks can keep a separate wait without steps or a clock.
  */
 export function NarrativeIndicator({
   stepCount,

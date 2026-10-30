@@ -30,8 +30,7 @@ import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../../orchestrati
 import { TurnAdmissionDispatchCoordinator, type TurnParentStartOwner, type TurnRuntimeAdmissionAuthority } from "../../turns/turn-admission-dispatch-coordinator.js";
 import { isAgentRpcMethod, routeAgentRpc, type AgentRouterDeps } from "../agent-rpc.js";
 
-// No catalog model declares Fast, so these turns never carry `fastMode`.
-const noModels = { listModels: async () => [] };
+import { testModelCatalog } from "../../__tests__/provider-model-fixture.js";
 
 let directory: string;
 let settings: SettingsService;
@@ -86,7 +85,7 @@ async function fixture(
     id: "codex", descriptor: { id: "codex", capabilities: [] }, supportsCompletion: false,
      maxInputCharactersPerTurn: 100_000,
 
-    sendTurn: () => providerFinished.promise, stopSession: () => {}, shutdown: () => {}, listModels: async () => [],
+    sendTurn: () => providerFinished.promise, stopSession: () => {}, shutdown: () => {}, listModels: testModelCatalog.listModels,
   });
   const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
   const git = new FakeGitExecutor();
@@ -103,7 +102,7 @@ async function fixture(
     threads, workspaces, messages, new TurnRevertStore(db), worktrees, new AttachmentService(), providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, writer, commands, canonical), undefined,
-    new FileService(workspaces, threads, worktrees, git, hostRuntime), hostRuntime.platform, noModels, owner,
+    new FileService(workspaces, threads, worktrees, git, hostRuntime), hostRuntime.platform, testModelCatalog, owner,
   );
   let reserved = false;
   const runtime: TurnRuntimeAdmissionAuthority = {

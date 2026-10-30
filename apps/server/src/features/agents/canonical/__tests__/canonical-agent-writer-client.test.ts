@@ -776,13 +776,27 @@ describe("canonical SQLite writer", () => {
   }, 30_000);
 
   it("lets a second SQLite writer proceed while recovery continues across batches", async () => {
-    writer = new CanonicalAgentWriterClient(dbPath);
+    let notifyBatchPaused: () => void = () => {};
+    const batchPaused = new Promise<void>((resolve) => { notifyBatchPaused = resolve; });
+    const worker = new Worker(new URL("./recovery-paused-writer.worker.ts", import.meta.url), { type: "module" });
+    writer = new CanonicalAgentWriterClient(dbPath, () => new Proxy(worker, {
+      set(target, property, value) {
+        if (property !== "onmessage" || typeof value !== "function") return Reflect.set(target, property, value);
+        target.onmessage = (message: MessageEvent<CanonicalWriterResponse | "recovery-batch-paused">) => {
+          if (message.data === "recovery-batch-paused") notifyBatchPaused();
+          else value(message);
+        };
+        return true;
+      },
+      get(target, property) {
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }));
     await writer.commit("slow-recovery-start", {
       threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events(),
     });
     db.run("CREATE TABLE writer_lock_probe (id TEXT PRIMARY KEY, recovered_count INTEGER NOT NULL)");
-    db.run(`CREATE TRIGGER slow_recovery BEFORE INSERT ON canonical_agent_items
-      WHEN NEW.id LIKE 'toolCall:slow-%' BEGIN SELECT randomblob(8000000); END`);
     const input = {
       executionId: EXECUTION_ID,
       items: Array.from({ length: 80 }, (_, index) => recoveryToolCall(`slow-${index}`)),
@@ -791,21 +805,22 @@ describe("canonical SQLite writer", () => {
     const recovery = writer.recordParentNarrativeRecovery("slow-recovery", input)
       .finally(() => { settled = true; });
     const count = db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id LIKE 'toolCall:slow-%'");
-    for (let attempts = 0; attempts < 500 && (count.get() as { count: number }).count === 0; attempts++) {
-      await new Promise((resolve) => setTimeout(resolve, 2));
+    try {
+      await Promise.race([batchPaused, recovery]);
+      expect(settled).toBe(false);
+      expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
+        .get("slow-recovery")).toEqual({ count: 0 });
+      db.prepare(`INSERT INTO writer_lock_probe (id, recovered_count)
+        SELECT ?, COUNT(*) FROM canonical_agent_items WHERE id LIKE 'toolCall:slow-%'`).run("main-write");
+      const probe = db.prepare<{ recovered_count: number }, []>(
+        "SELECT recovered_count FROM writer_lock_probe WHERE id = 'main-write'",
+      ).get();
+      expect(probe?.recovered_count).toBeGreaterThan(0);
+      expect(probe?.recovered_count).toBeLessThan(input.items.length);
+    } finally {
+      worker.postMessage("resume-recovery");
+      await recovery;
     }
-    expect((count.get() as { count: number }).count).toBeGreaterThan(0);
-    expect(settled).toBe(false);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
-      .get("slow-recovery")).toEqual({ count: 0 });
-    db.prepare(`INSERT INTO writer_lock_probe (id, recovered_count)
-      SELECT ?, COUNT(*) FROM canonical_agent_items WHERE id LIKE 'toolCall:slow-%'`).run("main-write");
-    const probe = db.prepare<{ recovered_count: number }, []>(
-      "SELECT recovered_count FROM writer_lock_probe WHERE id = 'main-write'",
-    ).get();
-    expect(probe?.recovered_count).toBeGreaterThan(0);
-    expect(probe?.recovered_count).toBeLessThan(input.items.length);
-    await recovery;
     expect(count.get()).toEqual({ count: input.items.length });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
       .get("slow-recovery")).toEqual({ count: 1 });

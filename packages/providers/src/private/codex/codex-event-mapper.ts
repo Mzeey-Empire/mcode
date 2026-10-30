@@ -2381,7 +2381,7 @@ export class CodexEventMapper {
     const bufferedOutput = this.takeCommandOutputBuffer(item, toolCallId);
     const fallback = this.commandCompletionOutput(item);
     const exitCode = typeof item.exitCode === "number" && Number.isInteger(item.exitCode) ? item.exitCode : undefined;
-    return this.completedToolEvents(item, toolCallId, notification, { isError: item.exitCode != null && item.exitCode !== 0, ...(exitCode !== undefined ? { exitCode } : {}), output: bufferedOutput, fallback });
+    return this.completedToolEvents(item, toolCallId, notification, { isError: item.status === "failed" || (exitCode !== undefined && exitCode !== 0), ...(exitCode !== undefined ? { exitCode } : {}), output: bufferedOutput, fallback });
   }
 
   private takeCommandOutputBuffer(item: CompletedItem, toolCallId: string): BoundedToolOutputBuffer | undefined {

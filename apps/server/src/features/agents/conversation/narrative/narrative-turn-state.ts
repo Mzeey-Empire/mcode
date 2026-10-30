@@ -6,6 +6,7 @@ import { resolveBrowserNarrativeTool } from "@mcode/contracts/models/browser-nar
 import { isDelegateTaskToolName } from "@mcode/contracts/models/subagent-roster";
 import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { isToolCallActive, toolCallResultStatus } from "@mcode/contracts/models/tool-call-record";
 import { type ThoughtSegmentKind } from "@mcode/contracts/models/thought-segment";
 import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { CreateToolCallRecordInput } from "../../tools/persistence/tool-call-record-repo.js";
@@ -80,6 +81,8 @@ export interface StagedNarrationSegment {
 
 /** Tool-use event shape consumed by {@link NarrativeTurnState.bufferToolCall}. */
 export interface BufferToolCallEvent {
+  status?: Extract<AgentEvent, { type: "toolUse" }>["status"];
+  phase?: Extract<AgentEvent, { type: "toolUse" }>["phase"];
   toolCallId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
@@ -550,6 +553,10 @@ export class NarrativeTurnState {
     parentToolCallId: string | undefined,
   ): string | undefined {
     const shouldMergeDuplicate = this.shouldMergeDuplicateToolCall(existing, event);
+    if ((event.status || event.phase) && isToolCallActive(existing.status)) {
+      if (event.status === "running" && !event.phase && existing.phase) existing.startedAt = new Date().toISOString();
+      existing.phase = event.phase;
+    }
     if (shouldMergeDuplicate) {
       this.mergeDuplicateToolCall(existing, event);
     }
@@ -676,7 +683,8 @@ export class NarrativeTurnState {
       reasoningEffort: presentation?.reasoningEffort,
       inputSummary: "",
       outputSummary: "",
-      status: "running",
+      status: event.status ?? "running",
+      phase: event.phase,
       startedAt: new Date().toISOString(),
       sortOrder,
       parentToolCallId,
@@ -706,6 +714,7 @@ export class NarrativeTurnState {
       outputArtifactPath?: string;
       exitCode?: number;
       cancelled?: boolean;
+      denied?: boolean;
     },
     subagentPresentation?: SubagentPresentation,
   ): void {
@@ -786,13 +795,15 @@ export class NarrativeTurnState {
       outputArtifactPath?: string;
       exitCode?: number;
       cancelled?: boolean;
+      denied?: boolean;
     } | undefined,
   ): void {
     const outputLimit = resolveBrowserNarrativeTool(toolCall.toolName) ? 4_000 : 500;
     toolCall.outputSummary = output.slice(0, outputLimit);
     toolCall.outputTruncated = outputMeta?.outputTruncated === true;
     this.applyOutputMetadata(toolCall, outputMeta);
-    toolCall.status = outputMeta?.cancelled ? "cancelled" : isError ? "failed" : "completed";
+    toolCall.status = toolCallResultStatus({ ...outputMeta, isError });
+    toolCall.phase = outputMeta?.denied ? "denied" : undefined;
     toolCall.completedAt = new Date().toISOString();
   }
 
@@ -978,6 +989,7 @@ export class NarrativeTurnState {
   private toolCallRecoveryStateFields(toolCall: BufferedToolCall) {
     return {
       status: toolCall.status,
+      ...(toolCall.phase ? { phase: toolCall.phase } : {}),
       started_at: this.requireRecoveryString(toolCall.startedAt, "tool call start time"),
       completed_at: toolCall.completedAt ?? null,
       sort_order: toolCall.sortOrder,
@@ -1281,8 +1293,9 @@ export class NarrativeTurnState {
     outcome: TurnOutcome,
     settledAt: string,
   ): void {
-    if (toolCall.status !== "running") return;
+    if (!isToolCallActive(toolCall.status)) return;
     toolCall.status = this.settledToolCallStatus(outcome);
+    toolCall.phase = undefined;
     toolCall.completedAt = settledAt;
   }
 

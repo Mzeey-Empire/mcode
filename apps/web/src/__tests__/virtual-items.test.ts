@@ -1,4 +1,5 @@
 import { createMockMessage } from "@mcode/contracts/testing";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts/models/plan-questions";
 import { describe, it, expect } from "vitest";
 import {
   buildStableItems,
@@ -16,6 +17,13 @@ import type { Message, ToolCall, HookExecution, ToolCallRecord, HookExecutionRec
 
 const STREAMING_AGENT = { phase: "streaming" } as const;
 const COMPLETED_AGENT = { phase: "completed" } as const;
+
+it("omits the hidden planning answer payload without dropping its attached files", () => {
+  const answer = makeMessage({ role: "user", content: `${PLAN_ANSWER_MESSAGE_PREFIX}\n- Named export` });
+  expect(buildStableItems([answer])).toEqual([]);
+  const attached = { ...answer, attachments: [{ id: "file-1", name: "requirements.txt", mimeType: "text/plain", sizeBytes: 8 }] };
+  expect(buildStableItems([attached]).map((item) => item.type)).toEqual(["message"]);
+});
 
 it("opens text only for the current active response and keeps historical messages settled", () => {
   const historical = makeMessage({ id: "old" });
@@ -433,6 +441,13 @@ describe("final response item keys", () => {
 });
 
 describe("buildVolatileItems", () => {
+  it("removes the status row immediately when a plan turn with tools settles", () => {
+    const tools = [makeToolCall({ isComplete: true })];
+    const settled = buildVolatileItems(tools, COMPLETED_AGENT, 1000, "", [], [], undefined, undefined, false,
+      { stopPending: false, compacting: false, planning: true });
+    expect(settled.filter((item) => item.type === "narrative-indicator")).toEqual([]);
+  });
+
   it("returns narrative-flow item when agent is running with tool calls", () => {
     const toolCalls = [makeToolCall({ id: "t1" })];
     const items = buildVolatileItems(toolCalls, STREAMING_AGENT, 1000, undefined);
@@ -669,18 +684,21 @@ describe("buildVirtualItems (combined)", () => {
       makeMessage({ id: "msg-2", sequence: 2, role: "assistant", content: "thinking" }),
     ];
     const toolCalls = [makeToolCall({ id: "tc-1" })];
-    const result = buildAll(messages, toolCalls, undefined, COMPLETED_AGENT, undefined, "msg-2");
+    const result = buildAll(messages, toolCalls, undefined, STREAMING_AGENT, undefined, "msg-2");
 
     const types = result.map((item) => item.type);
     // Persisted chrome is absent until records load and contain visible rows.
+    // The running status sits directly after the response.
     expect(types).toEqual([
       "message",
       "narrative-flow",
       "message",
+      "narrative-indicator",
     ]);
     expect(result[0]).toMatchObject({ type: "message", key: "msg-1" });
     expect(result[1]).toMatchObject({ type: "narrative-flow" });
     expect(result[2]).toMatchObject({ type: "message", key: "msg-2" });
+    expect(result[3]).toMatchObject({ type: "narrative-indicator", stepCount: 1 });
   });
 
   it.each(["Earlier narration", "Answer"])("places partial final text in the response beside closed owned commentary %j", (commentary) => {
@@ -948,7 +966,7 @@ describe("buildVirtualItems (combined)", () => {
       makeMessage({ id: "msg-2", sequence: 2, role: "user", content: "next prompt" }),
     ];
     const toolCalls = [makeToolCall({ id: "tc-1" })];
-    const result = buildAll(messages, toolCalls, undefined, COMPLETED_AGENT, undefined);
+    const result = buildAll(messages, toolCalls, undefined, STREAMING_AGENT, undefined);
 
     // Persisted chrome is absent until loaded records contain visible rows.
     // The live narrative is appended at the tail because the trailing message
@@ -958,6 +976,7 @@ describe("buildVirtualItems (combined)", () => {
       "message",
       "message",
       "narrative-flow",
+      "narrative-indicator",
     ]);
   });
 
@@ -974,9 +993,8 @@ describe("buildVirtualItems (combined)", () => {
 
     const types = result.map((item) => item.type);
     // user msg, narrative-flow (before split assistant msg), split assistant
-    // msg, narrative-indicator (status footer below the response — it stays
-    // under the bubble through the persist swap so its exit transition plays
-    // in place). Persisted chrome is absent until records load.
+    // msg, narrative-indicator (live status footer below the response).
+    // Persisted chrome is absent until records load.
     // live assistant response is suppressed because a tool is still running —
     // `computeLiveStreamingText` returns "" while any top-level tool is in
     // flight, since the model isn't streaming user-facing text during tool
@@ -1159,5 +1177,17 @@ describe("delegated task status", () => {
       { stopPending: false, compacting: false, waitingFor: "approval", delegating: true },
     );
     expect(findIndicator(items)?.status.label).toBe("Waiting for approval");
+  });
+
+  it("drops the delegated-only line immediately when the last task settles", () => {
+    const build = createVolatileItemsBuilder();
+    const live = build(leftoverTools, COMPLETED_AGENT, 1, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false, delegating: true });
+    expect(findIndicator(live)).toMatchObject({
+      stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
+    });
+    const settled = build(leftoverTools, COMPLETED_AGENT, 1, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false });
+    expect(settled.filter((item) => item.type === "narrative-indicator")).toEqual([]);
   });
 });

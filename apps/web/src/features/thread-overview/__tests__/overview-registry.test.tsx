@@ -96,7 +96,8 @@ describe("overview registry", () => {
   it("renders the direct-thread rows grouped by section under the header", async () => {
     mockLoadedEntries();
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
-    await waitFor(() => expect(mockTransport.getRemoteUrl).toHaveBeenCalledWith(thread.workspace_id, thread.id));
+    await screen.findByTestId("thread-overview-change-summary");
+    expect(mockTransport.getRemoteUrl).toHaveBeenCalledWith(thread.workspace_id, thread.id);
     const card = screen.getByTestId("thread-overview-card");
     const rowIds = Array.from(card.querySelectorAll("[data-testid]"), element => element.getAttribute("data-testid"))
       .filter(id => ["thread-overview-card-header", "workspace-menu-changes", "thread-overview-local", "workspace-menu-branch", "thread-overview-recap"].includes(id ?? ""));
@@ -262,7 +263,7 @@ describe("overview registry", () => {
     expect(mockTransport.getReviewComparison).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByTestId("header-overview-toggle"));
-    expect(screen.getByTestId("thread-overview-change-loading")).toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-menu-changes")).not.toBeInTheDocument();
     expect(screen.queryByText("example/repo")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("thread-overview-change-summary"))
       .toHaveAttribute("aria-label", "19 additions, 5 deletions"));

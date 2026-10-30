@@ -251,6 +251,47 @@ describe("one lifecycle for the current turn", () => {
   });
 });
 
+describe("turn timing", () => {
+  const TURN_START = "2026-01-01T00:00:00.000Z";
+
+  function userTurn(status: AgentTurn["status"], endedAt: string | null): AgentTurn {
+    return { ...canonicalTurn(status, { kind: "user" }), startedAt: TURN_START, endedAt, updatedAt: endedAt ?? TURN_START };
+  }
+
+  it("measures a settled user turn from the server's start to its end, not its first tool to its last", () => {
+    const settled = { ...answer("settled-answer", "settled-execution"), outcome: "completed" as const };
+    const record = createEmptyThreadRecord();
+    record.messages = [settled];
+    record.narrativeByMessage = { [settled.id]: { approvals: [], hooks: [], thoughts: [], tools: [{
+      id: "read", message_id: settled.id, parent_tool_call_id: null, tool_name: "Read", input_summary: "", output_summary: "",
+      status: "completed", started_at: "2026-01-01T00:00:40.000Z", completed_at: "2026-01-01T00:00:42.000Z", sort_order: 0,
+    }] } };
+    record.canonicalAgent.state.turns["canonical-turn"] = userTurn("Completed", "2026-01-01T00:01:40.000Z");
+    record.canonicalAgent.state.items["settled-item"] = {
+      id: "settled-item", threadId: THREAD, turnId: "canonical-turn", kind: "message",
+      payload: { projection: "message", message: settled }, providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+    };
+    resetThreadStoreForTests({ records: new Map([[THREAD, record]]) });
+
+    const { result } = renderHook(useLifecycle);
+
+    const fold = result.current.items.find((item) => item.type === "work-fold");
+    expect(fold?.type === "work-fold" && fold.durationMs).toBe(100_000);
+  });
+
+  it("starts the live timer at the server's turn start, not the client's receive time", () => {
+    const record = createEmptyThreadRecord();
+    record.agentStartTime = Date.parse("2026-01-01T00:00:59.000Z");
+    record.canonicalAgent.state.turns["canonical-turn"] = userTurn("Running", null);
+    resetThreadStoreForTests({ records: new Map([[THREAD, record]]) });
+    useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId: THREAD, turnExecutionId: EXECUTION, phase: "running" });
+
+    const { result } = renderHook(useLifecycle);
+
+    expect(result.current.data.agentStartTime).toBe(Date.parse(TURN_START));
+  });
+});
+
 describe("work fold presence", () => {
   const settled = { ...answer("settled-answer", "settled-execution"), outcome: "completed" as const };
 

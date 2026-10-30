@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IAgentProvider, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { testModelCatalog } from "../../agents/__tests__/provider-model-fixture.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { createThreadPersistenceTestRuntime } from "../testing/thread-persistence-test-runtime.js";
 import { ThreadRepo } from "../persistence/thread-repo.js";
@@ -90,7 +91,7 @@ describe("server-held thread completion", () => {
       id: "codex", descriptor: { id: "codex", capabilities: [] }, supportsCompletion: false,
       subagentReporting: null,
       maxInputCharactersPerTurn: 100_000,
-      sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: async () => [],
+      sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: testModelCatalog.listModels,
     } satisfies Omit<IAgentProvider, keyof NodeEvents.EventEmitter>);
     const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
     const client = new CanonicalAgentWriterClient(storage.writer);
@@ -104,7 +105,7 @@ describe("server-held thread completion", () => {
       new GitWorktreeService(workspaces, new FakeGitExecutor(), hostRuntime), new AttachmentService(), providers,
       new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
       new GoalLifecycleService(threads, providers, storage.writer, commands, canonical),
-      undefined, undefined, hostRuntime.platform, { listModels: async () => [] },
+      undefined, undefined, hostRuntime.platform, testModelCatalog,
       createTestParentStartOwner(storage.database), undefined, undefined, holds,
     );
     const runtime: TurnRuntimeAdmissionAuthority = {

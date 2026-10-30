@@ -30,7 +30,7 @@ function withUsageSources(
     categories = [],
   }: {
     oauthAvailable: boolean;
-    categories?: Awaited<ReturnType<ClaudeProvider["getUsage"]>>["quotaCategories"];
+    categories?: Awaited<ReturnType<ClaudeProvider["getUsage"]>>["quotaCategories"] | null;
   },
 ): ClaudeProvider {
   (claude as any).oauthUsageSource = {
@@ -63,6 +63,20 @@ describe("ClaudeProvider usage billing mode", () => {
       billingMode: "api_key",
       sessionCostUsd: 12.34,
     });
+  });
+
+  it("reports a failed plan quota fetch as unavailable rather than empty after a turn", async () => {
+    const claude = withUsageSources(provider(), { oauthAvailable: true, categories: null });
+    (claude as any).lastNumTurns = 3;
+
+    await expect(claude.getUsage()).rejects.toThrow("Claude usage source unavailable");
+  });
+
+  it("keeps API-key session usage when no quota source answers", async () => {
+    const claude = withUsageSources(provider(), { oauthAvailable: false, categories: null });
+    (claude as any).lastSessionCostUsd = 1.5;
+
+    await expect(claude.getUsage()).resolves.toMatchObject({ quotaCategories: [], billingMode: "api_key", sessionCostUsd: 1.5 });
   });
 
   it("marks usage as unknown when OAuth is absent and session cost is missing", async () => {

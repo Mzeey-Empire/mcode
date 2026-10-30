@@ -281,7 +281,10 @@ export class GitComparisonService {
 
   private async copyReviewIndex(cwd: string, source: string, temporary: string, env: NodeJS.ProcessEnv): Promise<void> {
     try {
+      const { atime, mtime } = await NodeFSPromises.stat(source);
       await NodeFSPromises.copyFile(source, temporary);
+      // A newer index timestamp makes Git trust stat data for racily clean files.
+      await NodeFSPromises.utimes(temporary, atime, mtime);
     } catch (error) {
       if (!hasErrorCode(error, "ENOENT")) throw error;
       // ENOENT can also name the destination directory. Only an absent source permits an empty index.

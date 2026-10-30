@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type Ref, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type Ref, type RefObject } from "react";
 import { GitFork } from "lucide-react";
 import type { Message } from "@mcode/contracts/models/message";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
@@ -21,7 +21,7 @@ import { useToastStore } from "@/stores/toastStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
-import { threadOverviewScope, useOverviewPresentation } from "@/features/thread-overview/overview-presentation";
+import { newThreadOverviewScope, threadOverviewScope, useOverviewPresentation } from "@/features/thread-overview/overview-presentation";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import type { ViewportInsets } from "@/components/ui/virtual-viewport";
 import { OVERVIEW_CANVAS_RESERVE } from "@/lib/composer-layout";
@@ -38,7 +38,7 @@ import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "..
 import { tryGetConversationResidency } from "../../residency/conversation-residency";
 import { TurnRevertAnnouncer } from "../../turn-revert/TurnRevertAnnouncer";
 import type { ChatViewState } from "./useChatViewState";
-import { NewThreadStartColumn } from "./NewThreadStartColumn";
+import { NewThreadOverview, NewThreadStartColumn } from "./NewThreadStartColumn";
 
 /** Actions that the visual chat surface routes to stores, transport, and composer state. */
 export interface ChatViewInteractions {
@@ -214,7 +214,7 @@ function ThreadStartupTrail({ thread, startup, pendingStartup }: {
 
 /** One row laid out like a MessageList row, so the durable thread opens without a jump. */
 function PreparingTranscriptRow({ children, ref }: { readonly children: ReactNode; readonly ref?: Ref<HTMLDivElement> }) {
-  return <div ref={ref} className="w-full px-4 py-2 sm:px-8"><div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>{children}</div></div>;
+  return <div ref={ref} className="w-full px-4 py-2 sm:px-[var(--chat-gutter,--spacing(8))]"><div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>{children}</div></div>;
 }
 
 /**
@@ -237,23 +237,33 @@ function PreparingThreadSurface({
 }) {
   const echoedStartup = useEchoedPendingStartup(thread, pendingStartup);
   const motion = useFirstSendMotion(thread.id);
+  const paneRef = useRef<HTMLDivElement>(null);
+  const paneWidth = useElementWidth(paneRef, thread.id);
+  // The thread has no durable Overview yet, so the card the user sent from stays docked, keeping its reserve
+  // and the column width the same from the start column through to the running thread.
+  const overviewScope = useMemo(() => newThreadOverviewScope(thread.workspace_id), [thread.workspace_id]);
+  const overview = useOverviewPresentation(overviewScope, paneWidth);
+  const overviewDocked = overview.presentation === "docked";
+  const overviewReserve = overviewDocked ? `${OVERVIEW_CANVAS_RESERVE}px` : undefined;
   return (
-    <div className="flex h-full flex-col bg-background" data-testid="thread-preparing-shell" data-thread-view>
-      <ThreadHeader state={state} />
-      <div className="min-h-0 flex-1 overflow-y-auto pt-4">
-        <PreparingTranscriptRow ref={motion.message}>
-          <MessageBubble message={preparingUserMessage(thread, echoedStartup)} />
-        </PreparingTranscriptRow>
-        <PreparingTranscriptRow ref={motion.steps}>
-          {/* A creation error the server never recorded as a stopped startup has no trail state to show. */}
-          {thread.clientError && !startupDecision(startup)
-            ? <CollapsibleError error={thread.clientError} onRetry={() => { void useWorkspaceStore.getState().retryPreparingThread(thread.id); }} onDismiss={() => useWorkspaceStore.getState().dismissPreparingThread(thread.id)} />
-            : <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={pendingStartup} />}
-        </PreparingTranscriptRow>
-      </div>
-      <div ref={motion.composer}>
-        <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} startingThread={startingThread} />
-      </div>
+    <div ref={paneRef} className={cn("relative flex h-full flex-col bg-background", overviewDocked && "[--chat-gutter:--spacing(6)]")} data-testid="thread-preparing-shell" data-thread-view>
+      <OverviewLayer>
+        <ThreadHeader state={state} actions={<NewThreadOverview scope={overviewScope} overview={overview} readOnly />} />
+        <div className="min-h-0 flex-1 overflow-y-auto pt-4" style={{ paddingRight: overviewReserve }}>
+          <PreparingTranscriptRow ref={motion.message}>
+            <MessageBubble message={preparingUserMessage(thread, echoedStartup)} />
+          </PreparingTranscriptRow>
+          <PreparingTranscriptRow ref={motion.steps}>
+            {/* A creation error the server never recorded as a stopped startup has no trail state to show. */}
+            {thread.clientError && !startupDecision(startup)
+              ? <CollapsibleError error={thread.clientError} onRetry={() => { void useWorkspaceStore.getState().retryPreparingThread(thread.id); }} onDismiss={() => useWorkspaceStore.getState().dismissPreparingThread(thread.id)} />
+              : <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={pendingStartup} />}
+          </PreparingTranscriptRow>
+        </div>
+        <div ref={motion.composer} data-testid="chat-composer-stage" style={{ paddingRight: overviewReserve }}>
+          <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} startingThread={startingThread} />
+        </div>
+      </OverviewLayer>
     </div>
   );
 }
@@ -309,8 +319,8 @@ interface ThreadHeaderRename {
   readonly onSaveTitle: (title: string) => void;
 }
 
-/** Renders the thread header for both surface variants; the preparing variant omits `rename` and `paneWidth` and has no actions yet. */
-function ThreadHeader({ state, rename, paneWidth }: { state: ChatViewState; rename?: ThreadHeaderRename; paneWidth?: number }) {
+/** Renders the thread header for both surface variants; the preparing variant omits `rename` and `paneWidth` and passes its own `actions`. */
+function ThreadHeader({ state, rename, paneWidth, actions }: { state: ChatViewState; rename?: ThreadHeaderRename; paneWidth?: number; actions?: ReactNode }) {
   const thread = state.activeThread!;
   return (
     <CanvasHeader>
@@ -332,7 +342,7 @@ function ThreadHeader({ state, rename, paneWidth }: { state: ChatViewState; rena
           </Tooltip>
         )}
       </div>
-      {paneWidth !== undefined ? <HeaderActions thread={thread} threadPaneWidth={paneWidth} /> : null}
+      {paneWidth !== undefined ? <HeaderActions thread={thread} threadPaneWidth={paneWidth} /> : actions}
     </CanvasHeader>
   );
 }
@@ -526,7 +536,7 @@ function shouldKeepPreparingShell(
   return pendingStartup !== undefined && startupResolving;
 }
 
-function ChatMessageStage({ state, interactions, startupTrail, contentPaddingRight, chromeInsets, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly startupTrail: ReactNode; readonly contentPaddingRight: string | undefined; readonly chromeInsets: ViewportInsets }) {
+function ChatMessageStage({ state, interactions, startupTrail, contentPaddingRight, chromeInsets, entrance, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly startupTrail: ReactNode; readonly contentPaddingRight: string | undefined; readonly chromeInsets: ViewportInsets; readonly entrance: boolean }) {
   const thread = state.activeThread!;
   const messageListProps = {
     contentPaddingRight,
@@ -549,7 +559,7 @@ function ChatMessageStage({ state, interactions, startupTrail, contentPaddingRig
     onOpenSubagents,
   };
   return (
-    <div data-testid="chat-message-stage" className="animate-fade-up-in absolute inset-0">
+    <div data-testid="chat-message-stage" className={cn("absolute inset-0", entrance && "animate-fade-up-in")}>
       <ConversationStageContent stage={getConversationStage(state)} state={state} thread={thread} leadingContent={undefined} afterFirstUserContent={startupTrail} messageListProps={messageListProps} />
       <TurnRevertAnnouncer threadId={thread.id} />
     </div>
@@ -597,7 +607,7 @@ function useChromeInsets(top: RefObject<HTMLElement | null>, bottom: RefObject<H
 }
 
 /** Renders the fully active conversation surface. */
-function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: ReturnType<typeof useThreadStartup>; readonly startingThread: ComposerStartingThread | undefined }) {
+function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: ReturnType<typeof useThreadStartup>; readonly startingThread: ComposerStartingThread | undefined; readonly handedOff: boolean }) {
   const {
     state,
     interactions,
@@ -614,6 +624,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
     dismissedError,
     startup,
     startingThread,
+    handedOff,
   } = props;
   const thread = state.activeThread!;
   const conversationErrorBanner = state.messageCount > 0 || state.isAgentRunning ? conversationErrorLabel(state) : null;
@@ -638,7 +649,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
           {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
           <TurnSavingNotice lostProgress={state.lostProgress} />
         </div>
-        <ChatMessageStage state={state} interactions={interactions} contentPaddingRight={overviewReserve} chromeInsets={chromeInsets} startupTrail={startup && startup.state !== "completed" ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
+        <ChatMessageStage state={state} interactions={interactions} contentPaddingRight={overviewReserve} chromeInsets={chromeInsets} entrance={!handedOff} startupTrail={startup && startup.state !== "completed" ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
         <div ref={bottomChromeRef} className="relative mt-auto">
           {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
           <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} startingThread={startingThread} paddingRight={overviewReserve} />
@@ -651,6 +662,16 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
 /** Selects the visual chat shell for the current workspace selection. */
 export function ChatViewSurface(props: ChatViewSurfaceProps) {
   const { state } = props;
+  const { pendingStartup, startup, startingThread, keepPreparingShell } = useSelectedThreadStartup(state);
+  const handedOff = useHandedOffThread(state.activeThread?.id, startup?.threadId, keepPreparingShell);
+  if (!state.activeThreadId) return <NewThreadStartColumn projectName={state.activeWorkspaceName || undefined} workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />;
+  if (!state.activeThread) return <MissingThreadSurface />;
+  if (keepPreparingShell) return <PreparingThreadSurface thread={state.activeThread} state={state} startup={startup} pendingStartup={pendingStartup} startingThread={startingThread} />;
+  return <ActiveThreadSurface {...props} startup={startup} startingThread={startingThread} handedOff={handedOff} />;
+}
+
+/** The selected thread's startup, and whether it still holds the preparing shell. */
+function useSelectedThreadStartup(state: ChatViewState) {
   const pendingStartup = useWorkspaceStore((s) =>
     state.activeThread ? s.pendingStartupByThreadId[state.activeThread.id] : undefined);
   const startupLookup = useThreadStartupLookup({
@@ -659,11 +680,20 @@ export function ChatViewSurface(props: ChatViewSurfaceProps) {
     workspaceId: state.activeThread?.workspace_id,
     enabled: Boolean(state.activeThread),
   });
-  const startupDismissed = useThreadStartupStore((s) =>
-    startupLookup.startup ? s.dismissedStartupIds.has(startupLookup.startup.startupId) : false);
-  const startingThread = useStartingThread(startupLookup.startup, pendingStartup);
-  if (!state.activeThreadId) return <NewThreadStartColumn projectName={state.activeWorkspaceName || undefined} workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />;
-  if (!state.activeThread) return <MissingThreadSurface />;
-  if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving, pendingStartup, startupDismissed)) return <PreparingThreadSurface thread={state.activeThread} state={state} startup={startupLookup.startup} pendingStartup={pendingStartup} startingThread={startingThread} />;
-  return <ActiveThreadSurface {...props} startup={startupLookup.startup} startingThread={startingThread} />;
+  const startup = startupLookup.startup;
+  const startupDismissed = useThreadStartupStore((s) => startup ? s.dismissedStartupIds.has(startup.startupId) : false);
+  const startingThread = useStartingThread(startup, pendingStartup);
+  const keepPreparingShell = state.activeThread
+    ? shouldKeepPreparingShell(state.activeThread, state, startup, startupLookup.resolving, pendingStartup, startupDismissed)
+    : false;
+  return { pendingStartup, startup, startingThread, keepPreparingShell };
+}
+
+// The preparing shell already shows the first message where the transcript draws it, so the transcript that
+// replaces it must paint at once: the stage's entrance fade would start from a blank frame. Remembers the thread
+// the shell last showed, under both its placeholder and its durable id.
+function useHandedOffThread(threadId: string | undefined, durableThreadId: string | undefined, preparing: boolean): boolean {
+  const [shown, setShown] = useState<readonly (string | undefined)[]>([]);
+  if (preparing && (shown[0] !== threadId || shown[1] !== durableThreadId)) setShown([threadId, durableThreadId]);
+  return threadId !== undefined && shown.includes(threadId);
 }
