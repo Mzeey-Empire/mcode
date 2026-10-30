@@ -133,7 +133,6 @@ function NarrativeIndicatorTranscriptItemRenderer({ item }: TranscriptItemRender
       stepCount={indicator.stepCount}
       status={indicator.status}
       startTime={indicator.startTime}
-      isAgentRunning={indicator.isAgentRunning}
     />
   );
 }

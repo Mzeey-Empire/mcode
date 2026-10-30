@@ -1,77 +1,26 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/lib/time";
 import { Spinner } from "@/components/ui/spinner";
 import { StackedLayersIcon, stackedLayersIconClassName } from "@/components/ui/StackedLayersIcon";
 import type { RunStatus } from "./run-status";
-import { STATUS_LINE_EXIT_MS } from "./status-line-exit";
-
-/** Lifecycle of the indicator: live → animating out → unrendered. */
-type IndicatorPhase = "running" | "exiting" | "done";
 
 function elapsedSeconds(startTime: number | undefined): number {
   return startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
 }
 
-function advanceRunningEpoch(
-  isAgentRunning: boolean,
-  previousRunningRef: React.MutableRefObject<boolean>,
-  runningEpochRef: React.MutableRefObject<number>,
-): number {
-  if (isAgentRunning && !previousRunningRef.current) {
-    runningEpochRef.current += 1;
-  }
-  previousRunningRef.current = isAgentRunning;
-  return runningEpochRef.current;
-}
-
-function deriveIndicatorPhase(
-  isAgentRunning: boolean,
-  completedExitEpoch: number,
-  runningEpoch: number,
-): IndicatorPhase {
-  if (isAgentRunning) return "running";
-  return completedExitEpoch === runningEpoch ? "done" : "exiting";
-}
-
-function useNarrativeIndicatorLifecycle(
-  startTime: number | undefined,
-  isAgentRunning: boolean,
-): { elapsed: number; phase: IndicatorPhase } {
-  const previousRunningRef = useRef(isAgentRunning);
-  const runningEpochRef = useRef(isAgentRunning ? 0 : -1);
-  const elapsedRef = useRef(elapsedSeconds(startTime));
+function useElapsedSeconds(startTime: number | undefined): number {
   const [, setElapsedTick] = useState(0);
-  const [completedExitEpoch, setCompletedExitEpoch] = useState(
-    isAgentRunning ? -1 : runningEpochRef.current,
-  );
-  const runningEpoch = advanceRunningEpoch(
-    isAgentRunning,
-    previousRunningRef,
-    runningEpochRef,
-  );
-  if (isAgentRunning) elapsedRef.current = elapsedSeconds(startTime);
-  const phase = deriveIndicatorPhase(isAgentRunning, completedExitEpoch, runningEpoch);
 
   useEffect(() => {
-    if (phase !== "exiting") return;
-    const timer = setTimeout(() => setCompletedExitEpoch(runningEpoch), STATUS_LINE_EXIT_MS);
-    return () => clearTimeout(timer);
-  }, [phase, runningEpoch]);
-
-  useEffect(() => {
-    // Freeze the elapsed readout once the turn ends so the exit animation
-    // fades out a stable value instead of ticking mid-fade.
-    if (!startTime || !isAgentRunning) return;
-
+    if (!startTime) return;
     const interval = setInterval(() => {
       setElapsedTick((tick) => tick + 1);
     }, 1000);
-
     return () => clearInterval(interval);
-  }, [startTime, isAgentRunning]);
+  }, [startTime]);
 
-  return { elapsed: elapsedRef.current, phase };
+  return elapsedSeconds(startTime);
 }
 
 /** Props for {@link NarrativeIndicator}: step count, run status, and turn start time. */
@@ -82,18 +31,9 @@ interface NarrativeIndicatorProps {
   status: RunStatus;
   /** Epoch ms when the agent turn started, used to compute elapsed time. */
   startTime?: number;
-  /** Whether the agent is still running; flipping to false plays the exit transition. */
-  isAgentRunning: boolean;
 }
 
-/** Keeps the last running status so the exit fade shows what the turn was doing, not a new word. */
-function useFrozenStatus(status: RunStatus, isAgentRunning: boolean): RunStatus {
-  const lastRunningRef = useRef(status);
-  if (isAgentRunning) lastRunningRef.current = status;
-  return lastRunningRef.current;
-}
-
-function RunStatusIcon({ icon, running }: { icon: RunStatus["icon"]; running: boolean }) {
+function RunStatusIcon({ icon }: { icon: RunStatus["icon"] }) {
   if (icon === "dot") {
     return <span className="size-1.5 shrink-0 rounded-full bg-primary" data-run-status-icon="dot" />;
   }
@@ -107,8 +47,8 @@ function RunStatusIcon({ icon, running }: { icon: RunStatus["icon"]; running: bo
   }
   return (
     <StackedLayersIcon
-      animated={running}
-      className={stackedLayersIconClassName(running)}
+      animated
+      className={stackedLayersIconClassName(true)}
       data-run-status-icon="layers"
     />
   );
@@ -122,41 +62,31 @@ function RunStatusIcon({ icon, running }: { icon: RunStatus["icon"]; running: bo
  *   5 steps · Running bun run lint 38s
  *   Stopping 1m 4s
  *
- * When the turn ends the bar collapses and fades out over
- * {@link STATUS_LINE_EXIT_MS} with its last running label instead of vanishing in
- * a single frame, then renders nothing. Mounting with the agent already
- * stopped (e.g. revisiting a thread whose turn finished) skips straight to
- * rendering nothing.
+ * It renders only while the turn is live. The transcript drops its item in the
+ * same render that settles the turn, so the bar never shares a frame with the
+ * settled footer.
  */
 export function NarrativeIndicator({
   stepCount,
   status,
   startTime,
-  isAgentRunning,
 }: NarrativeIndicatorProps) {
-  const { elapsed, phase } = useNarrativeIndicatorLifecycle(startTime, isAgentRunning);
-  const shown = useFrozenStatus(status, isAgentRunning);
-
-  if (phase === "done") return null;
+  const elapsed = useElapsedSeconds(startTime);
   // The turn is held on the user, so its step count and clock are not what they need to see.
-  const waiting = shown.icon === "dot";
+  const waiting = status.icon === "dot";
 
   return (
     <div
-      className={cn(
-        "mt-2 flex h-6 items-center pl-2 text-xs",
-        waiting ? "gap-2" : "gap-1.5",
-        phase === "exiting" && "narrative-indicator-exit",
-      )}
-      data-state={phase}
+      className={cn("mt-2 flex h-6 items-center pl-2 text-xs", waiting ? "gap-2" : "gap-1.5")}
+      data-state="running"
     >
-      <RunStatusIcon icon={shown.icon} running={phase === "running"} />
+      <RunStatusIcon icon={status.icon} />
       {!waiting && stepCount > 0 && (
         <span className="shrink-0 text-muted">
           {stepCount} {stepCount === 1 ? "step" : "steps"} ·
         </span>
       )}
-      <span className={cn("min-w-0 text-fade", waiting ? "text-muted" : "font-medium text-ink")}>{shown.label}</span>
+      <span className={cn("min-w-0 text-fade", waiting ? "text-muted" : "font-medium text-ink")}>{status.label}</span>
       {!waiting && startTime !== undefined && (
         <span className="shrink-0 font-mono text-muted">{formatDuration(elapsed)}</span>
       )}

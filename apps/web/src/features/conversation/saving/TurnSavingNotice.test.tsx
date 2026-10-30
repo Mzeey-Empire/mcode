@@ -30,7 +30,7 @@ function ConnectedRuntimeNotice() {
   const running = useThreadStore((state) => state.runningThreadIds.has(pending.threadId));
   const status = deriveRunStatus({ stopPending: false, compacting: false, subagentsRunning: false, answering: false,
     activeTool: record?.toolCalls.find((tool) => !tool.isComplete) });
-  return <><NarrativeIndicator stepCount={1} status={status} isAgentRunning={running} />
+  return <>{running && <NarrativeIndicator stepCount={1} status={status} />}
     <TurnSavingNotice lostProgress={false} /></>;
 }
 

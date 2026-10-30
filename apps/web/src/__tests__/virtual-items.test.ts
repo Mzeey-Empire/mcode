@@ -673,19 +673,14 @@ describe("buildVirtualItems (combined)", () => {
 
     const types = result.map((item) => item.type);
     // Persisted chrome is absent until records load and contain visible rows.
-    // The narrative-indicator lingers after the turn (isAgentRunning=false,
-    // tool calls still volatile) so it can play its exit transition, and sits
-    // right after the bubble.
     expect(types).toEqual([
       "message",
       "narrative-flow",
       "message",
-      "narrative-indicator",
     ]);
     expect(result[0]).toMatchObject({ type: "message", key: "msg-1" });
     expect(result[1]).toMatchObject({ type: "narrative-flow" });
     expect(result[2]).toMatchObject({ type: "message", key: "msg-2" });
-    expect(result[3]).toMatchObject({ type: "narrative-indicator", isAgentRunning: false });
   });
 
   it.each(["Earlier narration", "Answer"])("places partial final text in the response beside closed owned commentary %j", (commentary) => {
@@ -897,18 +892,10 @@ describe("buildVirtualItems (combined)", () => {
     expect(result.some((i) => i.type === "narrative-indicator")).toBe(false);
   });
 
-  it("keeps the narrative-indicator (isAgentRunning=false) while tool calls are still volatile", () => {
-    // Regression for issue #695: removing the indicator item at turnComplete
-    // made it vanish in a single frame. It now stays emitted through the
-    // turn's volatile tail so NarrativeIndicator can animate out; the
-    // component renders null once the exit completes.
+  it("drops the live status line in the render that settles the turn, even while its tool calls are still volatile", () => {
     const toolCalls = [makeToolCall({ id: "tc-1", isComplete: true })];
     const items = buildVolatileItems(toolCalls, COMPLETED_AGENT, 1000, undefined);
-    const indicator = items.find((i) => i.type === "narrative-indicator") as
-      | (ChatVirtualItem & { type: "narrative-indicator" })
-      | undefined;
-    expect(indicator).toBeDefined();
-    expect(indicator?.isAgentRunning).toBe(false);
+    expect(items.some((i) => i.type === "narrative-indicator")).toBe(false);
   });
 
   it("indicator (running, no streaming) appends narrative-flow followed by narrative-indicator", () => {
@@ -971,7 +958,6 @@ describe("buildVirtualItems (combined)", () => {
       "message",
       "message",
       "narrative-flow",
-      "narrative-indicator",
     ]);
   });
 
@@ -1146,12 +1132,6 @@ describe("provider retry status", () => {
       { stopPending: false, compacting: false, waitingFor: "approval" },
     );
     expect(findIndicator(items)?.status.label).toBe("Waiting for approval");
-    expect(findIndicator(items)?.isAgentRunning).toBe(true);
-  });
-
-  it("keeps the status line row, no longer live, while it fades after the last approval is answered", () => {
-    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: "turn" });
-    expect(findIndicator(items)?.isAgentRunning).toBe(false);
   });
 
   it("shows no status line on an idle thread with nothing waiting", () => {
@@ -1169,16 +1149,8 @@ describe("delegated task status", () => {
       { stopPending: true, compacting: false, planning: true, delegating: true },
     );
     expect(findIndicator(items)).toMatchObject({
-      isAgentRunning: true, stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
+      stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
     });
-  });
-
-  it("keeps the delegated shape, no longer live, while the line fades after the last task ends", () => {
-    const items = buildVolatileItems(
-      leftoverTools, undefined, 1, undefined, [], [], undefined, undefined, undefined,
-      { stopPending: false, compacting: false, exiting: "delegated" },
-    );
-    expect(findIndicator(items)).toMatchObject({ isAgentRunning: false, stepCount: 0, startTime: undefined });
   });
 
   it("lets an approval wait outrank delegation", () => {

@@ -221,8 +221,9 @@ a loss notice. Unfinished saved turns become interrupted; already saved outcomes
 remain intact. Neither recovery nor a save retry reruns provider tools.
 
 The live status line has no text shimmer; only the icon moves. The clock
-ticks once a second and freezes when the turn ends, and the exit fade keeps the
-last running label instead of swapping in a final word. Rate limit and retry
+ticks once a second. The line has no exit fade: its item leaves in the same
+render that settles the turn, so no frame shows it beside the settled footer or
+an idle Composer, and a finished turn keeps no empty row. Rate limit and retry
 state end with the first provider event that is neither, so a holding label
 cannot outlive the stall it describes.
 
