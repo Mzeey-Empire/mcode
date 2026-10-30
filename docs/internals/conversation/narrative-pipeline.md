@@ -222,8 +222,12 @@ a loss notice. Unfinished saved turns become interrupted; already saved outcomes
 remain intact. Neither recovery nor a save retry reruns provider tools.
 
 The live status line has no text shimmer; only the icon moves. The clock
-ticks once a second and freezes when the turn ends, and the exit fade keeps the
-last running label instead of swapping in a final word. Rate limit and retry
+ticks once a second. The line has no exit fade: its item leaves in the same
+render that settles the turn, so its live steps and clock never share a frame
+with the settled footer, and a finished turn keeps no empty row. Unfinished
+delegated tasks keep a `Waiting on subagents` line without the ended turn's
+steps or clock; that line leaves immediately when the last task settles.
+Rate limit and retry
 state end with the first provider event that is neither, so a holding label
 cannot outlive the stall it describes.
 

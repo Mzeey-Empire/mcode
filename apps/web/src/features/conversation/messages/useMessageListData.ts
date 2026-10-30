@@ -20,7 +20,6 @@ import type { Message } from "@/transport/types";
 import { useTurnEndings } from "../turn-ending/useTurnEndings";
 import type { ThoughtSegment } from "../narrative/types";
 import type { RunHoldingSignals, RunRetry } from "../narrative/run-status";
-import { useDelegatedOnlyPhase, useStatusLineExit } from "../narrative/status-line-exit";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
@@ -110,8 +109,8 @@ function resolveCanonicalTurnIdentity(
   };
 }
 
-/** Turn-level states that hold the status line, plus whether it is fading out after going off. */
-function useRunHoldingSignals(threadId: string | null | undefined, isAgentRunning: boolean, awaitingApproval: boolean, awaitingNativeAnswers: boolean): RunHoldingSignals {
+/** Turn-level states that hold the status line. */
+function useRunHoldingSignals(threadId: string | null | undefined, awaitingApproval: boolean, awaitingNativeAnswers: boolean): RunHoldingSignals {
   const awaitingPlanAnswers = useThreadRecord(threadId, (record) => record.planQuestionsStatus === "pending");
   const awaitingAnswers = awaitingPlanAnswers || awaitingNativeAnswers;
   const planning = useWorkspaceThread(threadId, (thread) => thread?.plan_phase === "planning");
@@ -122,17 +121,14 @@ function useRunHoldingSignals(threadId: string | null | undefined, isAgentRunnin
     record.rateLimit ? "rate-limited" : record.apiRetry ? "retrying" : undefined);
   const retryErrorStatus = useThreadRecord(threadId, (record) => record.apiRetry?.errorStatus);
   const delegatingNow = threadAttentionStore((state) => threadId ? state.byThreadId[threadId]?.hasUnfinishedDelegatedTasks === true : false);
-  const ownLive = isAgentRunning || awaitingApproval || awaitingAnswers;
-  const exiting = useStatusLineExit(threadId, ownLive || delegatingNow);
-  const delegatedOnlyPhase = useDelegatedOnlyPhase(threadId, ownLive, delegatingNow);
   const waitingFor = awaitingApproval ? "approval" : awaitingAnswers ? "answers" : undefined;
   return useMemo<RunHoldingSignals>(() => {
     const retry: RunRetry | undefined =
       retryKind === "retrying" ? { kind: "retrying", errorStatus: retryErrorStatus }
         : retryKind === "rate-limited" ? { kind: "rate-limited" }
           : undefined;
-    return { stopPending, compacting, retry, ...(waitingFor ? { waitingFor } : {}), ...(planning ? { planning } : {}), ...(delegatingNow ? { delegating: true } : {}), ...(exiting ? { exiting: delegatedOnlyPhase ? "delegated" : "turn" } : {}) };
-  }, [stopPending, compacting, retryKind, retryErrorStatus, waitingFor, planning, delegatingNow, exiting, delegatedOnlyPhase]);
+    return { stopPending, compacting, retry, ...(waitingFor ? { waitingFor } : {}), ...(planning ? { planning } : {}), ...(delegatingNow ? { delegating: true } : {}) };
+  }, [stopPending, compacting, retryKind, retryErrorStatus, waitingFor, planning, delegatingNow]);
 }
 
 /** Reads and normalizes the transcript data needed by the conversation viewport. */
@@ -226,7 +222,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const awaitingNativeAnswers = useMemo(() => docked.some((request) => request.subject.kind === "question"), [docked]);
   const hooks = useThreadRecord(renderedThreadId, (record) => record.hooks);
   const decidedApprovals = useThreadRecord(renderedThreadId, (record) => record.approvals);
-  const holdingSignals = useRunHoldingSignals(renderedThreadId, isAgentDisplayActive(canonicalContent.agentDisplayState), awaitingApproval, awaitingNativeAnswers);
+  const holdingSignals = useRunHoldingSignals(renderedThreadId, awaitingApproval, awaitingNativeAnswers);
   const persistedNarrativeByMessage = useThreadRecord(renderedThreadId, (record) => record.narrativeByMessage);
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);

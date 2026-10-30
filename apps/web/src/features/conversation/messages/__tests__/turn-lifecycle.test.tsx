@@ -245,7 +245,6 @@ describe("one lifecycle for the current turn", () => {
     expect(timelineOrder(result.current.items)).toEqual([
       "work-fold:child-answer",
       "message:child-answer",
-      "narrative-indicator",
       "turn-meta-line:child-answer",
     ]);
     expect(shouldQueueActiveThreadSubmit(THREAD, true, null, false, "follow-up")).toBe(false);

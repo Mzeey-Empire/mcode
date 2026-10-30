@@ -364,16 +364,12 @@ export type ChatVirtualItem =
       /**
        * "X steps · label" status footer rendered BELOW the
        * live assistant response so the writing animation reads as the primary
-       * surface and the progress meta sits underneath. Emitted while the agent
-       * is running and kept through the turn's volatile tail (tool calls still
-       * in memory) so the component can animate out instead of vanishing in a
-       * single frame; it renders nothing once its exit completes.
+       * surface and the progress meta sits underneath. Emitted only while the
+       * turn is live, so the settled footer replaces it in one render.
        */
       stepCount: number;
       status: RunStatus;
       startTime: number | undefined;
-      /** False once the turn ended — tells the component to play its exit. */
-      isAgentRunning: boolean;
     }
   | {
       key: string;
@@ -612,8 +608,9 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
   const signals = holdingSignals ?? NO_HOLDING_SIGNALS;
   const ownLive = isAgentRunning || signals.waitingFor !== undefined;
   const live = ownLive || signals.delegating === true;
-  if (!live && !signals.exiting) return undefined;
-  if (!ownLive && (signals.delegating || signals.exiting === "delegated")) return delegatedOnlyIndicatorItem(live);
+  // The settled footer replaces this row in the same render; a leftover item would draw an empty row.
+  if (!live) return undefined;
+  if (!ownLive) return delegatedOnlyIndicatorItem();
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
   const running = topLevelTools.filter(isTurnWorkRunning);
   const status = deriveRunStatus({
@@ -623,12 +620,12 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
     answering,
     summaryHeading: currentActivityHeading(thoughts),
   });
-  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning: live };
+  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime };
 }
 
-function delegatedOnlyIndicatorItem(live: boolean): ChatVirtualItem {
+function delegatedOnlyIndicatorItem(): ChatVirtualItem {
   const status = deriveRunStatus({ ...NO_HOLDING_SIGNALS, subagentsRunning: true, answering: false });
-  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: 0, status, startTime: undefined, isAgentRunning: live };
+  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: 0, status, startTime: undefined };
 }
 
 function sameAgentDisplayState(
@@ -688,7 +685,7 @@ function sameTurnEndNoticeItem(left: ChatVirtualItem, right: ChatVirtualItem): b
 }
 
 function sameNarrativeIndicatorItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.status.label === right.status.label, left.status.icon === right.status.icon, left.stepCount === right.stepCount, left.startTime === right.startTime, left.isAgentRunning === right.isAgentRunning].every(Boolean);
+  return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.status.label === right.status.label, left.status.icon === right.status.icon, left.stepCount === right.stepCount, left.startTime === right.startTime].every(Boolean);
 }
 
 const VIRTUAL_ITEM_EQUALITY: Record<ChatVirtualItem["type"], (left: ChatVirtualItem, right: ChatVirtualItem) => boolean> = {

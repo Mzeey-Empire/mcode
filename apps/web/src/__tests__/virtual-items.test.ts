@@ -441,12 +441,10 @@ describe("final response item keys", () => {
 });
 
 describe("buildVolatileItems", () => {
-  it("removes the settled status row after its exit even when the plan turn used tools", () => {
+  it("removes the status row immediately when a plan turn with tools settles", () => {
     const tools = [makeToolCall({ isComplete: true })];
-    const exiting = buildVolatileItems(tools, COMPLETED_AGENT, 1000, "", [], [], undefined, undefined, false,
-      { stopPending: false, compacting: false, exiting: "turn" });
-    expect(exiting.filter((item) => item.type === "narrative-indicator")).toHaveLength(1);
-    const settled = buildVolatileItems(tools, COMPLETED_AGENT, 1000, "");
+    const settled = buildVolatileItems(tools, COMPLETED_AGENT, 1000, "", [], [], undefined, undefined, false,
+      { stopPending: false, compacting: false, planning: true });
     expect(settled.filter((item) => item.type === "narrative-indicator")).toEqual([]);
   });
 
@@ -700,7 +698,7 @@ describe("buildVirtualItems (combined)", () => {
     expect(result[0]).toMatchObject({ type: "message", key: "msg-1" });
     expect(result[1]).toMatchObject({ type: "narrative-flow" });
     expect(result[2]).toMatchObject({ type: "message", key: "msg-2" });
-    expect(result[3]).toMatchObject({ type: "narrative-indicator", isAgentRunning: true });
+    expect(result[3]).toMatchObject({ type: "narrative-indicator", stepCount: 1 });
   });
 
   it.each(["Earlier narration", "Answer"])("places partial final text in the response beside closed owned commentary %j", (commentary) => {
@@ -912,15 +910,10 @@ describe("buildVirtualItems (combined)", () => {
     expect(result.some((i) => i.type === "narrative-indicator")).toBe(false);
   });
 
-  it("keeps the narrative-indicator through the turn's exit transition", () => {
+  it("drops the live status line in the render that settles the turn, even while its tool calls are still volatile", () => {
     const toolCalls = [makeToolCall({ id: "tc-1", isComplete: true })];
-    const items = buildVolatileItems(toolCalls, COMPLETED_AGENT, 1000, undefined, undefined, undefined,
-      undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: "turn" });
-    const indicator = items.find((i) => i.type === "narrative-indicator") as
-      | (ChatVirtualItem & { type: "narrative-indicator" })
-      | undefined;
-    expect(indicator).toBeDefined();
-    expect(indicator?.isAgentRunning).toBe(false);
+    const items = buildVolatileItems(toolCalls, COMPLETED_AGENT, 1000, undefined);
+    expect(items.some((i) => i.type === "narrative-indicator")).toBe(false);
   });
 
   it("indicator (running, no streaming) appends narrative-flow followed by narrative-indicator", () => {
@@ -1000,9 +993,8 @@ describe("buildVirtualItems (combined)", () => {
 
     const types = result.map((item) => item.type);
     // user msg, narrative-flow (before split assistant msg), split assistant
-    // msg, narrative-indicator (status footer below the response — it stays
-    // under the bubble through the persist swap so its exit transition plays
-    // in place). Persisted chrome is absent until records load.
+    // msg, narrative-indicator (live status footer below the response).
+    // Persisted chrome is absent until records load.
     // live assistant response is suppressed because a tool is still running —
     // `computeLiveStreamingText` returns "" while any top-level tool is in
     // flight, since the model isn't streaming user-facing text during tool
@@ -1158,12 +1150,6 @@ describe("provider retry status", () => {
       { stopPending: false, compacting: false, waitingFor: "approval" },
     );
     expect(findIndicator(items)?.status.label).toBe("Waiting for approval");
-    expect(findIndicator(items)?.isAgentRunning).toBe(true);
-  });
-
-  it("keeps the status line row, no longer live, while it fades after the last approval is answered", () => {
-    const items = buildVolatileItems([], undefined, undefined, undefined, [], [], undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: "turn" });
-    expect(findIndicator(items)?.isAgentRunning).toBe(false);
   });
 
   it("shows no status line on an idle thread with nothing waiting", () => {
@@ -1181,16 +1167,8 @@ describe("delegated task status", () => {
       { stopPending: true, compacting: false, planning: true, delegating: true },
     );
     expect(findIndicator(items)).toMatchObject({
-      isAgentRunning: true, stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
+      stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
     });
-  });
-
-  it("keeps the delegated shape, no longer live, while the line fades after the last task ends", () => {
-    const items = buildVolatileItems(
-      leftoverTools, undefined, 1, undefined, [], [], undefined, undefined, undefined,
-      { stopPending: false, compacting: false, exiting: "delegated" },
-    );
-    expect(findIndicator(items)).toMatchObject({ isAgentRunning: false, stepCount: 0, startTime: undefined });
   });
 
   it("lets an approval wait outrank delegation", () => {
@@ -1199,5 +1177,17 @@ describe("delegated task status", () => {
       { stopPending: false, compacting: false, waitingFor: "approval", delegating: true },
     );
     expect(findIndicator(items)?.status.label).toBe("Waiting for approval");
+  });
+
+  it("drops the delegated-only line immediately when the last task settles", () => {
+    const build = createVolatileItemsBuilder();
+    const live = build(leftoverTools, COMPLETED_AGENT, 1, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false, delegating: true });
+    expect(findIndicator(live)).toMatchObject({
+      stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
+    });
+    const settled = build(leftoverTools, COMPLETED_AGENT, 1, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false });
+    expect(settled.filter((item) => item.type === "narrative-indicator")).toEqual([]);
   });
 });
