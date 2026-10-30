@@ -2998,7 +2998,8 @@ export class ClaudeProvider
       this.lastServiceTier !== undefined ||
       this.lastNumTurns !== undefined ||
       this.lastDurationMs !== undefined;
-    if (categories === null && !hasThreadMetrics) {
+    // A plan account always has capped quota, so a failed fetch must not read as "no capped quota".
+    if (categories === null && (billingMode === "plan" || !hasThreadMetrics)) {
       throw new Error("Claude usage source unavailable");
     }
     return {
