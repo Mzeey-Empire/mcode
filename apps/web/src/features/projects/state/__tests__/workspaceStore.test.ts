@@ -401,6 +401,7 @@ describe("workspaceStore completion lifecycle", () => {
     const reopened = makeThread();
     useWorkspaceStore.setState({
       threads: [makeThread({
+        last_activity_at: reopened.last_activity_at,
         user_completed_at: "2026-08-12T08:00:00.000Z",
         scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
       })],

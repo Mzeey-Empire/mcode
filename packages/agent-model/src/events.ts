@@ -100,6 +100,15 @@ export const CanonicalAgentEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("item.recorded"), item: AgentItemSchema }).strict(),
   z
     .object({
+      type: z.literal("item.content-appended"),
+      /** UTF-16 length of the routed item's `payload.content` before this append. */
+      offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+      text: z.string().min(1),
+      updatedAt: CanonicalTimestampSchema,
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("publication.recorded"),
       publicationId: z.string().regex(/^[1-9]\d*$/).max(16),
       /** Renderer-facing agent event; opaque here because the canonical layer is provider-agnostic. */

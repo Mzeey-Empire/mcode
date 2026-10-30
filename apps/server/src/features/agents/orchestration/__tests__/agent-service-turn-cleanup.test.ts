@@ -359,7 +359,8 @@ describe("AgentService turn cleanup through the production execution worker", { 
 
     // Thread should no longer be active
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
-    expect(memoryPressureService.markIdle).toHaveBeenCalled();
+    // The runtime ends the turn before the worker release chain finishes; markIdle runs at the end of that chain.
+    await vi.waitFor(() => expect(memoryPressureService.markIdle).toHaveBeenCalledWith(THREAD_ID));
   });
 
   it("releases a stopped queued dispatch so the next FIFO Turn can reserve the active slot", async () => {
@@ -939,7 +940,8 @@ describe("AgentService turn cleanup through the production execution worker", { 
     await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
-    expect(memoryPressureService.markIdle).toHaveBeenCalled();
+    // The runtime ends the turn before the worker release chain finishes; markIdle runs at the end of that chain.
+    await vi.waitFor(() => expect(memoryPressureService.markIdle).toHaveBeenCalledWith(THREAD_ID));
   });
 });
 
