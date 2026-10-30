@@ -14,7 +14,7 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { createAgentServiceForTest, drainAgentServicePersistenceForTest, goalLifecycleForAgentServiceTest, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
 import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
-import type { IAgentProvider } from "@mcode/contracts/providers/interfaces";
+import type { IAgentProvider, ProviderId } from "@mcode/contracts/providers/interfaces";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
 import { FakeGitExecutor } from "../../../projects/git/execution/fake-git-executor.js";
@@ -27,6 +27,7 @@ import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-st
 import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import type { TerminalCommandCompletion } from "../../../terminal/commands/terminal-command-service.js";
 import { routeThreadStartupRpc } from "../../../thread-startup/transport/thread-startup-rpc.js";
+import { routeAgentRpc, type AgentRouterDeps } from "../../transport/agent-rpc.js";
 
 const roots: string[] = [];
 const services: ReturnType<typeof createAgentServiceForTest>[] = [];
@@ -49,6 +50,28 @@ function requireThreadCreationOptions(options: Parameters<ThreadService["create"
   return options;
 }
 
+function sendRpcDeps(agentService: AgentRouterDeps["agentService"]): AgentRouterDeps {
+  const unused = (): never => { throw new Error("Unexpected dependency in send RPC"); };
+  return {
+    agentService,
+    approvalService: { respondToApproval: unused, listPendingApprovals: unused },
+    hookExecutionRepo: { listByMessage: unused },
+    messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused, confirmUserMessage: unused },
+    narrativeStore: { load: unused, listApprovals: unused },
+    planQuestionAnswersRepo: { listAnsweredForThread: unused },
+    planService: { saveVersion: unused, snapshot: unused, implement: unused, createComment: unused, updateComment: unused, setCommentStatus: unused, deleteComment: unused },
+    planTurnService: { answerQuestions: unused, dismissQuestions: unused },
+    recapService: { generate: unused },
+    subagentRosterService: { loadRoster: unused, loadDetail: unused, stop: unused },
+    taskRepo: { get: unused },
+    thoughtSegmentRepo: { listByMessage: unused },
+    threadControlService: { respondToApproval: unused, listPendingApprovals: unused },
+    toolCallRecordRepo: { listByMessage: unused, listByParent: unused },
+    turnRecoveryService: { retryErroredTurn: unused, resumeTurn: unused },
+    turnResumeScheduler: { schedule: unused, unschedule: unused },
+  };
+}
+
 async function createAgentServiceHarness(automaticSetup?:
   | { queueAutomaticFirstTurn: ReturnType<typeof vi.fn>; admitAutomaticTurn?: ReturnType<typeof vi.fn> }
   | ((deps: {
@@ -58,6 +81,7 @@ async function createAgentServiceHarness(automaticSetup?:
   }) => WorkspaceEnvironmentService),
   useGoalLifecycle = false,
   threadBranching?: { create: ReturnType<typeof vi.fn> },
+  providerId: ProviderId = "claude",
 ) {
   const db: Database = (persistenceRuntime = createThreadPersistenceTestRuntime()).reader;
   const threadRepo = new ThreadRepo(db, persistenceRuntime.writer);
@@ -72,7 +96,11 @@ async function createAgentServiceHarness(automaticSetup?:
   } as unknown as ThreadService;
   const availability = { assertUsable: vi.fn() };
   const provider = {
-    id: "claude" as const,
+    id: providerId,
+    listModels: vi.fn<IAgentProvider["listModels"]>(async () => [
+      { id: "provider-default", name: "Provider default" },
+      { id: "provider-alternative", name: "Provider alternative" },
+    ]),
     sendTurn: vi.fn<IAgentProvider["sendTurn"]>(async () => undefined),
     stopSession: vi.fn<IAgentProvider["stopSession"]>(async () => undefined),
     setGoal: vi.fn(),
@@ -1059,6 +1087,46 @@ describe("AgentService.createAndSend defaults", () => {
       sessionId: `mcode-${thread.id}`,
       model: "claude-sonnet-4-6",
     })));
+  });
+
+  it.each(["codex", "cursor"] satisfies ProviderId[])("defaults a model-less %s send to its own catalog", async (providerId) => {
+    const { threadRepo, workspaceRepo, service, provider } = await createAgentServiceHarness(undefined, false, undefined, providerId);
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const thread = await threadRepo.create(workspace.id, "New thread", "direct", "main", true, providerId);
+    await threadRepo.updateModel(thread.id, "claude-sonnet-4-6");
+
+    await routeAgentRpc("agent.send", { threadId: thread.id, content: "Use this provider's default", provider: providerId }, sendRpcDeps(service));
+
+    expect(threadRepo.findById(thread.id)?.model).toBe("provider-default");
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: thread.id,
+      model: "provider-default",
+    })));
+  });
+
+  it("keeps an explicit model without consulting the default catalog", async () => {
+    const { threadRepo, workspaceRepo, service, provider } = await createAgentServiceHarness(undefined, false, undefined, "codex");
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const thread = await threadRepo.create(workspace.id, "Explicit model", "direct", "main", true, "codex");
+
+    await routeAgentRpc("agent.send", { threadId: thread.id, content: "Use the selected model", provider: "codex", model: "provider-alternative" }, sendRpcDeps(service));
+
+    expect(threadRepo.findById(thread.id)?.model).toBe("provider-alternative");
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledWith(expect.objectContaining({ model: "provider-alternative" })));
+    expect(provider.listModels).not.toHaveBeenCalled();
+  });
+
+  it("rejects a model-less send with no provider models before persisting a turn", async () => {
+    const { threadRepo, workspaceRepo, messageRepo, service, provider } = await createAgentServiceHarness(undefined, false, undefined, "codex");
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const thread = await threadRepo.create(workspace.id, "Empty catalog", "direct", "main", true, "codex");
+    provider.listModels.mockResolvedValue([]);
+
+    await expect(routeAgentRpc("agent.send", { threadId: thread.id, content: "No models", provider: "codex" }, sendRpcDeps(service))).rejects.toThrow();
+
+    expect(threadRepo.findById(thread.id)?.model).toBeNull();
+    expect(messageRepo.listByThread(thread.id, 100).messages).toEqual([]);
+    expect(provider.sendTurn).not.toHaveBeenCalled();
   });
 
   it("adds selected-text comments to a branched first-turn handoff and persists their metadata", async () => {
