@@ -278,8 +278,11 @@ function useChangesState(thread: Thread) {
   // Renames, binary edits and empty files change files without changing line totals.
   const hasChanges = showChangeSummary || changeSummary.files > 0;
   const isSettledResolvePending = !isRunning && !hasCurrentChangeSummary;
+  const hadLoadedChanges = loadedChangeSummary?.threadId === thread.id && loadedChangeSummary.summary.files > 0;
+  // Without known changed files the row would appear only to show the bar, then vanish when the
+  // load finds nothing; it appears once the load finds changes instead.
   const isChangeSummaryLoading = open && isSettledResolvePending && !showChangeSummary
-    && changeSummaryStatus !== "error";
+    && (hasChanges || hadLoadedChanges) && changeSummaryStatus !== "error";
   // The fallback summary has no line totals, so a failed load must say so rather than show nothing.
   const isChangeSummaryFailed = isSettledResolvePending && changeSummaryStatus === "error";
   useEffect(() => {
