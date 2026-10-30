@@ -70,12 +70,12 @@ function acceptedEnvelope(payload: AcceptedCanonicalAgentEventEnvelope["payload"
 
 type AnswerShape = "replace" | "append";
 
-function streamLine(n: number, shape: AnswerShape): AcceptedCanonicalAgentEventEnvelope[] {
+function streamLine(n: number, shape: AnswerShape, isFinalResponse?: boolean): AcceptedCanonicalAgentEventEnvelope[] {
   const item = shape === "append" && n > 1
     ? acceptedEnvelope({ type: "item.content-appended", offset: linesThrough(n - 1).length, text: line(n), updatedAt: NOW })
     : acceptedEnvelope({ type: "item.recorded", item: answerItem(linesThrough(n)) });
   const delta = acceptedEnvelope({ type: "publication.recorded", publicationId: String(progressSequence + 1),
-    event: { type: "textDelta", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, delta: line(n) } });
+    event: { type: "textDelta", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, delta: line(n), isFinalResponse } });
   return [item, delta];
 }
 
@@ -171,5 +171,23 @@ describe("canonical reconnect answer text", () => {
     drainFrames();
 
     expect(liveTimeline()).toEqual([{ type: "hook" }, { type: "delta", text: linesThrough(2) }]);
+  });
+
+  it.each([{ name: "no narration", narrative: [] }, { name: "empty narration", narrative: [{
+    ...SESSION_START_HOOK, id: "empty-narration", kind: "reasoning" as const,
+    payload: { projection: "narrationSegment", record: { id: "empty-narration", message_id: "", text: "",
+      started_at: NOW, ended_at: NOW, sort_order: 0, is_final_response: 0 } },
+  }] }])("keeps the recovered answer prefix after a fresh reload with $name", ({ narrative }) => {
+    for (const isFinalResponse of [undefined, true]) {
+      progressSequence = 0;
+      resetThreadStoreForTests({ currentThreadId: THREAD_ID });
+      useThreadStore.setState({ records: seedThreadRecord(THREAD_ID, { runtimePhase: "running", turnExecutionId: EXECUTION_ID }) });
+      reconnectAfterMissing(1, 3, narrative, "append");
+      deliver(streamLine(4, "append", isFinalResponse));
+      drainFrames();
+
+      expect(liveTimeline().filter((entry) => entry.type === "delta")).toEqual([{ type: "delta", text:
+        "1: Sentence about 1.\n2: Sentence about 2.\n3: Sentence about 3.\n4: Sentence about 4.\n" }]);
+    }
   });
 });

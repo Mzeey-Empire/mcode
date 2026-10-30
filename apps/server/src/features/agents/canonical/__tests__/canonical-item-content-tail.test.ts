@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import type { Database } from "bun:sqlite";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -14,7 +15,13 @@ import {
 } from "@mcode/contracts/compat/agent-model";
 import { openDatabase, openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
+import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
 import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
+import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
+import { prepareAcceptedParentEvents } from "../accepted-parent-events.js";
+import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
 import { CanonicalAgentStore } from "../canonical-agent-store.js";
 
 const THREAD_ID = "thread-1";
@@ -212,6 +219,70 @@ describe.each(CACHE_MODES)("canonical item content tail (writer cache $cache)", 
     db.prepare(`UPDATE canonical_agent_item_content_appends SET "offset" = 5 WHERE item_id = ?`).run(ANSWER_ID);
 
     expect(() => newStore(db, cache).loadItem(ANSWER_ID)).toThrow("content tail does not match its row");
+  });
+});
+
+describe("assistant text producer through the SQLite writer", () => {
+  it("reloads the full streamed answer and clears the tail on boundary close", async () => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-answer-writer-"));
+    const path = NodePath.join(directory, "app.sqlite");
+    const db = openMigratedTestDatabase(path);
+    seedThread(db);
+    const store = newStore(db, true);
+    startParent(store, db);
+    const owner = new ApplicationDatabaseWriter(path, leaseWriterWorker);
+    const writer = new CanonicalAgentWriterClient(owner);
+    const execution = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID };
+    let position = { epoch: EPOCH, sequence: 0 };
+
+    async function write(operation: ExecutionSemanticOperation): Promise<void> {
+      const thread = store.loadThread(THREAD_ID);
+      const turn = store.loadTurn(TURN_ID);
+      if (!thread || !turn) throw new Error("Missing parent turn");
+      const previous = store.loadItem(ANSWER_ID);
+      const prepared = prepareAcceptedParentEvents({ operation, thread, turn,
+        items: previous ? { [ANSWER_ID]: previous } : {},
+        publicationIds: (operation.livePublication ?? []).map((_, index) => String(index + 1)), messageSequence: 2, acceptedAt: NOW });
+      const events = acceptedEvents(store, prepared.events.map((event) => event.payload)).map((event, index) => ({
+        ...event, eventId: prepared.events[index]!.eventId, routing: prepared.events[index]!.routing,
+        progressPosition: { epoch: EPOCH, sequence: position.sequence + index + 1 },
+      }));
+      const through = { epoch: EPOCH, sequence: position.sequence + events.length };
+      await writer.appendAccepted(operation.operationId, { execution, phase: "running", nativeCursor: null,
+        contentHash: NodeCrypto.createHash("sha256").update(JSON.stringify(events)).digest("hex"),
+        predecessor: position, through, baseRevision: thread.conversationRevision, events });
+      position = through;
+      await writer.acknowledgeOperation(EXECUTION_ID, operation.operationId);
+    }
+
+    try {
+      const lease = { leaseId: "answer-lease", ownerEpoch: 1, workerIndex: 0, workerGeneration: 1 };
+      for (const [index, text] of ["Part", "ial", "ly", "!"].entries()) {
+        await write({ operationId: `answer:${index + 1}`, execution, lease, ordinal: index + 1,
+          mutation: { kind: "live-event", text: { kind: "append", inputs: [{ ...execution, sequence: index + 1, text }] } } });
+      }
+      expect(storedRowContent(db)).toBe("Part");
+      expect(tailRows(db)).toEqual([{ offset: 4, text: "ial" }, { offset: 7, text: "ly" }, { offset: 9, text: "!" }]);
+      await write({ operationId: "answer:5", execution, lease, ordinal: 5,
+        mutation: { kind: "live-event", text: { kind: "unchanged" } },
+        livePublication: [{ after: "writer", event: { type: "assistantMessageBoundary", threadId: THREAD_ID,
+          turnExecutionId: EXECUTION_ID, isFinalResponse: true } }],
+      });
+      expect(tailRows(db)).toEqual([]);
+      expect(storedRowContent(db)).toBe("Partially!");
+      const reader = openReadOnlyDatabase(path);
+      try {
+        expect(newStore(reader, false).loadItem(ANSWER_ID)?.payload)
+          .toEqual({ projection: "assistantText", content: "Partially!", isStreaming: false });
+      } finally {
+        reader.close(true);
+      }
+    } finally {
+      await writer.close();
+      await owner.close();
+      db.close(true);
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 
