@@ -240,7 +240,120 @@ function savedFrame(events: readonly CanonicalAgentEventEnvelope[]): CanonicalAg
   };
 }
 
+function answerEvent(): CanonicalAgentEventEnvelope {
+  return {
+    ...envelope("answer", 4, 2, {
+      type: "item.recorded",
+      item: {
+        id: "answer", threadId: THREAD_ID, turnId: TURN_ID, kind: "message", providerIdentities: [],
+        payload: { projection: "assistantText", content: "start", isStreaming: true },
+        createdAt: NOW, updatedAt: NOW,
+      },
+    }),
+    routing: { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, itemId: "answer" },
+  };
+}
+
+function appendEvent(index: number): CanonicalAgentEventEnvelope {
+  return {
+    ...envelope(`append-${index}`, index + 5, index + 3, {
+      type: "item.content-appended", offset: 5 + index * 2, text: "xy", updatedAt: NOW,
+    }),
+    routing: { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, itemId: "answer" },
+  };
+}
+
 describe("canonical accepted and saved progress", () => {
+  it("installs and replays saved-only admission before epoch progress begins", () => {
+    const admission = { phase: "saved", threadId: THREAD_ID, epoch: EPOCH, through: 0,
+      revision: { conversationRevision: 1, rosterRevision: 0 }, events: initialEvents() } satisfies CanonicalAgentProgressFrame;
+    const saved = applyCanonicalProgressFrame(createCanonicalAgentReplica(), admission);
+    const repeated = applyCanonicalProgressFrame(saved.replica, admission);
+    const completed = applyCanonicalProgressFrame(repeated.replica, { ...admission,
+      revision: { conversationRevision: 2, rosterRevision: 0 }, events: [envelope("complete", 4, 2, { type: "turn.completed", endedAt: NOW })] });
+
+    expect(saved.outcome).toBe("applied");
+    expect(saved.replica.state.turns[TURN_ID]?.status).toBe("Running");
+    expect(repeated.replica.recoveryRequired).toBe(false);
+    expect(completed.replica.state.turns[TURN_ID]?.status).toBe("Completed");
+    expect(completed.publications).toEqual([]);
+  });
+
+  it("reduces 4,000 streamed appends and their receipts within two seconds", () => {
+    const initial = [...initialEvents(), answerEvent()];
+    let current = applyCanonicalProgressFrame(createCanonicalAgentReplica(), acceptedFrame(initial)).replica;
+    current = applyCanonicalProgressFrame(current, savedFrame(initial)).replica;
+    let rejected = 0;
+    const startedAt = performance.now();
+    for (let index = 0; index < 4_000; index += 1) {
+      const append = appendEvent(index);
+      const live = applyCanonicalProgressFrame(current, acceptedFrame([append]));
+      const saved = applyCanonicalProgressFrame(live.replica, savedFrame([append]));
+      if (live.outcome !== "applied" || saved.outcome !== "applied") rejected += 1;
+      current = saved.replica;
+    }
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(rejected).toBe(0);
+    expect(current.state.items.answer?.payload.content).toBe(`start${"xy".repeat(4_000)}`);
+    expect(current.durableState.items.answer?.payload.content).toBe(`start${"xy".repeat(4_000)}`);
+    expect(current.progress?.retained).toEqual([]);
+    expect(elapsedMs).toBeLessThan(2_000);
+  }, 30_000);
+
+  it.each(["accepted-first", "saved-first"])("appends exactly once across overlapping receipts and replay with %s delivery", (order) => {
+    const initial = [...initialEvents(), answerEvent()];
+    let current = applyCanonicalProgressFrame(createCanonicalAgentReplica(), savedFrame(initial)).replica;
+    current = applyCanonicalProgressFrame(current, acceptedFrame(initial)).replica;
+    const appends = [appendEvent(0), appendEvent(1)];
+    for (const event of appends) {
+      const frames = [acceptedFrame([event]), savedFrame([event])];
+      if (order === "saved-first") frames.reverse();
+      for (const frame of frames) {
+        const update = applyCanonicalProgressFrame(current, frame);
+        expect(update.outcome).toBe("applied");
+        current = update.replica;
+      }
+    }
+    const repeatedSave = applyCanonicalProgressFrame(current, savedFrame([...initial, ...appends]));
+    const repeatedLive = applyCanonicalProgressFrame(repeatedSave.replica, acceptedFrame(appends));
+
+    expect(repeatedSave.outcome).toBe("applied");
+    expect(repeatedLive.outcome).toBe("ignored");
+    expect(repeatedLive.publications).toEqual([]);
+    expect(repeatedLive.replica.state.items.answer?.payload.content).toBe("startxyxy");
+    expect(repeatedLive.replica.durableState.items.answer?.payload.content).toBe("startxyxy");
+    expect(repeatedLive.replica.recoveryRequired).toBe(false);
+  });
+
+  it("rejects a new progress position that reuses the latest accepted sequence", () => {
+    const events = [...initialEvents(), answerEvent(), appendEvent(0)];
+    const live = applyCanonicalProgressFrame(createCanonicalAgentReplica(), acceptedFrame(events));
+    const conflicting = acceptedEvents([{ ...appendEvent(0), eventId: "conflicting-append" }]).map(event => ({
+      ...event, progressPosition: { epoch: EPOCH, sequence: 6 },
+    }));
+    const update = applyCanonicalProgressFrame(live.replica, {
+      phase: "accepted", threadId: THREAD_ID, epoch: EPOCH, from: 5, through: 6, events: conflicting,
+    });
+
+    expect(update.outcome).toBe("recovery-required");
+    expect(update.publications).toEqual([]);
+    expect(update.replica.state.items.answer?.payload.content).toBe("startxy");
+    expect(update.replica.progress?.acceptedThrough).toBe(5);
+  });
+
+  it("rejects a conflicting latest identity when its save arrived before acceptance", () => {
+    const events = [...initialEvents(), answerEvent(), appendEvent(0)];
+    const saved = applyCanonicalProgressFrame(createCanonicalAgentReplica(), savedFrame(events));
+    const conflicting = events.map(event => event.eventId === "append-0" ? { ...event, eventId: "conflicting-append" } : event);
+    const update = applyCanonicalProgressFrame(saved.replica, acceptedFrame(conflicting));
+
+    expect(update.outcome).toBe("recovery-required");
+    expect(update.publications).toEqual([]);
+    expect(update.replica.state.items.answer?.payload.content).toBe("startxy");
+    expect(update.replica.progress?.acceptedThrough).toBe(0);
+  });
+
   it("renders a completed turn before saving and saves without publishing it again", () => {
     const events = [...initialEvents(), envelope("complete", 4, 2, { type: "turn.completed", endedAt: NOW })];
     const live = applyCanonicalProgressFrame(createCanonicalAgentReplica(), acceptedFrame(events));

@@ -22,11 +22,24 @@ function serverSequencedMessages(record: ThreadRecord | undefined): { sequence: 
 
 /** Observe loaded settled records only for the selected, focused conversation. */
 export function startThreadAttentionTracking(): () => void {
+  let previousMessages: ThreadRecord["messages"] | undefined;
+  let previousServerMessageIds: ThreadRecord["serverMessageIds"] | undefined;
+  let sequencedMessages: ReturnType<typeof serverSequencedMessages> = [];
+  const messagesForRecord = (record: ThreadRecord | undefined) => {
+    // Progress refreshes the saved-message index when message items change;
+    // streaming audit records do not change the acknowledgement candidates.
+    if (!record?.canonicalAgent.progress || record.messages !== previousMessages || record.serverMessageIds !== previousServerMessageIds) {
+      sequencedMessages = serverSequencedMessages(record);
+      previousMessages = record?.messages;
+      previousServerMessageIds = record?.serverMessageIds;
+    }
+    return sequencedMessages;
+  };
   const refresh = (): void => {
     const threadId = useWorkspaceStore.getState().activeThreadId;
     const record = threadId ? useThreadStore.getState().records.get(threadId) : undefined;
     const lastTurn = threadId ? threadAttentionStore.getState().byThreadId[threadId]?.lastTurn : null;
-    const settled = serverSequencedMessages(record).flatMap((message) =>
+    const settled = messagesForRecord(record).flatMap((message) =>
       message.outcome != null || message.sequence === lastTurn?.sequence ? [message.sequence] : []);
     threadAttentionStore.getState().refreshOnScreen(threadId, settled.length ? Math.max(...settled) : null);
   };

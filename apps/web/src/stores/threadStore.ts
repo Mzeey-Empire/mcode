@@ -955,6 +955,19 @@ function canonicalSavedMessageIds(record: ThreadRecord): Record<string, string> 
   return ids;
 }
 
+function canonicalSavedMessagesChanged(frame: CanonicalAgentProgressFrame, previous: ThreadRecord): boolean {
+  if (frame.phase === "recovery") return true;
+  if (frame.phase !== "saved") return false;
+  const items = previous.canonicalAgent.durableState.items;
+  return frame.events.some((event) => {
+    if (event.payload.type === "item.recorded") {
+      return event.payload.item.payload.projection === "message"
+        || items[event.payload.item.id]?.payload.projection === "message";
+    }
+    return event.routing.itemId !== undefined && items[event.routing.itemId]?.payload.projection === "message";
+  });
+}
+
 function drainedSavingEpoch(frame: CanonicalAgentProgressFrame, previous: ThreadRecord): string | undefined {
   const previousEpoch = previous.canonicalAgent.progress?.epoch;
   // A loss-free generation replacement follows the server's durable barrier.
@@ -3520,7 +3533,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         ...projection,
         ...(visibleChanged && record.messages.length > 0 ? steeredMessagesPatch(frame.threadId, projected) : {}),
         ...reconcileSavedTurnStatuses(projected, drainedSavingEpoch(frame, previous)),
-        serverMessageIds: { ...projected.serverMessageIds, ...canonicalSavedMessageIds(projected) },
+        serverMessageIds: canonicalSavedMessagesChanged(frame, previous)
+          ? { ...projected.serverMessageIds, ...canonicalSavedMessageIds(projected) }
+          : projected.serverMessageIds,
       });
       return visibleChanged ? reconcileCanonicalRuntime(records, state.runningThreadIds, frame.threadId) : { records };
     });

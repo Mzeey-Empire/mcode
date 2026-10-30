@@ -1,5 +1,5 @@
 import { CANONICAL_AGENT_PROGRESS_RECOVERY_MAX, CanonicalAgentProgressFrameSchema, type CanonicalAgentProgressFrame, type CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
-import { reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { reduceAgentEventBatch, type AgentModelState, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import {
   applyCanonicalPushEvents,
   applyCanonicalReconnectRecovery,
@@ -20,6 +20,21 @@ function gap(current: CanonicalAgentReplica): CanonicalProgressUpdate {
   return result({ ...current, recoveryRequired: true }, "recovery-required");
 }
 
+function compactProgressState(state: AgentModelState): AgentModelState {
+  const appliedEventIds: AgentModelState["appliedEventIds"] = {};
+  const acceptedInputEventIds: AgentModelState["acceptedInputEventIds"] = {};
+  // Epoch cursors fence older deliveries. Keep the latest identity so reusing
+  // its accepted sequence still conflicts without copying the whole turn per delta.
+  for (const [executionId, sequence] of Object.entries(state.lastAcceptedSequenceByExecution)) {
+    const inputKey = `${executionId}:${sequence}`;
+    const eventId = state.acceptedInputEventIds[inputKey];
+    if (eventId === undefined) continue;
+    appliedEventIds[eventId] = true;
+    acceptedInputEventIds[inputKey] = eventId;
+  }
+  return { ...state, appliedEventIds, acceptedInputEventIds };
+}
+
 function project(current: CanonicalAgentReplica): CanonicalProgressUpdate {
   const reduced = reduceAgentEventBatch(current.durableState, current.progress?.retained ?? []);
   if (reduced.outcome === "rejected") return gap(current);
@@ -28,7 +43,7 @@ function project(current: CanonicalAgentReplica): CanonicalProgressUpdate {
     const turn = turns[id];
     if (turn && (turn.status === "Pending" || turn.status === "Running")) turns[id] = { ...turn, status: "Interrupted" };
   }
-  return result({ ...current, state: { ...reduced.state, turns } }, "applied");
+  return result({ ...current, state: compactProgressState({ ...reduced.state, turns }) }, "applied");
 }
 
 function accepted(current: CanonicalAgentReplica, frame: Extract<CanonicalAgentProgressFrame, { phase: "accepted" }>): CanonicalProgressUpdate {
@@ -38,17 +53,24 @@ function accepted(current: CanonicalAgentReplica, frame: Extract<CanonicalAgentP
   const fresh = frame.events.filter((event) => event.progressPosition.sequence > progress.acceptedThrough);
   const retained = [...progress.retained, ...fresh.filter((event) => event.progressPosition.sequence > progress.savedThrough)];
   if (retained.length > CANONICAL_AGENT_PROGRESS_RECOVERY_MAX) return gap(current);
-  const reduced = reduceAgentEventBatch(current.state, fresh);
+  const toReduce = fresh.filter((event) => event.progressPosition.sequence > progress.savedThrough
+    || event.acceptedSequence === current.state.lastAcceptedSequenceByExecution[event.routing.executionId]);
+  const reduced = reduceAgentEventBatch(current.state, toReduce);
   if (reduced.outcome === "rejected") return gap(current);
   // Live progress cannot repair a missing durable admission or revision.
-  return result({ ...current, state: reduced.state, progress: { ...progress, acceptedThrough: frame.through, retained } }, "applied", fresh);
+  return result({ ...current, state: compactProgressState(reduced.state), progress: { ...progress, acceptedThrough: frame.through, retained } }, "applied", fresh);
 }
 
 function saved(current: CanonicalAgentReplica, frame: Extract<CanonicalAgentProgressFrame, { phase: "saved" }>): CanonicalProgressUpdate {
   const progress = current.progress ?? { epoch: frame.epoch, acceptedThrough: 0, savedThrough: 0, retained: [] };
   if (progress.epoch !== frame.epoch) return gap(current);
   if (!contiguousSavedPrefix(progress.savedThrough, frame)) return gap(current);
-  const durable = applyCanonicalPushEvents(current, frame.ownerThreadId ?? frame.threadId, frame.events);
+  const events = frame.events.filter((event) => {
+    if (event.progressPosition) return event.progressPosition.sequence > progress.savedThrough;
+    return event.durableRevision > current.revision.conversationRevision
+      || (event.rosterRevision ?? 0) > current.revision.rosterRevision;
+  });
+  const durable = applyCanonicalPushEvents(current, frame.ownerThreadId ?? frame.threadId, events);
   if (durable.outcome === "recovery-required") return { ...durable, publications: [] };
   if (durable.replica.revision.conversationRevision !== frame.revision.conversationRevision
     || durable.replica.revision.rosterRevision !== frame.revision.rosterRevision) {
@@ -56,7 +78,8 @@ function saved(current: CanonicalAgentReplica, frame: Extract<CanonicalAgentProg
     return gap(current);
   }
   const through = Math.max(progress.savedThrough, frame.through);
-  const next = { ...durable.replica, progress: { ...progress, savedThrough: through, retained: progress.retained.filter((event) => event.progressPosition.sequence > through) } };
+  const durableState = compactProgressState(durable.replica.durableState);
+  const next = { ...durable.replica, state: durableState, durableState, progress: { ...progress, savedThrough: through, retained: progress.retained.filter((event) => event.progressPosition.sequence > through) } };
   // A validated receipt for already accepted events changes save health, not visible content.
   return acknowledgesAcceptedPrefix(progress, frame)
     ? result({ ...next, state: current.state }, "applied")

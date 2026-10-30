@@ -121,10 +121,14 @@ export function SelectedTextCommentMarkers({
     () => pendingComment ? [...comments, pendingComment] : comments,
     [comments, pendingComment],
   );
+  const hasVisibleComments = visibleComments.length > 0;
 
   useEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport) return;
+    if (!viewport || !hasVisibleComments) {
+      setLayout(null);
+      return;
+    }
     let frame = 0;
     const refresh = () => {
       cancelAnimationFrame(frame);
@@ -144,7 +148,7 @@ export function SelectedTextCommentMarkers({
       viewport.removeEventListener("scroll", refresh);
       window.removeEventListener("resize", refresh);
     };
-  }, [renderedThreadId, viewportRef]);
+  }, [hasVisibleComments, renderedThreadId, viewportRef]);
 
   const { geometries, markers } = useMemo(() => {
     const viewport = viewportRef.current;
