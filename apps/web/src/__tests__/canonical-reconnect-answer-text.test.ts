@@ -172,4 +172,19 @@ describe("canonical reconnect answer text", () => {
 
     expect(liveTimeline()).toEqual([{ type: "hook" }, { type: "delta", text: linesThrough(2) }]);
   });
+
+  it.each([{ name: "no narration", narrative: [] }, { name: "empty narration", narrative: [{
+    ...SESSION_START_HOOK, id: "empty-narration", kind: "reasoning" as const,
+    payload: { projection: "narrationSegment", record: { id: "empty-narration", message_id: "", text: "",
+      started_at: NOW, ended_at: NOW, sort_order: 0, is_final_response: 0 } },
+  }] }])("keeps the recovered answer prefix after a fresh reload with $name", ({ narrative }) => {
+    resetThreadStoreForTests({ currentThreadId: THREAD_ID });
+    useThreadStore.setState({ records: seedThreadRecord(THREAD_ID, { runtimePhase: "running", turnExecutionId: EXECUTION_ID }) });
+    reconnectAfterMissing(1, 3, narrative, "append");
+    deliver(streamLine(4, "append"));
+    drainFrames();
+
+    expect(liveTimeline()).toEqual([{ type: "delta", text:
+      "1: Sentence about 1.\n2: Sentence about 2.\n3: Sentence about 3.\n4: Sentence about 4.\n" }]);
+  });
 });

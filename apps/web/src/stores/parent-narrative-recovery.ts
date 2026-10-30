@@ -93,9 +93,9 @@ function mergeById<T extends { id: string; sort_order: number }>(existing: reado
   return [...byId.values()].sort((left, right) => left.sort_order - right.sort_order || left.id.localeCompare(right.id));
 }
 
-/** Narration segments, or a discarded-narration marker, mean the server's thought list replaces the local tape. */
+/** Non-empty narration, or a discarded-narration marker, replaces the local tape. Empty rows cannot restore an answer prefix. */
 function serverOwnsThoughtTape(items: readonly ParentNarrativeRecoveryItem[], owned: Partial<ThreadRecord>): boolean {
-  return items.length > 0 ? items.some((item) => item.kind === "narrationSegment") : owned.thoughtSegments !== undefined;
+  return items.length > 0 ? items.some((item) => item.kind === "narrationSegment" && item.record.text.length > 0) : owned.thoughtSegments !== undefined;
 }
 
 /**
@@ -107,7 +107,7 @@ function serverOwnsThoughtTape(items: readonly ParentNarrativeRecoveryItem[], ow
 function syncedThoughtTape(record: ThreadRecord, streaming: string | undefined): Partial<ThreadRecord> {
   const segments = record.thoughtSegments;
   const last = segments.at(-1);
-  if (streaming === undefined || !last || last.id?.startsWith("assistant-text:")) return {};
+  if (streaming === undefined || last?.id?.startsWith("assistant-text:")) return {};
   const tape = narrationSegments(segments).filter((segment) => !segment.id?.startsWith("assistant-text:"))
     .map((segment) => segment.text).join("");
   if (record.streaming !== tape || !streaming.startsWith(tape)) return {};
