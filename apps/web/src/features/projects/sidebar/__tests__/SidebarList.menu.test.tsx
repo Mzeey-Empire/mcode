@@ -30,7 +30,7 @@ const WITH_PR = [createMockThreadPullRequest({ number: 7, state: "open", url: "h
 function seedThread(overrides: Partial<Thread>): void {
   useWorkspaceStore.setState({
     workspaces: [WORKSPACE],
-    threads: [createMockThread({ id: "t1", workspace_id: "ws-1", title: "Menu thread", mode: "worktree", pull_requests: WITH_PR, ...overrides })],
+    threads: [createMockThread({ id: "t1", workspace_id: "ws-1", title: "Menu thread", mode: "worktree", pull_requests: WITH_PR, last_activity_at: new Date().toISOString(), ...overrides })],
     activeWorkspaceId: "ws-1",
     activeThreadId: null,
     loadWorkspaces: vi.fn().mockResolvedValue(undefined),

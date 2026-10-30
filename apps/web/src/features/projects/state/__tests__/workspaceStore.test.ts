@@ -398,21 +398,26 @@ describe("workspaceStore completion lifecycle", () => {
   });
 
   it("reopens without clearing preserved renderer state", async () => {
-    const reopened = makeThread();
-    useWorkspaceStore.setState({
-      threads: [makeThread({
-        last_activity_at: reopened.last_activity_at,
-        user_completed_at: "2026-08-12T08:00:00.000Z",
-        scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
-      })],
-    });
-    reopenThread.mockResolvedValue(reopened);
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-08-12T08:00:00.000Z") });
+    try {
+      const reopened = makeThread();
+      vi.setSystemTime(new Date("2026-08-12T08:00:00.001Z"));
+      useWorkspaceStore.setState({
+        threads: [makeThread({
+          user_completed_at: "2026-08-12T08:00:00.000Z",
+          scheduled_deletion_at: "2026-08-15T08:00:00.000Z",
+        })],
+      });
+      reopenThread.mockResolvedValue(reopened);
 
-    await useWorkspaceStore.getState().reopenThread(reopened.id);
+      await useWorkspaceStore.getState().reopenThread(reopened.id);
 
-    expect(reopenThread).toHaveBeenCalledWith(reopened.id);
-    expect(useWorkspaceStore.getState().threads[0]).toMatchObject(reopened);
-    expect(clearScope).not.toHaveBeenCalled();
+      expect(reopenThread).toHaveBeenCalledWith(reopened.id);
+      expect(useWorkspaceStore.getState().threads[0]).toMatchObject(reopened);
+      expect(clearScope).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("applies a queued manual cleanup retry inline", async () => {
