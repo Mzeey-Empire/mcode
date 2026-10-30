@@ -133,6 +133,16 @@ describe("ToolCallRecordStore", () => {
     expect(saved?.completed_at === null).toBe(phase === "waiting");
   });
 
+  it("reads a row whose phase came from a newer build by its status", () => {
+    repo.create({ messageId, toolCallId: "tc-newer", toolName: "Bash", inputSummary: "ls", outputSummary: "", status: "running", sortOrder: 0 });
+    db.prepare("UPDATE tool_call_records SET phase = 'escalated' WHERE id = 'tc-newer'").run();
+
+    const [saved] = repo.listByMessage(messageId);
+
+    expect(saved?.status).toBe("running");
+    expect(saved?.phase).toBeUndefined();
+  });
+
   it.each(["bulkCreate", "createBoundedBatch"])("%s preserves conflicts unless replacement is enabled, then updates every column", (method) => {
     db.prepare(
       "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence) SELECT 'msg-2', thread_id, role, content, timestamp, 2 FROM messages WHERE id = ?",

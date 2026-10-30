@@ -9,7 +9,7 @@ import type { Database } from "bun:sqlite";
 import { and, asc, eq, inArray, isNull, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { ToolCallRecord, ToolCallStatus } from "@mcode/contracts/models/tool-call-record";
-import { isToolCallActive, ToolCallStatusSchema, ToolCallPhaseSchema } from "@mcode/contracts/models/tool-call-record";
+import { isToolCallActive, ToolCallPhaseSchema } from "@mcode/contracts/models/tool-call-record";
 import {
   type WriteBatchLimits,
   type WriteBatchResult,
@@ -134,13 +134,19 @@ function rowToToolCallRecord(row: ToolCallRecordRow): ToolCallRecord {
     output_total_bytes: row.outputTotalBytes,
     output_artifact_path: row.outputArtifactPath,
     exit_code: row.exitCode,
-    status: ToolCallStatusSchema.parse(row.status),
-    ...(row.phase ? { phase: ToolCallPhaseSchema.parse(row.phase) } : {}),
+    status: row.status as ToolCallStatus,
+    ...phaseFromRow(row.phase),
     ...(row.background ? { background: true } : {}),
     started_at: row.startedAt,
     completed_at: row.completedAt,
     sort_order: row.sortOrder,
   };
+}
+
+// Builds sharing the database may write phases this build does not know; the row still reads by its status.
+function phaseFromRow(phase: string | null): Pick<ToolCallRecord, "phase"> {
+  const parsed = ToolCallPhaseSchema.safeParse(phase);
+  return parsed.success ? { phase: parsed.data } : {};
 }
 
 /** Repository for tool call record creation and retrieval against SQLite. */
