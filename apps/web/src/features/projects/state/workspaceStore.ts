@@ -46,6 +46,7 @@ import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
 import { readRememberedStartFromOrigin, rememberStartFromOrigin } from "@/lib/start-from-origin-preference";
 import { recordThreadSelection } from "@/lib/thread-switch-telemetry";
 import { readRememberedOpenThread, rememberOpenThread } from "@/lib/open-thread-memory";
+import { useToastStore } from "@/stores/toastStore";
 
 function unboundStartupResolution(state: ThreadStartup["state"]): "unbound" | "terminal" | "interrupted" {
   if (state === "interrupted") return "interrupted";
@@ -2000,4 +2001,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 // becoming its durable id, so the store change itself is what gets remembered.
 useWorkspaceStore.subscribe((state, previous) => {
   if (state.activeThreadId !== previous.activeThreadId) rememberOpenThread(state.activeThreadId);
+  if (state.activeThreadId !== previous.activeThreadId && previous.activeThreadId) {
+    useToastStore.getState().dismissByKey(`stop-failure:${previous.activeThreadId}`);
+  }
 });

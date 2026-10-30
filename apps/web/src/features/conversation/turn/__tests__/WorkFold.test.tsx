@@ -15,8 +15,14 @@ describe("workFoldLabel", () => {
     expect(workFoldLabel(outcome, 102_000)).toBe(label);
   });
 
-  it("drops the duration when wall time is unknown", () => {
-    expect(workFoldLabel("cancelled", null)).toBe("Worked");
+  it.each([
+    ["cancelled", "Stopped"],
+    ["interrupted", "Interrupted"],
+    ["errored", "Failed"],
+    ["completed", "Worked"],
+  ] as const)("retains the %s outcome when wall time is unknown", (outcome, label) => {
+    expect(workFoldLabel(outcome, null)).toBe(label);
+    expect(workFoldLabel(outcome, -1)).toBe(label);
   });
 
   it("rounds a sub-second turn up to one second", () => {

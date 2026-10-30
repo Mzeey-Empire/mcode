@@ -753,10 +753,11 @@ export function isThreadExecuting(
   threadId: string,
   threadState: ThreadExecutionState = useThreadStore.getState(),
 ): boolean {
-  if ((threadState.pendingStopCounts[threadId] ?? 0) > 0) return true;
   const record = threadState.records.get(threadId);
   const canonicalPhase = record ? getCanonicalRuntimePhase(threadId, record) : null;
   if (canonicalPhase !== null) return isExecutingPhase(canonicalPhase);
+  if (record?.runtimePhase === "cancelled") return false;
+  if ((threadState.pendingStopCounts[threadId] ?? 0) > 0) return true;
   return threadState.runningThreadIds.has(threadId)
     || isExecutingPhase(record?.runtimePhase);
 }
@@ -2961,7 +2962,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const record = get().records.get(threadId);
     if (!record || record.turnExecutionId !== executionAtStop) return;
     // Command failure cannot undo newer lifecycle truth or become a provider error.
-    patchRec(threadId, { awaitingUserStopPersist: undefined });
+    patchRec(threadId, { awaitingUserStopPersist: undefined, stopRequestedExecutionId: undefined });
     const phase = getThreadRuntimePhase(threadId, record);
     const canStillStop = isExecutingPhase(phase)
       || (phase === "idle" && get().runningThreadIds.has(threadId));
@@ -2971,6 +2972,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       kind: "failed",
       title: "Couldn't stop this turn",
       meta: `Try Stop again. ${reason}`,
+      dedupeKey: `stop-failure:${threadId}`,
     });
   };
 
@@ -3868,10 +3870,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }));
     const beforeStop = get().records.get(threadId);
     const executionAtStop = beforeStop?.turnExecutionId ?? null;
-    patchRec(threadId, { awaitingUserStopPersist: true });
+    patchRec(threadId, { awaitingUserStopPersist: true, stopRequestedExecutionId: executionAtStop ?? undefined });
     try {
       const result = await getTransport().stopAgent(threadId);
-      get().applyThreadRuntimeSnapshot(result.snapshot);
+      const currentExecutionId = get().records.get(threadId)?.turnExecutionId;
+      if (currentExecutionId === executionAtStop || currentExecutionId === result.turnExecutionId) {
+        patchRec(threadId, { stopRequestedExecutionId: result.turnExecutionId ?? undefined });
+        get().applyThreadRuntimeSnapshot(result.snapshot);
+      }
     } catch (e) {
       handleStopCommandFailure(threadId, executionAtStop, e);
     }
@@ -4584,6 +4590,16 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 });
 
+function clearSettledStopFailures(state: ThreadState, previous: ThreadState): void {
+  for (const [threadId, record] of state.records) {
+    const before = previous.records.get(threadId);
+    if (record !== before && (!isThreadRuntimeActive(threadId, record)
+      || record.turnExecutionId !== before?.turnExecutionId)) {
+      useToastStore.getState().dismissByKey(`stop-failure:${threadId}`);
+    }
+  }
+}
+
 /**
  * Holds a thread's queued follow-ups when its latest turn ends without completing.
  * Observing the phase catches every writer that settles a turn (events, persistence, canonical
@@ -4592,6 +4608,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
  */
 useThreadStore.subscribe((state, previous) => {
   if (state.records === previous.records) return;
+  clearSettledStopFailures(state, previous);
   const { queues, editingThreadId } = useQueueStore.getState();
   // A message open in the editor is popped from its queue but is still queued input.
   const pending = Object.keys(queues).filter((threadId) => queues[threadId]?.length || threadId === editingThreadId);

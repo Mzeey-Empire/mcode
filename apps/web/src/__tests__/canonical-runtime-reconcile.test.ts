@@ -4,7 +4,8 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { type Message } from "@mcode/contracts/models/message";
 import { type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
-import { useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
+import { getThreadRuntimePhase, isThreadStopPending } from "@/stores/thread-lifecycle";
 import {
   resetThreadStoreForTests,
   seedThreadRecord,
@@ -98,6 +99,11 @@ function seedRuntime(phase: "running" | "idle", turnExecutionId: string | null, 
   });
 }
 
+function stopPending(): boolean {
+  const state = useThreadStore.getState();
+  return isThreadStopPending(THREAD_ID, state.records.get(THREAD_ID), state.pendingStopCounts[THREAD_ID] ?? 0);
+}
+
 function promptAdmission(prompt: Message): CanonicalAgentEventEnvelope[] {
   return [...turnEvents(EXECUTION_ID), envelope("user-message", 4, EXECUTION_ID, {
     type: "item.recorded", item: { id: `message:${prompt.id}`, threadId: THREAD_ID, turnId: TURN_ID,
@@ -128,6 +134,49 @@ describe("canonical runtime reconciliation", () => {
     vi.mocked(mockTransport.sendMessage).mockReset();
   });
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+
+  it("holds Stopping when its Stop snapshot overtakes canonical progress", async () => {
+    seedRuntime("running", EXECUTION_ID, true);
+    const events = turnEvents(EXECUTION_ID);
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, events);
+    vi.mocked(mockTransport.stopAgent).mockResolvedValueOnce({ threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+      status: "cancelled", dispatchState: "dispatched",
+      snapshot: { threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, phase: "cancelled" } });
+    await useThreadStore.getState().stopAgent(THREAD_ID);
+    expect(stopPending()).toBe(true);
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [envelope("late-checkpoint", 4, EXECUTION_ID,
+      { type: "execution.checkpoint", operationKind: "stop-requested" })]);
+    expect(stopPending()).toBe(true);
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [envelope("cancelled", 5, EXECUTION_ID,
+      { type: "turn.cancelled", endedAt: NOW, reason: "Turn cancelled", stop: { by: "user" } })]);
+    expect(isThreadExecuting(THREAD_ID)).toBe(false);
+    expect(stopPending()).toBe(false);
+  });
+
+  it("releases the Composer gate in the same state update as canonical cancellation, before the Stop RPC returns", async () => {
+    seedRuntime("running", EXECUTION_ID, true);
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, turnEvents(EXECUTION_ID));
+    let finishStop: (() => void) | undefined;
+    vi.mocked(mockTransport.stopAgent).mockImplementationOnce(() => new Promise((resolve) => {
+      finishStop = () => resolve({ threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, status: "cancelled", dispatchState: "dispatched",
+        snapshot: { threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, phase: "cancelled" } });
+    }));
+    const stopping = useThreadStore.getState().stopAgent(THREAD_ID);
+    try {
+      useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [envelope("cancelled", 4, EXECUTION_ID,
+        { type: "turn.cancelled", endedAt: NOW, reason: "Turn cancelled", stop: { by: "user" } })]);
+      expect(readThreadField(THREAD_ID, (record) => getThreadRuntimePhase(THREAD_ID, record))).toBe("cancelled");
+      expect(isThreadExecuting(THREAD_ID)).toBe(false);
+      expect(stopPending()).toBe(false);
+      useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId: THREAD_ID, turnExecutionId: OTHER_EXECUTION_ID, phase: "running" });
+      expect(stopPending()).toBe(false);
+    } finally {
+      finishStop?.();
+      await stopping;
+    }
+    expect(readThreadField(THREAD_ID, (record) => record.turnExecutionId)).toBe(OTHER_EXECUTION_ID);
+    expect(readThreadField(THREAD_ID, (record) => getThreadRuntimePhase(THREAD_ID, record))).toBe("running");
+  });
 
   it.each(["cancelled", "interrupted"] as const)("reconciles a user stop with queued progress and a %s Ended", (outcome) => {
     seedRuntime("running", EXECUTION_ID, true);

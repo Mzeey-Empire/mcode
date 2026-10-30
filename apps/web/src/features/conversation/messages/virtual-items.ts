@@ -575,9 +575,9 @@ export function buildVolatileItems(
   });
 
   return [
-    narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning, agentStartTime, committedAssistantBody),
+    narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning && !holdingSignals?.stopPending, agentStartTime, committedAssistantBody),
     liveResponseItem(liveText, currentTurn, agentDisplayState, responseTextIsStreaming),
-    narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
+    agentDisplayState?.phase === "cancelled" ? undefined : narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
 }
 
