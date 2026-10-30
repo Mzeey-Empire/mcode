@@ -357,7 +357,7 @@ describe("narrative tool row layout classes", () => {
     );
 
     const child = screen.getByRole("button", { name: /Ran command/ });
-    expect(child).toHaveTextContent(/exit 1$/);
+    expect(child).toHaveTextContent(/failed$/);
     fireEvent.click(child);
 
     const panel = screen.getByRole("region", { name: "Shell output" });
