@@ -39,6 +39,26 @@ function makeToolCall(overrides: Partial<ToolCall> = {}): ToolCall {
 }
 
 describe("virtual item render isolation", () => {
+  it("puts You stopped in its final position on the first terminal render", () => {
+    const projectTranscript = createTranscriptItemProjector();
+    const user = createMockMessage({ id: "prompt", role: "user", thread_id: "thread-1", sequence: 1 });
+    const answer = createMockMessage({ id: "answer", role: "assistant", thread_id: "thread-1", sequence: 2, outcome: "cancelled" });
+    const input = {
+      messages: [user, answer], toolCalls: [makeToolCall()],
+      agentStartTime: 1000, streamingText: "",
+      agentDisplayState: { phase: "cancelled" } as const,
+      currentTurn: { threadId: "thread-1", messageId: "answer", responseKey: "response" },
+      turnEndingsByMessageId: { answer: { turnId: "turn-1", providerId: "claude" as const,
+        view: { foldLabel: "Stopped", notice: { style: "quiet" as const, title: "You stopped" } } } },
+    };
+    const position = (exiting: boolean) => projectTranscript({ ...input,
+      holdingSignals: { stopPending: exiting, compacting: false, ...(exiting ? { exiting: "turn" as const } : {}) },
+    }).filter((item) => item.type === "message" || item.type === "turn-end-notice" || item.type === "narrative-indicator")
+      .map((item) => item.type === "message" ? `message:${item.message.id}` : item.type);
+    expect(position(true)).toEqual(["message:prompt", "message:answer", "turn-end-notice"]);
+    expect(position(false)).toEqual(["message:prompt", "message:answer", "turn-end-notice"]);
+  });
+
   it("re-renders only the typing row when final-response text changes", () => {
     renderCounts.clear();
     const projectTranscript = createTranscriptItemProjector();

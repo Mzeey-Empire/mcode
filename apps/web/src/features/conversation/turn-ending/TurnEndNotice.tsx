@@ -39,7 +39,7 @@ export function TurnEndNotice({ notice, actions = {}, pending = false, error = n
 function QuietTurnEndNotice({ notice }: { notice: QuietNotice }) {
   return (
     <div className="flex items-center gap-3 py-1 pr-2.5 text-muted">
-      {notice.icon === "paused" ? <CirclePause {...ICON_PROPS} /> : <Square {...ICON_PROPS} />}
+      {notice.icon === "paused" ? <CirclePause {...ICON_PROPS} /> : <Square {...ICON_PROPS} fill="currentColor" />}
       <div className="flex flex-col">
         <p className="text-body-small">{notice.title}</p>
         {notice.detail ? <p className="text-body-small">{notice.detail}</p> : null}

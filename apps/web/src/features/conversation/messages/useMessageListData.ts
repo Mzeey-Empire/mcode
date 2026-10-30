@@ -4,7 +4,7 @@ import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
 import { useThreadStore } from "@/stores/threadStore";
-import { getCanonicalLifecycleTurn, getThreadRuntimePhase } from "@/stores/thread-lifecycle";
+import { getCanonicalLifecycleTurn, getThreadRuntimePhase, isThreadStopPending } from "@/stores/thread-lifecycle";
 import { getThreadRecord, useThreadRecord } from "../state";
 import { isConversationVisible } from "../residency/conversation-residency";
 import {
@@ -94,7 +94,7 @@ function useRunHoldingSignals(threadId: string | null | undefined, isAgentRunnin
   const awaitingPlanAnswers = useThreadRecord(threadId, (record) => record.planQuestionsStatus === "pending");
   const awaitingAnswers = awaitingPlanAnswers || awaitingNativeAnswers;
   const planning = useWorkspaceThread(threadId, (thread) => thread?.plan_phase === "planning");
-  const stopPending = useThreadStore((state) => threadId ? (state.pendingStopCounts[threadId] ?? 0) > 0 : false);
+  const stopPending = useThreadStore((state) => threadId ? isThreadStopPending(threadId, state.records.get(threadId), state.pendingStopCounts[threadId] ?? 0) : false);
   const compacting = useThreadRecord(threadId, (record) => record.isCompacting);
   // Primitive selectors: an object-returning selector yields a fresh reference per store update and loops rerenders.
   const retryKind = useThreadRecord(threadId, (record): RunRetry["kind"] | undefined =>

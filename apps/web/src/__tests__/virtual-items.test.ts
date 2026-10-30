@@ -12,6 +12,7 @@ import {
 } from "@/features/conversation/messages/virtual-items";
 import type { ChatVirtualItem } from "@/features/conversation/messages/virtual-items";
 import type { ThoughtSegment } from "@/features/conversation/narrative/types";
+import { buildNarrativeItems } from "@/features/conversation/narrative/build-narrative";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, HookExecutionRecord } from "@/transport/types";
 
 const STREAMING_AGENT = { phase: "streaming" } as const;
@@ -1132,6 +1133,24 @@ function isLiveResponse(item: ChatVirtualItem): boolean {
 }
 
 describe("provider retry status", () => {
+  it("shows only Stopping as live activity while an open reasoning row remains in the transcript", () => {
+    const items = buildVolatileItems([], STREAMING_AGENT, 1000, "", [], [
+      { text: "Considering the move", startedAt: 1000, kind: "reasoning" },
+    ], undefined, undefined, undefined, { stopPending: true, compacting: false });
+    const flow = items.find((item) => item.type === "narrative-flow");
+    if (flow?.type !== "narrative-flow") throw new Error("Missing reasoning flow");
+    expect(buildNarrativeItems(flow).items).toEqual([
+      { type: "reasoning", segment: { text: "Considering the move", startedAt: 1000, kind: "reasoning" }, isActive: false },
+    ]);
+    expect(findIndicator(items)?.status).toEqual({ label: "Stopping", icon: "spinner" });
+  });
+
+  it("removes the live line immediately when a stopped turn settles, even during its exit hold", () => {
+    const items = buildVolatileItems([makeToolCall({ isComplete: true })], { phase: "cancelled" }, 1000, "", [], [],
+      undefined, undefined, undefined, { stopPending: true, compacting: false, exiting: "turn" });
+    expect(items.map((item) => item.type)).toEqual(["narrative-flow"]);
+  });
+
   it("names the HTTP status in the running turn's status row", () => {
     const items = buildVolatileItems(
       [makeToolCall()], STREAMING_AGENT, 1, undefined, [], [], undefined, undefined, undefined,

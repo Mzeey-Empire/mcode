@@ -1,5 +1,6 @@
 import { useRef, useCallback, useEffect, useMemo } from "react";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
+import { isThreadStopPending } from "@/stores/thread-lifecycle";
 import { useThreadRecord } from "../state";
 import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
 import type { Thread } from "@/transport";
@@ -378,7 +379,7 @@ export function Composer({
     (s) => threadId ? isThreadExecuting(threadId, s) : false,
   );
   const isStopPending = useThreadStore(
-    (s) => threadId ? (s.pendingStopCounts[threadId] ?? 0) > 0 : false,
+    (s) => threadId ? isThreadStopPending(threadId, s.records.get(threadId), s.pendingStopCounts[threadId] ?? 0) : false,
   );
   const surfaceState = useComposerSurfaceState({
     threadId,
