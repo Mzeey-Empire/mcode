@@ -155,6 +155,70 @@ describe("transcript viewport", () => {
     expect(view.viewport.scrollTop).toBe(1425);
   });
 
+  describe("layout changes", () => {
+    const heights = new Map<string, number>();
+    const translateY = (element: Element | null) =>
+      Number(/translateY\((-?[\d.]+)px\)/.exec(element instanceof HTMLElement ? element.style.transform : "")?.[1] ?? 0);
+
+    /** Places hosts where vlist's wrapper transforms put them, and text blocks at their offsets inside a host. */
+    beforeEach(() => {
+      heights.clear();
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        if (this === view.viewport) return new DOMRect(0, 0, 600, 200);
+        const key = this.getAttribute("data-transcript-key");
+        if (key !== null) {
+          const top = (Number.parseFloat(view.viewport.style.paddingTop) || 0) + translateY(this.parentElement) - view.viewport.scrollTop;
+          return new DOMRect(0, top, 600, heights.get(key) ?? 100);
+        }
+        const host = this.closest("[data-transcript-key]");
+        if (this.dataset.line === undefined || !(host instanceof HTMLElement)) return new DOMRect(0, 0, 0, 0);
+        return new DOMRect(0, host.getBoundingClientRect().top + Number(this.dataset.line), 600, Number(this.dataset.lineHeight));
+      });
+    });
+
+    function layOutBlocks(host: HTMLElement, blockHeight: number): HTMLElement[] {
+      const blocks = [...host.children].filter((child): child is HTMLElement => child instanceof HTMLElement);
+      blocks.forEach((block, index) => {
+        block.dataset.line = String(index * blockHeight);
+        block.dataset.lineHeight = String(blockHeight);
+      });
+      heights.set(host.getAttribute("data-transcript-key")!, blocks.length * blockHeight);
+      LayoutObserver.resize(host, blocks.length * blockHeight);
+      return blocks;
+    }
+
+    it("keeps the words being read in place when the reading row rewraps at a new width", async () => {
+      view.moveTo({ kind: "reading", key: "9", offset: 0 });
+      const host = hosts.find((candidate) => candidate.id === "9")!.element;
+      host.append(...Array.from({ length: 10 }, () => document.createElement("p")));
+      const blocks = layOutBlocks(host, 100);
+      await nextFrame();
+      view.moveTo({ kind: "reading", key: "9", offset: 450 });
+      expect(blocks[4].getBoundingClientRect().top).toBe(-50);
+
+      // A narrower window wraps every block onto more lines.
+      layOutBlocks(host, 150);
+      await nextFrame();
+
+      expect(blocks[4].getBoundingClientRect().top).toBe(-50);
+      expect(position).toEqual({ kind: "reading", key: "9", offset: 650 });
+    });
+
+    it("keeps a restored reading row in place once the rows above it measure", async () => {
+      view.moveTo({ kind: "reading", key: "9", offset: 25 });
+      const anchor = hosts.find((host) => host.id === "9")!.element;
+      expect(anchor.getBoundingClientRect().top).toBe(-25);
+
+      const earlier = hosts.find((host) => host.id === "1")!.element;
+      heights.set("1", 160);
+      LayoutObserver.resize(earlier, 160);
+      await nextFrame();
+
+      expect(anchor.getBoundingClientRect().top).toBe(-25);
+      expect(view.viewport.scrollTop).toBe(985);
+    });
+  });
+
   it("preserves the reading row when history fills a previously short viewport", () => {
     const recent = [{ id: "recent", height: 120 }];
     view.setRows(recent);
