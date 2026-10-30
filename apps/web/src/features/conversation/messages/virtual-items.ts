@@ -145,6 +145,8 @@ export interface TranscriptProjectionInput {
   persistedNarrativeByMessage?: PersistedNarrativeRecordsByMessage;
   /** Canonical child turn summaries keyed by assistant message id. */
   turnSummariesByMessageId?: Record<string, TurnSummary>;
+  /** Server-timed turn durations keyed by assistant message id, for every canonical turn. */
+  turnDurationsByMessageId?: Readonly<Record<string, number | null>>;
   /** Settled turn endings keyed by the message each notice follows. */
   turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>;
   /** In-memory tool calls for the active turn. */
@@ -222,6 +224,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       responseTextIsStreaming: input.responseTextIsStreaming,
       persistedNarrativeByMessage: input.persistedNarrativeByMessage,
       turnSummariesByMessageId: input.turnSummariesByMessageId,
+      turnDurationsByMessageId: input.turnDurationsByMessageId,
       turnEndingsByMessageId: input.turnEndingsByMessageId,
       currentTurnLiveNarrative: settledLiveNarrative(input),
     };
@@ -238,6 +241,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
         stableInput.responseTextIsStreaming,
         stableInput.currentTurnLiveNarrative,
         stableInput.turnEndingsByMessageId,
+        stableInput.turnDurationsByMessageId,
       );
     previousStableInput = stableInput;
     previousStableItems = stableItems;
@@ -263,14 +267,14 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
 type StableTranscriptInput = Pick<TranscriptProjectionInput,
   "messages" | "persistedFilesChanged" | "latestTurnWithChanges" | "currentTurn" | "agentDisplayState"
   | "responseTextIsStreaming" | "persistedNarrativeByMessage" | "turnSummariesByMessageId"
-  | "turnEndingsByMessageId"> & {
+  | "turnDurationsByMessageId" | "turnEndingsByMessageId"> & {
   currentTurnLiveNarrative: SettledLiveNarrative | undefined;
 };
 
 const STABLE_TRANSCRIPT_KEYS = [
   "messages", "persistedFilesChanged", "latestTurnWithChanges", "currentTurn", "agentDisplayState",
-  "responseTextIsStreaming", "persistedNarrativeByMessage", "turnSummariesByMessageId", "turnEndingsByMessageId",
-  "currentTurnLiveNarrative",
+  "responseTextIsStreaming", "persistedNarrativeByMessage", "turnSummariesByMessageId", "turnDurationsByMessageId",
+  "turnEndingsByMessageId", "currentTurnLiveNarrative",
 ] as const satisfies readonly (keyof StableTranscriptInput)[];
 
 function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, current: StableTranscriptInput): boolean {
@@ -397,9 +401,10 @@ export function buildStableItems(
   responseTextIsStreaming?: boolean,
   currentTurnLiveNarrative?: SettledLiveNarrative,
   turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>,
+  turnDurationsByMessageId?: Readonly<Record<string, number | null>>,
 ): ChatVirtualItem[] {
   return messages.flatMap((message) => isRoutineProviderNotice(message) ? [] : stableItemsForMessage(message, {
-    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId,
+    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId, turnDurationsByMessageId,
   }));
 }
 
@@ -409,6 +414,7 @@ interface StableItemInput {
   currentTurn?: CurrentTurnResponseIdentity;
   persistedNarrativeByMessage?: PersistedNarrativeRecordsByMessage;
   turnSummariesByMessageId?: Record<string, TurnSummary>;
+  turnDurationsByMessageId?: Readonly<Record<string, number | null>>;
   currentAgentDisplayState?: AgentDisplayState;
   responseTextIsStreaming?: boolean;
   /** What the settled current turn's live state can put under its fold. */
@@ -443,9 +449,12 @@ function recordedTurnSummary(message: Message, input: StableItemInput): TurnSumm
   const canonical = input.turnSummariesByMessageId?.[message.id];
   if (canonical) return canonical;
   const records = input.persistedNarrativeByMessage?.[message.id];
-  return records
-    ? { counts: persistedTurnCounts(records), durationMs: persistedTurnDurationMs(records) }
-    : { counts: NO_COUNTS, durationMs: null };
+  // Records only span tools and thoughts, so they miss the time before the first tool and while the answer streams.
+  const serverDurationMs = input.turnDurationsByMessageId?.[message.id] ?? null;
+  return {
+    counts: records ? persistedTurnCounts(records) : NO_COUNTS,
+    durationMs: serverDurationMs ?? (records ? persistedTurnDurationMs(records) : null),
+  };
 }
 
 function settledTurnSummary(message: Message, input: StableItemInput): TurnSummary {
