@@ -4,6 +4,8 @@ import type { Thread } from "./models/thread.js";
 import type { Message } from "./models/message.js";
 import type { ThreadPullRequest } from "./models/thread-pull-request.js";
 
+const DEFAULT_TIMESTAMP = "2026-01-01T00:00:00.000Z";
+
 /** Build a linked PR with valid defaults for contract consumers' tests. */
 export function createMockThreadPullRequest(overrides: Partial<ThreadPullRequest> = {}): ThreadPullRequest {
   return { number: 42, state: "open", title: null, url: null, ...overrides };
@@ -33,8 +35,8 @@ export function createMockWorkspace(
     path: "/tmp/test-project",
     provider_config: {},
     is_git_repo: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: DEFAULT_TIMESTAMP,
+    updated_at: DEFAULT_TIMESTAMP,
     pinned: false,
     last_opened_at: null,
     sort_order: 0,
@@ -61,9 +63,9 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
     issue_number: null,
     pull_requests: [],
     sdk_session_id: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    last_activity_at: new Date().toISOString(),
+    created_at: DEFAULT_TIMESTAMP,
+    updated_at: DEFAULT_TIMESTAMP,
+    last_activity_at: DEFAULT_TIMESTAMP,
     model: null,
     provider: "claude",
     deleted_at: null,
@@ -106,7 +108,7 @@ export function createMockMessage(overrides?: Partial<Message>): Message {
     files_changed: null,
     cost_usd: null,
     tokens_used: null,
-    timestamp: new Date().toISOString(),
+    timestamp: DEFAULT_TIMESTAMP,
     sequence: 1,
     attachments: null,
     ...overrides,
