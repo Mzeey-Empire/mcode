@@ -318,12 +318,13 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     if (releasePaths?.length) void releaseBrowserCaptureSpills(releasePaths);
   },
 
-  suppressAutoDrain: (threadId, reason = "Queue paused") => {
+  suppressAutoDrain: (threadId, reason) => {
     set((state) => {
-      if (state.autoDrainSuppressedThreadIds.has(threadId) && state.autoDrainPauseReasons[threadId] === reason) return state;
+      const nextReason = reason ?? state.autoDrainPauseReasons[threadId];
+      if (state.autoDrainSuppressedThreadIds.has(threadId) && state.autoDrainPauseReasons[threadId] === nextReason) return state;
       return {
         autoDrainSuppressedThreadIds: new Set([...state.autoDrainSuppressedThreadIds, threadId]),
-        autoDrainPauseReasons: { ...state.autoDrainPauseReasons, [threadId]: reason },
+        autoDrainPauseReasons: { ...state.autoDrainPauseReasons, [threadId]: nextReason },
       };
     });
   },

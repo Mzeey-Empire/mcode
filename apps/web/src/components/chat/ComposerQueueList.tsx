@@ -62,7 +62,7 @@ export function ComposerQueueList({
     <>
       {held ? (
         <div className="flex items-center justify-between gap-2 text-caption text-muted">
-          <p><span>Paused</span> · <span>{pauseReason ?? "Queue paused"}</span></p>
+          <p><span>Paused</span>{pauseReason ? <> · <span>{pauseReason}</span></> : null}</p>
           <Button variant="ghost" aria-label="Resume queued messages" disabled={isPaused || route !== "send"} onClick={resume}>
             Resume
           </Button>
