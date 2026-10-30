@@ -10,7 +10,7 @@ import { useTaskStore, type TaskItem } from "@/stores/taskStore";
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import type { PlanVersion } from "@mcode/contracts/models/plan";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -257,6 +257,16 @@ describe("overview Changes, Tasks and Usage rows", () => {
     expect(panel.visible).toBe(true);
     expect(panel.activeTabId).toBe(rightPanelSingletonId("tasks"));
     expect(screen.queryByTestId("thread-overview-plan")).not.toBeInTheDocument();
+  });
+
+  it("renders a backticked plan title as inline code", () => {
+    usePlanStore.setState({ plansByThread: { [thread.id]: [{ ...planVersion(1), title: "Add `mod10`" }] } });
+    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+
+    const row = screen.getByTestId("thread-overview-plan");
+    expect(row).toHaveTextContent("Add mod10");
+    expect(within(row).getByText("mod10").tagName).toBe("CODE");
+    expect(row).toHaveAccessibleName("Open plan Add mod10, version 1");
   });
 
   it("shows the Implement turn's task progress on an accepted plan row", () => {
