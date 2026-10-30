@@ -93,8 +93,10 @@ interface QueueState {
   disposedQueuedMessages: Record<string, QueuedDispatchLease[]>;
   /** Incremented by Clear all or deletion so a failed lease cannot recreate a removed queue. */
   queueGenerations: Record<string, number>;
-  /** Threads whose queued messages require an explicit Continue before automatic drain resumes. */
+  /** Threads whose queued messages require an explicit Resume before automatic drain resumes. */
   autoDrainSuppressedThreadIds: Set<string>;
+  /** Short explanation shown beside Resume while automatic drain is paused. */
+  autoDrainPauseReasons: Record<string, string | undefined>;
   /** Toast text shown briefly after enqueue. Null when hidden. */
   toast: string | null;
   /**
@@ -118,9 +120,9 @@ interface QueueState {
   claimQueuedMessage: (threadId: string, messageId: string) => QueuedMessage | undefined;
   /** Commit an accepted queued send or restore a failed lease at its original FIFO position. */
   settleQueuedDispatch: (threadId: string, messageId: string, accepted: boolean) => void;
-  /** Block automatic drain until the user explicitly continues this thread. */
-  suppressAutoDrain: (threadId: string) => void;
-  /** Allow automatic drain after an explicit Continue. */
+  /** Block automatic drain until the user explicitly resumes this queue. */
+  suppressAutoDrain: (threadId: string, reason?: string) => void;
+  /** Allow automatic drain after an explicit Resume. */
   resumeAutoDrain: (threadId: string) => void;
   removeFromQueue: (threadId: string, messageId: string) => void;
   clearQueue: (threadId: string) => void;
@@ -220,6 +222,10 @@ function settleActiveQueuedMessage(
       inFlightQueuedMessages,
       queues: { ...state.queues, [threadId]: messages },
       autoDrainSuppressedThreadIds: new Set(state.autoDrainSuppressedThreadIds).add(threadId),
+      autoDrainPauseReasons: {
+        ...state.autoDrainPauseReasons,
+        [threadId]: state.autoDrainPauseReasons[threadId] ?? "Could not send",
+      },
     },
   };
 }
@@ -237,6 +243,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   disposedQueuedMessages: {},
   queueGenerations: {},
   autoDrainSuppressedThreadIds: new Set<string>(),
+  autoDrainPauseReasons: {},
   toast: null,
   editingThreadId: null,
 
@@ -311,10 +318,13 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     if (releasePaths?.length) void releaseBrowserCaptureSpills(releasePaths);
   },
 
-  suppressAutoDrain: (threadId) => {
+  suppressAutoDrain: (threadId, reason = "Queue paused") => {
     set((state) => {
-      if (state.autoDrainSuppressedThreadIds.has(threadId)) return state;
-      return { autoDrainSuppressedThreadIds: new Set([...state.autoDrainSuppressedThreadIds, threadId]) };
+      if (state.autoDrainSuppressedThreadIds.has(threadId) && state.autoDrainPauseReasons[threadId] === reason) return state;
+      return {
+        autoDrainSuppressedThreadIds: new Set([...state.autoDrainSuppressedThreadIds, threadId]),
+        autoDrainPauseReasons: { ...state.autoDrainPauseReasons, [threadId]: reason },
+      };
     });
   },
 
@@ -323,7 +333,9 @@ export const useQueueStore = create<QueueState>((set, get) => ({
       if (!state.autoDrainSuppressedThreadIds.has(threadId)) return state;
       const autoDrainSuppressedThreadIds = new Set(state.autoDrainSuppressedThreadIds);
       autoDrainSuppressedThreadIds.delete(threadId);
-      return { autoDrainSuppressedThreadIds };
+      const autoDrainPauseReasons = { ...state.autoDrainPauseReasons };
+      delete autoDrainPauseReasons[threadId];
+      return { autoDrainSuppressedThreadIds, autoDrainPauseReasons };
     });
   },
 
@@ -363,12 +375,15 @@ export const useQueueStore = create<QueueState>((set, get) => ({
       };
       const autoDrainSuppressedThreadIds = new Set(state.autoDrainSuppressedThreadIds);
       autoDrainSuppressedThreadIds.delete(threadId);
+      const autoDrainPauseReasons = { ...state.autoDrainPauseReasons };
+      delete autoDrainPauseReasons[threadId];
       return {
         queues: next,
         inFlightQueuedMessages,
         disposedQueuedMessages,
         queueGenerations,
         autoDrainSuppressedThreadIds,
+        autoDrainPauseReasons,
       };
     });
   },

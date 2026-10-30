@@ -6,13 +6,12 @@ import {
   releaseHeldSteer,
   sendHeldSteerAgain,
 } from "@/features/conversation/composer/queue/queued-steer";
-import { useSendNowRoute } from "@/features/conversation/composer/queue/useQueuedMessageDispatch";
+import { useQueuedMessageDispatch, useSendNowRoute } from "@/features/conversation/composer/queue/useQueuedMessageDispatch";
 import { supportsTurnSteer } from "@/features/conversation/composer/composer-capabilities";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import { SentBrowserNotesTile } from "@/features/preview/notes/SentBrowserNotesTile";
 import { isDeliveryUnknown, useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
-import { useThreadStore } from "@/stores/threadStore";
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
 
@@ -45,7 +44,8 @@ export function ComposerQueueList({
     providerId.success && supportsTurnSteer(s.getAvailability(providerId.data)?.capabilities ?? []));
   const route = useSendNowRoute(threadId);
   const held = useQueueStore((s) => s.autoDrainSuppressedThreadIds.has(threadId));
-  const idle = useThreadStore((s) => !s.runningThreadIds.has(threadId));
+  const pauseReason = useQueueStore((s) => s.autoDrainPauseReasons[threadId]);
+  const { resume } = useQueuedMessageDispatch(threadId);
   if (queue.length === 0) return null;
 
   const canSendNow = (message: QueuedMessage) => !isPaused
@@ -60,7 +60,14 @@ export function ComposerQueueList({
 
   return (
     <>
-      {held && idle ? <p className="text-caption text-muted">Paused</p> : null}
+      {held ? (
+        <div className="flex items-center justify-between gap-2 text-caption text-muted">
+          <p><span>Paused</span> · <span>{pauseReason ?? "Queue paused"}</span></p>
+          <Button variant="ghost" aria-label="Resume queued messages" disabled={isPaused || route !== "send"} onClick={resume}>
+            Resume
+          </Button>
+        </div>
+      ) : null}
       <ul aria-label="Queued messages" className="m-0 list-none p-0">
         {queue.map((message, index) => (
           <li key={message.id} className="flex h-10 items-center gap-2">

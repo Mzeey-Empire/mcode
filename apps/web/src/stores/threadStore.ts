@@ -781,6 +781,18 @@ function canAutoDrainQueuedMessage(threadId: string): boolean {
     && !hasPendingPlanQuestions(threadId);
 }
 
+function pauseRejectedQueuedSend(threadId: string, error: unknown): void {
+  if (!useQueueStore.getState().inFlightQueuedMessages[threadId]) return;
+  const reason = turnAdmissionFailureReason(error);
+  const pauseReasons = {
+    busy: "Thread busy",
+    pending_mutation: "Update in progress",
+    stopped: "Turn stopped",
+    unavailable: "Provider unavailable",
+  };
+  useQueueStore.getState().suppressAutoDrain(threadId, reason ? pauseReasons[reason] : "Could not send");
+}
+
 /**
  * Sends a claimed queue item and settles its lease. A resend reuses the replacement id the
  * server issued, so admission can claim the held steer it replaces. An entry holding draft
@@ -817,7 +829,8 @@ export async function sendQueuedMessage(threadId: string, message: QueuedMessage
     );
     if (sent) admitQueuedDraftHold(message.id);
     useQueueStore.getState().settleQueuedDispatch(threadId, message.id, sent);
-  } catch {
+  } catch (error) {
+    pauseRejectedQueuedSend(threadId, error);
     useQueueStore.getState().settleQueuedDispatch(threadId, message.id, false);
   }
 }
@@ -2700,7 +2713,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const releaseProviderLostRuntime = (threadId: string): void => {
     // The phase goes idle with the ending still unknown, so hold the queue explicitly rather than drain on a guess.
     clearDequeueTimer(threadId);
-    useQueueStore.getState().suppressAutoDrain(threadId);
+    useQueueStore.getState().suppressAutoDrain(threadId, "Provider disconnected");
     clearStreamingTextUsage(threadId);
     patchRec(threadId, {
       agentStartTime: undefined,
@@ -2737,13 +2750,15 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     event: Extract<AgentEvent, { type: "turnComplete" | "ended" }>,
     runtime: { incomingExecutionId: string | undefined; runtimeRecord: ThreadRecord },
   ): Message | null => {
+    if (event.type !== "turnComplete") return null;
     const guardrail = guardrailMessageFor(event);
     if (!guardrail) return null;
     if (runtime.incomingExecutionId && runtime.runtimeRecord.turnExecutionId !== runtime.incomingExecutionId) {
       return guardrail;
     }
     clearDequeueTimer(event.threadId);
-    useQueueStore.getState().suppressAutoDrain(event.threadId);
+    const pauseReason = TERMINAL_STOP_REASON_MESSAGES[event.reason]?.split(".")[0];
+    useQueueStore.getState().suppressAutoDrain(event.threadId, pauseReason);
     return guardrail;
   };
 
@@ -3157,6 +3172,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       throw new TurnAdmissionError("busy", `Thread ${threadId} already has an active agent session`);
     }
     if (!isControlCommand) {
+      const queue = useQueueStore.getState();
+      if (!queue.queues[threadId]?.length && !queue.inFlightQueuedMessages[threadId] && queue.editingThreadId !== threadId) {
+        queue.resumeAutoDrain(threadId);
+      }
       invalidateDeferredNarrativeEvents(threadId);
       useTaskStore.getState().prepareTaskBubbleForNewTurn(threadId);
     }
@@ -3300,6 +3319,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       set((state) => ({ runningThreadIds: new Set([...state.runningThreadIds, threadId]) }));
     }
     if (invalidateFailedPrompt) invalidateDeferredNarrativeEvents(threadId);
+    pauseRejectedQueuedSend(threadId, error);
     return false;
   };
 
@@ -3816,7 +3836,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   /** Request exact active turn stop and apply authoritative runtime result. */
   stopAgent: async (threadId) => {
     clearDequeueTimer(threadId);
-    useQueueStore.getState().suppressAutoDrain(threadId);
+    useQueueStore.getState().suppressAutoDrain(threadId, "Stopped by you");
     set((state) => ({
       pendingStopCounts: {
         ...state.pendingStopCounts,
@@ -4560,7 +4580,11 @@ useThreadStore.subscribe((state, previous) => {
     const wasEnded = before !== undefined && endedWithoutCompleting(getThreadRuntimePhase(threadId, before));
     if (ended && !wasEnded) {
       clearDequeueTimer(threadId);
-      useQueueStore.getState().suppressAutoDrain(threadId);
+      const queue = useQueueStore.getState();
+      if (!queue.autoDrainSuppressedThreadIds.has(threadId)) {
+        const phase = getThreadRuntimePhase(threadId, record);
+        queue.suppressAutoDrain(threadId, phase === "errored" ? "Turn failed" : "Turn interrupted");
+      }
     }
   }
 });

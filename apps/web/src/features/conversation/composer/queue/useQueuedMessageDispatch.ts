@@ -3,7 +3,7 @@ import type { QueuedMessage } from "@/stores/queueStore";
 import { useQueueStore } from "@/stores/queueStore";
 import { getThreadRuntimePhase } from "@/stores/thread-lifecycle";
 import { getThreadRecord } from "@/stores/thread-record";
-import { isThreadExecuting, sendQueuedMessage, useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting, scheduleDrainAfterEdit, sendQueuedMessage, useThreadStore } from "@/stores/threadStore";
 import { steerQueuedMessage } from "./queued-steer";
 
 /** What Send now does for a thread at this moment: send at once, steer the running turn, or nothing. */
@@ -35,10 +35,18 @@ export function useSendNowRoute(threadId: string): SendNowRoute["kind"] {
   return useThreadStore((state) => sendNowRoute(threadId, state, leased).kind);
 }
 
-/** Sends a queued message now: at once when idle, by steering into the turn while one runs. */
+/** Sends a queued message explicitly or resumes automatic FIFO drain when idle. */
 export function useQueuedMessageDispatch(threadId: string | undefined): {
   sendNow(message: QueuedMessage): Promise<void>;
+  resume(): void;
 } {
+  const resume = useCallback(() => {
+    if (!threadId) return;
+    const queue = useQueueStore.getState();
+    if (sendNowRoute(threadId, useThreadStore.getState(), Boolean(queue.inFlightQueuedMessages[threadId])).kind !== "send") return;
+    queue.resumeAutoDrain(threadId);
+    scheduleDrainAfterEdit(threadId);
+  }, [threadId]);
   const sendNow = useCallback(
     async (message: QueuedMessage): Promise<void> => {
       if (!threadId) return;
@@ -61,5 +69,5 @@ export function useQueuedMessageDispatch(threadId: string | undefined): {
     [threadId],
   );
 
-  return { sendNow };
+  return { sendNow, resume };
 }
