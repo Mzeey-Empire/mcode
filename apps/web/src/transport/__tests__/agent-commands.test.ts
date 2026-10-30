@@ -256,6 +256,102 @@ describe("agent command transport", () => {
     transport.close();
   });
 
+  it.each([true, false])("confirms a timed-out send by its exact message id, admitted=%s", async (admitted) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const transport = createWsTransport("ws://localhost:1234");
+    mockWs.simulateOpen();
+    const messageId = "00000000-0000-4000-8000-000000000078";
+    const pending = transport.sendMessage({ threadId: "thread-1", messageId, content: "Send once" });
+    const outcome = pending.then(() => "sent", (error: unknown) => error);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    const confirmation = mockWs.sent.map(parseRequest).find((request) => request.method === "agent.confirmMessage");
+    expect(confirmation?.params).toEqual({ threadId: "thread-1", messageId });
+    if (!confirmation) throw new Error("missing message confirmation");
+    mockWs.respond(confirmation.id, { admitted });
+
+    if (admitted) expect(await outcome).toBe("sent");
+    else expect(await outcome).toMatchObject({ name: "RpcTimeoutError", method: "agent.send" });
+    expect(mockWs.sent.map(parseRequest).filter((request) => request.method === "agent.send")).toHaveLength(1);
+    transport.close();
+  });
+
+  it("confirms a send after reconnect instead of resending an admitted message", async () => {
+    fakeReconnectTimers();
+    const transport = createWsTransport("ws://localhost:1234");
+    mockWs.simulateOpen();
+    const messageId = "00000000-0000-4000-8000-000000000079";
+    const pending = transport.sendMessage({ threadId: "thread-1", messageId, content: "Send once" });
+    const outcome = pending.then(() => "sent", (error: unknown) => error);
+    await vi.waitFor(() => expect(mockWs.sent.map(parseRequest).some((request) => request.method === "agent.send")).toBe(true));
+    const firstSocket = mockWs;
+
+    firstSocket.close();
+    await elapseReconnectDelay();
+    mockWs.simulateOpen();
+    await vi.waitFor(() => expect(mockWs.sent.map(parseRequest).some((request) => request.method === "agent.confirmMessage")).toBe(true));
+    const confirmation = mockWs.sent.map(parseRequest).find((request) => request.method === "agent.confirmMessage");
+    expect(confirmation?.params).toEqual({ threadId: "thread-1", messageId });
+    if (!confirmation) throw new Error("missing message confirmation");
+    mockWs.respond(confirmation.id, { admitted: true });
+
+    expect(await outcome).toBe("sent");
+    expect([...firstSocket.sent, ...mockWs.sent].map(parseRequest).filter((request) => request.method === "agent.send")).toHaveLength(1);
+    transport.close();
+  });
+
+  it("preserves an explicit send refusal without asking whether it was admitted", async () => {
+    const transport = createWsTransport("ws://localhost:1234");
+    mockWs.simulateOpen();
+    const pending = transport.sendMessage({
+      threadId: "thread-1", messageId: "00000000-0000-4000-8000-000000000080", content: "Rejected prompt",
+    });
+    const outcome = expect(pending).rejects.toMatchObject({
+      name: "RpcError", code: "TURN_ADMISSION_REJECTED", data: { reason: "busy" },
+    });
+    await vi.waitFor(() => expect(mockWs.sent.map(parseRequest).some((request) => request.method === "agent.send")).toBe(true));
+    const request = mockWs.sent.map(parseRequest).find((candidate) => candidate.method === "agent.send");
+    if (!request) throw new Error("missing send request");
+    mockWs.onmessage?.({ data: JSON.stringify({
+      id: request.id, error: { code: "TURN_ADMISSION_REJECTED", data: { reason: "busy" }, message: "Busy" },
+    }) });
+
+    await outcome;
+    expect(mockWs.sent.map(parseRequest).filter((candidate) => candidate.method === "agent.confirmMessage")).toHaveLength(0);
+    transport.close();
+  });
+
+  it("keeps the send failure when its admission cannot be confirmed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const transport = createWsTransport("ws://localhost:1234");
+    mockWs.simulateOpen();
+    const pending = transport.sendMessage({
+      threadId: "thread-1", messageId: "00000000-0000-4000-8000-000000000081", content: "Unconfirmed prompt",
+    });
+    const outcome = pending.then(() => "sent", (error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(20_000);
+    const confirmation = mockWs.sent.map(parseRequest).find((request) => request.method === "agent.confirmMessage");
+    if (!confirmation) throw new Error("missing message confirmation");
+    mockWs.onmessage?.({ data: JSON.stringify({ id: confirmation.id, error: { code: "INTERNAL_ERROR", message: "Unavailable" } }) });
+
+    expect(await outcome).toMatchObject({ name: "RpcTimeoutError", method: "agent.send" });
+    transport.close();
+  });
+
+  it.each([false, true])("rejects an intentional close without waiting for confirmation, connected=%s", async (connected) => {
+    vi.useFakeTimers();
+    const transport = createWsTransport("ws://localhost:1234");
+    if (connected) mockWs.simulateOpen();
+    const pending = transport.sendMessage({
+      threadId: "thread-1", messageId: "00000000-0000-4000-8000-000000000082", content: "Closing prompt",
+    });
+    const rejection = expect(pending).rejects.toBeInstanceOf(Error);
+    transport.close();
+
+    await rejection;
+    expect(mockWs.sent.map(parseRequest).filter((request) => request.method === "agent.confirmMessage")).toHaveLength(0);
+  });
+
   it("sends the typed new-thread command without changing its RPC fields", async () => {
     const transport = createWsTransport("ws://localhost:1234");
     mockWs.simulateOpen();

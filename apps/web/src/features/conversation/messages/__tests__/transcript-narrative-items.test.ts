@@ -1,6 +1,8 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import type { Message } from "@mcode/contracts/models/message";
+import type { ToolCall } from "@/transport/types";
+import type { ToolCallTransition } from "../useToolCallTransitions";
 import { expandTranscriptNarrative, expandTranscriptToolGroups } from "../transcript-narrative-items";
 import { createTranscriptItemProjector, type ChatVirtualItem, type PersistedNarrativeRecords, type TranscriptProjectionInput } from "../virtual-items";
 
@@ -36,6 +38,35 @@ describe("transcript narrative rows", () => {
       expect(rows.filter((row) => row.type === "tool-row")).toHaveLength(toolCalls.length);
       expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
     }
+  });
+
+  function readCall(id: string, isComplete: boolean): ToolCall {
+    return { id, toolName: "Read", toolInput: { file_path: `${id}.md` }, output: isComplete ? "text" : "", isError: false, isComplete, startedAt: 1200 };
+  }
+
+  function liveFlow(toolCalls: ToolCall[]): ChatVirtualItem {
+    return { type: "narrative-flow", key: "live", startTime: 1000, approvals: [], hooks: [], thoughtSegments: [], toolCalls, streamingText: "", isAgentRunning: true };
+  }
+
+  function exiting(call: ToolCall): ReadonlyMap<string, ToolCallTransition> {
+    return new Map([[call.id, { phase: "exiting", call: { ...call, isComplete: false }, expiresAt: Date.now() + 250 }]]);
+  }
+
+  it("swaps a finished call's running row for its completed row in place, without an exit collapse", () => {
+    const done = readCall("read-1", true);
+    const rows = expandTranscriptNarrative([liveFlow([done])], {}, new Set(), undefined, exiting(done));
+    const running = expandTranscriptNarrative([liveFlow([{ ...done, isComplete: false }])], {}, new Set());
+
+    expect(rows.map(rowLabel)).toEqual(["tool-group"]);
+    expect(rows.map((row) => row.type === "narrative-row" && row.key)).toEqual(running.map((row) => row.type === "narrative-row" && row.key));
+  });
+
+  it("keeps the exit collapse for a call that joins an earlier group", () => {
+    const done = readCall("read-2", true);
+    const rows = expandTranscriptNarrative([liveFlow([readCall("read-1", true), done])], {}, new Set(), undefined, exiting(done));
+
+    expect(rows.map(rowLabel)).toEqual(["tool-group", "active-tool"]);
+    expect(rows.at(-1)).toMatchObject({ transition: "exiting" });
   });
 
   it("keeps an open lone call in its own row instead of listing it as a child", () => {

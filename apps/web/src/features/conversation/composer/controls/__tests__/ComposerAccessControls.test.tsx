@@ -54,6 +54,15 @@ describe("ComposerAccessControls", () => {
     expect(screen.getByRole("menuitemradio", { name: "Don't ask" })).toHaveAttribute("aria-checked", "false");
   });
 
+  it("names the access mode in a tooltip, so the icon alone is labelled", async () => {
+    renderControls();
+    const user = userEvent.setup();
+
+    await user.hover(screen.getByRole("button", { name: /Access mode: Ask me/ }));
+
+    expect(await screen.findByText("Access mode: Ask me")).toBeInTheDocument();
+  });
+
   it("uses the shared permission picker for Copilot", async () => {
     const onSelectionChange = renderControls({
       selection: { ...selection, provider: "copilot" },

@@ -222,6 +222,7 @@ function makeThread(
     
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    last_activity_at: new Date().toISOString(),
     model: null,
     provider: "claude",
     user_completed_at: null,

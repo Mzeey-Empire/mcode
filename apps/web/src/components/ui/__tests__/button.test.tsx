@@ -103,4 +103,29 @@ describe("SplitButton", () => {
     expect(onAlternate).toHaveBeenCalledTimes(1);
     expect(onAction).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps the action's label uncovered while loading and spins in the chevron", async () => {
+    const onAction = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <SplitButton
+        variant="default"
+        loading
+        onClick={onAction}
+        menuLabel="More ways to implement"
+        menu={<DropdownMenuItem label="Implement v1 in a new thread" />}
+      >
+        Implement v1
+      </SplitButton>,
+    );
+
+    const action = screen.getByRole("button", { name: "Implement v1" });
+    await user.click(action);
+
+    expect(onAction).not.toHaveBeenCalled();
+    expect(action).toHaveAttribute("aria-busy", "true");
+    expect(action.querySelector('[aria-hidden="true"]')).toBeNull();
+    const chevron = screen.getByRole("button", { name: "More ways to implement" });
+    expect(chevron.querySelector('span[aria-hidden="true"]')).not.toBeNull();
+  });
 });

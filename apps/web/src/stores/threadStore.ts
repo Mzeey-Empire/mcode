@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
+import { toolCallResultStatus } from "@mcode/contracts/models/tool-call-record";
 import { TurnAdmissionError, turnAdmissionFailureReason } from "@mcode/shared/turn-admission";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { AgentModelState, AgentTurn, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
@@ -782,6 +783,18 @@ function canAutoDrainQueuedMessage(threadId: string): boolean {
     && !hasPendingPlanQuestions(threadId);
 }
 
+function pauseRejectedQueuedSend(threadId: string, error: unknown): void {
+  if (!useQueueStore.getState().inFlightQueuedMessages[threadId]) return;
+  const reason = turnAdmissionFailureReason(error);
+  const pauseReasons = {
+    busy: "Thread busy",
+    pending_mutation: "Update in progress",
+    stopped: "Turn stopped",
+    unavailable: "Provider unavailable",
+  };
+  useQueueStore.getState().suppressAutoDrain(threadId, reason ? pauseReasons[reason] : "Could not send");
+}
+
 /**
  * Sends a claimed queue item and settles its lease. A resend reuses the replacement id the
  * server issued, so admission can claim the held steer it replaces. An entry holding draft
@@ -818,7 +831,8 @@ export async function sendQueuedMessage(threadId: string, message: QueuedMessage
     );
     if (sent) admitQueuedDraftHold(message.id);
     useQueueStore.getState().settleQueuedDispatch(threadId, message.id, sent);
-  } catch {
+  } catch (error) {
+    pauseRejectedQueuedSend(threadId, error);
     useQueueStore.getState().settleQueuedDispatch(threadId, message.id, false);
   }
 }
@@ -868,6 +882,17 @@ function resetTurnEphemeral(_rec: ThreadRecord): Partial<ThreadRecord> {
 function succeedingTurnReset(record: ThreadRecord, executionId: string | undefined): Partial<ThreadRecord> {
   if (!executionId || record.turnExecutionId === null || record.turnExecutionId === executionId) return {};
   return { toolCalls: [], thoughtSegments: [], hooks: [], approvals: [], turnExecutionId: executionId };
+}
+
+/**
+ * A live turn the client did not start, such as Plan Implement, also needs its own response and
+ * clock. Otherwise the settled turn's answer stays the current response, so the new rows render
+ * above the new prompt and the timer counts from the settled turn's start.
+ */
+function succeedingTurnClaim(threadId: string, record: ThreadRecord, turn: AgentTurn | undefined): Partial<ThreadRecord> {
+  const reset = succeedingTurnReset(record, turn?.executionId);
+  if (reset.turnExecutionId === undefined || activeCanonicalExecutionId(turn) !== reset.turnExecutionId) return reset;
+  return { ...reset, currentTurnMessageId: "", currentTurnResponseKey: createTurnResponseKey(threadId), agentStartTime: Date.now() };
 }
 
 function shouldFlushCanonicalText(frame: CanonicalAgentProgressFrame, state: AgentModelState): boolean {
@@ -2071,6 +2096,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     projectTaskToolUse(event.threadId, event.toolCallId, toolName, mergedInput, getRec(event.threadId).toolCalls, parentToolCallId);
   };
 
+  const toolUseStatus = (event: Extract<AgentEvent, { type: "toolUse" }>): ToolCall["status"] => event.phase ?? event.status;
+
   const newToolCall = (
     event: Extract<AgentEvent, { type: "toolUse" }>,
     toolName: string,
@@ -2086,6 +2113,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       isError: false,
       isComplete: false,
       parentToolCallId: event.parentToolCallId || undefined,
+      status: toolUseStatus(event) ?? "running",
       startedAt: Date.now(),
       lastActivityAt: Date.now(),
     };
@@ -2106,6 +2134,13 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const toolName = event.toolName || "unknown";
     const toolInput = event.toolInput ?? {};
     const existing = getRec(event.threadId).toolCalls.find((toolCall) => toolCall.id === event.toolCallId);
+    const status = toolUseStatus(event);
+    if (existing && status && !existing.isComplete) {
+      patchRec(event.threadId, (record) => ({ toolCalls: record.toolCalls.map((call) => call.id === event.toolCallId
+        ? { ...call, status, ...(status === "running" && call.status !== "running" ? { startedAt: Date.now() } : {}) }
+        : call) }));
+      return;
+    }
     if (existing && shouldMergeToolUse(existing, toolName)) {
       mergeToolUse(event, existing, toolName, toolInput);
       return;
@@ -2184,9 +2219,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       output: event.output,
       isError: event.isError,
       isComplete: true,
+      status: event.denied ? "denied" : toolCallResultStatus(event),
       lastActivityAt: Date.now(),
       ...toolResultOptionalFields(event),
-      ...(durationMs != null ? { durationMs } : {}),
+      durationMs: event.denied ? undefined : durationMs,
     };
   };
 
@@ -2701,7 +2737,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const releaseProviderLostRuntime = (threadId: string): void => {
     // The phase goes idle with the ending still unknown, so hold the queue explicitly rather than drain on a guess.
     clearDequeueTimer(threadId);
-    useQueueStore.getState().suppressAutoDrain(threadId);
+    useQueueStore.getState().suppressAutoDrain(threadId, "Provider disconnected");
     clearStreamingTextUsage(threadId);
     patchRec(threadId, {
       agentStartTime: undefined,
@@ -2738,13 +2774,15 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     event: Extract<AgentEvent, { type: "turnComplete" | "ended" }>,
     runtime: { incomingExecutionId: string | undefined; runtimeRecord: ThreadRecord },
   ): Message | null => {
+    if (event.type !== "turnComplete") return null;
     const guardrail = guardrailMessageFor(event);
     if (!guardrail) return null;
     if (runtime.incomingExecutionId && runtime.runtimeRecord.turnExecutionId !== runtime.incomingExecutionId) {
       return guardrail;
     }
     clearDequeueTimer(event.threadId);
-    useQueueStore.getState().suppressAutoDrain(event.threadId);
+    const pauseReason = TERMINAL_STOP_REASON_MESSAGES[event.reason]?.split(".")[0];
+    useQueueStore.getState().suppressAutoDrain(event.threadId, pauseReason);
     return guardrail;
   };
 
@@ -3159,6 +3197,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       throw new TurnAdmissionError("busy", `Thread ${threadId} already has an active agent session`);
     }
     if (!isControlCommand) {
+      const queue = useQueueStore.getState();
+      if (!queue.queues[threadId]?.length && !queue.inFlightQueuedMessages[threadId] && queue.editingThreadId !== threadId) {
+        queue.resumeAutoDrain(threadId);
+      }
       invalidateDeferredNarrativeEvents(threadId);
       useTaskStore.getState().prepareTaskBubbleForNewTurn(threadId);
     }
@@ -3302,6 +3344,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       set((state) => ({ runningThreadIds: new Set([...state.runningThreadIds, threadId]) }));
     }
     if (invalidateFailedPrompt) invalidateDeferredNarrativeEvents(threadId);
+    pauseRejectedQueuedSend(threadId, error);
     return false;
   };
 
@@ -3320,7 +3363,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     let nextRecords = records;
     const patch: Partial<ThreadRecord> = {};
     if (record.runtimePhase !== phase) patch.runtimePhase = phase;
-    Object.assign(patch, succeedingTurnReset(record, turn?.executionId));
+    Object.assign(patch, succeedingTurnClaim(threadId, record, turn));
     // Stamp the execution identity on live claims so later reconciles and the
     // child lifecycle gate can keep correlating this turn to the record.
     const executionId = activeCanonicalExecutionId(turn);
@@ -3818,7 +3861,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   /** Request exact active turn stop and apply authoritative runtime result. */
   stopAgent: async (threadId) => {
     clearDequeueTimer(threadId);
-    useQueueStore.getState().suppressAutoDrain(threadId);
+    useQueueStore.getState().suppressAutoDrain(threadId, "Stopped by you");
     set((state) => ({
       pendingStopCounts: {
         ...state.pendingStopCounts,
@@ -4577,7 +4620,11 @@ useThreadStore.subscribe((state, previous) => {
     const wasEnded = before !== undefined && endedWithoutCompleting(getThreadRuntimePhase(threadId, before));
     if (ended && !wasEnded) {
       clearDequeueTimer(threadId);
-      useQueueStore.getState().suppressAutoDrain(threadId);
+      const queue = useQueueStore.getState();
+      if (!queue.autoDrainSuppressedThreadIds.has(threadId)) {
+        const phase = getThreadRuntimePhase(threadId, record);
+        queue.suppressAutoDrain(threadId, phase === "errored" ? "Turn failed" : "Turn interrupted");
+      }
     }
   }
 });

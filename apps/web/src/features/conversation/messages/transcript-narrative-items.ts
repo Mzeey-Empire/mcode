@@ -245,14 +245,30 @@ function persistedFoldRows(
   );
 }
 
+/**
+ * Calls that lead their completed group, which keys its row like the running row. That row takes the same slot,
+ * so collapsing the running row first would only shrink and regrow the line.
+ */
+function callsTakenOverInPlace(
+  item: NarrativeFlowVirtualItem,
+  transitions: ReadonlyMap<string, ToolCallTransition>,
+): ReadonlySet<string> {
+  const exiting = item.toolCalls.filter((call) => transitions.get(call.id)?.phase === "exiting");
+  if (exiting.length === 0) return new Set();
+  const settledLeads = new Set(buildNarrativeItems(item).items.flatMap((settled) =>
+    settled.type === "tool-group" && settled.group.calls[0] ? [settled.group.calls[0].id] : []));
+  return new Set(exiting.filter((call) => settledLeads.has(call.id)).map((call) => call.id));
+}
+
 function liveNarrativeRows(
   item: NarrativeFlowVirtualItem,
   prefix: string,
   transitions: ReadonlyMap<string, ToolCallTransition>,
 ): TranscriptNarrativeItem[] {
+  const takenOver = callsTakenOverInPlace(item, transitions);
   const toolCalls = item.toolCalls.map((call) => {
     const transition = transitions.get(call.id);
-    return transition?.phase === "exiting" ? transition.call : call;
+    return transition?.phase === "exiting" && !takenOver.has(call.id) ? transition.call : call;
   });
   const current = new Map(item.toolCalls.map((call) => [call.id, call]));
   const rows = narrativeRows(prefix, buildNarrativeItems({ ...item, toolCalls }).items);

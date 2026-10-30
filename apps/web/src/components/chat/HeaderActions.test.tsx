@@ -473,7 +473,8 @@ describe("HeaderActions - consolidated header", () => {
   it("renders the thread overview rows", () => {
     renderHeaderActions(makeThread({ worktree_path: "/repo/worktrees/feat-x" }));
     expect(screen.queryByText("Environment")).not.toBeInTheDocument();
-    expect(screen.getByTestId("workspace-menu-changes")).toHaveTextContent("Changes");
+    // A thread with no known changes shows no Changes row, not a loading bar that vanishes.
+    expect(screen.queryByTestId("workspace-menu-changes")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-change-summary")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-repository")).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-overview-local")).toHaveTextContent("Worktree");

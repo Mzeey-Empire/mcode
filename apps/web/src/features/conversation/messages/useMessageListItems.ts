@@ -34,6 +34,7 @@ type MessageListItemsInput = Pick<
   | "thoughtSegments"
   | "toolCalls"
   | "turnSummariesByMessageId"
+  | "turnDurationsByMessageId"
   | "turnEndingsByMessageId"
 > & {
   /** Groups and work folds open right now. Fold children mount without an entrance animation. */
@@ -118,6 +119,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
     thoughtSegments,
     toolCalls,
     turnSummariesByMessageId,
+    turnDurationsByMessageId,
     turnEndingsByMessageId,
   } = input;
   const currentTurn = useMemo(
@@ -148,6 +150,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       currentTurn,
       persistedNarrativeByMessage,
       turnSummariesByMessageId,
+      turnDurationsByMessageId,
       turnEndingsByMessageId,
       toolCalls,
       agentDisplayState,
@@ -182,6 +185,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       thoughtSegments,
       toolCalls,
       turnSummariesByMessageId,
+      turnDurationsByMessageId,
       turnEndingsByMessageId,
     ],
   );

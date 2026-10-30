@@ -26,6 +26,7 @@ import { threadAttentionStore } from "@/features/thread-attention/thread-attenti
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
 const EMPTY_FILES_CHANGED: Record<string, string[]> = {};
+const EMPTY_TURN_DURATIONS: Readonly<Record<string, number | null>> = {};
 
 function resolveDisplayedThreadId(displayThreadId: string | undefined, activeThreadId: string | null | undefined) {
   return displayThreadId ?? activeThreadId;
@@ -72,6 +73,26 @@ function resolveCanonicalActivity(
     thoughtSegments: preferCanonical(projection?.thoughtSegments, legacy.thoughtSegments),
     turnSummariesByMessageId: projection?.turnSummariesByMessageId,
   };
+}
+
+/**
+ * Prefers the server start of a canonical turn that is still running. The local start is the client's receive
+ * time, which restarts after a thread switch or reconnect and can carry over from an earlier turn.
+ */
+function resolveAgentStartTime(
+  projection: CanonicalMessageProjection | undefined,
+  ownsLifecycle: boolean,
+  legacyStartTime: number | undefined,
+): number | undefined {
+  if (ownsLifecycle) return projection?.agentStartTime;
+  const running = projection && isAgentDisplayActive(projection.agentDisplayState);
+  return (running ? projection.agentStartTime : undefined) ?? legacyStartTime;
+}
+
+function canonicalTurnDurations(projection: CanonicalMessageProjection | undefined): Readonly<Record<string, number | null>> {
+  if (!projection) return EMPTY_TURN_DURATIONS;
+  return Object.fromEntries(Object.entries(projection.turnSummariesByMessageId)
+    .map(([messageId, summary]) => [messageId, summary.durationMs]));
 }
 
 function resolveCanonicalTurnIdentity(
@@ -168,8 +189,10 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const canonicalContent = resolveCanonicalContent(canonicalLifecycleProjection, {
     messages: visibleLegacyMessages,
     agentDisplayState: legacyAgentDisplayState,
-    agentStartTime: canonicalLifecycleTurn ? canonicalProjection?.agentStartTime : legacyAgentStartTime,
+    agentStartTime: resolveAgentStartTime(canonicalProjection, canonicalLifecycleTurn !== undefined, legacyAgentStartTime),
   });
+  // The projection rebuilds on every canonical event; keep the map's identity so the stable transcript stays cached.
+  const turnDurationsByMessageId = useShallow(canonicalTurnDurations)(canonicalProjection);
   const canonicalActivity = resolveCanonicalActivity(canonicalLifecycleProjection, {
     toolCalls: legacyToolCalls ?? EMPTY_TOOL_CALLS,
     thoughtSegments: legacyThoughtSegments,
@@ -251,6 +274,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     assistantResponseKeys: canonicalTurnIdentity.assistantResponseKeys,
     currentTurnMessageIdByThread,
     turnSummariesByMessageId: canonicalActivity.turnSummariesByMessageId,
+    turnDurationsByMessageId,
     turnEndingsByMessageId: turnEndings.endingsByMessageId,
   };
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolCallRecordSchema, ToolCallStatusSchema } from "@mcode/contracts/models/tool-call-record";
+import { ToolCallRecordSchema, ToolCallStatusSchema, ToolCallPhaseSchema } from "@mcode/contracts/models/tool-call-record";
 import { databaseWriteOperation } from "../../../../runtime/persistence/sqlite/database-write-operation.js";
 import { narrativeWriteBatchLimitsSchema, narrativeWriteBatchResultSchema } from "../../conversation/narrative/persistence/narrative-write-batches.js";
 
@@ -11,7 +11,7 @@ export const createToolCallRecordInputSchema = z.object({
   subagentDurationMs: z.number().int().nonnegative().optional(), model: z.string().optional(), reasoningEffort: z.string().optional(),
   inputSummary: z.string(), outputSummary: z.string(), outputTruncated: z.boolean().optional(),
   outputTotalBytes: z.number().int().nonnegative().optional(), outputArtifactPath: z.string().optional(), exitCode: z.number().int().optional(),
-  status: ToolCallStatusSchema, background: z.boolean().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(),
+  status: ToolCallStatusSchema, phase: ToolCallPhaseSchema.optional(), background: z.boolean().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(),
   sortOrder: z.number().int(), parentToolCallId: z.string().optional(),
 }).strict();
 

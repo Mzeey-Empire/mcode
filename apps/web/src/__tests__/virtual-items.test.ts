@@ -1,4 +1,5 @@
 import { createMockMessage } from "@mcode/contracts/testing";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts/models/plan-questions";
 import { describe, it, expect } from "vitest";
 import {
   buildStableItems,
@@ -17,6 +18,13 @@ import type { Message, ToolCall, HookExecution, ToolCallRecord, HookExecutionRec
 
 const STREAMING_AGENT = { phase: "streaming" } as const;
 const COMPLETED_AGENT = { phase: "completed" } as const;
+
+it("omits the hidden planning answer payload without dropping its attached files", () => {
+  const answer = makeMessage({ role: "user", content: `${PLAN_ANSWER_MESSAGE_PREFIX}\n- Named export` });
+  expect(buildStableItems([answer])).toEqual([]);
+  const attached = { ...answer, attachments: [{ id: "file-1", name: "requirements.txt", mimeType: "text/plain", sizeBytes: 8 }] };
+  expect(buildStableItems([attached]).map((item) => item.type)).toEqual(["message"]);
+});
 
 it("opens text only for the current active response and keeps historical messages settled", () => {
   const historical = makeMessage({ id: "old" });
@@ -434,6 +442,15 @@ describe("final response item keys", () => {
 });
 
 describe("buildVolatileItems", () => {
+  it("removes the settled status row after its exit even when the plan turn used tools", () => {
+    const tools = [makeToolCall({ isComplete: true })];
+    const exiting = buildVolatileItems(tools, COMPLETED_AGENT, 1000, "", [], [], undefined, undefined, false,
+      { stopPending: false, compacting: false, exiting: "turn" });
+    expect(exiting.filter((item) => item.type === "narrative-indicator")).toHaveLength(1);
+    const settled = buildVolatileItems(tools, COMPLETED_AGENT, 1000, "");
+    expect(settled.filter((item) => item.type === "narrative-indicator")).toEqual([]);
+  });
+
   it("returns narrative-flow item when agent is running with tool calls", () => {
     const toolCalls = [makeToolCall({ id: "t1" })];
     const items = buildVolatileItems(toolCalls, STREAMING_AGENT, 1000, undefined);
@@ -670,13 +687,11 @@ describe("buildVirtualItems (combined)", () => {
       makeMessage({ id: "msg-2", sequence: 2, role: "assistant", content: "thinking" }),
     ];
     const toolCalls = [makeToolCall({ id: "tc-1" })];
-    const result = buildAll(messages, toolCalls, undefined, COMPLETED_AGENT, undefined, "msg-2");
+    const result = buildAll(messages, toolCalls, undefined, STREAMING_AGENT, undefined, "msg-2");
 
     const types = result.map((item) => item.type);
     // Persisted chrome is absent until records load and contain visible rows.
-    // The narrative-indicator lingers after the turn (isAgentRunning=false,
-    // tool calls still volatile) so it can play its exit transition, and sits
-    // right after the bubble.
+    // The running status sits directly after the response.
     expect(types).toEqual([
       "message",
       "narrative-flow",
@@ -686,7 +701,7 @@ describe("buildVirtualItems (combined)", () => {
     expect(result[0]).toMatchObject({ type: "message", key: "msg-1" });
     expect(result[1]).toMatchObject({ type: "narrative-flow" });
     expect(result[2]).toMatchObject({ type: "message", key: "msg-2" });
-    expect(result[3]).toMatchObject({ type: "narrative-indicator", isAgentRunning: false });
+    expect(result[3]).toMatchObject({ type: "narrative-indicator", isAgentRunning: true });
   });
 
   it.each(["Earlier narration", "Answer"])("places partial final text in the response beside closed owned commentary %j", (commentary) => {
@@ -898,13 +913,10 @@ describe("buildVirtualItems (combined)", () => {
     expect(result.some((i) => i.type === "narrative-indicator")).toBe(false);
   });
 
-  it("keeps the narrative-indicator (isAgentRunning=false) while tool calls are still volatile", () => {
-    // Regression for issue #695: removing the indicator item at turnComplete
-    // made it vanish in a single frame. It now stays emitted through the
-    // turn's volatile tail so NarrativeIndicator can animate out; the
-    // component renders null once the exit completes.
+  it("keeps the narrative-indicator through the turn's exit transition", () => {
     const toolCalls = [makeToolCall({ id: "tc-1", isComplete: true })];
-    const items = buildVolatileItems(toolCalls, COMPLETED_AGENT, 1000, undefined);
+    const items = buildVolatileItems(toolCalls, COMPLETED_AGENT, 1000, undefined, undefined, undefined,
+      undefined, undefined, undefined, { stopPending: false, compacting: false, exiting: "turn" });
     const indicator = items.find((i) => i.type === "narrative-indicator") as
       | (ChatVirtualItem & { type: "narrative-indicator" })
       | undefined;
@@ -962,7 +974,7 @@ describe("buildVirtualItems (combined)", () => {
       makeMessage({ id: "msg-2", sequence: 2, role: "user", content: "next prompt" }),
     ];
     const toolCalls = [makeToolCall({ id: "tc-1" })];
-    const result = buildAll(messages, toolCalls, undefined, COMPLETED_AGENT, undefined);
+    const result = buildAll(messages, toolCalls, undefined, STREAMING_AGENT, undefined);
 
     // Persisted chrome is absent until loaded records contain visible rows.
     // The live narrative is appended at the tail because the trailing message
