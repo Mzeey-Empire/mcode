@@ -140,16 +140,3 @@ export const useToastStore = create<ToastState>((set, get) => ({
     runLifetime(id, lifetime, get().dismiss);
   },
 }));
-
-/** Where the toast lane must start so it clears chrome pinned under the conversation header. */
-interface ToastLaneClearanceState {
-  /** Viewport y of the lowest pinned chrome edge, or null when nothing is pinned. */
-  readonly bottomPx: number | null;
-  setBottom: (bottomPx: number | null) => void;
-}
-
-/** The pinned prompt reports its bottom edge here so toasts never cover it. */
-export const useToastLaneClearance = create<ToastLaneClearanceState>((set) => ({
-  bottomPx: null,
-  setBottom: (bottomPx) => set((state) => (state.bottomPx === bottomPx ? state : { bottomPx })),
-}));

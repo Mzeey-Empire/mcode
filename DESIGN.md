@@ -1235,17 +1235,16 @@ Toasts report events about something the user cannot see right now. Never
 show a toast for the thread on screen.
 
 - **Lane:** top center of the conversation column, 8px under the 48px header,
-  centered on the column, not the window. While the pinned prompt shows, the
-  lane starts below it so a toast never covers it.
+  centered on the column, not the window.
 - **Shape:** `34rem` wide, `selected` fill, `dialog` radius, no border, the
   `floating` shadow, 12px top and bottom, 16px left, 10px right.
 - **Anatomy:** a status mark, the title in Label (fading when long), a caption
   meta line (`Finished · 14:32`), and a 24px round close with a 14px glyph.
   The whole toast is the button that opens its object; there is no separate
   View button. Hover lifts the fill to `border`.
-- **Lifetime:** finished and failed events hide after 8 seconds, paused while
-  hovered. Needs-you events stay until opened or closed. At most three stack,
-  newest on top.
+- **Lifetime:** a finished event hides after 8 seconds, paused while hovered.
+  Needs-you and failed events stay until opened or closed. At most three
+  stack, newest on top.
 - **Motion:** see Motion and Time.
 
 ### Settings and Utility Pages

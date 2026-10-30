@@ -8,7 +8,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useToastLaneClearance } from "@/stores/toastStore";
 
 /**
  * Approximate collapsed bar height (outer chrome, two-line preview, and footer
@@ -41,7 +40,6 @@ export function StickyUserMessage({
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const textRef = useRef<HTMLParagraphElement>(null);
-  const barRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!visible) {
@@ -61,20 +59,6 @@ export function StickyUserMessage({
     return () => observer.disconnect();
   }, [visible, expanded, preview]);
 
-  useLayoutEffect(() => {
-    const bar = barRef.current;
-    if (!visible || !bar) return;
-    const { setBottom } = useToastLaneClearance.getState();
-    const report = () => setBottom(bar.getBoundingClientRect().bottom);
-    report();
-    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(report);
-    observer?.observe(bar);
-    return () => {
-      observer?.disconnect();
-      setBottom(null);
-    };
-  }, [visible]);
-
   const clamped = !expanded && overflows;
   const canToggle = overflows || expanded;
 
@@ -83,10 +67,8 @@ export function StickyUserMessage({
   }
 
   return (
-    // The bar is opaque so rows scrolling under it, and the gaps around its card, stay hidden.
     <div
-      ref={barRef}
-      className="pointer-events-none absolute inset-x-0 top-0 z-(--layer-sticky) bg-background px-4 pb-2 pt-1 sm:px-[var(--chat-gutter,--spacing(8))]"
+      className="pointer-events-none absolute inset-x-0 top-0 z-(--layer-sticky) px-4 pb-2 pt-1 sm:px-[var(--chat-gutter,--spacing(8))]"
       data-testid="sticky-user-message"
     >
       <div className="w-full" style={{ paddingRight: contentPaddingRight }}>

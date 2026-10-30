@@ -2,7 +2,6 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TOAST_LIFETIME_MS, useToastStore, type ToastInput } from "@/stores/toastStore";
-import { StickyUserMessage } from "@/components/chat/StickyUserMessage";
 import { ToastLane } from "../toast";
 
 const store = () => useToastStore.getState();
@@ -316,27 +315,5 @@ describe("ToastLane", () => {
     act(() => void vi.advanceTimersByTime(200));
 
     expect(store().toasts).toHaveLength(1);
-  });
-
-  it("starts the lane below the pinned prompt while it shows and under the header once it hides", () => {
-    const pinnedBottom = 138;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      return this.dataset.testid === "sticky-user-message"
-        ? new DOMRect(0, 48, 800, pinnedBottom - 48)
-        : new DOMRect(0, 0, 0, 0);
-    });
-    const renderPinned = (visible: boolean) => (
-      <>
-        <StickyUserMessage preview="Write an essay" visible={visible} onJumpToMessage={vi.fn()} />
-        <ToastLane anchor={null} fallbackRef={{ current: null }} reserveOverview={false} />
-      </>
-    );
-    const { rerender } = render(renderPinned(true));
-    show({ kind: "failed", title: "Could not send message" });
-
-    expect(Number.parseFloat(lane().style.top)).toBeGreaterThanOrEqual(pinnedBottom);
-
-    rerender(renderPinned(false));
-    expect(Number.parseFloat(lane().style.top)).toBe(56);
   });
 });
