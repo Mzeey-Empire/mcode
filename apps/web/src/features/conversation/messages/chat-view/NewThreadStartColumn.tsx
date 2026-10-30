@@ -74,7 +74,8 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewT
   );
 }
 
-function NewThreadOverview({ scope, overview }: { scope: OverviewScope; overview: OverviewPresentationState }) {
+/** The new-thread Overview mount; the preparing thread surface keeps it until the durable thread has its own. */
+export function NewThreadOverview({ scope, overview }: { scope: OverviewScope; overview: OverviewPresentationState }) {
   const { workspaceId } = scope;
   const subject = useMemo<OverviewSubject>(() => ({ kind: "new-thread", workspaceId }), [workspaceId]);
   return (

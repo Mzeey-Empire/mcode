@@ -412,6 +412,22 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByTestId("chat-composer-stage")).toHaveStyle({ paddingRight: "328px" });
   });
 
+  it("keeps the Overview docked and the composer beside it while a thread is preparing", () => {
+    const realRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === "thread-preparing-shell" ? new DOMRect(0, 0, 1400, 900) : realRect.call(this);
+    });
+    onTestFinished(() => { vi.restoreAllMocks(); });
+    const preparing = { ...makeThread(), clientPreparing: true };
+    setupWorkspaceMock(defaultWorkspaceState({ threads: [preparing] }));
+
+    render(<ChatView />);
+
+    const shell = screen.getByTestId("thread-preparing-shell");
+    expect(within(shell).getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "docked");
+    expect(within(shell).getByTestId("chat-composer-stage")).toHaveStyle({ paddingRight: "328px" });
+  });
+
   it("keeps an empty selected thread free of starter suggestions", () => {
     render(<ChatView />);
 
