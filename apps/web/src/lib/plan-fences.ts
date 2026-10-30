@@ -1,5 +1,16 @@
 // The @mcode/shared barrel loads winston, which blanks the renderer; import the browser-safe subpath.
 import { isPlanFenceOpener } from "@mcode/shared/plan-fence";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts/models/plan-questions";
+import type { Message } from "@/transport/types";
+import { stripInjectedFiles } from "./file-tags";
+
+/** Planning answers are represented by the answered-question receipt unless they carry attachments. */
+export function isHiddenPlanAnswer(message: Message): boolean {
+  return message.role === "user"
+    && !message.attachments?.length
+    && !message.previewAnnotations?.annotations.length
+    && stripInjectedFiles(message.content).startsWith(PLAN_ANSWER_MESSAGE_PREFIX);
+}
 
 /** Protocol fences rendered outside the transcript, including historic stored plans. */
 export const HIDDEN_PLAN_FENCE_INFO = ["plan-questions", "mcode-plan", "plan-output"];
