@@ -4,6 +4,7 @@ import { useQueueStore } from "@/stores/queueStore";
 import { getThreadRuntimePhase } from "@/stores/thread-lifecycle";
 import { getThreadRecord } from "@/stores/thread-record";
 import { isThreadExecuting, sendQueuedMessage, useThreadStore } from "@/stores/threadStore";
+import { requestTranscriptFollow } from "@/features/conversation/messages/transcript-follow-request";
 import { steerQueuedMessage } from "./queued-steer";
 
 /** What Send now does for a thread at this moment: send at once, steer the running turn, or nothing. */
@@ -44,13 +45,15 @@ export function useQueuedMessageDispatch(threadId: string | undefined): {
       if (!threadId) return;
       const leased = Boolean(useQueueStore.getState().inFlightQueuedMessages[threadId]);
       const route = sendNowRoute(threadId, useThreadStore.getState(), leased);
+      if (route.kind === "none") return;
+      // Send now is an explicit Send, unlike the automatic drain, so it brings the reader to the prompt.
+      requestTranscriptFollow(threadId);
       if (route.kind === "steer") {
         // Steering is an explicit send too, so the rest of the queue follows once this turn completes.
         useQueueStore.getState().resumeAutoDrain(threadId);
         await steerQueuedMessage(threadId, message.id, route.turnExecutionId);
         return;
       }
-      if (route.kind === "none") return;
       const queueState = useQueueStore.getState();
       const queued = queueState.claimQueuedMessage(threadId, message.id);
       if (!queued) return;
