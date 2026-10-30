@@ -83,17 +83,11 @@ describe("projectCanonicalMessageList", () => {
     }
     state.items.older!.turnId = "older-turn";
     state.items["other-thread"]!.threadId = "other-thread";
-    for (const [id, isFinal] of [["thought", 0], ["final-text", 1]] as const) {
-      state.items[id] = item(id, "reasoning", { projection: "narrationSegment", record: {
-        id, message_id: answer.id, text: isFinal ? answer.content : "Checking the fixture",
-        started_at: STARTED_AT, ended_at: STARTED_AT, sort_order: 0, is_final_response: isFinal,
-      } }, STARTED_AT);
-    }
     const projection = projectCanonicalMessageList({
       threadId: THREAD_ID, state, messages: [answer], toolCalls: [], thoughtSegments: [],
     });
     expect(projection?.turnSummariesByMessageId.answer).toMatchObject({
-      counts: { steps: 2, subagents: 1, thoughts: 1 }, durationMs: 5_000,
+      counts: { steps: 2, subagents: 1 }, durationMs: 5_000,
     });
   });
 

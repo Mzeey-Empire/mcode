@@ -1,5 +1,4 @@
 import { ToolCallRecordSchema } from "@mcode/contracts/models/tool-call-record";
-import { ThoughtSegmentRecordSchema } from "@mcode/contracts/models/thought-segment";
 import { isTaskListToolName } from "@mcode/contracts/models/task-list-tools";
 import { type AgentItem, type AgentModelState, type AgentTurn } from "@mcode/contracts/compat/agent-model";
 import { type Message } from "@mcode/contracts/models/message";
@@ -27,6 +26,8 @@ export interface CanonicalMessageProjection {
   currentTurnResponseKey: string;
   assistantResponseKeys: Record<string, string>;
   turnSummariesByMessageId: Record<string, TurnSummary>;
+  /** Answers to provider wakes, including when the opening notice is outside loaded history. */
+  providerContinuationMessageIds: ReadonlySet<string>;
 }
 
 interface CanonicalProjectionInput {
@@ -129,9 +130,7 @@ function summaryToolCalls(items: readonly AgentItem[]): ToolCall[] {
 
 function canonicalTurnSummary(turn: AgentTurn, items: readonly AgentItem[]): TurnSummary {
   const topLevelTools = summaryToolCalls(items);
-  const reasoningItems = items.filter((item) => item.payload.projection === "codexChildReasoning"
-    || (item.payload.projection === "narrationSegment" && !ThoughtSegmentRecordSchema().parse(item.payload.record).is_final_response));
-  const isProviderContinuation = items.some((item) => canonicalMessage(item.payload)?.systemNotice?.kind === "provider-turn");
+  const reasoningItems = items.filter((item) => item.payload.projection === "codexChildReasoning");
   const activityItems = items.filter((item) =>
     item.payload.projection === "codexChildToolCall"
     || item.payload.projection === "codexChildToolResult"
@@ -146,7 +145,6 @@ function canonicalTurnSummary(turn: AgentTurn, items: readonly AgentItem[]): Tur
       subagents: topLevelTools.filter(isSubagentLaunchCall).length,
     },
     durationMs: canonicalTurnDuration(turn, activityItems),
-    ...(isProviderContinuation ? { isProviderContinuation: true } : {}),
     ...(outcome !== undefined && outcome !== "completed" ? { outcome } : {}),
     ...(outcomeExecutionId !== undefined ? { outcomeExecutionId } : {}),
     ...(turn.permissionMode !== "full" && { approvalReview: { mode: turn.approvalReviewMode, reason: turn.approvalReviewReason } }),
@@ -294,14 +292,19 @@ function projectedThoughtSegments(items: readonly AgentItem[], terminal: boolean
   return thoughts;
 }
 
-function turnSummaries(threadTurns: readonly AgentTurn[], threadItems: readonly AgentItem[]): Record<string, TurnSummary> {
+function settledTurnProjection(threadTurns: readonly AgentTurn[], threadItems: readonly AgentItem[]) {
   const summaries: Record<string, TurnSummary> = {};
+  const providerContinuationMessageIds = new Set<string>();
   for (const turn of threadTurns.filter(isTerminalTurn)) {
     const turnItems = threadItems.filter((item) => item.turnId === turn.id).sort(compareItems);
     const answer = latestAssistantMessage(turnItems);
-    if (answer) summaries[answer.id] = canonicalTurnSummary(turn, turnItems);
+    if (!answer) continue;
+    summaries[answer.id] = canonicalTurnSummary(turn, turnItems);
+    if (turnItems.some((item) => canonicalMessage(item.payload)?.systemNotice?.kind === "provider-turn")) {
+      providerContinuationMessageIds.add(answer.id);
+    }
   }
-  return summaries;
+  return { turnSummariesByMessageId: summaries, providerContinuationMessageIds };
 }
 
 /** Project the latest canonical child turn over hydrated conversation history. */
@@ -343,6 +346,6 @@ export function projectCanonicalMessageList({
     currentTurnMessageId: response.assistantMessage?.id ?? "",
     currentTurnResponseKey: responseKey,
     assistantResponseKeys: response.assistantMessage ? { [response.assistantMessage.id]: responseKey } : {},
-    turnSummariesByMessageId: turnSummaries(threadTurns, threadItems),
+    ...settledTurnProjection(threadTurns, threadItems),
   };
 }

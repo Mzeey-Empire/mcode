@@ -76,34 +76,17 @@ function timelineOrder(items: ReturnType<typeof useMessageListItems>["items"]) {
 afterEach(() => resetThreadStoreForTests());
 
 describe("one lifecycle for the current turn", () => {
-  it("uses the full canonical wall time for a parent turn", () => {
-    const record = createEmptyThreadRecord();
-    const saved = { ...answer("parent-answer", EXECUTION), outcome: "completed" as const };
-    record.messages = [saved];
-    record.canonicalAgent.state.turns["canonical-turn"] = {
-      ...canonicalTurn("Completed", { kind: "user" }), executionId: EXECUTION,
-      endedAt: "2026-01-01T00:01:00Z", updatedAt: "2026-01-01T00:01:00Z",
-    };
-    record.canonicalAgent.state.items[saved.id] = {
-      id: saved.id, threadId: THREAD, turnId: "canonical-turn", kind: "message",
-      payload: { projection: "message", message: saved }, providerIdentities: [], createdAt: NOW, updatedAt: NOW,
-    };
-    resetThreadStoreForTests({ records: new Map([[THREAD, record]]) });
-    const { result } = renderHook(useLifecycle);
-    expect(result.current.folds.map((row) => row.durationMs)).toEqual([60_000]);
-  });
-
   it("closes a tool-free provider continuation with its wall time and zero steps", () => {
     const record = createEmptyThreadRecord();
     const saved = { ...answer("continuation-answer", EXECUTION), outcome: "completed" as const };
     const notice = createMockMessage({ id: "continuation-notice", thread_id: THREAD, role: "user",
       content: "Claude continued after a background task finished", systemNotice: { kind: "provider-turn", presentation: "timeline" } });
-    record.messages = [notice, saved];
+    record.messages = [saved];
     record.canonicalAgent.state.turns["canonical-turn"] = {
       ...canonicalTurn("Completed", { kind: "user" }), executionId: EXECUTION,
       endedAt: "2026-01-01T00:00:03Z", updatedAt: "2026-01-01T00:00:03Z",
     };
-    for (const message of record.messages) record.canonicalAgent.state.items[message.id] = {
+    for (const message of [notice, saved]) record.canonicalAgent.state.items[message.id] = {
       id: message.id, threadId: THREAD, turnId: "canonical-turn", kind: "message",
       payload: { projection: "message", message }, providerIdentities: [], createdAt: NOW, updatedAt: NOW,
     };
@@ -315,6 +298,8 @@ describe("turn timing", () => {
 
     const fold = result.current.items.find((item) => item.type === "work-fold");
     expect(fold?.type === "work-fold" && fold.durationMs).toBe(100_000);
+    expect(result.current.items.filter((item) => item.type === "turn-meta-line"))
+      .toEqual([{ key: "turn-meta-line:settled-answer", type: "turn-meta-line", messageId: settled.id, steps: 1, subagents: 0 }]);
   });
 
   it("starts the live timer at the server's turn start, not the client's receive time", () => {

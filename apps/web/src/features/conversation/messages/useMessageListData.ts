@@ -27,6 +27,7 @@ const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
 const EMPTY_FILES_CHANGED: Record<string, string[]> = {};
 const EMPTY_TURN_DURATIONS: Readonly<Record<string, number | null>> = {};
+const EMPTY_PROVIDER_CONTINUATIONS: ReadonlySet<string> = new Set();
 
 function resolveDisplayedThreadId(displayThreadId: string | undefined, activeThreadId: string | null | undefined) {
   return displayThreadId ?? activeThreadId;
@@ -67,12 +68,11 @@ function resolveCanonicalActivity(
     toolCalls: ToolCall[];
     thoughtSegments: ThoughtSegment[];
   },
-  summaryProjection: CanonicalMessageProjection | undefined,
 ) {
   return {
     toolCalls: preferCanonical(projection?.toolCalls, legacy.toolCalls),
     thoughtSegments: preferCanonical(projection?.thoughtSegments, legacy.thoughtSegments),
-    turnSummariesByMessageId: summaryProjection?.turnSummariesByMessageId,
+    turnSummariesByMessageId: projection?.turnSummariesByMessageId,
   };
 }
 
@@ -194,10 +194,13 @@ export function useMessageListData(displayThreadId: string | undefined) {
   });
   // The projection rebuilds on every canonical event; keep the map's identity so the stable transcript stays cached.
   const turnDurationsByMessageId = useShallow(canonicalTurnDurations)(canonicalProjection);
+  const providerContinuationMessageIds = useShallow(
+    (projection: CanonicalMessageProjection | undefined) => projection?.providerContinuationMessageIds ?? EMPTY_PROVIDER_CONTINUATIONS,
+  )(canonicalProjection);
   const canonicalActivity = resolveCanonicalActivity(canonicalLifecycleProjection, {
     toolCalls: legacyToolCalls ?? EMPTY_TOOL_CALLS,
     thoughtSegments: legacyThoughtSegments,
-  }, canonicalProjection);
+  });
   const canonicalResponseText = canonicalLifecycleProjection
     ? { streamingText: canonicalLifecycleProjection.streamingText, responseTextIsStreaming: false }
     : { streamingText: canonicalProjection?.streamingText ?? streamingText, responseTextIsStreaming };
@@ -276,6 +279,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     currentTurnMessageIdByThread,
     turnSummariesByMessageId: canonicalActivity.turnSummariesByMessageId,
     turnDurationsByMessageId,
+    providerContinuationMessageIds,
     turnEndingsByMessageId: turnEndings.endingsByMessageId,
   };
 }
