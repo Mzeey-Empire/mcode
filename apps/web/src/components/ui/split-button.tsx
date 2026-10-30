@@ -50,6 +50,7 @@ type SplitButtonMenuProps = Pick<
   variant: SplitButtonVariant
   size: SplitButtonSize
   disabled: boolean
+  loading: boolean
   anchor: RefObject<HTMLDivElement | null>
 }
 
@@ -62,6 +63,7 @@ function SplitButtonMenu({
   variant,
   size,
   disabled,
+  loading,
   anchor,
 }: SplitButtonMenuProps) {
   return (
@@ -72,7 +74,8 @@ function SplitButtonMenu({
             {...menuTriggerProps}
             variant={variant}
             size={CHEVRON_SIZE[size]}
-            disabled={disabled}
+            disabled={disabled || loading}
+            loading={loading}
             aria-label={menuLabel}
             className={cn(
               // The divider sits inside the chevron half so both fills stay continuous.
@@ -115,13 +118,15 @@ function SplitButton({
   const rootRef = useRef<HTMLDivElement>(null)
   return (
     <div ref={rootRef} data-slot="split-button" className={cn("inline-flex min-w-0 rounded-control", className)}>
+      {/* While loading, the label stays readable and the chevron half carries the spinner. */}
       <Button
         {...actionProps}
         variant={variant}
         size={size}
         disabled={disabled}
-        loading={loading}
-        onClick={onClick}
+        aria-busy={loading || undefined}
+        {...(loading && { "aria-disabled": true })}
+        onClick={loading ? (event) => event.preventDefault() : onClick}
         className={cn("min-w-0 rounded-r-none", variant === "outline" && "border-r-0", actionProps?.className)}
       >
         {children}
@@ -130,7 +135,8 @@ function SplitButton({
         {...menuProps}
         variant={variant}
         size={size}
-        disabled={disabled || loading}
+        disabled={disabled}
+        loading={loading}
         anchor={rootRef}
       />
     </div>

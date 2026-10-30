@@ -18,8 +18,11 @@ interface PlanPanelHeaderProps {
 export function PlanPanelHeader({ threadId, versions, viewed, executing }: PlanPanelHeaderProps) {
   return (
     <PanelHeaderSlot slot="leading">
-      <PlanVersionPicker threadId={threadId} versions={versions} viewed={viewed} />
-      <PlanImplementSplit threadId={threadId} viewed={viewed} executing={executing} />
+      {/* The container lets Implement shorten its label to fit a narrow panel. */}
+      <div className="@container flex h-full min-w-0 flex-1 items-center gap-2">
+        <PlanVersionPicker threadId={threadId} versions={versions} viewed={viewed} />
+        <PlanImplementSplit threadId={threadId} viewed={viewed} executing={executing} />
+      </div>
     </PanelHeaderSlot>
   );
 }

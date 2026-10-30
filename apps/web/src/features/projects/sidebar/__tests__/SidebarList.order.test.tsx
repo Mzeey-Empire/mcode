@@ -280,6 +280,48 @@ describe("SidebarList frozen order", () => {
     expect(flipWhenPublished(["c", "a", "b"])).toBe(true);
   });
 
+  function rowButton(id: string): HTMLElement {
+    return within(document.querySelector<HTMLElement>(`[data-thread-id='${id}']`)!).getByRole("button", { name: new RegExp(`^Provider, Claude Title ${id}`) });
+  }
+
+  it("holds the order while keyboard focus is in the list and reorders once focus leaves", () => {
+    render(<><ProjectSidebar /><button type="button">outside</button></>);
+    startPushListeners();
+    act(() => rowButton("b").focus());
+
+    act(() => pushEmitter.emit("thread.activity", { threadId: "c", at: new Date(NOW).toISOString() }));
+    expect(renderedThreadIds()).toEqual(["a", "b", "c"]);
+
+    act(() => screen.getByRole("button", { name: "outside" }).focus());
+
+    expect(renderedThreadIds()).toEqual(["c", "a", "b"]);
+  });
+
+  it("keeps holding when the pointer leaves while focus stays in the list", () => {
+    render(<ProjectSidebar />);
+    startPushListeners();
+    fireEvent.pointerEnter(list());
+    act(() => rowButton("b").focus());
+
+    act(() => pushEmitter.emit("thread.activity", { threadId: "c", at: new Date(NOW).toISOString() }));
+    fireEvent.pointerLeave(list());
+
+    expect(renderedThreadIds()).toEqual(["a", "b", "c"]);
+  });
+
+  it("does not hold the order for a row a click focused once the pointer leaves", () => {
+    render(<ProjectSidebar />);
+    startPushListeners();
+    fireEvent.pointerEnter(list());
+    fireEvent.pointerDown(rowButton("b"));
+    act(() => rowButton("b").focus());
+
+    act(() => pushEmitter.emit("thread.activity", { threadId: "c", at: new Date(NOW).toISOString() }));
+    fireEvent.pointerLeave(list());
+
+    expect(renderedThreadIds()).toEqual(["c", "a", "b"]);
+  });
+
   it("reorders a reconnect hydration without a FLIP", () => {
     render(<ProjectSidebar />);
 

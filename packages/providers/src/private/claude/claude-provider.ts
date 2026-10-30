@@ -1011,6 +1011,9 @@ export class ClaudeProvider
       toolName,
       requestId,
     );
+    if (decision !== "cancelled") {
+      this.claudeEventMapper(threadId)?.commandApprovalResolved(options.toolUseID, result.behavior === "allow");
+    }
     logger.debug("canUseTool returning", {
       toolName,
       requestId,
@@ -1028,6 +1031,7 @@ export class ClaudeProvider
     routing?: ClaudeCanonicalEventRouting,
   ): Promise<ClaudeApprovalDecision> {
     const session = this.runtime.get(`mcode-${threadId}`);
+    this.claudeEventMapper(threadId)?.commandApprovalRequested(options.toolUseID);
     const body = await claudeApprovalBody(toolName, input, options, session?.cwd);
     if (options.signal?.aborted) return "cancelled";
     // Read the origin after the await: the stream can consume task_started while file evidence loads.
@@ -1071,13 +1075,18 @@ export class ClaudeProvider
     this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome });
   }
 
+  private claudeEventMapper(threadId: string): ClaudeEventMapper | undefined {
+    const session = this.runtime.get(`mcode-${threadId}`);
+    return session ? this.streamStates.get(session.query)?.mapper : undefined;
+  }
+
   private toClaudePermissionResult(
     decision: ClaudeApprovalDecision,
     input: Record<string, unknown>,
     options: Parameters<CanUseTool>[2],
     toolName: string,
     requestId: string,
-  ): ClaudeToolPermissionResult {
+  ): NonNullable<ClaudeToolPermissionResult> {
     if (typeof decision !== "string") return { behavior: "deny", message: decision.denyMessage };
     switch (decision) {
       case "allow":
@@ -1723,6 +1732,8 @@ export class ClaudeProvider
     if (reuseOutcome === "retry_fresh")
       return await this.doSendMessage({ ...params, resume: params.resumeRequired && params.resume }, routing);
 
+    // Retrying an old close after attach would revoke the replacement MCP credential.
+    if (!existing) await this.runtime.stop(sessionId);
     const resumeId = this.sdkSessionIds.get(sessionId) ?? uuid;
     const baseOptions = await this.createClaudeBaseOptions(
       context,
@@ -2998,7 +3009,8 @@ export class ClaudeProvider
       this.lastServiceTier !== undefined ||
       this.lastNumTurns !== undefined ||
       this.lastDurationMs !== undefined;
-    if (categories === null && !hasThreadMetrics) {
+    // A plan account always has capped quota, so a failed fetch must not read as "no capped quota".
+    if (categories === null && (billingMode === "plan" || !hasThreadMetrics)) {
       throw new Error("Claude usage source unavailable");
     }
     return {

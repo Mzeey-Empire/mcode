@@ -1,5 +1,6 @@
 import { createCanonicalSubagentPresentation, createSubagentPresentation, decodeCanonicalSubagentDetailTarget, decodeSubagentAliasDetailTarget } from "@mcode/contracts/models/tool-call-record";
 import { isDelegateTaskToolName } from "@mcode/contracts/models/subagent-roster";
+import { isToolCallActive } from "@mcode/contracts/models/tool-call-record";
 import { isTaskListToolName } from "@mcode/contracts/models/task-list-tools";
 import { resolveBrowserNarrativeTool } from "@mcode/contracts/models/browser-narrative";
 import type { ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
@@ -67,7 +68,7 @@ export function recordToToolCall(record: ToolCallRecord): ToolCall {
   const cached = toolCallCache.get(record);
   if (cached) return cached;
 
-  const durationMs = persistedDurationMs(record.started_at, record.completed_at);
+  const durationMs = record.phase === "denied" ? undefined : persistedDurationMs(record.started_at, record.completed_at);
   const lifecycleInput = isSubagentLifecycleRecord(record)
     ? parseSubagentLifecycleInput(record.input_summary)
     : undefined;
@@ -79,7 +80,8 @@ export function recordToToolCall(record: ToolCallRecord): ToolCall {
     ...(subagentPresentation ? { subagentPresentation } : {}),
     output: record.output_summary || null,
     isError: record.status === "failed",
-    isComplete: record.status === "completed" || record.status === "failed" || record.status === "cancelled",
+    status: record.phase ?? record.status,
+    isComplete: !isToolCallActive(record.status),
     ...persistedToolCallOptionalFields(record, durationMs),
     parentToolCallId: record.parent_tool_call_id ?? undefined,
     startedAt: isoToMs(record.started_at),
@@ -312,7 +314,7 @@ function persistedToolCallOptionalFields(
   durationMs: number | undefined,
 ): Partial<Pick<ToolCall, "isCancelled" | "background" | "outputTruncated" | "outputTotalBytes" | "outputArtifactPath" | "durationMs" | "exitCode">> {
   const fields: Partial<Pick<ToolCall, "isCancelled" | "background" | "outputTruncated" | "outputTotalBytes" | "outputArtifactPath" | "durationMs" | "exitCode">> = {};
-  if (record.status === "cancelled") fields.isCancelled = true;
+  if (record.status === "cancelled" && record.phase !== "denied") fields.isCancelled = true;
   if (record.background === true) fields.background = true;
   if (record.output_truncated === 1) fields.outputTruncated = true;
   if (typeof record.output_total_bytes === "number") fields.outputTotalBytes = record.output_total_bytes;

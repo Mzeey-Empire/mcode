@@ -23,7 +23,7 @@ describe("planEditorDecorations", () => {
     ]);
   });
 
-  it("treats only the first H1 as the title and only the next paragraph as the summary", () => {
+  it("treats only the first H1 as the title, later H1s as labels, and only the next paragraph as the summary", () => {
     const markdown = "Intro\n\n# Title\n\nSummary one\nwraps here\n\nBody\n\n# Again\n";
 
     const lines = planEditorDecorations(markdown).filter((range) => range.kind === "line");
@@ -32,26 +32,70 @@ describe("planEditorDecorations", () => {
       { kind: "line", from: 7, className: "cm-plan-title" },
       { kind: "line", from: 16, className: "cm-plan-summary" },
       { kind: "line", from: 28, className: "cm-plan-summary" },
+      { kind: "line", from: 46, className: "cm-plan-label" },
     ]);
   });
 
-  it("puts bullet markers in the marker column", () => {
-    expect(planEditorDecorations("- item\n")).toEqual([
-      { kind: "mark", from: 0, to: 1, className: "cm-plan-list-marker" },
+  it("draws bullet markers as dots in the marker column", () => {
+    expect(planEditorDecorations("- item\n* next\n")).toEqual([
+      { kind: "replace", from: 0, to: 1, text: "•", className: "cm-plan-list-marker" },
       { kind: "hide", from: 1, to: 2 },
+      { kind: "replace", from: 7, to: 8, text: "•", className: "cm-plan-list-marker" },
+      { kind: "hide", from: 8, to: 9 },
     ]);
   });
 
-  it("leaves fenced code fences visible", () => {
+  it("shows fenced code as a code block with its fences hidden", () => {
     const markdown = "```ts\nconst a = 1;\n```\n";
 
-    expect(planEditorDecorations(markdown)).toEqual([]);
+    expect(planEditorDecorations(markdown)).toEqual([
+      { kind: "line", from: 0, className: "cm-plan-code-block" },
+      { kind: "hide", from: 0, to: 3 },
+      { kind: "hide", from: 3, to: 5 },
+      { kind: "line", from: 6, className: "cm-plan-code-block" },
+      { kind: "line", from: 19, className: "cm-plan-code-block" },
+      { kind: "hide", from: 19, to: 22 },
+    ]);
+  });
+
+  it("shows a fence nested in a list item as a code block", () => {
+    const markdown = "- Example:\n\n  ```ts\n  x\n  ```\n";
+
+    const codeLines = planEditorDecorations(markdown).filter((range) => range.kind === "line");
+    const fenceMarks = planEditorDecorations(markdown).filter((range) => range.kind === "hide" && range.from > 11);
+
+    expect(codeLines).toEqual([
+      { kind: "line", from: 12, className: "cm-plan-code-block" },
+      { kind: "line", from: 20, className: "cm-plan-code-block" },
+      { kind: "line", from: 24, className: "cm-plan-code-block" },
+    ]);
+    expect(fenceMarks).toEqual([
+      { kind: "hide", from: 14, to: 17 },
+      { kind: "hide", from: 17, to: 19 },
+      { kind: "hide", from: 26, to: 29 },
+    ]);
+  });
+
+  it("reads setext headings as the title and labels and draws a rule for ---", () => {
+    const markdown = "Add mod10\n===\n\nSummary\n\nSteps\n===\n\n---\n";
+
+    expect(planEditorDecorations(markdown)).toEqual([
+      { kind: "line", from: 0, className: "cm-plan-title" },
+      { kind: "line", from: 10, className: "cm-plan-title" },
+      { kind: "hide", from: 10, to: 13 },
+      { kind: "line", from: 15, className: "cm-plan-summary" },
+      { kind: "line", from: 24, className: "cm-plan-label" },
+      { kind: "line", from: 30, className: "cm-plan-label" },
+      { kind: "hide", from: 30, to: 33 },
+      { kind: "line", from: 35, className: "cm-plan-rule" },
+      { kind: "hide", from: 35, to: 38 },
+    ]);
   });
 
   it("shows a coded file path item as its name, then its folder", () => {
     expect(planEditorDecorations("- `apps/web/src/x/File.tsx`\n")).toEqual([
       { kind: "line", from: 0, className: "cm-plan-path-item text-fade" },
-      { kind: "mark", from: 0, to: 1, className: "cm-plan-list-marker" },
+      { kind: "replace", from: 0, to: 1, text: "•", className: "cm-plan-list-marker" },
       { kind: "hide", from: 1, to: 2 },
       { kind: "hide", from: 2, to: 3 },
       { kind: "mark", from: 2, to: 27, className: "cm-plan-code" },
@@ -78,7 +122,7 @@ describe("planEditorDecorations", () => {
 
     expect(ranges.filter((range) => range.kind !== "hide")).toEqual([
       { kind: "line", from: 0, className: "cm-plan-path-item text-fade" },
-      { kind: "mark", from: 0, to: 1, className: "cm-plan-list-marker" },
+      { kind: "replace", from: 0, to: 1, text: "•", className: "cm-plan-list-marker" },
       { kind: "mark", from: 2, to: 13, className: "cm-plan-code" },
       { kind: "mark", from: 3, to: 12, className: "cm-plan-path-name" },
     ]);

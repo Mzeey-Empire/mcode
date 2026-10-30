@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as NodeFS from "node:fs";
 import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
 import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
 
@@ -8,6 +9,8 @@ vi.mock("@mcode/shared", () => ({
 }));
 
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
+import type { CompletedItem } from "../../private/codex/codex-types.js";
+import { parseCodexNotification } from "../../private/codex/codex-notification-validation.js";
 
 function requireToolResult(events: ReturnType<CodexEventMapper["mapNotification"]>) {
   const result = events.find((runtimeEvent) => runtimeEvent.event.type === "toolResult");
@@ -694,6 +697,42 @@ describe("CodexEventMapper", () => {
         exitCode: 0,
       },
     ]);
+  });
+
+  it("preserves the recorded failing command's exit code", () => {
+    const line = NodeFS.readFileSync(new URL("./fixtures/codex-protocol-golden.ndjson", import.meta.url), "utf8")
+      .split("\n").find((row) => row.includes('"method":"item/completed"') && row.includes('"id":"call_vmPsSALBbbsA6qAyQadKHB1Z"'));
+    if (!line) throw new Error("Expected the recorded failing command");
+    const row: unknown = JSON.parse(line);
+    if (!row || typeof row !== "object" || !("raw" in row)) throw new Error("Expected a raw notification");
+    const notification = parseCodexNotification(row.raw);
+    if (!notification) throw new Error("Expected a valid Codex notification");
+
+    expect(requireToolResult(mapper.mapNotification(notification)).event).toMatchObject({
+      type: "toolResult", toolCallId: "call_vmPsSALBbbsA6qAyQadKHB1Z", isError: true, exitCode: 124,
+    });
+  });
+
+  it.each([
+    { status: "failed", exitCode: 3, isError: true },
+    { status: "failed", exitCode: null, isError: true },
+    { status: "completed", exitCode: 0, isError: false },
+    { status: "completed", exitCode: 3, isError: true },
+    { status: "completed", exitCode: null, isError: false },
+  ])("maps command status $status and exit code $exitCode", ({ status, exitCode, isError }) => {
+    const result = requireToolResult(mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: { item: {
+        type: "commandExecution", id: "cmd-failure", command: "exit 3",
+        status, exitCode, aggregatedOutput: "",
+      } satisfies CompletedItem },
+    }));
+
+    expect(result.event).toEqual({
+      type: "toolResult", threadId: "test-thread", toolCallId: "cmd-failure",
+      output: "", isError, ...(exitCode === null ? {} : { exitCode }),
+    });
   });
 
   it("bounds streamed command output and writes the full artifact", async () => {

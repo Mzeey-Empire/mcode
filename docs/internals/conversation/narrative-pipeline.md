@@ -26,8 +26,9 @@ call or assistant message does not complete other calls. Turn termination
 settles any outstanding calls.
 
 A group of one call renders that call's own row, so a failed edit reads
-"Edit failed" with its file. Larger groups show a summary with failure and
-cancellation counts and expand into one row per call. A group counts as open
+"Edit failed" with its file. Larger groups show a summary with failure, denial,
+and cancellation counts and expand into one row per call. Denied commands do not
+count as commands that ran. A group counts as open
 while any of its calls' output is open, so a call the user opened never lands
 inside a collapsed group when it completes or its group grows. Collapsing the
 group closes those outputs too. Failure shows as text in

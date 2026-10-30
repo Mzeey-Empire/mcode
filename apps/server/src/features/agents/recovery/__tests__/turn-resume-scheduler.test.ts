@@ -45,8 +45,7 @@ import { TurnResumeScheduleStore } from "../turn-resume-schedule-store.js";
 import { TurnResumeScheduler, type TurnResumeSchedulerClock } from "../turn-resume-scheduler.js";
 import { RESUME_CONTINUATION_PROMPT } from "../turn-resume.js";
 
-// No catalog model declares Fast, so these turns never carry `fastMode`.
-const noModels = { listModels: async () => [] };
+import { testModelCatalog } from "../../__tests__/provider-model-fixture.js";
 
 const NOW = "2026-10-11T12:00:00.000Z";
 const THREAD_ID = "scheduled-thread";
@@ -248,7 +247,7 @@ describe("TurnResumeScheduler", () => {
       subagentReporting: null,
        maxInputCharactersPerTurn: 100_000,
 
-      sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: async () => [],
+      sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: testModelCatalog.listModels,
     });
     const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
     const settings = new SettingsService();
@@ -259,7 +258,7 @@ describe("TurnResumeScheduler", () => {
     const admission = new TurnAdmissionDispatchCoordinator(threads, workspaces, messageRepo, new TurnRevertStore(db),
       new GitWorktreeService(workspaces, new FakeGitExecutor(), hostRuntime), new AttachmentService(), providers,
       new ProviderAvailabilityService(settings, providers), boundary, settings, plans,
-      new GoalLifecycleService(threads, providers, writer, commands, boundary), undefined, undefined, hostRuntime.platform, noModels,
+      new GoalLifecycleService(threads, providers, writer, commands, boundary), undefined, undefined, hostRuntime.platform, testModelCatalog,
       { start: async (start) => {
         if (reschedule) await scheduler.schedule(input("2026-10-11T12:02:00.000Z"));
         await parentOwner.start(start);

@@ -64,6 +64,38 @@ export interface MoveOptions {
   readonly release?: boolean;
 }
 
+/**
+ * Where the reader is, held by identity: the reading row, the content node inside it that crossed the
+ * reading line, and the screen tops both had when the reader last positioned the view. A tall row
+ * rewraps when the width changes, so only the node keeps the same words in view.
+ */
+interface PinnedAnchor {
+  readonly key: string;
+  readonly node: Element;
+  readonly top: number;
+  readonly hostTop: number;
+}
+
+/** The deepest descendant of `host` whose box crosses `line`, found by bisecting each level's children in flow order. */
+function contentAtLine(host: Element, line: number): Element {
+  let node = host;
+  for (;;) {
+    const children = node.children;
+    let low = 0;
+    let high = children.length - 1;
+    let next: Element | undefined;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      const rect = children[middle].getBoundingClientRect();
+      if (rect.bottom <= line) low = middle + 1;
+      else if (rect.top > line) high = middle - 1;
+      else { next = children[middle]; break; }
+    }
+    if (!next) return node;
+    node = next;
+  }
+}
+
 const FLIP_DURATION_MS = 180;
 const FLIP_EASING = "cubic-bezier(0.2, 0, 0, 1)";
 
@@ -83,7 +115,7 @@ export class VirtualViewport {
   private expectedScrollTop = 0;
   private disposed = false;
   private animating = false;
-  private pinnedAnchor: { key: string; top: number } | undefined;
+  private pinnedAnchor: PinnedAnchor | undefined;
   private insets: ViewportInsets = { top: 0, bottom: 0 };
   private flow: { prefix: HTMLDivElement; host: HTMLDivElement; suffix: HTMLDivElement } | undefined;
   private flowFill = 0;
@@ -101,6 +133,10 @@ export class VirtualViewport {
     this.prefix = options.classPrefix ?? "virtual";
     this.position = options.initialPosition ?? { kind: "offset", top: 0 };
     this.observer = new ResizeObserver((entries) => this.measure(entries));
+    // vlist reads its viewport height once, inside createVList, before the root below gets its height. A grid
+    // container stretches that root to full height already, so the first rows render on the mounting commit
+    // instead of after vlist's deferred resize observer.
+    container.style.display = "grid";
     this.list = createVList<VirtualRow>({
       container,
       classPrefix: this.prefix,
@@ -370,35 +406,45 @@ export class VirtualViewport {
       this.context.sizeCache.getTotalSize(),
       padsBelowReadingRow ? target + this.viewportHeight - this.insets.top - this.insets.bottom : 0,
     ));
-    if (!this.animating) {
-      this.context.scrollTo(target);
-      this.correctAnchorDrift(anchor);
-    }
-    this.expectedScrollTop = this.viewport.scrollTop;
+    if (!this.animating) this.context.scrollTo(target);
     this.context.forceRender();
+    // Rows sit at their new offsets only after the render, so drift is read from there.
+    if (!this.animating && this.correctAnchorDrift(anchor)) this.context.forceRender();
+    this.expectedScrollTop = this.viewport.scrollTop;
     this.layoutFlowHost();
     this.scheduleLayout();
     this.onPosition(this.position);
   }
 
-  /** The reading row's live host plus the screen position it must keep. */
-  private readingAnchorHost(): { host: HTMLDivElement; top: number } | undefined {
+  /** The element that must hold still on screen, and the screen top it must keep. */
+  private readingAnchorHost(): { element: Element; top: number } | undefined {
     if (this.position.kind !== "reading") return undefined;
     const host = this.hosts.get(this.position.key);
+    if (!host?.isConnected) return undefined;
     // Content changes push the anchored row between measurement passes, so the
     // pin must come from the user's last scroll, not the current drifted rect.
     const pinned = this.pinnedAnchor;
-    const top = pinned?.key === this.position.key
-      ? pinned.top
-      : host?.isConnected ? host.getBoundingClientRect().top : undefined;
-    return host && top !== undefined ? { host, top } : undefined;
+    if (pinned?.key !== this.position.key) return { element: host, top: host.getBoundingClientRect().top };
+    return pinned.node !== host && host.contains(pinned.node)
+      ? { element: pinned.node, top: pinned.top }
+      : { element: host, top: pinned.hostTop };
   }
 
-  /** Sizes resolve through provisional heights; the host's real rect is truth. */
-  private correctAnchorDrift(anchor: { host: HTMLDivElement; top: number } | undefined): void {
-    if (!anchor?.host.isConnected) return;
-    const drift = anchor.host.getBoundingClientRect().top - anchor.top;
-    if (drift !== 0) this.viewport.scrollTop += drift;
+  /**
+   * Sizes resolve through provisional heights and rows rewrap at new widths; the pinned element's real
+   * rect is truth. Rebases the reading offset on the corrected scroll so later passes and remembered
+   * positions agree with what is on screen. Returns whether the scroll moved.
+   */
+  private correctAnchorDrift(anchor: { element: Element; top: number } | undefined): boolean {
+    if (!anchor?.element.isConnected) return false;
+    const drift = anchor.element.getBoundingClientRect().top - anchor.top;
+    if (drift === 0) return false;
+    this.context.scrollTo(this.viewport.scrollTop + drift);
+    const index = this.position.kind === "reading" ? this.rowIndexes.get(this.position.key) : undefined;
+    if (this.position.kind === "reading" && index !== undefined) {
+      this.position = { ...this.position, offset: this.viewport.scrollTop - this.context.sizeCache.getOffset(index) };
+    }
+    return true;
   }
 
   private targetScrollTop(): number {
@@ -462,9 +508,18 @@ export class VirtualViewport {
 
   private pinReadingAnchor(): void {
     const host = this.position.kind === "reading" ? this.hosts.get(this.position.key) : undefined;
-    this.pinnedAnchor = this.position.kind === "reading" && host?.isConnected
-      ? { key: this.position.key, top: host.getBoundingClientRect().top }
-      : undefined;
+    if (this.position.kind !== "reading" || !host?.isConnected) {
+      this.pinnedAnchor = undefined;
+      return;
+    }
+    const line = this.viewport.getBoundingClientRect().top + this.insets.top;
+    const node = contentAtLine(host, line);
+    this.pinnedAnchor = {
+      key: this.position.key,
+      node,
+      top: node.getBoundingClientRect().top,
+      hostTop: host.getBoundingClientRect().top,
+    };
   }
 
   /** Captures the first visible row independently of React's commit timing. */
@@ -516,7 +571,9 @@ export class VirtualViewport {
     this.insets = insets;
     this.viewport.style.paddingTop = `${insets.top}px`;
     this.viewport.style.paddingBottom = `${insets.bottom}px`;
-    if (this.pinnedAnchor) this.pinnedAnchor = { ...this.pinnedAnchor, top: this.pinnedAnchor.top + shift };
+    if (this.pinnedAnchor) {
+      this.pinnedAnchor = { ...this.pinnedAnchor, top: this.pinnedAnchor.top + shift, hostTop: this.pinnedAnchor.hostTop + shift };
+    }
     this.applyPosition();
   }
 

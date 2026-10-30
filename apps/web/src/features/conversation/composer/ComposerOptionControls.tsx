@@ -5,6 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Eye, KeyRound, ShieldCheck } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -59,19 +60,27 @@ export function AccessModeMenu({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="compact"
-            aria-label={`Access mode: ${selected.label}`}
-            className="gap-1.5 text-muted transition-colors hover:bg-hover/40 hover:text-ink"
-          >
-            <Icon size={14} />
-            <span className="text-sm @max-[560px]:hidden">{selected.label}</span>
-          </Button>
-        }
-      />
+      {/* A narrow Composer hides the label, so the tooltip names the mode for the icon alone. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  aria-label={`Access mode: ${selected.label}`}
+                  className="gap-1.5 text-muted transition-colors hover:bg-hover/40 hover:text-ink"
+                >
+                  <Icon size={14} />
+                  <span className="text-sm @max-[560px]:hidden">{selected.label}</span>
+                </Button>
+              }
+            />
+          }
+        />
+        <TooltipContent side="top">{`Access mode: ${selected.label}`}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" sideOffset={8} className="w-60">
         {options.filter((mode) => modes != null || approvalReviewSupported || mode.id !== "automatic").map((mode) => {
           const ModeIcon = mode.icon;

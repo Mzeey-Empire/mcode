@@ -59,6 +59,7 @@ type BackgroundToolStatus = ProviderBackgroundToolSettlement["status"];
 
 /** State read by the Claude SDK event mapper. */
 export interface ClaudeMappedSession {
+  permissionMode?: string;
   model: string;
   contextWindowMode: ContextWindowMode | undefined;
   pendingToolUses: Set<string>;
@@ -110,6 +111,8 @@ export type ClaudeMapOutcome = "none" | "turn_complete" | "result_error";
 
 /** Converts Claude SDK messages to provider-neutral events. */
 export class ClaudeEventMapper {
+  private readonly commandCalls = new Map<string, Extract<AgentEvent, { type: "toolUse" }>>();
+  private readonly deniedCommands = new Set<string>();
   private lastAssistantText = "";
   // The CLI yields each finished block before the API reports stop_reason, so main-thread text waits for message_delta, a tool call, or the result.
   private boundaryAwaitsStopReason = false;
@@ -189,6 +192,8 @@ export class ClaudeEventMapper {
 
   /** Resets only derived attribution when a new queued execution consumes its prompt. */
   resetExecution(): void {
+    this.commandCalls.clear();
+    this.deniedCommands.clear();
     this.toolUseIds.clear();
     this.toolParents.clear();
     this.subagentRuns.clear();
@@ -363,7 +368,7 @@ export class ClaudeEventMapper {
       toolName,
       parent_tool_use_id: parentToolCallId ?? null,
     });
-    this.emit({
+    this.emitCommandUse({
       type: AgentEventType.ToolUse,
       threadId: this.threadId,
       toolCallId,
@@ -371,6 +376,53 @@ export class ClaudeEventMapper {
       toolInput: canonicalToolInput(toolName, objectValue(block.input)),
       parentToolCallId,
     });
+  }
+
+  private emitCommandUse(event: Extract<AgentEvent, { type: "toolUse" }>): void {
+    if (event.toolName === "Bash") {
+      if (this.callbacks.getSession()?.permissionMode === "supervised") event = { ...event, status: "running", phase: "queued" };
+      this.commandCalls.set(event.toolCallId, event);
+    }
+    this.emit(event);
+  }
+
+  /** Binds permission waits to the SDK's exact command invocation. */
+  commandApprovalRequested(toolCallId: string): void {
+    this.updateCommandStatus(toolCallId, "waiting");
+  }
+
+  /** Publishes execution only after permission, and settles a refusal without an SDK error. */
+  commandApprovalResolved(toolCallId: string, allowed: boolean): void {
+    if (!this.commandCalls.has(toolCallId)) return;
+    if (allowed) {
+      this.updateCommandStatus(toolCallId, "running");
+      return;
+    }
+    this.deniedCommands.add(toolCallId);
+    this.callbacks.getSession()?.pendingToolUses.delete(toolCallId);
+    const source = this.nativeSource;
+    this.nativeSource = {};
+    try {
+      this.emit({ type: AgentEventType.ToolResult, threadId: this.threadId, toolCallId,
+        output: "Command denied before execution.", isError: false, denied: true });
+    } finally {
+      this.nativeSource = source;
+    }
+  }
+
+  private updateCommandStatus(toolCallId: string, status: "waiting" | "running"): void {
+    const call = this.commandCalls.get(toolCallId);
+    const phase = status === "waiting" ? "waiting" : undefined;
+    if (!call || (call.status === "running" && call.phase === phase) || this.deniedCommands.has(toolCallId)) return;
+    const updated: Extract<AgentEvent, { type: "toolUse" }> = { ...call, status: "running", phase };
+    this.commandCalls.set(toolCallId, updated);
+    const source = this.nativeSource;
+    this.nativeSource = {};
+    try {
+      this.emit(updated);
+    } finally {
+      this.nativeSource = source;
+    }
   }
 
   private trackSubagentRun(toolCallId: string, parentToolCallId: string | undefined): void {
@@ -647,7 +699,7 @@ export class ClaudeEventMapper {
       toolName,
       parent_tool_use_id: parentToolCallId ?? null,
     });
-    this.emit({
+    this.emitCommandUse({
       type: AgentEventType.ToolUse,
       threadId: this.threadId,
       toolCallId,
@@ -660,6 +712,9 @@ export class ClaudeEventMapper {
 
   private toolResult(message: Message): ClaudeMapOutcome {
     const toolCallId = stringValue(message.tool_use_id);
+    // Claude reports a permission refusal as is_error. The permission callback already settled it.
+    if (this.deniedCommands.has(toolCallId)) return "none";
+    this.commandCalls.delete(toolCallId);
     const output = toolResultText(message.content);
     if (toolCallId)
       this.callbacks.getSession()?.pendingToolUses.delete(toolCallId);
@@ -791,6 +846,9 @@ export class ClaudeEventMapper {
   }
   private toolProgress(message: Message): ClaudeMapOutcome {
     const toolCallId = stringValue(message.tool_use_id);
+    const command = this.commandCalls.get(toolCallId);
+    if (this.deniedCommands.has(toolCallId) || command?.phase === "waiting") return "none";
+    if (command?.phase === "queued") this.updateCommandStatus(toolCallId, "running");
     if (toolCallId)
       this.emit({
         type: AgentEventType.ToolProgress,
