@@ -13,6 +13,7 @@ vi.mock("@/stores/threadStore", () => ({
 }));
 
 import { sendComposerThreadMessage } from "./composer-thread-message";
+import { useTranscriptFollowStore } from "@/features/conversation/messages/transcript-follow-request";
 
 const comment: SelectedTextComment = {
   id: "550e8400-e29b-41d4-a716-446655440003",
@@ -46,5 +47,19 @@ describe("sendComposerThreadMessage", () => {
     expect(sent?.[0]).toBe("thread-1");
     expect(sent?.[1]).toBe("Explain the tradeoff.");
     expect(sent?.[17]).toEqual([comment]);
+  });
+
+  it("asks the thread's transcript to follow the prompt it sends", async () => {
+    threadActions.sendMessage.mockResolvedValue(true);
+
+    await sendComposerThreadMessage("thread-1", {
+      content: "Next step.",
+      displayContent: "Next step.",
+      attachments: [],
+      selection: createDefaultComposerAgentSelection(),
+      mentions: [],
+    });
+
+    expect(useTranscriptFollowStore.getState().request).toEqual({ threadId: "thread-1" });
   });
 });

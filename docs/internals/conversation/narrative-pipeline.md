@@ -95,7 +95,9 @@ streaming text, images, or disclosures change size.
 
 The viewport has one position: follow the tail, retain a reading row and pixel
 offset, or align a navigation target. Upward scrolling stops tail following.
-Returning to the bottom resumes it. Prepends and resident-history eviction retain
+Returning to the bottom resumes it. An explicit Composer Send also resumes it in that thread,
+because a disclosure click or a restored reading spot can leave the view reading at
+the bottom. A queued follow-up that sends on its own does not move a reader. Prepends and resident-history eviction retain
 the reading row when that row remains available. Each rendered thread has its own
 viewport, and the existing thread cache stores its reading anchor.
 When an initial page is shorter than the viewport, prepending history retains
