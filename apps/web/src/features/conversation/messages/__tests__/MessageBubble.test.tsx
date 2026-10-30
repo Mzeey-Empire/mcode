@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import type { Message, StoredAttachment } from "@/transport";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { MessageBubble } from "../MessageBubble";
+import { useToastStore } from "@/stores/toastStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import {
@@ -227,6 +228,26 @@ function makeMixedFeedbackBundle(): V1Bundle {
     annotations: [preview, { ...comment, displayNumber: 2 }],
   };
 }
+
+describe("MessageBubble copy", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useToastStore.setState({ toasts: [] });
+  });
+
+  it("reports a failed clipboard write instead of doing nothing", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("Write permission denied"));
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const { getByRole } = render(<MessageBubble message={makeMessage("copy me")} />);
+
+    fireEvent.click(getByRole("button", { name: "Copy message" }));
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ kind: "failed", title: "Couldn't copy message" }),
+    ]));
+    expect(writeText).toHaveBeenCalledWith("copy me");
+  });
+});
 
 describe("MessageBubble user messages", () => {
   it("hides a legacy ladder handoff anchor instead of printing its raw document", () => {

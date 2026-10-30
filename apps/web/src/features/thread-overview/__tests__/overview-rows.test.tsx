@@ -168,6 +168,22 @@ describe("overview Changes, Tasks and Usage rows", () => {
     expect(screen.queryByTestId("workspace-menu-changes")).not.toBeInTheDocument();
   });
 
+  it("does not show the Changes row while a turn-end load with no known changes is pending", async () => {
+    let resolveComparison: (value: ReturnType<typeof readyComparison>) => void = () => {};
+    vi.mocked(mockTransport.getReviewComparison).mockReturnValue(new Promise((resolve) => { resolveComparison = resolve; }));
+    setRunning(true);
+    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await flushTimers(100);
+
+    act(() => setRunning(false));
+    await flushTimers(1_500);
+    expect(mockTransport.getReviewComparison).toHaveBeenCalled();
+    expect(screen.queryByTestId("workspace-menu-changes")).not.toBeInTheDocument();
+
+    await act(async () => resolveComparison(readyComparison(2, 1)));
+    expect(screen.getByTestId("thread-overview-change-summary")).toHaveTextContent("+2 −1");
+  });
+
   it("keeps the Changes row for a change without line totals", async () => {
     vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({
       status: "ready",

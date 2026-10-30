@@ -3,6 +3,7 @@ import type { Message } from "@/transport";
 import { ImageIcon, RotateCcw, Copy, Check, Target } from "lucide-react";
 import { WarningIcon } from "@/components/ui/icon-map";
 import { cn } from "@/lib/utils";
+import { useToastStore } from "@/stores/toastStore";
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
 import { stripPlanFences } from "@/lib/plan-fences";
 import { stripInjectedFiles } from "@/lib/file-tags";
@@ -397,8 +398,8 @@ function CopyButton({ content, className = HOVER_COPY_CLASS }: { content: string
       setCopied(true);
       clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard write failed — don't show copied state
+    } catch (error: unknown) {
+      useToastStore.getState().show({ kind: "failed", title: "Couldn't copy message", meta: String(error) });
     }
   }, [content]);
 
