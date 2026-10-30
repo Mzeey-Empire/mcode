@@ -5,14 +5,21 @@ import userEvent from "@testing-library/user-event";
 import type { Message, StoredAttachment } from "@/transport";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { MessageBubble } from "../MessageBubble";
+import { useToastStore } from "@/stores/toastStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
+import { usePlanStore } from "@/stores/planStore";
+import { useThreadStore } from "@/stores/threadStore";
+import { mockTransport } from "@/__tests__/mocks/transport";
+import type { PlanVersion } from "@mcode/contracts/models/plan";
 import {
   clearAttachmentTransportWsUrlCache,
   setAttachmentTransportWsUrl,
 } from "@/lib/attachment-url";
 
 beforeEach(() => {
+  useToastStore.setState({ toasts: [] });
+  usePlanStore.setState({ plansByThread: {}, activeVersionByThread: {} });
   resetThreadStoreForTests({ records: new Map([["thread-1", {
     ...createEmptyThreadRecord(),
     narrativeByMessage: {
@@ -26,6 +33,11 @@ afterEach(() => {
   cleanup();
   resetThreadStoreForTests();
 });
+
+vi.mock("@/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/transport")>()),
+  getTransport: () => mockTransport,
+}));
 
 // Mock MarkdownContent to detect when it's used
 vi.mock("@/components/chat/MarkdownContent", () => ({
@@ -74,6 +86,59 @@ function makeMessage(content: string): Message {
 }
 
 describe("hidden plan messages", () => {
+  it.each(["", "The plan adds the helper."])("points to the saved plan for an assistant response containing %j", (content) => {
+    const plan: PlanVersion = {
+      id: "plan-1", threadId: "thread-1", messageId: "msg-1", version: 1,
+      title: "Add the helper", contentMd: "# Add the helper", author: "agent",
+      providerId: "codex", captureSource: "native", baseVersionId: null,
+      revision: 0, acceptedAt: null, acceptedMessageId: null, status: "ready",
+      createdAt: "2026-10-30T00:00:00.000Z", updatedAt: "2026-10-30T00:00:00.000Z",
+    };
+    usePlanStore.getState().addPlan("thread-1", plan);
+    const message = createMockMessage({ id: "msg-1", thread_id: "thread-1", role: "assistant", content });
+    const { container, rerender } = render(<MessageBubble message={message} />);
+    expect(container.textContent).toContain("Plan v1 is in the Plan tab.");
+    rerender(<MessageBubble message={{ ...message, id: "another-response" }} />);
+    expect(container.textContent).not.toContain("Plan v1 is in the Plan tab.");
+  });
+
+  it("lets a completed empty question list continue planning without inventing answers", async () => {
+    const message = createMockMessage({ id: "msg-1", thread_id: "thread-1", role: "assistant", content: "```plan-questions\n[]\n```" });
+    resetThreadStoreForTests({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [message], runtimePhase: "completed" }]]) });
+    const answer = vi.mocked(mockTransport.answerPlanQuestions).mockResolvedValue(undefined);
+    const { getByRole, queryByRole, container } = render(<MessageBubble message={message} />);
+    await userEvent.click(getByRole("button", { name: "Continue planning" }));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("thread-1", [], "full", undefined, undefined, undefined));
+    act(() => useThreadStore.getState().markPlanAnswered("thread-1", message.id));
+    expect(queryByRole("button", { name: "Continue planning" })).toBeNull();
+    expect(container.textContent).toContain("No questions to answer.");
+  });
+
+  it("keeps empty-question recovery available when submission fails", async () => {
+    const message = createMockMessage({ id: "msg-1", thread_id: "thread-1", role: "assistant", content: "```plan-questions\n[ \n ]\n```" });
+    resetThreadStoreForTests({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [message], runtimePhase: "completed" }]]) });
+    vi.mocked(mockTransport.answerPlanQuestions).mockRejectedValueOnce(new Error("Provider unavailable"));
+    const { getByRole } = render(<MessageBubble message={message} />);
+    await userEvent.click(getByRole("button", { name: "Continue planning" }));
+    await waitFor(() => expect(useThreadStore.getState().records.get("thread-1")).toMatchObject({ errorSource: "send", planQuestionsStatus: "pending" }));
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ kind: "failed", title: "Could not send message", meta: "Provider unavailable" }),
+    ]);
+    expect(getByRole("button", { name: "Continue planning" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("does not offer empty-question continuation before settlement or after a newer message", () => {
+    const message = createMockMessage({ id: "msg-1", thread_id: "thread-1", role: "assistant", content: "```plan-questions\n[]\n```" });
+    resetThreadStoreForTests({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [message], runtimePhase: "running" }]]) });
+    const { container, queryByRole, rerender } = render(<MessageBubble message={message} agentDisplayState={{ phase: "streaming" }} />);
+    expect(container.textContent).toBe("");
+    const newer = createMockMessage({ id: "newer", thread_id: "thread-1", role: "user", content: "Change the request" });
+    act(() => resetThreadStoreForTests({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [message, newer], runtimePhase: "completed" }]]) }));
+    rerender(<MessageBubble message={message} />);
+    expect(queryByRole("button", { name: "Continue planning" })).toBeNull();
+    expect(container.textContent).toContain("No questions to answer.");
+  });
+
   it.each([
     '```plan-output\n{"title":"Historic plan"}\n```',
     "````mcode-plan\n# Plan\n```ts\ncode();\n```\n````",
@@ -227,6 +292,26 @@ function makeMixedFeedbackBundle(): V1Bundle {
     annotations: [preview, { ...comment, displayNumber: 2 }],
   };
 }
+
+describe("MessageBubble copy", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useToastStore.setState({ toasts: [] });
+  });
+
+  it("reports a failed clipboard write instead of doing nothing", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("Write permission denied"));
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const { getByRole } = render(<MessageBubble message={makeMessage("copy me")} />);
+
+    fireEvent.click(getByRole("button", { name: "Copy message" }));
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ kind: "failed", title: "Couldn't copy message" }),
+    ]));
+    expect(writeText).toHaveBeenCalledWith("copy me");
+  });
+});
 
 describe("MessageBubble user messages", () => {
   it("hides a legacy ladder handoff anchor instead of printing its raw document", () => {

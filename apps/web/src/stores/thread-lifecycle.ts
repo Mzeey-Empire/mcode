@@ -107,3 +107,12 @@ export function isThreadRuntimeActive(threadId: string, record: ThreadRecord): b
   const phase = getThreadRuntimePhase(threadId, record);
   return phase === "running" || phase === "finalizing";
 }
+
+/** Holds Stop feedback for its exact execution until the transcript's lifecycle settles. */
+export function isThreadStopPending(threadId: string, record: ThreadRecord | undefined, pendingStopCount: number): boolean {
+  const phase = record ? getThreadRuntimePhase(threadId, record) : "idle";
+  if (phase === "completed" || endedWithoutCompleting(phase)) return false;
+  if (record?.stopRequestedExecutionId === undefined) return pendingStopCount > 0;
+  return record.stopRequestedExecutionId === record.turnExecutionId
+    && isThreadRuntimeActive(threadId, record);
+}

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ToolCall } from "@/transport/types";
 import { ShellToolCallRow } from "../ShellToolCallRow";
 import { ActiveToolRow } from "../ActiveToolRow";
+import { ToolSummaryLine } from "../ToolSummaryLine";
 
 const call: ToolCall = {
   id: "command", toolName: "Bash", toolInput: { command: "echo hello" },
@@ -11,6 +12,28 @@ const call: ToolCall = {
 };
 
 describe("ShellToolCallRow automatic expansion", () => {
+  it.each([
+    ["queued", "Queued command", "Queued"],
+    ["waiting", "Waiting for approval", "Waiting for approval"],
+    ["denied", "Denied command", "Denied"],
+  ] satisfies [NonNullable<ToolCall["status"]>, string, string][])("shows %s without claiming execution", (status, label, footer) => {
+    render(<ShellToolCallRow toolCall={{ ...call, status, isComplete: status === "denied", durationMs: 20_000 }} />);
+    const toggle = screen.getByRole("button", { name: new RegExp(`^${label}`) });
+    expect(toggle).toHaveTextContent(`${label}echo hello`);
+    expect(toggle).not.toHaveTextContent("20s");
+    fireEvent.click(toggle);
+    expect(within(screen.getByRole("region", { name: "Shell output" })).getByText(footer, { exact: true })).toBeVisible();
+    expect(screen.queryByText("Running command")).toBeNull();
+  });
+
+  it("counts denied commands separately from commands that ran", () => {
+    render(<ToolSummaryLine group={{ calls: [
+      { ...call, id: "allowed", isComplete: true },
+      { ...call, id: "denied", status: "denied", isComplete: true },
+    ] }} />);
+    expect(screen.getByRole("button")).toHaveTextContent(/^Ran 1 command · 1 denied$/);
+  });
+
   it("does not construct a completed transcript before disclosure", () => {
     const { container } = render(<ShellToolCallRow toolCall={{ ...call, isComplete: true }} />);
     const toggle = screen.getByRole("button", { name: /^Ran command/ });
@@ -75,9 +98,12 @@ describe("ShellToolCallRow automatic expansion", () => {
     expect(screen.getByRole("button", { name: /^Ran command/ })).toHaveTextContent(/^Ran command2secho hello$/);
   });
 
-  it("reads a failed command as command then exit and duration", () => {
-    render(<ShellToolCallRow toolCall={{ ...call, isComplete: true, isError: true, exitCode: 1, durationMs: 3_000 }} />);
-    expect(screen.getByRole("button", { name: /^Ran command/ })).toHaveTextContent(/^Ran commandecho helloexit 1 · 3s$/);
+  it.each(["Bash", "command_execution"])("labels a failed %s command and preserves its exit code in the transcript", (toolName) => {
+    render(<ShellToolCallRow toolCall={{ ...call, toolName, isComplete: true, isError: true, exitCode: 3, durationMs: 3_000 }} />);
+    const toggle = screen.getByRole("button", { name: /^Ran command/ });
+    expect(toggle).toHaveTextContent(/^Ran commandecho hellofailed · 3s$/);
+    fireEvent.click(toggle);
+    expect(within(screen.getByRole("region", { name: "Shell output" })).getByText("exit code 3", { exact: true })).toBeVisible();
   });
 
   it("shows no duration for a running command", () => {

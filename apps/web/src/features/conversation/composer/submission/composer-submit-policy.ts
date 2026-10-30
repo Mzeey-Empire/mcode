@@ -1,5 +1,6 @@
 import { isGoalControlCommand } from "@/lib/goal-command";
 import { useThreadStore } from "@/stores/threadStore";
+import { useQueueStore } from "@/stores/queueStore";
 
 /** Resolve submit state from the newest snapshot, not an earlier render. */
 export function isThreadRunningForSubmit(
@@ -9,7 +10,7 @@ export function isThreadRunningForSubmit(
   return threadId ? useThreadStore.getState().runningThreadIds.has(threadId) : renderedIsAgentRunning;
 }
 
-/** Decide whether an existing-thread submit must wait behind the active turn. */
+/** Keep existing-thread submits behind the active turn and any earlier queued input. */
 export function shouldQueueActiveThreadSubmit(
   threadId: string | undefined,
   renderedIsAgentRunning: boolean,
@@ -17,8 +18,14 @@ export function shouldQueueActiveThreadSubmit(
   isNewThread: boolean | undefined,
   trimmedContent: string,
 ): boolean {
+  const queue = useQueueStore.getState();
+  const hasQueuedInput = threadId && (
+    queue.queues[threadId]?.length
+    || queue.inFlightQueuedMessages[threadId]
+    || queue.editingThreadId === threadId
+  );
   return Boolean(
-    isThreadRunningForSubmit(threadId, renderedIsAgentRunning) &&
+    (isThreadRunningForSubmit(threadId, renderedIsAgentRunning) || hasQueuedInput) &&
       threadId &&
       !branchFromMessageId &&
       !isNewThread &&

@@ -19,6 +19,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    setupFiles: ["./src/test-setup.ts"],
     include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     pool: "forks",
     maxWorkers: serverTestWorkers(),

@@ -416,6 +416,22 @@ describe("Thread Lifecycle Behavior", () => {
     expect(useComposerDraftStore.getState().drafts[threadId]).toBeUndefined();
   });
 
+  it.each(["switch", "settle", "next-turn"] as const)("clears a failed Stop toast on %s without dismissing unrelated notices", async (transition) => {
+    const threadId = "thread-1";
+    const executionId = "00000000-0000-4000-8000-000000000001";
+    useWorkspaceStore.setState({ activeThreadId: threadId });
+    useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId, turnExecutionId: executionId, phase: "running" });
+    useToastStore.getState().show({ kind: "info", title: "Unrelated notice" });
+    vi.mocked(mockTransport.stopAgent).mockRejectedValueOnce(new Error("WebSocket disconnected"));
+    await useThreadStore.getState().stopAgent(threadId);
+    expect(useToastStore.getState().toasts.map((toast) => toast.title)).toEqual(["Couldn't stop this turn", "Unrelated notice"]);
+    if (transition === "switch") useWorkspaceStore.setState({ activeThreadId: "other-thread" });
+    else useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId,
+      turnExecutionId: transition === "next-turn" ? "00000000-0000-4000-8000-000000000002" : executionId,
+      phase: transition === "next-turn" ? "running" : "cancelled" });
+    expect(useToastStore.getState().toasts.map((toast) => toast.title)).toEqual(["Unrelated notice"]);
+  });
+
   it("when sendMessage fails, the thread is no longer marked as running", async () => {
     const threadId = "thread-1";
     (

@@ -122,7 +122,7 @@ function WorkFoldTranscriptItemRenderer({ item, expanded, onToggleGroup }: Trans
 /** Renders the settled turn's step counts. */
 function TurnMetaLineTranscriptItemRenderer({ item }: TranscriptItemRendererProps) {
   const meta = item as Extract<ChatVirtualItem, { type: "turn-meta-line" }>;
-  return <TurnMetaLine steps={meta.steps} subagents={meta.subagents} />;
+  return <TurnMetaLine steps={meta.steps} subagents={meta.subagents} durationMs={meta.durationMs} />;
 }
 
 /** Renders live narrative progress below the response. */
@@ -133,7 +133,6 @@ function NarrativeIndicatorTranscriptItemRenderer({ item }: TranscriptItemRender
       stepCount={indicator.stepCount}
       status={indicator.status}
       startTime={indicator.startTime}
-      isAgentRunning={indicator.isAgentRunning}
     />
   );
 }

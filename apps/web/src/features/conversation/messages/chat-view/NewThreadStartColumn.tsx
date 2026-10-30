@@ -74,9 +74,13 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewT
   );
 }
 
-function NewThreadOverview({ scope, overview }: { scope: OverviewScope; overview: OverviewPresentationState }) {
+/**
+ * The new-thread Overview mount; the preparing thread surface keeps it, `readOnly`, until the durable thread has its
+ * own. Its pickers edit the next new thread, not the one already starting, so they stay closed there.
+ */
+export function NewThreadOverview({ scope, overview, readOnly }: { scope: OverviewScope; overview: OverviewPresentationState; readOnly?: boolean }) {
   const { workspaceId } = scope;
-  const subject = useMemo<OverviewSubject>(() => ({ kind: "new-thread", workspaceId }), [workspaceId]);
+  const subject = useMemo<OverviewSubject>(() => ({ kind: "new-thread", workspaceId, readOnly }), [workspaceId, readOnly]);
   return (
     <div className="ml-auto flex items-center justify-end gap-1">
       <OverviewMount subject={subject} subjectKey={scope.key} presentation={overview} />

@@ -233,6 +233,7 @@ const WORKSPACE = {
   id: "ws-1",
   name: "Test Project",
   path: "/test",
+  is_git_repo: false,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };
@@ -410,6 +411,46 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     view.rerender(<ChatView />);
 
     expect(screen.getByTestId("chat-composer-stage")).toHaveStyle({ paddingRight: "328px" });
+  });
+
+  it("keeps the Overview docked and the composer beside it while a thread is preparing", () => {
+    const realRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === "thread-preparing-shell" ? new DOMRect(0, 0, 1400, 900) : realRect.call(this);
+    });
+    onTestFinished(() => { vi.restoreAllMocks(); });
+    const preparing = { ...makeThread(), clientPreparing: true };
+    setupWorkspaceMock(defaultWorkspaceState({ threads: [preparing] }));
+
+    render(<ChatView />);
+
+    const shell = screen.getByTestId("thread-preparing-shell");
+    expect(within(shell).getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "docked");
+    expect(within(shell).getByTestId("chat-composer-stage")).toHaveStyle({ paddingRight: "328px" });
+  });
+
+  it("shows the starting thread's target in the docked card without opening a picker", async () => {
+    const realRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === "thread-preparing-shell" ? new DOMRect(0, 0, 1400, 900) : realRect.call(this);
+    });
+    onTestFinished(() => { vi.restoreAllMocks(); });
+    const preparing = { ...makeThread(), clientPreparing: true };
+    setupWorkspaceMock({ ...defaultWorkspaceState({ threads: [preparing] }), workspaces: [{ ...WORKSPACE, is_git_repo: true }], newThreadBranch: "release/2" });
+    const user = userEvent.setup();
+
+    render(<ChatView />);
+
+    const card = within(screen.getByTestId("thread-preparing-shell")).getByTestId("thread-overview-card");
+    const workspaceRow = within(card).getByTestId("overview-target-workspace");
+    const branchRow = within(card).getByTestId("overview-target-branch");
+    expect(workspaceRow).toHaveTextContent("Local");
+    expect(branchRow).toHaveTextContent("On release/2");
+    await user.click(workspaceRow);
+    await user.click(branchRow);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Workspace" })).not.toBeInTheDocument();
   });
 
   it("keeps an empty selected thread free of starter suggestions", () => {
@@ -1479,7 +1520,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     render(<ChatView />);
 
-    expect(screen.getByTestId("conversation-error-banner")).toHaveTextContent("Conversation refresh failed");
+    expect(screen.getByTestId("conversation-error-banner")).toHaveTextContent("Could not refresh conversation: Conversation refresh failed");
     expect(screen.getByTestId("message-list")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-error")).not.toBeInTheDocument();
   });
@@ -1500,7 +1541,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByTestId("message-list")).toBeInTheDocument();
   });
 
-  it("labels a rejected send as a send failure", () => {
+  it("leaves a rejected send to its toast instead of a conversation banner", () => {
     chatViewThreadMockRef.current = defaultThreadState({
       activeRecord: {
         ...createEmptyThreadRecord(),
@@ -1512,9 +1553,9 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     render(<ChatView />);
 
-    expect(screen.getByTestId("conversation-error-banner")).toHaveTextContent(
-      "Could not send message: Thread thread-1 already has an active agent session",
-    );
+    expect(screen.queryByTestId("conversation-error-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("conversation-error")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-list")).toBeInTheDocument();
   });
 
   it("keeps running threads subscribed while another thread is selected", async () => {

@@ -45,6 +45,8 @@ import { isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
 import { readRememberedStartFromOrigin, rememberStartFromOrigin } from "@/lib/start-from-origin-preference";
 import { recordThreadSelection } from "@/lib/thread-switch-telemetry";
+import { readRememberedOpenThread, rememberOpenThread } from "@/lib/open-thread-memory";
+import { useToastStore } from "@/stores/toastStore";
 
 function unboundStartupResolution(state: ThreadStartup["state"]): "unbound" | "terminal" | "interrupted" {
   if (state === "interrupted") return "interrupted";
@@ -54,6 +56,8 @@ function unboundStartupResolution(state: ThreadStartup["state"]): "unbound" | "t
 const SYNC_THROTTLE_MS = 30_000;
 let lastPrSyncTime: number | null = null;
 let hydrationRequest = 0;
+/** Only the first thread snapshot after a page load may reopen the remembered thread. */
+let openThreadRestorePending = true;
 
 async function syncThreadPrs(): Promise<void> {
   const now = Date.now();
@@ -822,6 +826,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     void getConversationResidency().activate(activeThreadId, threads);
   };
 
+  // A thread deleted or archived while open is gone or settled by the next load, so the
+  // window falls back to New thread instead of reopening it.
+  const reopenRememberedThread = () => {
+    if (!openThreadRestorePending) return;
+    openThreadRestorePending = false;
+    const rememberedId = readRememberedOpenThread();
+    if (!rememberedId) return;
+    const { activeThreadId, activeDraftId, threads } = get();
+    if (activeThreadId || activeDraftId) return;
+    const thread = threads.find((candidate) => candidate.id === rememberedId);
+    if (!thread || thread.status === "archived" || thread.status === "deleted") {
+      rememberOpenThread(null);
+      return;
+    }
+    get().setActiveWorkspace(thread.workspace_id);
+    get().setActiveThread(thread.id);
+  };
+
   const applyOptimisticSuccess = (
     placeholderId: string,
     workspaceId: string,
@@ -1411,6 +1433,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const incoming = await getTransport().listAllThreads();
       if (request !== hydrationRequest) return;
       set((state) => ({ threads: mergeThreadSnapshot(incoming, before, state.threads), threadSnapshotEpoch: state.threadSnapshotEpoch + 1, loading: false, error: null }));
+      reopenRememberedThread();
       void get().syncThreadPrs();
     } catch (error) {
       if (request === hydrationRequest) set({ error: String(error), loading: false });
@@ -1972,4 +1995,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     get().recordPullRequestLink(threadId, prNumber, prUrl, existing?.state ?? "open");
   },
 };
+});
+
+// Several paths assign activeThreadId directly, such as a new thread's placeholder
+// becoming its durable id, so the store change itself is what gets remembered.
+useWorkspaceStore.subscribe((state, previous) => {
+  if (state.activeThreadId !== previous.activeThreadId) rememberOpenThread(state.activeThreadId);
+  if (state.activeThreadId !== previous.activeThreadId && previous.activeThreadId) {
+    useToastStore.getState().dismissByKey(`stop-failure:${previous.activeThreadId}`);
+  }
 });

@@ -4,7 +4,7 @@ import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
 import { useThreadStore } from "@/stores/threadStore";
-import { getCanonicalLifecycleTurn, getThreadRuntimePhase } from "@/stores/thread-lifecycle";
+import { getCanonicalLifecycleTurn, getThreadRuntimePhase, isThreadStopPending } from "@/stores/thread-lifecycle";
 import { getThreadRecord, useThreadRecord } from "../state";
 import { isConversationVisible } from "../residency/conversation-residency";
 import {
@@ -20,12 +20,13 @@ import type { Message } from "@/transport/types";
 import { useTurnEndings } from "../turn-ending/useTurnEndings";
 import type { ThoughtSegment } from "../narrative/types";
 import type { RunHoldingSignals, RunRetry } from "../narrative/run-status";
-import { useDelegatedOnlyPhase, useStatusLineExit } from "../narrative/status-line-exit";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
 const EMPTY_FILES_CHANGED: Record<string, string[]> = {};
+const EMPTY_TURN_DURATIONS: Readonly<Record<string, number | null>> = {};
+const EMPTY_PROVIDER_CONTINUATIONS: ReadonlySet<string> = new Set();
 
 function resolveDisplayedThreadId(displayThreadId: string | undefined, activeThreadId: string | null | undefined) {
   return displayThreadId ?? activeThreadId;
@@ -74,6 +75,26 @@ function resolveCanonicalActivity(
   };
 }
 
+/**
+ * Prefers the server start of a canonical turn that is still running. The local start is the client's receive
+ * time, which restarts after a thread switch or reconnect and can carry over from an earlier turn.
+ */
+function resolveAgentStartTime(
+  projection: CanonicalMessageProjection | undefined,
+  ownsLifecycle: boolean,
+  legacyStartTime: number | undefined,
+): number | undefined {
+  if (ownsLifecycle) return projection?.agentStartTime;
+  const running = projection && isAgentDisplayActive(projection.agentDisplayState);
+  return (running ? projection.agentStartTime : undefined) ?? legacyStartTime;
+}
+
+function canonicalTurnDurations(projection: CanonicalMessageProjection | undefined): Readonly<Record<string, number | null>> {
+  if (!projection) return EMPTY_TURN_DURATIONS;
+  return Object.fromEntries(Object.entries(projection.turnSummariesByMessageId)
+    .map(([messageId, summary]) => [messageId, summary.durationMs]));
+}
+
 function resolveCanonicalTurnIdentity(
   projection: CanonicalMessageProjection | undefined,
   legacy: {
@@ -89,29 +110,26 @@ function resolveCanonicalTurnIdentity(
   };
 }
 
-/** Turn-level states that hold the status line, plus whether it is fading out after going off. */
-function useRunHoldingSignals(threadId: string | null | undefined, isAgentRunning: boolean, awaitingApproval: boolean, awaitingNativeAnswers: boolean): RunHoldingSignals {
+/** Turn-level states that hold the status line. */
+function useRunHoldingSignals(threadId: string | null | undefined, awaitingApproval: boolean, awaitingNativeAnswers: boolean): RunHoldingSignals {
   const awaitingPlanAnswers = useThreadRecord(threadId, (record) => record.planQuestionsStatus === "pending");
   const awaitingAnswers = awaitingPlanAnswers || awaitingNativeAnswers;
   const planning = useWorkspaceThread(threadId, (thread) => thread?.plan_phase === "planning");
-  const stopPending = useThreadStore((state) => threadId ? (state.pendingStopCounts[threadId] ?? 0) > 0 : false);
+  const stopPending = useThreadStore((state) => threadId ? isThreadStopPending(threadId, state.records.get(threadId), state.pendingStopCounts[threadId] ?? 0) : false);
   const compacting = useThreadRecord(threadId, (record) => record.isCompacting);
   // Primitive selectors: an object-returning selector yields a fresh reference per store update and loops rerenders.
   const retryKind = useThreadRecord(threadId, (record): RunRetry["kind"] | undefined =>
     record.rateLimit ? "rate-limited" : record.apiRetry ? "retrying" : undefined);
   const retryErrorStatus = useThreadRecord(threadId, (record) => record.apiRetry?.errorStatus);
   const delegatingNow = threadAttentionStore((state) => threadId ? state.byThreadId[threadId]?.hasUnfinishedDelegatedTasks === true : false);
-  const ownLive = isAgentRunning || awaitingApproval || awaitingAnswers;
-  const exiting = useStatusLineExit(threadId, ownLive || delegatingNow);
-  const delegatedOnlyPhase = useDelegatedOnlyPhase(threadId, ownLive, delegatingNow);
   const waitingFor = awaitingApproval ? "approval" : awaitingAnswers ? "answers" : undefined;
   return useMemo<RunHoldingSignals>(() => {
     const retry: RunRetry | undefined =
       retryKind === "retrying" ? { kind: "retrying", errorStatus: retryErrorStatus }
         : retryKind === "rate-limited" ? { kind: "rate-limited" }
           : undefined;
-    return { stopPending, compacting, retry, ...(waitingFor ? { waitingFor } : {}), ...(planning ? { planning } : {}), ...(delegatingNow ? { delegating: true } : {}), ...(exiting ? { exiting: delegatedOnlyPhase ? "delegated" : "turn" } : {}) };
-  }, [stopPending, compacting, retryKind, retryErrorStatus, waitingFor, planning, delegatingNow, exiting, delegatedOnlyPhase]);
+    return { stopPending, compacting, retry, ...(waitingFor ? { waitingFor } : {}), ...(planning ? { planning } : {}), ...(delegatingNow ? { delegating: true } : {}) };
+  }, [stopPending, compacting, retryKind, retryErrorStatus, waitingFor, planning, delegatingNow]);
 }
 
 /** Reads and normalizes the transcript data needed by the conversation viewport. */
@@ -168,8 +186,13 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const canonicalContent = resolveCanonicalContent(canonicalLifecycleProjection, {
     messages: visibleLegacyMessages,
     agentDisplayState: legacyAgentDisplayState,
-    agentStartTime: canonicalLifecycleTurn ? canonicalProjection?.agentStartTime : legacyAgentStartTime,
+    agentStartTime: resolveAgentStartTime(canonicalProjection, canonicalLifecycleTurn !== undefined, legacyAgentStartTime),
   });
+  // The projection rebuilds on every canonical event; keep the map's identity so the stable transcript stays cached.
+  const turnDurationsByMessageId = useShallow(canonicalTurnDurations)(canonicalProjection);
+  const providerContinuationMessageIds = useShallow(
+    (projection: CanonicalMessageProjection | undefined) => projection?.providerContinuationMessageIds ?? EMPTY_PROVIDER_CONTINUATIONS,
+  )(canonicalProjection);
   const canonicalActivity = resolveCanonicalActivity(canonicalLifecycleProjection, {
     toolCalls: legacyToolCalls ?? EMPTY_TOOL_CALLS,
     thoughtSegments: legacyThoughtSegments,
@@ -203,7 +226,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const awaitingNativeAnswers = useMemo(() => docked.some((request) => request.subject.kind === "question"), [docked]);
   const hooks = useThreadRecord(renderedThreadId, (record) => record.hooks);
   const decidedApprovals = useThreadRecord(renderedThreadId, (record) => record.approvals);
-  const holdingSignals = useRunHoldingSignals(renderedThreadId, isAgentDisplayActive(canonicalContent.agentDisplayState), awaitingApproval, awaitingNativeAnswers);
+  const holdingSignals = useRunHoldingSignals(renderedThreadId, awaitingApproval, awaitingNativeAnswers);
   const persistedNarrativeByMessage = useThreadRecord(renderedThreadId, (record) => record.narrativeByMessage);
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);
@@ -251,6 +274,8 @@ export function useMessageListData(displayThreadId: string | undefined) {
     assistantResponseKeys: canonicalTurnIdentity.assistantResponseKeys,
     currentTurnMessageIdByThread,
     turnSummariesByMessageId: canonicalActivity.turnSummariesByMessageId,
+    turnDurationsByMessageId,
+    providerContinuationMessageIds,
     turnEndingsByMessageId: turnEndings.endingsByMessageId,
   };
 }

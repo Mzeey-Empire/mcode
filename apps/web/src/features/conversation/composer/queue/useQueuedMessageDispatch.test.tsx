@@ -7,7 +7,8 @@ import { useQueueStore } from "@/stores/queueStore";
 import { useToastStore } from "@/stores/toastStore";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { createEmptyThreadRecord, getThreadRecord, type ThreadRecord } from "@/stores/thread-record";
-import { useThreadStore } from "@/stores/threadStore";
+import { sendQueuedMessage, useThreadStore } from "@/stores/threadStore";
+import { useTranscriptFollowStore } from "@/features/conversation/messages/transcript-follow-request";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { RpcError } from "@/transport";
@@ -77,6 +78,7 @@ describe("useQueuedMessageDispatch", () => {
       toast: null,
       editingThreadId: null,
     });
+    useToastStore.setState({ toasts: [] });
     useWorkspaceStore.setState({
       activeThreadId: THREAD_ID,
       threads: [createMockThread({ id: THREAD_ID })],
@@ -109,6 +111,9 @@ describe("useQueuedMessageDispatch", () => {
         browserCaptureSpillPaths: ["browser-capture-spill/workspace/capture.json"],
       }),
     ]);
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ kind: "failed", title: "Could not send message", meta: "transport unavailable" }),
+    ]);
   });
 
   it("sends the chosen message at once while the thread is idle", async () => {
@@ -124,6 +129,30 @@ describe("useQueuedMessageDispatch", () => {
       expect.objectContaining({ threadId: THREAD_ID, content: "second queued follow-up" }),
     );
     expect(queuedContents()).toEqual(["first queued follow-up"]);
+  });
+
+  it("brings the thread's transcript to the prompt on Send now", async () => {
+    queueMessage("queued follow-up");
+    useTranscriptFollowStore.setState({ request: null });
+    const { result } = renderHook(() => useQueuedMessageDispatch(THREAD_ID));
+
+    await act(async () => {
+      await result.current.sendNow(queued(0));
+    });
+
+    expect(useTranscriptFollowStore.getState().request).toEqual({ threadId: THREAD_ID });
+  });
+
+  it("leaves the reader in place when the queue drains on its own", async () => {
+    queueMessage("queued follow-up");
+    useTranscriptFollowStore.setState({ request: null });
+
+    await act(async () => {
+      await sendQueuedMessage(THREAD_ID, useQueueStore.getState().claimNextQueuedMessage(THREAD_ID)!);
+    });
+
+    expect(mockTransport.sendMessage).toHaveBeenCalledTimes(1);
+    expect(useTranscriptFollowStore.getState().request).toBeNull();
   });
 
   it("sends a queued message to the provider chosen when it was queued, so a switch happens at send time", async () => {
@@ -342,6 +371,7 @@ describe("useQueuedMessageDispatch", () => {
     expect(queuedContents()).toEqual([]);
     expect(useQueueStore.getState().inFlightQueuedMessages[THREAD_ID]).toBeUndefined();
     expect(getThreadRecord(useThreadStore.getState().records, THREAD_ID).error).toBeNull();
+    expect(useToastStore.getState().toasts).toEqual([]);
   });
 
   it("sends a rejected steer as the next turn when its turn ended meanwhile", async () => {

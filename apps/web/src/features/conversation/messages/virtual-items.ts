@@ -12,6 +12,7 @@ import { currentActivityHeading } from "../narrative/activity-label";
 import { isTurnWorkRunning } from "../narrative/narrative-builder-helpers";
 import { deriveRunStatus, type RunHoldingSignals, type RunStatus } from "../narrative/run-status";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
+import { isHiddenPlanAnswer } from "@/lib/plan-fences";
 import { approvalReviewNote, persistedTurnCounts, persistedTurnDurationMs } from "../turn/turn-summary";
 import { sameTurnEndNotice, type TurnEndNoticeView } from "../turn-ending/turn-ending-notice";
 import type { TurnEnding } from "../turn-ending/turn-endings-projection";
@@ -145,6 +146,10 @@ export interface TranscriptProjectionInput {
   persistedNarrativeByMessage?: PersistedNarrativeRecordsByMessage;
   /** Canonical child turn summaries keyed by assistant message id. */
   turnSummariesByMessageId?: Record<string, TurnSummary>;
+  /** Server-timed turn durations keyed by assistant message id, for every canonical turn. */
+  turnDurationsByMessageId?: Readonly<Record<string, number | null>>;
+  /** Answers produced by a provider wake rather than a user prompt. */
+  providerContinuationMessageIds?: ReadonlySet<string>;
   /** Settled turn endings keyed by the message each notice follows. */
   turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>;
   /** In-memory tool calls for the active turn. */
@@ -222,6 +227,8 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       responseTextIsStreaming: input.responseTextIsStreaming,
       persistedNarrativeByMessage: input.persistedNarrativeByMessage,
       turnSummariesByMessageId: input.turnSummariesByMessageId,
+      turnDurationsByMessageId: input.turnDurationsByMessageId,
+      providerContinuationMessageIds: input.providerContinuationMessageIds,
       turnEndingsByMessageId: input.turnEndingsByMessageId,
       currentTurnLiveNarrative: settledLiveNarrative(input),
     };
@@ -238,6 +245,8 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
         stableInput.responseTextIsStreaming,
         stableInput.currentTurnLiveNarrative,
         stableInput.turnEndingsByMessageId,
+        stableInput.turnDurationsByMessageId,
+        stableInput.providerContinuationMessageIds,
       );
     previousStableInput = stableInput;
     previousStableItems = stableItems;
@@ -263,14 +272,15 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
 type StableTranscriptInput = Pick<TranscriptProjectionInput,
   "messages" | "persistedFilesChanged" | "latestTurnWithChanges" | "currentTurn" | "agentDisplayState"
   | "responseTextIsStreaming" | "persistedNarrativeByMessage" | "turnSummariesByMessageId"
-  | "turnEndingsByMessageId"> & {
+  | "turnDurationsByMessageId" | "providerContinuationMessageIds" | "turnEndingsByMessageId"> & {
   currentTurnLiveNarrative: SettledLiveNarrative | undefined;
 };
 
 const STABLE_TRANSCRIPT_KEYS = [
   "messages", "persistedFilesChanged", "latestTurnWithChanges", "currentTurn", "agentDisplayState",
-  "responseTextIsStreaming", "persistedNarrativeByMessage", "turnSummariesByMessageId", "turnEndingsByMessageId",
-  "currentTurnLiveNarrative",
+  "responseTextIsStreaming", "persistedNarrativeByMessage", "turnSummariesByMessageId", "turnDurationsByMessageId",
+  "turnEndingsByMessageId", "currentTurnLiveNarrative",
+  "providerContinuationMessageIds",
 ] as const satisfies readonly (keyof StableTranscriptInput)[];
 
 function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, current: StableTranscriptInput): boolean {
@@ -352,6 +362,8 @@ export type ChatVirtualItem =
       messageId: string;
       steps: number;
       subagents: number;
+      /** Tool-free provider continuations still show their elapsed work. */
+      durationMs?: number;
     }
   | {
       key: string;
@@ -359,16 +371,12 @@ export type ChatVirtualItem =
       /**
        * "X steps · label" status footer rendered BELOW the
        * live assistant response so the writing animation reads as the primary
-       * surface and the progress meta sits underneath. Emitted while the agent
-       * is running and kept through the turn's volatile tail (tool calls still
-       * in memory) so the component can animate out instead of vanishing in a
-       * single frame; it renders nothing once its exit completes.
+       * surface and the progress meta sits underneath. Emitted only while the
+       * turn is live, so the settled footer replaces it in one render.
        */
       stepCount: number;
       status: RunStatus;
       startTime: number | undefined;
-      /** False once the turn ended — tells the component to play its exit. */
-      isAgentRunning: boolean;
     }
   | {
       key: string;
@@ -397,18 +405,22 @@ export function buildStableItems(
   responseTextIsStreaming?: boolean,
   currentTurnLiveNarrative?: SettledLiveNarrative,
   turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>,
+  turnDurationsByMessageId?: Readonly<Record<string, number | null>>,
+  providerContinuationMessageIds?: ReadonlySet<string>,
 ): ChatVirtualItem[] {
   return messages.flatMap((message) => isRoutineProviderNotice(message) ? [] : stableItemsForMessage(message, {
-    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId,
+    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId, turnDurationsByMessageId, providerContinuationMessageIds,
   }));
 }
 
 interface StableItemInput {
+  providerContinuationMessageIds?: ReadonlySet<string>;
   persistedFilesChanged?: Record<string, string[]>;
   latestTurnWithChanges?: string | null;
   currentTurn?: CurrentTurnResponseIdentity;
   persistedNarrativeByMessage?: PersistedNarrativeRecordsByMessage;
   turnSummariesByMessageId?: Record<string, TurnSummary>;
+  turnDurationsByMessageId?: Readonly<Record<string, number | null>>;
   currentAgentDisplayState?: AgentDisplayState;
   responseTextIsStreaming?: boolean;
   /** What the settled current turn's live state can put under its fold. */
@@ -443,9 +455,12 @@ function recordedTurnSummary(message: Message, input: StableItemInput): TurnSumm
   const canonical = input.turnSummariesByMessageId?.[message.id];
   if (canonical) return canonical;
   const records = input.persistedNarrativeByMessage?.[message.id];
-  return records
-    ? { counts: persistedTurnCounts(records), durationMs: persistedTurnDurationMs(records) }
-    : { counts: NO_COUNTS, durationMs: null };
+  // Records only span tools and thoughts, so they miss the time before the first tool and while the answer streams.
+  const serverDurationMs = input.turnDurationsByMessageId?.[message.id] ?? null;
+  return {
+    counts: records ? persistedTurnCounts(records) : NO_COUNTS,
+    durationMs: serverDurationMs ?? (records ? persistedTurnDurationMs(records) : null),
+  };
 }
 
 function settledTurnSummary(message: Message, input: StableItemInput): TurnSummary {
@@ -498,10 +513,11 @@ function workFoldItem(message: Message, input: StableItemInput, summary: TurnSum
   };
 }
 
-function turnMetaLineItem(message: Message, summary: TurnSummary): ChatVirtualItem | undefined {
+function turnMetaLineItem(message: Message, summary: TurnSummary, providerContinuationMessageIds: ReadonlySet<string> | undefined): ChatVirtualItem | undefined {
   const { steps, subagents } = summary.counts;
-  return steps > 0 || subagents > 0
-    ? { key: `turn-meta-line:${message.id}`, type: "turn-meta-line", messageId: message.id, steps, subagents }
+  const durationMs = providerContinuationMessageIds?.has(message.id) && steps === 0 ? summary.durationMs : null;
+  return steps > 0 || subagents > 0 || durationMs !== null
+    ? { key: `turn-meta-line:${message.id}`, type: "turn-meta-line", messageId: message.id, steps, subagents, ...(durationMs !== null ? { durationMs } : {}) }
     : undefined;
 }
 
@@ -519,6 +535,7 @@ function turnEndNoticeItem(message: Message, ending: TurnEnding | undefined): Ch
 }
 
 function stableItemsForMessage(message: Message, input: StableItemInput): ChatVirtualItem[] {
+  if (isHiddenPlanAnswer(message)) return [];
   const ending = input.turnEndingsByMessageId?.[message.id];
   if (message.role !== "assistant") return definedItems([messageVirtualItem(message, input), turnEndNoticeItem(message, ending)]);
   const settled = !isAgentDisplayActive(currentResponseState(message, input));
@@ -528,7 +545,7 @@ function stableItemsForMessage(message: Message, input: StableItemInput): ChatVi
   return definedItems([
     summary && showFold ? workFoldItem(message, input, summary) : undefined,
     messageVirtualItem(message, input),
-    summary && turnMetaLineItem(message, summary),
+    summary && turnMetaLineItem(message, summary, input.providerContinuationMessageIds),
     turnChangesItem(message, input),
     turnEndNoticeItem(message, ending),
   ]);
@@ -568,9 +585,9 @@ export function buildVolatileItems(
   });
 
   return [
-    narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning, agentStartTime, committedAssistantBody),
+    narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning && !holdingSignals?.stopPending, agentStartTime, committedAssistantBody),
     liveResponseItem(liveText, currentTurn, agentDisplayState, responseTextIsStreaming),
-    narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
+    agentDisplayState?.phase === "cancelled" ? undefined : narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
 }
 
@@ -601,8 +618,9 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
   const signals = holdingSignals ?? NO_HOLDING_SIGNALS;
   const ownLive = isAgentRunning || signals.waitingFor !== undefined;
   const live = ownLive || signals.delegating === true;
-  if (!live && toolCalls.length === 0 && !signals.exiting) return undefined;
-  if (!ownLive && (signals.delegating || signals.exiting === "delegated")) return delegatedOnlyIndicatorItem(live);
+  // The settled footer replaces this row in the same render; a leftover item would draw an empty row.
+  if (!live) return undefined;
+  if (!ownLive) return delegatedOnlyIndicatorItem();
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
   const running = topLevelTools.filter(isTurnWorkRunning);
   const status = deriveRunStatus({
@@ -612,12 +630,12 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
     answering,
     summaryHeading: currentActivityHeading(thoughts),
   });
-  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning: live };
+  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime };
 }
 
-function delegatedOnlyIndicatorItem(live: boolean): ChatVirtualItem {
+function delegatedOnlyIndicatorItem(): ChatVirtualItem {
   const status = deriveRunStatus({ ...NO_HOLDING_SIGNALS, subagentsRunning: true, answering: false });
-  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: 0, status, startTime: undefined, isAgentRunning: live };
+  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: 0, status, startTime: undefined };
 }
 
 function sameAgentDisplayState(
@@ -669,7 +687,7 @@ function sameWorkFoldItem(left: ChatVirtualItem, right: ChatVirtualItem): boolea
 }
 
 function sameTurnMetaLineItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "turn-meta-line" && right.type === "turn-meta-line" && left.messageId === right.messageId && left.steps === right.steps && left.subagents === right.subagents;
+  return left.type === "turn-meta-line" && right.type === "turn-meta-line" && left.messageId === right.messageId && left.steps === right.steps && left.subagents === right.subagents && left.durationMs === right.durationMs;
 }
 
 function sameTurnEndNoticeItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
@@ -677,7 +695,7 @@ function sameTurnEndNoticeItem(left: ChatVirtualItem, right: ChatVirtualItem): b
 }
 
 function sameNarrativeIndicatorItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.status.label === right.status.label, left.status.icon === right.status.icon, left.stepCount === right.stepCount, left.startTime === right.startTime, left.isAgentRunning === right.isAgentRunning].every(Boolean);
+  return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.status.label === right.status.label, left.status.icon === right.status.icon, left.stepCount === right.stepCount, left.startTime === right.startTime].every(Boolean);
 }
 
 const VIRTUAL_ITEM_EQUALITY: Record<ChatVirtualItem["type"], (left: ChatVirtualItem, right: ChatVirtualItem) => boolean> = {

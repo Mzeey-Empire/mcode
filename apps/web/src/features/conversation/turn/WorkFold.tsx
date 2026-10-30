@@ -4,19 +4,21 @@ import { formatDuration } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 const ENDED_LABELS: Record<Exclude<TurnOutcome, "completed">, string> = {
-  cancelled: "Stopped after",
-  interrupted: "Interrupted after",
-  errored: "Failed after",
+  cancelled: "Stopped",
+  interrupted: "Interrupted",
+  errored: "Failed",
 };
 
 /** Names how a settled turn ended and how long it ran, for example "Worked for 1m 42s". */
 export function workFoldLabel(outcome: TurnOutcome | null | undefined, durationMs: number | null): string {
-  if (durationMs == null || durationMs < 0) return "Worked";
+  if (durationMs == null || durationMs < 0) {
+    return outcome == null || outcome === "completed" ? "Worked" : ENDED_LABELS[outcome];
+  }
   // A sub-second turn still reads as work done, so it rounds up to one second.
   const duration = formatDuration(Math.max(1, Math.round(durationMs / 1000)));
   return outcome == null || outcome === "completed"
     ? `Worked for ${duration}`
-    : `${ENDED_LABELS[outcome]} ${duration}`;
+    : `${ENDED_LABELS[outcome]} after ${duration}`;
 }
 
 /** Props for {@link WorkFold}. */

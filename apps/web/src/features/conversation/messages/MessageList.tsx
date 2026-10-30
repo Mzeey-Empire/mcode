@@ -30,6 +30,7 @@ import { TranscriptViewport, type TranscriptHost, type TranscriptPosition } from
 import type { ViewportInsets } from "@/components/ui/virtual-viewport";
 import { useToastStore } from "@/stores/toastStore";
 import { useMessageRevealStore, type MessageRevealRequest } from "./message-reveal-store";
+import { useFollowOnSend } from "./transcript-follow-request";
 
 const SOURCE_NAVIGATION_MAX_FRAMES = 20;
 const FILL_VIEWPORT_RATIO = 1.5;
@@ -423,7 +424,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     useMessageListItems({ ...data, expandedFolds: expandedGroups, expandedGroups: presentGroups, leadingContent: props.leadingContent, afterFirstUserContent: props.afterFirstUserContent });
   const itemsByKey = useMemo(() => new Map(items.map((item) => [item.key, item])), [items]);
   const userRows = useMemo(() => items.filter((item) =>
-    item.type === "message" && item.message.role === "user" && !item.message.is_internal,
+    item.type === "message" && item.message.role === "user" && !item.message.is_internal && !item.message.systemNotice,
   ), [items]);
   const stickyItem = stickyKey ? itemsByKey.get(stickyKey) : undefined;
   const stickyMessage = stickyItem?.type === "message" ? stickyItem.message : undefined;
@@ -541,6 +542,8 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       setHighlightedKey(row.key);
     }
   }, []);
+  const getView = useCallback(() => controllerRef.current, []);
+  useFollowOnSend(data.renderedThreadId, getView);
   const revealSearch = useRef<RevealSearch | null>(null);
   const [revealPagesSettled, setRevealPagesSettled] = useState(0);
   const revealRequest = useMessageRevealStore((state) =>

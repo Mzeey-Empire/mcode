@@ -13,6 +13,7 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { AgentService } from "../agent-service.js";
+import { testModelCatalog } from "../../__tests__/provider-model-fixture.js";
 import { createAgentServiceForTest, startAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
@@ -70,6 +71,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     providerStub = wrapProviderEmitterForRuntimeEvents(Object.assign(new NodeEvents.EventEmitter(), {
       id: "claude" as ProviderId,
       supportsCompletion: false,
+      listModels: testModelCatalog.listModels,
 
       maxInputCharactersPerTurn: 16_000,
       // Never resolves. We want to observe events emitted BEFORE completion.

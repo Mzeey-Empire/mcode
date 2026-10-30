@@ -422,6 +422,7 @@ export class CodexLiveEventReducer {
         outputTotalBytes: event.outputTotalBytes,
         outputArtifactPath: event.outputArtifactPath,
         cancelled: event.cancelled,
+        denied: event.denied,
       }, event.subagentPresentation);
     return [
       { kind: "tool-result", event },

@@ -93,7 +93,16 @@ function rowButton({ testId, open, children }: TargetRowButtonProps) {
   );
 }
 
-function WorkspaceRow({ target }: { target: NewThreadTarget }) {
+/** A target row that opens nothing: a project without git, or the target of a thread that is already starting. */
+function StaticTargetRow({ testId, Icon, children }: { testId: string; Icon: TargetRowContentProps["Icon"]; children: ReactNode }) {
+  return (
+    <div data-testid={testId} className={cn(OVERVIEW_ROW_CLASS, "flex items-center")}>
+      <TargetRowContent Icon={Icon}>{children}</TargetRowContent>
+    </div>
+  );
+}
+
+function WorkspaceRow({ target, readOnly }: { target: NewThreadTarget; readOnly: boolean }) {
   const [open, setOpen] = useState(false);
   const rowRef = useRef<HTMLButtonElement>(null);
   const { workspace, mode } = target;
@@ -101,13 +110,7 @@ function WorkspaceRow({ target }: { target: NewThreadTarget }) {
   const selectedWorktree = useWorkspaceStore((state) => state.selectedWorktree);
   const { Icon, label } = COMPOSER_MODE_OPTIONS[mode];
   const content = <WorkspaceRowLabel label={label} meta={newThreadWorkspaceMeta(mode, folder, selectedWorktree)} />;
-  if (!workspace.is_git_repo) {
-    return (
-      <div data-testid="overview-target-workspace" className={cn(OVERVIEW_ROW_CLASS, "flex items-center")}>
-        <TargetRowContent Icon={Icon}>{content}</TargetRowContent>
-      </div>
-    );
-  }
+  if (readOnly || !workspace.is_git_repo) return <StaticTargetRow testId="overview-target-workspace" Icon={Icon}>{content}</StaticTargetRow>;
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
@@ -130,10 +133,11 @@ function WorkspaceRow({ target }: { target: NewThreadTarget }) {
   );
 }
 
-function BranchRow({ pick, workspaceId, testId }: { pick: TargetPick; workspaceId: string; testId: string }) {
+function BranchRow({ pick, workspaceId, testId, readOnly }: { pick: TargetPick; workspaceId: string; testId: string; readOnly: boolean }) {
   const [open, setOpen] = useState(false);
   const rowRef = useRef<HTMLButtonElement>(null);
   const Icon = pick.list === "worktrees" ? GitFork : GitBranch;
+  if (readOnly) return <StaticTargetRow testId={testId} Icon={Icon}><TargetLabelText label={pick.label} /></StaticTargetRow>;
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -160,34 +164,34 @@ function BranchRow({ pick, workspaceId, testId }: { pick: TargetPick; workspaceI
   );
 }
 
-function BranchRows({ target }: { target: NewThreadTarget }) {
+function BranchRows({ target, readOnly }: { target: NewThreadTarget; readOnly: boolean }) {
   const { workspace, mode } = target;
   const selection = useNewThreadTargetSelection(workspace.id, mode);
   return (<>
-    <BranchRow pick={selection.target} workspaceId={workspace.id} testId="overview-target-branch" />
+    <BranchRow pick={selection.target} workspaceId={workspace.id} testId="overview-target-branch" readOnly={readOnly} />
     {selection.baseBranch
-      ? <BranchRow pick={selection.baseBranch} workspaceId={workspace.id} testId="overview-target-base-branch" />
+      ? <BranchRow pick={selection.baseBranch} workspaceId={workspace.id} testId="overview-target-base-branch" readOnly={readOnly} />
       : null}
   </>);
 }
 
-function WorkspaceEntry({ workspaceId }: { workspaceId: string }) {
+function WorkspaceEntry({ workspaceId, readOnly }: { workspaceId: string; readOnly: boolean }) {
   const target = useNewThreadTarget(workspaceId);
-  return target ? <WorkspaceRow target={target} /> : null;
+  return target ? <WorkspaceRow target={target} readOnly={readOnly} /> : null;
 }
 
-function BranchEntry({ workspaceId }: { workspaceId: string }) {
+function BranchEntry({ workspaceId, readOnly }: { workspaceId: string; readOnly: boolean }) {
   const target = useNewThreadTarget(workspaceId);
   // A project that is not a git repo runs in its folder as it is, so there is no branch to pick.
-  return target?.workspace.is_git_repo ? <BranchRows target={target} /> : null;
+  return target?.workspace.is_git_repo ? <BranchRows target={target} readOnly={readOnly} /> : null;
 }
 
 /** Where a new thread runs: New worktree, Existing worktree or Local, with the menu that switches it. */
 export function TargetWorkspaceEntryBlock({ subject }: { subject: OverviewSubject }) {
-  return subject.kind === "new-thread" ? <WorkspaceEntry workspaceId={subject.workspaceId} /> : null;
+  return subject.kind === "new-thread" ? <WorkspaceEntry workspaceId={subject.workspaceId} readOnly={subject.readOnly ?? false} /> : null;
 }
 
 /** The branch, pull request or worktree a new thread starts from, with the picker that changes it. */
 export function TargetBranchEntryBlock({ subject }: { subject: OverviewSubject }) {
-  return subject.kind === "new-thread" ? <BranchEntry workspaceId={subject.workspaceId} /> : null;
+  return subject.kind === "new-thread" ? <BranchEntry workspaceId={subject.workspaceId} readOnly={subject.readOnly ?? false} /> : null;
 }

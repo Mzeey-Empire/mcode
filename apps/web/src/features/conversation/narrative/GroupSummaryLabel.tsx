@@ -3,10 +3,11 @@ import type { ToolCall } from "@/transport/types";
 import { isCancelledCall } from "./narrative-builder-helpers";
 
 /** How one finished tool call ended. */
-export type ToolCallOutcome = "completed" | "failed" | "cancelled";
+export type ToolCallOutcome = "completed" | "failed" | "cancelled" | "denied";
 
 /** Classifies a tool call's outcome; an error wins over a cancellation. */
 export function toolCallOutcome(toolCall: ToolCall): ToolCallOutcome {
+  if (toolCall.status === "denied") return "denied";
   if (toolCall.isError) return "failed";
   if (isCancelledCall(toolCall)) return "cancelled";
   return hasFailedBrowserResult(toolCall) ? "failed" : "completed";
@@ -26,9 +27,11 @@ function hasFailedBrowserResult(toolCall: ToolCall): boolean {
 export function GroupSummaryLabel({ text, calls }: { text: string; calls: readonly ToolCall[] }) {
   const failed = calls.filter((call) => toolCallOutcome(call) === "failed").length;
   const cancelled = calls.filter((call) => toolCallOutcome(call) === "cancelled").length;
+  const denied = calls.filter((call) => toolCallOutcome(call) === "denied").length;
   const outcomes = [
     failed > 0 ? `${failed} failed` : null,
     cancelled > 0 ? `${cancelled} cancelled` : null,
+    denied > 0 ? `${denied} denied` : null,
   ].filter(Boolean);
   return (
     <>

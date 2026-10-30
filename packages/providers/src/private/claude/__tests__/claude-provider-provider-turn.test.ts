@@ -12,17 +12,20 @@ import { mockShutdownHost } from "./helpers/mock-shutdown-host.js";
 const USER_EXECUTION_ID = "55555555-5555-4555-8555-555555555555";
 const PROVIDER_EXECUTION_ID = "66666666-6666-4666-8666-666666666666";
 const SUMMARY = "Background command \"sleep 20\" completed";
+const CONTINUATION_NOTICE = "Claude continued after a background task finished";
 
 /** Replays the measured SDK sequence: a user turn, then a self-started turn after a background task finishes. */
-function backgroundTaskQuery() {
+function backgroundTaskQuery(notifyBeforeEnd: boolean) {
   return ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
     let closeSession!: () => void;
     const closed = new Promise<void>((resolve) => { closeSession = resolve; });
     const stream = (async function* () {
       await prompt[Symbol.asyncIterator]().next();
       yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
+      const notification = { type: "system", subtype: "task_notification", task_id: "task-1", status: "completed", summary: SUMMARY };
+      if (notifyBeforeEnd) yield notification;
       yield { type: "result", is_error: false, result: "started", usage: { output_tokens: 1 } };
-      yield { type: "system", subtype: "task_notification", task_id: "task-1", status: "completed", summary: SUMMARY };
+      if (!notifyBeforeEnd) yield notification;
       yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
       yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: "The background task finished." }] } };
       yield { type: "result", is_error: false, result: "The background task finished.", usage: { output_tokens: 6 } };
@@ -62,7 +65,7 @@ const WAKE_REPLY = "The subagent printed 42.";
  * Replays live run 4: the background subagent streams right after its launch ends,
  * then Claude replies to the task notification in a turn it starts by itself.
  */
-function backgroundAgentWakeQuery() {
+function backgroundAgentWakeQuery(beforeRootReply = () => {}) {
   return ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
     let closeSession!: () => void;
     const closed = new Promise<void>((resolve) => { closeSession = resolve; });
@@ -81,6 +84,8 @@ function backgroundAgentWakeQuery() {
       ] } };
       yield { type: "user", parent_tool_use_id: "AGENT_1", message: { content: [{ type: "tool_result", tool_use_id: "BASH_1", content: "42" }] } };
       yield { type: "system", subtype: "task_notification", task_id: "task-agent", tool_use_id: "AGENT_1", status: "completed", summary: AGENT_SUMMARY };
+      yield { type: "assistant", parent_tool_use_id: "AGENT_1", message: { stop_reason: "end_turn", content: [{ type: "text", text: "## Subagent report\n- 42" }] } };
+      beforeRootReply();
       yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
       yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: WAKE_REPLY }] } };
       yield { type: "result", is_error: false, result: WAKE_REPLY, usage: { output_tokens: 6 } };
@@ -105,8 +110,8 @@ function providerWith(events: ProviderRuntimeEvent[], turns: Parameters<typeof m
   );
 }
 
-async function runBackgroundTask(opening: ProviderTurnOpening) {
-  mockQuery.mockImplementation(backgroundTaskQuery());
+async function runBackgroundTask(opening: ProviderTurnOpening, notifyBeforeEnd = false) {
+  mockQuery.mockImplementation(backgroundTaskQuery(notifyBeforeEnd));
   const events: ProviderRuntimeEvent[] = [];
   const open = vi.fn(async () => opening);
   const provider = providerWith(events, { open, settleBackgroundTool: async () => {} });
@@ -126,14 +131,14 @@ function afterUserTurn(events: ProviderRuntimeEvent[]): ProviderRuntimeEvent[] {
 }
 
 describe("ClaudeProvider provider-started turns", () => {
-  it("opens a server turn for a self-started reply and routes it there", async () => {
+  it.each([false, true])("opens a server turn with its wake reason when the task notifies before the result: %s", async (notifyBeforeEnd) => {
     const { events, open } = await runBackgroundTask({
       kind: "opened",
       routing: { threadId: "thread-provider", turnId: "turn-provider", executionId: PROVIDER_EXECUTION_ID, deliveryAttempt: 1 },
-    });
+    }, notifyBeforeEnd);
 
     expect(open).toHaveBeenCalledTimes(1);
-    expect(open).toHaveBeenCalledWith({ threadId: "thread-provider", notice: SUMMARY });
+    expect(open).toHaveBeenCalledWith({ threadId: "thread-provider", notice: CONTINUATION_NOTICE });
     const later = afterUserTurn(events);
     expect(later.map(({ event }) => event.turnExecutionId)).toEqual(later.map(() => PROVIDER_EXECUTION_ID));
     expect(later.map(({ event }) => event.type)).toEqual(expect.arrayContaining([
@@ -177,12 +182,17 @@ describe("ClaudeProvider background agents", () => {
   });
 
   it("opens the wake turn at the reply, not at the subagent steps streamed after the launch ends", async () => {
-    mockQuery.mockImplementation(backgroundAgentWakeQuery());
+    let rootReplyReady = false;
+    const openedAtRootReply: boolean[] = [];
+    mockQuery.mockImplementation(backgroundAgentWakeQuery(() => { rootReplyReady = true; }));
     const events: ProviderRuntimeEvent[] = [];
-    const open = vi.fn(async (): Promise<ProviderTurnOpening> => ({
-      kind: "opened",
-      routing: { threadId: "thread-provider", turnId: "turn-provider", executionId: PROVIDER_EXECUTION_ID, deliveryAttempt: 1 },
-    }));
+    const open = vi.fn(async (): Promise<ProviderTurnOpening> => {
+      openedAtRootReply.push(rootReplyReady);
+      return {
+        kind: "opened",
+        routing: { threadId: "thread-provider", turnId: "turn-provider", executionId: PROVIDER_EXECUTION_ID, deliveryAttempt: 1 },
+      };
+    });
     const provider = providerWith(events, { open, settleBackgroundTool: vi.fn(async () => {}) });
     try {
       await sendUserTurn(provider);
@@ -192,7 +202,8 @@ describe("ClaudeProvider background agents", () => {
       await provider.shutdown();
     }
 
-    expect(open).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-provider", notice: AGENT_SUMMARY });
+    expect(openedAtRootReply).toEqual([true]);
+    expect(open).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-provider", notice: CONTINUATION_NOTICE });
     const wake = afterUserTurn(events);
     expect(wake.map(({ event }) => event.turnExecutionId)).toEqual(wake.map(() => PROVIDER_EXECUTION_ID));
     expect(wake.find(({ event }) => event.type === AgentEventType.Message)?.event).toMatchObject({ content: WAKE_REPLY });

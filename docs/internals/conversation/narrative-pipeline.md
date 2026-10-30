@@ -26,8 +26,9 @@ call or assistant message does not complete other calls. Turn termination
 settles any outstanding calls.
 
 A group of one call renders that call's own row, so a failed edit reads
-"Edit failed" with its file. Larger groups show a summary with failure and
-cancellation counts and expand into one row per call. A group counts as open
+"Edit failed" with its file. Larger groups show a summary with failure, denial,
+and cancellation counts and expand into one row per call. Denied commands do not
+count as commands that ran. A group counts as open
 while any of its calls' output is open, so a call the user opened never lands
 inside a collapsed group when it completes or its group grows. Collapsing the
 group closes those outputs too. Failure shows as text in
@@ -94,7 +95,9 @@ streaming text, images, or disclosures change size.
 
 The viewport has one position: follow the tail, retain a reading row and pixel
 offset, or align a navigation target. Upward scrolling stops tail following.
-Returning to the bottom resumes it. Prepends and resident-history eviction retain
+Returning to the bottom resumes it. An explicit Composer Send also resumes it in that thread,
+because a disclosure click or a restored reading spot can leave the view reading at
+the bottom. A queued follow-up that sends on its own does not move a reader. Prepends and resident-history eviction retain
 the reading row when that row remains available. Each rendered thread has its own
 viewport, and the existing thread cache stores its reading anchor.
 When an initial page is shorter than the viewport, prepending history retains
@@ -221,8 +224,12 @@ a loss notice. Unfinished saved turns become interrupted; already saved outcomes
 remain intact. Neither recovery nor a save retry reruns provider tools.
 
 The live status line has no text shimmer; only the icon moves. The clock
-ticks once a second and freezes when the turn ends, and the exit fade keeps the
-last running label instead of swapping in a final word. Rate limit and retry
+ticks once a second. The line has no exit fade: its item leaves in the same
+render that settles the turn, so its live steps and clock never share a frame
+with the settled footer, and a finished turn keeps no empty row. Unfinished
+delegated tasks keep a `Waiting on subagents` line without the ended turn's
+steps or clock; that line leaves immediately when the last task settles.
+Rate limit and retry
 state end with the first provider event that is neither, so a holding label
 cannot outlive the stall it describes.
 

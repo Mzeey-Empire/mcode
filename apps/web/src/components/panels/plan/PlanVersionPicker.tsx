@@ -41,10 +41,11 @@ export function PlanVersionPicker({ threadId, versions, viewed }: PlanVersionPic
             size="compact"
             aria-label={`Plan version: v${viewed.version} ${word}`}
             data-testid="plan-version-picker"
-            className="h-8 min-w-0 shrink gap-1.5 px-2.5 text-sm"
+            // Gives way to the Implement label beside it; a narrow header keeps only the version.
+            className="h-8 min-w-0 shrink-[8] gap-1.5 px-2.5 text-sm"
           >
             <span className="shrink-0 font-medium text-ink">v{viewed.version}</span>
-            <span className="text-fade min-w-0 text-muted">{word}</span>
+            <span className="text-fade min-w-0 text-muted @max-[224px]:hidden">{word}</span>
             <ChevronDown aria-hidden className="size-3 shrink-0 text-muted" />
           </Button>
         }

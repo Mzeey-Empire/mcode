@@ -30,7 +30,7 @@ export const FLOOR_TABLE_NAME = "mcode_schema_compatibility";
  * contain {@link floorUpsertStatement} for that migration's `when` and the step's own tag.
  */
 export const CONTRACT_STEPS: Readonly<Record<string, ContractStep>> = {
-  "0105_sticky_sebastian_shaw": {
+  "0106_assistant_content_appends": {
     breaks: [],
     expandedIn: "0104_graceful_patriot",
     reason: "Stored item.content-appended events fail strict envelope parsing in builds before 0104. canonical-accepted-write.ts parses the newest stored envelope, so those builds must refuse the database.",

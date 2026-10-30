@@ -747,8 +747,15 @@
     {
       "idx": 105,
       "version": "6",
-      "when": 1793296428766,
-      "tag": "0105_sticky_sebastian_shaw",
+      "when": 1793324929887,
+      "tag": "0105_graceful_tarantula",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "6",
+      "when": 1793361605398,
+      "tag": "0106_assistant_content_appends",
       "breakpoints": true
     }
   ]

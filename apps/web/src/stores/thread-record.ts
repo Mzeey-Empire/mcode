@@ -152,6 +152,8 @@ export interface ThreadRecord {
   rateLimit?: { retryAfterMs?: number; limitType?: string; utilization?: number };
   apiRetry?: ProviderRetry;
   awaitingUserStopPersist?: true;
+  /** Exact execution whose Stop was requested, retained until its lifecycle settles. */
+  stopRequestedExecutionId?: string;
   interruptStopFileNotice?: { paths: string[] };
   lastHydratedAt?: number;
 

@@ -36,6 +36,31 @@ function createMapper(captureSdkSessionId = vi.fn(() => true)) {
 }
 
 describe("ClaudeEventMapper native dispatch", () => {
+  it("keeps a subagent report out of the parent turn's final response", async () => {
+    const { mapper, events } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: "Waiting for both reports." }] } });
+    await mapper.map({ type: "assistant", parent_tool_use_id: "AGENT_1", message: { stop_reason: "end_turn", content: [{ type: "text", text: "## Subagent A\n- Read README.md" }] } });
+    await mapper.map({ type: "result", is_error: false, usage: { output_tokens: 3 } });
+    expect(events.filter((event) => event.type === AgentEventType.Message))
+      .toEqual([{ type: AgentEventType.Message, threadId: "test", content: "Waiting for both reports.", tokens: 3 }]);
+  });
+
+  it("keeps a denial terminal when Claude follows it with an error result or progress", async () => {
+    const { mapper, events } = createMapper();
+    await mapper.map({ type: "tool_use", id: "denied", name: "Bash", input: { command: "echo beta" } });
+    mapper.commandApprovalRequested("denied");
+    mapper.commandApprovalResolved("denied", false);
+    await mapper.map({ type: "tool_result", tool_use_id: "denied", content: "Permission denied", is_error: true });
+    await mapper.map({ type: "tool_progress", tool_use_id: "denied", elapsed_time_seconds: 20 });
+    expect(events.filter((event) => event.type === "toolResult")).toEqual([
+      { type: "toolResult", threadId: "test", toolCallId: "denied", output: "Command denied before execution.", isError: false, denied: true },
+    ]);
+    expect(events.filter((event) => event.type === "toolProgress")).toEqual([]);
+    await mapper.map({ type: "tool_use", id: "failed", name: "Bash", input: { command: "exit 1" } });
+    await mapper.map({ type: "tool_result", tool_use_id: "failed", content: "exit 1", is_error: true });
+    expect(events.at(-1)).toMatchObject({ toolCallId: "failed", isError: true });
+  });
+
   it("captures first-init session metadata with its own root and replay identity", () => {
     const { mapper, evidence } = createMapper();
     mapper.captureSessionIdentity({ type: "system", subtype: "init", session_id: "SESSION_1", parent_tool_use_id: null, uuid: "INIT_1" }, true);

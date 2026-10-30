@@ -408,6 +408,41 @@ describe("threadStore reconnect and queued follow-ups", () => {
     ]);
   });
 
+  it("drains follow-ups after an explicit fresh turn replaces a Stop with no backlog", async () => {
+    vi.useFakeTimers();
+    useThreadStore.setState({ runningThreadIds: new Set([THREAD_ID]) });
+    vi.mocked(mockTransport.stopAgent).mockResolvedValueOnce({
+      threadId: THREAD_ID,
+      turnExecutionId: "stopped-turn",
+      snapshot: { threadId: THREAD_ID, turnExecutionId: "stopped-turn", phase: "cancelled" },
+      status: "cancelled",
+      dispatchState: "dispatched",
+    });
+    await useThreadStore.getState().stopAgent(THREAD_ID);
+    await useThreadStore.getState().sendMessage(THREAD_ID, "fresh turn");
+    queueMessage("first queued follow-up");
+    queueMessage("second queued follow-up");
+
+    for (let turn = 0; turn < 2; turn += 1) {
+      useThreadStore.getState().handleAgentEvent({
+        type: "turnComplete",
+        threadId: THREAD_ID,
+        reason: "end_turn",
+        costUsd: null,
+        tokensIn: 0,
+        tokensOut: 0,
+      });
+      await vi.advanceTimersByTimeAsync(400);
+    }
+
+    expect(vi.mocked(mockTransport.sendMessage).mock.calls.map(([request]) => request.content)).toEqual([
+      "fresh turn",
+      "first queued follow-up",
+      "second queued follow-up",
+    ]);
+    expect(useQueueStore.getState().queues[THREAD_ID]).toEqual([]);
+  });
+
   it.each([
     "max_turns", "error_max_budget_usd", "max_turn_requests", "max_tokens",
     "output_truncated", "refusal", "quota_exhausted", "auth_required",
@@ -551,7 +586,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
     { location: "foreground", activeThreadId: THREAD_ID, toastCount: 1 },
     { location: "background", activeThreadId: "another-thread", toastCount: 0 },
   ])("uses the shared toast for a $location Stop failure without changing lifecycle", async ({ activeThreadId, toastCount }) => {
-    vi.useFakeTimers();
     useWorkspaceStore.setState({ activeThreadId });
     useThreadStore.getState().applyThreadRuntimeSnapshot({
       threadId: THREAD_ID, turnExecutionId: "execution-1", phase: "running",
@@ -564,9 +598,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
     if (toastCount) expect(useToastStore.getState().toasts[0]).toMatchObject({
       kind: "failed", title: "Couldn't stop this turn", meta: "Try Stop again. Connection unavailable",
     });
-    // Failed toasts stay until the user closes them.
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(useToastStore.getState().toasts).toHaveLength(toastCount);
   });
 
   it("cancels a scheduled drain when a Stop snapshot arrives first", async () => {

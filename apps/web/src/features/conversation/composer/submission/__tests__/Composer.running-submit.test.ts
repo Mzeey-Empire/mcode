@@ -5,10 +5,12 @@ import {
 } from "../composer-submit-policy";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
+import { useQueueStore } from "@/stores/queueStore";
 
 describe("Composer submit running-state", () => {
   beforeEach(() => {
     resetThreadStoreForTests({ runningThreadIds: new Set() });
+    useQueueStore.setState({ queues: {}, inFlightQueuedMessages: {}, editingThreadId: null });
   });
 
   it("treats a thread as running when the store has advanced before render props", () => {
@@ -46,5 +48,27 @@ describe("Composer submit running-state", () => {
     expect(
       shouldQueueActiveThreadSubmit("t-1", false, null, false, "/goal clear"),
     ).toBe(false);
+  });
+
+  it("keeps a new message behind a paused backlog even when the turn is idle", () => {
+    useQueueStore.getState().enqueue("t-1", {
+      content: "first", attachments: [], model: "gpt-5.6-luna", permissionMode: "full",
+    });
+    useQueueStore.getState().suppressAutoDrain("t-1");
+
+    expect(shouldQueueActiveThreadSubmit("t-1", false, null, false, "second")).toBe(true);
+    expect(shouldQueueActiveThreadSubmit("t-1", false, "branch-point", false, "branch")).toBe(false);
+    expect(shouldQueueActiveThreadSubmit("t-1", false, null, false, "/goal clear")).toBe(false);
+  });
+
+  it("keeps a submit queued while the preceding item is being admitted or edited", () => {
+    useQueueStore.getState().enqueue("t-1", {
+      content: "first", attachments: [], model: "gpt-5.6-luna", permissionMode: "full",
+    });
+    useQueueStore.getState().claimNextQueuedMessage("t-1");
+    expect(shouldQueueActiveThreadSubmit("t-1", false, null, false, "second")).toBe(true);
+
+    useQueueStore.setState({ inFlightQueuedMessages: {}, editingThreadId: "t-1" });
+    expect(shouldQueueActiveThreadSubmit("t-1", false, null, false, "saved edit")).toBe(true);
   });
 });

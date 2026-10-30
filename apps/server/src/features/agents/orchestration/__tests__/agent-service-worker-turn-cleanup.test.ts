@@ -15,6 +15,7 @@ import { ThreadControlMutationReservationService } from "../../../thread-control
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
+import { TurnRuntimeController } from "../turn-runtime-controller.js";
 import { appendPreviewAnnotations, sendRecoveryAttempt } from "../../transport/turn-message-dispatch.js";
 import { openWorkerServiceFixture } from "./worker-turn-fixture.js";
 
@@ -38,6 +39,26 @@ async function sendTurn(fixture: WorkerFixture) {
 
 function turnComplete(threadId: string, turnExecutionId: string, providerId: ProviderId = "codex"): AgentEvent {
   return { type: "turnComplete", threadId, turnExecutionId, reason: "end_turn", costUsd: null, tokensIn: 1, tokensOut: 1, providerId };
+}
+
+function captureTurnRelease(fixture: WorkerFixture) {
+  const turn = container.resolve(TurnRuntimeController).workerTurnForTest(fixture.thread.id);
+  if (!turn) throw new Error("Worker turn is unavailable before release");
+  return async () => {
+    try {
+      await turn.terminalRelease;
+      await turn.lostStreamFinish;
+    } finally {
+      // Recovery can release the worker after accepting an interruption but before saving it.
+      await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+    }
+  };
+}
+
+async function endTurn(fixture: WorkerFixture, event: Extract<AgentEvent, { type: "ended" }>) {
+  const waitForRelease = captureTurnRelease(fixture);
+  await fixture.emit(event);
+  await waitForRelease();
 }
 
 async function spawnChild(fixture: WorkerFixture, executionId: string, name: string, parent?: CodexChildEvidence) {
@@ -154,7 +175,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     await fixture.emit({ type: "toolResult", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
       toolCallId: "browser-evaluate", output: '{"valueJson":"BROWSER_OUTPUT_SECRET"}', isError: false });
     await fixture.emit(turnComplete(fixture.thread.id, turn.turnExecutionId));
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
 
     const durableEvents = fixture.db.query<{
       type: string;
@@ -181,6 +202,12 @@ describe("AgentService cleanup through production worker composition", { timeout
 
   it("keeps an automatic queued dispatch pending after an early provider send until Ended releases the active Turn", async () => {
     const fixture = await openFixture("claude");
+    const providerSent = new Promise<void>((resolve) => {
+      fixture.provider.sendTurn.mockImplementationOnce(async (turn) => {
+        fixture.sent.push(turn);
+        resolve();
+      });
+    });
     const message = await fixture.messages.create(fixture.thread.id, "user", "Queued work", 1);
     const accepted = await fixture.service.dispatchQueuedAutomaticTurn({
       threadId: fixture.thread.id, messageId: message.id, content: "Queued work", displayContent: "Queued work",
@@ -191,12 +218,13 @@ describe("AgentService cleanup through production worker composition", { timeout
     void accepted.completion.then(() => { completed = true; });
     await Promise.resolve();
     expect(completed).toBe(false);
-    await vi.waitFor(() => expect(fixture.sent).toHaveLength(1));
+    await providerSent;
+    expect(fixture.sent).toHaveLength(1);
     const turn = fixture.sent[0];
     if (!turn) throw new Error("Queued turn did not reach the provider");
     await fixture.emit(turnComplete(fixture.thread.id, turn.turnExecutionId, fixture.provider.id));
     expect(completed).toBe(false);
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
     await expect(accepted.completion).resolves.toBeUndefined();
     expect(completed).toBe(true);
   });
@@ -221,8 +249,8 @@ describe("AgentService cleanup through production worker composition", { timeout
     if (!original) throw new Error("Original turn was not dispatched");
     await fixture.emit({ type: "error", threadId: fixture.thread.id, turnExecutionId: original.turnExecutionId,
       error: "provider failed", failure: { kind: "fatal" } });
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: original.turnExecutionId });
-    await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: original.turnExecutionId });
+    expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined();
     await NodeFSPromises.unlink(sourcePath);
     const storage = new AttachmentService();
     const recovery = new TurnRecoveryService(fixture.canonical, fixture.threads, storage,
@@ -260,7 +288,8 @@ describe("AgentService cleanup through production worker composition", { timeout
     releaseStop();
     await stopping;
     expect(completed).toBe(true);
-    await vi.waitFor(() => expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Interrupted"));
+    await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Interrupted");
     expect(fixture.canonical.loadCanonicalChildStopTarget({ owningParentThreadId: fixture.thread.id, childThreadId: child.childThread.id })?.latestTurn?.status).toBe("Interrupted");
     expect(fixture.service.runtimeAccess().activeThreadIds()).not.toContain(fixture.thread.id);
     expect(fixture.provider.stopSession).toHaveBeenCalledWith(`mcode-${fixture.thread.id}`);
@@ -271,6 +300,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     const turn = await sendTurn(fixture);
     fixture.provider.stopSession.mockImplementation(() => fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, outcome: "cancelled" }));
     await fixture.service.stopAll();
+    await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Interrupted");
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
   });
@@ -280,8 +310,8 @@ describe("AgentService cleanup through production worker composition", { timeout
     const turn = await sendTurn(fixture);
     await fixture.emit({ type: "message", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
       content: "partial answer before stream loss", tokens: null });
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
-    await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
+    expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined();
     expect(fixture.service.runtimeAccess().activeThreadIds()).not.toContain(fixture.thread.id);
     expect(fixture.service.runtimeAccess().runtimeSnapshots()).toContainEqual(expect.objectContaining({
       threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, phase: "interrupted",
@@ -355,9 +385,13 @@ describe("AgentService cleanup through production worker composition", { timeout
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);
     const recover = vi.spyOn(fixture.workers, "recoverRejected");
-    vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockRejectedValueOnce(new Error("Provider fence failed"));
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
-    await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
+    const fenceError = new Error("Provider fence failed");
+    vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockRejectedValueOnce(fenceError);
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id,
+      turnExecutionId: turn.turnExecutionId, reason: "provider_lost" }).catch((error: unknown) => {
+      expect(error).toBe(fenceError);
+    });
+    expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined();
     expect(recover).toHaveBeenCalledWith(expect.objectContaining({ executionId: turn.turnExecutionId }));
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
       status: "Interrupted", ending: { outcome: "interrupted", cause: "saving_stopped" },
@@ -371,6 +405,7 @@ describe("AgentService cleanup through production worker composition", { timeout
   it("recovers a failed lost-stream release once and preserves the committed ending", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);
+    const waitForRelease = captureTurnRelease(fixture);
     const recover = vi.spyOn(fixture.workers, "recoverRejected");
     const releaseError = new Error("Provider retirement failed");
     let releaseRetirement!: () => void;
@@ -388,6 +423,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     } finally {
       releaseRetirement();
     }
+    await expect(waitForRelease()).rejects.toBe(releaseError);
     expect(recover).toHaveBeenCalledTimes(1);
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
       status: "Interrupted", ending: { outcome: "interrupted", cause: "provider_exited" },
@@ -401,6 +437,7 @@ describe("AgentService cleanup through production worker composition", { timeout
   it("keeps a provider terminal committed during the lost-stream drain", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);
+    const waitForRelease = captureTurnRelease(fixture);
     const recover = vi.spyOn(fixture.workers, "recoverRejected");
     let releaseFence!: () => void;
     const fenceReady = new Promise<void>((resolve) => { releaseFence = resolve; });
@@ -413,7 +450,8 @@ describe("AgentService cleanup through production worker composition", { timeout
     } finally {
       releaseFence();
     }
-    await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
+    await waitForRelease();
+    expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined();
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed");
     expect(recover).not.toHaveBeenCalled();
     expect(fixture.published.filter((event) => event.type === "ended" && event.turnExecutionId === turn.turnExecutionId
@@ -460,8 +498,8 @@ describe("AgentService cleanup through production worker composition", { timeout
     const fixture = await openFixture();
     const previous = await sendTurn(fixture);
     await fixture.emit(turnComplete(fixture.thread.id, previous.turnExecutionId));
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: previous.turnExecutionId });
-    await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: previous.turnExecutionId });
+    expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined();
     const publication = container.resolve(AgentEventPublicationRegistry);
     Object.assign(fixture.provider, {
       discardSession: async () => {
@@ -485,8 +523,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     }));
     expect(fixture.canonical.loadTurnByExecution(replacement.turnExecutionId)?.status).toBe("Running");
     await fixture.emit(turnComplete(fixture.thread.id, replacement.turnExecutionId));
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: replacement.turnExecutionId });
-    await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: replacement.turnExecutionId });
     expect(fixture.canonical.loadTurnByExecution(replacement.turnExecutionId)?.status).toBe("Completed");
   });
 
@@ -506,7 +543,7 @@ describe("AgentService cleanup through production worker composition", { timeout
   it("maps provider-cancelled Ended to the recoverable interrupted outcome", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, outcome: "cancelled" });
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, outcome: "cancelled" });
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Interrupted");
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending)
       .toEqual({ outcome: "interrupted", cause: "provider_exited" });
@@ -522,7 +559,8 @@ describe("AgentService cleanup through production worker composition", { timeout
     const turn = await sendTurn(fixture);
     fixture.provider.stopSession.mockImplementation(() => fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId }));
     await Promise.all([fixture.service.stopSession(fixture.thread.id, first), fixture.service.stopSession(fixture.thread.id, second)]);
-    await vi.waitFor(() => expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Cancelled"));
+    await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Cancelled");
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "cancelled", stop: first });
   });
 
@@ -531,7 +569,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     const turn = await sendTurn(fixture);
     await fixture.emit({ type: "message", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, content: "partial answer before failure", tokens: null });
     await fixture.emit({ type: "error", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, error: "provider failed", failure: { kind: "fatal", status: 500, code: "internal_error" } });
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Errored");
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({
       outcome: "errored", failure: { kind: "fatal", provider: "codex", message: "provider failed", status: 500, code: "internal_error" },
@@ -550,8 +588,8 @@ describe("AgentService cleanup through production worker composition", { timeout
     const turn = await sendTurn(fixture);
     await fixture.emit({ type: "error", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
       error: "Provider connection failed: ECONNRESET", failure: { kind: "retryable" } });
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
-    await vi.waitFor(() => expect(fixture.service.runtimeAccess().activeThreadIds()).not.toContain(fixture.thread.id));
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
+    expect(fixture.service.runtimeAccess().activeThreadIds()).not.toContain(fixture.thread.id);
 
     expect(fixture.published.filter((event) => event.type === "error" && event.turnExecutionId === turn.turnExecutionId)).toHaveLength(1);
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Errored");
@@ -563,7 +601,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     const acceptedNoEarlierThan = Date.now();
     await fixture.emit({ type: "error", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, error: "You've hit your usage limit",
       failure: { kind: "usage_limit", status: 429, retryAfterMs: 60_000, limitType: "five_hour" } });
-    await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
     const acceptedNoLaterThan = Date.now();
     const durable = fixture.canonical.loadTurnByExecution(turn.turnExecutionId);
     expect(durable?.status).toBe("Interrupted");

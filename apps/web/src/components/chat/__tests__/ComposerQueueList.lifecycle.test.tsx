@@ -12,6 +12,7 @@ import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { getThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import { ComposerQueueList } from "../ComposerQueueList";
+import { TurnAdmissionError } from "@mcode/shared/turn-admission";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -88,12 +89,12 @@ describe("ComposerQueueList lifecycle", () => {
     (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(1);
   });
 
-  it("shows the remaining FIFO item after a successful completion drain", async () => {
+  it.each(["codex", "claude"])("drains successful %s follow-ups in order", async (provider) => {
     vi.useFakeTimers();
     queueMessage("first queued follow-up");
     queueMessage("second queued follow-up");
     useThreadStore.setState({ runningThreadIds: new Set([THREAD_ID]) });
-    render(<QueueControls />);
+    render(<QueueControls provider={provider} />);
 
     useThreadStore.getState().handleAgentEvent({
       type: "turnComplete",
@@ -113,6 +114,16 @@ describe("ComposerQueueList lifecycle", () => {
     expect(screen.queryByText("first queued follow-up")).not.toBeInTheDocument();
     expect(screen.getByText("second queued follow-up")).toBeInTheDocument();
     expect(screen.queryByText("Paused")).not.toBeInTheDocument();
+    act(() => {
+      useThreadStore.getState().handleAgentEvent({
+        type: "turnComplete", threadId: THREAD_ID, reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0,
+      });
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(vi.mocked(mockTransport.sendMessage).mock.calls.map(([request]) => request.content)).toEqual([
+      "first queued follow-up", "second queued follow-up",
+    ]);
+    expect(screen.queryByRole("list", { name: "Queued messages" })).not.toBeInTheDocument();
   });
 
   it("keeps the queue visible and paused after a manual stop", async () => {
@@ -139,6 +150,45 @@ describe("ComposerQueueList lifecycle", () => {
     expect(screen.getByText("second queued follow-up")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send queued message 1 now" })).toBeInTheDocument();
     expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.getByText("Stopped by you")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume queued messages" })).toBeEnabled();
+  });
+
+  it("explains an admission refusal and Resume retries the first item before the second", async () => {
+    vi.useFakeTimers();
+    queueMessage("first queued follow-up");
+    queueMessage("second queued follow-up");
+    runTurn();
+    vi.mocked(mockTransport.sendMessage).mockRejectedValueOnce(new TurnAdmissionError("busy", "Already running"));
+    render(<QueueControls provider="codex" />);
+    act(() => {
+      useThreadStore.getState().handleAgentEvent({
+        type: "turnComplete", threadId: THREAD_ID, reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0,
+      });
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(screen.getByText("Thread busy")).toBeInTheDocument();
+    expect(screen.getByText("first queued follow-up")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume queued messages" })).toBeDisabled();
+    act(() => {
+      useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId: THREAD_ID, turnExecutionId: "turn-1", phase: "completed" });
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Resume queued messages" }).click();
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(screen.queryByText("first queued follow-up")).not.toBeInTheDocument();
+    expect(screen.getByText("second queued follow-up")).toBeInTheDocument();
+    act(() => {
+      useThreadStore.getState().handleAgentEvent({
+        type: "turnComplete", threadId: THREAD_ID, reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0,
+      });
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(vi.mocked(mockTransport.sendMessage).mock.calls.map(([request]) => request.content)).toEqual([
+      "first queued follow-up", "first queued follow-up", "second queued follow-up",
+    ]);
+    expect(screen.queryByRole("list", { name: "Queued messages" })).not.toBeInTheDocument();
   });
 
   it("pauses the queue after a failed turn until Send now resumes it", async () => {

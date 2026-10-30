@@ -10,8 +10,9 @@ import { EntityIcon } from "./EntityToken";
 const ITEM_HEIGHT = 40;
 const VISIBLE_ITEMS = 8;
 const TRAY_SURFACE_CLASS = "px-2 py-1";
-// Docked on the composer it matches the task tray in `ComposerTray`.
-const ATTACHED_TRAY_SURFACE_CLASS = "rounded-t-[1.2rem] border-0 bg-panel";
+// Docked on the composer it matches the task tray in `ComposerTray`, but keeps the rail border
+// because it floats over the transcript, where `panel` alone matches the light canvas.
+const ATTACHED_TRAY_SURFACE_CLASS = "rounded-t-[1.2rem] bg-panel";
 
 function commandDisplayLabel(command: Command): string {
   if (command.capabilityKind === "plugin") return `@${command.name}`;

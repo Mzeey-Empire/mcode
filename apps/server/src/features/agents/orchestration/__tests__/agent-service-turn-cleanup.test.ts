@@ -359,7 +359,7 @@ describe("AgentService turn cleanup through the production execution worker", { 
 
     // Thread should no longer be active
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
-    expect(memoryPressureService.markIdle).toHaveBeenCalled();
+    expect(memoryPressureService.markIdle).toHaveBeenCalledWith(THREAD_ID);
   });
 
   it("releases a stopped queued dispatch so the next FIFO Turn can reserve the active slot", async () => {
@@ -908,11 +908,9 @@ describe("AgentService turn cleanup through the production execution worker", { 
       turnExecutionId: resumedExecutionId,
     } satisfies AgentEvent);
 
-    // The resumed turn becomes active after prior-turn persistence releases its barrier.
-    await vi.waitFor(() => {
-      expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID);
-      expect(memoryPressureService.markActive).toHaveBeenCalled();
-    });
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
+    expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID);
+    expect(memoryPressureService.markActive).toHaveBeenCalledWith(THREAD_ID);
   });
 
   it("removes thread from activeThreadIds on Ended event", async () => {
@@ -939,7 +937,34 @@ describe("AgentService turn cleanup through the production execution worker", { 
     await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
-    expect(memoryPressureService.markIdle).toHaveBeenCalled();
+    expect(memoryPressureService.markIdle).toHaveBeenCalledWith(THREAD_ID);
+  });
+
+  it("waits for a lost provider stream to finish and release the turn", async () => {
+    const { service, providerEmitter, memoryPressureService } = await buildService();
+    startAgentServiceIngressForTest(service);
+    await service.sendMessage({
+      threadId: THREAD_ID,
+      content: "hello",
+      permissionMode: "default",
+      model: "claude-sonnet-4-6",
+      attachments: [],
+      provider: "claude",
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.Ended,
+      threadId: THREAD_ID,
+      turnExecutionId: activeExecutionId(service),
+      reason: "provider_lost",
+    } satisfies AgentEvent);
+
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
+
+    expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
+    expect(service.runtimeAccess().runtimeSnapshots()).toContainEqual(expect.objectContaining({
+      threadId: THREAD_ID, phase: "interrupted",
+    }));
+    expect(memoryPressureService.markIdle).toHaveBeenCalledWith(THREAD_ID);
   });
 });
 

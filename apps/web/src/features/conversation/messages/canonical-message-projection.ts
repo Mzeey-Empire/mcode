@@ -26,6 +26,8 @@ export interface CanonicalMessageProjection {
   currentTurnResponseKey: string;
   assistantResponseKeys: Record<string, string>;
   turnSummariesByMessageId: Record<string, TurnSummary>;
+  /** Answers to provider wakes, including when the opening notice is outside loaded history. */
+  providerContinuationMessageIds: ReadonlySet<string>;
 }
 
 interface CanonicalProjectionInput {
@@ -290,14 +292,19 @@ function projectedThoughtSegments(items: readonly AgentItem[], terminal: boolean
   return thoughts;
 }
 
-function turnSummaries(threadTurns: readonly AgentTurn[], threadItems: readonly AgentItem[]): Record<string, TurnSummary> {
+function settledTurnProjection(threadTurns: readonly AgentTurn[], threadItems: readonly AgentItem[]) {
   const summaries: Record<string, TurnSummary> = {};
+  const providerContinuationMessageIds = new Set<string>();
   for (const turn of threadTurns.filter(isTerminalTurn)) {
     const turnItems = threadItems.filter((item) => item.turnId === turn.id).sort(compareItems);
     const answer = latestAssistantMessage(turnItems);
-    if (answer) summaries[answer.id] = canonicalTurnSummary(turn, turnItems);
+    if (!answer) continue;
+    summaries[answer.id] = canonicalTurnSummary(turn, turnItems);
+    if (turnItems.some((item) => canonicalMessage(item.payload)?.systemNotice?.kind === "provider-turn")) {
+      providerContinuationMessageIds.add(answer.id);
+    }
   }
-  return summaries;
+  return { turnSummariesByMessageId: summaries, providerContinuationMessageIds };
 }
 
 /** Project the latest canonical child turn over hydrated conversation history. */
@@ -339,6 +346,6 @@ export function projectCanonicalMessageList({
     currentTurnMessageId: response.assistantMessage?.id ?? "",
     currentTurnResponseKey: responseKey,
     assistantResponseKeys: response.assistantMessage ? { [response.assistantMessage.id]: responseKey } : {},
-    turnSummariesByMessageId: turnSummaries(threadTurns, threadItems),
+    ...settledTurnProjection(threadTurns, threadItems),
   };
 }
