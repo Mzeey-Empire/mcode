@@ -50,6 +50,8 @@ function toDecoration(range: PlanDecorationRange) {
       return hiddenMark.range(range.from, range.to);
     case "widget":
       return Decoration.widget({ widget: new TrailingTextWidget(range.text, range.className), side: 1 }).range(range.from);
+    case "replace":
+      return Decoration.replace({ widget: new TrailingTextWidget(range.text, range.className) }).range(range.from, range.to);
   }
 }
 
@@ -112,6 +114,19 @@ const planTheme = EditorView.theme({
     color: "var(--color-muted)",
   },
   [`.${PLAN_EDITOR_CLASS.code}`]: { fontFamily: "var(--font-mono)" },
+  [`.${PLAN_EDITOR_CLASS.codeBlock}`]: {
+    fontFamily: "var(--font-mono)",
+    fontSize: "1.2rem",
+    backgroundColor: "var(--color-hover)",
+    paddingInline: "1.2rem",
+  },
+  // The rule's dashes are hidden, so the empty line draws a hairline through its middle.
+  [`.${PLAN_EDITOR_CLASS.rule}`]: {
+    backgroundImage: "linear-gradient(var(--color-border), var(--color-border))",
+    backgroundSize: "100% 1px",
+    backgroundPosition: "center",
+    backgroundRepeat: "no-repeat",
+  },
   [`.${PLAN_EDITOR_CLASS.pathName}`]: { fontFamily: "var(--font-mono)", fontWeight: "600", color: "var(--color-ink)" },
   [`.${PLAN_EDITOR_CLASS.pathFolder}`]: {
     marginLeft: "0.8rem",

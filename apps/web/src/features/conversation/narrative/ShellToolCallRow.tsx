@@ -1,5 +1,5 @@
 import { type TransitionEvent, useId, useRef, useState } from "react";
-import { Check, Clock, Terminal, X } from "lucide-react";
+import { Check, Clock, Terminal, X, type LucideIcon } from "lucide-react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -31,12 +31,12 @@ function formatToolDuration(durationMs: number | undefined): string | null {
 }
 
 interface ShellToolCallStatus {
+  label: string;
+  footer: string;
+  icon: LucideIcon;
   duration: string | null;
-  /** Short outcome for the row meta, such as `exit 1`. */
+  /** Short outcome for the row meta, such as `failed`. */
   failureMeta: string | null;
-  /** Outcome for the transcript footer, such as `exit code 1`. */
-  failureLabel: string | null;
-  isRunning: boolean;
 }
 
 function isShellCallCancelled(toolCall: ToolCall): boolean {
@@ -61,23 +61,45 @@ function shellFailureLabel(toolCall: ToolCall, isCancelled: boolean): string | n
 function shellFailureMeta(toolCall: ToolCall, isCancelled: boolean): string | null {
   if (isCancelled) return "cancelled";
   if (!toolCall.isError) return null;
-  const exitCode = shellExitCode(toolCall);
-  return exitCode === null ? "failed" : `exit ${exitCode}`;
+  return "failed";
+}
+
+function unstartedCommandStatus(toolCall: ToolCall): ShellToolCallStatus | null {
+  if (toolCall.status === "denied") {
+    return {
+      label: "Denied command", footer: "Denied", icon: X,
+      duration: null, failureMeta: null,
+    };
+  }
+  if (!toolCall.isComplete && (toolCall.status === "queued" || toolCall.status === "waiting")) {
+    const waiting = toolCall.status === "waiting";
+    return {
+      label: waiting ? "Waiting for approval" : "Queued command",
+      footer: waiting ? "Waiting for approval" : "Queued", icon: Clock,
+      duration: null, failureMeta: null,
+    };
+  }
+  return null;
 }
 
 function shellToolCallStatus(toolCall: ToolCall): ShellToolCallStatus {
+  const unstarted = unstartedCommandStatus(toolCall);
+  if (unstarted) return unstarted;
   const isCancelled = isShellCallCancelled(toolCall);
+  const isRunning = isShellCallRunning(toolCall, isCancelled);
+  const failureLabel = shellFailureLabel(toolCall, isCancelled);
   return {
+    label: isRunning ? "Running command" : "Ran command",
+    footer: failureLabel ?? (isRunning ? "Running" : "Success"),
+    icon: failureLabel ? X : isRunning ? Clock : Check,
     duration: toolCall.isComplete ? formatToolDuration(toolCall.durationMs) : null,
     failureMeta: shellFailureMeta(toolCall, isCancelled),
-    failureLabel: shellFailureLabel(toolCall, isCancelled),
-    isRunning: isShellCallRunning(toolCall, isCancelled),
   };
 }
 
 /**
  * A finished command reads duration then command; a failed one reads command
- * then `exit 1 · 0:03`, so the outcome sits where the eye lands last.
+ * then `failed · 3s`, so the outcome sits where the eye lands last.
  */
 function ShellToolCallHeader({ command, detail, status, disclosure }: {
   command: string;
@@ -92,7 +114,7 @@ function ShellToolCallHeader({ command, detail, status, disclosure }: {
   return (
     <NarrativeToolRow
       icon={Terminal}
-      label={status.isRunning ? "Running command" : "Ran command"}
+      label={status.label}
       disclosure={disclosure}
     >
       {!failureMeta && status.duration ? <NarrativeToolRowMeta>{status.duration}</NarrativeToolRowMeta> : null}
@@ -105,14 +127,14 @@ function ShellToolCallHeader({ command, detail, status, disclosure }: {
 function ShellToolCallTranscript({
   command,
   toolCall,
-  failureLabel,
-  isRunning,
+  footer,
+  icon: Icon,
   panelId,
 }: {
   command: string;
   toolCall: ToolCall;
-  failureLabel: string | null;
-  isRunning: boolean;
+  footer: string;
+  icon: LucideIcon;
   panelId: string;
 }) {
   return (
@@ -153,8 +175,8 @@ function ShellToolCallTranscript({
 
       <footer className="flex justify-end px-3 py-2">
         <Badge variant="ghost" size="compact" className="gap-1 px-0 font-normal text-muted" role="status">
-          {failureLabel ? <X aria-hidden="true" /> : isRunning ? <Clock aria-hidden="true" /> : <Check aria-hidden="true" />}
-          {failureLabel ?? (isRunning ? "Running" : "Success")}
+          <Icon aria-hidden="true" />
+          {footer}
         </Badge>
       </footer>
     </section>
@@ -206,8 +228,8 @@ export function ShellToolCallRow({ toolCall, expansion }: ShellToolCallRowProps)
           <ShellToolCallTranscript
             command={command}
             toolCall={toolCall}
-            failureLabel={status.failureLabel}
-            isRunning={status.isRunning}
+            footer={status.footer}
+            icon={status.icon}
             panelId={panelId}
           />
         )}

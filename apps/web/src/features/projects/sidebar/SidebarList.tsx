@@ -1,4 +1,4 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -363,8 +363,39 @@ interface SidebarListProps {
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 
-const freezeOnEnter = () => useSidebarUiStore.getState().freeze(freezeOrder(selectSidebarFacts(useWorkspaceStore.getState().threads), Date.now()));
-const unfreezeOnLeave = () => useSidebarUiStore.getState().unfreeze();
+type OrderHolder = "pointer" | "focus";
+
+/**
+ * Holds the row order while the pointer or keyboard focus is inside the list, so a finishing turn
+ * cannot move a row out from under the user. One snapshot spans both, taken when the first arrives.
+ */
+function useHeldOrder() {
+  const holders = useRef(new Set<OrderHolder>());
+  const pressed = useRef(false);
+  const hold = useCallback((holder: OrderHolder, held: boolean) => {
+    const wasHeld = holders.current.size > 0;
+    if (held) holders.current.add(holder);
+    else holders.current.delete(holder);
+    const isHeld = holders.current.size > 0;
+    if (isHeld === wasHeld) return;
+    const ui = useSidebarUiStore.getState();
+    if (isHeld) ui.freeze(freezeOrder(selectSidebarFacts(useWorkspaceStore.getState().threads), Date.now()));
+    else ui.unfreeze();
+  }, []);
+  return useMemo(() => ({
+    onPointerEnter: () => hold("pointer", true),
+    onPointerLeave: () => hold("pointer", false),
+    // A click also focuses its row; only keyboard focus should outlast the pointer.
+    onPointerDown: () => { pressed.current = true; },
+    onFocus: () => {
+      if (!pressed.current) hold("focus", true);
+      pressed.current = false;
+    },
+    onBlur: (event: FocusEvent<HTMLDivElement>) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) hold("focus", false);
+    },
+  }), [hold]);
+}
 
 /**
  * Renders the derived sidebar items into one virtual list, one virtual row per item. It never
@@ -384,6 +415,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
   usePreparingRowEntrance(containerRef, entrance.rowKeys, entrance.preparing);
 
   const { olderBar, toggleOlder } = usePublishRows(controllerRef, items, rows, flip, olderIds);
+  const heldOrder = useHeldOrder();
 
   const { dropIndicator } = drag;
   const renderRow = useCallback((item: SidebarItem): ReactNode => {
@@ -398,7 +430,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
 
   const dragged = drag.activeDragId === null ? undefined : itemsByKey.get(`project:${drag.activeDragId}`);
   return (
-    <div className="relative isolate -mr-1.5 min-h-0 flex-1 [&_.project-tree-viewport]:[scrollbar-gutter:stable]" onPointerEnter={freezeOnEnter} onPointerLeave={unfreezeOnLeave}>
+    <div className="relative isolate -mr-1.5 min-h-0 flex-1 [&_.project-tree-viewport]:[scrollbar-gutter:stable]" {...heldOrder}>
       <div ref={containerRef} data-testid="thread-list" className="h-full" />
       <DndContext
         sensors={drag.sensors}

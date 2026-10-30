@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderEventDraft } from "@mcode/providers";
@@ -72,6 +72,33 @@ describe("writerOwnedProviderExtension", () => {
 });
 
 describe("CodexLiveEventReducer", () => {
+  it("persists approval decisions and begins command timing at permission grant", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+    try {
+      const reducer = new CodexLiveEventReducer(execution);
+      reduceEvent(reducer, "turnStarted");
+      const command = { toolCallId: "allowed", toolName: "Bash", toolInput: { command: "echo alpha" } };
+      reduceEvent(reducer, "toolUse", { ...command, status: "running", phase: "waiting" });
+      reduceEvent(reducer, "toolUse", { ...command, toolCallId: "denied", status: "running", phase: "queued" });
+      vi.advanceTimersByTime(20_000);
+      reduceEvent(reducer, "toolUse", { ...command, status: "running" });
+      vi.advanceTimersByTime(1_000);
+      reduceEvent(reducer, "toolResult", { toolCallId: "allowed", output: "alpha", isError: false });
+      reduceEvent(reducer, "toolResult", { toolCallId: "denied", output: "Denied", isError: false, denied: true });
+      const terminal = reduceEvent(reducer, "turnComplete", { reason: "stop", costUsd: 0, tokensIn: 0, tokensOut: 0 });
+      const projection = terminal.writer.find((intent) => intent.kind === "terminal-projection");
+      expect(projection?.narrative.filter((item) => item.kind === "toolCall").map(({ record }) => ({
+        id: record.id, status: record.status, phase: record.phase, started: record.started_at, completed: record.completed_at,
+      }))).toEqual([
+        { id: "allowed", status: "completed", phase: undefined, started: "2026-10-30T12:00:20.000Z", completed: "2026-10-30T12:00:21.000Z" },
+        { id: "denied", status: "cancelled", phase: "denied", started: "2026-10-30T12:00:00.000Z", completed: "2026-10-30T12:00:21.000Z" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["boundary", "tool", "text-item"])("settles a closing plan fence before the next %s", (boundary) => {
     const reducer = new CodexLiveEventReducer(execution, "output");
     const firstItem = `assistant-text:${"a".repeat(64)}`;

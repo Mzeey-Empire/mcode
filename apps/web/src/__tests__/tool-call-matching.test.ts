@@ -32,6 +32,22 @@ describe("Tool Call Matching", () => {
     vi.useRealTimers();
   });
 
+  it("starts command duration after approval and settles only the denied command", () => {
+    const send = useThreadStore.getState().handleAgentEvent;
+    const first = { type: "toolUse", threadId: "thread-1", toolCallId: "first", toolName: "Bash", toolInput: { command: "echo alpha" } } satisfies AgentEvent;
+    send({ ...first, status: "running", phase: "waiting" });
+    send({ ...first, toolCallId: "second", status: "running", phase: "queued" });
+    vi.advanceTimersByTime(20_000);
+    send({ ...first, status: "running" });
+    vi.advanceTimersByTime(1_000);
+    send({ type: "toolResult", threadId: "thread-1", toolCallId: "first", output: "alpha", isError: false });
+    send({ type: "toolResult", threadId: "thread-1", toolCallId: "second", output: "Denied", isError: false, denied: true });
+    expect(getTestThreadToolCalls("thread-1").map(({ durationMs, isComplete, isError, status }) => ({ durationMs, isComplete, isError, status }))).toEqual([
+      { durationMs: 1_000, isComplete: true, isError: false, status: "completed" },
+      { durationMs: undefined, isComplete: true, isError: false, status: "denied" },
+    ]);
+  });
+
   it("keeps overlapping calls active until their own results arrive", () => {
     const send = useThreadStore.getState().handleAgentEvent;
     for (const toolCallId of ["first", "second"]) {

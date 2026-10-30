@@ -297,7 +297,6 @@ describe("projectCanonicalMessageList", () => {
       "work-fold:child-answer",
       "tools:native-read",
       "message:child-answer",
-      "narrative-indicator",
       "turn-meta-line:child-answer",
       "message:protocol-notice",
     ]);

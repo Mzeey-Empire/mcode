@@ -13,27 +13,34 @@ describe("live tool presentation transitions", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-  it("animates a new call, then retains its completed row until regrouping", () => {
+  it("animates a new call, swaps a lone call in place, and retains a regrouping call's row", () => {
     const initialCalls: ToolCall[] = [];
     const { result, rerender } = renderHook(({ calls }: { calls: ToolCall[] }) => ({
       transitions: useToolCallTransitions(calls),
       calls,
     }), { initialProps: { calls: initialCalls } });
-    rerender({ calls: [call("one")] });
-    expect(result.current.transitions.get("one")?.phase).toBe("entering");
-    act(() => vi.advanceTimersByTime(250));
-    expect(result.current.transitions.size).toBe(0);
-    rerender({ calls: [call("one", true)] });
     const rows = () => expandTranscriptNarrative([{
       type: "narrative-flow", key: "live", toolCalls: result.current.calls,
       approvals: [], hooks: [], thoughtSegments: [], streamingText: "", isAgentRunning: true, startTime: 1,
     }], {}, new Set(), undefined, result.current.transitions);
-    const closing = rows()[0];
+    rerender({ calls: [call("one")] });
+    expect(result.current.transitions.get("one")?.phase).toBe("entering");
+    act(() => vi.advanceTimersByTime(250));
+    expect(result.current.transitions.size).toBe(0);
+    const running = rows()[0];
+    rerender({ calls: [call("one", true)] });
+    expect(rows()[0]).toMatchObject({ key: running.key, item: { type: "tool-group", group: { calls: [{ id: "one", isComplete: true }] } } });
+
+    rerender({ calls: [call("one", true), call("two")] });
+    act(() => vi.advanceTimersByTime(250));
+    rerender({ calls: [call("one", true), call("two", true)] });
+    const closing = rows()[1];
     expect(closing).toMatchObject({ transition: "exiting", item: { type: "active-tool", toolCall: { isComplete: true } } });
     act(() => vi.advanceTimersByTime(249));
-    expect(rows()[0].key).toBe(closing.key);
+    expect(rows()[1].key).toBe(closing.key);
     act(() => vi.advanceTimersByTime(1));
-    expect(rows()[0]).toMatchObject({ item: { type: "tool-group", group: { calls: [{ id: "one", isComplete: true }] } } });
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toMatchObject({ item: { type: "tool-group", group: { calls: [{ id: "one" }, { id: "two" }] } } });
   });
 
   it("does not postpone an earlier exit when overlapping calls complete", () => {

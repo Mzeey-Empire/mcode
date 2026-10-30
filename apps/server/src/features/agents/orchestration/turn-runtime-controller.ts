@@ -227,6 +227,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.eventPublication.registerPipelineStart(() => this.initializeProviderEvents());
   }
 
+  /** Retain a turn's release promises while test ingress drains, even after its lifecycle ends. */
+  workerTurnForTest(threadId: string): Readonly<Pick<WorkerOwnedTurn, "terminalRelease" | "lostStreamFinish">> | undefined {
+    return this.lifecycles.worker(threadId);
+  }
+
   /** The running worker turn a steer may join. A stopping or finishing turn takes no new messages. */
   private steerableTurn(threadId: string): SteerableTurn | null {
     const owned = this.lifecycles.worker(threadId);

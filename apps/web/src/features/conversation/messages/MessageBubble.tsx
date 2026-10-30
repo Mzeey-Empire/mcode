@@ -3,8 +3,9 @@ import type { Message } from "@/transport";
 import { ImageIcon, RotateCcw, Copy, Check, Target } from "lucide-react";
 import { WarningIcon } from "@/components/ui/icon-map";
 import { cn } from "@/lib/utils";
+import { useToastStore } from "@/stores/toastStore";
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
-import { stripPlanFences } from "@/lib/plan-fences";
+import { isHiddenPlanAnswer, stripPlanFences } from "@/lib/plan-fences";
 import { stripInjectedFiles } from "@/lib/file-tags";
 import {
   buildStoredAttachmentImageSrc,
@@ -17,7 +18,9 @@ import { SentBrowserNotesTile } from "@/features/preview/notes/SentBrowserNotesT
 import { readSentNotes } from "@/features/preview/notes/sentBrowserNotes";
 import { useThreadRecord } from "../state";
 import { AnsweredSummary } from "@/components/chat/plan-questions/AnsweredSummary";
-import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts/models/plan-questions";
+import { usePlanStore } from "@/stores/planStore";
+import { useThreadStore } from "@/stores/threadStore";
+import { Button } from "@/components/ui/button";
 import { DeltaBlock } from "../narrative/DeltaBlock";
 import { TURN_PROSE_CLASS } from "../narrative/narrative-layout";
 import { PersistedTurnHooks } from "../narrative/PersistedTurnHooks";
@@ -397,8 +400,8 @@ function CopyButton({ content, className = HOVER_COPY_CLASS }: { content: string
       setCopied(true);
       clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard write failed — don't show copied state
+    } catch (error: unknown) {
+      useToastStore.getState().show({ kind: "failed", title: "Couldn't copy message", meta: String(error) });
     }
   }, [content]);
 
@@ -758,13 +761,11 @@ function UserMessageContent({
   const { imageAttachments, fileAttachments, imageSlides } = useMessageAttachments(message);
   const textContent = useMemo(() => stripInjectedFiles(message.content), [message.content]);
   const userGoal = parseUserGoalCommand(textContent);
-  const hasPreviewAnnotations = (message.previewAnnotations?.annotations.length ?? 0) > 0;
-  const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
   const formattedTime = useMemo(
     () => new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     [message.timestamp],
   );
-  if (!hasAttachments && !hasPreviewAnnotations && textContent.startsWith(PLAN_ANSWER_MESSAGE_PREFIX)) return null;
+  if (isHiddenPlanAnswer(message)) return null;
   const displayText = userGoal ? userGoal.condition : textContent;
   const provenance = message.parentAgentProvenance;
   const provenanceDetails = provenance ? [
@@ -912,6 +913,37 @@ function AssistantMessageActions({
   );
 }
 
+/** Keeps a question-free response actionable through the existing plan-answer command. */
+function EmptyPlanQuestions({ message, answered }: { message: Message; answered: boolean }) {
+  const [pending, setPending] = useState(false);
+  const canContinue = useThreadRecord(message.thread_id, (record) => record.messages.at(-1)?.id === message.id
+    && record.runtimePhase !== "running" && record.runtimePhase !== "finalizing");
+  const continuePlanning = async () => {
+    setPending(true);
+    try {
+      await useThreadStore.getState().submitPlanAnswers(message.thread_id);
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <div className={TURN_PROSE_CLASS}>
+      <p>No questions to answer.</p>
+      {!answered && canContinue && (
+        <Button variant="link" size="compact" disabled={pending} onClick={continuePlanning}>Continue planning</Button>
+      )}
+    </div>
+  );
+}
+
+/** Renders the receipt or recovery action that replaces a hidden question fence. */
+function HiddenPlanResponse({ message, answered, textMayContinue }: { message: Message; answered: boolean; textMayContinue: boolean }) {
+  if (/^\s*```plan-questions\s*\n\[\s*\]\s*\n```\s*$/.test(message.content) && !textMayContinue) {
+    return <EmptyPlanQuestions message={message} answered={answered} />;
+  }
+  return answered ? <AnsweredSummary content={message.content} messageId={message.id} /> : null;
+}
+
 /** Renders an assistant message, including its live response state. */
 function AssistantMessageContent({
   message,
@@ -924,11 +956,16 @@ function AssistantMessageContent({
   const { imageAttachments, fileAttachments, imageSlides } = useMessageAttachments(message);
   const textContent = useMemo(() => stripInjectedFiles(message.content), [message.content]);
   const isAnsweredPlanMessage = useThreadRecord(message.thread_id, (record) => record.answeredPlanMessageIds.has(message.id));
+  const planVersion = usePlanStore((state) => state.plansByThread[message.thread_id]
+    ?.find((plan) => plan.messageId === message.id)?.version);
   const goal = parseGoalStatusNotice(textContent);
   if (goal) return <AssistantGoalNotice goal={goal} />;
   const assistantContentEmpty = isAssistantContentEmpty(message.content, isTextStillArriving(textIsStreaming, agentDisplayState));
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
-  if (assistantContentEmpty && !hasAttachments) return isAnsweredPlanMessage ? <AnsweredSummary content={message.content} messageId={message.id} /> : null;
+  if (assistantContentEmpty && !hasAttachments && planVersion === undefined) {
+    return <HiddenPlanResponse message={message} answered={isAnsweredPlanMessage}
+      textMayContinue={isTextStillArriving(textIsStreaming, agentDisplayState)} />;
+  }
   const resolvedAgentDisplayState = agentDisplayState ?? COMPLETED_AGENT_DISPLAY_STATE;
   const isAgentResponseComplete = resolvedAgentDisplayState.phase === "completed";
   return (
@@ -949,6 +986,7 @@ function AssistantMessageContent({
         textIsStreaming={textIsStreaming}
         isAgentResponseComplete={isAgentResponseComplete}
       />
+      {planVersion !== undefined && <p className={TURN_PROSE_CLASS}>Plan v{planVersion} is in the Plan tab.</p>}
       <AssistantMessageActions
         message={message}
         textContent={textContent}

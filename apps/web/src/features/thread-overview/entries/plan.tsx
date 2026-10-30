@@ -19,8 +19,22 @@ function selectRowPlan(versions: readonly PlanVersion[] | undefined, sourceMessa
   return implemented ?? versions?.at(-1);
 }
 
+// Plan titles come from the plan's markdown H1, so backtick spans render as
+// inline code, as they do in the transcript.
+function PlanTitle({ title }: { title: string }) {
+  return title.split(/`([^`]+)`/).map((part, index) =>
+    index % 2 === 1 ? (
+      <code key={index} className="rounded bg-hover px-1 font-mono">
+        {part}
+      </code>
+    ) : (
+      part
+    ),
+  );
+}
+
 function rowLabel(plan: PlanVersion, progress: TaskProgress | null): string {
-  const label = `Open plan ${plan.title}, version ${plan.version}`;
+  const label = `Open plan ${plan.title.replace(/`/g, "")}, version ${plan.version}`;
   return progress ? `${label}, ${progress.settled} of ${progress.total} tasks done` : label;
 }
 
@@ -50,7 +64,9 @@ function PlanEntry({ thread }: { thread: Thread }) {
       <OverviewRowIcon>
         <FileText />
       </OverviewRowIcon>
-      <span className="text-fade min-w-0 grow text-ink">{latest.title}</span>
+      <span className="text-fade min-w-0 grow text-ink">
+        <PlanTitle title={latest.title} />
+      </span>
       <span className="shrink-0 text-xs tabular-nums text-muted">{trailing}</span>
     </Button>
   );

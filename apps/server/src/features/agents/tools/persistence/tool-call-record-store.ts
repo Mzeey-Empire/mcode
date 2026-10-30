@@ -9,6 +9,7 @@ import type { Database } from "bun:sqlite";
 import { and, asc, eq, inArray, isNull, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { ToolCallRecord, ToolCallStatus } from "@mcode/contracts/models/tool-call-record";
+import { isToolCallActive, ToolCallPhaseSchema } from "@mcode/contracts/models/tool-call-record";
 import {
   type WriteBatchLimits,
   type WriteBatchResult,
@@ -42,6 +43,7 @@ export interface CreateToolCallRecordInput {
   outputArtifactPath?: string;
   exitCode?: number;
   status: ToolCallStatus;
+  phase?: ToolCallRecord["phase"];
   /** ISO timestamp captured when the provider started the tool call. */
   startedAt?: string;
   /** ISO timestamp captured when the tool call reached a terminal status. */
@@ -72,7 +74,7 @@ function prepareToolCallRecordInsert(
 ): ToolCallRecordInsert {
   const id = input.toolCallId ?? NodeCrypto.randomUUID();
   const startedAt = input.startedAt ?? now;
-  const completedAt = input.status !== "running" ? input.completedAt ?? now : null;
+  const completedAt = isToolCallActive(input.status) ? null : input.completedAt ?? now;
   return { id, startedAt, completedAt };
 }
 
@@ -102,6 +104,7 @@ function toolCallRecordFromInsert(
     output_artifact_path: nullIfUndefined(input.outputArtifactPath),
     exit_code: nullIfUndefined(input.exitCode),
     status: input.status,
+    ...(input.phase ? { phase: input.phase } : {}),
     ...(input.background === true ? { background: true } : {}),
     started_at: insert.startedAt,
     completed_at: insert.completedAt,
@@ -132,11 +135,18 @@ function rowToToolCallRecord(row: ToolCallRecordRow): ToolCallRecord {
     output_artifact_path: row.outputArtifactPath,
     exit_code: row.exitCode,
     status: row.status as ToolCallStatus,
+    ...phaseFromRow(row.phase),
     ...(row.background ? { background: true } : {}),
     started_at: row.startedAt,
     completed_at: row.completedAt,
     sort_order: row.sortOrder,
   };
+}
+
+// Builds sharing the database may write phases this build does not know; the row still reads by its status.
+function phaseFromRow(phase: string | null): Pick<ToolCallRecord, "phase"> {
+  const parsed = ToolCallPhaseSchema.safeParse(phase);
+  return parsed.success ? { phase: parsed.data } : {};
 }
 
 /** Repository for tool call record creation and retrieval against SQLite. */
@@ -200,6 +210,7 @@ export class ToolCallRecordStore {
       outputArtifactPath: placeholder("outputArtifactPath"),
       exitCode: placeholder("exitCode"),
       status: placeholder("status"),
+      phase: placeholder("phase"),
       background: placeholder("background"),
       startedAt: placeholder("startedAt"),
       completedAt: placeholder("completedAt"),
@@ -229,6 +240,7 @@ export class ToolCallRecordStore {
         outputArtifactPath: sql`excluded.output_artifact_path`,
         exitCode: sql`excluded.exit_code`,
         status: sql`excluded.status`,
+        phase: sql`excluded.phase`,
         background: sql`excluded.background`,
         startedAt: sql`excluded.started_at`,
         completedAt: sql`excluded.completed_at`,
@@ -268,6 +280,7 @@ export class ToolCallRecordStore {
       outputArtifactPath: nullIfUndefined(input.outputArtifactPath),
       exitCode: nullIfUndefined(input.exitCode),
       status: input.status,
+      phase: nullIfUndefined(input.phase),
       background: input.background === true,
       startedAt: insert.startedAt,
       completedAt: insert.completedAt,
