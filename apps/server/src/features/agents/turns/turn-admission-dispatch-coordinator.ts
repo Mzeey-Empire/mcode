@@ -517,7 +517,7 @@ export class TurnAdmissionDispatchCoordinator {
     this.requireSendableThread(thread);
     const providerId = this.selectProvider(thread.provider, command.provider);
     this.assertProviderAvailable(command.threadId, providerId);
-    command = await this.resolveDefaultModel(command, providerId);
+    command = await this.resolveDefaultModel(command, providerId, thread);
     const workspace = this.requireWorkspace(thread.workspace_id);
     const mentions = this.validateMentions({
       workspaceId: workspace.id,
@@ -688,10 +688,11 @@ export class TurnAdmissionDispatchCoordinator {
     return requested ?? (threadProvider as ProviderId) ?? "claude";
   }
 
-  private async resolveDefaultModel(command: SendMessageCommand, providerId: ProviderId): Promise<SendMessageCommand> {
+  private async resolveDefaultModel(command: SendMessageCommand, providerId: ProviderId, thread: Thread): Promise<SendMessageCommand> {
     if (command.model !== undefined || providerId === "claude") return command;
     const models = await this.models.listModels(providerId);
-    const model = models[0]?.id;
+    const storedModel = thread.provider === providerId ? models.find((entry) => entry.id === thread.model) : undefined;
+    const model = (storedModel ?? models[0])?.id;
     if (!model) throw new Error(`No default model available for provider ${providerId}`);
     return { ...command, model };
   }

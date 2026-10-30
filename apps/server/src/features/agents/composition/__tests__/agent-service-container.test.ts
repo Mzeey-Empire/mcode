@@ -23,6 +23,7 @@ import { ExecutionProviderEventOwnership } from "../../execution/execution-provi
 import { ExecutionWorkerLossCoordinator } from "../../execution/execution-worker-loss-coordinator.js";
 import { ExecutionFileEvidenceCoordinator } from "../../execution/execution-file-evidence-coordinator.js";
 import { AgentService } from "../../orchestration/agent-service.js";
+import { testModelCatalog } from "../../__tests__/provider-model-fixture.js";
 import { AgentEventPublicationRegistry } from "../../orchestration/agent-event-publication-registry.js";
 import { TurnRuntimeController } from "../../orchestration/turn-runtime-controller.js";
 import { ThreadCreationCoordinator } from "../../turns/thread-creation-coordinator.js";
@@ -786,7 +787,7 @@ function fakeCodexProvider(
     sendTurn,
     stopSession,
     shutdown: () => undefined,
-    listModels: async () => [],
+    listModels: testModelCatalog.listModels,
     setCanonicalTurnDeliveryFailureHandler: () => undefined,
     fenceCanonicalTurnEvents,
     retireCanonicalTurnEvents: async () => undefined,

@@ -1104,6 +1104,18 @@ describe("AgentService.createAndSend defaults", () => {
     })));
   });
 
+  it.each(["codex", "cursor"] satisfies ProviderId[])("keeps a stored %s model from its catalog when the send omits it", async (providerId) => {
+    const { threadRepo, workspaceRepo, service, provider } = await createAgentServiceHarness(undefined, false, undefined, providerId);
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const thread = await threadRepo.create(workspace.id, "Saved selection", "direct", "main", true, providerId);
+    await threadRepo.updateModel(thread.id, "provider-alternative");
+
+    await routeAgentRpc("agent.send", { threadId: thread.id, content: "Keep the selected model", provider: providerId }, sendRpcDeps(service));
+
+    expect(threadRepo.findById(thread.id)?.model).toBe("provider-alternative");
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledWith(expect.objectContaining({ model: "provider-alternative" })));
+  });
+
   it("keeps an explicit model without consulting the default catalog", async () => {
     const { threadRepo, workspaceRepo, service, provider } = await createAgentServiceHarness(undefined, false, undefined, "codex");
     const workspace = await workspaceRepo.create("Repo", "/repo");

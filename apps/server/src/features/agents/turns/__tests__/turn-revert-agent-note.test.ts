@@ -31,8 +31,7 @@ import { TurnRevertStore } from "../persistence/turn-revert-store.js";
 import { prepareTurnRevert, settleTurnRevert } from "../persistence/turn-revert-write-operations.js";
 import { TurnAdmissionDispatchCoordinator, type SendMessageCommand, type TurnParentStartOwner, type TurnRuntimeAdmissionAuthority } from "../turn-admission-dispatch-coordinator.js";
 
-// No catalog model declares Fast, so these turns never carry `fastMode`.
-const noModels = { listModels: async () => [] };
+import { testModelCatalog } from "../../__tests__/provider-model-fixture.js";
 
 let directory: string;
 let settings: SettingsService;
@@ -63,7 +62,7 @@ async function fixture(mode: "store" | "worker") {
     id: "codex" as const, descriptor: { id: "codex" as const, capabilities: [] }, supportsCompletion: false,
      maxInputCharactersPerTurn: 100_000,
 
-    sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: async () => [],
+    sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: testModelCatalog.listModels,
   });
   const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
   const worktrees = new GitWorktreeService(workspaces, new FakeGitExecutor(), hostRuntime);
@@ -92,7 +91,7 @@ async function fixture(mode: "store" | "worker") {
     threads, workspaces, messages, reverts, worktrees, new AttachmentService(), providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
     new GoalLifecycleService(threads, providers, writer, commands, canonical), undefined, undefined,
-    hostRuntime.platform, noModels, owner,
+    hostRuntime.platform, testModelCatalog, owner,
   );
   const runtime: TurnRuntimeAdmissionAuthority = {
     reserve: () => ({ threadId: thread.id, turnExecutionId: NodeCrypto.randomUUID(), mutationReservationToken: NodeCrypto.randomUUID(), generation: 1 }),
@@ -123,6 +122,16 @@ async function fixture(mode: "store" | "worker") {
 }
 
 describe.each(["store", "worker"] as const)("revert note admission through %s", (mode) => {
+  it.each([{ providerOriginated: true }, { delegationWake: true }])("keeps the saved model for a turn without a composer selection: %j", async (origin) => {
+    const f = await fixture(mode);
+    await f.threads.updateModel(f.thread.id, "gpt-5.5");
+
+    const admitted = await f.send(origin);
+
+    expect(admitted.request.model).toBe("gpt-5.5");
+    expect(f.threads.findById(f.thread.id)?.model).toBe("gpt-5.5");
+  });
+
   it("sends the literal note once while keeping persisted and published user content clean", async () => {
     const f = await fixture(mode);
     expect((await f.send()).request.message).toBe("What changed?");
