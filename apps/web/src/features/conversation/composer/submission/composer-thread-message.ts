@@ -4,6 +4,7 @@ import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import { useThreadStore } from "@/stores/threadStore";
+import { requestTranscriptFollow } from "@/features/conversation/messages/transcript-follow-request";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
 
@@ -42,6 +43,7 @@ export async function sendComposerThreadMessage(
 ): Promise<void> {
   const { selection } = payload;
   const scoped = providerScopedSelection(selection);
+  requestTranscriptFollow(threadId);
   const sent = await useThreadStore.getState().sendMessage(
     threadId,
     payload.content,
