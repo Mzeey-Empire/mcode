@@ -1924,6 +1924,8 @@ export class CanonicalAgentStore {
   /** The writer worker yields between committed recovery batches so other SQLite writers can proceed. */
   async recordParentNarrativeRecoveryYielding(
     input: ParentNarrativeRecoveryCommitInput,
+    // A macrotask-only yield can reacquire SQLite before another connection's busy waiter wakes.
+    yieldControl: () => Promise<void> = () => new Promise<void>((resolve) => setTimeout(resolve, 2)),
   ): Promise<boolean> {
     const prepared = this.prepareParentNarrativeRecovery(input);
     if (prepared === undefined) return false;
@@ -1932,8 +1934,7 @@ export class CanonicalAgentStore {
     await runBoundedWriteBatches({
       ...this.narrativeRecoveryBatches(prepared, envelopes),
       beginImmediate: true,
-      // A macrotask-only yield can reacquire SQLite before another connection's busy waiter wakes.
-      yieldControl: () => new Promise<void>((resolve) => setTimeout(resolve, 2)),
+      yieldControl,
     });
     if (envelopes.length > 0) this.publish(envelopes);
     this.dropDiscardedNarrativeItems(prepared.discardedItemIds);
