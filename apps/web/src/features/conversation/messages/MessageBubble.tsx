@@ -880,7 +880,7 @@ function AssistantResponseText({
   return (
     <div className={`pt-1 ${TURN_PROSE_CLASS}`} data-testid="assistant-response-text" data-selected-text-content data-selected-text-eligible={isAgentResponseComplete ? "true" : "false"}>
       {renderDelta ? (
-        <DeltaBlock text={message.content} isStreaming={isStreaming} showCursor={isStreaming}
+        <DeltaBlock text={message.content} isStreaming={isStreaming}
           textMayContinue={isTextStillArriving(textIsStreaming, agentDisplayState)} />
       ) : (
         <Suspense fallback={<p className="whitespace-pre-wrap">{stripPlanFences(message.content)}</p>}>
