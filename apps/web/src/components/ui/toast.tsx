@@ -25,7 +25,7 @@ import {
   type ToastPresence,
 } from "@/lib/toast-presence";
 import { cn } from "@/lib/utils";
-import { useToastStore, type Toast, type ToastKind } from "@/stores/toastStore";
+import { useToastLaneClearance, useToastStore, type Toast, type ToastKind } from "@/stores/toastStore";
 import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 /** 8px under the 48px conversation header. */
@@ -164,6 +164,7 @@ function stackExtent(entries: readonly ToastPresence[], placements: ReadonlyMap<
  */
 export function ToastLane({ anchor, fallbackRef, reserveOverview }: ToastLaneProps) {
   const column = useLaneColumn(anchor, fallbackRef, reserveOverview);
+  const clearanceBottom = useToastLaneClearance((state) => state.bottomPx);
   const [heights, setHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
   const { expanded, handlers } = useStackExpansion();
   const { entries, remove } = useToastPresence(heights, expanded);
@@ -189,7 +190,7 @@ export function ToastLane({ anchor, fallbackRef, reserveOverview }: ToastLanePro
       data-expanded={expanded}
       className="fixed z-(--layer-toast) w-85 -translate-x-1/2"
       style={{
-        top: column.top + LANE_TOP_PX,
+        top: Math.max(column.top + LANE_TOP_PX, clearanceBottom ?? 0),
         left: column.left + column.width / 2,
         height: stackExtent(entries, placements, heights),
       }}
