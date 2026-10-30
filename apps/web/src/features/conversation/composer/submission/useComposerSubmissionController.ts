@@ -5,6 +5,7 @@ import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-pr
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { useToastStore } from "@/stores/toastStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { scheduleDrainAfterEdit } from "@/stores/threadStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
 import type { ComposerExecutionTargetController } from "../execution/useComposerExecutionTarget";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
@@ -115,7 +116,10 @@ export function useComposerSubmissionController({
         editing: queue.editing,
         submission,
       });
-      if (queued) completeQueued(submission);
+      if (queued) {
+        completeQueued(submission);
+        if (threadId) scheduleDrainAfterEdit(threadId);
+      }
       return queued;
     },
     [completeQueued, queue.editing, threadId],
