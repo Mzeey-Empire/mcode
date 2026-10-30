@@ -12,6 +12,7 @@ import { currentActivityHeading } from "../narrative/activity-label";
 import { isTurnWorkRunning } from "../narrative/narrative-builder-helpers";
 import { deriveRunStatus, type RunHoldingSignals, type RunStatus } from "../narrative/run-status";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
+import { isHiddenPlanAnswer } from "@/lib/plan-fences";
 import { approvalReviewNote, persistedTurnCounts, persistedTurnDurationMs } from "../turn/turn-summary";
 import { sameTurnEndNotice, type TurnEndNoticeView } from "../turn-ending/turn-ending-notice";
 import type { TurnEnding } from "../turn-ending/turn-endings-projection";
@@ -528,6 +529,7 @@ function turnEndNoticeItem(message: Message, ending: TurnEnding | undefined): Ch
 }
 
 function stableItemsForMessage(message: Message, input: StableItemInput): ChatVirtualItem[] {
+  if (isHiddenPlanAnswer(message)) return [];
   const ending = input.turnEndingsByMessageId?.[message.id];
   if (message.role !== "assistant") return definedItems([messageVirtualItem(message, input), turnEndNoticeItem(message, ending)]);
   const settled = !isAgentDisplayActive(currentResponseState(message, input));
@@ -610,7 +612,7 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
   const signals = holdingSignals ?? NO_HOLDING_SIGNALS;
   const ownLive = isAgentRunning || signals.waitingFor !== undefined;
   const live = ownLive || signals.delegating === true;
-  if (!live && toolCalls.length === 0 && !signals.exiting) return undefined;
+  if (!live && !signals.exiting) return undefined;
   if (!ownLive && (signals.delegating || signals.exiting === "delegated")) return delegatedOnlyIndicatorItem(live);
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
   const running = topLevelTools.filter(isTurnWorkRunning);
