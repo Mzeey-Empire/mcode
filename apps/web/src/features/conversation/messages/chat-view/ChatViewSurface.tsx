@@ -631,15 +631,16 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
     <div ref={paneRef} className={cn("relative flex h-full flex-col bg-background", overviewDocked && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view" data-thread-view>
       <OverviewLayer>
         {/* The transcript fills the pane and scrolls under both chrome blocks. The top block takes the
-            sticky layer so it paints over the transcript that follows it in the DOM. */}
-        <div ref={topChromeRef} className="relative z-(--layer-sticky)">
+            sticky layer so it paints over the transcript that follows it in the DOM. Both blocks are
+            opaque so text never shows around the header pill or the composer card. */}
+        <div ref={topChromeRef} className="relative z-(--layer-sticky) bg-background">
           <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} paneWidth={paneWidth} />
           <ActiveThreadBanners state={state} />
           {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
           <TurnSavingNotice lostProgress={state.lostProgress} />
         </div>
         <ChatMessageStage state={state} interactions={interactions} contentPaddingRight={overviewReserve} chromeInsets={chromeInsets} startupTrail={startup && startup.state !== "completed" ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
-        <div ref={bottomChromeRef} className="relative mt-auto">
+        <div ref={bottomChromeRef} className="relative mt-auto bg-background">
           {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
           <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} startingThread={startingThread} paddingRight={overviewReserve} />
         </div>
