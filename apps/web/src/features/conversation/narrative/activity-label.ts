@@ -70,6 +70,9 @@ function shellActivity(tool: ToolCall): string {
 
 /** Status line label for one running tool call. */
 export function toolActivityLabel(tool: ToolCall): string {
+  if (tool.status === "queued") return "Command queued";
+  if (tool.status === "waiting") return "Waiting for approval";
+  if (tool.status === "denied") return "Command denied";
   if (isShellTool(tool.toolName)) return shellActivity(tool);
   const name = resolveToolName(tool.toolName);
   return fileActivity(tool, name)

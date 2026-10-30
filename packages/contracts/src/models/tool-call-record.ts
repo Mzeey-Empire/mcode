@@ -259,11 +259,26 @@ export function mergeSubagentPresentation(
   };
 }
 
+/** Execution states before a tool produces its result. */
+export const ToolExecutionStatusSchema = z.enum(["queued", "waiting", "running"]);
+
 /** Status of a persisted tool call record. */
-export const ToolCallStatusSchema = z.enum(["running", "completed", "failed", "cancelled"]);
+export const ToolCallStatusSchema = z.enum(["queued", "waiting", "running", "completed", "failed", "cancelled", "denied"]);
 
 /** Status of a persisted tool call record. */
 export type ToolCallStatus = z.infer<typeof ToolCallStatusSchema>;
+
+/** True while a queued, waiting, or running invocation still needs a result. */
+export function isToolCallActive(status: ToolCallStatus): boolean {
+  return status === "queued" || status === "waiting" || status === "running";
+}
+
+/** Permission refusal and cancellation have their own outcomes, separate from tool errors. */
+export function toolCallResultStatus(result: { denied?: boolean; cancelled?: boolean; isError: boolean }): ToolCallStatus {
+  if (result.denied) return "denied";
+  if (result.cancelled) return "cancelled";
+  return result.isError ? "failed" : "completed";
+}
 
 /** Persisted tool call record linked to an assistant message. */
 export const ToolCallRecordSchema = lazySchema(() => z.object({

@@ -1011,6 +1011,9 @@ export class ClaudeProvider
       toolName,
       requestId,
     );
+    if (decision !== "cancelled") {
+      this.claudeEventMapper(threadId)?.commandApprovalResolved(options.toolUseID, result.behavior === "allow");
+    }
     logger.debug("canUseTool returning", {
       toolName,
       requestId,
@@ -1028,6 +1031,7 @@ export class ClaudeProvider
     routing?: ClaudeCanonicalEventRouting,
   ): Promise<ClaudeApprovalDecision> {
     const session = this.runtime.get(`mcode-${threadId}`);
+    this.claudeEventMapper(threadId)?.commandApprovalRequested(options.toolUseID);
     const body = await claudeApprovalBody(toolName, input, options, session?.cwd);
     if (options.signal?.aborted) return "cancelled";
     // Read the origin after the await: the stream can consume task_started while file evidence loads.
@@ -1071,13 +1075,18 @@ export class ClaudeProvider
     this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome });
   }
 
+  private claudeEventMapper(threadId: string): ClaudeEventMapper | undefined {
+    const session = this.runtime.get(`mcode-${threadId}`);
+    return session ? this.streamStates.get(session.query)?.mapper : undefined;
+  }
+
   private toClaudePermissionResult(
     decision: ClaudeApprovalDecision,
     input: Record<string, unknown>,
     options: Parameters<CanUseTool>[2],
     toolName: string,
     requestId: string,
-  ): ClaudeToolPermissionResult {
+  ): NonNullable<ClaudeToolPermissionResult> {
     if (typeof decision !== "string") return { behavior: "deny", message: decision.denyMessage };
     switch (decision) {
       case "allow":

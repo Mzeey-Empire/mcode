@@ -56,6 +56,32 @@ describe("Claude approval origin", () => {
       tool_use_id: toolUseId, description, task_type: "local_agent" };
   }
 
+  it("publishes queued, waiting, running and denied states for the exact SDK tool IDs", async () => {
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event) => events.push(event));
+    const canUseTool = await startTurn("commands", [{ type: "assistant", message: { content: [
+      { type: "tool_use", id: "first", name: "Bash", input: { command: "echo alpha" } },
+      { type: "tool_use", id: "second", name: "Bash", input: { command: "echo beta" } },
+    ] } }]);
+    const options = { signal: new AbortController().signal, toolUseID: "first", requestId: "native-first" };
+    const first = canUseTool("Bash", { command: "echo alpha" }, options);
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    await provider.resolveApproval(requests[0].requestId, { choiceId: "allow" });
+    expect(await first).toMatchObject({ behavior: "allow" });
+    const second = canUseTool("Bash", { command: "echo beta" }, { ...options, toolUseID: "second" });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    await provider.resolveApproval(requests[1].requestId, { choiceId: "deny" });
+    expect(await second).toMatchObject({ behavior: "deny" });
+    expect(events.map(({ event }) => event).filter((event) => event.type === "toolUse")).toMatchObject([
+      { toolCallId: "first", status: "queued" }, { toolCallId: "second", status: "queued" },
+      { toolCallId: "first", status: "waiting" }, { toolCallId: "first", status: "running" },
+      { toolCallId: "second", status: "waiting" },
+    ]);
+    await vi.waitFor(() => expect(events.map(({ event }) => event).filter((event) => event.type === "toolResult")).toMatchObject([
+      { toolCallId: "second", denied: true, isError: false },
+    ]));
+  });
+
   async function requestOrigin(canUseTool: CanUseTool, agentID?: string): Promise<ApprovalOrigin> {
     const count = requests.length;
     const decision = canUseTool("Bash", { command: "date" }, {

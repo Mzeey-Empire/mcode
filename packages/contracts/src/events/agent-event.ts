@@ -5,7 +5,7 @@ import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderBillingModeSchema, QuotaCategorySchema } from "../providers/usage.js";
 import { StoredAttachmentSchema } from "../models/attachment.js";
 import { GoalStateSchema } from "../models/goal.js";
-import { SubagentPresentationSchema } from "../models/tool-call-record.js";
+import { SubagentPresentationSchema, ToolExecutionStatusSchema } from "../models/tool-call-record.js";
 import { TurnOutcomeSchema } from "../models/turn-outcome.js";
 import { TurnFailureSchema } from "../models/turn-failure.js";
 import { ApprovalDecidedPayloadSchema } from "../models/approval-receipt.js";
@@ -97,6 +97,8 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       toolCallId: z.string(),
       toolName: z.string(),
       toolInput: z.record(z.unknown()),
+      /** An explicit update for this invocation; omission retains the usual running default. */
+      status: ToolExecutionStatusSchema.optional(),
       parentToolCallId: z.string().optional(),
       subagentPresentation: SubagentPresentationSchema().optional(),
     }),
@@ -107,6 +109,8 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       parentToolCallId: z.string().optional(),
       output: z.string(),
       isError: z.boolean(),
+      /** Permission was refused before execution, rather than the tool failing. */
+      denied: z.boolean().optional(),
       /** Process exit code when the provider reports one for a shell command. */
       exitCode: z.number().int().optional(),
       /** True when the output preview omits middle bytes from the full output. */

@@ -107,6 +107,8 @@ export { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts/models/enu
 
 /** In-progress tool call tracked by the frontend streaming layer. */
 export interface ToolCall {
+  /** Explicit provider-neutral execution state, including permission waits and refusals. */
+  status?: import("@mcode/contracts/models/tool-call-record").ToolCallStatus;
   id: string;
   toolName: string;
   toolInput: Record<string, unknown>;

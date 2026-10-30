@@ -9,6 +9,7 @@ import { type InterruptionCause } from "@mcode/contracts/compat/agent-model";
 import { type StoredAttachment } from "@mcode/contracts/models/attachment";
 import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { z } from "zod";
+import { isToolCallActive } from "@mcode/contracts/models/tool-call-record";
 
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
 import { markTurnRevertsAgentNotified } from "../turns/persistence/turn-revert-write-operations.js";
@@ -693,7 +694,7 @@ function settleToolCall(
   held: ReadonlySet<string>,
 ): ParentNarrativeRecoveryItem {
   // A background call and the steps under it outlive their turn; only its own late result settles them.
-  const settles = item.record.status === "running" && !held.has(item.record.id);
+  const settles = isToolCallActive(item.record.status) && !held.has(item.record.id);
   return { kind: "toolCall", record: {
     ...item.record,
     message_id: messageId,

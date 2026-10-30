@@ -9,6 +9,7 @@ import type { Database } from "bun:sqlite";
 import { and, asc, eq, inArray, isNull, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { ToolCallRecord, ToolCallStatus } from "@mcode/contracts/models/tool-call-record";
+import { isToolCallActive } from "@mcode/contracts/models/tool-call-record";
 import {
   type WriteBatchLimits,
   type WriteBatchResult,
@@ -72,7 +73,7 @@ function prepareToolCallRecordInsert(
 ): ToolCallRecordInsert {
   const id = input.toolCallId ?? NodeCrypto.randomUUID();
   const startedAt = input.startedAt ?? now;
-  const completedAt = input.status !== "running" ? input.completedAt ?? now : null;
+  const completedAt = isToolCallActive(input.status) ? null : input.completedAt ?? now;
   return { id, startedAt, completedAt };
 }
 
