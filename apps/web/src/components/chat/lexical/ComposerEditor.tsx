@@ -89,12 +89,56 @@ function EditorRefPlugin({
   return null;
 }
 
-/** Internal plugin that syncs the editor's editable state with the disabled prop. */
-function EditablePlugin({ disabled }: { readonly disabled?: boolean }): null {
+/**
+ * The composer, by label, that lost focus by being disabled or replaced rather than by the user. A new thread's
+ * first message does both: it swaps in the thread's composer, which stays disabled while the thread starts.
+ * One element holds focus at a time, so one slot is enough. A pointer press or focus landing anywhere cancels
+ * it, so a composer never takes focus from what the user reached for meanwhile.
+ */
+let pendingFocusReturn: { readonly key: string; readonly listeners: AbortController } | null = null;
+
+function holdFocusReturn(key: string): void {
+  releaseFocusReturn();
+  const listeners = new AbortController();
+  document.addEventListener("focusin", releaseFocusReturn, { capture: true, signal: listeners.signal });
+  document.addEventListener("pointerdown", releaseFocusReturn, { capture: true, signal: listeners.signal });
+  pendingFocusReturn = { key, listeners };
+}
+
+function releaseFocusReturn(): void {
+  pendingFocusReturn?.listeners.abort();
+  pendingFocusReturn = null;
+}
+
+/** Takes back focus held for this composer, unless focus has since gone somewhere else. */
+function returnHeldFocus(editor: LexicalEditor, focusKey: string | undefined): void {
+  if (!focusKey || pendingFocusReturn?.key !== focusKey) return;
+  releaseFocusReturn();
+  if (document.activeElement !== null && document.activeElement !== document.body) return;
+  // `editor.focus()` alone moves only the selection, which focuses the root in some engines but not all.
+  editor.getRootElement()?.focus({ preventScroll: true });
+  editor.focus();
+}
+
+/** Internal plugin that syncs the editor's editable state with the disabled prop and returns focus lost to it. */
+function EditablePlugin({ disabled, focusKey }: { readonly disabled?: boolean; readonly focusKey?: string }): null {
   const [editor] = useLexicalComposerContext();
   useEffect(() => {
-    editor.setEditable(!disabled);
-  }, [editor, disabled]);
+    if (!focusKey) return undefined;
+    // Lexical detaches the root while it is still in the page, so it still holds focus here.
+    return editor.registerRootListener((root, previous) => {
+      if (root === null && previous?.contains(document.activeElement)) holdFocusReturn(focusKey);
+    });
+  }, [editor, focusKey]);
+  useEffect(() => {
+    if (disabled) {
+      if (focusKey && editor.getRootElement()?.contains(document.activeElement)) holdFocusReturn(focusKey);
+      editor.setEditable(false);
+      return;
+    }
+    editor.setEditable(true);
+    returnHeldFocus(editor, focusKey);
+  }, [editor, disabled, focusKey]);
   return null;
 }
 
@@ -176,7 +220,7 @@ export function ComposerEditor({
         <HistoryPlugin />
         <OnChangePlugin onChange={handleChange} ignoreSelectionChange />
         <EditorRefPlugin editorRef={ref} />
-        <EditablePlugin disabled={disabled} />
+        <EditablePlugin disabled={disabled} focusKey={ariaLabel} />
         <MentionPlugin
           onTrigger={onMentionTrigger}
           onDismiss={onMentionDismiss}

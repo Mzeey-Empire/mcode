@@ -70,6 +70,112 @@ describe("ComposerEditor", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
+  describe("focus across a disabled spell", () => {
+    function renderComposer(disabled: boolean) {
+      const editorRef: { current: LexicalEditor | null } = { current: null };
+      let instance = "first";
+      const element = (isDisabled: boolean) => (
+        <>
+          <ComposerEditor
+            key={instance}
+            onChange={() => {}}
+            onSubmit={() => {}}
+            onMentionTrigger={() => {}}
+            onMentionDismiss={() => {}}
+            isMentionPopupOpen={false}
+            onSlashTrigger={() => {}}
+            onSlashDismiss={() => {}}
+            isSlashPopupOpen={false}
+            editorRef={editorRef}
+            ariaLabel="Composer"
+            disabled={isDisabled}
+          />
+          <input aria-label="Search" />
+        </>
+      );
+      const view = render(element(disabled));
+      return {
+        editorRef,
+        setDisabled: (next: boolean) => view.rerender(element(next)),
+        /** Swaps in a new composer under the same label, as a new thread's first message does. */
+        replace: (nextDisabled: boolean) => {
+          instance = "second";
+          view.rerender(element(nextDisabled));
+        },
+      };
+    }
+
+    // A browser blurs an element that stops being editable; jsdom does not, so the tests blur it.
+    function blurDisabledEditor() {
+      (document.activeElement as HTMLElement | null)?.blur();
+    }
+
+    it("returns focus to the editor when it is enabled again, as after a new thread starts", async () => {
+      const { editorRef, setDisabled } = renderComposer(false);
+      await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+      const editor = screen.getByRole("textbox", { name: "Composer" });
+      act(() => editor.focus());
+
+      setDisabled(true);
+      blurDisabledEditor();
+      expect(document.activeElement).toBe(document.body);
+      setDisabled(false);
+
+      await vi.waitFor(() => expect(document.activeElement).toBe(editor));
+    });
+
+    it("gives focus to the composer that replaces a focused one once it is enabled", async () => {
+      const { editorRef, setDisabled, replace } = renderComposer(false);
+      await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+      act(() => screen.getByRole("textbox", { name: "Composer" }).focus());
+
+      replace(true);
+      expect(document.activeElement).toBe(document.body);
+      setDisabled(false);
+
+      await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Composer" })));
+    });
+
+    it("stays unfocused when the user pressed elsewhere while the editor was disabled", async () => {
+      const { editorRef, setDisabled } = renderComposer(false);
+      await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+      act(() => screen.getByRole("textbox", { name: "Composer" }).focus());
+
+      setDisabled(true);
+      blurDisabledEditor();
+      fireEvent.pointerDown(document.body);
+      setDisabled(false);
+
+      await new Promise((resolve) => queueMicrotask(() => resolve(undefined)));
+      expect(document.activeElement).toBe(document.body);
+    });
+
+    it("leaves focus where the user moved it while the editor was disabled", async () => {
+      const { editorRef, setDisabled } = renderComposer(false);
+      await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+      act(() => screen.getByRole("textbox", { name: "Composer" }).focus());
+
+      setDisabled(true);
+      blurDisabledEditor();
+      const search = screen.getByRole("textbox", { name: "Search" });
+      act(() => search.focus());
+      setDisabled(false);
+
+      await new Promise((resolve) => queueMicrotask(() => resolve(undefined)));
+      expect(document.activeElement).toBe(search);
+    });
+
+    it("does not take focus on enable when the editor did not have it", async () => {
+      const { editorRef, setDisabled } = renderComposer(true);
+      await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+
+      setDisabled(false);
+
+      await new Promise((resolve) => queueMicrotask(() => resolve(undefined)));
+      expect(document.activeElement).toBe(document.body);
+    });
+  });
+
   it("does not submit Enter while an IME composition is active", async () => {
     const onSubmit = vi.fn();
     render(
