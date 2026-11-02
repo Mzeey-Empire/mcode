@@ -99,10 +99,17 @@ function rowIdentity(item: NarrativeItem): string {
     case "reasoning": return `reasoning:${item.segment.startedAt}`;
     case "tool-group": return `tool:${item.group.calls[0]?.id}`;
     case "active-tool": return `tool:${item.toolCall.id}`;
-    case "hook": return `hook:${item.hook.hookName}:${item.hook.startedAt}`;
-    case "approval": return `approval:${item.receipt.requestId}`;
     case "subagent": return `subagent:${item.toolCall.id}`;
     case "delta": return "delta";
+    default: return markerRowIdentity(item);
+  }
+}
+
+function markerRowIdentity(item: Extract<NarrativeItem, { type: "hook" | "approval" | "notice" }>): string {
+  switch (item.type) {
+    case "hook": return `hook:${item.hook.hookName}:${item.hook.startedAt}`;
+    case "approval": return `approval:${item.receipt.requestId}`;
+    case "notice": return `notice:${item.notice.id}`;
   }
 }
 
@@ -223,8 +230,9 @@ function foldChildren(
   const note: TranscriptFoldNoteItem[] = fold.approvalNote
     ? [{ type: "fold-note", key: `${fold.key}:approval`, messageId: fold.messageId, text: fold.approvalNote }]
     : [];
-  const liveRows = live ? liveNarrativeRows(live, context.livePrefix, context.transitions) : [];
-  const rows = live && (liveRows.length > 0 || !context.recordsByMessage[fold.messageId])
+  const liveFlow = live && fold.notices ? { ...live, notices: fold.notices } : live;
+  const liveRows = liveFlow ? liveNarrativeRows(liveFlow, context.livePrefix, context.transitions) : [];
+  const rows = liveFlow && (liveRows.some((row) => row.item.type !== "notice") || !context.recordsByMessage[fold.messageId])
     ? liveRows
     : persistedFoldRows(fold, context.recordsByMessage, context.messages.get(fold.messageId)?.outcomeExecutionId);
   return [...note, ...rows];
@@ -240,7 +248,7 @@ function persistedFoldRows(
   const visibleRecords = visiblePersistedRecords(records);
   return narrativeRows(
     outcomeExecutionId ?? fold.messageId,
-    buildPersistedNarrativeItems({ ...visibleRecords, messageContent: fold.messageContent }),
+    buildPersistedNarrativeItems({ ...visibleRecords, messageContent: fold.messageContent, notices: fold.notices }),
     fold.messageId,
   );
 }

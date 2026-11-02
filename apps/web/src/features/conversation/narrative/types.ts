@@ -51,6 +51,15 @@ export interface ApprovalReceipt {
   decidedAt: number;
 }
 
+/** A timeline note that belongs at the point in a turn where it happened, such as a context compaction. */
+export interface TurnNotice {
+  /** Id of the system message that records the note. */
+  id: string;
+  text: string;
+  /** Epoch ms of the system message; places the note among the turn's rows. */
+  at: number;
+}
+
 /**
  * Coalesced consecutive tool calls rendered as one expandable summary row.
  */
@@ -60,7 +69,7 @@ export interface ToolGroup {
 }
 
 /**
- * One row in the live narrative timeline: thought, reasoning, tool group, hook, approval receipt, subagent, active tool, or final delta.
+ * One row in the live narrative timeline: thought, reasoning, tool group, hook, approval receipt, turn notice, subagent, active tool, or final delta.
  */
 export type NarrativeItem =
   | { type: "thought"; segment: ThoughtSegment; isActive: boolean }
@@ -68,6 +77,7 @@ export type NarrativeItem =
   | { type: "tool-group"; group: ToolGroup; hasError: boolean; hasCancelled: boolean }
   | { type: "hook"; hook: HookExecution }
   | { type: "approval"; receipt: ApprovalReceipt }
+  | { type: "notice"; notice: TurnNotice }
   | {
       type: "subagent";
       lifecycle: SubagentLifecycle;

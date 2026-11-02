@@ -24,7 +24,7 @@ import { recoverParentNarrative, steeredUserMessages } from "./parent-narrative-
 import { backgroundHeldToolIds, stepsSettledWith, type ToolCallLink } from "@/features/conversation/narrative/background-held-tools";
 import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
 import { CANONICAL_AGENT_PROGRESS_BATCH_MAX } from "@mcode/contracts/models/canonical-agent-progress";
-import { MessageSchema } from "@mcode/contracts/models/message";
+import { CONTEXT_COMPACTED_NOTICE, MessageSchema } from "@mcode/contracts/models/message";
 import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts/models/enums";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { isGoalOpen } from "@mcode/contracts/models/goal";
@@ -2899,7 +2899,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   const compactedSystemMessage = (threadId: string): void => {
     if (!getRec(threadId).isCompacting) return;
-    appendMessageToThread(threadId, createSystemMessage(threadId, "Context compacted"));
+    appendMessageToThread(threadId, createSystemMessage(threadId, CONTEXT_COMPACTED_NOTICE));
   };
 
   const handleCompacting = (event: Extract<AgentEvent, { type: "compacting" }>): void => {

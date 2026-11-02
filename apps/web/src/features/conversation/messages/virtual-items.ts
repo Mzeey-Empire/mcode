@@ -5,7 +5,7 @@ import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { TurnRuntimePhase } from "@mcode/contracts/models/turn-runtime";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport/types";
-import type { ApprovalReceipt, NarrativeCounts, ThoughtSegment, TurnSummary } from "../narrative/types";
+import type { ApprovalReceipt, NarrativeCounts, ThoughtSegment, TurnNotice, TurnSummary } from "../narrative/types";
 import { buildNarrativeItems, computeLiveStreamingText } from "../narrative/build-narrative";
 import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import { currentActivityHeading } from "../narrative/activity-label";
@@ -16,6 +16,7 @@ import { isHiddenPlanAnswer } from "@/lib/plan-fences";
 import { approvalReviewNote, persistedTurnCounts, persistedTurnDurationMs } from "../turn/turn-summary";
 import { sameTurnEndNotice, type TurnEndNoticeView } from "../turn-ending/turn-ending-notice";
 import type { TurnEnding } from "../turn-ending/turn-endings-projection";
+import { createTurnNoticePlacer, turnNoticeFromMessage } from "./turn-notices";
 
 /**
  * A plan-questions assistant message is a COMPLETED "ask the user" turn whose
@@ -34,6 +35,8 @@ function isPlanQuestionsMessage(content: string): boolean {
 const EMPTY_HOOKS: readonly HookExecution[] = [];
 const EMPTY_APPROVALS: readonly ApprovalReceipt[] = [];
 const EMPTY_THOUGHT_SEGMENTS: readonly ThoughtSegment[] = [];
+const EMPTY_NOTICES: readonly TurnNotice[] = [];
+const EMPTY_NOTICE_MESSAGES: readonly Message[] = [];
 
 /** Cached persisted narrative rows for an assistant message. */
 export type PersistedNarrativeRecords = {
@@ -214,12 +217,17 @@ export function agentMessageItemKey(
 export function createTranscriptItemProjector(): (input: TranscriptProjectionInput) => ChatVirtualItem[] {
   const buildVolatile = createVolatileItemsBuilder();
   const buildVirtual = createVirtualItemsBuilder();
+  const placeNotices = createTurnNoticePlacer();
   let previousStableInput: StableTranscriptInput | undefined;
   let previousStableItems: ChatVirtualItem[] = [];
 
   return (input) => {
+    const responseMessageId = input.messages.find((message) => message.role === "assistant" && isCurrentResponse(message, input))?.id;
+    const isLive = isAgentDisplayActive(input.agentDisplayState);
+    const notices = placeNotices(input.messages, { responseId: isLive ? responseMessageId : undefined, ownsTrailing: isLive || hasLiveNarrative(input) });
     const stableInput = {
-      messages: input.messages,
+      messages: notices.messages,
+      turnNoticesByResponseId: notices.byResponseId,
       persistedFilesChanged: input.persistedFilesChanged,
       latestTurnWithChanges: input.latestTurnWithChanges,
       currentTurn: input.currentTurn,
@@ -247,6 +255,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
         stableInput.turnEndingsByMessageId,
         stableInput.turnDurationsByMessageId,
         stableInput.providerContinuationMessageIds,
+        stableInput.turnNoticesByResponseId,
       );
     previousStableInput = stableInput;
     previousStableItems = stableItems;
@@ -263,9 +272,9 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       input.responseTextIsStreaming,
       input.holdingSignals,
       input.approvals,
+      notices.live,
     );
-    const responseMessageId = input.messages.find((message) => message.role === "assistant" && isCurrentResponse(message, stableInput))?.id;
-    return buildVirtual(stableItems, volatileItems, hasLiveNarrative(input), responseMessageId);
+    return buildVirtual(stableItems, volatileItems, hasLiveNarrative(input) || notices.live.length > 0, responseMessageId);
   };
 }
 
@@ -274,13 +283,14 @@ type StableTranscriptInput = Pick<TranscriptProjectionInput,
   | "responseTextIsStreaming" | "persistedNarrativeByMessage" | "turnSummariesByMessageId"
   | "turnDurationsByMessageId" | "providerContinuationMessageIds" | "turnEndingsByMessageId"> & {
   currentTurnLiveNarrative: SettledLiveNarrative | undefined;
+  turnNoticesByResponseId: Readonly<Record<string, readonly Message[]>>;
 };
 
 const STABLE_TRANSCRIPT_KEYS = [
   "messages", "persistedFilesChanged", "latestTurnWithChanges", "currentTurn", "agentDisplayState",
   "responseTextIsStreaming", "persistedNarrativeByMessage", "turnSummariesByMessageId", "turnDurationsByMessageId",
   "turnEndingsByMessageId", "currentTurnLiveNarrative",
-  "providerContinuationMessageIds",
+  "providerContinuationMessageIds", "turnNoticesByResponseId",
 ] as const satisfies readonly (keyof StableTranscriptInput)[];
 
 function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, current: StableTranscriptInput): boolean {
@@ -335,6 +345,8 @@ export type ChatVirtualItem =
       hooks: readonly HookExecution[];
       approvals: readonly ApprovalReceipt[];
       thoughtSegments: readonly ThoughtSegment[];
+      /** Notices of the live turn, such as a context compaction, placed by time among its rows. */
+      notices?: readonly TurnNotice[];
       streamingText: string;
       isAgentRunning: boolean;
       startTime: number | undefined;
@@ -354,6 +366,8 @@ export type ChatVirtualItem =
       durationMs: number | null;
       /** Approval-review sentence shown as the first row inside the open fold. */
       approvalNote?: string;
+      /** Notices of this turn, such as a context compaction, placed by time among the open fold's rows. */
+      notices?: readonly TurnNotice[];
     }
   | {
       key: string;
@@ -407,9 +421,10 @@ export function buildStableItems(
   turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>,
   turnDurationsByMessageId?: Readonly<Record<string, number | null>>,
   providerContinuationMessageIds?: ReadonlySet<string>,
+  turnNoticesByResponseId?: Readonly<Record<string, readonly Message[]>>,
 ): ChatVirtualItem[] {
   return messages.flatMap((message) => isRoutineProviderNotice(message) ? [] : stableItemsForMessage(message, {
-    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId, turnDurationsByMessageId, providerContinuationMessageIds,
+    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId, turnDurationsByMessageId, providerContinuationMessageIds, turnNoticesByResponseId,
   }));
 }
 
@@ -426,9 +441,11 @@ interface StableItemInput {
   /** What the settled current turn's live state can put under its fold. */
   currentTurnLiveNarrative?: SettledLiveNarrative;
   turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>;
+  /** Notices taken out of the message list, keyed by the answer of the turn they happened in. */
+  turnNoticesByResponseId?: Readonly<Record<string, readonly Message[]>>;
 };
 
-function isCurrentResponse(message: Message, input: StableItemInput): boolean {
+function isCurrentResponse(message: Message, input: Pick<StableItemInput, "currentTurn">): boolean {
   return input.currentTurn?.threadId === message.thread_id
     && (input.currentTurn.messageId === message.id
       || (input.currentTurn.executionId !== undefined
@@ -499,7 +516,7 @@ function hasFoldRows(records: NonNullable<PersistedNarrativeRecords>, messageCon
     .some((item) => item.type !== "hook" && item.type !== "delta");
 }
 
-function workFoldItem(message: Message, input: StableItemInput, summary: TurnSummary): ChatVirtualItem | undefined {
+function workFoldItem(message: Message, input: StableItemInput, summary: TurnSummary, notices: readonly Message[]): ChatVirtualItem | undefined {
   if (!hasFoldableNarrative(message, input, summary)) return undefined;
   const approvalNote = approvalReviewNote(summary.approvalReview);
   return {
@@ -510,6 +527,7 @@ function workFoldItem(message: Message, input: StableItemInput, summary: TurnSum
     outcome: summary.outcome,
     durationMs: summary.durationMs,
     ...(approvalNote ? { approvalNote } : {}),
+    ...(notices.length > 0 ? { notices: notices.map(turnNoticeFromMessage) } : {}),
   };
 }
 
@@ -534,16 +552,24 @@ function turnEndNoticeItem(message: Message, ending: TurnEnding | undefined): Ch
     : undefined;
 }
 
+/** The work fold above an answer, or, when the turn has none, its notices as their own rows. */
+function turnWorkItems(message: Message, input: StableItemInput, summary: TurnSummary | undefined, ending: TurnEnding | undefined): ChatVirtualItem[] {
+  const notices = input.turnNoticesByResponseId?.[message.id] ?? EMPTY_NOTICE_MESSAGES;
+  // A turn the provider never started has no work to fold, whatever the records hold.
+  const fold = summary && ending?.view.foldLabel !== null ? workFoldItem(message, input, summary, notices) : undefined;
+  // Without a fold there are no rows for the notices to sit among.
+  return fold ? [fold] : notices.map((notice) => messageVirtualItem(notice, input));
+}
+
 function stableItemsForMessage(message: Message, input: StableItemInput): ChatVirtualItem[] {
   if (isHiddenPlanAnswer(message)) return [];
   const ending = input.turnEndingsByMessageId?.[message.id];
   if (message.role !== "assistant") return definedItems([messageVirtualItem(message, input), turnEndNoticeItem(message, ending)]);
   const settled = !isAgentDisplayActive(currentResponseState(message, input));
   const summary = settled ? settledTurnSummary(message, input) : undefined;
-  // A turn the provider never started has no work to fold, whatever the records hold.
-  const showFold = ending?.view.foldLabel !== null;
+  const workItems = turnWorkItems(message, input, summary, ending);
   return definedItems([
-    summary && showFold ? workFoldItem(message, input, summary) : undefined,
+    ...workItems,
     messageVirtualItem(message, input),
     summary && turnMetaLineItem(message, summary, input.providerContinuationMessageIds),
     turnChangesItem(message, input),
@@ -572,6 +598,7 @@ export function buildVolatileItems(
   responseTextIsStreaming?: boolean,
   holdingSignals?: RunHoldingSignals,
   approvals?: readonly ApprovalReceipt[],
+  notices?: readonly TurnNotice[],
 ): ChatVirtualItem[] {
   const isAgentRunning = isAgentDisplayActive(agentDisplayState);
   const resolvedHooks = hooks ?? EMPTY_HOOKS;
@@ -585,14 +612,14 @@ export function buildVolatileItems(
   });
 
   return [
-    narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning && !holdingSignals?.stopPending, agentStartTime, committedAssistantBody),
+    narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, notices ?? EMPTY_NOTICES, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning && !holdingSignals?.stopPending, agentStartTime, committedAssistantBody),
     liveResponseItem(liveText, currentTurn, agentDisplayState, responseTextIsStreaming),
     agentDisplayState?.phase === "cancelled" ? undefined : narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
 }
 
-function narrativeFlowItem(toolCalls: readonly ToolCall[], hooks: readonly HookExecution[], approvals: readonly ApprovalReceipt[], thoughts: readonly ThoughtSegment[], streamingText: string, liveText: string, isAgentRunning: boolean, startTime: number | undefined, committedAssistantBody: string | undefined): ChatVirtualItem | undefined {
-  return isAgentRunning || [toolCalls, thoughts, approvals].some((rows) => rows.length > 0) ? { key: "narrative-flow", type: "narrative-flow", toolCalls, hooks, approvals, thoughtSegments: thoughts, streamingText: liveText.length > 0 ? "" : streamingText, isAgentRunning, startTime, committedAssistantBody } : undefined;
+function narrativeFlowItem(toolCalls: readonly ToolCall[], hooks: readonly HookExecution[], approvals: readonly ApprovalReceipt[], notices: readonly TurnNotice[], thoughts: readonly ThoughtSegment[], streamingText: string, liveText: string, isAgentRunning: boolean, startTime: number | undefined, committedAssistantBody: string | undefined): ChatVirtualItem | undefined {
+  return isAgentRunning || [toolCalls, thoughts, approvals, notices].some((rows) => rows.length > 0) ? { key: "narrative-flow", type: "narrative-flow", toolCalls, hooks, approvals, notices, thoughtSegments: thoughts, streamingText: liveText.length > 0 ? "" : streamingText, isAgentRunning, startTime, committedAssistantBody } : undefined;
 }
 
 function liveResponseItem(liveText: string, currentTurn: CurrentTurnResponseIdentity | undefined, agentDisplayState: AgentDisplayState | undefined, textIsStreaming?: boolean): ChatVirtualItem | undefined {
@@ -678,12 +705,16 @@ function sameTurnChangesItem(left: ChatVirtualItem, right: ChatVirtualItem): boo
   return left.type === "turn-changes" && right.type === "turn-changes" && [left.messageId === right.messageId, left.filesChanged === right.filesChanged, left.isLatestTurn === right.isLatestTurn].every(Boolean);
 }
 
+function sameNotices(left: readonly TurnNotice[] = EMPTY_NOTICES, right: readonly TurnNotice[] = EMPTY_NOTICES): boolean {
+  return left.length === right.length && left.every((notice, index) => notice === right[index]);
+}
+
 function sameNarrativeFlowItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "narrative-flow" && right.type === "narrative-flow" && [left.toolCalls === right.toolCalls, left.hooks === right.hooks, left.approvals === right.approvals, left.thoughtSegments === right.thoughtSegments, left.streamingText === right.streamingText, left.isAgentRunning === right.isAgentRunning, left.startTime === right.startTime, left.committedAssistantBody === right.committedAssistantBody].every(Boolean);
+  return left.type === "narrative-flow" && right.type === "narrative-flow" && [left.toolCalls === right.toolCalls, left.hooks === right.hooks, left.approvals === right.approvals, sameNotices(left.notices, right.notices), left.thoughtSegments === right.thoughtSegments, left.streamingText === right.streamingText, left.isAgentRunning === right.isAgentRunning, left.startTime === right.startTime, left.committedAssistantBody === right.committedAssistantBody].every(Boolean);
 }
 
 function sameWorkFoldItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "work-fold" && right.type === "work-fold" && [left.messageId === right.messageId, left.messageContent === right.messageContent, left.outcome === right.outcome, left.durationMs === right.durationMs, left.approvalNote === right.approvalNote].every(Boolean);
+  return left.type === "work-fold" && right.type === "work-fold" && [left.messageId === right.messageId, left.messageContent === right.messageContent, left.outcome === right.outcome, left.durationMs === right.durationMs, left.approvalNote === right.approvalNote, sameNotices(left.notices, right.notices)].every(Boolean);
 }
 
 function sameTurnMetaLineItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {

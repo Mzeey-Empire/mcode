@@ -19,7 +19,7 @@ import {
   isReasoningSegment,
   narrationSegments,
 } from "./narrative-thought-classification";
-import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
+import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment, TurnNotice } from "./types";
 
 const NATIVE_AGENT_TOOL_NAME = "Agent";
 
@@ -29,6 +29,8 @@ export interface LiveNarrativeInputs {
   hooks: readonly HookExecution[];
   /** Decided approvals for this turn; absent when the turn has none. */
   approvals?: readonly ApprovalReceipt[];
+  /** Notes such as a context compaction, placed by time among this turn's rows. */
+  notices?: readonly TurnNotice[];
   thoughtSegments: readonly ThoughtSegment[];
   streamingText: string;
   isAgentRunning: boolean;
@@ -41,7 +43,8 @@ export type LiveTimelineEvent =
   | { kind: "tool"; call: ToolCall; startedAt: number }
   | { kind: "subagent"; call: ToolCall; marker?: ToolCall; lifecycle: SubagentLifecycle; startedAt: number }
   | { kind: "hook"; hook: HookExecution; startedAt: number }
-  | { kind: "approval"; receipt: ApprovalReceipt; startedAt: number };
+  | { kind: "approval"; receipt: ApprovalReceipt; startedAt: number }
+  | { kind: "notice"; notice: TurnNotice; startedAt: number };
 
 /** Normalized live state that preserves parent grouping before row projection. */
 export interface LiveNarrativePreparation {
@@ -85,6 +88,7 @@ export function prepareLiveNarrative(
       thoughtSegments,
       inputs.hooks,
       inputs.approvals ?? [],
+      inputs.notices ?? [],
     ),
     activeToolCalls,
     hasRunningTopLevelTool,
@@ -138,13 +142,15 @@ function createLiveTimeline(
   thoughtSegments: readonly ThoughtSegment[],
   hooks: readonly HookExecution[],
   approvals: readonly ApprovalReceipt[],
+  notices: readonly TurnNotice[],
 ): LiveTimelineEvent[] {
   // Receipts lead the stable sort: an equal client stamp means one arrival batch, where a decision precedes the tool it unblocked.
   const timeline = approvals.map((receipt): LiveTimelineEvent => ({ kind: "approval", receipt, startedAt: receipt.decidedAt }))
     .concat(createThoughtEvents(thoughtSegments))
     .concat(createTopLevelToolEvents(topLevelCalls))
     .concat(createSubagentEvents(toolCalls, childrenByParent))
-    .concat(createHookEvents(hooks));
+    .concat(createHookEvents(hooks))
+    .concat(notices.map((notice): LiveTimelineEvent => ({ kind: "notice", notice, startedAt: notice.at })));
   return timeline.sort((left, right) => left.startedAt - right.startedAt);
 }
 
@@ -288,11 +294,13 @@ function projectLiveTimeline(
 }
 
 function standaloneItem(
-  event: Extract<LiveTimelineEvent, { kind: "hook" | "approval" }>,
+  event: Extract<LiveTimelineEvent, { kind: "hook" | "approval" | "notice" }>,
 ): NarrativeItem {
-  return event.kind === "hook"
-    ? { type: "hook", hook: event.hook }
-    : { type: "approval", receipt: event.receipt };
+  switch (event.kind) {
+    case "hook": return { type: "hook", hook: event.hook };
+    case "approval": return { type: "approval", receipt: event.receipt };
+    case "notice": return { type: "notice", notice: event.notice };
+  }
 }
 
 function projectThoughtEvent(
