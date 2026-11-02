@@ -662,6 +662,7 @@ export function Composer({
               reasoningLevels: agentControls.reasoningLevels,
               capabilities: agentControls.capabilities,
               attachedCapabilityIds: agentControls.attachedCapabilityIds,
+              lockedCapabilityIds: agentControls.lockedCapabilityIds,
               permissionLocked: agentControls.permissionLocked,
               approvalReviewSupported: agentControls.approvalReviewSupported,
             },

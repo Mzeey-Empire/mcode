@@ -22,7 +22,9 @@ interface ComposerAddMenuProps {
   onAttachFiles: () => void;
   capabilities: readonly ResolvedComposerCapability[];
   attachedCapabilityIds: ReadonlySet<ComposerCapabilityId>;
-  /** Toggles Plan and attaches the others, so only Plan stays choosable while it is on. */
+  /** Attached capabilities the menu shows checked but cannot turn off; their own chip does. */
+  lockedCapabilityIds: ReadonlySet<ComposerCapabilityId>;
+  /** Toggles Plan and a pending Goal, and attaches orchestration. */
   onAttachCapability: (capabilityId: ComposerCapabilityId) => void;
   getComposerRect: () => DOMRect | null;
 }
@@ -44,6 +46,7 @@ export function ComposerAddMenu({
   onAttachFiles,
   capabilities,
   attachedCapabilityIds,
+  lockedCapabilityIds,
   onAttachCapability,
   getComposerRect,
 }: ComposerAddMenuProps) {
@@ -66,7 +69,7 @@ export function ComposerAddMenu({
       aria-label="Add to composer"
       data-testid="composer-add"
       disabled={disabled}
-      className="size-8 shrink-0 rounded-lg text-muted hover:bg-hover/40 hover:text-ink disabled:pointer-events-none disabled:opacity-50"
+      className="size-8 shrink-0 rounded-full text-muted hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-50"
     >
       <Plus size={16} aria-hidden />
     </Button>
@@ -106,7 +109,7 @@ export function ComposerAddMenu({
                     label={capability.label}
                     icon={<Icon />}
                     checked={attached}
-                    disabled={attached && capability.id !== "plan"}
+                    disabled={lockedCapabilityIds.has(capability.id)}
                     closeOnClick
                     onCheckedChange={afterClose(() => onAttachCapability(capability.id))}
                   />

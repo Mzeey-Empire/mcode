@@ -37,6 +37,7 @@ function renderAddMenu({
         onAttachFiles={vi.fn()}
         capabilities={capabilities}
         attachedCapabilityIds={attachedCapabilityIds}
+        lockedCapabilityIds={new Set()}
         onAttachCapability={onAttachCapability}
         getComposerRect={() => COMPOSER_RECT}
       />

@@ -67,7 +67,7 @@ function BrowserCaptureTooltip({
   );
 }
 
-/** Horizontal strip of pending attachment thumbnails or file tiles with per-item remove actions. */
+/** The composer tray's row of pending attachment tiles (56px images, 156px files), scrolling sideways, each with a remove action. */
 export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollEdges = useHorizontalScrollEdges(scrollRef, attachments.length);
@@ -121,19 +121,19 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
         {scrollEdges.left ? (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 left-0 z-(--layer-sticky) w-4 bg-gradient-to-r from-background to-transparent"
+            className="pointer-events-none absolute inset-y-0 left-0 z-(--layer-sticky) w-4 bg-gradient-to-r from-panel to-transparent"
           />
         ) : null}
         {scrollEdges.right ? (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 right-0 z-(--layer-sticky) w-4 bg-gradient-to-l from-background to-transparent"
+            className="pointer-events-none absolute inset-y-0 right-0 z-(--layer-sticky) w-4 bg-gradient-to-l from-panel to-transparent"
           />
         ) : null}
         <div
           ref={scrollRef}
           className={cn(
-            "flex gap-2 overflow-x-auto px-3 py-2",
+            "flex gap-2 overflow-x-auto pt-1",
             "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
           )}
         >
@@ -152,16 +152,16 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
               <BrowserCaptureTooltip key={att.id} title={spill?.title}>
                 <div
                   className={cn(
-                    "group relative flex-shrink-0 overflow-hidden rounded-lg border border-border/60 bg-hover/60 transition-all duration-150",
-                    "hover:border-primary/40 hover:bg-hover/80",
+                    "group relative flex-shrink-0 overflow-hidden rounded-[10px] border border-border bg-hover transition-colors duration-150",
+                    "hover:border-primary/40",
                   )}
                 >
-                  <div className="flex h-[72px] w-[140px] flex-col justify-center gap-0.5 px-3 py-1">
+                  <div className="flex h-14 w-[156px] flex-col justify-center gap-0.5 px-2.5">
                     <div className="flex min-h-0 items-center gap-2">
-                      <FileText size={18} className="shrink-0 text-primary" />
+                      <FileText size={16} className="shrink-0 text-primary" />
                       <span className="text-fade text-xs font-medium text-ink">Page context</span>
                     </div>
-                    <span className="block max-w-[120px] text-fade pl-[26px] text-xs leading-tight text-muted">
+                    <span className="block text-fade pl-6 text-xs text-muted">
                       {spill ? spill.line : "No image"}
                     </span>
                     {removeButton(att.name, att.id)}
@@ -179,13 +179,13 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
             // group-hover still reveals the remove control.
             return (
               <BrowserCaptureTooltip key={att.id} title={spill?.title}>
-                <div className="group relative h-[72px] w-[72px] flex-shrink-0">
+                <div className="group relative size-14 flex-shrink-0">
                   <button
                     type="button"
                     className={cn(
-                      "relative flex h-full w-full cursor-pointer overflow-hidden rounded-lg border p-0 text-left outline-none",
-                      "border-border/60 bg-hover/60 transition-[border-color,background-color,filter]",
-                      "hover:border-primary/45 hover:bg-hover/80 hover:brightness-[1.04]",
+                      "relative flex h-full w-full cursor-pointer overflow-hidden rounded-[10px] border p-0 text-left outline-none",
+                      "border-border bg-hover transition-[border-color,filter]",
+                      "hover:border-primary/45 hover:brightness-[1.04]",
                       "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                     )}
                     aria-label={`Preview image ${att.name}`}
@@ -228,8 +228,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
             <div
               key={att.id}
               className={cn(
-                "group relative flex-shrink-0 overflow-hidden rounded-lg transition-all duration-150",
-                "border border-transparent hover:border-primary/40 hover:bg-hover/50",
+                "group relative flex-shrink-0 overflow-hidden rounded-[10px]",
               )}
             >
               <FileAttachmentTile

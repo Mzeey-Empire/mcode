@@ -1160,10 +1160,32 @@ are provider-native, so they show the parent thread's provider.
   submission. Before the first send the thread overview hosts the workspace
   and branch selectors; after it, the overview carries mode, branch, and
   tasks.
+- An empty composer is one fully rounded capsule row: `+`, the modes, the
+  draft (one 24px line), then the right group (the split pill, context and
+  the run button). The row has 5px padding (6px on the left) and a 4px gap.
+  Once the draft wraps, it takes the full width on top and the controls drop
+  to a row below; the radius becomes 22px and the draft scrolls past 240px.
+  The capsule also takes two rows whenever the one-row draft column would be
+  under 120px, and returns to one row only when the draft, as a single line,
+  fits the one-row column with 48px to spare, so editing near the wrap point
+  does not flip it back and forth.
+- Width tiers are container queries on the capsule. Below 680px the model
+  part shows its short name, the reasoning part shows rising bars (one per
+  level, filled up to the current one), the parts tighten to 7px padding,
+  and the modes show icons only. Below 480px the model part shows only its
+  logo.
+- Plan and Goal, when on, sit beside `+` as modes in a 36px pill with the
+  panel fill and the split's 1px by 14px dividers. Each mode is 32px high
+  with a 14px icon, its name, and a 24px remove button; removing it returns
+  focus to the draft. One mode shows its name; two, or a narrow capsule,
+  show icons only, with the name in a tooltip. With no mode on, `+` is a
+  bare 32px button. The `+` menu toggles Plan and a goal not yet sent. A
+  running goal and orchestration stay checked there but turn off only from
+  their own chip.
 - Model, reasoning, and access share one rounded pill on the right of the
-  control bar, one part each, with one sliding highlight across the parts.
+  capsule, one part each, with one sliding highlight across the parts.
   Every part's popover opens in one spot: 8px above the right edge of the
-  controls row, covering any tray, so it never moves when content above
+  capsule, covering any tray, so it never moves when content above
   changes. With a popover open, resting 100ms on another part switches to
   its popover, as in a menu bar. Picking a model that has reasoning levels
   swaps to the reasoning popover in place. The reasoning part is as wide as
@@ -1177,8 +1199,18 @@ are provider-native, so they show the parent thread's provider.
 - The submit control owns pending state. While a turn is running, the same
   location exposes the neutral Stop or queue behavior according to the
   product contract.
-- Trays that belong to the composer (the task row, queued messages, the slash
-  command list) dock flush on its top edge with the panel fill and no border.
+- Trays that belong to the composer (the task row, queued messages, file and
+  image tiles, the slash command list) dock flush on its top edge with the
+  panel fill and no border.
+- Tray size: inset 22px from each side of the capsule (`--tray-inset`,
+  shared with the slash menu and the tab above a new thread's composer, so
+  all three have one footprint), 14px top corners,
+  4px 8px 8px padding, and a 4px gap between rows. Tiles are 56px high with
+  a 10px radius, a 1px border and the hover fill: an image tile is 56px
+  square with its thumbnail, a file tile is 156px wide with its name (16px
+  icon, fade truncation) over its size in muted. Each tile has a 20px round
+  remove button at its top right, shown on hover or keyboard focus. The tile
+  row scrolls sideways with no scrollbar.
 - A request that needs the user (approval, plan questions) docks in place of
   the composer surface and names the waiting state in the status line.
 

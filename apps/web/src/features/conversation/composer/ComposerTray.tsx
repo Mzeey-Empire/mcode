@@ -143,15 +143,20 @@ export interface ComposerTrayProps {
   /** True while the thread's agent runs; a running thread has no usage-limit row. */
   readonly running: boolean;
   readonly queue: ReactNode;
+  /** The draft's file and image tiles; the tray shows whenever it has any, like queued messages. */
+  readonly tiles?: ReactNode;
 }
+
+/** Tray look: inset by `--tray-inset` from the capsule, which the slash menu shares, with the panel fill and top corners. */
+export const COMPOSER_TRAY_CLASS = "mx-(--tray-inset) flex flex-col gap-1 rounded-t-[14px] bg-panel px-2 pt-1 pb-2";
 
 /**
  * Tray docked on top of the composer. Shows a usage-limit stop as the first
  * row, then the thread's parent-agent task list as one row, with the queued
- * messages below it; expanding the task list grows the tray upward so the
+ * messages and the draft's tiles below it; expanding the task list grows the tray upward so the
  * composer stays put.
  */
-export function ComposerTray({ threadId, running, queue }: ComposerTrayProps) {
+export function ComposerTray({ threadId, running, queue, tiles }: ComposerTrayProps) {
   const usageLimit = useUsageLimitTray(threadId, running);
   const progress = useTaskProgress(threadId);
   const expanded = useTaskStore((s) => s.trayExpandedByThread[threadId] ?? false);
@@ -161,7 +166,7 @@ export function ComposerTray({ threadId, running, queue }: ComposerTrayProps) {
   const listContainerRef = useRef<HTMLDivElement>(null);
   const hasQueue = useQueueStore((s) => (s.queues[threadId]?.length ?? 0) > 0);
 
-  if (!usageLimit && !progress && !hasQueue) return null;
+  if (!usageLimit && !progress && !hasQueue && !tiles) return null;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Escape" || !expanded) return;
@@ -174,7 +179,7 @@ export function ComposerTray({ threadId, running, queue }: ComposerTrayProps) {
   return (
     <div
       data-testid="composer-tray"
-      className="mx-3.5 flex flex-col rounded-t-[1.2rem] bg-panel px-2 py-1"
+      className={COMPOSER_TRAY_CLASS}
       onKeyDown={handleKeyDown}
     >
       {usageLimit && <UsageLimitRow threadId={threadId} state={usageLimit} />}
@@ -193,6 +198,7 @@ export function ComposerTray({ threadId, running, queue }: ComposerTrayProps) {
         />
       )}
       {queue}
+      {tiles}
     </div>
   );
 }

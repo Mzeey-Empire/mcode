@@ -1,14 +1,14 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from "react";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
-import { getSelectedModelPresentation, ModelPickerPanel } from "@/components/chat/ModelPickerPanel";
+import { getSelectedModelPresentation, ModelPickerPanel, type SelectedModelPresentation } from "@/components/chat/ModelPickerPanel";
 import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverMotion, type PopoverRootActions } from "@/components/ui/popover";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatReasoningLabel } from "@/lib/format-model-label";
-import { findProviderModel, getReasoningLevels } from "@/lib/model-registry";
+import { formatReasoningLabel, narrowModelLabel } from "@/lib/format-model-label";
+import { findProviderModel, getReasoningLevels, listProviderModels } from "@/lib/model-registry";
 import { cn } from "@/lib/utils";
 import { AccessOptionList } from "../controls/AccessOptionList";
 import { useComposerAccess, type ComposerAccessInput } from "../controls/ComposerAccessControls";
@@ -23,7 +23,7 @@ import { CAPSULE_PARTS, partPopoverReducer, SWITCH_DWELL_MS, type CapsulePart, t
 
 /** Props for {@link ComposerCapsuleSplit}. */
 export interface ComposerCapsuleSplitProps extends ComposerAccessInput {
-  /** The composer's controls row. Every part's popover opens 8px above its right edge, covering any tray, so a tray never moves it. */
+  /** The composer capsule. Every part's popover opens 8px above its right edge, covering any tray, so a tray never moves it. */
   readonly anchorRef: RefObject<HTMLElement | null>;
   readonly defaults: ComposerModelPreferenceDefaults;
   readonly reasoningLevels: ReasoningLevel[];
@@ -47,7 +47,13 @@ type OpenPartPopover = Extract<PartPopoverState, { status: "open" }>;
 const MODEL_POPUP_CLASS = cn(PICKER_PANEL_CLASS, "max-h-(--available-height) overflow-y-auto");
 
 const PART_CLASS =
-  "relative inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-body-small text-ink outline-none aria-expanded:bg-selected focus-visible:outline-2 focus-visible:outline-focus";
+  "relative inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-body-small text-ink outline-none aria-expanded:bg-selected focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
+
+/** The model part's label below the 680px tier, read against its provider's other models. */
+function narrowLabelOf(model: SelectedModelPresentation, providerId: string): string {
+  const prefix = model.displayProvider ? `${model.displayProvider.name} ` : "";
+  return narrowModelLabel(model.shortLabel, listProviderModels(providerId).map((sibling) => sibling.label.replace(prefix, "")));
+}
 
 function reasoningTipOf(levels: readonly ReasoningLevel[], current: ReasoningLevel): string {
   return levels.length > 0 ? `Reasoning: ${formatReasoningLabel(current)}` : POPUP_LABEL.reasoning;
@@ -136,6 +142,29 @@ function SteadyReasoningLabel({ levels, current }: { readonly levels: readonly R
   );
 }
 
+function ReasoningBars({ levels, current }: { readonly levels: readonly ReasoningLevel[]; readonly current: ReasoningLevel }) {
+  const filled = levels.indexOf(current) + 1;
+  const step = 16 / levels.length;
+  return (
+    <svg aria-hidden width={18} height={16} viewBox="0 0 18 16" className="hidden @max-[680px]/capsule:block" data-testid="capsule-reasoning-bars">
+      {levels.map((level, index) => {
+        const height = 4 + Math.round((index * 11) / Math.max(1, levels.length - 1));
+        return (
+          <rect
+            key={level}
+            x={1 + index * step}
+            y={15 - height}
+            width={step - 1.2}
+            height={height}
+            rx={1}
+            className={index < filled ? "fill-ink" : "fill-muted/35"}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 function CapsuleDivider() {
   return <span aria-hidden className="relative h-3.5 w-px shrink-0 bg-border" />;
 }
@@ -215,14 +244,20 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
       {part("model", modelLabel, modelLabel, (
         <>
           <ProviderIcon provider={model.iconProviderId} size={16} />
-          <span className="min-w-0 text-fade">{model.shortLabel}</span>
+          <span className="min-w-0 text-fade @max-[680px]/capsule:hidden">{model.shortLabel}</span>
+          <span className="hidden min-w-0 text-fade @max-[680px]/capsule:inline @max-[480px]/capsule:hidden">{narrowLabelOf(model, selection.provider)}</span>
         </>
       ))}
       {showReasoning && (
         <>
           <CapsuleDivider />
           {part("reasoning", "Model settings", reasoningTipOf(reasoningLevels, selection.reasoning), reasoningLevels.length > 0
-            ? <SteadyReasoningLabel levels={reasoningLevels} current={selection.reasoning} />
+            ? (
+              <>
+                <span className="contents @max-[680px]/capsule:hidden"><SteadyReasoningLabel levels={reasoningLevels} current={selection.reasoning} /></span>
+                <ReasoningBars levels={reasoningLevels} current={selection.reasoning} />
+              </>
+            )
             : <ComposerModelPreferenceSummary selection={selection} defaults={defaults} reasoningLevels={reasoningLevels} />)}
         </>
       )}

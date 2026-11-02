@@ -12,6 +12,9 @@
    drop Paper's `--color-` prefix so they never shadow Tailwind's default palette.
    Feature code uses the semantic roles below, enforced by mcode/no-raw-color. */
 :root {
+  /* The composer tray, the slash menu and a new thread's target rail share one footprint above the capsule,
+     so the menu covers whichever of them it overlaps edge to edge. */
+  --tray-inset: 22px;
   --neutral-50: oklch(99% 0.005 260);
   --neutral-100: oklch(95.5% 0.005 260);
   --neutral-200: oklch(90% 0.005 260);

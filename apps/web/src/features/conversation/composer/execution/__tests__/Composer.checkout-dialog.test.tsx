@@ -1656,7 +1656,7 @@ describe("Composer checkout confirmation", () => {
     });
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
     expect(getTestThreadMessages(thread.id)).toEqual([]);
-    expect(screen.getByTestId("attachment-preview")).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("attachment-preview")).not.toBeInTheDocument();
   });
 
   it("reserves capacity for delayed pathless image persistence", async () => {
@@ -1855,7 +1855,7 @@ describe("Composer checkout confirmation", () => {
       await firstPersistence;
     });
 
-    expect(screen.getByTestId("attachment-preview")).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("attachment-preview")).not.toBeInTheDocument();
     await user.upload(screen.getByTestId("composer-attachment-input"), secondImage);
     await waitFor(() => expect(saveClipboardFile).toHaveBeenCalledTimes(2));
     await user.click(
@@ -1874,7 +1874,7 @@ describe("Composer checkout confirmation", () => {
     });
 
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
-    expect(screen.getByTestId("attachment-preview")).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("attachment-preview")).not.toBeInTheDocument();
     expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 
@@ -1981,7 +1981,7 @@ describe("Composer checkout confirmation", () => {
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
     expect(getTestThreadMessages(threadA.id)).toEqual([]);
     expect(getTestThreadMessages(threadB.id)).toEqual([]);
-    expect(screen.getByTestId("attachment-preview")).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("attachment-preview")).not.toBeInTheDocument();
     expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 });
