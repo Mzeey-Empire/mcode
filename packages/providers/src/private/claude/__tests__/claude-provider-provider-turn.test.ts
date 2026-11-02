@@ -121,6 +121,33 @@ function statusThenReplyQuery(beforeReply: () => void) {
   };
 }
 
+const PROMPT_REPLY = "OK";
+
+/**
+ * Replays live run r23: a session resumed after its process died with a background task running.
+ * The CLI records the task's stopped notification in a turn of its own, with no model call and no
+ * reply, and only then answers the queued prompt.
+ */
+function stoppedTaskNoticeBeforeReplyQuery() {
+  return ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    let closeSession!: () => void;
+    const closed = new Promise<void>((resolve) => { closeSession = resolve; });
+    const stream = (async function* () {
+      await prompt[Symbol.asyncIterator]().next();
+      yield { type: "system", subtype: "task_notification", task_id: "task-bash", tool_use_id: "BASH_BG", status: "stopped",
+        summary: "Background shell command didn't finish before the previous session ended" };
+      yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
+      yield { type: "result", subtype: "success", is_error: false, result: "", num_turns: 0,
+        origin: { kind: "task-notification" }, usage: { output_tokens: 0 } };
+      yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
+      yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: PROMPT_REPLY }] } };
+      yield { type: "result", subtype: "success", is_error: false, result: PROMPT_REPLY, num_turns: 1, usage: { output_tokens: 1 } };
+      await closed;
+    })();
+    return Object.assign(stream, { close: closeSession });
+  };
+}
+
 function sendUserTurn(provider: InstanceType<typeof ClaudeProvider>) {
   return provider.sendTurn({
     turnId: "turn-user", turnExecutionId: USER_EXECUTION_ID,
@@ -198,6 +225,26 @@ describe("ClaudeProvider provider-started turns", () => {
     expect(openedAtReply).toEqual([true]);
     expect(afterUserTurn(events).find(({ event }) => event.type === AgentEventType.Message)?.event)
       .toMatchObject({ content: WAKE_REPLY });
+  });
+
+  it("keeps the prompt's turn open past a task notice the CLI records without calling the model", async () => {
+    mockQuery.mockImplementation(stoppedTaskNoticeBeforeReplyQuery());
+    const events: ProviderRuntimeEvent[] = [];
+    const open = vi.fn(async (): Promise<ProviderTurnOpening> => ({ kind: "declined", reason: "busy" }));
+    const provider = providerWith(events, { open, settleBackgroundTool: vi.fn(async () => {}) });
+    const userEvents = () => events.filter(({ event }) => event.turnExecutionId === USER_EXECUTION_ID);
+    try {
+      await sendUserTurn(provider);
+      await vi.waitFor(() => expect(userEvents().some(({ event }) => event.type === AgentEventType.Ended)).toBe(true));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      await provider.shutdown();
+    }
+
+    expect(open).not.toHaveBeenCalled();
+    expect(userEvents().filter(({ event }) => event.type === AgentEventType.Ended)).toHaveLength(1);
+    expect(userEvents().filter(({ event }) => event.type === AgentEventType.Message).at(-1)?.event)
+      .toMatchObject({ content: PROMPT_REPLY });
   });
 
   it("publishes nothing for a self-started reply the server declines", async () => {

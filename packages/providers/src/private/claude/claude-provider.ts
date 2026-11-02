@@ -613,6 +613,20 @@ function rememberProviderTurnNotice(state: ClaudeStreamLoopState, message: Recor
   state.providerTurnNotice = "Claude continued after a background task finished";
 }
 
+/**
+ * True for the result of a turn the CLI ran by itself without calling the model, such as recording a
+ * background task the previous process left running. A resumed CLI runs that turn before the queued
+ * prompt, so its result must not end the prompt's turn. A user's own result, including a local slash
+ * command's, carries no origin.
+ */
+function isUnpromptedResultWithoutReply(message: Record<string, unknown>): boolean {
+  const origin = message.origin;
+  return message.type === "result"
+    && message.num_turns === 0
+    && typeof origin === "object" && origin !== null
+    && "kind" in origin && origin.kind !== "human";
+}
+
 /** Claude Agent SDK adapter implementing IAgentProvider with prompt queue pattern. */
 export class ClaudeProvider
   extends NodeEvents.EventEmitter
@@ -2184,6 +2198,7 @@ export class ClaudeProvider
     rememberProviderTurnNotice(state, message);
     state.mapper.settleBackgroundTask(message);
     if (await this.skipUnownedClaudeOutput(sessionId, state, message)) return true;
+    if (isUnpromptedResultWithoutReply(message)) return true;
     const isResumeFailure = this.isFailedClaudeResume(message, state.sessionInitialized);
     await this.startClaudeResume(sessionId, state, message, isResumeFailure);
     if (isResumeFailure) {
