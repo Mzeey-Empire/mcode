@@ -1,14 +1,16 @@
-import { createMockMessage } from "@mcode/contracts/testing";
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { type ConversationPage } from "@mcode/contracts/models/conversation-page";
 import { type SetThreadSubscriptionsResult } from "@mcode/contracts/ws/methods";
 import { mockTransport } from "@/__tests__/mocks/transport";
+import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadSubscriptionReconciler } from "../useThreadSubscriptionReconciler";
 
 const setThreadSubscriptions = vi.mocked(mockTransport.setThreadSubscriptions);
@@ -113,6 +115,48 @@ it("reloads a leased non-active transcript after recovery invalidates its pendin
   } finally {
     residency.unmountDisplayConversation(THREAD);
   }
+});
+
+it("reloads the selected transcript when recovery requested before selection invalidates its first load", async () => {
+  clearRecordCache();
+  useWorkspaceStore.setState({ threads: [createMockThread({ id: THREAD })] });
+  const pages: Array<(page: ConversationPage) => void> = [];
+  loadConversationPage.mockImplementation(() => new Promise((resolve) => { pages.push(resolve); }));
+  let resolveRecovery: ((result: SetThreadSubscriptionsResult) => void) | undefined;
+  setThreadSubscriptions.mockImplementationOnce(() => new Promise((resolve) => { resolveRecovery = resolve; }));
+  const messages = [
+    createMockMessage({ id: "earlier-answer", thread_id: THREAD, role: "assistant", content: "Earlier answer", sequence: 6 }),
+    createMockMessage({ id: "running-prompt", thread_id: THREAD, role: "user", content: "Running task", sequence: 7 }),
+  ];
+  // After a page reload the subscription request goes out before the route selects the thread.
+  renderHook(() => useThreadSubscriptionReconciler({
+    activeThreadId: null, desiredThreadIds: DESIRED, connectionStatus: "connected",
+    runningThreadIds: new Set([THREAD]), canonicalRecoverySignature: "",
+  }));
+  await act(async () => {});
+  const selection = getConversationResidency().activate(THREAD, useWorkspaceStore.getState().threads);
+  await act(async () => {});
+  expect(pages).toHaveLength(1);
+
+  const completeRecovery = resolveRecovery;
+  if (!completeRecovery) throw new Error("Missing recovery response resolver");
+  await act(async () => {
+    completeRecovery({ canonicalRecoveries: [{
+      phase: "recovery", threadId: THREAD, epoch: EPOCH, acceptedThrough: 0, savedThrough: 0, retained: [], loss: "none",
+      durable: { mode: "snapshot", threadId: THREAD, snapshot: {
+        revision: { conversationRevision: 1, rosterRevision: 0 }, state: fixture().seeded,
+      } },
+    }] });
+  });
+  await act(async () => {
+    for (const resolvePage of pages) resolvePage({ messages, hasMore: true, narrativeByMessage: {} });
+    await selection;
+  });
+
+  expect(pages).toHaveLength(2);
+  expect(useThreadStore.getState().records.get(THREAD)?.messages.map((message) => message.id))
+    .toEqual(["earlier-answer", "running-prompt"]);
+  expect(useThreadStore.getState().records.get(THREAD)?.hasMoreMessages).toBe(true);
 });
 
 it("requests durable repair after a batched saved gap and live prefix, then restores the admitted turn and text", async () => {

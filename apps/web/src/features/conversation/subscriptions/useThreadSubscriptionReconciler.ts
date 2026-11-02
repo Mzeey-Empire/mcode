@@ -174,12 +174,14 @@ function refreshConversation(threadId: string): void {
 function applyCanonicalRecovery(
   recovery: CanonicalAgentProgressRecovery,
   revisions: NonNullable<SetThreadSubscriptionsInput["revisions"]>,
-  activeThreadId: string | null,
 ): void {
   if (!canonicalRecoveryChanged(recovery, revisions)) return;
   const residency = getConversationResidency();
   residency.invalidateConversation(recovery.threadId);
-  if (recovery.threadId === activeThreadId || residency.isDisplayConversationLeased(recovery.threadId)) {
+  // Read the selection when the response lands. After a page reload the request goes out before the
+  // route selects the thread, and the invalidation above discards the selected thread's first load.
+  const selected = useThreadStore.getState().currentThreadId === recovery.threadId;
+  if (selected || residency.isDisplayConversationLeased(recovery.threadId)) {
     refreshConversation(recovery.threadId);
   }
 }
@@ -195,7 +197,7 @@ function applyAtomicResponse(
     useThreadStore.getState().applyCanonicalReconnectRecoveries(canonicalRecoveries);
   }
   for (const recovery of canonicalRecoveries) {
-    applyCanonicalRecovery(recovery, request.revisions, context.activeThreadId);
+    applyCanonicalRecovery(recovery, request.revisions);
   }
   if (!atomicResponseIsCurrent(context.refs, request)) return;
   context.refs.confirmedThreadIds.current = request.sentThreadIds;
