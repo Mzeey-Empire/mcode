@@ -21,7 +21,14 @@ describe("resolveHardwareAccelerationMode", () => {
     expect(resolveHardwareAccelerationMode(performanceRun("default"), false)).toBe("default");
   });
 
+  it("ignores the runner's acceleration mode outside a production performance run", () => {
+    expect(resolveHardwareAccelerationMode(
+      { MCODE_FRONTEND_PERFORMANCE_ACCELERATION_MODE: "default" },
+      false,
+    )).toBe("disabled");
+  });
+
   it("rejects an unknown performance runner mode", () => {
-    expect(() => resolveHardwareAccelerationMode(performanceRun("fast"), true)).toThrow();
+    expect(() => resolveHardwareAccelerationMode(performanceRun("fast"), true)).toThrow(/disabled or default/);
   });
 });
