@@ -11,8 +11,11 @@
  * carry their own `leading-relaxed`, so they inherit the prose leading instead;
  * otherwise settled text would sit at 26px lines and the row would shrink at
  * the swap from the streaming body to the persisted markdown.
+ *
+ * The chat column clips horizontal overflow, so an unbroken run such as a comma-separated number
+ * list, a URL or a hash breaks inside the column instead of being cut off at its edge.
  */
-export const TURN_PROSE_CLASS = "text-prose text-ink [&_p]:leading-[inherit] [&_li]:leading-[inherit]";
+export const TURN_PROSE_CLASS = "text-prose text-ink break-words [&_p]:leading-[inherit] [&_li]:leading-[inherit]";
 
 /** Constrains a horizontal tool/meta row inside the virtualized chat column. */
 export const NARRATIVE_TOOL_ROW =
