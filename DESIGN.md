@@ -1211,8 +1211,18 @@ are provider-native, so they show the parent thread's provider.
   It is 32px high with tabular numbers, and hover or focus opens the token
   breakdown card, which adds a "Provider quota: Low" line when quota is low.
 - Trays that belong to the composer (the task row, queued messages, file and
-  image tiles, the slash command list) dock flush on its top edge with the
-  panel fill and no border.
+  image tiles) dock flush on its top edge with the panel fill and no border.
+- `/` at the start of a word opens the slash menu in the tray's place and
+  look: the same inset and top corners, 8px padding, its bottom edge on the
+  capsule's top border. It covers an open tray exactly, and the covered
+  controls are inert. The list scrolls past 262px with no scrollbar. Rows are
+  32px pills with a 14px icon (`muted`, `ink` on the active row), the name in
+  Body with the matched part semibold, and the description in `muted`, both
+  fade-truncated. A 1px `border` rule separates Mcode commands, provider
+  commands, skills and plugins; an empty result reads "No matches". The active
+  row takes the sliding highlight in `ink` at 7%. Arrows move it, hover moves
+  it without scrolling, Enter or Tab picks. Escape closes the menu and keeps
+  the text, and it stays closed until a trigger starts a new word.
 - Tray size: inset 22px from each side of the capsule (`--tray-inset`,
   shared with the slash menu and the tab above a new thread's composer, so
   all three have one footprint), 14px top corners,

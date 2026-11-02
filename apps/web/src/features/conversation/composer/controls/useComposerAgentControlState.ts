@@ -48,6 +48,8 @@ export interface ComposerAgentControlState {
   attachCapability(capabilityId: ComposerCapabilityId): void;
   /** Turns Plan on and never off, for the inline `/plan ` conversion. */
   enablePlan(): void;
+  /** Turns a pending Goal on and never off, for `/goal`; does nothing while a goal runs. */
+  enableGoal(): void;
   detachPlan(): void;
   detachGoal(): void;
   detachOrchestration(): void;
@@ -140,6 +142,9 @@ export function useComposerAgentControlState({
     onGoalPendingChange(true);
     focusEditor();
   }, [activeGoal, focusEditor, goalCapability, onGoalPendingChange]);
+  const enableGoal = useCallback(() => {
+    if (!goalPending) attachGoal();
+  }, [attachGoal, goalPending]);
   const attachOrchestration = useCallback(() => {
     if (!orchestrationCapability) return;
     onSelectionChange({ orchestrationMode: ORCHESTRATION_MODES.PROACTIVE });
@@ -209,6 +214,7 @@ export function useComposerAgentControlState({
     approvalReviewSupported,
     attachCapability,
     enablePlan,
+    enableGoal,
     detachPlan,
     detachGoal,
     detachOrchestration,

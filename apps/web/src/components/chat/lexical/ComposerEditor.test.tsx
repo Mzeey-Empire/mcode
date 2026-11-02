@@ -18,7 +18,6 @@ describe("ComposerEditor", () => {
         isMentionPopupOpen={false}
         onSlashTrigger={() => {}}
         onSlashDismiss={() => {}}
-        isSlashPopupOpen={false}
         editorRef={editorRef}
         ariaLabel="Comment note"
         submitOnEnter={false}
@@ -51,7 +50,6 @@ describe("ComposerEditor", () => {
         isMentionPopupOpen={false}
         onSlashTrigger={() => {}}
         onSlashDismiss={() => {}}
-        isSlashPopupOpen={false}
         editorRef={editorRef}
         ariaLabel="Comment note"
         submitOnEnter={false}
@@ -81,7 +79,6 @@ describe("ComposerEditor", () => {
         isMentionPopupOpen={false}
         onSlashTrigger={() => {}}
         onSlashDismiss={() => {}}
-        isSlashPopupOpen={false}
         ariaLabel="Composer"
       />,
     );

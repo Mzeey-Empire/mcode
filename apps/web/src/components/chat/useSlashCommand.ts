@@ -14,6 +14,7 @@ import {
   type ComposerCapabilityAction,
   type ResolvedComposerCapability,
 } from "@/features/conversation/composer/composer-capabilities";
+import { readMenuTrigger, slashMenuReducer, type MenuTrigger, type SlashMenuEvent, type SlashMenuState } from "./menu-trigger";
 
 /** A slash command entry shown in the popup. */
 export type ComposerCommandAction = ComposerCapabilityAction;
@@ -80,8 +81,12 @@ const BUILTIN_COMMANDS: Command[] = [
   },
 ];
 
-/** Regex: matches `/` at start of line or after whitespace, followed by non-space chars. */
-export const SLASH_TRIGGER_RE = /(^|\s)(\/\S*)$/;
+function menuQuery(menu: SlashMenuState): string {
+  return menu.status === "open" ? menu.trigger.query : "";
+}
+
+/** Plain inputs have one text node, so their triggers share one anchor key. */
+const PLAIN_INPUT_NODE_KEY = "input";
 
 function capabilityCommandDescription(
   capability: Pick<ResolvedComposerCapability, "id" | "label">,
@@ -204,6 +209,8 @@ export interface UseSlashCommandReturn {
    */
   state: PopupState;
   items: Command[];
+  /** The text typed after the trigger key, empty while closed. */
+  query: string;
   allCommands: Command[];
   selectedIndex: number;
   anchorRect: DOMRect | null;
@@ -213,11 +220,18 @@ export interface UseSlashCommandReturn {
    * the hook defaults to end-of-string, matching the Composer's Lexical path.
    */
   onInputChange: (value: string, cursorPos?: number) => void;
+  /** Notify the hook that the editor caret sits after `textBeforeCaret` in the text node `nodeKey`. */
+  onEditorTrigger: (textBeforeCaret: string, nodeKey: string) => void;
+  /** Notify the hook that the caret no longer sits on a trigger. */
+  onTriggerLost: () => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   /** Moves the selection to a row, for pointer movement over the list. */
   onHighlight: (index: number) => void;
   onSelect: (cmd: Command, replaceText: (v: string) => void) => void;
+  /** Escape: closes the menu and keeps it closed while the user keeps typing the same word. */
   onDismiss: () => void;
+  /** Closes the menu because focus left it, such as a click outside. */
+  onBlur: () => void;
   onRetry: () => void;
 }
 
@@ -262,10 +276,14 @@ export function useSlashCommand({
   includePlugins = true,
   planActive = false,
 }: UseSlashCommandOptions): UseSlashCommandReturn {
-  const [isOpen, setIsOpen] = useState(false);
+  const [menu, setMenu] = useState<SlashMenuState>({ status: "closed", dismissed: null });
+  // Escape and the editor update for the next keystroke can land before a re-render, so each event reduces from the
+  // last event's result rather than from this render's `menu`.
+  const latestMenuRef = useRef(menu);
+  const isOpen = menu.status === "open";
+  const filter = menuQuery(menu);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-  const [filter, setFilter] = useState("");
   // The visible list is an interaction snapshot. Cache invalidations must not
   // reorder a picker while the user is navigating it with the keyboard.
   const [openCommands, setOpenCommands] = useState<Command[] | null>(null);
@@ -390,6 +408,32 @@ export function useSlashCommand({
     }
   }, [catalogRequest, snapshot, isLoading, needsRefresh, error, load, isOpen]);
 
+  const applyMenuEvent = useCallback(
+    (event: SlashMenuEvent) => {
+      const current = latestMenuRef.current;
+      const next = slashMenuReducer(current, event);
+      if (next === current) return;
+      latestMenuRef.current = next;
+      setMenu(next);
+      if (next.status === "closed") {
+        setOpenCommands(null);
+        selectedCommandIdentityRef.current = null;
+        return;
+      }
+      const anchor = anchorRef.current;
+      if (anchor) setAnchorRect(anchor.getBoundingClientRect());
+      if (current.status !== "open") {
+        if (snapshot !== null) setOpenCommands(allCommands);
+        if (providerId === "codex" && catalogRequest) {
+          load(catalogRequest, true).catch(() => { /* surfaced via `error` */ });
+        }
+      }
+      setSelectedIndex(0);
+      selectedCommandIdentityRef.current = null;
+    },
+    [anchorRef, allCommands, catalogRequest, load, providerId, snapshot],
+  );
+
   const onInputChange = useCallback(
     (value: string, cursorPos?: number) => {
       lastInputRef.current = value;
@@ -397,31 +441,23 @@ export function useSlashCommand({
       // the Composer's Lexical path which always notifies with the full text.
       const cursor = cursorPos ?? value.length;
       lastCursorRef.current = cursor;
-      const before = value.slice(0, cursor);
-      const match = SLASH_TRIGGER_RE.exec(before);
-
-      if (!match) {
-        setIsOpen(false);
-        setOpenCommands(null);
-        selectedCommandIdentityRef.current = null;
-        return;
-      }
-
-      const anchor = anchorRef.current;
-      if (anchor) setAnchorRect(anchor.getBoundingClientRect());
-
-      if (!isOpen) {
-        if (snapshot !== null) setOpenCommands(allCommands);
-        if (providerId === "codex" && catalogRequest) {
-          load(catalogRequest, true).catch(() => { /* surfaced via `error` */ });
-        }
-      }
-      setFilter(match[2].slice(1));
-      setIsOpen(true);
-      setSelectedIndex(0);
-      selectedCommandIdentityRef.current = null;
+      applyMenuEvent({ type: "caretMoved", trigger: readMenuTrigger(PLAIN_INPUT_NODE_KEY, value.slice(0, cursor)) });
     },
-    [anchorRef, allCommands, catalogRequest, isOpen, load, providerId, snapshot],
+    [applyMenuEvent],
+  );
+
+  const onEditorTrigger = useCallback(
+    (textBeforeCaret: string, nodeKey: string) => {
+      lastInputRef.current = textBeforeCaret;
+      lastCursorRef.current = undefined;
+      applyMenuEvent({ type: "caretMoved", trigger: readMenuTrigger(nodeKey, textBeforeCaret) });
+    },
+    [applyMenuEvent],
+  );
+
+  const onTriggerLost = useCallback(
+    () => applyMenuEvent({ type: "caretMoved", trigger: null }),
+    [applyMenuEvent],
   );
 
   const onKeyDown = useCallback(
@@ -455,13 +491,11 @@ export function useSlashCommand({
         case "Escape":
           e.preventDefault();
           e.stopPropagation();
-          setIsOpen(false);
-          setOpenCommands(null);
-          selectedCommandIdentityRef.current = null;
+          applyMenuEvent({ type: "escaped" });
           break;
       }
     },
-    [displayedSelectedIndex, filtered, isOpen],
+    [applyMenuEvent, displayedSelectedIndex, filtered, isOpen],
   );
 
   const onHighlight = useCallback(
@@ -481,14 +515,12 @@ export function useSlashCommand({
       // mid-text replacements splice at the right offset. Falls back to
       // end-of-string for the Composer's Lexical path which never sets it.
       const cursor = lastCursorRef.current ?? value.length;
-      const before = value.slice(0, cursor);
-      const match = SLASH_TRIGGER_RE.exec(before);
+      const trigger: MenuTrigger | null = readMenuTrigger(PLAIN_INPUT_NODE_KEY, value.slice(0, cursor));
 
-      if (match) {
-        // Use match.index + leading group length to anchor to the exact regex match
-        // position, rather than lastIndexOf which can pick the wrong occurrence
-        // when the same trigger text appears multiple times before the cursor.
-        const triggerStart = match.index + match[1].length;
+      if (trigger) {
+        // The anchor is the trigger's own offset, rather than lastIndexOf, which can pick the wrong
+        // occurrence when the same trigger text appears more than once before the cursor.
+        const triggerStart = trigger.anchor.start;
         replaceText(
           cmd.action
             ? value.slice(0, triggerStart) + value.slice(cursor)
@@ -498,18 +530,13 @@ export function useSlashCommand({
         );
       }
       if (cmd.action && onMcodeCommand) onMcodeCommand(cmd.action);
-      setIsOpen(false);
-      setOpenCommands(null);
-      selectedCommandIdentityRef.current = null;
+      applyMenuEvent({ type: "picked" });
     },
-    [onMcodeCommand],
+    [applyMenuEvent, onMcodeCommand],
   );
 
-  const onDismiss = useCallback(() => {
-    setIsOpen(false);
-    setOpenCommands(null);
-    selectedCommandIdentityRef.current = null;
-  }, []);
+  const onDismiss = useCallback(() => applyMenuEvent({ type: "escaped" }), [applyMenuEvent]);
+  const onBlur = useCallback(() => applyMenuEvent({ type: "blurred" }), [applyMenuEvent]);
   const onRetry = useCallback(() => {
     if (!catalogRequest) return;
     load(catalogRequest, true).catch(() => { /* surfaced via `error` */ });
@@ -519,14 +546,18 @@ export function useSlashCommand({
     isOpen,
     state,
     items: filtered,
+    query: filter,
     allCommands,
     selectedIndex: displayedSelectedIndex,
     anchorRect,
     onInputChange,
+    onEditorTrigger,
+    onTriggerLost,
     onKeyDown,
     onHighlight,
     onSelect,
     onDismiss,
+    onBlur,
     onRetry,
   };
 }

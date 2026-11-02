@@ -223,9 +223,8 @@ export function CommentEditorComposer({
         onMentionTrigger={fileAutocomplete.handleInputChange}
         onMentionDismiss={fileAutocomplete.dismiss}
         isMentionPopupOpen={fileAutocomplete.isOpen}
-        onSlashTrigger={slashCommand.onInputChange}
-        onSlashDismiss={slashCommand.onDismiss}
-        isSlashPopupOpen={slashCommand.isOpen}
+        onSlashTrigger={slashCommand.onEditorTrigger}
+        onSlashDismiss={slashCommand.onTriggerLost}
         editorRef={editorRef}
         contentEditableRef={contentEditableRef}
         autoFocus

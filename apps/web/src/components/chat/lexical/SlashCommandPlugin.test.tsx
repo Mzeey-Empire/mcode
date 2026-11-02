@@ -121,6 +121,10 @@ function planMode() {
   return screen.queryByRole("button", { name: "Remove Plan" });
 }
 
+function goalMode() {
+  return screen.queryByRole("button", { name: "Remove Goal" });
+}
+
 function slashTray() {
   return screen.queryByRole("listbox", { name: "Slash commands" });
 }
@@ -218,5 +222,64 @@ describe("SlashCommandPlugin /plan in the composer", () => {
 
     expect(editor).toHaveTextContent(/^\/plan fix the menu$/);
     expect(planMode()).toBeNull();
+  });
+
+  it("turns Goal on and removes the text when /goal is typed inline", async () => {
+    const { editor, type } = await renderComposer();
+
+    await type("/goal ");
+
+    await waitFor(() => expect(goalMode()).toBeInTheDocument());
+    expect(editor.textContent ?? "").not.toContain("/goal");
+  });
+
+  it("keeps Goal on when /goal is picked while a goal is pending", async () => {
+    const { user, type } = await renderComposer();
+    await type("/goal ");
+    await waitFor(() => expect(goalMode()).toBeInTheDocument());
+
+    await type("/goa");
+    await screen.findByRole("option", { name: /^\/goal / });
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(slashTray()).toBeNull());
+    expect(goalMode()).toBeInTheDocument();
+  });
+
+  it("closes on Escape, keeps the text, and stays closed while the word grows", async () => {
+    const { editor, user, type } = await renderComposer();
+    await type("/pl");
+    await waitFor(() => expect(slashTray()).toBeInTheDocument());
+
+    await user.keyboard("{Escape}");
+    await type("a");
+
+    expect(slashTray()).toBeNull();
+    expect(editor).toHaveTextContent(/^\/pla$/);
+
+    await type(" /co");
+    await waitFor(() => expect(slashTray()).toBeInTheDocument());
+  });
+
+  it("makes the tray's remove buttons inert while the menu covers it", async () => {
+    useComposerDraftStore.setState({
+      drafts: {
+        "thread-1": {
+          input: "",
+          attachments: [{ id: "file-1", name: "notes.txt", mimeType: "text/plain", sizeBytes: 2048, previewUrl: "", filePath: "/tmp/notes.txt" }],
+          modelId: "",
+          reasoning: "medium",
+        },
+      },
+      pendingPrefill: null,
+    });
+    const { type } = await renderComposer();
+    const remove = screen.getByRole("button", { name: "Remove notes.txt" });
+    expect(remove.closest("[inert]")).toBeNull();
+
+    await type("/");
+    await waitFor(() => expect(slashTray()).toBeInTheDocument());
+
+    expect(remove.closest("[inert]")).not.toBeNull();
   });
 });

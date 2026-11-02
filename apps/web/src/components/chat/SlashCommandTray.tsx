@@ -1,18 +1,24 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import { cn } from "@/lib/utils";
 import type { Command, PopupState } from "./useSlashCommand";
 import { ComposerOverlaySurface } from "./ComposerOverlaySurface";
 import { shortenPathPrefixedName } from "./command-name";
 import { EntityIcon } from "./EntityToken";
 
-const ITEM_HEIGHT = 40;
-const VISIBLE_ITEMS = 8;
-const TRAY_SURFACE_CLASS = "px-2 py-1";
-// Docked on the composer it matches the task tray in `ComposerTray`, but keeps the rail border
-// because it floats over the transcript, where `panel` alone matches the light canvas.
-const ATTACHED_TRAY_SURFACE_CLASS = "rounded-t-[1.2rem] bg-panel";
+const TRAY_SURFACE_CLASS = "p-2";
+// Floating over the transcript it keeps the rail border, where `panel` alone matches the light canvas.
+const ATTACHED_TRAY_SURFACE_CLASS = "rounded-t-[14px] bg-panel";
+/**
+ * In the capsule the menu takes the attachment tray's place and look: the tray's inset, measured inside the capsule's
+ * 1px border, and its bottom edge on that border, so the menu and an open tray share one footprint.
+ */
+const CAPSULE_DOCK_CLASS =
+  "absolute inset-x-[calc(var(--tray-inset)-1px)] bottom-[calc(100%+1px)] z-(--layer-dropdown) cursor-default rounded-t-[14px] bg-panel p-2";
+const LIST_CLASS =
+  "scroll-fade-y relative max-h-[262px] [&>[data-slot=sliding-highlight]]:rounded-full [&>[data-slot=sliding-highlight]]:bg-ink/7";
 
 function commandDisplayLabel(command: Command): string {
   if (command.capabilityKind === "plugin") return `@${command.name}`;
@@ -38,6 +44,10 @@ interface SlashCommandTrayProps {
   className?: string;
   /** Active workspace root used to identify local workspace skills. */
   workspacePath?: string;
+  /** The text typed after the trigger key; its first match in each name is set in semibold. */
+  query?: string;
+  /** Docks in the composer capsule, in the attachment tray's place. Otherwise it floats above its anchor. */
+  docked?: boolean;
 }
 
 /**
@@ -59,6 +69,8 @@ export function SlashCommandTray({
   tone = "default",
   className,
   workspacePath,
+  query = "",
+  docked = false,
 }: SlashCommandTrayProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -103,11 +115,26 @@ export function SlashCommandTray({
     return () => document.removeEventListener("mousedown", handler);
   }, [isOpen, onDismiss]);
 
-  if (state.kind === "closed" || !anchorRect) return null;
+  if (state.kind === "closed") return null;
 
-  // A lone row is already the obvious target; the selection fill only helps choose among several.
-  const showSelectionFill = items.length > 1;
+  const content = (
+    <SlashMenuContent
+      state={state}
+      selectedIndex={selectedIndex}
+      scrollRef={scrollRef}
+      query={query}
+      tone={tone}
+      workspacePath={workspacePath}
+      onSelect={onSelect}
+      onRetry={onRetry}
+      onPointerMove={handlePointerMove}
+    />
+  );
 
+  if (docked) {
+    return <div data-slash-tray className={cn(CAPSULE_DOCK_CLASS, className)}>{content}</div>;
+  }
+  if (!anchorRect) return null;
   return (
     // The listbox role belongs to the scrolling options container. The error
     // branch renders its Retry control outside that semantic container.
@@ -119,57 +146,87 @@ export function SlashCommandTray({
       className={cn(TRAY_SURFACE_CLASS, className)}
       attachedClassName={ATTACHED_TRAY_SURFACE_CLASS}
     >
-      {/*
-        Render priority (stale-while-revalidate) is encoded by PopupState:
-          - error             -> ErrorRow (surfaces transient failures even
-                                 when built-in commands are present)
-          - ready             -> list (settled, not revalidating)
-          - staleRevalidating -> list (cached items shown while a fresh load
-                                 is in flight; identical render, but a named
-                                 state so the stuck-tray case is testable)
-          - loading           -> inline "Loading commands..." (no cached items
-                                 yet, e.g. a filter excludes every built-in)
-          - empty             -> EmptyState (no matches, not loading, no error)
-        `closed` is handled by the early return above, so this switch over the
-        remaining kinds is exhaustive and compiler-checked.
-      */}
-      {(() => {
-        switch (state.kind) {
-          case "error":
-            return <ErrorRow message={state.error.message} onRetry={onRetry} tone={tone} />;
-          case "ready":
-          case "staleRevalidating":
-            return (
-              <div
-                ref={scrollRef}
-                role="listbox"
-                aria-label="Slash commands"
-                aria-activedescendant={items[selectedIndex] ? `slash-cmd-${selectedIndex}` : undefined}
-                className="scroll-fade-y"
-                style={{ maxHeight: VISIBLE_ITEMS * ITEM_HEIGHT }}
-                onPointerMove={handlePointerMove}
-              >
-                {items.map((cmd, index) => (
-                  <CommandRow
-                    key={cmd.id}
-                    cmd={cmd}
-                    index={index}
-                    selected={index === selectedIndex}
-                    showSelectionFill={showSelectionFill}
-                    onSelect={onSelect}
-                    tone={tone}
-                    origin={duplicateSkillOriginTag(cmd, items, workspacePath)}
-                  />
-                ))}
-              </div>
-            );
-          case "loading":
-            return <LoadingInline />;
-          case "empty":
-            return <EmptyState />;
-        }
-      })()}
+      {content}
     </ComposerOverlaySurface>
+  );
+}
+
+function SlashMenuContent({
+  state,
+  selectedIndex,
+  scrollRef,
+  query,
+  tone,
+  workspacePath,
+  onSelect,
+  onRetry,
+  onPointerMove,
+}: {
+  state: Exclude<PopupState, { kind: "closed" }>;
+  selectedIndex: number;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  query: string;
+  tone: "default" | "dark";
+  workspacePath?: string;
+  onSelect: (cmd: Command) => void;
+  onRetry: () => void;
+  onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
+}) {
+  // Render priority (stale-while-revalidate) is encoded by PopupState: error, then the list (ready, or
+  // staleRevalidating while cached items show during a fresh load), then the inline loader, then empty.
+  // The switch over the open kinds is exhaustive and compiler-checked.
+  switch (state.kind) {
+    case "error":
+      return <ErrorRow message={state.error.message} onRetry={onRetry} tone={tone} />;
+    case "ready":
+    case "staleRevalidating": {
+      const items = state.items;
+      return (
+        <div
+          ref={scrollRef}
+          role="listbox"
+          aria-label="Slash commands"
+          aria-activedescendant={items[selectedIndex] ? `slash-cmd-${selectedIndex}` : undefined}
+          className={LIST_CLASS}
+          onPointerMove={onPointerMove}
+        >
+          <SlidingHighlight follow="aria-selected" />
+          {items.map((cmd, index) => (
+            <Fragment key={cmd.id}>
+              {index > 0 && items[index - 1].namespace !== cmd.namespace && (
+                <div role="separator" className="mx-2 my-1 h-px bg-border" />
+              )}
+              <CommandRow
+                cmd={cmd}
+                index={index}
+                selected={index === selectedIndex}
+                query={query}
+                onSelect={onSelect}
+                tone={tone}
+                origin={duplicateSkillOriginTag(cmd, items, workspacePath)}
+              />
+            </Fragment>
+          ))}
+        </div>
+      );
+    }
+    case "loading":
+      return <LoadingInline />;
+    case "empty":
+      return <EmptyState />;
+  }
+}
+
+/** The label with its first case-insensitive match of `query` in semibold. */
+function highlightMatch(label: string, query: string): ReactNode {
+  const at = query ? label.toLowerCase().indexOf(query.toLowerCase()) : -1;
+  if (at < 0) return label;
+  return (
+    <>
+      {label.slice(0, at)}
+      <b className="font-semibold">{label.slice(at, at + query.length)}</b>
+      {label.slice(at + query.length)}
+    </>
   );
 }
 
@@ -177,7 +234,7 @@ function CommandRow({
   cmd,
   index,
   selected,
-  showSelectionFill,
+  query,
   onSelect,
   tone = "default",
   origin,
@@ -185,7 +242,7 @@ function CommandRow({
   cmd: Command;
   index: number;
   selected: boolean;
-  showSelectionFill: boolean;
+  query: string;
   onSelect: (cmd: Command) => void;
   tone?: "default" | "dark";
   origin?: "Local";
@@ -209,20 +266,15 @@ function CommandRow({
         e.preventDefault(); // prevent textarea blur
         onSelect(cmd);
       }}
-      className={cn(
-        // The selection is the only fill; a separate hover fill would show a second highlighted row.
-        "h-10 w-full min-w-0 justify-start gap-2 overflow-hidden rounded-lg px-2 text-left hover:bg-transparent",
-        selected && showSelectionFill && "bg-hover hover:bg-hover",
-      )}
+      // The sliding highlight is the only fill; a hover fill would show a second highlighted row.
+      className="group/row relative h-8 w-full min-w-0 justify-start gap-2 overflow-hidden rounded-full pr-3 pl-[9px] text-left hover:bg-transparent"
     >
       <CommandIdentityMark command={cmd} />
-      <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
-        <span className="min-w-0 shrink text-fade text-label text-ink">
-          {commandDisplayLabel(cmd)}
-        </span>
-        <span className="min-w-12 flex-1 text-fade text-body-small text-muted">
-          {cmd.description}
-        </span>
+      <span className="max-w-[55%] shrink-0 text-fade text-body text-ink">
+        {highlightMatch(commandDisplayLabel(cmd), query)}
+      </span>
+      <span className="min-w-0 flex-1 text-fade text-body-small text-muted">
+        {cmd.description}
       </span>
       {origin && (
         <Badge
@@ -248,7 +300,7 @@ function commandIconKind(command: Command): "skill" | "plugin" | "mcode" | "comm
 
 function CommandIdentityMark({ command }: { command: Command }) {
   return (
-    <span aria-hidden="true" className="flex size-4 shrink-0 items-center justify-center text-ink">
+    <span aria-hidden="true" className="flex size-3.5 shrink-0 items-center justify-center text-muted group-aria-selected/row:text-ink">
       <EntityIcon
         kind={commandIconKind(command)}
         commandName={command.name}
@@ -322,9 +374,8 @@ function LoadingInline() {
 
 function EmptyState() {
   return (
-    <div aria-live="polite" role="status" className="flex items-center gap-3 px-3 py-2">
-      <span className="flex h-5 w-5 flex-shrink-0" />
-      <span className="text-sm text-muted">No commands match</span>
+    <div aria-live="polite" role="status" className="flex h-8 items-center px-2 text-body-small text-muted">
+      No matches
     </div>
   );
 }

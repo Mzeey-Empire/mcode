@@ -23,9 +23,8 @@ interface ComposerEditorProps {
   onMentionDismiss: () => void;
   isMentionPopupOpen: boolean;
   /** Called when / trigger is detected - drives slash command tray */
-  onSlashTrigger: (value: string) => void;
+  onSlashTrigger: (textBeforeCaret: string, nodeKey: string) => void;
   onSlashDismiss: () => void;
-  isSlashPopupOpen: boolean;
   /** Called when `/name` is closed by a space; return true to consume the typed command. */
   onInlineSlashCommand?: (commandName: string) => boolean;
   /** Ref callback to expose the LexicalEditor instance */
@@ -130,7 +129,6 @@ export function ComposerEditor({
   isMentionPopupOpen,
   onSlashTrigger,
   onSlashDismiss,
-  isSlashPopupOpen,
   onInlineSlashCommand,
   editorRef,
   contentEditableRef,
@@ -204,7 +202,6 @@ export function ComposerEditor({
         <SlashCommandPlugin
           onTrigger={onSlashTrigger}
           onDismiss={onSlashDismiss}
-          isPopupOpen={isSlashPopupOpen}
           onInlineCommand={onInlineSlashCommand}
         />
         <KeyboardPlugin

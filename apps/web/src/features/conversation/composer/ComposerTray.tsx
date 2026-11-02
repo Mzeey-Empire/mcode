@@ -145,10 +145,17 @@ export interface ComposerTrayProps {
   readonly queue: ReactNode;
   /** The draft's file and image tiles; the tray shows whenever it has any, like queued messages. */
   readonly tiles?: ReactNode;
+  /** True while the slash menu covers the tray; its controls are then inert. */
+  readonly covered?: boolean;
 }
 
-/** Tray look: inset by `--tray-inset` from the capsule, which the slash menu shares, with the panel fill and top corners. */
-export const COMPOSER_TRAY_CLASS = "mx-(--tray-inset) flex flex-col gap-1 rounded-t-[14px] bg-panel px-2 pt-1 pb-2";
+/**
+ * Tray look: inset by `--tray-inset` from the capsule, which the slash menu shares, with the panel fill and top corners.
+ * Covered by the menu, the tray hides its rows but keeps its panel, so a menu shorter than the tray reads as one surface.
+ */
+export function composerTrayClass(covered: boolean): string {
+  return cn("mx-(--tray-inset) flex flex-col gap-1 rounded-t-[14px] bg-panel px-2 pt-1 pb-2", covered && "*:invisible");
+}
 
 /**
  * Tray docked on top of the composer. Shows a usage-limit stop as the first
@@ -156,7 +163,7 @@ export const COMPOSER_TRAY_CLASS = "mx-(--tray-inset) flex flex-col gap-1 rounde
  * messages and the draft's tiles below it; expanding the task list grows the tray upward so the
  * composer stays put.
  */
-export function ComposerTray({ threadId, running, queue, tiles }: ComposerTrayProps) {
+export function ComposerTray({ threadId, running, queue, tiles, covered = false }: ComposerTrayProps) {
   const usageLimit = useUsageLimitTray(threadId, running);
   const progress = useTaskProgress(threadId);
   const expanded = useTaskStore((s) => s.trayExpandedByThread[threadId] ?? false);
@@ -179,7 +186,8 @@ export function ComposerTray({ threadId, running, queue, tiles }: ComposerTrayPr
   return (
     <div
       data-testid="composer-tray"
-      className={COMPOSER_TRAY_CLASS}
+      inert={covered}
+      className={composerTrayClass(covered)}
       onKeyDown={handleKeyDown}
     >
       {usageLimit && <UsageLimitRow threadId={threadId} state={usageLimit} />}

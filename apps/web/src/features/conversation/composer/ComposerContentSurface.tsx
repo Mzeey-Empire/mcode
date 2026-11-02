@@ -35,7 +35,7 @@ import { ComposerModes, type ComposerModeView } from "./capsule/ComposerModes";
 import { useCapsuleRows } from "./capsule/capsule-layout";
 import type { ComposerMode } from "./execution/composer-mode";
 import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
-import { COMPOSER_TRAY_CLASS, ComposerTray } from "./ComposerTray";
+import { ComposerTray, composerTrayClass } from "./ComposerTray";
 import { clearVisibleBrowserNotes } from "./draft/draft-browser-notes";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { ApprovalAnnouncer, ApprovalDock, useDelegatedThreadTitles, useDockApprovals } from "@/features/conversation/approvals/ApprovalDock";
@@ -162,9 +162,11 @@ function ComposerTraySurface({
   const tiles = model.attachments.length > 0
     ? <AttachmentPreview attachments={model.attachments} onRemove={actions.onRemoveAttachment} />
     : null;
+  // The open slash menu covers the tray, so the hidden controls must not take focus or clicks.
+  const covered = model.slashCommand.isOpen;
   if (!model.threadId || model.branchFromMessageId || model.isNewThread) {
     // A draft with no started thread has no queue or tasks, so its tray holds only the tiles.
-    return tiles && <div data-testid="composer-tray" className={COMPOSER_TRAY_CLASS}>{tiles}</div>;
+    return tiles && <div data-testid="composer-tray" inert={covered} className={composerTrayClass(covered)}>{tiles}</div>;
   }
   // Nothing may reach agent.send while the thread is starting, queued messages included.
   const paused = model.planPending || model.startingThread;
@@ -172,6 +174,7 @@ function ComposerTraySurface({
     <ComposerTray
       threadId={model.threadId}
       running={model.isAgentRunning}
+      covered={covered}
       tiles={tiles}
       queue={(
         <ComposerQueueList
@@ -312,9 +315,8 @@ function ComposerDraftCell({
         onMentionTrigger={model.fileAutocomplete.handleInputChange}
         onMentionDismiss={model.fileAutocomplete.dismiss}
         isMentionPopupOpen={model.fileAutocomplete.isOpen}
-        onSlashTrigger={model.slashCommand.onInputChange}
-        onSlashDismiss={model.slashCommand.onDismiss}
-        isSlashPopupOpen={model.slashCommand.isOpen}
+        onSlashTrigger={model.slashCommand.onEditorTrigger}
+        onSlashDismiss={model.slashCommand.onTriggerLost}
         onInlineSlashCommand={actions.onInlineSlashCommand}
         editorRef={model.editorRef}
         disabled={disabled}
@@ -348,9 +350,11 @@ function ComposerEditorPopups({
         selectedIndex={model.slashCommand.selectedIndex}
         anchorRect={model.slashCommand.anchorRect}
         workspacePath={model.workspacePath}
+        query={model.slashCommand.query}
+        docked
         onSelect={actions.onSlashSelect}
         onHighlight={model.slashCommand.onHighlight}
-        onDismiss={model.slashCommand.onDismiss}
+        onDismiss={model.slashCommand.onBlur}
         onRetry={model.slashCommand.onRetry}
       />
       <SpellcheckContextMenu editorRef={model.editorContainerRef} />
