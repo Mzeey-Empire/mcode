@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { lazySchema } from "./utils/lazySchema.js";
 import { InteractionModeSchema, PermissionModeSchema } from "./models/enums.js";
+import { ReasoningLevelSchema } from "./models/settings.js";
 
 /** Maximum characters accepted for an opaque thread-control identifier. */
 export const THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH = 128;
@@ -139,6 +140,13 @@ export const TaskStateSchema = lazySchema(() => z.discriminatedUnion("status", [
 /** Current delegated-task state, derived from authoritative lifecycle records. */
 export type TaskState = z.infer<ReturnType<typeof TaskStateSchema>>;
 
+/** Optional execution settings a Coordinator may choose for a delegated task. */
+export const DelegateTaskOptionsSchema = lazySchema(() => z.object({
+  reasoningEffort: ReasoningLevelSchema.optional(),
+}).strict());
+/** Parsed delegated-task execution settings. */
+export type DelegateTaskOptions = z.infer<ReturnType<typeof DelegateTaskOptionsSchema>>;
+
 /** Launch one task on the Coordinator's Project with an explicit execution target. */
 export const DelegateTaskInputSchema = lazySchema(() => z.object({
   clientRequestId: opaqueId,
@@ -148,6 +156,7 @@ export const DelegateTaskInputSchema = lazySchema(() => z.object({
   modelId: executionId,
   isolation: z.enum(["shared", "worktree"]),
   permissionMode: PermissionModeSchema.optional(),
+  options: DelegateTaskOptionsSchema().optional(),
 }).strict());
 /** Parsed task delegation request. */
 export type DelegateTaskInput = z.infer<ReturnType<typeof DelegateTaskInputSchema>>;
@@ -194,7 +203,8 @@ export type ThreadLaunchResult = z.infer<ReturnType<typeof ThreadLaunchResultSch
 
 /** Durable receipt returned immediately after delegation admission. */
 export const DelegateTaskResultSchema = lazySchema(() => z.union([
-  z.object({ taskId: opaqueId, threadId: opaqueId.optional(), state: TaskStateSchema(), effectivePermissionMode: PermissionModeSchema }).strict(),
+  z.object({ taskId: opaqueId, threadId: opaqueId.optional(), state: TaskStateSchema(), effectivePermissionMode: PermissionModeSchema,
+    effectiveOptions: DelegateTaskOptionsSchema().optional() }).strict(),
   taskRejection(),
 ]));
 /** Delegation receipt or authority-safe rejection. */
@@ -228,16 +238,33 @@ export const ThreadTargetListInputSchema = lazySchema(() => z.object({}).strict(
 /** Read-only thread target discovery input. */
 export type ThreadTargetListInput = z.infer<ReturnType<typeof ThreadTargetListInputSchema>>;
 
-const threadTargetModel = z.object({
+/** A setting a listed model accepts in delegate_task `options`, with the value used when it is omitted. */
+export const ThreadTargetModelOptionSchema = lazySchema(() => z.object({
+  id: z.literal("reasoningEffort"),
+  values: z.array(ReasoningLevelSchema).min(1).max(7),
+  default: ReasoningLevelSchema,
+}).strict().superRefine((value, ctx) => {
+  if (new Set(value.values).size !== value.values.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["values"], message: "values must not repeat a level" });
+  }
+  if (!value.values.includes(value.default)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["default"], message: "default must be one of values" });
+  }
+}));
+/** Option a listed model accepts in delegate_task `options`. */
+export type ThreadTargetModelOption = z.infer<ReturnType<typeof ThreadTargetModelOptionSchema>>;
+
+const threadTargetModel = lazySchema(() => z.object({
   id: executionId,
   name: z.string().trim().min(1).max(THREAD_CREATE_TITLE_MAX_LENGTH),
-}).strict();
+  options: z.array(ThreadTargetModelOptionSchema()).min(1).max(1).optional(),
+}).strict());
 
 /** Provider and model target usable for delegated thread creation. */
 export const ThreadTargetProviderSchema = lazySchema(() => z.object({
   providerId: executionId,
   name: z.string().trim().min(1).max(THREAD_CREATE_TITLE_MAX_LENGTH),
-  models: z.array(threadTargetModel).min(1).max(THREAD_TARGET_MODEL_MAX),
+  models: z.array(threadTargetModel()).min(1).max(THREAD_TARGET_MODEL_MAX),
   defaultModelId: executionId.optional(),
 }).strict().superRefine((value, ctx) => {
   if (value.defaultModelId && !value.models.some((model) => model.id === value.defaultModelId)) {
