@@ -1016,7 +1016,20 @@ holds equal-width segments with the `badge` radius. The active segment has the
 `selected` fill and an `ink` Label; inactive segments are `muted` Body small.
 Use them for sibling sources of one list (Branches | Pull requests, Local |
 Origin) and for view modes (unified | split). Segments show names only, no
-counts.
+counts. A hovered or focus-visible segment takes the sliding highlight, under
+the active segment's own fill.
+
+**Sliding highlight.** Every menu, picker, and segmented control has one
+`hover` fill per group, never a fill per row. When the highlighted row
+changes, the fill slides to it over `--duration-standard` (180ms) on
+`--ease-standard`, taking the row's size and radius. When nothing is
+highlighted it fades out where it is, and when a row is highlighted again it
+fades in where it lands instead of sliding from a stale spot. A filtered or
+rebuilt list puts the fill on its highlighted row in place, with no slide and
+no flash. A group with one option shows no fill. The fill scrolls with its
+row and never scrolls the list: the arrow keys scroll a row into view, hover
+does not. Under reduced motion only the opacity fade remains. Checks and the
+`selected` fill stay on their rows, separate from the transient fill.
 
 ### Cards / Panels
 - **Workspace panes:** Edge-to-edge, square to the app shell, and resizable where the user compares or inspects content. Do not wrap a primary work area in a decorative card.
@@ -1193,7 +1206,7 @@ against each other (`badge` radius, 12px inset). A row holds the name in Body
 small and, only when it improves scanning, a 16px `muted` icon in a 20px slot.
 Shortcuts sit right-aligned in `muted` caption. Rows show names only: no descriptions, counts, operands, or
 group labels. Groups are separated by 1px dividers. The highlighted row takes
-the `hover` fill. A checked row shows a check. Destructive rows use `error`
+the `hover` fill as the sliding highlight. A checked row shows a check. Destructive rows use `error`
 for icon and label. An unavailable row stays listed and dimmed, and its reason
 appears in a tooltip ("Nothing staged"). A submenu opens to the side.
 
@@ -1208,7 +1221,8 @@ commit, model, project):
 3. A flat list with no section labels and no per-row type icons or counts.
    The selected row shows a trailing check, with a `muted` tag when it helps
    ("current", "worktree"). About five rows are visible; the list scrolls
-   with top and bottom fades.
+   with top and bottom fades. The highlighted row takes the sliding
+   highlight; the selected row keeps its own `selected` fill.
 4. Silent paging: more rows load as the user scrolls, and a `muted` footer
    reads "Showing 50 of 568". A search across all history may read
    "N matches in M commits" instead.
