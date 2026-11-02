@@ -3363,10 +3363,15 @@ describe("CanonicalAgentStore", () => {
 
     db.exec("ANALYZE sqlite_schema");
     db.prepare("DELETE FROM sqlite_stat1 WHERE tbl = ?").run("canonical_agent_events");
-    db.prepare("INSERT INTO sqlite_stat1 (tbl, idx, stat) VALUES (?, ?, ?)")
-      .run("canonical_agent_events", "idx_canonical_agent_events_execution_sequence", "424 424 1");
-    db.prepare("INSERT INTO sqlite_stat1 (tbl, idx, stat) VALUES (?, ?, ?)")
-      .run("canonical_agent_events", "idx_canonical_agent_events_thread_revision", "424 424 1");
+    // Statistics copied from a database analyzed while it held one execution; they made the thread-scoped lookup scan.
+    const staleStatistics = [
+      ["idx_canonical_agent_events_thread_revision", "424 424 3"],
+      ["idx_canonical_agent_events_execution_sequence", "424 424 1"],
+      ["sqlite_autoindex_canonical_agent_events_1", "424 1"],
+    ] as const;
+    for (const [index, stat] of staleStatistics) {
+      db.prepare("INSERT INTO sqlite_stat1 (tbl, idx, stat) VALUES (?, ?, ?)").run("canonical_agent_events", index, stat);
+    }
     db.exec("ANALYZE sqlite_schema");
 
     const captured: CapturedStatement[] = [];
