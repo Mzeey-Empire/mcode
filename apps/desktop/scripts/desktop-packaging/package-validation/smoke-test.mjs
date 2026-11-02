@@ -49,7 +49,7 @@ const POLL_INTERVAL_MS = 300;
 /** Find the server.cjs and runtime binary from the unpacked directory.
  *  Prefers the renamed `mcode-server` binary (production code path) and
  *  falls back to the main Electron binary when the renamed copy is absent. */
-function findUnpackedServer() {
+function findUnpackedServer(releaseDir) {
   const candidates = [
     // Windows
     {
@@ -155,8 +155,26 @@ function findBundleServer() {
   return { server, bun: process.env.BUN ?? "bun", ptyHost: process.env.MCODE_PTY_HOST_EXECUTABLE };
 }
 
+/**
+ * Rename the release directory until this script exits.
+ *
+ * The compiled Bun server keeps the build-time path of each bundled module.
+ * Code that finds its files through that path works only where the package
+ * was built, so the smoke test must run the package from somewhere else.
+ *
+ * @param {string} directory Release directory that holds the unpacked app.
+ * @returns {string} The directory the package now runs from.
+ */
+function relocateReleaseDir(directory) {
+  const relocated = `${directory}-smoke-relocated`;
+  NodeFS.renameSync(directory, relocated);
+  process.on("exit", () => NodeFS.renameSync(relocated, directory));
+  console.log(`[smoke-test] Relocated release directory: ${relocated}`);
+  return relocated;
+}
+
 const bundleOnly = process.argv.includes("--bundle");
-const found = bundleOnly ? findBundleServer() : findUnpackedServer();
+const found = bundleOnly ? findBundleServer() : findUnpackedServer(relocateReleaseDir(releaseDir));
 
 if (!found) {
   const target = bundleOnly ? "dist/server/server.cjs" : "unpacked release directory";
