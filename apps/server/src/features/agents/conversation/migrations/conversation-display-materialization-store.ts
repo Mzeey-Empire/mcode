@@ -19,6 +19,8 @@ import { ApprovalReceiptStore } from "../../approvals/approval-receipt-store.js"
 import { terminalAssistantProjectionCondition, terminalProviderChildTurnCondition } from "../../canonical/canonical-conversation-visibility.js";
 
 const MATERIALIZATION_STATE_ID = 1;
+// completed holds the version whose backfill finished; earlier builds wrote 1 and replayed every start, so version 2 gives existing databases one last catch-up and child repair.
+const DISPLAY_MATERIALIZATION_VERSION = 2;
 const MATERIALIZATION_BATCH_ITEMS = 100;
 const MATERIALIZATION_BATCH_BYTES = 1_048_576;
 
@@ -293,8 +295,14 @@ export class ConversationDisplayMaterializationStore {
     }).prepare();
   }
 
-  /** Commit one bounded materialization checkpoint; true means all backfill is complete. */
+  /** Skip completed versions or commit one bounded checkpoint; true means the current backfill is complete. */
   runBatch(): boolean {
+    const state = this.orm.select({ completed: conversationDisplayMaterializationState.completed })
+      .from(conversationDisplayMaterializationState)
+      .where(eq(conversationDisplayMaterializationState.id, MATERIALIZATION_STATE_ID))
+      .get();
+    if (state && state.completed >= DISPLAY_MATERIALIZATION_VERSION) return true;
+
     this.orm.insert(conversationDisplayMaterializationState)
       .values({ id: MATERIALIZATION_STATE_ID, completed: 0 })
       .onConflictDoNothing()
@@ -303,7 +311,7 @@ export class ConversationDisplayMaterializationStore {
     if (batch.length === 0) {
       if (this.backfillTerminalChildMessageBatch()) return false;
       this.orm.update(conversationDisplayMaterializationState)
-        .set({ completed: 1, updatedAt: new Date().toISOString() })
+        .set({ completed: DISPLAY_MATERIALIZATION_VERSION, updatedAt: new Date().toISOString() })
         .where(eq(conversationDisplayMaterializationState.id, MATERIALIZATION_STATE_ID))
         .run();
       return true;

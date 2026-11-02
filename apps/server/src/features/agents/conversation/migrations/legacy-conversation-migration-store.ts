@@ -120,6 +120,12 @@ export class LegacyConversationMigrationStore {
     hooks: LegacyConversationMigrationFailureHooks = {},
   ): LegacyConversationMigrationBatchResult {
     if (this.repairLegacyExecution(hooks)) return this.currentResult(0, false);
+    // Completion classified every message present once; later messages are already display rows and need no conversion.
+    const checkpoint = this.db.query<{ status: string }, [number]>(`
+      SELECT status FROM canonical_legacy_migration_checkpoints WHERE version = ?
+    `).get(LEGACY_CONVERSATION_MIGRATION_VERSION);
+    if (checkpoint?.status === "completed") return this.currentResult(0, true);
+
     const row = this.nextUnclassifiedMessage();
     if (!row) return this.completeMigration();
 
