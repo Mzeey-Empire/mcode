@@ -8,13 +8,16 @@ vi.mock("electron", () => ({
 
 import { ServerRuntime } from "../index.js";
 
-function createRuntime(port = 43123): ServerRuntime {
+function createRuntime(
+  port = 43123,
+  overrides: Partial<ConstructorParameters<typeof ServerRuntime>[0]> = {},
+): ServerRuntime {
   return new ServerRuntime({
     platform: "linux",
     manager: {
       port,
       authToken: "test-token",
-      ipcPath: "",
+      ipcPath: "test-ipc-path",
       onUnexpectedExit: null,
       start: vi.fn(async () => ({ port, authToken: "test-token" })),
       isHealthy: vi.fn(async () => true),
@@ -33,6 +36,7 @@ function createRuntime(port = 43123): ServerRuntime {
     powerMonitor: { on: vi.fn() },
     powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn() },
     getCookieStore: () => ({ set: vi.fn() }),
+    ...overrides,
   });
 }
 
@@ -41,6 +45,75 @@ describe("ServerRuntime Desktop Window seam", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+  });
+
+  it("withholds the server URL until the window has its auth cookie and relay", async () => {
+    vi.useFakeTimers();
+    let finishCookieInstallation!: () => void;
+    const cookieInstallation = new Promise<void>((resolve) => {
+      finishCookieInstallation = resolve;
+    });
+    const window = {
+      isMinimized: () => false,
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: vi.fn() },
+      once: vi.fn(),
+    };
+    type Handler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
+    const handlers = new Map<string, Handler>();
+    let cookieInstalled = false;
+    let relayWindow: unknown = null;
+    let relayIpcPath = "";
+    const cookieSet = vi.fn(async () => {
+      await cookieInstallation;
+      cookieInstalled = true;
+    });
+    const runtime = createRuntime(43123, {
+      ipcMain: {
+        handle: (channel, handler) => {
+          handlers.set(channel, handler);
+        },
+      },
+      getMainWindow: () => window,
+      getCookieStore: () => ({ set: cookieSet }),
+      relayStarter: (ipcPath, attachedWindow) => {
+        relayIpcPath = ipcPath;
+        relayWindow = attachedWindow;
+        return vi.fn();
+      },
+    });
+    runtime.registerConnectionHandlers();
+    const getServerUrl = handlers.get("get-server-url");
+    if (!getServerUrl) throw new Error("get-server-url handler was not registered");
+
+    let resolved = false;
+    const response = Promise.resolve(getServerUrl({ sender: window.webContents })).then((connection) => {
+      resolved = true;
+      return { connection, cookieInstalled, relayWindow, relayIpcPath };
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false);
+
+    const connecting = runtime.connectWindow(window);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cookieSet).toHaveBeenCalledOnce();
+    expect(resolved).toBe(false);
+
+    finishCookieInstallation();
+    await expect(response).resolves.toEqual({
+      connection: {
+        url: "ws://127.0.0.1:43123?token=test-token",
+        ipcPath: "test-ipc-path",
+      },
+      cookieInstalled: true,
+      relayWindow: window,
+      relayIpcPath: "test-ipc-path",
+    });
+    await expect(connecting).resolves.toBe(43123);
   });
 
   it.each([0, 1, 42])(

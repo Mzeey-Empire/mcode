@@ -539,28 +539,30 @@ app.whenReady().then(async () => {
       },
     });
 
-    // Start the server child process
-    const port = await serverRuntime.start();
-    console.log(
-      `[perf] Server ready: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`,
-    );
-    console.log(`Server started on port ${port}`);
-
-    serverRuntime.registerLifecycle();
     registerAttachmentsFeature();
 
     // Register IPC handlers BEFORE creating the window so the renderer can
     // invoke get-server-url as soon as it loads, without racing the handler.
     registerIpcHandlers();
 
-    // Set auth cookie so the renderer can authenticate to the server via HTTP
-    await serverRuntime.installAuthCookie();
-
     // Create window
     mainWindow = desktopWindow.createWindow();
+    mainWindow.once("ready-to-show", () => {
+      console.log(
+        `[perf] Window shown: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`,
+      );
+    });
     console.log(
       `[perf] Window created: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`,
     );
+
+    const port = await serverRuntime.connectWindow(mainWindow);
+    console.log(
+      `[perf] Server ready: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`,
+    );
+    console.log(`Server started on port ${port}`);
+
+    serverRuntime.registerLifecycle();
 
     // macOS: re-create window when dock icon is clicked
     app.on("activate", () => {

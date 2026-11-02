@@ -117,6 +117,10 @@ export class ServerRuntime {
   private readonly dependencies: ServerRuntimeDependencies;
   private readonly relayStarter: ServerRuntimeRelayStarter;
   private readonly reliabilityHarnessControlPlane: ReliabilityHarnessControlPlane | null;
+  private resolveConnectionReady!: () => void;
+  private readonly connectionReady = new Promise<void>((resolve) => {
+    this.resolveConnectionReady = resolve;
+  });
 
   constructor(dependencies: ServerRuntimeDependencies) {
     this.dependencies = dependencies;
@@ -163,9 +167,18 @@ export class ServerRuntime {
   }
 
   /** Start the server and return its listening port. */
-  async start(): Promise<number> {
+  private async start(): Promise<number> {
     const { port } = await this.serverManager.start();
     await this.reliabilityHarnessControlPlane?.start();
+    return port;
+  }
+
+  /** Start the server and prepare the window's authenticated connection before releasing renderer requests. */
+  async connectWindow(window: ServerRuntimeWindow): Promise<number> {
+    const port = await this.start();
+    await this.installAuthCookie();
+    this.attachWindow(window);
+    this.resolveConnectionReady();
     return port;
   }
 
@@ -189,6 +202,7 @@ export class ServerRuntime {
         authToken: this.serverManager.authToken,
         ipcPath: this.serverManager.ipcPath,
       }),
+      waitForConnection: () => this.connectionReady,
       ensureServerRunning: () => this.serverHealthRecovery.ensureServerRunning(),
       reportBusy: (sender, busy) => {
         this.serverBusyBlocker.report(
@@ -200,7 +214,7 @@ export class ServerRuntime {
   }
 
   /** Install the authenticated cookie for the local server connection. */
-  async installAuthCookie(): Promise<void> {
+  private async installAuthCookie(): Promise<void> {
     await installServerAuthCookie(this.dependencies.getCookieStore(), {
       port: this.serverManager.port,
       authToken: this.serverManager.authToken,
