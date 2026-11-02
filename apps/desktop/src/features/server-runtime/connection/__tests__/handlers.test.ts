@@ -20,6 +20,7 @@ describe("registerServerConnectionHandlers", () => {
   let ensureServerRunning: ReturnType<typeof vi.fn>;
   let reportBusy: ReturnType<typeof vi.fn>;
   let getConnection: ReturnType<typeof vi.fn>;
+  let waitForConnection: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     handlers = new Map();
@@ -27,6 +28,7 @@ describe("registerServerConnectionHandlers", () => {
     otherWebContents = {};
     ensureServerRunning = vi.fn().mockResolvedValue(undefined);
     reportBusy = vi.fn();
+    waitForConnection = vi.fn().mockResolvedValue(undefined);
     getConnection = vi.fn().mockReturnValue({
       port: 43127,
       authToken: "token-with-unicode-✓",
@@ -39,6 +41,7 @@ describe("registerServerConnectionHandlers", () => {
       },
       getMainWebContents: () => mainWebContents,
       getConnection,
+      waitForConnection,
       ensureServerRunning,
       reportBusy,
     });
@@ -52,19 +55,49 @@ describe("registerServerConnectionHandlers", () => {
     ]);
   });
 
-  it("returns the authenticated URL and IPC path only to the main renderer", () => {
+  it("returns the authenticated URL and IPC path only to the main renderer", async () => {
     const getServerUrl = handlers.get("get-server-url");
     if (!getServerUrl) throw new Error("get-server-url handler was not registered");
 
-    expect(getServerUrl({ sender: mainWebContents })).toEqual({
+    await expect(getServerUrl({ sender: mainWebContents })).resolves.toEqual({
       url: "ws://127.0.0.1:43127?token=token-with-unicode-✓",
       ipcPath: "\\\\.\\pipe\\mcode-✓",
     });
     expect(getConnection).toHaveBeenCalledOnce();
 
     getConnection.mockClear();
-    expect(() => getServerUrl({ sender: otherWebContents })).toThrow();
+    await expect(getServerUrl({ sender: otherWebContents })).rejects.toThrow();
     expect(getConnection).not.toHaveBeenCalled();
+  });
+
+  it("waits for the connection before returning the server URL", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveConnection!: () => void;
+      waitForConnection.mockReturnValue(new Promise<void>((resolve) => {
+        resolveConnection = resolve;
+      }));
+      const getServerUrl = handlers.get("get-server-url");
+      if (!getServerUrl) throw new Error("get-server-url handler was not registered");
+
+      let resolved = false;
+      const response = Promise.resolve(getServerUrl({ sender: mainWebContents })).then((connection) => {
+        resolved = true;
+        return connection;
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(resolved).toBe(false);
+      expect(getConnection).not.toHaveBeenCalled();
+
+      resolveConnection();
+      await expect(response).resolves.toEqual({
+        url: "ws://127.0.0.1:43127?token=token-with-unicode-✓",
+        ipcPath: "\\\\.\\pipe\\mcode-✓",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("delegates ensure-server-running after authorization", async () => {
@@ -231,7 +264,7 @@ describe("ServerRuntime entry point", () => {
   });
 
   it("starts through the manager and returns its port", async () => {
-    await expect(runtime.start()).resolves.toBe(43210);
+    await expect(runtime.connectWindow(window)).resolves.toBe(43210);
     expect(manager.start).toHaveBeenCalledOnce();
   });
 
@@ -255,8 +288,9 @@ describe("ServerRuntime entry point", () => {
     expect(manager.restart).toHaveBeenCalledOnce();
   });
 
-  it("registers authenticated handlers and routes busy state through power control", () => {
+  it("registers authenticated handlers and routes busy state through power control", async () => {
     runtime.registerConnectionHandlers();
+    await runtime.connectWindow(window);
 
     const getServerUrl = handlers.get("get-server-url");
     const setBusy = handlers.get("set-server-busy");
@@ -264,7 +298,7 @@ describe("ServerRuntime entry point", () => {
       throw new Error("server connection handlers were not registered");
     }
 
-    expect(getServerUrl({ sender: window.webContents })).toEqual({
+    await expect(getServerUrl({ sender: window.webContents })).resolves.toEqual({
       url: "ws://127.0.0.1:43210?token=entry-token",
       ipcPath: "entry-ipc-path",
     });
@@ -279,7 +313,7 @@ describe("ServerRuntime entry point", () => {
   });
 
   it("installs the current connection cookie and attaches relay cleanup", async () => {
-    await runtime.installAuthCookie();
+    await runtime.connectWindow(window);
     expect(cookieSet).toHaveBeenCalledWith({
       url: "http://localhost:43210",
       name: "mcode-auth",
@@ -288,7 +322,6 @@ describe("ServerRuntime entry point", () => {
       sameSite: "strict",
     });
 
-    runtime.attachWindow(window);
     const cleanupRelay = relayStarter.mock.results[0]?.value;
     expect(relayStarter).toHaveBeenCalledWith("entry-ipc-path", window);
     expect(window.once).toHaveBeenCalledWith("closed", cleanupRelay);

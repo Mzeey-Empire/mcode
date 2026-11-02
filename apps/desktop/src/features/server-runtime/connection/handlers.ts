@@ -26,6 +26,7 @@ interface ServerConnectionHandlerDependencies {
   ipcMain: IpcMain;
   getMainWebContents: () => unknown;
   getConnection: () => ServerConnection;
+  waitForConnection: () => Promise<void>;
   ensureServerRunning: () => Promise<void>;
   reportBusy: (sender: unknown, busy: boolean) => void;
 }
@@ -45,11 +46,13 @@ export function registerServerConnectionHandlers({
   ipcMain,
   getMainWebContents,
   getConnection,
+  waitForConnection,
   ensureServerRunning,
   reportBusy,
 }: ServerConnectionHandlerDependencies): void {
-  ipcMain.handle("get-server-url", (event) => {
+  ipcMain.handle("get-server-url", async (event) => {
     requireMainRenderer(event, getMainWebContents);
+    await waitForConnection();
     const { port, authToken, ipcPath } = getConnection();
     return {
       url: `ws://${SERVER_LOOPBACK_HOST}:${port}?token=${authToken}`,
