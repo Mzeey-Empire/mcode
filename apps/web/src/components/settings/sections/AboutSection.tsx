@@ -3,6 +3,7 @@ import { useUpdateStore } from "@/stores/updateStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { SettingRow } from "../SettingRow";
 import { SectionHeading } from "../SectionHeading";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Spinner } from "@/components/ui/spinner";
@@ -74,7 +75,7 @@ function HardwareAccelerationSetting() {
 
   if (!bridge?.getHardwareAcceleration || !bridge.relaunch) return null;
   const needsRestart = runningEnabled !== null && runningEnabled !== savedEnabled;
-  return <SettingRow label="Hardware acceleration"><div className="flex items-center gap-3">{needsRestart && <><span className="font-mono text-xs text-muted">Restart to apply</span><button onClick={() => void bridge.relaunch?.()} className="rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-ink transition-colors hover:bg-primary/90">Restart</button></>}<Switch aria-label="Hardware acceleration" checked={savedEnabled} onCheckedChange={(value) => void updateSettings({ graphics: { hardwareAcceleration: value } })} /></div></SettingRow>;
+  return <SettingRow label="Hardware acceleration"><div className="flex items-center gap-3">{needsRestart && <><span className="font-mono text-xs text-muted">Restart to apply</span><Button size="compact" onClick={() => void bridge.relaunch?.()}>Restart</Button></>}<Switch aria-label="Hardware acceleration" checked={savedEnabled} onCheckedChange={(value) => void updateSettings({ graphics: { hardwareAcceleration: value } })} /></div></SettingRow>;
 }
 
 function getUpdatePreferences(settings: Settings): { autoDownload: boolean; autoInstallOnQuit: boolean; checkInterval: UpdateCheckInterval; releaseLine: UpdateReleaseLine } {
