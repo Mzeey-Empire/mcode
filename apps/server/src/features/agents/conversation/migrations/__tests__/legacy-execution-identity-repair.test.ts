@@ -52,7 +52,7 @@ describe("converted legacy execution identity repair", () => {
   });
 
   it("repairs one turn per batch including soft-deleted history", async () => {
-    const [first, second] = await seedConvertedVersions(db, ["v1", "v2"]);
+    const [first, second] = await seedThenConvert(db, ["v1", "v2"]);
     downgrade(db);
     downgrade(db, "v2");
     db.query("UPDATE threads SET deleted_at = '2026-02-01T00:00:00.000Z' WHERE id = 'thread-v2'").run();
@@ -143,7 +143,7 @@ describe("converted legacy execution identity repair", () => {
   });
 
   it("retains a committed unit when the next unit fails and resumes from the remaining key", async () => {
-    const [first, second] = await seedConvertedVersions(db, ["v1", "v2"]);
+    const [first, second] = await seedThenConvert(db, ["v1", "v2"]);
     downgrade(db);
     downgrade(db, "v2");
     db.exec("UPDATE canonical_agent_ingest_checkpoints SET phase = 'running' WHERE turn_id = 'legacy-turn:user-v2'");
@@ -283,12 +283,11 @@ async function openSubscriptionClient(): Promise<{ client: WebSocket; close: () 
 }
 
 async function seedConverted(db: Database, version = "v1"): Promise<string> {
-  const [converted] = await seedConvertedVersions(db, [version]);
+  const [converted] = await seedThenConvert(db, [version]);
   return converted!;
 }
 
-// Legacy rows all predate the first conversion, and a completed conversion never runs again.
-async function seedConvertedVersions(db: Database, versions: readonly string[]): Promise<string[]> {
+async function seedThenConvert(db: Database, versions: readonly string[]): Promise<string[]> {
   for (const version of versions) db.exec(fixture.replaceAll("v1", version));
   await new LegacyConversationMigrationStore(db).runToCompletion();
   return versions.map((version) => z.string().uuid().parse(execution(db, version)));
