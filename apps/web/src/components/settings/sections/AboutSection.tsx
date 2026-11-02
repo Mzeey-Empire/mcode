@@ -74,7 +74,8 @@ function HardwareAccelerationSetting() {
 
   if (!bridge?.getHardwareAcceleration || !bridge.relaunch) return null;
   const needsRestart = runningEnabled !== null && runningEnabled !== savedEnabled;
-  return <SettingRow label="Hardware acceleration"><div className="flex items-center gap-3">{needsRestart && <><span className="font-mono text-xs text-muted">Restart to apply</span><Button size="compact" onClick={() => void bridge.relaunch?.()}>Restart</Button></>}<Switch aria-label="Hardware acceleration" checked={savedEnabled} onCheckedChange={(value) => void updateSettings({ graphics: { hardwareAcceleration: value } })} /></div></SettingRow>;
+  // The switch sits on the row's anchored edge in both layouts, so Restart appearing never moves it.
+  return <SettingRow label="Hardware acceleration" hint="Applies after Mcode restarts."><div className="flex items-center gap-3 min-[80rem]:flex-row-reverse"><Switch aria-label="Hardware acceleration" checked={savedEnabled} onCheckedChange={(value) => void updateSettings({ graphics: { hardwareAcceleration: value } })} />{needsRestart && <Button variant="secondary" size="compact" onClick={() => void bridge.relaunch?.()}>Restart</Button>}</div></SettingRow>;
 }
 
 function getUpdatePreferences(settings: Settings): { autoDownload: boolean; autoInstallOnQuit: boolean; checkInterval: UpdateCheckInterval; releaseLine: UpdateReleaseLine } {
