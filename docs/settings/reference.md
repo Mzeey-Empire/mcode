@@ -42,6 +42,7 @@ Per-setting reference for Mcode's `settings.json`. For schema conventions and st
 | `updates.autoDownload` | boolean | `true` | - | - | Download updates automatically when available |
 | `updates.autoInstallOnQuit` | boolean | `true` | - | - | Install downloaded updates when the app quits |
 | `updates.checkInterval` | enum | `"4hours"` | `"15min"` \| `"1hour"` \| `"4hours"` \| `"1day"` \| `"never"` | - | How often the desktop app checks for updates. Check interval is applied at launch; other update options re-read from disk on each check. |
+| `graphics.hardwareAcceleration` | boolean | `false` | - | - | Desktop only. Keeps Electron's GPU acceleration on. Read once at launch, so a change applies after a restart. |
 | `server.memory.heapMb` | integer | `512` | 256-8192 | `MCODE_SERVER_HEAP_MB` | Bun uses it as a soft process-RSS budget for memory-pressure shedding (output truncation, idle pool eviction) and applies saved settings immediately. The environment override applies at server launch. Invalid environment values fall through to `settings.json`. |
 | `preview.memorySaver.maxWarm` | integer | `3` | 1-20 | - | Most-recently-used background preview tabs kept warm while the panel is hidden. Others are discarded (renderer freed) and reload on reopen. |
 | `preview.memorySaver.bgIdleMs` | integer | `300000` | 30000-3600000 | - | Idle time (ms) before a background preview tab is discarded while the panel is visible. |
