@@ -1,4 +1,4 @@
-import type { ComponentProps, DragEventHandler, ReactNode, RefObject } from "react";
+import type { ComponentProps, DragEventHandler, MouseEvent, ReactNode, RefObject } from "react";
 import { ArrowUp, X } from "lucide-react";
 import { AttachmentPreview } from "@/components/chat/AttachmentPreview";
 import { ComposerAddMenu } from "@/components/chat/ComposerAddMenu";
@@ -404,6 +404,15 @@ function ComposerStartingSpinner({
   );
 }
 
+/**
+ * Leaves focus in the editor when a composer action is pressed with the pointer. Stop does not end the
+ * conversation: the user often types the next instruction straight away, and a focused Stop button turns
+ * disabled while the turn stops, which drops focus and every key typed after it.
+ */
+function keepEditorFocus(event: MouseEvent): void {
+  event.preventDefault();
+}
+
 function ComposerInlineStopButton({
   model,
   actions,
@@ -419,6 +428,7 @@ function ComposerInlineStopButton({
             variant="ghost"
             shape="round"
             size="icon-compact"
+            onMouseDown={keepEditorFocus}
             onClick={actions.onStop}
             aria-label="Stop agent"
           >
@@ -573,6 +583,7 @@ function ComposerSendButton({
       size="icon-default"
       // Empty Send recedes to a panel circle so the amber fill only appears once there is something to send.
       className={cn(visualState === "empty" && "bg-panel text-muted")}
+      onMouseDown={keepEditorFocus}
       onClick={onClick}
       disabled={disabled}
       aria-label={SEND_BUTTON_COPY[copy]}
