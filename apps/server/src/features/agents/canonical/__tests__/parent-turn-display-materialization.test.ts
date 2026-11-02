@@ -110,10 +110,12 @@ function expectDisplayRows(db: Database, turnId: string): void {
   expect(new HookExecutionStore(db).listByMessage(messageId).map((hook) => ({
     name: hook.hook_name, durationMs: hook.duration_ms,
   }))).toEqual([{ name: "PreToolUse", durationMs: 1 }]);
-  const items = db.query<{ id: string }, [string]>(`
-    SELECT id FROM canonical_agent_items WHERE turn_id = ?
+  const items = db.query<{ id: string; projection: string }, [string]>(`
+    SELECT id, json_extract(payload_json, '$.projection') AS projection FROM canonical_agent_items WHERE turn_id = ?
       AND json_extract(payload_json, '$.projection') NOT IN ('providerRuntimeEvent', 'narrativeRecoveryDiscarded')
   `).all(turnId);
+  expect(items.map((item) => item.projection).sort())
+    .toEqual(["hook", "message", "message", "narrationSegment", "toolCall", "toolCall"]);
   for (const item of items) {
     const mappings = db.query<{ target_kind: string; target_id: string }, [string]>(`
       SELECT target_kind, target_id FROM canonical_conversation_display_mappings WHERE source_item_id = ?
