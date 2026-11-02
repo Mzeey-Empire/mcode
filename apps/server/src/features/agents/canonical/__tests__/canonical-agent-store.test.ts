@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -49,6 +49,37 @@ function identity(): ProviderIdentity {
     value: "native-thread-1",
     provenance: "native",
   };
+}
+
+interface CapturedStatement {
+  sql: string;
+  parameters: SQLQueryBindings[];
+}
+
+function traceStatements(db: Database, captured: CapturedStatement[]): Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property !== "prepare") {
+        const value = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        return new Proxy(statement, {
+          get(statementTarget, statementProperty) {
+            const value = Reflect.get(statementTarget, statementProperty);
+            if (statementProperty !== "all" && statementProperty !== "get" && statementProperty !== "values") {
+              return typeof value === "function" ? value.bind(statementTarget) : value;
+            }
+            return (...parameters: SQLQueryBindings[]) => {
+              captured.push({ sql, parameters });
+              return value.call(statementTarget, ...parameters);
+            };
+          },
+        });
+      };
+    },
+  });
 }
 
 function initialDrafts(): CanonicalAgentEventDraft[] {
@@ -618,7 +649,7 @@ describe("CanonicalAgentStore", () => {
       '"canonical_agent_threads"."id" = ? and "canonical_agent_threads"."parent_thread_id" = ?',
       '"canonical_agent_turns"."id" = ? and "canonical_agent_turns"."thread_id" = ?',
       'select "event_id", "accepted_sequence" from "canonical_agent_events"',
-      'select "accepted_sequence" from "canonical_agent_events"',
+      'select max("accepted_sequence") from "canonical_agent_events"',
     ];
     expect(retainedTargets.map((target) =>
       preparedSql.filter((sql) => sql.includes(target)).length
@@ -3306,6 +3337,71 @@ describe("CanonicalAgentStore", () => {
     expect(recovered.filter((envelope) => envelope.payload.type === "publication.recorded"))
       .toHaveLength(2);
     expect(published).toHaveBeenCalled();
+  });
+
+  it("searches the execution sequence index with stale statistics for checkpoint-less executions", () => {
+    sink.commit({
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      executionId: EXECUTION_ID,
+      phase: "running",
+      events: initialDrafts(),
+    });
+    seedCanonicalItemHistory(db, 256);
+    sink.recordSynthesizedPublications(THREAD_ID, [
+      { type: "goalUpdated", threadId: THREAD_ID },
+      { type: "goalCleared", threadId: THREAD_ID },
+    ]);
+
+    const otherThreadId = "new-synthesized-thread";
+    db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(otherThreadId, "workspace-1", "Other thread", "main", "codex", NOW, NOW);
+    db.prepare(`INSERT INTO canonical_agent_threads
+      (id, workspace_id, root_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(otherThreadId, "workspace-1", otherThreadId, "codex", "Idle", NOW, NOW);
+
+    db.exec("ANALYZE sqlite_schema");
+    db.prepare("DELETE FROM sqlite_stat1 WHERE tbl = ?").run("canonical_agent_events");
+    // Statistics copied from a database analyzed while it held one execution; they made the thread-scoped lookup scan.
+    const staleStatistics = [
+      ["idx_canonical_agent_events_thread_revision", "424 424 3"],
+      ["idx_canonical_agent_events_execution_sequence", "424 424 1"],
+      ["sqlite_autoindex_canonical_agent_events_1", "424 1"],
+    ] as const;
+    for (const [index, stat] of staleStatistics) {
+      db.prepare("INSERT INTO sqlite_stat1 (tbl, idx, stat) VALUES (?, ?, ?)").run("canonical_agent_events", index, stat);
+    }
+    db.exec("ANALYZE sqlite_schema");
+
+    const captured: CapturedStatement[] = [];
+    const reopened = new CanonicalAgentStore(traceStatements(db, captured), published);
+    expect(reopened.loadCheckpoint(syntheticThreadExecutionId(THREAD_ID))).toBeNull();
+    expect(reopened.loadCheckpoint(syntheticThreadExecutionId(otherThreadId))).toBeNull();
+
+    const continued = reopened.recordSynthesizedPublications(THREAD_ID, [
+      { type: "goalUpdated", threadId: THREAD_ID },
+    ]);
+    const started = reopened.recordSynthesizedPublications(otherThreadId, [
+      { type: "goalUpdated", threadId: otherThreadId },
+    ]);
+    expect(continued.map((event) => event.acceptedSequence)).toEqual([3]);
+    expect(started.map((event) => event.acceptedSequence)).toEqual([1]);
+
+    const lookup = captured.find((statement) =>
+      statement.sql.startsWith("select ")
+      && statement.sql.includes('"accepted_sequence"')
+      && statement.sql.includes('from "canonical_agent_events"')
+      && statement.parameters.includes(syntheticThreadExecutionId(THREAD_ID)),
+    );
+    if (!lookup) throw new Error("No accepted sequence lookup was captured");
+    const plan = db.prepare<{ detail: string }, SQLQueryBindings[]>(`EXPLAIN QUERY PLAN ${lookup.sql}`)
+      .all(...lookup.parameters)
+      .map((row) => row.detail)
+      .join(" | ");
+    expect(plan).toContain("SEARCH canonical_agent_events USING COVERING INDEX idx_canonical_agent_events_execution_sequence");
+    expect(plan).not.toContain("SCAN canonical_agent_events");
+    expect(plan).not.toContain("TEMP B-TREE");
   });
 
   it("keeps synthesized sequence and execution identities separate across threads after reopening", () => {

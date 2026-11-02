@@ -3,7 +3,7 @@ import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
 import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
-import { and, asc, between, desc, eq, getTableColumns, inArray, isNotNull, isNull, or, placeholder, sql } from "drizzle-orm";
+import { and, asc, between, desc, eq, getTableColumns, inArray, isNotNull, isNull, max, or, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CanonicalAgentEventEnvelopeSchema, CollaborationActionSchema, ProviderIdentitySchema, createAgentModelState, reduceAgentEvent, reduceAgentEventBatch, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn, type CanonicalAgentEvent, type CanonicalAgentEventEnvelope, type AcceptedCanonicalAgentEventEnvelope, type CollaborationAction, type InterruptionCause, type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
 import { canonicalSubagentTerminalOutcome, type CanonicalSubagentStopRequest, CANONICAL_SUBAGENT_LINEAGE_MAX_DEPTH, CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN } from "@mcode/contracts/models/canonical-subagent-roster";
@@ -433,7 +433,7 @@ export class CanonicalAgentStore {
       persistState: (state, threadId, turnId, executionId, conversationChanged, events) =>
         this.persistState(state, threadId, turnId, executionId, conversationChanged, events),
       insertEvent: (event) => this.insertEvent(event),
-      lastAcceptedSequence: (threadId, executionId) => this.lastAcceptedSequence(threadId, executionId),
+      lastAcceptedSequence: (executionId) => this.lastAcceptedSequence(executionId),
       persistCheckpoint: (checkpoint) => this.persistCheckpoint(this.toCanonicalCheckpoint(checkpoint)!),
       materializeItems: (events) => this.materializeRecordedItems(events),
       recover: (input, error) => this.recoverCommit(this.toCanonicalCommitInput(input), error),
@@ -2262,7 +2262,7 @@ export class CanonicalAgentStore {
     }
     state.checkpoint = this.loadCheckpoint(input.executionId);
     state.acceptedSequence = state.checkpoint?.lastAcceptedSequence
-      ?? this.lastAcceptedSequence(input.threadId, input.executionId);
+      ?? this.lastAcceptedSequence(input.executionId);
     if (state.acceptedSequence > 0) {
       modelState.lastAcceptedSequenceByExecution[input.executionId] = state.acceptedSequence;
     }
@@ -3152,10 +3152,8 @@ export class CanonicalAgentStore {
     const lastAcceptedSequence = Math.max(...acceptedSequences);
     this.addSequenceCollisions(state, first.routing.executionId, firstAcceptedSequence, lastAcceptedSequence);
 
-    const acceptedSequence = checkpoint?.lastAcceptedSequence ?? this.lastAcceptedSequence(
-      first.routing.threadId,
-      first.routing.executionId,
-    );
+    const acceptedSequence = checkpoint?.lastAcceptedSequence
+      ?? this.lastAcceptedSequence(first.routing.executionId);
     if (acceptedSequence > 0) {
       state.lastAcceptedSequenceByExecution[first.routing.executionId] = acceptedSequence;
     }
@@ -3174,8 +3172,8 @@ export class CanonicalAgentStore {
     }
   }
 
-  private lastAcceptedSequence(threadId: string, executionId: string): number {
-    const row = this.loadLastAcceptedSequenceStatement.get({ threadId, executionId });
+  private lastAcceptedSequence(executionId: string): number {
+    const row = this.loadLastAcceptedSequenceStatement.get({ executionId });
     return row?.acceptedSequence ?? 0;
   }
 
@@ -3780,14 +3778,9 @@ export class CanonicalAgentStore {
 
   private buildLoadLastAcceptedSequenceStatement() {
     return this.orm
-      .select({ acceptedSequence: canonicalAgentEvents.acceptedSequence })
+      .select({ acceptedSequence: max(canonicalAgentEvents.acceptedSequence) })
       .from(canonicalAgentEvents)
-      .where(and(
-        eq(canonicalAgentEvents.threadId, placeholder("threadId")),
-        eq(canonicalAgentEvents.executionId, placeholder("executionId")),
-      ))
-      .orderBy(desc(canonicalAgentEvents.acceptedSequence))
-      .limit(1)
+      .where(eq(canonicalAgentEvents.executionId, placeholder("executionId")))
       .prepare();
   }
 
