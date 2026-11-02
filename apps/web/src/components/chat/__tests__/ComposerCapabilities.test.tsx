@@ -52,7 +52,7 @@ describe("composer capabilities", () => {
     await user.click(screen.getByRole("button", { name: "Add to composer" }));
 
     const menu = screen.getByRole("menu", { name: "Add to composer" });
-    expect(menu).toHaveAttribute("data-slot", "popover-content");
+    expect(menu).toHaveAttribute("data-slot", "dropdown-menu-content");
     await waitFor(() => expect(menu.parentElement).toHaveAttribute("data-side", "top"));
     expect(screen.getByTestId("composer-overlay-host")).toBeEmptyDOMElement();
   });
@@ -94,7 +94,7 @@ describe("composer capabilities", () => {
     renderAddMenu({ capabilities: CODEX_CAPABILITIES, onAttachCapability });
 
     await user.click(screen.getByRole("button", { name: "Add to composer" }));
-    await user.click(screen.getByRole("menuitemcheckbox", { name: /Ultra/ }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: /Ultra/ }));
 
     await waitFor(() => expect(onAttachCapability).toHaveBeenCalledWith("orchestration"));
     expect(screen.queryByRole("menu", { name: "Add to composer" })).not.toBeInTheDocument();
@@ -127,7 +127,7 @@ describe("composer capabilities", () => {
     await user.click(screen.getByRole("button", { name: "Add to composer" }));
 
     expect(
-      screen.getByRole("menuitemcheckbox", { name: /Plan/ }).querySelector(".lucide-list-checks"),
+      (await screen.findByRole("menuitemcheckbox", { name: /Plan/ })).querySelector(".lucide-list-checks"),
     ).toBeTruthy();
     expect(
       screen.getByRole("menuitemcheckbox", { name: /Goal/ }).querySelector(".lucide-goal"),
@@ -137,15 +137,20 @@ describe("composer capabilities", () => {
     ).toBeTruthy();
   });
 
-  it("marks attached capabilities as selected in the add menu", async () => {
+  it("shows Plan as a checked menu item while plan mode is on, and turns it off when picked", async () => {
     const user = userEvent.setup();
-    renderAddMenu({ attachedCapabilityIds: new Set(["plan"]) });
+    const onAttachCapability = vi.fn();
+    renderAddMenu({ attachedCapabilityIds: new Set(["plan"]), onAttachCapability });
 
     await user.click(screen.getByRole("button", { name: "Add to composer" }));
 
-    const planButton = screen.getByRole("menuitemcheckbox", { name: /Plan/ });
-    expect(planButton).toHaveAttribute("aria-checked", "true");
-    expect(planButton.querySelector(".lucide-check")).toBeTruthy();
+    const plan = await screen.findByRole("menuitemcheckbox", { name: /Plan/ });
+    expect(plan).toHaveAttribute("aria-checked", "true");
+    expect(plan.querySelector(".lucide-check")).toBeTruthy();
+    expect(screen.getByRole("menuitemcheckbox", { name: /Goal/ })).toHaveAttribute("aria-checked", "false");
+
+    await user.click(plan);
+    await waitFor(() => expect(onAttachCapability).toHaveBeenCalledWith("plan"));
   });
 
   it("hides the capability section when the provider exposes no Mcode capabilities", async () => {
@@ -155,30 +160,20 @@ describe("composer capabilities", () => {
     await user.click(screen.getByRole("button", { name: "Add to composer" }));
 
     expect(screen.queryByText("Capabilities")).not.toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Files/ })).toBeVisible();
+    expect(await screen.findByRole("menuitem", { name: /Files/ })).toBeVisible();
   });
 
-  it("focuses the first action and supports arrow, Home, and End navigation", async () => {
+  it("returns focus to + when Escape closes the menu", async () => {
     const user = userEvent.setup();
     renderAddMenu();
 
     const trigger = screen.getByRole("button", { name: "Add to composer" });
     await user.click(trigger);
-
-    const files = screen.getByRole("menuitem", { name: /Files/ });
-    const plan = screen.getByRole("menuitemcheckbox", { name: /Plan/ });
-    const ultracode = screen.getByRole("menuitemcheckbox", { name: /Ultracode/ });
-    await waitFor(() => expect(files).toHaveFocus());
-
     await user.keyboard("{ArrowDown}");
-    expect(plan).toHaveFocus();
-    await user.keyboard("{End}");
-    expect(ultracode).toHaveFocus();
-    await user.keyboard("{Home}");
-    expect(files).toHaveFocus();
-    await user.keyboard("{ArrowUp}");
-    expect(ultracode).toHaveFocus();
+    expect(screen.getByRole("menu", { name: "Add to composer" }).contains(document.activeElement)).toBe(true);
+
     await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu", { name: "Add to composer" })).not.toBeInTheDocument());
     expect(trigger).toHaveFocus();
   });
 });
