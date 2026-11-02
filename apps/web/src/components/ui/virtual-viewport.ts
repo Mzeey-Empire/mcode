@@ -477,12 +477,16 @@ export class VirtualViewport {
     return true;
   }
 
+  private endScrollTop(): number {
+    return this.insets.top + this.context.sizeCache.getTotalSize() + this.insets.bottom - this.viewportHeight;
+  }
+
   private targetScrollTop(): number {
     const cache = this.context.sizeCache;
     const { top: insetTop, bottom: insetBottom } = this.insets;
     const height = this.viewportHeight;
     if (this.position.kind === "offset") return this.position.top;
-    if (this.position.kind === "end") return insetTop + cache.getTotalSize() + insetBottom - height;
+    if (this.position.kind === "end") return this.endScrollTop();
     const index = this.rowIndexes.get(this.position.key);
     if (index === undefined) return this.viewport.scrollTop;
     const offset = cache.getOffset(index);
@@ -610,6 +614,14 @@ export class VirtualViewport {
       this.pinnedAnchor = { ...this.pinnedAnchor, top: this.pinnedAnchor.top + shift, hostTop: this.pinnedAnchor.hostTop + shift };
     }
     this.applyPosition();
+  }
+
+  /**
+   * Height of rows below the bottom inset's edge. Blank space padded below a reading row does not
+   * count, so a reader who is not following the end but can see the last row reads 0.
+   */
+  contentBelow(): number {
+    return Math.max(0, this.endScrollTop() - this.viewport.scrollTop);
   }
 
   /** Returns a row's measured or estimated top, measured from the top inset's edge. */

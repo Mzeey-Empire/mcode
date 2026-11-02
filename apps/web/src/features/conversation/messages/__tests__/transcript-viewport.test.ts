@@ -360,6 +360,24 @@ describe("transcript viewport", () => {
     expect(view.rowTop("19")).toBe(before);
   });
 
+  it("reports no content below when a collapsed disclosure leaves the last row in view", async () => {
+    const row = hosts.find((host) => host.id === "18")!;
+    const button = document.createElement("button");
+    button.setAttribute("aria-expanded", "true");
+    row.element.append(button);
+    button.click();
+    LayoutObserver.resize(row.element, 40);
+    await nextFrame();
+    expect(position.kind).toBe("reading");
+    expect(view.rowTop("18")).toBe(0);
+    expect(view.rowBottom("19")).toBe(140);
+    expect(view.contentBelow()).toBe(0);
+
+    view.setRows([...rows, { id: "20", height: 100 }]);
+    expect(view.rowBottom("20")).toBe(240);
+    expect(view.contentBelow()).toBe(40);
+  });
+
   it("cancels smooth navigation when the user scrolls", async () => {
     vi.useFakeTimers();
     view.moveTo({ kind: "reading", key: "1", offset: 0 });

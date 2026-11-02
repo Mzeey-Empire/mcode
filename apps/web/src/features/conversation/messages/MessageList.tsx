@@ -38,6 +38,8 @@ const MAX_FILL_PAGES = 3;
 /** Bounds a Show in chat search so a message that history no longer holds ends in a miss, not endless paging. */
 const MAX_REVEAL_PAGES = 20;
 const TRANSCRIPT_TOP_GAP = 16;
+/** A strip this thin under the composer holds a row's bottom spacing, not text the reader missed. */
+const END_IN_VIEW_SLACK = 8;
 /**
  * Row edges are measured from the top inset's edge, TRANSCRIPT_TOP_GAP below the sticky message's top,
  * so a prompt whose row starts above this line is the one the sticky message stands in for.
@@ -405,7 +407,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const controllerRef = useRef<TranscriptViewport | null>(null);
   const turnExpandRef = useRef(new Map<string, boolean>());
   const [hosts, setHosts] = useState<readonly TranscriptHost[]>([]);
-  const [atTail, setAtTail] = useState(true);
+  const [endInView, setEndInView] = useState(true);
   const [stickyVisible, setStickyVisible] = useState(false);
   const [stickyKey, setStickyKey] = useState<string>();
   const [highlightedKey, setHighlightedKey] = useState<string>();
@@ -441,8 +443,10 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
 
   const syncPosition = useCallback((position: TranscriptPosition) => {
     positionRef.current = position;
-    setAtTail(position.kind === "end");
     const view = controllerRef.current;
+    // A disclosure holds its row in place, so the reader can stop following the end while the
+    // last row stays in view. The pill appears only once rows actually sit below the edge.
+    setEndInView(position.kind === "end" || (view !== null && view.contentBelow() <= END_IN_VIEW_SLACK));
     if (!view) return;
     const current = latest.current;
     const userRow = findReadingUserRow(view, current.userRows, STICKY_BOUNDARY);
@@ -636,7 +640,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
         selectedTextCommentEditor={props.selectedTextCommentEditor} selectedTextCommentEditorScope={props.selectedTextCommentEditorScope}
         viewportRef={viewportRef} renderedThreadId={data.renderedThreadId} stickyPreview={stickyPreview}
         isStickyVisible={stickyVisible} onJumpToUserMessage={jumpToUser} chromeInsets={chrome}
-        showJumpToLatest={!atTail}
+        showJumpToLatest={!endInView}
         onJumpToLatest={() => controllerRef.current?.moveTo({ kind: "end" }, true)}
       />
     </div>
