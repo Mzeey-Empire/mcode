@@ -474,6 +474,9 @@ export class VirtualViewport {
   private readonly interrupt = (): void => {
     this.context.cancelScroll();
     this.animating = false;
+    // Input cannot move rows that fit the scroller, so the reader has not left the end. Taking the
+    // first row as the reading position would stop a short page from following rows added below it.
+    if (this.viewport.scrollHeight <= this.viewport.clientHeight) return;
     this.position = this.readingPosition();
     this.pinReadingAnchor();
     this.onPosition(this.position);
@@ -498,7 +501,9 @@ export class VirtualViewport {
     this.scheduleLayout();
     const top = this.viewport.scrollTop;
     if (Math.abs(top - this.expectedScrollTop) < 1) return;
-    const atEnd = this.viewport.scrollHeight - this.viewportHeight - top <= 2;
+    // A taller window pulls scrollTop in, and that scroll can arrive before the resize observer
+    // updates the cached height. The live height reads the clamp as still at the end.
+    const atEnd = this.viewport.scrollHeight - this.viewport.clientHeight - top <= 2;
     const anchor = this.readingPosition();
     this.position = this.options.positionOnScroll?.(anchor, atEnd) ?? anchor;
     this.pinReadingAnchor();
