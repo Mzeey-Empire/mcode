@@ -7,6 +7,11 @@ import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { volatileIngestClass, type ProviderEventBatch, type ProviderEventSinkPort } from "../host-ports.js";
 
 const MAX_PENDING_EVENTS_PER_EXECUTION = 1_024;
+/**
+ * Native replays arrive close to their original, so dedupe needs only recent identities.
+ * A long Claude turn streams one identity per thinking or text delta, far past this window.
+ */
+const NATIVE_REPLAY_WINDOW = 4_096;
 
 /** Identifies the canonical turn execution that owns provider live events. */
 export interface CanonicalLiveEventRouting {
@@ -199,9 +204,9 @@ export class CanonicalLiveEventPublisher {
       this.fail(queue, routing, new Error("Conflicting provider replay identity"));
       return true;
     }
-    if (queue.nativeEvents.size >= 4_096) {
-      this.fail(queue, routing, new Error("Provider replay identity bound exceeded"));
-      return true;
+    if (queue.nativeEvents.size >= NATIVE_REPLAY_WINDOW) {
+      const oldest = queue.nativeEvents.keys().next().value;
+      if (oldest !== undefined) queue.nativeEvents.delete(oldest);
     }
     queue.nativeEvents.set(key, signature);
     return false;

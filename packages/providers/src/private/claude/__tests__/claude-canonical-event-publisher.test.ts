@@ -150,6 +150,22 @@ describe("ClaudeCanonicalEventPublisher", () => {
     expect(failure).toHaveBeenCalledExactlyOnceWith(routing, expect.any(Error));
   });
 
+  it("keeps a long turn alive past the replay window and still drops a recent replay", async () => {
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
+    const failure = vi.fn();
+    const publisher = new ClaudeCanonicalEventPublisher(createSink(submit), failure);
+    const event = providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "fixture" });
+    const nativeEvents = 10_000;
+    for (let i = 1; i <= nativeEvents; i++) {
+      publisher.publish(routing, event, [], `NATIVE_EVENT_${i}`);
+      if (i % 500 === 0) await publisher.flushForExecution(routing);
+    }
+    publisher.publish(routing, event, [], `NATIVE_EVENT_${nativeEvents}`);
+    await publisher.waitForExecution(routing);
+    expect(failure).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledTimes(nativeEvents);
+  });
+
   it.each([1_023, 1_024, 1_025])("fails queue overflow explicitly at %i pending events", async (count) => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const failure = vi.fn();
