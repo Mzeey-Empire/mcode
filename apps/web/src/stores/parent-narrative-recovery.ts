@@ -214,22 +214,47 @@ function recoveredResponse(threadId: string, turn: AgentTurn, state: AgentModelS
   const id = persisted?.id ?? (record.currentTurnMessageId || `canonical-recovery:${turn.id}`);
   const previous = record.messages.find((message) => message.id === id);
   const message = persisted ?? terminalMessage(threadId, turn, record, text, id, previous);
-  const responseKey = `canonical-turn-response:${turn.id}`;
-  // Persistence can acknowledge a local row before queued canonical progress recovers its server row.
-  const mappedMessageIds = Object.keys(record.serverMessageIds).filter((localId) => record.serverMessageIds[localId] === id);
-  const replaced = new Set([
-    id,
-    ...mappedMessageIds,
-    ...(record.pendingTurnPersistMessageIds.includes(record.currentTurnMessageId) ? [record.currentTurnMessageId] : []),
-  ]);
+  const replaced = replacedMessageIds(record, id);
+  const { responseKey, claimsLiveKey } = recoveredResponseKey(record, replaced, turn, terminal);
   return {
     messages: [...record.messages.filter((candidate) => !replaced.has(candidate.id)), message],
     ...(responseTextIsOpen(turn, state)
       ? {} : { responseTextIsStreaming: false }),
     currentTurnMessageId: id,
+    ...(claimsLiveKey ? { currentTurnResponseKey: "" } : {}),
     pendingTurnPersistMessageIds: [...new Set([...record.pendingTurnPersistMessageIds.filter((pending) => !replaced.has(pending)), id])],
     assistantResponseKeys: { ...record.assistantResponseKeys, [id]: responseKey },
   };
+}
+
+/** Messages the recovered answer `id` replaces. */
+function replacedMessageIds(record: ThreadRecord, id: string): ReadonlySet<string> {
+  // Persistence can acknowledge a local row before queued canonical progress recovers its server row.
+  const mappedMessageIds = Object.keys(record.serverMessageIds).filter((localId) => record.serverMessageIds[localId] === id);
+  return new Set([
+    id,
+    ...mappedMessageIds,
+    ...(record.pendingTurnPersistMessageIds.includes(record.currentTurnMessageId) ? [record.currentTurnMessageId] : []),
+  ]);
+}
+
+/**
+ * The recovered answer replaces the row already on screen, so it keeps that row's key: a new key
+ * remounts the answer at an estimated height, and for a frame the transcript shows the wrong place.
+ * Claiming the live key releases it, so no later live row draws with the same key.
+ */
+function recoveredResponseKey(record: ThreadRecord, replaced: ReadonlySet<string>, turn: AgentTurn, terminal: boolean): { responseKey: string; claimsLiveKey: boolean } {
+  for (const messageId of replaced) {
+    const held = record.assistantResponseKeys[messageId];
+    if (held) return { responseKey: held, claimsLiveKey: false };
+  }
+  // A loaded answer draws with its id unless it is the current one, which draws with the live key
+  // (see `agentMessageItemKey`). Only a finished turn draws no more live text, so only its answer can be the live row.
+  const drawn = record.messages.find((message) => replaced.has(message.id));
+  const live = record.currentTurnResponseKey;
+  const drawsLive = terminal && (!drawn || drawn.id === record.currentTurnMessageId);
+  if (drawsLive && live && !Object.values(record.assistantResponseKeys).includes(live)) return { responseKey: live, claimsLiveKey: true };
+  return { responseKey: drawn?.id ?? `canonical-turn-response:${turn.id}`, claimsLiveKey: false };
 }
 
 function responseTextIsOpen(turn: AgentTurn, state: AgentModelState): boolean {
