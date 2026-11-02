@@ -128,7 +128,8 @@ export class CodexLiveEventReducer {
   private assistant = new AssistantExecutionState();
   private phase: "awaiting-start" | "active" | "completed" | "ended" = "awaiting-start";
   private unknownText = "";
-  private knownFinalText = false;
+  /** Text a stream hint called final since the last boundary; a non-final boundary overrules the hint. */
+  private hintedFinalText = "";
   private compacting = false;
   private plan: PlanExecutionState | null;
   private planTextBytes = 0;
@@ -151,7 +152,7 @@ export class CodexLiveEventReducer {
     copy.plan = this.plan?.fork() ?? null;
     copy.phase = this.phase;
     copy.unknownText = this.unknownText;
-    copy.knownFinalText = this.knownFinalText;
+    copy.hintedFinalText = this.hintedFinalText;
     copy.compacting = this.compacting;
     copy.planTextBytes = this.planTextBytes;
     copy.planQuestionsResolved = this.planQuestionsResolved;
@@ -226,9 +227,6 @@ export class CodexLiveEventReducer {
 
   private textRejection(event: AgentEvent): string | undefined {
     switch (event.type) {
-      case "assistantMessageBoundary":
-        return !event.isFinalResponse && this.knownFinalText
-          ? "mixed final and unknown assistant text" : undefined;
       case "textDelta": return this.deltaRejection(event);
       case "turnComplete":
       case "ended":
@@ -239,7 +237,7 @@ export class CodexLiveEventReducer {
   }
 
   private deltaRejection(event: TextDeltaEvent): string | undefined {
-    if (event.isFinalResponse === false && this.knownFinalText) return "mixed final and nonfinal assistant text";
+    if (event.isFinalResponse === false && this.hintedFinalText) return "mixed final and nonfinal assistant text";
     if (event.isFinalResponse !== undefined && this.unknownText) return "mixed classified and unknown assistant text";
     return undefined;
   }
@@ -343,7 +341,7 @@ export class CodexLiveEventReducer {
       if (this.narrative.closeOpenReasoning(event.threadId)) writer.push(this.recovery());
       this.assistant.appendStreamingText(event.delta);
       if (event.isFinalResponse === undefined) this.unknownText += event.delta;
-      else this.knownFinalText = true;
+      else this.hintedFinalText += event.delta;
       writer.push({ kind: "assistant-text-delta", delta: event.delta, classification: event.isFinalResponse ? "final" : "unknown" });
     }
     return writer;
@@ -359,18 +357,19 @@ export class CodexLiveEventReducer {
         this.assistant.appendStreamingText(text);
         writer.push({ kind: "assistant-text-promote", text });
       }
-      this.unknownText = "";
     } else {
-      if (this.unknownText) {
-        const staged = this.narrative.stageNarrationSegment(event.threadId, this.unknownText);
+      // Unknown text follows hinted text, because a hint after unknown text is rejected.
+      const narration = this.hintedFinalText + this.unknownText;
+      if (narration) {
+        const staged = this.narrative.stageNarrationSegment(event.threadId, narration);
         if (staged) this.narrative.applyStagedNarrationSegment(event.threadId, staged);
-        const retainedText = this.assistant.removeStreamingSuffix(this.unknownText);
-        writer.push({ kind: "assistant-text-reclassify", text: this.unknownText,
+        const retainedText = this.assistant.removeStreamingSuffix(narration);
+        writer.push({ kind: "assistant-text-reclassify", text: narration,
           ...(retainedText ? { retainedText } : {}), classification: "narration" });
-        this.unknownText = "";
       }
     }
-    this.knownFinalText = false;
+    this.unknownText = "";
+    this.hintedFinalText = "";
     writer.push(this.recovery());
     return writer;
   }
@@ -381,7 +380,7 @@ export class CodexLiveEventReducer {
     const body = this.assistant.materializationInput(event.model ?? null);
     this.assistant.resetStreamingText();
     this.narrative.clearAgentStackOnMessage(event.threadId);
-    this.knownFinalText = false;
+    this.hintedFinalText = "";
     this.unknownText = "";
     const writer: CodexLiveWriterIntent[] = [
       { kind: "assistant-body", content: body.content, model: body.model, provider: event.provider ?? null, attachments: body.attachments, tokens: event.tokens },
