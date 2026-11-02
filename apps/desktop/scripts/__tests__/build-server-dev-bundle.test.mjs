@@ -3,10 +3,13 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeURL from "node:url";
 import {
   resolveCopilotTargetPackagePlan,
 } from "../desktop-packaging/target-inventory/target-inventory.mjs";
 import {
+  buildServerRuntimeBundles,
   claudeSdkPlatformPackageCandidates,
   claudeSdkPlatformParts,
   copyClaudeSdkCliNextTo,
@@ -26,6 +29,78 @@ import {
 
 const repoRoot = NodePath.resolve(import.meta.dirname, "../../../..");
 const serverRoot = NodePath.join(repoRoot, "apps/server");
+
+describe("buildServerRuntimeBundles", () => {
+  let tmpDir;
+  let bundleFiles;
+
+  beforeEach(async () => {
+    tmpDir = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "server-runtime-bundles-"));
+    const fixtureServerRoot = NodePath.join(tmpDir, "server");
+    const entryFiles = [
+      "index.js",
+      "features/terminal/host/pty-host-entry.js",
+      "features/agents/canonical/canonical-agent-writer.worker.js",
+      "features/agents/execution/execution.worker.js",
+    ];
+    for (const entryFile of entryFiles) {
+      const entryPath = NodePath.join(fixtureServerRoot, "dist-tsc", entryFile);
+      await NodeFSPromises.mkdir(NodePath.dirname(entryPath), { recursive: true });
+      await NodeFSPromises.writeFile(entryPath, "process.stdout.write(import.meta.url);\n");
+    }
+
+    const outDir = NodePath.join(tmpDir, "out");
+    const serverOutFile = NodePath.join(outDir, "server.cjs");
+    const ptyHostOutFile = NodePath.join(outDir, "pty-host.cjs");
+    bundleFiles = [
+      serverOutFile,
+      ptyHostOutFile,
+      NodePath.join(outDir, "canonical-agent-writer.worker.cjs"),
+      NodePath.join(outDir, "execution.worker.cjs"),
+    ];
+    await buildServerRuntimeBundles({
+      serverRoot: fixtureServerRoot,
+      serverOutFile,
+      ptyHostOutFile,
+    });
+  });
+
+  afterEach(async () => {
+    if (tmpDir) {
+      await NodeFSPromises.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("names each bundle under the packaged resources root", () => {
+    const resourcesRoot = NodePath.join(tmpDir, "resources");
+    const env = { ...process.env, MCODE_PACKAGED_RESOURCES_ROOT: resourcesRoot };
+    const bundleUrls = bundleFiles.map((file) =>
+      NodeChildProcess.execFileSync(process.execPath, [file], { env, encoding: "utf8" }),
+    );
+    const expectedUrls = [
+      "server.cjs",
+      "pty-host.cjs",
+      "canonical-agent-writer.worker.cjs",
+      "execution.worker.cjs",
+    ].map((fileName) =>
+      NodeURL.pathToFileURL(
+        NodePath.join(resourcesRoot, "app.asar.unpacked", "dist", "server", fileName),
+      ).href,
+    );
+
+    expect(bundleUrls).toEqual(expectedUrls);
+  });
+
+  it("keeps the bundle's own path outside packaged builds", () => {
+    const env = { ...process.env };
+    delete env.MCODE_PACKAGED_RESOURCES_ROOT;
+    const bundleUrls = bundleFiles.map((file) =>
+      NodeChildProcess.execFileSync(process.execPath, [file], { env, encoding: "utf8" }),
+    );
+
+    expect(bundleUrls).toEqual(bundleFiles.map((file) => NodeURL.pathToFileURL(file).href));
+  });
+});
 
 describe("electronPlatformToNpm", () => {
   it("maps electron-builder platform names to npm values", () => {
