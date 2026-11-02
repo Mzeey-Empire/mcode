@@ -16,6 +16,21 @@ import * as NodeURL from "node:url";
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 
+// bun build --compile keeps build-machine paths, so packaged bundles use the resources root passed by the desktop.
+const importMetaUrlBanner = [
+  "var __importMetaPath = __filename;",
+  "if (process.env.MCODE_PACKAGED_RESOURCES_ROOT) {",
+  '  __importMetaPath = require("path").join(',
+  "    process.env.MCODE_PACKAGED_RESOURCES_ROOT,",
+  '    "app.asar.unpacked",',
+  '    "dist",',
+  '    "server",',
+  '    require("path").basename(__filename),',
+  "  );",
+  "}",
+  'var __importMetaUrl = require("url").pathToFileURL(__importMetaPath).href;',
+].join("\n");
+
 /** Monorepo root when this script lives at `<root>/scripts/`. */
 export function repoRootFromScript() {
   return NodePath.resolve(__dirname, "..");
@@ -592,7 +607,7 @@ export async function buildServerRuntimeBundles({
     format: "cjs",
   external: ["bun", "bun:sqlite", "node-pty", "electron", "koffi"],
     banner: {
-      js: 'var __importMetaUrl = require("url").pathToFileURL(__filename).href;',
+      js: importMetaUrlBanner,
     },
     define: {
       "import.meta.url": "__importMetaUrl",
