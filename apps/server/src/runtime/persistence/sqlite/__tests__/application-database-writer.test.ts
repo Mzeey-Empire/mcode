@@ -86,6 +86,13 @@ describe("application SQLite owner", () => {
     } finally { freshReader.close(true); }
   });
 
+  it("names the load failure when the worker script cannot be resolved", async () => {
+    const missingWorker = NodePath.join(directory, "missing-writer.worker.cjs");
+    const unloadable = new ApplicationDatabaseWriter(dbPath, () => new Worker(missingWorker));
+
+    await expect(unloadable.whenReady()).rejects.toThrow(/Canonical writer worker closed: .*missing-writer\.worker\.cjs/);
+  });
+
   it("hands the typed refusal across the worker boundary when the ledger is damaged", async () => {
     const damagedPath = NodePath.join(directory, "damaged.sqlite");
     openDatabase({ dbPath: damagedPath }).close(true);
