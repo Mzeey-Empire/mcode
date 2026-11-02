@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, type ComponentProps,
 import { ChevronDown, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger, type PopoverMotion, type PopoverRootActions } from "@/components/ui/popover";
 import {
   MODEL_PROVIDERS,
   findModelById,
@@ -613,6 +613,9 @@ export function ModelSelector({
 
   useResetPickerOnOpen(open, providerLocked, displayProvider, defaultProviderId, showTab, setQuery);
   useFetchProviderModelsWhenOpen(open, activeTab, favoritesVisible, fetchProviderModels);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const genieMotion = useMemo((): PopoverMotion => ({ kind: "genie", origin: () => triggerRef.current }), []);
+  const popoverActions = useRef<PopoverRootActions | null>(null);
 
   const handlePick = (option: ModelPickerOption) => {
     if (option.kind === "legacy-fold") {
@@ -620,11 +623,13 @@ export function ModelSelector({
       return;
     }
     onSelect(option.modelId, option.providerId);
-    setOpen(false);
+    // Closing through the root rather than `setOpen` lets the picker pour back into its trigger.
+    popoverActions.current?.close();
   };
 
   const trigger = (
     <PopoverTrigger
+      ref={triggerRef}
       render={
         customTrigger ?? <ModelSelectorTrigger iconProviderId={presentation.iconProviderId} shortLabel={presentation.shortLabel} detail={detail} />
       }
@@ -633,7 +638,7 @@ export function ModelSelector({
 
   const loading = activeTab !== FAVORITES_TAB && loadingProviders.has(activeTab);
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} motion={genieMotion} actionsRef={popoverActions}>
       {trigger}
       <PopoverContent
         role="dialog"
