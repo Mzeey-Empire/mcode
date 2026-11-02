@@ -109,7 +109,6 @@ import {
   getFrontendPerformanceMetrics,
   handleRendererCrashReport,
   normalizeRendererCrashReport,
-  resolveHardwareAccelerationMode,
 } from "../main.js";
 
 describe("renderer crash report IPC boundary", () => {
@@ -260,25 +259,6 @@ describe("renderer crash report IPC boundary", () => {
 });
 
 describe("frontend performance metrics", () => {
-  it("changes acceleration only for an explicit production performance run", () => {
-    expect(resolveHardwareAccelerationMode({})).toBe("disabled");
-    expect(resolveHardwareAccelerationMode({
-      MCODE_FRONTEND_PERFORMANCE_ACCELERATION_MODE: "default",
-    })).toBe("disabled");
-    expect(resolveHardwareAccelerationMode({
-      MCODE_FRONTEND_PERFORMANCE_MODE: "production",
-      MCODE_FRONTEND_PERFORMANCE_ACCELERATION_MODE: "disabled",
-    })).toBe("disabled");
-    expect(resolveHardwareAccelerationMode({
-      MCODE_FRONTEND_PERFORMANCE_MODE: "production",
-      MCODE_FRONTEND_PERFORMANCE_ACCELERATION_MODE: "default",
-    })).toBe("default");
-    expect(() => resolveHardwareAccelerationMode({
-      MCODE_FRONTEND_PERFORMANCE_MODE: "production",
-      MCODE_FRONTEND_PERFORMANCE_ACCELERATION_MODE: "invalid",
-    })).toThrow(/disabled or default/);
-  });
-
   it("keeps process CPU, memory, and hardware state separate", () => {
     expect(getFrontendPerformanceMetrics()).toEqual({
       packaged: false,

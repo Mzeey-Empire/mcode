@@ -244,6 +244,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     }): Promise<unknown> {
       return ipcRenderer.invoke("app:apply-release-line", payload);
     },
+    /** Read whether this process started with GPU acceleration on. */
+    getHardwareAcceleration(): Promise<{ enabled: boolean }> {
+      return ipcRenderer.invoke("app:get-hardware-acceleration");
+    },
+    /** Restart the desktop app so launch-time settings take effect. */
+    relaunch(): Promise<void> {
+      return ipcRenderer.invoke("app:relaunch");
+    },
     /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
     onUpdateStatus(callback: (status: unknown) => void) {
       const listener = (_event: unknown, status: unknown) => callback(status);

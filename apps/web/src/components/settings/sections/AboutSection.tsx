@@ -3,6 +3,7 @@ import { useUpdateStore } from "@/stores/updateStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { SettingRow } from "../SettingRow";
 import { SectionHeading } from "../SectionHeading";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Spinner } from "@/components/ui/spinner";
@@ -53,6 +54,28 @@ function VersionValue({ version, stage }: { version: string | null | undefined; 
 
 function AboutSettingsRows({ version, stage, updatesHint, status, statusLabel, canCheck, isBusy, onInstall, onCheck, releaseLine, onReleaseLineChange, checkInterval, onCheckIntervalChange, autoDownload, onAutoDownloadChange, providerCliChecks, onProviderCliChecksChange, autoInstallOnQuit, onAutoInstallOnQuitChange }: { version: string | null | undefined; stage: BuildStage | null; updatesHint: string; status: UpdateStatus; statusLabel: string; canCheck: boolean; isBusy: boolean; onInstall: () => void; onCheck: () => void; releaseLine: UpdateReleaseLine; onReleaseLineChange: (value: UpdateReleaseLine) => void; checkInterval: UpdateCheckInterval; onCheckIntervalChange: (value: UpdateCheckInterval) => void; autoDownload: boolean; onAutoDownloadChange: (value: boolean) => void; providerCliChecks: boolean; onProviderCliChecksChange: (value: boolean) => void; autoInstallOnQuit: boolean; onAutoInstallOnQuitChange: (value: boolean) => void }) {
   return <div><SettingRow label="Version" hint="Currently installed build."><VersionValue version={version} stage={stage} /></SettingRow><SettingRow label="Updates" hint={updatesHint}><UpdateStatusControl status={status} statusLabel={statusLabel} canCheck={canCheck} isBusy={isBusy} onInstall={onInstall} onCheck={onCheck} /></SettingRow><SettingRow label="Release line" hint="Stable follows tagged releases. Nightly follows automated prerelease builds when the project publishes them."><SegmentedControl options={RELEASE_LINE_OPTIONS} value={releaseLine} onChange={(value) => onReleaseLineChange(value as UpdateReleaseLine)} /></SettingRow><SettingRow label="Check interval" hint="How often to poll for new releases. Takes effect on next launch."><SegmentedControl options={INTERVAL_OPTIONS} value={checkInterval} onChange={(value) => onCheckIntervalChange(value as UpdateCheckInterval)} /></SettingRow><SettingRow label="Auto-download" hint="Download updates in the background as soon as they are available."><Switch checked={autoDownload} onCheckedChange={onAutoDownloadChange} /></SettingRow><SettingRow label="Provider CLI checks" hint="Ask the npm registry once a day for newer provider CLIs."><Switch aria-label="Provider CLI checks" checked={providerCliChecks} onCheckedChange={onProviderCliChecksChange} /></SettingRow><SettingRow label="Auto-install on quit" hint="Apply downloaded updates automatically when the app closes."><Switch checked={autoInstallOnQuit} onCheckedChange={onAutoInstallOnQuitChange} /></SettingRow></div>;
+}
+
+function HardwareAccelerationSetting() {
+  const bridge = typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
+  const savedEnabled = useSettingsStore((s) => s.settings.graphics?.hardwareAcceleration ?? false);
+  const updateSettings = useSettingsStore((s) => s.update);
+  const [runningEnabled, setRunningEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void bridge?.getHardwareAcceleration?.().then(({ enabled }) => {
+      if (!cancelled) setRunningEnabled(enabled);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge]);
+
+  if (!bridge?.getHardwareAcceleration || !bridge.relaunch) return null;
+  const needsRestart = runningEnabled !== null && runningEnabled !== savedEnabled;
+  // The switch sits on the row's anchored edge in both layouts, so Restart appearing never moves it.
+  return <SettingRow label="Hardware acceleration" hint="Applies after Mcode restarts."><div className="flex items-center gap-3 min-[80rem]:flex-row-reverse"><Switch aria-label="Hardware acceleration" checked={savedEnabled} onCheckedChange={(value) => void updateSettings({ graphics: { hardwareAcceleration: value } })} />{needsRestart && <Button variant="secondary" size="compact" onClick={() => void bridge.relaunch?.()}>Restart</Button>}</div></SettingRow>;
 }
 
 function getUpdatePreferences(settings: Settings): { autoDownload: boolean; autoInstallOnQuit: boolean; checkInterval: UpdateCheckInterval; releaseLine: UpdateReleaseLine } {
@@ -251,6 +274,7 @@ export function AboutSection() {
     <div>
       <SectionHeading>About</SectionHeading>
       <AboutSettingsRows version={version} stage={stage} updatesHint={updatesHint} status={status} statusLabel={statusLabel} canCheck={Boolean(bridge)} isBusy={isBusy} onInstall={() => void handleInstall()} onCheck={() => void handleCheck()} releaseLine={releaseLine} onReleaseLineChange={(value) => void handleChannelChange(value)} checkInterval={checkInterval} onCheckIntervalChange={(value) => void updateSettings({ updates: { checkInterval: value } })} autoDownload={autoDownload} onAutoDownloadChange={(value) => void updateSettings({ updates: { autoDownload: value } })} providerCliChecks={providerCliChecks} onProviderCliChecksChange={(value) => void updateSettings({ updates: { providerCliChecks: value } })} autoInstallOnQuit={autoInstallOnQuit} onAutoInstallOnQuitChange={(value) => void updateSettings({ updates: { autoInstallOnQuit: value } })} />
+      <HardwareAccelerationSetting />
       {pendingDowngrade && (
         <ConfirmChannelDowngradeDialog
           currentVersion={pendingDowngrade.currentVersion}
