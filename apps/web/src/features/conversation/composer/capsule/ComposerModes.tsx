@@ -28,7 +28,7 @@ function ComposerMode({ mode, iconOnly }: { readonly mode: ComposerModeView; rea
           <span
             data-testid={`composer-mode-${mode.id}`}
             className={cn(
-              "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full pr-0.5 pl-[9px] text-body-small whitespace-nowrap text-ink",
+              "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full pr-0.5 pl-[9px] text-compact whitespace-nowrap text-ink",
               // Below 680px the capsule's container query drops the names, as two modes always do.
               "@max-[680px]/capsule:gap-0.5 @max-[680px]/capsule:pl-[7px]",
               iconOnly && "gap-0.5 pl-[7px]",

@@ -267,13 +267,13 @@ function CommandRow({
         onSelect(cmd);
       }}
       // The sliding highlight is the only fill; a hover fill would show a second highlighted row.
-      className="group/row relative h-8 w-full min-w-0 justify-start gap-2 overflow-hidden rounded-full pr-3 pl-[9px] text-left hover:bg-transparent"
+      className="group/row relative h-8 w-full min-w-0 justify-start gap-2 overflow-hidden rounded-full pr-3 pl-2 text-left hover:bg-transparent [&_svg:not([class*='size-'])]:size-3.5"
     >
       <CommandIdentityMark command={cmd} />
-      <span className="max-w-[55%] shrink-0 text-fade text-body text-ink">
+      <span className="max-w-[55%] shrink-0 text-fade text-body-small text-ink">
         {highlightMatch(commandDisplayLabel(cmd), query)}
       </span>
-      <span className="min-w-0 flex-1 text-fade text-body-small text-muted">
+      <span className="min-w-0 flex-1 text-fade text-compact text-muted">
         {cmd.description}
       </span>
       {origin && (

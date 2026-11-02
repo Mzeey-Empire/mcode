@@ -14,15 +14,17 @@ import { cn } from "@/lib/utils";
 /**
  * Provider icon sizes. 16 and 20 are the product roles; 12 is the mark inside
  * a disc and in dense rows that their section tickets have not restyled yet;
+ * 14 is the composer capsule's model part, beside its 13px compact text;
  * 10 is only the rear mark of {@link ProviderIconStack}.
  */
-export type ProviderIconSize = 10 | 12 | 16 | 20;
+export type ProviderIconSize = 10 | 12 | 14 | 16 | 20;
 
 // A size class, not only width and height attributes: parents such as Button
 // size every descendant SVG that lacks a `size-*` class.
 const SIZE_CLASS: Record<ProviderIconSize, string> = {
   10: "size-2.5",
   12: "size-3",
+  14: "size-3.5",
   16: "size-4",
   20: "size-5",
 };

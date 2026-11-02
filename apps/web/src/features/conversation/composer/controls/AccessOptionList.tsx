@@ -45,7 +45,7 @@ export function AccessOptionList({ access, onChosen }: AccessOptionListProps) {
       role="listbox"
       aria-label="Access"
       onKeyDown={moveFocus}
-      className={cn("relative w-60", MENU_LIST_CLASS)}
+      className={cn("relative", MENU_LIST_CLASS)}
     >
       <SlidingHighlight follow={{ pointer: '[role="option"]' }} />
       {access.options.map((option) => (

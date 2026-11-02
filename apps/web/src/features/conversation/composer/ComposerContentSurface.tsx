@@ -672,13 +672,14 @@ function ComposerCapsuleRight({ model, actions, rightRef }: Pick<ComposerCapsule
         isProviderLocked={model.isProviderLocked}
         onSelectionChange={actions.onSelectionChange}
         onSelectionTouched={actions.onSelectionTouched}
-      />
-      <ComposerContextUsage model={model} />
-      <ComposerSendButton
-        model={model}
-        actions={actions}
-        needsWorkspace={model.needsWorkspace}
-      />
+      >
+        <ComposerContextUsage model={model} />
+        <ComposerSendButton
+          model={model}
+          actions={actions}
+          needsWorkspace={model.needsWorkspace}
+        />
+      </ComposerCapsuleSplit>
     </div>
   );
 }

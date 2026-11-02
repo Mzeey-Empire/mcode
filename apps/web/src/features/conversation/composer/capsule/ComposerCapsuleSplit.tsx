@@ -1,6 +1,7 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from "react";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
+import { PERMISSION_MODES } from "@/transport";
 import { getSelectedModelPresentation, ModelPickerPanel, type SelectedModelPresentation } from "@/components/chat/ModelPickerPanel";
 import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverMotion, type PopoverRootActions } from "@/components/ui/popover";
@@ -29,6 +30,8 @@ export interface ComposerCapsuleSplitProps extends ComposerAccessInput {
   readonly reasoningLevels: ReasoningLevel[];
   /** Started thread: model changes stay within its provider. */
   readonly isProviderLocked: boolean;
+  /** Controls that share the pill after the parts, outside their hover fill: the context label and Send. */
+  readonly children?: ReactNode;
 }
 
 const POPUP_LABEL: Record<CapsulePart, string> = {
@@ -44,10 +47,16 @@ const REFOCUS_REASONS: ReadonlySet<string> = new Set(["escape-key", "trigger-pre
 
 type OpenPartPopover = Extract<PartPopoverState, { status: "open" }>;
 
-const MODEL_POPUP_CLASS = cn(PICKER_PANEL_CLASS, "max-h-(--available-height) overflow-y-auto");
+// The access list carries the menu's own 4px padding, so its popover adds none.
+const POPUP_CLASS: Record<CapsulePart, string> = {
+  model: cn(PICKER_PANEL_CLASS, "max-h-(--available-height) overflow-y-auto"),
+  reasoning: "w-56 p-1",
+  access: "w-58 p-0",
+};
 
+// The open part takes the fill a step above the hover, so it still reads as open with the pointer on another part.
 const PART_CLASS =
-  "relative inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-body-small text-ink outline-none aria-expanded:bg-selected focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
+  "relative inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-[9px] text-compact text-ink outline-none aria-expanded:bg-button-secondary-hover focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
 
 /** The model part's label below the 680px tier, read against its provider's other models. */
 function narrowLabelOf(model: SelectedModelPresentation, providerId: string): string {
@@ -132,7 +141,7 @@ function FocusOnMount({ selectors, children }: { readonly selectors: readonly st
  */
 function SteadyReasoningLabel({ levels, current }: { readonly levels: readonly ReasoningLevel[]; readonly current: ReasoningLevel }) {
   return (
-    <span className="grid" data-testid="capsule-reasoning-label">
+    <span className="inline-grid justify-items-center text-muted" data-testid="capsule-reasoning-label">
       {levels.map((level) => (
         <span key={level} className={cn("col-start-1 row-start-1", level !== current && "invisible")} aria-hidden={level !== current || undefined}>
           {formatReasoningLabel(level)}
@@ -146,7 +155,7 @@ function ReasoningBars({ levels, current }: { readonly levels: readonly Reasonin
   const filled = levels.indexOf(current) + 1;
   const step = 16 / levels.length;
   return (
-    <svg aria-hidden width={18} height={16} viewBox="0 0 18 16" className="hidden @max-[680px]/capsule:block" data-testid="capsule-reasoning-bars">
+    <svg aria-hidden width={14} height={14} viewBox="0 0 18 16" className="hidden @max-[680px]/capsule:block" data-testid="capsule-reasoning-bars">
       {levels.map((level, index) => {
         const height = 4 + Math.round((index * 11) / Math.max(1, levels.length - 1));
         return (
@@ -165,8 +174,9 @@ function ReasoningBars({ levels, current }: { readonly levels: readonly Reasonin
   );
 }
 
-function CapsuleDivider() {
-  return <span aria-hidden className="relative h-3.5 w-px shrink-0 bg-border" />;
+/** The rule between the pill's parts. It paints under the hover fill, so the fill slides over it. */
+export function CapsuleDivider() {
+  return <span aria-hidden className="h-3.5 w-px shrink-0 bg-border" />;
 }
 
 /**
@@ -237,88 +247,92 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
   );
   const modelLabel = `Model: ${model.shortLabel}`;
   const accessLabel = `Access mode: ${access.selected.label}`;
+  const unsupervised = selection.permissionMode === PERMISSION_MODES.FULL;
 
   return (
-    <div role="group" aria-label="Agent settings" className="relative flex min-w-0 items-center rounded-full bg-panel p-0.5">
-      <SlidingHighlight follow={{ pointer: "[data-capsule-part]" }} />
-      {part("model", modelLabel, modelLabel, (
-        <>
-          <ProviderIcon provider={model.iconProviderId} size={16} />
-          <span className="min-w-0 text-fade @max-[680px]/capsule:hidden">{model.shortLabel}</span>
-          <span className="hidden min-w-0 text-fade @max-[680px]/capsule:inline @max-[480px]/capsule:hidden">{narrowLabelOf(model, selection.provider)}</span>
-        </>
-      ))}
-      {showReasoning && (
-        <>
-          <CapsuleDivider />
-          {part("reasoning", "Model settings", reasoningTipOf(reasoningLevels, selection.reasoning), reasoningLevels.length > 0
-            ? (
-              <>
-                <span className="contents @max-[680px]/capsule:hidden"><SteadyReasoningLabel levels={reasoningLevels} current={selection.reasoning} /></span>
-                <ReasoningBars levels={reasoningLevels} current={selection.reasoning} />
-              </>
-            )
-            : <ComposerModelPreferenceSummary selection={selection} defaults={defaults} reasoningLevels={reasoningLevels} />)}
-        </>
-      )}
-      <CapsuleDivider />
-      {part("access", accessLabel, accessLabel, <AccessIcon size={14} className="text-muted" />)}
-      <Popover
-        handle={handle}
-        open={state.status === "open"}
-        triggerId={state.status === "open" ? triggerIdOf(state.part) : null}
-        motion={genie}
-        actionsRef={actionsRef}
-        onOpenChange={(next, details) => {
-          if (!next) {
-            dispatch({ type: "dismiss" });
-            // At once, not when the popup unmounts, so focus is back on the part while the popup pours into it. The
-            // part's tooltip stays disabled until this close renders, so focus handed back opens no tooltip over it.
-            if (state.status === "open" && REFOCUS_REASONS.has(details.reason)) {
-              triggers.current.get(state.part)?.focus({ preventScroll: true });
+    <div className="flex min-w-0 items-center rounded-full bg-panel p-0.5">
+      <div role="group" aria-label="Agent settings" className="relative flex min-w-0 items-center">
+        <SlidingHighlight follow={{ pointer: "[data-capsule-part]" }} />
+        {part("model", modelLabel, modelLabel, (
+          <>
+            <ProviderIcon provider={model.iconProviderId} size={14} />
+            <span className="min-w-0 text-fade @max-[680px]/capsule:hidden">{model.shortLabel}</span>
+            <span className="hidden min-w-0 text-fade @max-[680px]/capsule:inline @max-[480px]/capsule:hidden">{narrowLabelOf(model, selection.provider)}</span>
+          </>
+        ))}
+        {showReasoning && (
+          <>
+            <CapsuleDivider />
+            {part("reasoning", "Model settings", reasoningTipOf(reasoningLevels, selection.reasoning), reasoningLevels.length > 0
+              ? (
+                <>
+                  <span className="contents @max-[680px]/capsule:hidden"><SteadyReasoningLabel levels={reasoningLevels} current={selection.reasoning} /></span>
+                  <ReasoningBars levels={reasoningLevels} current={selection.reasoning} />
+                </>
+              )
+              : <ComposerModelPreferenceSummary selection={selection} defaults={defaults} reasoningLevels={reasoningLevels} />)}
+          </>
+        )}
+        <CapsuleDivider />
+        {part("access", accessLabel, accessLabel, <AccessIcon size={16} className={unsupervised ? "text-warning" : "text-muted"} />)}
+        <Popover
+          handle={handle}
+          open={state.status === "open"}
+          triggerId={state.status === "open" ? triggerIdOf(state.part) : null}
+          motion={genie}
+          actionsRef={actionsRef}
+          onOpenChange={(next, details) => {
+            if (!next) {
+              dispatch({ type: "dismiss" });
+              // At once, not when the popup unmounts, so focus is back on the part while the popup pours into it. The
+              // part's tooltip stays disabled until this close renders, so focus handed back opens no tooltip over it.
+              if (state.status === "open" && REFOCUS_REASONS.has(details.reason)) {
+                triggers.current.get(state.part)?.focus({ preventScroll: true });
+              }
+              return;
             }
-            return;
-          }
-          const opened = details.trigger?.getAttribute("data-capsule-part");
-          if (isCapsulePart(opened)) dispatch({ type: "open", part: opened });
-        }}
-      >
-        <PopoverContent
-          anchor={anchorRef}
-          side="top"
-          align="end"
-          sideOffset={8}
-          initialFocus={false}
-          finalFocus={false}
-          role="dialog"
-          aria-label={shown ? POPUP_LABEL[shown.part] : undefined}
-          className={shown?.part === "model" ? MODEL_POPUP_CLASS : "w-auto p-1"}
+            const opened = details.trigger?.getAttribute("data-capsule-part");
+            if (isCapsulePart(opened)) dispatch({ type: "open", part: opened });
+          }}
         >
-          {shown && {
-            model: (
-              <FocusOnMount key="model" selectors={MODEL_FOCUS}>
-                <ModelPickerPanel
-                  selectedModelId={selection.modelId}
-                  selectedProviderId={selection.provider}
-                  providerLocked={isProviderLocked}
-                  query={shown.modelQuery}
-                  onQueryChange={(text) => dispatch({ type: "query", text })}
-                  tab={shown.modelTab}
-                  onTabChange={(tab) => dispatch({ type: "tab", tab })}
-                  onSelect={pickModel}
-                  footer={showReasoning ? settings : null}
-                />
-              </FocusOnMount>
-            ),
-            reasoning: (
-              <FocusOnMount key="reasoning" selectors={REASONING_FOCUS}>
-                <div className="w-72">{settings}</div>
-              </FocusOnMount>
-            ),
-            access: <AccessOptionList key="access" access={access} onChosen={() => actionsRef.current?.close()} />,
-          }[shown.part]}
-        </PopoverContent>
-      </Popover>
+          <PopoverContent
+            anchor={anchorRef}
+            side="top"
+            align="end"
+            sideOffset={8}
+            initialFocus={false}
+            finalFocus={false}
+            role="dialog"
+            aria-label={shown ? POPUP_LABEL[shown.part] : undefined}
+            className={shown ? POPUP_CLASS[shown.part] : undefined}
+          >
+            {shown && {
+              model: (
+                <FocusOnMount key="model" selectors={MODEL_FOCUS}>
+                  <ModelPickerPanel
+                    selectedModelId={selection.modelId}
+                    selectedProviderId={selection.provider}
+                    providerLocked={isProviderLocked}
+                    query={shown.modelQuery}
+                    onQueryChange={(text) => dispatch({ type: "query", text })}
+                    tab={shown.modelTab}
+                    onTabChange={(tab) => dispatch({ type: "tab", tab })}
+                    onSelect={pickModel}
+                    footer={showReasoning ? settings : null}
+                  />
+                </FocusOnMount>
+              ),
+              reasoning: (
+                <FocusOnMount key="reasoning" selectors={REASONING_FOCUS}>
+                  {settings}
+                </FocusOnMount>
+              ),
+              access: <AccessOptionList key="access" access={access} onChosen={() => actionsRef.current?.close()} />,
+            }[shown.part]}
+          </PopoverContent>
+        </Popover>
+      </div>
+      {props.children}
     </div>
   );
 }

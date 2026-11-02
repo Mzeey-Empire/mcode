@@ -89,7 +89,7 @@ export function ComposerAddMenu({
         side="top"
         align="start"
         sideOffset={8}
-        className="w-56"
+        className="w-58"
       >
         <DropdownMenuGroup>
           <DropdownMenuGroupLabel>Attach</DropdownMenuGroupLabel>

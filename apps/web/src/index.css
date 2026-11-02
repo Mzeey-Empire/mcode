@@ -245,6 +245,10 @@
   --text-caption: 1.2rem;
   --text-caption--line-height: 1.6rem;
   --text-caption--font-weight: 400;
+  /* The composer capsule's controls and slash menu descriptions: a step under body small, so they stay quieter than the draft. */
+  --text-compact: 1.3rem;
+  --text-compact--line-height: 2rem;
+  --text-compact--font-weight: 400;
   --text-label: 1.4rem;
   --text-label--line-height: 2rem;
   --text-label--font-weight: 500;
