@@ -5,7 +5,7 @@ import { type Thread } from "@mcode/contracts/models/thread";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import type { ThreadRepo } from "../persistence/thread-repo.js";
 import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
-import type { DelegationTargetResolver, DelegationTargetResolution } from "../../agents/collaboration/delegation-target-resolver.js";
+import { targetRejection, type DelegationTargetResolver, type DelegationTargetResolution } from "../../agents/collaboration/delegation-target-resolver.js";
 import { OriginFetchError, type GitRepositoryService } from "../../projects/git/git-repository-service.js";
 import type { CreateAndSendCommand, CreateAndSendOptions } from "../../agents/turns/thread-creation-coordinator.js";
 import { ExistingWorktreePlacementError } from "../../agents/turns/turn-admission-dispatch-coordinator.js";
@@ -80,8 +80,7 @@ export class ThreadLaunchService {
     if (!modelId) return rejection("invalid_model", "A model is required for the requested provider");
     const target = await this.deps.targets.resolve({ providerId, modelId });
     if (target.status === "resolved") return target;
-    if (target.status === "discovery_failed") return rejection("internal_error", "Provider target discovery failed", true);
-    return rejection(target.status === "invalid_provider" ? "invalid_provider" : "invalid_model", "The requested provider and model are unavailable");
+    return { status: "rejected", error: targetRejection(target) };
   }
 
   private async placement(workspaceId: string, workspace: ThreadLaunchWorkspace): Promise<LaunchPlacement | LaunchRejection> {

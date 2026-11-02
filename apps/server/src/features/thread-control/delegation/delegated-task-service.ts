@@ -11,7 +11,8 @@ import type { ThreadStartupService } from "../../thread-startup/thread-startup-s
 import { cancelThreadStartup, type CancelThreadStartupDeps } from "../../thread-startup/cancel-thread-startup.js";
 import type { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
 import type { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-boundary.js";
-import type { DelegationTargetResolver } from "../../agents/collaboration/delegation-target-resolver.js";
+import { targetRejection, type DelegationTargetResolver } from "../../agents/collaboration/delegation-target-resolver.js";
+import { selectReasoningLevel } from "../../agents/collaboration/reasoning-effort-option.js";
 import type { ApprovalService } from "../../agents/approvals/approval-service.js";
 import type { CreateAndSendCommand, CreateAndSendOptions } from "../../agents/turns/thread-creation-coordinator.js";
 import type { DelegatedTaskRepo } from "./delegated-task-repo.js";
@@ -146,17 +147,12 @@ export class DelegatedTaskService {
   rosterEntries(coordinatorThreadId: string): SubagentRosterEntry[] {
     const callsByTurn = new Map<string, ReturnType<DelegatedTaskRepo["sourceCalls"]>>();
     return this.deps.tasks.listByCoordinator(coordinatorThreadId).map((task) => {
-      let calls = callsByTurn.get(task.plan.creatorTurnId);
-      if (!calls) {
-        calls = this.deps.tasks.sourceCalls(coordinatorThreadId, task.plan.creatorTurnId);
-        callsByTurn.set(task.plan.creatorTurnId, calls);
-      }
-      const call = calls.find((source) => source.clientRequestId === task.clientRequestId);
+      const call = this.sourceCall(coordinatorThreadId, task, callsByTurn);
       const snapshot = this.snapshot(task);
       const status = rosterStatus(snapshot.state);
       return {
         id: delegatedTaskRosterEntryId(task.taskId), provider: task.plan.providerId, model: task.plan.modelId,
-        title: task.plan.title, prompt: task.plan.prompt, subagentType: null, reasoningEffort: null, stepCount: 0,
+        title: task.plan.title, prompt: task.plan.prompt, subagentType: null, reasoningEffort: task.plan.reasoningLevel ?? null, stepCount: 0,
         status, startedAt: new Date(task.createdAt).toISOString(),
         endedAt: this.latestAttempt(task)?.endedAt ?? null,
         tier: snapshot.threadId ? "transcript" : "meta", canStop: isLiveSubagentStatus(status),
@@ -164,6 +160,19 @@ export class DelegatedTaskService {
         sourceMessageId: call?.messageId ?? null, parentEntryId: null,
       };
     });
+  }
+
+  private sourceCall(
+    coordinatorThreadId: string,
+    task: DelegatedTask,
+    callsByTurn: Map<string, ReturnType<DelegatedTaskRepo["sourceCalls"]>>,
+  ): ReturnType<DelegatedTaskRepo["sourceCalls"]>[number] | undefined {
+    let calls = callsByTurn.get(task.plan.creatorTurnId);
+    if (!calls) {
+      calls = this.deps.tasks.sourceCalls(coordinatorThreadId, task.plan.creatorTurnId);
+      callsByTurn.set(task.plan.creatorTurnId, calls);
+    }
+    return calls.find((source) => source.clientRequestId === task.clientRequestId);
   }
 
   /** Claim or replay a pinned task without repeating launch side effects. */
@@ -265,18 +274,25 @@ export class DelegatedTaskService {
     if (input.isolation === "shared" && source.mode === "worktree" && !source.worktree_path) {
       return rejection("invalid_placement", "The Coordinator's worktree is unavailable");
     }
-    const target = await this.deps.targets.resolve(input);
-    if (target.status !== "resolved") {
-      if (target.status === "discovery_failed") return rejection("internal_error", "Provider target discovery failed", true);
-      return rejection(target.status === "invalid_provider" ? "invalid_provider" : "invalid_model", "The requested provider and model are unavailable");
-    }
+    const target = await this.pinTarget(input);
+    if ("status" in target) return target;
     return {
-      workspaceId: source.workspace_id, title: input.title, prompt: input.prompt,
-      providerId: target.providerId, modelId: target.modelId,
+      workspaceId: source.workspace_id, title: input.title, prompt: input.prompt, ...target,
       permissionMode: input.permissionMode ?? authority.permissionMode, coordinatorPermissionMode: authority.permissionMode,
       checkout: await this.checkout(source, input.isolation), messageId: NodeCrypto.randomUUID(),
       creatorTurnId: authority.sourceTurnId, creatorToolCallId: authority.sourceToolCallId,
       creatorProviderId: ProviderIdSchema.parse(authority.sourceProviderId), userId: authority.userId,
+    };
+  }
+
+  private async pinTarget(input: DelegateTaskInput): Promise<Pick<DelegatedTaskPlan, "providerId" | "modelId" | "reasoningLevel"> | TaskRejection> {
+    const target = await this.deps.targets.resolve({ providerId: input.providerId, modelId: input.modelId });
+    if (target.status !== "resolved") return { status: "rejected", error: targetRejection(target) };
+    const selection = selectReasoningLevel(target.modelId, target.reasoningEffortOption, input.options?.reasoningEffort);
+    if (!selection.ok) return rejection("invalid_request", selection.message);
+    return {
+      providerId: target.providerId, modelId: target.modelId,
+      ...(selection.level ? { reasoningLevel: selection.level } : {}),
     };
   }
 
@@ -335,6 +351,7 @@ export class DelegatedTaskService {
     const command: CreateAndSendCommand = {
       workspaceId: plan.workspaceId, startupId: task.taskId, title: plan.title, content: plan.prompt,
       provider: plan.providerId, model: plan.modelId, permissionMode: plan.permissionMode, interactionMode: "build", attachments: [],
+      ...(plan.reasoningLevel ? { reasoningLevel: plan.reasoningLevel } : {}),
     };
     switch (checkout.kind) {
       case "direct":
@@ -363,7 +380,11 @@ export class DelegatedTaskService {
   }
 
   private async receipt(task: DelegatedTask): Promise<Exclude<DelegateTaskResult, TaskRejection>> {
-    return { ...await this.report(task), effectivePermissionMode: task.plan.permissionMode };
+    return {
+      ...await this.report(task),
+      effectivePermissionMode: task.plan.permissionMode,
+      ...(task.plan.reasoningLevel ? { effectiveOptions: { reasoningEffort: task.plan.reasoningLevel } } : {}),
+    };
   }
 
   private async report(task: DelegatedTask) {

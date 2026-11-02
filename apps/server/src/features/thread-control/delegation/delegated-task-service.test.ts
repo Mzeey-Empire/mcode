@@ -10,7 +10,9 @@ import { delegatedTaskRosterEntryId } from "@mcode/contracts/models/subagent-ros
 import type { AgentStopResult } from "@mcode/contracts/models/turn-runtime";
 import type { ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
 import type { DelegateTaskResult, TaskStatusResult } from "@mcode/contracts/thread-control";
-import type { IAgentProvider, IProviderRegistry, TurnSteerOutcome } from "@mcode/contracts/providers/interfaces";
+import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { IAgentProvider, IProviderRegistry, TurnRequest, TurnSteerOutcome } from "@mcode/contracts/providers/interfaces";
 import type { TurnStopCause } from "@mcode/contracts/compat/agent-model";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import { createOriginFixture, git } from "../../projects/git/__tests__/start-from-origin-fixture.js";
@@ -84,7 +86,14 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function harness(permissionMode: "full" | "supervised" = "full", setup = false, coordinatorMode: "direct" | "worktree" = "direct") {
+const DEFAULT_CATALOG: ProviderModelInfo[] = [{ id: "gpt-test", name: "Test" }];
+
+async function harness(
+  permissionMode: "full" | "supervised" = "full",
+  setup = false,
+  coordinatorMode: "direct" | "worktree" = "direct",
+  catalog: ProviderModelInfo[] = DEFAULT_CATALOG,
+) {
   const fixture = await createOriginFixture();
   const { runtime, workspace, workspaces, repository, worktrees, executor, host } = fixture;
   const threads = new ThreadRepo(runtime.reader, runtime.writer);
@@ -100,7 +109,7 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
     forker: { fork: async () => { throw new Error("Delegation starts a new session"); } },
     sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {},
     interruptChildTurn: async () => {},
-    listModels: async () => [{ id: "gpt-test", name: "Test" }],
+    listModels: async () => catalog,
     listPendingApprovals: (threadId?: string) => pendingApprovals.filter((request) => !threadId || request.threadId === threadId),
   });
   const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
@@ -139,6 +148,7 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
   const creation = new ThreadCreationCoordinator(threads, () => threadService, admission, repository, workspaces, fetchDecisions,
     undefined, undefined, () => startups);
   const active = new Set<string>();
+  const firstTurns: TurnRequest[] = [];
   const authority: TurnRuntimeAdmissionAuthority = {
     reserve: (command) => ({ threadId: command.threadId, turnExecutionId: NodeCrypto.randomUUID(), mutationReservationToken: NodeCrypto.randomUUID(), generation: 1 }),
     activate: () => {}, abort: async () => {}, release: () => {}, owns: () => true,
@@ -193,7 +203,8 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
     commands: { createAndSend: async (command, options) => {
       const created = await creation.createInitialTurn(command, options);
       if (created.kind === "dispatch") {
-        await admission.admit(created.command, authority);
+        const admitted = await admission.admit(created.command, authority);
+        if (admitted.kind === "dispatch") firstTurns.push(admitted.request);
         active.add(created.thread.id);
       }
       return created.thread;
@@ -213,7 +224,7 @@ async function harness(permissionMode: "full" | "supervised" = "full", setup = f
   disposables.push(startups.subscribe((startup) => service.taskChanged(startup.startupId)));
   disposables.push(roster.observeCommittedEvents());
   return { ...fixture, service, tasks, threads, threadService, roster, startups, approvals, control, canonical, canonicalStore, messages, environment, audit,
-    coordinator, source, input, dispatch, active, admission, authority, resumes, pendingApprovals };
+    coordinator, source, input, dispatch, active, admission, authority, resumes, pendingApprovals, settings, firstTurns };
 }
 
 function requireTask(result: DelegateTaskResult): Exclude<DelegateTaskResult, { status: "rejected" }>;
@@ -1083,5 +1094,72 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
       .toEqual({ childThreadId: child.childThread.id, status: "interrupted" });
     expect(f.canonical.loadTurn(turn.id)?.status).toBe("Interrupted");
     expect(f.tasks.listByCoordinator(f.coordinator.id)).toEqual([]);
+  });
+});
+
+describe("delegated task reasoning effort", { timeout: 30_000 }, () => {
+  const LEVELED: ProviderModelInfo[] = [
+    { id: "gpt-test", name: "Test", supportedReasoningEfforts: ["low", "medium", "high"], defaultReasoningEffort: "medium" },
+  ];
+  const shared = (f: Fixture, extra: { options?: { reasoningEffort: ReasoningLevel } } = {}) => ({ ...f.input, isolation: "shared" as const, ...extra });
+  const level = (reasoningEffort: ReasoningLevel) => ({ options: { reasoningEffort } });
+
+  it("runs the child at an explicit level on its first turn, in its stored settings and in the receipt", async () => {
+    const f = await harness("full", false, "direct", LEVELED);
+    const task = requireTask(await f.service.delegate(f.source, shared(f, level("low"))));
+    expect(task.effectiveOptions).toEqual({ reasoningEffort: "low" });
+    expect(f.firstTurns.map((turn) => turn.reasoningLevel)).toEqual(["low"]);
+    expect(f.threads.findById(task.threadId ?? "")?.reasoning_level).toBe("low");
+  });
+
+  it("snaps the user default down to the model's top level when none is sent", async () => {
+    const f = await harness("full", false, "direct", LEVELED);
+    f.settings.update({ model: { defaults: { reasoning: "max" } } });
+    const task = requireTask(await f.service.delegate(f.source, shared(f)));
+    expect(task.effectiveOptions).toEqual({ reasoningEffort: "high" });
+    expect(f.firstTurns.map((turn) => turn.reasoningLevel)).toEqual(["high"]);
+    expect(f.threads.findById(task.threadId ?? "")?.reasoning_level).toBe("high");
+  });
+
+  it("rejects an unsupported level before claiming a task or creating a child", async () => {
+    const f = await harness("full", false, "direct", LEVELED);
+    const result = await f.service.delegate(f.source, shared(f, level("max")));
+    expect(result).toEqual({ status: "rejected", error: { code: "invalid_request", retryable: false,
+      message: "gpt-test accepts options.reasoningEffort low, medium, high; got max. Omit it to use high." } });
+    expect(f.tasks.listByCoordinator(f.coordinator.id)).toEqual([]);
+    expect(f.threads.listByWorkspace(f.workspace.id).map((thread) => thread.id)).toEqual([f.coordinator.id]);
+    expect(f.firstTurns).toEqual([]);
+  });
+
+  it("rejects a level for a model that lists no reasoning option", async () => {
+    const f = await harness();
+    expect(await f.service.delegate(f.source, shared(f, level("high")))).toMatchObject({
+      status: "rejected", error: { code: "invalid_request", message: "gpt-test does not accept options.reasoningEffort. Omit it." },
+    });
+    expect(f.tasks.listByCoordinator(f.coordinator.id)).toEqual([]);
+  });
+
+  it("replays the pinned level after the user default changes, and conflicts on a different level", async () => {
+    const f = await harness("full", false, "direct", LEVELED);
+    const first = requireTask(await f.service.delegate(f.source, shared(f)));
+    expect(first.effectiveOptions).toEqual({ reasoningEffort: "high" });
+    f.settings.update({ model: { defaults: { reasoning: "low" } } });
+    const retry = requireTask(await f.service.delegate(f.source, shared(f)));
+    expect(retry.taskId).toBe(first.taskId);
+    expect(retry.effectiveOptions).toEqual({ reasoningEffort: "high" });
+    expect(await f.service.delegate(f.source, shared(f, level("low")))).toMatchObject({
+      status: "rejected", error: { code: "conflict" },
+    });
+  });
+
+  it("sends no level for a model without a reasoning option, and shows it on the roster only when pinned", async () => {
+    const plain = await harness();
+    const unpinned = requireTask(await plain.service.delegate(plain.source, shared(plain)));
+    expect(unpinned.effectiveOptions).toBeUndefined();
+    expect(plain.firstTurns.map((turn) => turn.reasoningLevel)).toEqual([undefined]);
+
+    const leveled = await harness("full", false, "direct", LEVELED);
+    requireTask(await leveled.service.delegate(leveled.source, shared(leveled, level("medium"))));
+    expect(leveled.roster.loadRoster({ owningParentThreadId: leveled.coordinator.id }).entries.map((entry) => entry.reasoningEffort)).toEqual(["medium"]);
   });
 });
