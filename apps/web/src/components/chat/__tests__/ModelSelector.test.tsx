@@ -49,6 +49,7 @@ beforeEach(() => {
 });
 
 import { ModelSelector } from "../ModelSelector";
+import { useProviderModelsStore } from "@/stores/providerModelsStore";
 
 function setProviders(enabled: Record<string, boolean>) {
   useProviderAvailabilityStore.setState({
@@ -79,6 +80,7 @@ function optionNames(): string[] {
 
 beforeEach(() => {
   listProviderModels.mockReset().mockResolvedValue([]);
+  useProviderModelsStore.setState(useProviderModelsStore.getInitialState());
   useModelFavoritesStore.setState({ entries: [] });
   setProviders({ claude: true, codex: false });
 });

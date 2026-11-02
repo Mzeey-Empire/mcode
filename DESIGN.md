@@ -1160,6 +1160,16 @@ are provider-native, so they show the parent thread's provider.
   submission. Before the first send the thread overview hosts the workspace
   and branch selectors; after it, the overview carries mode, branch, and
   tasks.
+- Model, reasoning, and access share one rounded pill on the right of the
+  control bar, one part each, with one sliding highlight across the parts.
+  Every part's popover opens in one spot: 8px above the right edge of the
+  controls row, covering any tray, so it never moves when content above
+  changes. With a popover open, resting 100ms on another part switches to
+  its popover, as in a menu bar. Picking a model that has reasoning levels
+  swaps to the reasoning popover in place. The reasoning part is as wide as
+  the model's widest level, so dragging the bar never resizes the pill. The
+  part whose popover is open keeps the `selected` fill. Each part names its
+  setting in a tooltip, which stays hidden while a popover is open.
 - Separate configuration from the draft with tone and spacing, not a stack of
   chips. Use chips only for removable attached entities such as files, images,
   comments, or enabled capabilities. Capability chips such as Plan use the

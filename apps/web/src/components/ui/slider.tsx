@@ -50,17 +50,17 @@ export function SteppedSlider({
         if (typeof next === "number" && next !== value) onValueChange(next);
       }}
       className={cn(
-        "group/slider flex w-full touch-none select-none items-center [--slider-thumb-size:2.4rem]",
+        "group/slider flex w-full touch-none select-none items-center [--slider-thumb-size:2rem]",
         className,
       )}
       data-slot="slider"
     >
       <SliderPrimitive.Control className="flex w-full cursor-pointer items-center py-1">
-        <SliderPrimitive.Track className="relative h-4.5 w-full rounded-full bg-selected dark:bg-control-border/30">
+        <SliderPrimitive.Track className="relative h-5 w-full rounded-full bg-selected dark:bg-control-border/30">
           {/* At the first stop the fill sits wholly under the thumb, yet anti-aliasing leaves a
               sliver showing at the shared left edge, so it is hidden there instead. */}
           <SliderPrimitive.Indicator
-            className={cn("rounded-full bg-primary", SNAP_MOTION_CLASS, valuePercent <= 0 && "opacity-0")}
+            className={cn("rounded-full bg-primary/25", SNAP_MOTION_CLASS, valuePercent <= 0 && "opacity-0")}
           />
           <span
             aria-hidden="true"
@@ -86,11 +86,12 @@ export function SteppedSlider({
               SNAP_MOTION_CLASS,
             )}
           >
-            {/* Press feedback scales this inner disc, not the Thumb: Base UI measures the Thumb's
+            {/* The Thumb spans the track's height so it stays edge-aligned; the visible knob is a smaller disc
+                inset 3px inside it. Press feedback scales this disc, not the Thumb: Base UI measures the Thumb's
                 box to place it, so scaling the Thumb would shift it off its stop. */}
             <span
               aria-hidden="true"
-              className="block size-full rounded-full bg-background ring-1 ring-control-border/70 transition-transform duration-(--duration-fast) ease-(--ease-standard) group-active/slider:scale-105 motion-reduce:transition-none dark:bg-ink dark:ring-0"
+              className="m-[3px] block size-3.5 rounded-full bg-primary transition-transform duration-(--duration-fast) ease-(--ease-standard) group-active/slider:scale-105 motion-reduce:transition-none"
             />
           </SliderPrimitive.Thumb>
         </SliderPrimitive.Track>

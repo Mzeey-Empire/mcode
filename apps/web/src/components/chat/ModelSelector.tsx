@@ -1,60 +1,11 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type ComponentProps, type ReactElement, type ReactNode } from "react";
-import { ChevronDown, Star } from "lucide-react";
+import { useMemo, useRef, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
+import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverMotion, type PopoverRootActions } from "@/components/ui/popover";
-import {
-  MODEL_PROVIDERS,
-  findModelById,
-  isModelAvailable,
-  registerProviderModels,
-  toModelDefinition,
-  type ModelProvider,
-} from "@/lib/model-registry";
-import { getTransport } from "@/transport";
-import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
-import {
-  useModelFavoritesStore,
-  type ModelFavoriteEntry,
-} from "@/stores/modelFavoritesStore";
-import { tokenizeSearch, matchesAllTokens } from "@/lib/searchTokens";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { cn } from "@/lib/utils";
-
-/** Provider shown when the selected model belongs to no known provider. */
-const DEFAULT_PROVIDER_ID = "claude";
-
-function iconProviderIdFor(provider: ModelProvider | undefined): string {
-  return provider?.id ?? DEFAULT_PROVIDER_ID;
-}
-
-/** How long to wait before retrying a provider after a failed fetch. */
-const FETCH_RETRY_COOLDOWN_MS = 30_000;
-
-/** True when the catalog uses subgroup rows so a provider title above would repeat RPC group labels. */
-function catalogUsesModelGroups(models: ModelProvider["models"]): boolean {
-  return models.some((model) => Boolean(model.group?.trim()));
-}
-
-/** Tooltip copy for a provider tab that cannot open a catalog. */
-function providerTabUnavailableReason(
-  provider: ModelProvider,
-  providerDisabled: boolean,
-): string {
-  if (provider.comingSoon && providerDisabled) {
-    return `${provider.name} is coming soon and disabled in settings.`;
-  }
-  if (provider.comingSoon) return `${provider.name} is coming soon.`;
-  if (providerDisabled) {
-    return `${provider.name} is disabled. Enable it in Settings under Providers.`;
-  }
-  return provider.name;
-}
-
-const FAVORITES_TAB = "favorites";
-
-/** Picker tab: starred models or a single provider's catalog. */
-type ModelPickerTab = typeof FAVORITES_TAB | string;
+import { getSelectedModelPresentation, ModelPickerPanel, type SelectedModelPresentation } from "./ModelPickerPanel";
 
 interface ModelSelectorProps {
   selectedModelId: string;
@@ -77,427 +28,6 @@ interface ModelSelectorProps {
   trigger?: ReactElement;
 }
 
-interface SelectedModelPresentation {
-  displayProvider?: ModelProvider;
-  normalizedModelId: string;
-  selectedProviderId?: string;
-  iconProviderId: string;
-  shortLabel: string;
-}
-
-interface ProviderModelCatalog {
-  getModels: (provider: ModelProvider) => ModelProvider["models"];
-  loadingProviders: Set<string>;
-  fetchProviderModels: (providerId: string) => Promise<void>;
-}
-
-/** One model the picker can list, from a provider catalog or the favourites. */
-interface ModelOption {
-  readonly kind: "model";
-  readonly modelId: string;
-  readonly providerId: string;
-  readonly label: string;
-  /** Catalog subgroup, so the list can divide groups. */
-  readonly group?: string;
-  /** Formatted end date of a model whose subscription access has ended. */
-  readonly endedOn?: string;
-  /** Favourites mix providers, so their rows name the provider under the model. */
-  readonly showProvider: boolean;
-}
-
-/** The row at the end of a provider tab that shows or hides its legacy models. */
-interface LegacyFoldOption {
-  readonly kind: "legacy-fold";
-  readonly providerId: string;
-  readonly count: number;
-  readonly expanded: boolean;
-}
-
-type ModelPickerOption = ModelOption | LegacyFoldOption;
-
-/** Divides the legacy fold and the models behind it from the current models above. */
-const LEGACY_GROUP = "legacy";
-
-/**
- * The fold follows the selected model until the user toggles it: `auto` opens it only when the
- * selected model is legacy, so a thread's own model is never hidden behind it.
- */
-type LegacyFoldState = "auto" | "open" | "closed";
-
-function findDisplayProvider(
-  selectedProviderId: string | undefined,
-  normalizedModelId: string,
-): ModelProvider | undefined {
-  if (selectedProviderId) {
-    return MODEL_PROVIDERS.find((provider) => provider.id === selectedProviderId);
-  }
-  return MODEL_PROVIDERS.find((provider) =>
-    provider.models.some((model) => model.id === normalizedModelId),
-  );
-}
-
-function getSelectedModelPresentation(
-  selectedModelId: string,
-  selectedProviderId: string | undefined,
-): SelectedModelPresentation {
-  const model = findModelById(selectedModelId);
-  const normalizedModelId = model?.id ?? selectedModelId;
-  const displayProvider = findDisplayProvider(selectedProviderId, normalizedModelId);
-  const label = model?.label ?? selectedModelId;
-  const shortLabel = model && displayProvider
-    ? label.replace(`${displayProvider.name} `, "")
-    : label;
-
-  return {
-    displayProvider,
-    normalizedModelId,
-    selectedProviderId: selectedProviderId ?? displayProvider?.id,
-    iconProviderId: iconProviderIdFor(displayProvider),
-    shortLabel,
-  };
-}
-
-function getDefaultProviderId(
-  selectedProviderId: string | undefined,
-  displayProvider: ModelProvider | undefined,
-): ModelPickerTab {
-  const preferredProviderId = selectedProviderId ?? displayProvider?.id;
-  const providerExists = preferredProviderId
-    ? MODEL_PROVIDERS.some((provider) => provider.id === preferredProviderId)
-    : false;
-
-  if (providerExists) return preferredProviderId!;
-  return MODEL_PROVIDERS.find((provider) => !provider.comingSoon)?.id ?? FAVORITES_TAB;
-}
-
-function getProvidersForLeftRail(
-  providerLocked: boolean | undefined,
-  displayProvider: ModelProvider | undefined,
-): readonly ModelProvider[] {
-  if (providerLocked && displayProvider) {
-    return MODEL_PROVIDERS.filter((provider) => provider.id === displayProvider.id);
-  }
-  return MODEL_PROVIDERS;
-}
-
-function isProviderUsable(
-  providerId: string,
-  availabilityList: readonly {
-    id: string;
-    enabled: boolean;
-    hasAdapter: boolean;
-    cli: { status: string };
-  }[],
-): boolean {
-  const provider = availabilityList.find((entry) => entry.id === providerId);
-  if (!provider) return true;
-  return provider.enabled && provider.hasAdapter && provider.cli.status !== "not_found";
-}
-
-function getVisibleFavorites(
-  favorites: readonly ModelFavoriteEntry[],
-  canUseProvider: (providerId: string) => boolean,
-  providerLocked: boolean | undefined,
-  displayProvider: ModelProvider | undefined,
-): ModelFavoriteEntry[] {
-  return favorites.filter((favorite) => {
-    const providerIsHidden = !canUseProvider(favorite.providerId);
-    const outsideLockedProvider = providerLocked
-      && displayProvider
-      && favorite.providerId !== displayProvider.id;
-    return !providerIsHidden && !outsideLockedProvider;
-  });
-}
-
-function filterModelsBySearchQuery(
-  models: ModelProvider["models"],
-  searchQuery: string,
-): ModelProvider["models"] {
-  const tokens = tokenizeSearch(searchQuery);
-  if (tokens.length === 0) return models;
-  return models.filter((model) =>
-    matchesAllTokens([model.label, model.id, model.group ?? ""], tokens),
-  );
-}
-
-function filterFavoritesBySearchQuery(
-  favorites: readonly ModelFavoriteEntry[],
-  searchQuery: string,
-): ModelFavoriteEntry[] {
-  const tokens = tokenizeSearch(searchQuery);
-  if (tokens.length === 0) return [...favorites];
-  return favorites.filter((favorite) =>
-    matchesAllTokens([favorite.label, favorite.modelId], tokens),
-  );
-}
-
-function groupModels(models: ModelProvider["models"]): { label: string; models: ModelProvider["models"] }[] | null {
-  if (!catalogUsesModelGroups(models)) return null;
-
-  const groups = new Map<string, ModelProvider["models"]>();
-  for (const model of models) {
-    const label = model.group?.trim() ?? "";
-    const groupedModels = groups.get(label) ?? [];
-    groups.set(label, [...groupedModels, model]);
-  }
-  return [...groups].map(([label, groupedModels]) => ({
-    label,
-    models: groupedModels,
-  }));
-}
-
-function getFavoriteActionLabel(label: string, starred: boolean): string {
-  return starred ? `Remove ${label} from favourites` : `Add ${label} to favourites`;
-}
-
-function getProviderDisabled(
-  providerId: string,
-  availabilityList: readonly { id: string; enabled: boolean }[],
-): boolean {
-  const provider = availabilityList.find((entry) => entry.id === providerId);
-  return provider ? !provider.enabled : false;
-}
-
-function isProviderTabUnavailable(
-  provider: ModelProvider,
-  providerDisabled: boolean,
-): boolean {
-  return provider.comingSoon || providerDisabled;
-}
-
-function useProviderModelCatalog(): ProviderModelCatalog {
-  const [dynamicModels, setDynamicModels] = useState<Map<string, ModelProvider["models"]>>(
-    new Map(),
-  );
-  const dynamicModelsRef = useRef<Map<string, ModelProvider["models"]>>(new Map());
-  const [loadingProviders, setLoadingProviders] = useState<Set<string>>(new Set());
-  const fetchingRef = useRef<Set<string>>(new Set());
-  const fetchFailedAtRef = useRef<Map<string, number>>(new Map());
-
-  const fetchProviderModels = useCallback(async (providerId: string) => {
-    const lastFailedAt = fetchFailedAtRef.current.get(providerId);
-    const isCoolingDown = lastFailedAt !== undefined
-      && Date.now() - lastFailedAt < FETCH_RETRY_COOLDOWN_MS;
-
-    if (
-      fetchingRef.current.has(providerId)
-      || dynamicModelsRef.current.has(providerId)
-      || isCoolingDown
-    ) {
-      return;
-    }
-
-    fetchingRef.current.add(providerId);
-    setLoadingProviders((currentProviders) => new Set(currentProviders).add(providerId));
-    try {
-      const providerModels = await getTransport().listProviderModels(providerId);
-      const models = providerModels.map((model) => toModelDefinition(providerId, model));
-      const updatedModels = new Map(dynamicModelsRef.current).set(providerId, models);
-      dynamicModelsRef.current = updatedModels;
-      setDynamicModels(updatedModels);
-      registerProviderModels(providerId, models);
-    } catch {
-      fetchFailedAtRef.current.set(providerId, Date.now());
-    } finally {
-      fetchingRef.current.delete(providerId);
-      setLoadingProviders((currentProviders) => {
-        const nextProviders = new Set(currentProviders);
-        nextProviders.delete(providerId);
-        return nextProviders;
-      });
-    }
-  }, []);
-
-  const getModels = useCallback((provider: ModelProvider): ModelProvider["models"] => {
-    const models = dynamicModels.get(provider.id);
-    return models && models.length > 0 ? models : provider.models;
-  }, [dynamicModels]);
-
-  return { getModels, loadingProviders, fetchProviderModels };
-}
-
-function useResetPickerOnOpen(
-  open: boolean,
-  providerLocked: boolean | undefined,
-  displayProvider: ModelProvider | undefined,
-  defaultProviderId: ModelPickerTab,
-  setActiveTab: (tab: ModelPickerTab) => void,
-  setQuery: (searchQuery: string) => void,
-): void {
-  const previouslyOpen = useRef(false);
-  const displayProviderId = displayProvider?.id;
-
-  useEffect(() => {
-    const opened = open && !previouslyOpen.current;
-    if (opened) {
-      const nextTab = providerLocked && displayProviderId
-        ? displayProviderId
-        : defaultProviderId;
-      setActiveTab(nextTab);
-      setQuery("");
-    }
-    previouslyOpen.current = open;
-  }, [open, providerLocked, displayProviderId, defaultProviderId, setActiveTab, setQuery]);
-}
-
-function useFetchProviderModelsWhenOpen(
-  open: boolean,
-  activeTab: ModelPickerTab,
-  favoritesVisible: readonly ModelFavoriteEntry[],
-  fetchProviderModels: (providerId: string) => Promise<void>,
-): void {
-  useEffect(() => {
-    if (!open) return;
-
-    if (activeTab !== FAVORITES_TAB) {
-      void fetchProviderModels(activeTab);
-      return;
-    }
-
-    const providerIds = new Set(favoritesVisible.map((favorite) => favorite.providerId));
-    for (const providerId of providerIds) {
-      void fetchProviderModels(providerId);
-    }
-  }, [open, activeTab, favoritesVisible, fetchProviderModels]);
-}
-
-function optionKey(providerId: string, modelId: string): string {
-  return `${providerId}:${modelId}`;
-}
-
-function providerName(providerId: string): string {
-  return MODEL_PROVIDERS.find((provider) => provider.id === providerId)?.name ?? providerId;
-}
-
-function formatEndDate(availableUntil: string): string {
-  return new Date(`${availableUntil}T00:00:00`).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function isLegacyModel(model: ModelProvider["models"][number]): boolean {
-  return model.lifecycle === "legacy";
-}
-
-/** Whether the legacy fold shows its models, given the user's toggle and the selected model. */
-function isLegacyFoldExpanded(
-  foldState: LegacyFoldState,
-  models: ModelProvider["models"],
-  selectedModelId: string | undefined,
-): boolean {
-  if (foldState !== "auto") return foldState === "open";
-  return models.some((model) => isLegacyModel(model) && model.id === selectedModelId);
-}
-
-function catalogModelOptions(
-  providerId: string,
-  models: ModelProvider["models"],
-  groupOverride?: string,
-): ModelOption[] {
-  const groups = groupModels(models) ?? [{ label: undefined, models }];
-  return groups.flatMap((group) =>
-    group.models.map((model) => ({
-      kind: "model" as const,
-      modelId: model.id,
-      providerId,
-      label: model.label,
-      group: groupOverride ?? group.label,
-      endedOn: accessEndedOn(model),
-      showProvider: false,
-    })),
-  );
-}
-
-function providerModelOptions(
-  providerId: string,
-  models: ModelProvider["models"],
-  searchQuery: string,
-  legacyExpanded: boolean,
-): ModelPickerOption[] {
-  // A search reaches every model, so a legacy match is listed with the rest instead of behind the fold.
-  if (tokenizeSearch(searchQuery).length > 0) {
-    return catalogModelOptions(providerId, filterModelsBySearchQuery(models, searchQuery));
-  }
-  const currentOptions = catalogModelOptions(providerId, models.filter((model) => !isLegacyModel(model)));
-  const legacyModels = models.filter(isLegacyModel);
-  if (legacyModels.length === 0) return currentOptions;
-  const fold: LegacyFoldOption = { kind: "legacy-fold", providerId, count: legacyModels.length, expanded: legacyExpanded };
-  const legacyOptions = legacyExpanded ? catalogModelOptions(providerId, legacyModels, LEGACY_GROUP) : [];
-  return [...currentOptions, fold, ...legacyOptions];
-}
-
-function accessEndedOn(model: ModelProvider["models"][number]): string | undefined {
-  return model.availableUntil && !isModelAvailable(model) ? formatEndDate(model.availableUntil) : undefined;
-}
-
-function favoriteModelOptions(
-  favorites: readonly ModelFavoriteEntry[],
-  getModels: (provider: ModelProvider) => ModelProvider["models"],
-): ModelOption[] {
-  return favorites.map((favorite) => {
-    // A star outlives the model's access, so each favourite is checked against its provider's catalog.
-    const provider = MODEL_PROVIDERS.find((entry) => entry.id === favorite.providerId);
-    const model = provider && getModels(provider).find((entry) => entry.id === favorite.modelId);
-    return {
-      kind: "model" as const,
-      modelId: favorite.modelId,
-      providerId: favorite.providerId,
-      label: favorite.label,
-      endedOn: model ? accessEndedOn(model) : undefined,
-      showProvider: true,
-    };
-  });
-}
-
-function getPickerTabs(
-  providers: readonly ModelProvider[],
-  lockedToProvider: boolean,
-  isProviderDisabled: (providerId: string) => boolean,
-): PickerTab[] {
-  const providerTabs = providers.map((provider): PickerTab => {
-    const providerDisabled = isProviderDisabled(provider.id);
-    const unavailable = isProviderTabUnavailable(provider, providerDisabled);
-    return {
-      id: provider.id,
-      label: provider.name,
-      icon: <ProviderIcon provider={provider.id} className="size-[1.4rem]" />,
-      disabled: unavailable,
-      disabledReason: unavailable ? providerTabUnavailableReason(provider, providerDisabled) : undefined,
-    };
-  });
-  if (lockedToProvider) return providerTabs;
-  return [
-    { id: FAVORITES_TAB, label: "Favourites", icon: <Star aria-hidden className="size-[1.4rem]" /> },
-    ...providerTabs,
-  ];
-}
-
-function favoriteAction(
-  option: ModelOption,
-  starred: boolean,
-  onToggle: (entry: ModelFavoriteEntry) => void,
-): PickerRowAction {
-  return {
-    label: getFavoriteActionLabel(option.label, starred),
-    icon: <Star className={starred ? "fill-primary text-primary" : "text-ink"} />,
-    pinned: starred,
-    run: () => onToggle({ providerId: option.providerId, modelId: option.modelId, label: option.label }),
-  };
-}
-
-function legacyFoldRow(option: LegacyFoldOption): PickerRow {
-  return {
-    key: `${option.providerId}:legacy-fold`,
-    name: "Legacy models",
-    tag: String(option.count),
-    expanded: option.expanded,
-    group: LEGACY_GROUP,
-  };
-}
-
-/** The Composer's model trigger: provider icon and model name in ink, then a muted detail and chevron. */
 function ModelSelectorTrigger({
   iconProviderId,
   shortLabel,
@@ -523,8 +53,8 @@ function ModelSelectorTrigger({
 }
 
 /**
- * Composer model picker: a {@link Picker} with a Favourites tab and one tab per provider. A
- * provider-locked thread keeps only its provider's tab.
+ * A standalone model picker: a trigger and a popover around {@link ModelPickerPanel}. A pick closes the popover. The
+ * composer hosts the panel in its split capsule instead.
  */
 export function ModelSelector({
   selectedModelId,
@@ -536,110 +66,28 @@ export function ModelSelector({
   trigger: customTrigger,
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<ModelPickerTab>(FAVORITES_TAB);
   const [query, setQuery] = useState("");
-  const [legacyFold, setLegacyFold] = useState<LegacyFoldState>("auto");
-
-  const favorites = useModelFavoritesStore((store) => store.entries);
-  const toggleFavorite = useModelFavoritesStore((store) => store.toggleFavorite);
-  const availabilityList = useProviderAvailabilityStore((store) => store.providers);
-  const { getModels, loadingProviders, fetchProviderModels } = useProviderModelCatalog();
   const presentation = getSelectedModelPresentation(selectedModelId, selectedProviderId);
-  const { displayProvider } = presentation;
-
-  const canUseProvider = useCallback(
-    (providerId: string) => isProviderUsable(providerId, availabilityList),
-    [availabilityList],
-  );
-  const isProviderDisabled = useCallback(
-    (providerId: string) => getProviderDisabled(providerId, availabilityList),
-    [availabilityList],
-  );
-  const defaultProviderId = getDefaultProviderId(selectedProviderId, displayProvider);
-  const tabs = getPickerTabs(
-    getProvidersForLeftRail(providerLocked, displayProvider),
-    Boolean(providerLocked && displayProvider),
-    isProviderDisabled,
-  );
-  const favoritesVisible = useMemo(
-    () => getVisibleFavorites(favorites, canUseProvider, providerLocked, displayProvider),
-    [favorites, canUseProvider, providerLocked, displayProvider],
-  );
-  const starredKeys = useMemo(
-    () => new Set(favorites.map((favorite) => optionKey(favorite.providerId, favorite.modelId))),
-    [favorites],
-  );
-
-  const selectedModelInTab = presentation.selectedProviderId === activeTab ? presentation.normalizedModelId : undefined;
-  const items = useMemo((): ModelPickerOption[] => {
-    if (activeTab === FAVORITES_TAB) {
-      return favoriteModelOptions(filterFavoritesBySearchQuery(favoritesVisible, query), getModels);
-    }
-    const provider = MODEL_PROVIDERS.find((entry) => entry.id === activeTab);
-    if (!provider) return [];
-    const models = getModels(provider);
-    const legacyExpanded = isLegacyFoldExpanded(legacyFold, models, selectedModelInTab);
-    return providerModelOptions(provider.id, models, query, legacyExpanded);
-  }, [activeTab, favoritesVisible, getModels, query, legacyFold, selectedModelInTab]);
-
-  const renderItem = useCallback(
-    (option: ModelPickerOption): PickerRow => {
-      if (option.kind === "legacy-fold") return legacyFoldRow(option);
-      const key = optionKey(option.providerId, option.modelId);
-      const starred = starredKeys.has(key);
-      return {
-        key,
-        name: option.label,
-        group: option.group,
-        disabled: option.endedOn !== undefined,
-        disabledReason: option.endedOn && `Subscription access to ${option.label} ended on ${option.endedOn}.`,
-        description: option.showProvider ? (
-          <>
-            <ProviderIcon provider={option.providerId} size={12} />
-            <span className="min-w-0 text-fade">{providerName(option.providerId)}</span>
-          </>
-        ) : undefined,
-        // A model whose access ended can still be unstarred, but not newly starred.
-        action: option.endedOn && !starred ? undefined : favoriteAction(option, starred, toggleFavorite),
-      };
-    },
-    [starredKeys, toggleFavorite],
-  );
-
-  const showTab = useCallback((tab: ModelPickerTab) => {
-    setActiveTab(tab);
-    setLegacyFold("auto");
-  }, []);
-
-  useResetPickerOnOpen(open, providerLocked, displayProvider, defaultProviderId, showTab, setQuery);
-  useFetchProviderModelsWhenOpen(open, activeTab, favoritesVisible, fetchProviderModels);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const genieMotion = useMemo((): PopoverMotion => ({ kind: "genie", origin: () => triggerRef.current }), []);
   const popoverActions = useRef<PopoverRootActions | null>(null);
 
-  const handlePick = (option: ModelPickerOption) => {
-    if (option.kind === "legacy-fold") {
-      setLegacyFold(option.expanded ? "closed" : "open");
-      return;
-    }
-    onSelect(option.modelId, option.providerId);
-    // Closing through the root rather than `setOpen` lets the picker pour back into its trigger.
-    popoverActions.current?.close();
-  };
-
-  const trigger = (
-    <PopoverTrigger
-      ref={triggerRef}
-      render={
-        customTrigger ?? <ModelSelectorTrigger iconProviderId={presentation.iconProviderId} shortLabel={presentation.shortLabel} detail={detail} />
-      }
-    />
-  );
-
-  const loading = activeTab !== FAVORITES_TAB && loadingProviders.has(activeTab);
   return (
-    <Popover open={open} onOpenChange={setOpen} motion={genieMotion} actionsRef={popoverActions}>
-      {trigger}
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setQuery("");
+        setOpen(next);
+      }}
+      motion={genieMotion}
+      actionsRef={popoverActions}
+    >
+      <PopoverTrigger
+        ref={triggerRef}
+        render={
+          customTrigger ?? <ModelSelectorTrigger iconProviderId={presentation.iconProviderId} shortLabel={presentation.shortLabel} detail={detail} />
+        }
+      />
       <PopoverContent
         role="dialog"
         aria-label="Choose model and provider"
@@ -647,27 +95,18 @@ export function ModelSelector({
         align="end"
         className={cn(PICKER_PANEL_CLASS, "max-h-(--available-height) overflow-y-auto")}
       >
-        <Picker
-          numberedShortcuts
-          tabs={tabs}
-          activeTab={activeTab}
-          onTabChange={showTab}
+        <ModelPickerPanel
+          selectedModelId={selectedModelId}
+          selectedProviderId={selectedProviderId}
+          providerLocked={providerLocked}
           query={query}
           onQueryChange={setQuery}
-          searchPlaceholder="Search models"
-          items={items}
-          total={null}
-          status={loading ? "loading" : "ready"}
-          selectedKey={
-            presentation.selectedProviderId
-              ? optionKey(presentation.selectedProviderId, presentation.normalizedModelId)
-              : undefined
-          }
-          renderItem={renderItem}
-          onSelect={handlePick}
+          onSelect={(modelId, providerId) => {
+            onSelect(modelId, providerId);
+            // Closing through the root rather than `setOpen` lets the picker pour back into its trigger.
+            popoverActions.current?.close();
+          }}
           footer={settings}
-          hairlines={false}
-          selectedCheck={false}
         />
       </PopoverContent>
     </Popover>
