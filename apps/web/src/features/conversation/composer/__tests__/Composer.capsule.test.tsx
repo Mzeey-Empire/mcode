@@ -84,7 +84,6 @@ vi.mock("@/components/chat/FileTagPopup", () => ({
 
 vi.mock("@/components/chat/SpellcheckContextMenu", () => ({ SpellcheckContextMenu: () => <div /> }));
 vi.mock("@/components/chat/ComposerQueueList", () => ({ ComposerQueueList: () => <div /> }));
-vi.mock("@/components/chat/ContextTracker", () => ({ ContextTracker: () => <div /> }));
 vi.mock("@/components/chat/SlashCommandTray", () => ({ SlashCommandTray: () => <div /> }));
 
 function seedCodexThread(overrides: Partial<ReturnType<typeof createMockThread>> = {}) {
@@ -197,5 +196,60 @@ describe("Composer capsule", () => {
     const ultra = await screen.findByRole("menuitemcheckbox", { name: /Ultra/ });
     expect(ultra).toHaveAttribute("aria-checked", "true");
     expect(ultra).toHaveAttribute("aria-disabled", "true");
+  });
+
+  describe("run button", () => {
+    function seedDraft(input: string) {
+      useComposerDraftStore.setState({
+        drafts: { "thread-1": { input, attachments: [], modelId: "", reasoning: "medium" } },
+        pendingPrefill: null,
+      });
+    }
+
+    function runButtons() {
+      return screen.getAllByRole("button", { name: /^(Send message|Queue message|Stop agent)$/ });
+    }
+
+    it("shows only Queue while the agent runs with a draft", async () => {
+      resetThreadStoreForTests({ runningThreadIds: new Set(["thread-1"]) });
+      seedDraft("next step");
+      render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+
+      await screen.findByRole("button", { name: "Queue message" });
+      expect(runButtons()).toHaveLength(1);
+    });
+
+    it("shows only Stop while the agent runs with an empty draft", async () => {
+      resetThreadStoreForTests({ runningThreadIds: new Set(["thread-1"]) });
+      render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+
+      await screen.findByRole("button", { name: "Stop agent" });
+      expect(runButtons()).toHaveLength(1);
+    });
+
+    it("disables Send while idle with an empty draft", async () => {
+      render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+
+      expect(await screen.findByRole("button", { name: "Send message" })).toBeDisabled();
+    });
+  });
+
+  describe("context label", () => {
+    it("shows the rounded percentage in the warning tone from 70%", async () => {
+      seedCodexThread({ last_context_tokens: 144_800, context_window: 200_000 });
+      render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+
+      const label = await screen.findByTestId("composer-context-label");
+      expect(label).toHaveTextContent("72%");
+      expect(label).toHaveClass("text-warning");
+    });
+
+    it("shows nothing at 50%", async () => {
+      seedCodexThread({ last_context_tokens: 100_000, context_window: 200_000 });
+      render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+
+      await screen.findByRole("button", { name: "Send message" });
+      expect(screen.queryByTestId("composer-context-label")).not.toBeInTheDocument();
+    });
   });
 });

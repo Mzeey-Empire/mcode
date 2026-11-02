@@ -963,9 +963,9 @@ Paper's "04 · Components" page holds the full state matrix for every variant.
   view control in a panel header's second row. When it toggles something on,
   the fill becomes `control-border` and the icon stays `ink`. A round button
   that floats over content is 40px and takes the `floating` shadow.
-- **Composer Send:** a round primary button. While a turn runs the same slot
-  holds Stop: an `ink` circle with a `background`-colored square, never amber
-  or red.
+- **Composer Send:** a 32px round primary button. While a turn runs, the same
+  slot holds Stop (an `ink` circle with a `background` square, never amber or
+  red), or Queue once there is a draft. The Composer section has every state.
 - **Split button:** one control with the action on the left and a chevron on
   the right that opens a menu of alternate methods ("Implement v2 ⌄",
   "Commit 3 files ⌄"). The menu lists the alternates by name with their
@@ -1196,9 +1196,20 @@ are provider-native, so they show the parent thread's provider.
   chips. Use chips only for removable attached entities such as files, images,
   comments, or enabled capabilities. Capability chips such as Plan use the
   neutral selected fill.
-- The submit control owns pending state. While a turn is running, the same
-  location exposes the neutral Stop or queue behavior according to the
-  product contract.
+- One run button ends the right group: a 32px circle with a 16px icon, 2px
+  after the context label. Idle with something to send it is Send in the
+  amber fill. Idle and empty it is a disabled Send in the `selected` fill
+  with a `muted` icon that does not look pressable. While a turn runs with
+  an empty draft it is Stop: an `ink` circle with a 12px `background` square
+  of 2px radius. While a turn runs with a draft, a file, or an annotation it
+  is Queue, with the Send look. A running thread never shows a second
+  button.
+- The context label replaces the old ring. It shows nothing below 70% of the
+  context window or when the window is unknown. From 70% it reads "72%
+  context" in `warning`, and from 90% in `destructive`; below the 680px tier
+  it reads only "72%". A low provider quota shows it below 70% in `warning`.
+  It is 32px high with tabular numbers, and hover or focus opens the token
+  breakdown card, which adds a "Provider quota: Low" line when quota is low.
 - Trays that belong to the composer (the task row, queued messages, file and
   image tiles, the slash command list) dock flush on its top edge with the
   panel fill and no border.

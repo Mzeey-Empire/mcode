@@ -257,9 +257,6 @@ vi.mock("@/components/chat/ComposerQueueList", () => ({
   },
 }));
 
-vi.mock("@/components/chat/ContextTracker", () => ({
-  ContextTracker: () => <div />,
-}));
 
 vi.mock("@/components/chat/SlashCommandTray", () => ({
   SlashCommandTray: () => <div />,

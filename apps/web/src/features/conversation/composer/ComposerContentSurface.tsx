@@ -4,7 +4,6 @@ import { AttachmentPreview } from "@/components/chat/AttachmentPreview";
 import { ComposerAddMenu } from "@/components/chat/ComposerAddMenu";
 import { ComposerBranchBar } from "@/components/chat/ComposerBranchBar";
 import { ComposerQueueList } from "@/components/chat/ComposerQueueList";
-import { ContextTracker } from "@/components/chat/ContextTracker";
 import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPopup";
 import { PlanCommentsComposerChip } from "./PlanCommentsComposerChip";
 import { usePlanCommentChip } from "./usePlanCommentChip";
@@ -30,6 +29,7 @@ import type { Thread } from "@/transport";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { cn } from "@/lib/utils";
 import { ComposerAttachedCapabilities } from "./controls/ComposerAttachedCapabilities";
+import { ComposerContextLabel } from "./capsule/ComposerContextLabel";
 import { ComposerCapsuleSplit } from "./capsule/ComposerCapsuleSplit";
 import { ComposerModes, type ComposerModeView } from "./capsule/ComposerModes";
 import { useCapsuleRows } from "./capsule/capsule-layout";
@@ -422,33 +422,6 @@ function ComposerStartingSpinner({
   );
 }
 
-function ComposerInlineStopButton({
-  model,
-  actions,
-}: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
-  // The starting Stop already cancels the dispatched first turn, so a second Stop would be redundant.
-  if (model.startingThread || !model.isAgentRunning || !model.hasContent || model.planPending) return null;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant="ghost"
-            shape="round"
-            size="icon-compact"
-            onClick={actions.onStop}
-            aria-label="Stop agent"
-          >
-            <div className="size-2.5 rounded-[2px] bg-ink" />
-          </Button>
-        }
-      />
-      <TooltipContent>Stop agent</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function getTrackerContextWindow(
   modelId: ComposerCapsuleSplitProps["selection"]["modelId"],
   contextWindow: ContextWindowMode | null,
@@ -463,7 +436,7 @@ function getTrackerContextWindow(
     ?? undefined;
 }
 
-function ComposerContextWindowTracker({
+function ComposerContextUsage({
   model,
 }: Pick<ComposerContentSurfaceProps, "model">) {
   if (!model.threadId) return null;
@@ -477,7 +450,7 @@ function ComposerContextWindowTracker({
   );
 
   return (
-    <ContextTracker
+    <ComposerContextLabel
       tokensIn={model.contextEntry?.lastTokensIn ?? model.activeThread?.last_context_tokens ?? 0}
       contextWindow={contextWindow}
       totalProcessedTokens={model.contextEntry?.totalProcessedTokens}
@@ -588,9 +561,9 @@ function ComposerSendButton({
       type="button"
       variant={SEND_BUTTON_VARIANT[visualState]}
       shape="round"
-      size="icon-default"
-      // Empty Send recedes to a panel circle so the amber fill only appears once there is something to send.
-      className={cn(visualState === "empty" && "bg-panel text-muted")}
+      size="icon-compact"
+      // Empty Send recedes to a selected circle so the amber fill only appears once there is something to send.
+      className={cn("ml-0.5", visualState === "empty" && "cursor-default bg-selected text-muted disabled:opacity-100")}
       onClick={onClick}
       disabled={disabled}
       aria-label={SEND_BUTTON_COPY[copy]}
@@ -598,7 +571,7 @@ function ComposerSendButton({
       {visualState === "stopping" ? (
         <Spinner size={16} className="text-current" />
       ) : visualState === "stop" || visualState === "starting" ? (
-        <div className="size-3.5 rounded-[2px] bg-current" />
+        <div className="size-3 rounded-[2px] bg-current" />
       ) : (
         <ArrowUp />
       )}
@@ -683,8 +656,6 @@ function ComposerCapsuleRight({ model, actions, rightRef }: Pick<ComposerCapsule
   return (
     <div ref={rightRef} className="flex min-w-0 items-center justify-end gap-1 [grid-area:R]">
       <ComposerStartingSpinner startingThread={model.startingThread} />
-      <ComposerInlineStopButton model={model} actions={actions} />
-      <ComposerContextWindowTracker model={model} />
       <ComposerCapsuleSplit
         anchorRef={model.composerContainerRef}
         threadId={model.threadId}
@@ -698,6 +669,7 @@ function ComposerCapsuleRight({ model, actions, rightRef }: Pick<ComposerCapsule
         onSelectionChange={actions.onSelectionChange}
         onSelectionTouched={actions.onSelectionTouched}
       />
+      <ComposerContextUsage model={model} />
       <ComposerSendButton
         model={model}
         actions={actions}
