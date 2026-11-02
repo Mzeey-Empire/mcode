@@ -381,6 +381,25 @@ describe("AgentService cleanup through production worker composition", { timeout
       && event.outcome !== undefined)).toEqual([expect.objectContaining({ outcome: "interrupted" })]);
   });
 
+  it("reports the provider's own ending when it commits while a user stop drains the turn", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    let releaseFence!: () => void;
+    const fenceReady = new Promise<void>((resolve) => { releaseFence = resolve; });
+    const fence = vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementationOnce(() => fenceReady);
+    const stopping = fixture.service.stopSession(fixture.thread.id, { by: "user" });
+    try {
+      await vi.waitFor(() => expect(fence).toHaveBeenCalledTimes(1));
+      await fixture.emit(turnComplete(fixture.thread.id, turn.turnExecutionId));
+      await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
+    } finally {
+      releaseFence();
+    }
+
+    expect(await stopping).toMatchObject({ status: "already-terminal",
+      snapshot: { phase: "completed", turnExecutionId: turn.turnExecutionId } });
+  });
+
   it("recovers a failed lost-stream drain and admits a replacement", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);
