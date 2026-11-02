@@ -531,9 +531,10 @@ function workFoldItem(message: Message, input: StableItemInput, summary: TurnSum
   };
 }
 
-function turnMetaLineItem(message: Message, summary: TurnSummary, providerContinuationMessageIds: ReadonlySet<string> | undefined): ChatVirtualItem | undefined {
+function turnMetaLineItem(message: Message, summary: TurnSummary, input: StableItemInput, folded: boolean): ChatVirtualItem | undefined {
   const { steps, subagents } = summary.counts;
-  const durationMs = providerContinuationMessageIds?.has(message.id) && steps === 0 ? summary.durationMs : null;
+  // A tool-free continuation has no other place to show its time, unless its thoughts fold under "Worked for".
+  const durationMs = input.providerContinuationMessageIds?.has(message.id) && steps === 0 && !folded ? summary.durationMs : null;
   return steps > 0 || subagents > 0 || durationMs !== null
     ? { key: `turn-meta-line:${message.id}`, type: "turn-meta-line", messageId: message.id, steps, subagents, ...(durationMs !== null ? { durationMs } : {}) }
     : undefined;
@@ -571,7 +572,7 @@ function stableItemsForMessage(message: Message, input: StableItemInput): ChatVi
   return definedItems([
     ...workItems,
     messageVirtualItem(message, input),
-    summary && turnMetaLineItem(message, summary, input.providerContinuationMessageIds),
+    summary && turnMetaLineItem(message, summary, input, workItems.some((item) => item.type === "work-fold")),
     turnChangesItem(message, input),
     turnEndNoticeItem(message, ending),
   ]);

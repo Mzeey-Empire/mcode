@@ -96,6 +96,17 @@ describe("one lifecycle for the current turn", () => {
       .toEqual([{ key: "turn-meta-line:continuation-answer", type: "turn-meta-line", messageId: "continuation-answer", steps: 0, subagents: 0, durationMs: 3_000 }]);
   });
 
+  it("names a continuation's wall time once when its thoughts already fold under that time", () => {
+    const saved = { ...answer("continuation-answer", EXECUTION), outcome: "completed" as const };
+    const records: PersistedNarrativeRecordsByMessage = { [saved.id]: { approvals: [], hooks: [], tools: [], thoughts: [{
+      id: "thought", message_id: saved.id, text: "Checking the background result", started_at: NOW, ended_at: NOW, sort_order: 0,
+    }] } };
+    const summaries = { [saved.id]: { counts: { steps: 0, thoughts: 1, subagents: 0 }, durationMs: 1_000, outcome: "completed" as const } };
+    const rows = buildStableItems([saved], undefined, undefined, undefined, records, summaries, undefined, undefined, undefined,
+      undefined, undefined, new Set([saved.id]));
+    expect(rows.filter((row) => row.type === "work-fold" || row.type === "turn-meta-line").map((row) => row.type)).toEqual(["work-fold"]);
+  });
+
   it.each<TurnRuntimePhase>(["running", "finalizing"])("keeps %s active despite a stale saved outcome", (phase) => {
     const record = createEmptyThreadRecord();
     record.messages = [answer("previous-answer", "previous-execution"), answer("current-answer", EXECUTION)];
