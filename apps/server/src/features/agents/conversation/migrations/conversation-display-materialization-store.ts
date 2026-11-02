@@ -19,7 +19,8 @@ import { ApprovalReceiptStore } from "../../approvals/approval-receipt-store.js"
 import { terminalAssistantProjectionCondition, terminalProviderChildTurnCondition } from "../../canonical/canonical-conversation-visibility.js";
 
 const MATERIALIZATION_STATE_ID = 1;
-// completed holds the version whose backfill finished; earlier builds wrote 1 and replayed every start, so version 2 gives existing databases one last catch-up and child repair.
+// completed holds the version whose backfill finished. Earlier builds wrote 1 and replayed every start,
+// so version 2 gives existing databases one last catch-up and child repair.
 const DISPLAY_MATERIALIZATION_VERSION = 2;
 const MATERIALIZATION_BATCH_ITEMS = 100;
 const MATERIALIZATION_BATCH_BYTES = 1_048_576;
