@@ -209,3 +209,37 @@ it("requests durable repair after a batched saved gap and live prefix, then rest
   expect(useThreadStore.getState().runningThreadIds.has(THREAD)).toBe(true);
   expect(setThreadSubscriptions).toHaveBeenCalledTimes(2);
 });
+
+it("resubscribes and recovers a thread whose narrower request returned after the target changed", async () => {
+  const OTHER = "other-thread";
+  const snapshot = (threadId: string): SetThreadSubscriptionsResult["canonicalRecoveries"][number] => ({
+    phase: "recovery", threadId, epoch: EPOCH, acceptedThrough: 0, savedThrough: 0, retained: [], loss: "none",
+    durable: { mode: "snapshot", threadId, snapshot: {
+      revision: { conversationRevision: 1, rosterRevision: 0 },
+      state: threadId === THREAD ? fixture().seeded : createAgentModelState(),
+    } },
+  });
+  setThreadSubscriptions.mockImplementation(async (input) => ({ canonicalRecoveries: input.threadIds.map(snapshot) }));
+  const { rerender } = renderHook((props: { active: string; desired: string[] }) => useThreadSubscriptionReconciler({
+    activeThreadId: props.active, desiredThreadIds: props.desired, connectionStatus: "connected",
+    runningThreadIds: new Set(), canonicalRecoverySignature: "",
+  }), { initialProps: { active: OTHER, desired: [OTHER, THREAD] } });
+  await act(async () => {});
+
+  // Selecting THREAD subscribes it alone, then the outgoing transcript joins the set while that request is in flight.
+  resetThreadStoreForTests({ currentThreadId: THREAD });
+  let resolveNarrow: ((result: SetThreadSubscriptionsResult) => void) | undefined;
+  setThreadSubscriptions.mockImplementationOnce(() => new Promise((resolve) => { resolveNarrow = resolve; }));
+  rerender({ active: THREAD, desired: [THREAD] });
+  await act(async () => {});
+  rerender({ active: THREAD, desired: [THREAD, OTHER] });
+  await act(async () => {});
+  const completeNarrow = resolveNarrow;
+  if (!completeNarrow) throw new Error("Missing narrow subscription resolver");
+  await act(async () => {
+    completeNarrow({ canonicalRecoveries: [snapshot(THREAD)] });
+  });
+
+  expect(setThreadSubscriptions.mock.lastCall?.[0].threadIds).toEqual([THREAD, OTHER]);
+  expect(useThreadStore.getState().records.get(THREAD)?.canonicalAgent.revision.conversationRevision).toBe(1);
+});
