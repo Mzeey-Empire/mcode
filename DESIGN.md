@@ -1212,10 +1212,13 @@ are provider-native, so they show the parent thread's provider.
   breakdown card, which adds a "Provider quota: Low" line when quota is low.
 - Trays that belong to the composer (the task row, queued messages, file and
   image tiles) dock flush on its top edge with the panel fill and no border.
-- `/` at the start of a word opens the slash menu in the tray's place and
-  look: the same inset and top corners, 8px padding, its bottom edge on the
-  capsule's top border. It covers an open tray exactly, and the covered
-  controls are inert. The list scrolls past 262px with no scrollbar. Rows are
+- `/` at the start of a word opens the slash menu, and `$`, `£` or `₦` opens
+  it with only skills and plugins (a digit after them stays text). It sits in
+  the tray's place and look: the same inset and top corners, 8px padding, its
+  bottom edge on the capsule's top border. Over an open tray, the tray keeps
+  its panel and hides its rows, so a shorter menu still reads as one surface,
+  and the covered controls are inert. The list scrolls past 262px with no
+  scrollbar. Rows are
   32px pills with a 14px icon (`muted`, `ink` on the active row), the name in
   Body with the matched part semibold, and the description in `muted`, both
   fade-truncated. A 1px `border` rule separates Mcode commands, provider

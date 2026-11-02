@@ -1,5 +1,8 @@
-/** Keys that open the command menu at the start of a word. The trigger pattern is built from this list. */
-export const MENU_TRIGGER_KEYS = ["/"] as const;
+/**
+ * Keys that open the command menu at the start of a word. `/` lists everything; a currency key is the shorter path
+ * to skills and plugins only. The trigger pattern is built from this list.
+ */
+export const MENU_TRIGGER_KEYS = ["/", "$", "£", "₦"] as const;
 
 /** One of {@link MENU_TRIGGER_KEYS}. */
 export type MenuTriggerKey = (typeof MENU_TRIGGER_KEYS)[number];
@@ -37,11 +40,26 @@ export function readMenuTrigger(nodeKey: string, textBeforeCaret: string): MenuT
   if (!match) return null;
   const [, lead, key, query] = match;
   if (!isMenuTriggerKey(key)) return null;
+  const scope = key === "/" ? "all" : "skills";
+  // "$5", "£20" and "₦1,000" are money, so a currency key followed by a digit stays plain text.
+  if (scope === "skills" && /^\d/.test(query)) return null;
   return {
     anchor: { nodeKey, start: match.index + lead.length, key },
     query,
-    scope: "all",
+    scope,
   };
+}
+
+/** The entries a trigger lists: names containing its query, and for a currency key only skills and plugins. */
+export function filterMenuCommands<T extends { readonly name: string; readonly namespace: string }>(
+  commands: readonly T[],
+  { query, scope }: Pick<MenuTrigger, "query" | "scope">,
+): T[] {
+  const needle = query.toLowerCase();
+  return commands.filter((command) => (
+    (scope === "all" || command.namespace === "skill" || command.namespace === "plugin")
+    && command.name.toLowerCase().includes(needle)
+  ));
 }
 
 function sameAnchor(a: TriggerAnchor, b: TriggerAnchor): boolean {

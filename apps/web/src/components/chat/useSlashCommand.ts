@@ -14,7 +14,7 @@ import {
   type ComposerCapabilityAction,
   type ResolvedComposerCapability,
 } from "@/features/conversation/composer/composer-capabilities";
-import { readMenuTrigger, slashMenuReducer, type MenuTrigger, type SlashMenuEvent, type SlashMenuState } from "./menu-trigger";
+import { filterMenuCommands, readMenuTrigger, slashMenuReducer, type MenuTrigger, type SlashMenuEvent, type SlashMenuState } from "./menu-trigger";
 
 /** A slash command entry shown in the popup. */
 export type ComposerCommandAction = ComposerCapabilityAction;
@@ -81,8 +81,10 @@ const BUILTIN_COMMANDS: Command[] = [
   },
 ];
 
-function menuQuery(menu: SlashMenuState): string {
-  return menu.status === "open" ? menu.trigger.query : "";
+const CLOSED_MENU_FILTER: Pick<MenuTrigger, "query" | "scope"> = { query: "", scope: "all" };
+
+function menuFilter(menu: SlashMenuState): Pick<MenuTrigger, "query" | "scope"> {
+  return menu.status === "open" ? menu.trigger : CLOSED_MENU_FILTER;
 }
 
 /** Plain inputs have one text node, so their triggers share one anchor key. */
@@ -281,7 +283,7 @@ export function useSlashCommand({
   // last event's result rather than from this render's `menu`.
   const latestMenuRef = useRef(menu);
   const isOpen = menu.status === "open";
-  const filter = menuQuery(menu);
+  const { query: filter, scope } = menuFilter(menu);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   // The visible list is an interaction snapshot. Cache invalidations must not
@@ -351,13 +353,10 @@ export function useSlashCommand({
     [allCommands, openCommands],
   );
 
-  const filtered = useMemo(() => {
-    const f = filter.toLowerCase();
-    const matches = f
-      ? reconciledOpenCommands.filter((c) => c.name.toLowerCase().includes(f))
-      : reconciledOpenCommands;
-    return matches.slice(0, MAX_SLASH_COMMAND_ITEMS);
-  }, [filter, reconciledOpenCommands]);
+  const filtered = useMemo(
+    () => filterMenuCommands(reconciledOpenCommands, { query: filter, scope }).slice(0, MAX_SLASH_COMMAND_ITEMS),
+    [filter, reconciledOpenCommands, scope],
+  );
 
   const displayedSelectedIndex = useMemo(() => {
     const selectedIdentity = selectedCommandIdentityRef.current;

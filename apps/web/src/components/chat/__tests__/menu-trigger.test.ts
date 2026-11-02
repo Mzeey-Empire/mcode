@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readMenuTrigger, slashMenuReducer, type SlashMenuState } from "../menu-trigger";
+import { filterMenuCommands, readMenuTrigger, slashMenuReducer, type SlashMenuState } from "../menu-trigger";
 
 const CLOSED: SlashMenuState = { status: "closed", dismissed: null };
 
@@ -18,6 +18,20 @@ describe("readMenuTrigger", () => {
 
   it("ignores a slash inside a word", () => {
     expect(readMenuTrigger("n1", "a/b")).toBeNull();
+  });
+
+  it("leaves money as text", () => {
+    expect(readMenuTrigger("n1", "pay $5")).toBeNull();
+    expect(readMenuTrigger("n1", "£20")).toBeNull();
+    expect(readMenuTrigger("n1", "₦1,000")).toBeNull();
+  });
+
+  it.each(["$", "£", "₦"])("opens skills and plugins from %s", (key) => {
+    expect(readMenuTrigger("n1", `ask ${key}rev`)).toEqual({
+      anchor: { nodeKey: "n1", start: 4, key },
+      query: "rev",
+      scope: "skills",
+    });
   });
 });
 
@@ -46,5 +60,24 @@ describe("slashMenuReducer", () => {
     const left = caret(escaped, "n1", "");
 
     expect(caret(left, "n1", "/").status).toBe("open");
+  });
+});
+
+describe("filterMenuCommands", () => {
+  const commands = [
+    { name: "plan", namespace: "mcode" },
+    { name: "review", namespace: "command" },
+    { name: "review-pr", namespace: "skill" },
+    { name: "github-review", namespace: "plugin" },
+  ] as const;
+
+  it("keeps every kind for /", () => {
+    expect(filterMenuCommands(commands, { query: "rev", scope: "all" }).map((command) => command.name))
+      .toEqual(["review", "review-pr", "github-review"]);
+  });
+
+  it("drops command rows for a currency key", () => {
+    expect(filterMenuCommands(commands, { query: "", scope: "skills" }).map((command) => command.name))
+      .toEqual(["review-pr", "github-review"]);
   });
 });
