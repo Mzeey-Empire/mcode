@@ -468,8 +468,6 @@ function registerIpcHandlers(): void {
 // App lifecycle
 // ---------------------------------------------------------------------------
 
-// Disabled acceleration stays the product default and rollback path; the saved
-// graphics setting or the packaged performance runner can request Electron's default.
 // This call must occur before app.whenReady().
 if (HARDWARE_ACCELERATION_MODE === "disabled") app.disableHardwareAcceleration();
 

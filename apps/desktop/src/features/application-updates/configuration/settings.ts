@@ -50,7 +50,6 @@ function updaterSettingsDefaults(applicationVersion: string): UpdaterSettings {
   };
 }
 
-/** Read valid persisted updater settings, or return null. */
 function readPersistedUpdaterSettings(defaults: UpdaterSettings): UpdaterSettings | null {
   const persisted = readPersistedSettings();
   if (!persisted) return null;
@@ -66,7 +65,8 @@ export interface PersistedSettings {
 
 /**
  * Synchronously read and validate `settings.json` from the Mcode data directory.
- * Returns null after a diagnostic when the file is missing, malformed, or invalid.
+ * Returns null when the file is missing, malformed, or invalid.
+ * Missing files are silent; other read or validation failures emit a diagnostic.
  */
 export function readPersistedSettings(): PersistedSettings | null {
   try {
