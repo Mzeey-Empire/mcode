@@ -35,7 +35,6 @@ function renderControl(reasoning: ReasoningLevel) {
       selection={{ ...selection, reasoning }}
       defaults={{ contextWindow: undefined, thinking: undefined, globalCodexFast: false }}
       reasoningLevels={["medium", "high", "max"]}
-      isModelLocked={false}
       isProviderLocked={false}
       onSelectionChange={onSelectionChange}
     />,

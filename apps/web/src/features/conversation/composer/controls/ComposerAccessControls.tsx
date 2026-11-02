@@ -17,7 +17,6 @@ export interface ComposerAccessControlsProps {
   workspaceId?: string;
   branchFromMessageId?: string;
   selection: ComposerAgentSelection;
-  isModelLocked: boolean;
   permissionLocked: boolean;
   approvalReviewSupported: boolean;
   onSelectionChange(patch: Partial<ComposerAgentSelection>): void;
@@ -58,7 +57,7 @@ function DevinAccessControls({
   onSelectionTouched,
 }: Omit<
   ComposerAccessControlsProps,
-  "workspaceId" | "permissionLocked" | "approvalReviewSupported" | "isModelLocked"
+  "workspaceId" | "permissionLocked" | "approvalReviewSupported"
 >) {
   const devinMode = selection.devinMode && selection.devinMode !== "plan"
     ? selection.devinMode

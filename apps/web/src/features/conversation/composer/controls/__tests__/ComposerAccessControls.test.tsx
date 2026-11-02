@@ -23,7 +23,6 @@ function renderControls(overrides: Partial<React.ComponentProps<typeof ComposerA
   render(
     <ComposerAccessControls
       selection={selection}
-      isModelLocked={false}
       permissionLocked={false}
       approvalReviewSupported
       onSelectionChange={onSelectionChange}
@@ -121,7 +120,6 @@ describe("ComposerAccessControls", () => {
     const { rerender } = render(
       <ComposerAccessControls
         selection={{ ...selection, approvalReviewMode: "automatic" }}
-        isModelLocked={false}
         permissionLocked={false}
         approvalReviewSupported
         onSelectionChange={onSelectionChange}
@@ -133,7 +131,6 @@ describe("ComposerAccessControls", () => {
     rerender(
       <ComposerAccessControls
         selection={{ ...selection, approvalReviewMode: "automatic" }}
-        isModelLocked={false}
         permissionLocked={false}
         approvalReviewSupported={false}
         onSelectionChange={onSelectionChange}

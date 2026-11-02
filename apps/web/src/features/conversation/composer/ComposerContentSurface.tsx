@@ -102,7 +102,6 @@ interface ComposerContentSurfaceProps {
       readonly approvalReviewSupported: ComposerAccessControlsProps["approvalReviewSupported"];
     };
     readonly activeGoal: ComposerAttachedCapabilitiesProps["activeGoal"];
-    readonly isModelFullyLocked: boolean;
     readonly isProviderLocked: boolean;
     readonly contextWindow: ContextWindowMode | null;
     readonly settingsDefaultContextWindow: ContextWindowMode | undefined;
@@ -629,7 +628,6 @@ function ComposerControlBar({
           workspaceId={model.workspaceId}
           branchFromMessageId={model.branchFromMessageId}
           selection={model.selection}
-          isModelLocked={model.isModelFullyLocked}
           permissionLocked={model.agentControls.permissionLocked}
           approvalReviewSupported={model.agentControls.approvalReviewSupported}
           onSelectionChange={actions.onSelectionChange}
@@ -658,7 +656,6 @@ function ComposerControlBar({
           selection={model.selection}
           defaults={model.defaults}
           reasoningLevels={model.agentControls.reasoningLevels}
-          isModelLocked={model.isModelFullyLocked}
           isProviderLocked={model.isProviderLocked}
           onSelectionChange={actions.onSelectionChange}
         />

@@ -29,7 +29,7 @@ beforeEach(() => {
   useThreadStore.setState({ setThreadSettings } as never);
 });
 
-function renderLockedControl(
+function renderProviderLockedControl(
   branchFromMessageId?: string,
   { reasoning = selection.reasoning, reasoningLevels = ["low", "medium", "high"] }: {
     reasoning?: ReasoningLevel;
@@ -44,7 +44,6 @@ function renderLockedControl(
       selection={{ ...selection, reasoning }}
       defaults={{ contextWindow: undefined, thinking: undefined, globalCodexFast: false }}
       reasoningLevels={reasoningLevels}
-      isModelLocked
       isProviderLocked
       onSelectionChange={onSelectionChange}
     />,
@@ -53,8 +52,16 @@ function renderLockedControl(
 }
 
 describe("ComposerModelControl", () => {
+  it("opens the model picker while the agent runs", async () => {
+    renderProviderLockedControl();
+
+    await userEvent.click(screen.getByTestId("model-selector-trigger"));
+
+    expect(await screen.findByRole("dialog", { name: "Choose model and provider" })).toBeInTheDocument();
+  });
+
   it("changes and persists reasoning while the agent runs", async () => {
-    const onSelectionChange = renderLockedControl();
+    const onSelectionChange = renderProviderLockedControl();
 
     expect(screen.getByTestId("model-selector-trigger")).toHaveTextContent("High");
     await userEvent.click(screen.getByTestId("model-selector-trigger"));
@@ -68,7 +75,7 @@ describe("ComposerModelControl", () => {
   });
 
   it("turns Fast on for a fork without persisting it to the source thread", async () => {
-    const onSelectionChange = renderLockedControl("message-1");
+    const onSelectionChange = renderProviderLockedControl("message-1");
 
     await userEvent.click(screen.getByTestId("model-selector-trigger"));
     await userEvent.click(await screen.findByRole("button", { name: "Fast" }));
@@ -78,7 +85,7 @@ describe("ComposerModelControl", () => {
   });
 
   it("does not move past the last reasoning level", async () => {
-    const onSelectionChange = renderLockedControl();
+    const onSelectionChange = renderProviderLockedControl();
 
     await userEvent.click(screen.getByTestId("model-selector-trigger"));
     (await screen.findByLabelText("Reasoning effort")).focus();
@@ -88,7 +95,7 @@ describe("ComposerModelControl", () => {
   });
 
   it("commits the first level when the current level is not on the model's ladder", async () => {
-    const onSelectionChange = renderLockedControl(undefined, { reasoning: "xhigh" });
+    const onSelectionChange = renderProviderLockedControl(undefined, { reasoning: "xhigh" });
 
     await userEvent.click(screen.getByTestId("model-selector-trigger"));
     const slider = await screen.findByLabelText("Reasoning effort");
@@ -100,7 +107,7 @@ describe("ComposerModelControl", () => {
   });
 
   it("shows no slider when the model has a single reasoning level", async () => {
-    renderLockedControl(undefined, { reasoningLevels: ["high"] });
+    renderProviderLockedControl(undefined, { reasoningLevels: ["high"] });
 
     await userEvent.click(screen.getByTestId("model-selector-trigger"));
 
@@ -121,7 +128,6 @@ describe("ComposerModelControl model capabilities", () => {
         selection={{ ...selection, provider, modelId }}
         defaults={{ contextWindow: undefined, thinking: undefined, globalCodexFast: false }}
         reasoningLevels={["low", "medium", "high"]}
-        isModelLocked
         isProviderLocked
         onSelectionChange={vi.fn()}
       />,

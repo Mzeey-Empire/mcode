@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ComponentProps, type ReactElement, type ReactNode } from "react";
-import { ChevronDown, Lock, Star } from "lucide-react";
+import { ChevronDown, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -67,13 +67,11 @@ interface ModelSelectorProps {
   selectedProviderId?: string;
   /** Called with both the model ID and the provider it was selected from. */
   onSelect: (modelId: string, providerId: string) => void;
-  /** Fully locked: no changes allowed (agent running) */
-  locked: boolean;
   /** Provider locked: can switch models within the same provider but not change provider (thread started) */
   providerLocked?: boolean;
   /** Muted summary after the model name, such as the reasoning level. */
   detail?: ReactNode;
-  /** Settings for the selected model, shown under the catalog and alone while the model is locked. */
+  /** Settings for the selected model, shown under the catalog. */
   settings?: ReactNode;
   /** Replaces the selected-model button that opens the picker. */
   trigger?: ReactElement;
@@ -344,13 +342,12 @@ function useResetPickerOnOpen(
 
 function useFetchProviderModelsWhenOpen(
   open: boolean,
-  locked: boolean,
   activeTab: ModelPickerTab,
   favoritesVisible: readonly ModelFavoriteEntry[],
   fetchProviderModels: (providerId: string) => Promise<void>,
 ): void {
   useEffect(() => {
-    if (!open || locked) return;
+    if (!open) return;
 
     if (activeTab !== FAVORITES_TAB) {
       void fetchProviderModels(activeTab);
@@ -361,7 +358,7 @@ function useFetchProviderModelsWhenOpen(
     for (const providerId of providerIds) {
       void fetchProviderModels(providerId);
     }
-  }, [open, locked, activeTab, favoritesVisible, fetchProviderModels]);
+  }, [open, activeTab, favoritesVisible, fetchProviderModels]);
 }
 
 function optionKey(providerId: string, modelId: string): string {
@@ -500,33 +497,14 @@ function legacyFoldRow(option: LegacyFoldOption): PickerRow {
   };
 }
 
-function LockedModelLabel({
-  iconProviderId,
-  shortLabel,
-}: Pick<SelectedModelPresentation, "iconProviderId" | "shortLabel">) {
-  return (
-    <span
-      className="flex flex-none max-w-full items-center gap-0.5 px-1.5 py-1 text-xs text-muted"
-      aria-label={shortLabel}
-      role="img"
-    >
-      <ProviderIcon provider={iconProviderId} size={12} />
-      <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{shortLabel}</span>
-      <Lock size={10} className="ml-0.5 shrink-0 opacity-75" aria-hidden />
-    </span>
-  );
-}
-
 /** The Composer's model trigger: provider icon and model name in ink, then a muted detail and chevron. */
 function ModelSelectorTrigger({
   iconProviderId,
   shortLabel,
   detail,
-  locked,
   ...buttonProps
 }: Pick<SelectedModelPresentation, "iconProviderId" | "shortLabel"> & Omit<ComponentProps<typeof Button>, "children"> & {
   readonly detail: ReactNode;
-  readonly locked: boolean;
 }) {
   return (
     <Button
@@ -539,21 +517,19 @@ function ModelSelectorTrigger({
       <ProviderIcon provider={iconProviderId} size={16} />
       <span className="min-w-0 text-fade">{shortLabel}</span>
       {detail ? <span className="flex shrink-0 items-center gap-1 text-body-small text-muted">{detail}</span> : null}
-      {locked ? <Lock aria-label="Model locked while the agent runs" className="size-3 text-muted" /> : null}
       <ChevronDown aria-hidden className="size-3 text-muted" />
     </Button>
   );
 }
 
 /**
- * Composer model picker: a {@link Picker} with a Favourites tab and one tab per provider. A locked
- * thread shows the model as a label; a provider-locked thread keeps only its provider's tab.
+ * Composer model picker: a {@link Picker} with a Favourites tab and one tab per provider. A
+ * provider-locked thread keeps only its provider's tab.
  */
 export function ModelSelector({
   selectedModelId,
   selectedProviderId,
   onSelect,
-  locked,
   providerLocked,
   detail,
   settings,
@@ -636,7 +612,7 @@ export function ModelSelector({
   }, []);
 
   useResetPickerOnOpen(open, providerLocked, displayProvider, defaultProviderId, showTab, setQuery);
-  useFetchProviderModelsWhenOpen(open, locked, activeTab, favoritesVisible, fetchProviderModels);
+  useFetchProviderModelsWhenOpen(open, activeTab, favoritesVisible, fetchProviderModels);
 
   const handlePick = (option: ModelPickerOption) => {
     if (option.kind === "legacy-fold") {
@@ -647,29 +623,13 @@ export function ModelSelector({
     setOpen(false);
   };
 
-  if (locked && !settings) {
-    return <LockedModelLabel {...presentation} />;
-  }
-
   const trigger = (
     <PopoverTrigger
       render={
-        customTrigger ?? <ModelSelectorTrigger iconProviderId={presentation.iconProviderId} shortLabel={presentation.shortLabel} detail={detail} locked={locked} />
+        customTrigger ?? <ModelSelectorTrigger iconProviderId={presentation.iconProviderId} shortLabel={presentation.shortLabel} detail={detail} />
       }
     />
   );
-
-  // A running turn locks the model, but its settings (reasoning, Fast) stay editable mid-run.
-  if (locked) {
-    return (
-      <Popover open={open} onOpenChange={setOpen}>
-        {trigger}
-        <PopoverContent role="dialog" aria-label="Model settings" side="top" align="end" className="max-h-(--available-height) w-auto min-w-[224px] overflow-y-auto p-1">
-          {settings}
-        </PopoverContent>
-      </Popover>
-    );
-  }
 
   const loading = activeTab !== FAVORITES_TAB && loadingProviders.has(activeTab);
   return (

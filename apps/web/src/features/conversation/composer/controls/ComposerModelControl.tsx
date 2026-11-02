@@ -16,7 +16,6 @@ export interface ComposerModelControlProps {
   selection: ComposerAgentSelection;
   defaults: ComposerModelPreferenceDefaults;
   reasoningLevels: ReasoningLevel[];
-  isModelLocked: boolean;
   isProviderLocked: boolean;
   onSelectionChange(patch: Partial<ComposerAgentSelection>): void;
 }
@@ -28,7 +27,6 @@ export function ComposerModelControl({
   selection,
   defaults,
   reasoningLevels,
-  isModelLocked,
   isProviderLocked,
   onSelectionChange,
 }: ComposerModelControlProps) {
@@ -51,7 +49,6 @@ export function ComposerModelControl({
         }
         onSelectionChange(patch);
       }}
-      locked={isModelLocked}
       providerLocked={isProviderLocked}
       detail={showPreferences && (
         <ComposerModelPreferenceSummary
