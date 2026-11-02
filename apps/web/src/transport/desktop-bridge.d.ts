@@ -48,6 +48,10 @@ interface AppBridge {
     releaseLine: "stable" | "nightly";
     allowDowngrade?: boolean;
   }): Promise<UpdateStatus>;
+  /** Read whether this process started with GPU acceleration on. */
+  getHardwareAcceleration?(): Promise<{ enabled: boolean }>;
+  /** Restart the desktop app so launch-time settings take effect. */
+  relaunch?(): Promise<void>;
   /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
   onUpdateStatus(
     callback: (status: UpdateStatus) => void,

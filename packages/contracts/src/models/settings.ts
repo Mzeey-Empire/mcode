@@ -463,6 +463,14 @@ export const SettingsSchema = lazySchema(() =>
       })
       .default({}),
 
+    /** Desktop rendering settings, read by the main process at launch. */
+    graphics: z
+      .object({
+        /** Whether Electron keeps GPU acceleration on. Applies after a restart. */
+        hardwareAcceleration: z.boolean().default(false),
+      })
+      .default({}),
+
     /** External "open in" app preferences. */
     externalApps: z
       .object({
@@ -670,6 +678,11 @@ export const PartialSettingsSchema = lazySchema(() =>
         providerCliChecks: z.boolean().optional(),
         autoInstallOnQuit: z.boolean().optional(),
         checkInterval: UpdateCheckIntervalSchema.optional(),
+      })
+      .optional(),
+    graphics: z
+      .object({
+        hardwareAcceleration: z.boolean().optional(),
       })
       .optional(),
     externalApps: z

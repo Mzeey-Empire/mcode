@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // vi.hoisted so the refs exist inside the vi.mock factory below.
 const { saves, persisted } = vi.hoisted(() => ({
   saves: [] as { partial: unknown; resolve: () => void }[],
-  persisted: { updates: { channel: "stable" } as Record<string, unknown> },
+  persisted: {
+    updates: { channel: "stable" } as Record<string, unknown>,
+    graphics: { hardwareAcceleration: false } as Record<string, unknown>,
+  },
 }));
 
 // Saves stay pending until the test resolves them, and never change `settings`, like the real server round trip.
@@ -137,5 +140,58 @@ describe("AboutSection version row", () => {
     useUpdateStore.setState({ version: "0.16.0", stage: "stable" });
     render(<AboutSection />);
     expect(screen.getByText("0.16.0").parentElement?.textContent).toBe("0.16.0");
+  });
+});
+
+describe("AboutSection hardware acceleration", () => {
+  const relaunch = vi.fn(() => Promise.resolve());
+
+  function stubDesktopBridge(runningEnabled: boolean): void {
+    vi.stubGlobal("desktopBridge", {
+      app: {
+        getHardwareAcceleration: () => Promise.resolve({ enabled: runningEnabled }),
+        relaunch,
+      },
+    });
+  }
+
+  beforeEach(() => {
+    saves.length = 0;
+    relaunch.mockClear();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    persisted.graphics = { hardwareAcceleration: false };
+  });
+
+  it("is absent without the desktop bridge", () => {
+    render(<AboutSection />);
+    expect(screen.queryByRole("switch", { name: "Hardware acceleration" })).toBeNull();
+  });
+
+  it("saves the setting when toggled", async () => {
+    stubDesktopBridge(false);
+    render(<AboutSection />);
+    fireEvent.click(await screen.findByRole("switch", { name: "Hardware acceleration" }));
+    await waitFor(() =>
+      expect(saves.map((save) => save.partial)).toEqual([{ graphics: { hardwareAcceleration: true } }]),
+    );
+  });
+
+  it("offers a restart that relaunches when the saved value differs from the running one", async () => {
+    persisted.graphics = { hardwareAcceleration: true };
+    stubDesktopBridge(false);
+    render(<AboutSection />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restart" }));
+    expect(relaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no restart when the saved value matches the running one", async () => {
+    persisted.graphics = { hardwareAcceleration: true };
+    stubDesktopBridge(true);
+    render(<AboutSection />);
+    expect(await screen.findByRole("switch", { name: "Hardware acceleration" })).toBeChecked();
+    expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
   });
 });

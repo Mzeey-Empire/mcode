@@ -50,16 +50,33 @@ function updaterSettingsDefaults(applicationVersion: string): UpdaterSettings {
   };
 }
 
-/** Read valid persisted settings, or return null after the existing diagnostic. */
+/** Read valid persisted updater settings, or return null. */
 function readPersistedUpdaterSettings(defaults: UpdaterSettings): UpdaterSettings | null {
+  const persisted = readPersistedSettings();
+  if (!persisted) return null;
+  return mergeUpdaterSettings(persisted.parsed, persisted.settings.updates, defaults);
+}
+
+/** Settings file contents: the raw JSON and its schema-validated form with defaults. */
+export interface PersistedSettings {
+  /** Raw JSON, for callers that must tell an explicit value from a schema default. */
+  parsed: unknown;
+  settings: ReturnType<typeof SettingsSchema>["_output"];
+}
+
+/**
+ * Synchronously read and validate `settings.json` from the Mcode data directory.
+ * Returns null after a diagnostic when the file is missing, malformed, or invalid.
+ */
+export function readPersistedSettings(): PersistedSettings | null {
   try {
     const raw = NodeFS.readFileSync(NodePath.join(getMcodeDir(), "settings.json"), "utf-8");
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     const result = SettingsSchema().safeParse(parsed);
-    if (result.success) return mergeUpdaterSettings(parsed, result.data.updates, defaults);
-    console.warn("[auto-updater] settings.json failed validation, using defaults");
+    if (result.success) return { parsed, settings: result.data };
+    console.warn("[settings] settings.json failed validation, using defaults");
   } catch (err) {
-    logUpdaterSettingsReadFailure(err);
+    logSettingsReadFailure(err);
   }
   return null;
 }
@@ -67,7 +84,7 @@ function readPersistedUpdaterSettings(defaults: UpdaterSettings): UpdaterSetting
 /** Merge schema defaults with packaged defaults that depend on the application version. */
 function mergeUpdaterSettings(
   parsed: unknown,
-  updates: NonNullable<ReturnType<typeof SettingsSchema>["_output"]>["updates"],
+  updates: PersistedSettings["settings"]["updates"],
   defaults: UpdaterSettings,
 ): UpdaterSettings {
   const explicitChannel = (parsed as { updates?: { channel?: string } }).updates?.channel;
@@ -80,10 +97,10 @@ function mergeUpdaterSettings(
 }
 
 /** Report settings load failures other than a missing optional settings file. */
-function logUpdaterSettingsReadFailure(error: unknown): void {
+function logSettingsReadFailure(error: unknown): void {
   if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
   const message = error instanceof Error ? error.message : String(error);
-  console.warn(`[auto-updater] settings.json could not be loaded, using defaults: ${message}`);
+  console.warn(`[settings] settings.json could not be loaded, using defaults: ${message}`);
 }
 
 /** Convert a persisted check interval to milliseconds. */

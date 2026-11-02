@@ -9,7 +9,7 @@ vi.mock("electron", () => ({ app: appMock }));
 vi.mock("fs", () => ({ readFileSync: readFileMock }));
 vi.mock("@mcode/shared", () => ({ getMcodeDir: vi.fn(() => "/tmp/mcode") }));
 
-import { intervalToMs, loadUpdaterSettings } from "../settings";
+import { intervalToMs, loadUpdaterSettings, readPersistedSettings } from "../settings";
 
 describe("intervalToMs", () => {
   it.each([
@@ -95,5 +95,35 @@ describe("loadUpdaterSettings", () => {
       autoInstallOnQuit: true,
       checkInterval: "4hours",
     });
+  });
+});
+
+describe("readPersistedSettings", () => {
+  beforeEach(() => {
+    readFileMock.mockReset();
+  });
+
+  it("returns the saved graphics settings", () => {
+    readFileMock.mockReturnValue(
+      JSON.stringify({ graphics: { hardwareAcceleration: true } }),
+    );
+
+    expect(readPersistedSettings()?.settings.graphics.hardwareAcceleration).toBe(true);
+  });
+
+  it("applies the graphics default when the section is absent", () => {
+    readFileMock.mockReturnValue("{}");
+
+    expect(readPersistedSettings()?.settings.graphics.hardwareAcceleration).toBe(false);
+  });
+
+  it("returns null for a missing or invalid settings file", () => {
+    readFileMock.mockImplementation(() => {
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    });
+    expect(readPersistedSettings()).toBeNull();
+
+    readFileMock.mockReturnValue(JSON.stringify({ graphics: { hardwareAcceleration: "yes" } }));
+    expect(readPersistedSettings()).toBeNull();
   });
 });

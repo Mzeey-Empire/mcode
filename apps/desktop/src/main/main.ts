@@ -40,7 +40,14 @@ import {
   type UpdateTimer,
   type ApplicationUpdateIpc,
 } from "../features/application-updates/index.js";
-import { loadUpdaterSettings } from "../features/application-updates/configuration/settings.js";
+import {
+  loadUpdaterSettings,
+  readPersistedSettings,
+} from "../features/application-updates/configuration/settings.js";
+import {
+  resolveHardwareAccelerationMode,
+  type HardwareAccelerationMode,
+} from "./hardware-acceleration.js";
 import type { ApplicationWindowProvider } from "../features/application-updates/state/update-status.js";
 import { setupSpellcheck } from "./spellcheck.js";
 import {
@@ -100,25 +107,10 @@ NodeFS.mkdirSync(getMcodeDir(), { recursive: true });
 // ---------------------------------------------------------------------------
 
 const APP_ID = "com.mzeey.mcode";
-type HardwareAccelerationMode = "disabled" | "default";
-
-/** Selects the test-only acceleration mode without changing the product default. */
-export function resolveHardwareAccelerationMode(
-  env: Readonly<Record<string, string | undefined>>,
-): HardwareAccelerationMode {
-  if (env.MCODE_FRONTEND_PERFORMANCE_MODE !== "production") {
-    return "disabled";
-  }
-  const requested = env.MCODE_FRONTEND_PERFORMANCE_ACCELERATION_MODE ?? "disabled";
-  if (requested !== "disabled" && requested !== "default") {
-    throw new Error(
-      "MCODE_FRONTEND_PERFORMANCE_ACCELERATION_MODE must be disabled or default",
-    );
-  }
-  return requested;
-}
-
-const HARDWARE_ACCELERATION_MODE = resolveHardwareAccelerationMode(process.env);
+const HARDWARE_ACCELERATION_MODE = resolveHardwareAccelerationMode(
+  process.env,
+  readPersistedSettings()?.settings.graphics.hardwareAcceleration ?? null,
+);
 let mainWindow: BrowserWindow | null = null;
 
 /** Channel available only to the maintained frontend performance runner. */
@@ -454,6 +446,21 @@ function registerIpcHandlers(): void {
     return supported;
   });
 
+  ipcMain.handle("app:get-hardware-acceleration", (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) {
+      throw new Error("Hardware acceleration state requires the main renderer");
+    }
+    return { enabled: HARDWARE_ACCELERATION_MODE === "default" };
+  });
+
+  ipcMain.handle("app:relaunch", (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) {
+      throw new Error("Relaunch requires the main renderer");
+    }
+    app.relaunch();
+    app.quit();
+  });
+
   registerPreviewBrowserHandlers(hostRuntime.platform);
 }
 
@@ -461,8 +468,8 @@ function registerIpcHandlers(): void {
 // App lifecycle
 // ---------------------------------------------------------------------------
 
-// Keep disabled acceleration as the product default and rollback path. The
-// packaged performance runner can request Electron's default for paired tests.
+// Disabled acceleration stays the product default and rollback path; the saved
+// graphics setting or the packaged performance runner can request Electron's default.
 // This call must occur before app.whenReady().
 if (HARDWARE_ACCELERATION_MODE === "disabled") app.disableHardwareAcceleration();
 
