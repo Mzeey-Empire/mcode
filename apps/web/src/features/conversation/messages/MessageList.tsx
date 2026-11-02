@@ -337,6 +337,18 @@ function restoreTranscriptPosition(view: TranscriptViewport, threadId: string | 
   else view.restoreOffset(saved.scrollTop);
 }
 
+/**
+ * Top-up pages already spent on the loaded window. The record cache trims a kept-alive thread back to its
+ * tail page while it is not selected, so a window that now starts at a later message gets a fresh budget.
+ */
+function fillPagesForWindow(used: number, previousOldest: number | undefined, oldest: number | undefined): number {
+  return oldest !== undefined && previousOldest !== undefined && oldest > previousOldest ? 0 : used;
+}
+
+function canTopUp(data: MessageListData, pagesUsed: number): boolean {
+  return !data.loading && !data.isLoadingMore && data.hasMore && pagesUsed < MAX_FILL_PAGES;
+}
+
 function loadHistoryAtBoundary(viewport: HTMLElement, data: MessageListData, direction: "older" | "newer"): boolean {
   if (!data.renderedThreadId) return false;
   const isOlder = direction === "older";
@@ -498,6 +510,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   }, [items, data.loading, data.renderedThreadId, data.activeThreadId]);
 
   const fillPages = useRef(0);
+  const fillOldestSequence = useRef<number | undefined>(undefined);
   useEffect(() => {
     fillPages.current = 0;
   }, [data.renderedThreadId]);
@@ -506,11 +519,18 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     const view = controllerRef.current;
     const current = latest.current.data;
     if (!view || !restored.current || !current.isRenderedVisible || !current.renderedThreadId) return;
-    if (current.loading || current.isLoadingMore || !current.hasMore || fillPages.current >= MAX_FILL_PAGES) return;
+    const oldest = current.messages[0]?.sequence;
+    fillPages.current = fillPagesForWindow(fillPages.current, fillOldestSequence.current, oldest);
+    fillOldestSequence.current = oldest;
+    if (!canTopUp(current, fillPages.current)) return;
     const viewport = view.viewport;
     if (viewport.scrollHeight >= viewport.clientHeight * FILL_VIEWPORT_RATIO) return;
     fillPages.current += 1;
-    void current.loadOlderMessages(current.renderedThreadId);
+    // A skip means another load owns the page, so it spends none of the budget. Without the
+    // refund, skips can use up the budget while the transcript is still too short to scroll.
+    void current.loadOlderMessages(current.renderedThreadId).then((result) => {
+      if (result === "skipped") fillPages.current = Math.max(0, fillPages.current - 1);
+    });
   }, [items, data.isLoadingMore, data.hasMore, data.renderedThreadId]);
 
   const loadRequestedHistory = useCallback(() => {
