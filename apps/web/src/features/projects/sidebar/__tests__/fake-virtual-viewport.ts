@@ -61,6 +61,7 @@ export class FakeVirtualViewport {
     return () => {};
   }
   releaseHosts(): void {}
+  measureNewHosts(): void {}
   getReadingAnchor(): undefined {
     return undefined;
   }

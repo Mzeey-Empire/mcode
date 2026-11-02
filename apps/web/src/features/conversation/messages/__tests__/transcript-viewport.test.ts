@@ -114,6 +114,28 @@ describe("transcript viewport", () => {
     expect(position).toEqual({ kind: "end" });
   });
 
+  it("lays a row that leaves and returns out at its measured height before it is measured again", async () => {
+    LayoutObserver.resize(hosts.find((host) => host.id === "18")!.element, 300);
+    await nextFrame();
+    expect(view.viewport.scrollTop).toBe(2000);
+
+    // The record trims to its tail on selection, then the viewport fill pages the rest back in.
+    view.setRows(rows.slice(19));
+    view.setRows(rows);
+    expect(view.viewport.scrollTop).toBe(2000);
+    expect(position).toEqual({ kind: "end" });
+  });
+
+  it("places rows that were just filled at their real heights before the next frame", () => {
+    // The resize observer reports a new row a frame late; a transcript opening at its end would show
+    // that frame at the row's estimate, often the top of the thread.
+    const tail = hosts.find((host) => host.id === "19")!;
+    vi.spyOn(tail.element, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 600, 300));
+    view.measureNewHosts();
+    expect(view.viewport.scrollTop).toBe(2000);
+    expect(position).toEqual({ kind: "end" });
+  });
+
   it("does not publish unchanged visible hosts during repeated positioning", () => {
     const baseline = publications;
     const visible = hosts;

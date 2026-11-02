@@ -96,6 +96,8 @@ function contentAtLine(host: Element, line: number): Element {
   }
 }
 
+/** Measured heights kept for rows that left the list, beyond the rows it holds now. */
+const DETACHED_HEIGHT_LIMIT = 1000;
 const FLIP_DURATION_MS = 180;
 const FLIP_EASING = "cubic-bezier(0.2, 0, 0, 1)";
 
@@ -328,8 +330,15 @@ export class VirtualViewport {
     this.rows = rows.map((row) => previous.get(row.id) ?? row);
     this.rowIndexes.clear();
     this.rows.forEach((row, index) => this.rowIndexes.set(row.id, index));
+    // A row that leaves keeps its measured height: history windows trim and page back in, and a
+    // returning row laid out at its estimate overlaps its neighbours until it is measured again.
+    // The oldest detached heights go first once the limit is reached.
+    let excess = this.heights.size - this.rows.length - DETACHED_HEIGHT_LIMIT;
     for (const key of this.heights.keys()) {
-      if (!this.rowIndexes.has(key)) this.heights.delete(key);
+      if (excess <= 0) break;
+      if (this.rowIndexes.has(key)) continue;
+      this.heights.delete(key);
+      excess -= 1;
     }
   }
 
@@ -362,6 +371,27 @@ export class VirtualViewport {
       this.context.updateContentSize(this.context.sizeCache.getTotalSize());
       this.applyPosition(true);
     });
+  }
+
+  /**
+   * Measures published hosts that have no height yet. Call it once React has filled them, before the
+   * frame paints: the resize observer reports a new row a frame late, and until then the row sits at its
+   * estimate, so a transcript opening at its end shows the wrong place for that frame. Rows measured
+   * before are left to the observer, so a streaming commit forces no layout here.
+   */
+  measureNewHosts(): void {
+    if (this.disposed) return;
+    let changed = false;
+    for (const { id, element } of this.publishedHosts) {
+      if (this.heights.has(id)) continue;
+      const height = element.getBoundingClientRect().height;
+      if (height <= 0) continue;
+      this.heights.set(id, height);
+      changed = true;
+    }
+    if (!changed) return;
+    this.context.rebuildSizeCache();
+    this.applyPosition(true);
   }
 
   private updateViewportHeight(): boolean {
