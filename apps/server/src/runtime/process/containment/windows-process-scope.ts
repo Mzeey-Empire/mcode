@@ -1,6 +1,7 @@
 import * as NodeModule from "node:module";
+import { serverModuleUrl } from "../../environment/server-module-url.js";
 
-const nativeRequire = NodeModule.createRequire(import.meta.url);
+const nativeRequire = NodeModule.createRequire(serverModuleUrl(import.meta.url));
 const PROCESS_SET_QUOTA = 0x0100;
 const PROCESS_TERMINATE = 0x0001;
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;

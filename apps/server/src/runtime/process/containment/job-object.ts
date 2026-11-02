@@ -12,8 +12,9 @@
  */
 import * as NodeModule from "node:module";
 import { logger } from "@mcode/shared";
+import { serverModuleUrl } from "../../environment/server-module-url.js";
 
-const _require = NodeModule.createRequire(import.meta.url);
+const _require = NodeModule.createRequire(serverModuleUrl(import.meta.url));
 
 const PROCESS_SET_QUOTA = 0x0100;
 const PROCESS_TERMINATE = 0x0001;

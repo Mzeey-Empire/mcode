@@ -19,6 +19,7 @@ on:
       - "apps/server/src/index.ts"
       - "apps/server/src/application/bootstrap/**"
       - "apps/server/src/runtime/persistence/sqlite/database.ts"
+      - "apps/server/src/runtime/environment/server-module-url.ts"
       - "apps/server/src/runtime/process/orphan-cleanup.ts"
       - "apps/server/src/runtime/process/containment/**"
       - "apps/server/src/features/terminal/host/**"

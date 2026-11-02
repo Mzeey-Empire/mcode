@@ -6,6 +6,7 @@ import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 import type { CopilotProviderPorts, ProviderHostPorts } from "@mcode/providers";
 import { clearResolutionCache, createNodeResolverIO, resolveCopilotCli } from "../adapters/copilot/copilot-cli-resolver.js";
+import { serverModuleUrl } from "../../../runtime/environment/server-module-url.js";
 
 const execFileAsync = NodeUtil.promisify(NodeChildProcess.execFile);
 
@@ -43,7 +44,7 @@ function bundledCliPath(runtime: ProviderHostPorts["runtime"]): string {
   const platform = runtime.platform;
   const packageName = `@github/copilot-${platform}-${runtime.architecture}`;
   const binary = platform === "win32" ? "copilot.exe" : "copilot";
-  const staged = NodePath.join(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "node_modules", "@github", packageName.slice("@github/".length), binary);
+  const staged = NodePath.join(NodePath.dirname(NodeURL.fileURLToPath(serverModuleUrl(import.meta.url))), "node_modules", "@github", packageName.slice("@github/".length), binary);
   if (NodeFS.existsSync(staged)) return staged;
   const sourceRequire = NodeModule.createRequire(import.meta.url);
   const providerRequire = NodeModule.createRequire(sourceRequire.resolve("@mcode/providers"));
