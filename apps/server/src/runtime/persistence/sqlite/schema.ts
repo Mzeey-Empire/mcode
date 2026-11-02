@@ -821,7 +821,7 @@ export const conversationDisplayMaterializationState = sqliteTable(
     id: integer("id").primaryKey().notNull(),
     lastSourceCreatedAt: text("last_source_created_at"),
     lastSourceId: text("last_source_id"),
-    completed: integer("completed").notNull().default(0),
+    completedVersion: integer("completed").notNull().default(0),
     updatedAt: text("updated_at").notNull().default(timestampDefault),
   },
 );

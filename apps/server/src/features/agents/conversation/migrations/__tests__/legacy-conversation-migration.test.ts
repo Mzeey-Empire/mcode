@@ -79,6 +79,31 @@ describe("LegacyConversationMigrationStore", () => {
     ]);
   });
 
+  it("does no conversion work after a completed migration when live messages arrive", async () => {
+    applyFixture(db, "v1-parent-pair.sql");
+    await new LegacyConversationMigrationStore(db).runToCompletion();
+    db.prepare(`
+      INSERT INTO messages (id, thread_id, role, content, timestamp, sequence)
+      VALUES
+        ('live-user', 'thread-v1', 'user', 'New question', '2026-01-01T00:03:00.000Z', 3),
+        ('live-assistant', 'thread-v1', 'assistant', 'New answer', '2026-01-01T00:04:00.000Z', 4)
+    `).run();
+    const provenance = db.prepare("SELECT COUNT(*) AS count FROM canonical_legacy_message_provenance").get();
+    const checkpoint = db.prepare("SELECT * FROM canonical_legacy_migration_checkpoints WHERE version = ?")
+      .get(LEGACY_CONVERSATION_MIGRATION_VERSION);
+
+    const result = await new LegacyConversationMigrationStore(db).runToCompletion();
+
+    expect(result.completed).toBe(true);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_legacy_message_provenance").get()).toEqual(provenance);
+    expect(db.prepare("SELECT * FROM canonical_legacy_migration_checkpoints WHERE version = ?")
+      .get(LEGACY_CONVERSATION_MIGRATION_VERSION)).toEqual(checkpoint);
+    expect(db.prepare(`
+      SELECT id FROM canonical_agent_items
+      WHERE json_extract(payload_json, '$.message.id') IN ('live-user', 'live-assistant')
+    `).all()).toEqual([]);
+  });
+
   it("migrates a structurally linked legacy child turn into the canonical child thread", async () => {
     // Regression: legacy migration previously filtered out every thread with a parent_thread_id,
     // losing child messages and narrative items during canonical cutover.
