@@ -1,6 +1,7 @@
 import { createMockThread } from "@mcode/contracts/testing";
 import { createAgentModelState } from "@mcode/contracts/compat/agent-model";
 import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { AgentStopResult } from "@mcode/contracts/models/turn-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useQueueStore } from "@/stores/queueStore";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
@@ -47,30 +48,34 @@ async function expectQueueHeld(): Promise<void> {
   expect(queued()).toEqual(["first", "second"]);
 }
 
+function startWithRunningTurn(): void {
+  vi.clearAllMocks();
+  vi.useFakeTimers();
+  resetThreadStoreForTests({
+    currentThreadId: THREAD_ID,
+    runningThreadIds: new Set([THREAD_ID]),
+    records: new Map<string, ThreadRecord>([[THREAD_ID, {
+      ...createEmptyThreadRecord(),
+      runtimePhase: "running",
+      turnExecutionId: EXECUTION_ID,
+    }]]),
+  });
+  useQueueStore.setState({
+    queues: {},
+    inFlightQueuedMessages: {},
+    disposedQueuedMessages: {},
+    queueGenerations: {},
+    autoDrainSuppressedThreadIds: new Set<string>(),
+    toast: null,
+    editingThreadId: null,
+  });
+  useWorkspaceStore.setState({ activeThreadId: THREAD_ID, threads: [createMockThread({ id: THREAD_ID })] });
+  (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(1);
+}
+
 describe("queued follow-ups after a turn ends", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.useFakeTimers();
-    resetThreadStoreForTests({
-      currentThreadId: THREAD_ID,
-      runningThreadIds: new Set([THREAD_ID]),
-      records: new Map<string, ThreadRecord>([[THREAD_ID, {
-        ...createEmptyThreadRecord(),
-        runtimePhase: "running",
-        turnExecutionId: EXECUTION_ID,
-      }]]),
-    });
-    useQueueStore.setState({
-      queues: {},
-      inFlightQueuedMessages: {},
-      disposedQueuedMessages: {},
-      queueGenerations: {},
-      autoDrainSuppressedThreadIds: new Set<string>(),
-      toast: null,
-      editingThreadId: null,
-    });
-    useWorkspaceStore.setState({ activeThreadId: THREAD_ID, threads: [createMockThread({ id: THREAD_ID })] });
-    (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(1);
+    startWithRunningTurn();
     enqueue("first");
     enqueue("second");
   });
@@ -238,5 +243,80 @@ describe("queued follow-ups after a turn ends", () => {
     expect(mockTransport.sendMessage).toHaveBeenCalledTimes(1);
     expect(mockTransport.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ threadId: THREAD_ID, content: "first" }));
     expect(queued()).toEqual(["second"]);
+  });
+});
+
+describe("a message sent while the user's Stop is settling", () => {
+  const stopped: AgentStopResult = {
+    threadId: THREAD_ID,
+    turnExecutionId: EXECUTION_ID,
+    snapshot: { threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, phase: "cancelled" },
+    status: "cancelled",
+    dispatchState: "dispatched",
+  };
+  let settleStop: (result: AgentStopResult) => void;
+
+  beforeEach(() => {
+    startWithRunningTurn();
+    vi.mocked(mockTransport.stopAgent).mockImplementationOnce(() => new Promise((resolve) => { settleStop = resolve; }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const sent = (): string[] => vi.mocked(mockTransport.sendMessage).mock.calls.map(([request]) => request.content);
+
+  it("is sent when the turn ends before the stop command returns", async () => {
+    const stopping = useThreadStore.getState().stopAgent(THREAD_ID);
+    enqueue("after stop");
+    useThreadStore.getState().handleAgentEvent(ended("cancelled", "user"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    settleStop(stopped);
+    await stopping;
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(sent()).toEqual(["after stop"]);
+    expect(queued() ?? []).toEqual([]);
+  });
+
+  it("is sent when the stop command returns before the turn ends", async () => {
+    const stopping = useThreadStore.getState().stopAgent(THREAD_ID);
+    enqueue("after stop");
+    settleStop({ ...stopped, snapshot: { ...stopped.snapshot, phase: "finalizing" } });
+    await stopping;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sent()).toEqual([]);
+
+    useThreadStore.getState().handleAgentEvent(ended("cancelled", "user"));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(sent()).toEqual(["after stop"]);
+  });
+
+  it("is sent when the turn completes before the stop reaches it", async () => {
+    const stopping = useThreadStore.getState().stopAgent(THREAD_ID);
+    enqueue("after stop");
+    useThreadStore.getState().handleAgentEvent(ended("completed"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    settleStop({ ...stopped, snapshot: { ...stopped.snapshot, phase: "completed" }, status: "already-terminal" });
+    await stopping;
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(sent()).toEqual(["after stop"]);
+  });
+
+  it("joins the held queue when follow-ups were queued before the Stop", async () => {
+    enqueue("before stop");
+    const stopping = useThreadStore.getState().stopAgent(THREAD_ID);
+    enqueue("after stop");
+    useThreadStore.getState().handleAgentEvent(ended("cancelled", "user"));
+    settleStop(stopped);
+    await stopping;
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(sent()).toEqual([]);
+    expect(queued()).toEqual(["before stop", "after stop"]);
+    expect(useQueueStore.getState().autoDrainPauseReasons[THREAD_ID]).toBe("Stopped by you");
   });
 });
