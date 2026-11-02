@@ -95,6 +95,32 @@ function backgroundAgentWakeQuery(beforeRootReply = () => {}) {
   };
 }
 
+const STATUS_MESSAGES = [
+  { type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", resetsAt: 1_700_003_600, rateLimitType: "five_hour" } },
+  { type: "auth_status", isAuthenticating: false, output: [] },
+  { type: "prompt_suggestion", suggestion: "Run the tests" },
+];
+
+/** Replays status messages the SDK streams between turns, then a reply Claude starts by itself. */
+function statusThenReplyQuery(beforeReply: () => void) {
+  return ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    let closeSession!: () => void;
+    const closed = new Promise<void>((resolve) => { closeSession = resolve; });
+    const stream = (async function* () {
+      await prompt[Symbol.asyncIterator]().next();
+      yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
+      yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: "Done." }] } };
+      yield { type: "result", is_error: false, result: "Done.", usage: { output_tokens: 1 } };
+      yield* STATUS_MESSAGES;
+      beforeReply();
+      yield { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: WAKE_REPLY }] } };
+      yield { type: "result", is_error: false, result: WAKE_REPLY, usage: { output_tokens: 6 } };
+      await closed;
+    })();
+    return Object.assign(stream, { close: closeSession });
+  };
+}
+
 function sendUserTurn(provider: InstanceType<typeof ClaudeProvider>) {
   return provider.sendTurn({
     turnId: "turn-user", turnExecutionId: USER_EXECUTION_ID,
@@ -146,6 +172,32 @@ describe("ClaudeProvider provider-started turns", () => {
     ]));
     expect(later.filter(({ event }) => event.type === AgentEventType.Ended)).toHaveLength(1);
     expect(later.at(-1)?.event.type).toBe(AgentEventType.Ended);
+  });
+
+  it("opens a turn at Claude's reply, not at status messages streamed between turns", async () => {
+    let replyReady = false;
+    const openedAtReply: boolean[] = [];
+    mockQuery.mockImplementation(statusThenReplyQuery(() => { replyReady = true; }));
+    const events: ProviderRuntimeEvent[] = [];
+    const open = vi.fn(async (): Promise<ProviderTurnOpening> => {
+      openedAtReply.push(replyReady);
+      return {
+        kind: "opened",
+        routing: { threadId: "thread-provider", turnId: "turn-provider", executionId: PROVIDER_EXECUTION_ID, deliveryAttempt: 1 },
+      };
+    });
+    const provider = providerWith(events, { open, settleBackgroundTool: vi.fn(async () => {}) });
+    try {
+      await sendUserTurn(provider);
+      await vi.waitFor(() => expect(events.some(({ event }) =>
+        event.type === AgentEventType.Ended && event.turnExecutionId === PROVIDER_EXECUTION_ID)).toBe(true));
+    } finally {
+      await provider.shutdown();
+    }
+
+    expect(openedAtReply).toEqual([true]);
+    expect(afterUserTurn(events).find(({ event }) => event.type === AgentEventType.Message)?.event)
+      .toMatchObject({ content: WAKE_REPLY });
   });
 
   it("publishes nothing for a self-started reply the server declines", async () => {

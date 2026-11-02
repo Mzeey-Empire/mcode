@@ -308,6 +308,12 @@ const CLAUDE_STEER_READ_TIMEOUT_MS = 10_000;
  * `priority: "now"` message cut short, or one that completed before the CLI took the steer in.
  */
 const CLAUDE_STEER_SEGMENT_END_REASONS: ReadonlySet<unknown> = new Set(["aborted_streaming", "aborted_tools", "completed"]);
+/**
+ * SDK messages that are Claude replying, the only output that may open a turn Claude starts by itself.
+ * The SDK also streams status between turns, such as rate limits, auth and prompt suggestions, and
+ * a turn opened for one of those never gets a result, so it stays running until the user stops it.
+ */
+const CLAUDE_REPLY_MESSAGE_TYPES: ReadonlySet<unknown> = new Set(["assistant", "stream_event"]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type SdkMessageUuid = NonNullable<SDKUserMessage["uuid"]>;
@@ -2256,10 +2262,10 @@ export class ClaudeProvider
     const unowned = state.endedTurnExecutionId === state.currentTurnExecutionId
       && state.pendingPromptExecutionIds.length === 0;
     if (!unowned) return false;
-    if (message.type === "system") return true;
+    if (!CLAUDE_REPLY_MESSAGE_TYPES.has(message.type)) return true;
     // A background subagent's steps are not a turn. Opening one for them would start a turn
     // nobody prompted, and a declined one discards the reply Claude starts after the task notification.
-    if (message.type === "result" || state.mapper.isBackgroundTaskOutput(message)) return true;
+    if (state.mapper.isBackgroundTaskOutput(message)) return true;
     return !(await this.openProviderTurn(sessionId, state));
   }
 
