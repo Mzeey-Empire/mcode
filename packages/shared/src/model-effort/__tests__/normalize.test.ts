@@ -5,6 +5,8 @@ import {
   isMaxEffortModel,
   supportsEffortParameter,
   normalizeReasoningLevelForModel,
+  orderReasoningLevels,
+  reasoningLevelAtOrBelow,
 } from "../index.js";
 
 describe("isXhighEffortModel", () => {
@@ -322,5 +324,30 @@ describe("normalizeReasoningLevelForModel", () => {
     it("downgrades xhigh to high on gpt-5.4-mini", () => {
       expect(normalizeReasoningLevelForModel("gpt-5.4-mini", "xhigh")).toBe("high");
     });
+  });
+});
+
+describe("reasoningLevelAtOrBelow", () => {
+  it("snaps down to the highest declared level at or below the requested one", () => {
+    expect(reasoningLevelAtOrBelow("max", ["low", "medium", "high"])).toBe("high");
+  });
+
+  it("returns an exact member unchanged", () => {
+    expect(reasoningLevelAtOrBelow("medium", ["low", "medium", "high"])).toBe("medium");
+  });
+
+  it("never walks up when every declared level is above the requested one", () => {
+    expect(reasoningLevelAtOrBelow("minimal", ["medium", "high"])).toBeUndefined();
+  });
+
+  it("does not depend on the order of the declared levels", () => {
+    expect(reasoningLevelAtOrBelow("xhigh", ["high", "low", "medium"])).toBe("high");
+  });
+});
+
+describe("orderReasoningLevels", () => {
+  it("returns distinct levels lowest first", () => {
+    const levels: ReasoningLevel[] = ["high", "low", "low", "xhigh", "max"];
+    expect(orderReasoningLevels(levels)).toEqual(["low", "high", "xhigh", "max"]);
   });
 });
