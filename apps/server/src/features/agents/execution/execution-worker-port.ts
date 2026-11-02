@@ -13,6 +13,7 @@ import type {
   ExecutionWriteReceipt,
 } from "./execution-worker-handler.js";
 import { executionWriterFailure, type ExecutionWriterFailure } from "./execution-writer-failure.js";
+import { serverModuleUrl } from "../../../runtime/environment/server-module-url.js";
 
 type Command = ExecutionMailboxCommand<ExecutionWorkCommand>;
 type Request = ExecutionWorkerRequest<Command>;
@@ -203,8 +204,9 @@ export class ExecutionThreadWorkerPort implements ExecutionWorkerPort<Command, E
 }
 
 function defaultWorkerUrl(): URL {
-  const workerFile = import.meta.url.endsWith(".cjs") ? "./execution.worker.cjs" : "./execution.worker.ts";
-  return new URL(workerFile, import.meta.url);
+  const moduleUrl = serverModuleUrl(import.meta.url);
+  const workerFile = moduleUrl.endsWith(".cjs") ? "./execution.worker.cjs" : "./execution.worker.ts";
+  return new URL(workerFile, moduleUrl);
 }
 
 function matchesOperation(request: Request | undefined, operation: ExecutionSemanticOperation): boolean {

@@ -6,6 +6,7 @@ import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-
 import type { CanonicalWriterRequest, CanonicalWriterResponse } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { DatabaseStartupRefusal } from "./startup-refusal.js";
+import { serverModuleUrl } from "../../environment/server-module-url.js";
 import type { DatabaseWriteOperation } from "./database-write-operation.js";
 import type { ApplicationDatabaseWriterRequest, ApplicationDatabaseWriterResponse } from "./application-database-writer-protocol.js";
 
@@ -190,7 +191,7 @@ export class ApplicationDatabaseWriter {
     worker.onmessage = (event: MessageEvent<ApplicationDatabaseWriterResponse>) => {
       if (this.generation === generation) this.receive(event.data);
     };
-    worker.onerror = () => this.workerLost(worker, generation, false);
+    worker.onerror = (event) => this.workerLost(worker, generation, false, event.message);
     worker.addEventListener("close", () => this.workerLost(worker, generation, true));
     return new Promise((resolve, reject) => {
       this.initialize = { resolve, reject };
@@ -247,10 +248,10 @@ export class ApplicationDatabaseWriter {
     pending.publishedCount = Math.max(pending.publishedCount, pending.attemptPublicationCount);
   }
 
-  private workerLost(worker: DatabaseWriterWorker, generation: number, terminated: boolean): void {
+  private workerLost(worker: DatabaseWriterWorker, generation: number, terminated: boolean, reason?: string): void {
     if (this.generation !== generation || this.worker !== worker) return;
     this.worker = undefined;
-    const failure = new Error("Canonical writer worker closed");
+    const failure = new Error(reason ? `Canonical writer worker closed: ${reason}` : "Canonical writer worker closed");
     this.initialize?.reject(failure);
     this.initialize = undefined;
     const pending = this.dispatched;
@@ -336,10 +337,11 @@ function terminateWorker(worker: DatabaseWriterWorker): Promise<void> {
 
 /** Start the production writer worker thread. */
 export function createDatabaseWriterWorker(): Worker {
-  const filename = import.meta.url.endsWith(".cjs")
+  const moduleUrl = serverModuleUrl(import.meta.url);
+  const filename = moduleUrl.endsWith(".cjs")
     ? "./canonical-agent-writer.worker.cjs"
     : "../../../features/agents/canonical/canonical-agent-writer.worker.ts";
-  const url = new URL(filename, import.meta.url);
+  const url = new URL(filename, moduleUrl);
   const options = { type: "module", smol: true } satisfies WorkerOptions & { smol: boolean };
   return new Worker(url, options);
 }

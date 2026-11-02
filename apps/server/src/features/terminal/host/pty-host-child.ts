@@ -1,5 +1,6 @@
 import * as NodeChildProcess from "node:child_process";
-import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
+import { serverModuleUrl } from "../../../runtime/environment/server-module-url.js";
 import { WindowsProcessScopeFactory } from "../../../runtime/process/containment/windows-process-scope.js";
 import type { PtyHostChild } from "./pty-host-supervisor.js";
 
@@ -18,17 +19,8 @@ export function resolvePtyHostEntryPath(
   serverEntryPath: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const resourcesRoot = env.MCODE_PACKAGED_RESOURCES_ROOT;
-  if (resourcesRoot) {
-    return NodePath.join(
-      resourcesRoot,
-      "app.asar.unpacked",
-      "dist",
-      "server",
-      "pty-host.cjs",
-    );
-  }
-  return NodePath.resolve(NodePath.dirname(serverEntryPath), "pty-host.cjs");
+  const serverUrl = serverModuleUrl(NodeURL.pathToFileURL(serverEntryPath).href, env);
+  return NodeURL.fileURLToPath(new URL("./pty-host.cjs", serverUrl));
 }
 
 /** Resolves the Electron executable that owns the isolated PTY host. */
