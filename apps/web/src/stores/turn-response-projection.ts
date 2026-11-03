@@ -19,7 +19,11 @@ export function resolveTurnPersistLocalMessageId(
   }
 
   if (record.messages.some((message) => message.id === serverMessageId)) return serverMessageId;
-  return record.pendingTurnPersistMessageIds[0] ?? serverMessageId;
+  // Only a local row can still be waiting for its server id. A pending row the server already knows
+  // is a finished answer, such as an opened thread's last one, and pairing it with a newer turn's id
+  // would let that turn's answer replace it.
+  return record.pendingTurnPersistMessageIds.find((messageId) => record.serverMessageIds[messageId] === undefined)
+    ?? serverMessageId;
 }
 
 /** Queue a local response row until its corresponding persistence signal arrives. */
