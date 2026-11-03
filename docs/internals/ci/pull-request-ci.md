@@ -1,6 +1,6 @@
 # Pull request CI
 
-[`ci.yml`](../../../.github/workflows/ci.yml) runs PR Title, Typecheck, Lint, Test, and Build Check on every pull request to `main`. This page records the decisions and traps behind that workflow. Read the workflow for the steps themselves.
+[`ci.yml`](../../../.github/workflows/ci.yml) runs Typecheck, Lint, Test, and Build Check on every pull request to `main`. This page records the decisions and traps behind that workflow. Read the workflow for the steps themselves.
 
 ## Runner choice
 
@@ -19,6 +19,10 @@ Change it with `gh variable set CI_LINUX_RUNNER --body <value>`. Any other value
 The split is by PR number, not by run, so every push to one PR lands on the same provider. That keeps its caches warm and its timings comparable between pushes.
 
 PR Title always runs on GitHub-hosted runners. It finishes in seconds, and Blacksmith bills a full minute.
+
+## PR Title has its own workflow
+
+[`pr-title.yml`](../../../.github/workflows/pr-title.yml) also runs when a title is edited, so fixing a rejected title clears the check without a new push. It cannot live in `ci.yml`: that workflow cancels its in-progress run on every new event, so an `edited` trigger there would cancel the tests each time someone renamed the pull request.
 
 ## Required checks must fail, not skip
 
