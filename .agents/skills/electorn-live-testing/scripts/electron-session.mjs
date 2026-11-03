@@ -8,14 +8,26 @@ const SESSION_FILE_NAME = "electron-live-testing.json";
  *
  * The first connection reloads the app so it signs in with the seeded login cookie. Pass
  * `reload: false` to reconnect from a later step script without losing the app's state.
+ * Only a disposable session with its own session file, such as the perf workers, may pass
+ * `allowViewportEmulation: true`.
  */
-export async function connectElectronSession({ playwright, repoRoot, sessionFileName = SESSION_FILE_NAME, reload = true }) {
-  validateConnectionArguments(playwright, repoRoot, sessionFileName);
+export async function connectElectronSession({
+  playwright,
+  repoRoot,
+  sessionFileName = SESSION_FILE_NAME,
+  reload = true,
+  allowViewportEmulation = false,
+}) {
+  validateConnectionArguments(playwright, repoRoot, sessionFileName, allowViewportEmulation);
   const root = NodePath.resolve(repoRoot);
   const sessionFile = NodePath.join(root, ".dev", sessionFileName);
   const record = readSessionRecord(sessionFile, root);
   const ports = readRuntimePorts(root, record.appUrlPrefix);
   const connection = await connectToElectron(playwright, record, ports);
+  if (!allowViewportEmulation) {
+    for (const page of connection.context.pages()) blockViewportEmulation(page);
+    connection.context.on("page", blockViewportEmulation);
+  }
   const page = await waitForAppPage(connection.context, record.appUrlPrefix);
   const livePage = reload ? await reloadElectronAppPage(connection.context, page, record.appUrlPrefix) : page;
   return {
@@ -39,7 +51,13 @@ export async function reloadElectronAppPage(context, page, appUrl) {
   return requireLiveAppPage(context, page, appUrl);
 }
 
-function validateConnectionArguments(playwright, repoRoot, sessionFileName) {
+function blockViewportEmulation(page) {
+  page.setViewportSize = async () => {
+    throw new Error("page.setViewportSize lays the page out at a fake size inside the unchanged Electron window, and the fake lasts until Electron restarts. Resize the real window with setElectronWindowSize(page, { width, height }) from window-state.mjs.");
+  };
+}
+
+function validateConnectionArguments(playwright, repoRoot, sessionFileName, allowViewportEmulation) {
   if (!playwright?.chromium?.connectOverCDP) {
     throw new Error("Pass the module returned by await import(\"playwright\")");
   }
@@ -48,6 +66,12 @@ function validateConnectionArguments(playwright, repoRoot, sessionFileName) {
   }
   if (!/^electron-[a-z0-9-]+\.json$/.test(sessionFileName)) {
     throw new Error("sessionFileName must be a safe Electron session file name");
+  }
+  if (typeof allowViewportEmulation !== "boolean") {
+    throw new Error("allowViewportEmulation must be a boolean");
+  }
+  if (allowViewportEmulation && sessionFileName === SESSION_FILE_NAME) {
+    throw new Error("allowViewportEmulation needs a disposable Electron session with its own sessionFileName; the shared live-testing session must keep its real window size");
   }
 }
 

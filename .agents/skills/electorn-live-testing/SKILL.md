@@ -90,6 +90,8 @@ Select the in-app model before the test turn. Exploratory turns run on Haiku or 
 
 To minimize or restore the app window on Windows, call `setElectronWindowState(electronSession.pid, "minimized")` or `"normal"` from `scripts/window-state.mjs`. It changes only the app window and leaves focus where it is. The desktop window turns off background throttling, so a minimized page still reports `visible` and keeps painting. A minimize test therefore checks that the chat keeps up and shows the latest state at restore. Install a frame probe or a store subscription before you minimize.
 
+To size the window, call `setElectronWindowSize(electronPage, { width, height })` from `scripts/window-state.mjs` before each capture. It resizes the real window and throws when the screen cannot fit the size or when the page and window already disagree. The session blocks `page.setViewportSize`, because in Electron it lays the page out at a fake size inside the unchanged window until Electron restarts.
+
 ## Read app state
 
 Read a store through the module instance the app uses. `appModuleUrl` from `scripts/app-probes.mjs` returns the URL the page loaded a module from; import that URL inside `evaluate`:
@@ -115,7 +117,7 @@ Store screenshots, logs, and measurements under `.dev/verification/`. Keep explo
 
 ## Record before and after evidence
 
-UI changes carry a before and an after capture into the PR. Capture only on the default empty database. If `agent:up` warns that it holds a filtered copy of real data from `bun run db:seed`, run `bun run agent:reset` first. Take the before capture before editing renderer code, or run the base build; keep conditions identical across both — same window size, same workflow, same data.
+UI changes carry a before and an after capture into the PR. The UI Changes section of `.github/pull_request_template.md` says when a capture must be a video. Capture only on the default empty database. If `agent:up` warns that it holds a filtered copy of real data from `bun run db:seed`, run `bun run agent:reset` first. Take the before capture before editing renderer code, or run the base build; keep conditions identical across both — same window size, same workflow, same data.
 
 Photos are `electronPage.screenshot({ path })` under `.dev/verification/`. For video:
 

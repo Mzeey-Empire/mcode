@@ -58,4 +58,53 @@ describe("DelegationTargetResolver", () => {
     await expect(resolver.resolve({})).resolves.toEqual({ status: "resolved", providerId: "codex", modelId: "gpt" });
     await expect(resolver.resolve({ providerId: "codex" })).resolves.toEqual({ status: "resolved", providerId: "codex", modelId: "gpt" });
   });
+
+  describe("reasoning effort option", () => {
+    const catalog = [
+      { id: "tiered", name: "Tiered", supportedReasoningEfforts: ["high", "low", "medium"], defaultReasoningEffort: "medium" },
+      { id: "high-only", name: "High only", supportedReasoningEfforts: ["xhigh", "max"], defaultReasoningEffort: "xhigh" },
+      { id: "plain", name: "Plain", supportsReasoning: true },
+    ];
+
+    function setup() {
+      const settings = getDefaultSettings();
+      settings.provider.enabled.codex = true;
+      settings.model.defaults.provider = "codex";
+      settings.model.defaults.id = "tiered";
+      const codex = provider("codex");
+      const registry: IProviderRegistry = { resolve: () => codex, resolveAll: () => [codex], shutdown: vi.fn() };
+      const models = { listModels: vi.fn().mockResolvedValue(catalog) };
+      const resolver = new DelegationTargetResolver(registry, models as never, { get: () => settings } as never);
+      return { resolver, settings };
+    }
+
+    it("carries the model's levels lowest first with the user's default snapped onto them", async () => {
+      const { resolver } = setup();
+      await expect(resolver.resolve({ providerId: "codex", modelId: "tiered" })).resolves.toStrictEqual({
+        status: "resolved", providerId: "codex", modelId: "tiered",
+        reasoningEffortOption: { id: "reasoningEffort", values: ["low", "medium", "high"], default: "high" },
+      });
+    });
+
+    it("resolves a model without levels with no option", async () => {
+      const { resolver } = setup();
+      await expect(resolver.resolve({ providerId: "codex", modelId: "plain" })).resolves.toStrictEqual({
+        status: "resolved", providerId: "codex", modelId: "plain",
+      });
+    });
+
+    it("moves the resolved default with the user default, matching the listed default", async () => {
+      const { resolver, settings } = setup();
+      for (const [userDefault, tiered, highOnly] of [["low", "low", "xhigh"], ["max", "high", "max"], ["xhigh", "high", "xhigh"]] as const) {
+        settings.model.defaults.reasoning = userDefault;
+        const { providers } = await resolver.listTargets();
+        const listed = providers[0]?.models.map((model) => model.options?.[0]?.default);
+        expect(listed).toEqual([tiered, highOnly, undefined]);
+        await expect(resolver.resolve({ providerId: "codex", modelId: "tiered" }))
+          .resolves.toMatchObject({ reasoningEffortOption: { default: tiered } });
+        await expect(resolver.resolve({ providerId: "codex", modelId: "high-only" }))
+          .resolves.toMatchObject({ reasoningEffortOption: { default: highOnly } });
+      }
+    });
+  });
 });

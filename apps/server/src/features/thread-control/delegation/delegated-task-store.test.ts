@@ -40,6 +40,20 @@ describe("delegated task receipts", () => {
     expect(store.find("unknown", coordinator.id)).toBeNull();
   });
 
+  it("keeps a pinned reasoning level and still reads a plan stored before the field existed", () => {
+    const { db, coordinator, store, input } = fixture();
+    const pinned = store.claim({ ...input, plan: { ...input.plan, reasoningLevel: "high" } });
+    if (pinned.kind !== "claimed") throw new Error("Expected pinned claim");
+    expect(store.find(pinned.task.taskId, coordinator.id)?.plan.reasoningLevel).toBe("high");
+
+    const legacy = store.claim({ ...input, clientRequestId: "legacy" });
+    if (legacy.kind !== "claimed") throw new Error("Expected legacy claim");
+    db.query("UPDATE delegated_tasks SET plan_json = json_remove(plan_json, '$.reasoningLevel') WHERE task_id = ?").run(legacy.task.taskId);
+    const stored = store.find(legacy.task.taskId, coordinator.id);
+    expect(stored?.plan.modelId).toBe("gpt-test");
+    expect(stored?.plan.reasoningLevel).toBeUndefined();
+  });
+
   it("keeps live candidates and excludes durable terminal receipts, respecting the Coordinator filter", () => {
     const { db, workspace, coordinator, other, store, input } = fixture();
     const claim = (clientRequestId: string, coordinatorThreadId = coordinator.id) => {

@@ -1,18 +1,34 @@
 import type { IProviderRegistry, IAgentProvider, ProviderId } from "@mcode/contracts/providers/interfaces";
-import type { ThreadCreateInput, ThreadTargetListResult } from "@mcode/contracts/thread-control";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ThreadControlError, ThreadCreateInput, ThreadTargetListResult, ThreadTargetModelOption } from "@mcode/contracts/thread-control";
 import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
 import { inject, injectable } from "tsyringe";
 import { ModelCacheService } from "../../providers/models/model-cache-service.js";
 import { ProviderAvailabilityService } from "../../providers/availability/provider-availability-service.js";
 import { SettingsService } from "../../settings/settings-service.js";
+import { reasoningEffortOption } from "./reasoning-effort-option.js";
 
 /** Server-side resolution result used by ThreadControlService. */
 export type DelegationTargetResolution =
-  | { status: "resolved"; providerId: ProviderId; modelId: string }
+  | { status: "resolved"; providerId: ProviderId; modelId: string; reasoningEffortOption?: ThreadTargetModelOption }
   | { status: "invalid_provider" }
   | { status: "model_required" }
   | { status: "invalid_model" }
   | { status: "discovery_failed" };
+
+/** Maps an unresolved target to the rejection every delegating tool returns. */
+export function targetRejection(
+  resolution: Exclude<DelegationTargetResolution, { status: "resolved" }>,
+): ThreadControlError {
+  if (resolution.status === "discovery_failed") {
+    return { code: "internal_error", message: "Provider target discovery failed", retryable: true };
+  }
+  return {
+    code: resolution.status === "invalid_provider" ? "invalid_provider" : "invalid_model",
+    message: "The requested provider and model are unavailable",
+    retryable: false,
+  };
+}
 
 /**
  * Resolves the provider/model pairs that can actually accept delegated turns.
@@ -40,6 +56,7 @@ export class DelegationTargetResolver {
         provider.id,
         catalog.name,
         globalProviderId === provider.id ? globalModelId : undefined,
+        settings.model.defaults.reasoning,
       );
       if (target) targets.push(target);
       if (targets.length >= 20) break;
@@ -57,13 +74,19 @@ export class DelegationTargetResolver {
     if (!provider) return { status: "invalid_provider" };
     const model = this.requestedModel(input, providerId, globalProviderId, globalModelId);
     if (model.status) return model.status;
-    return this.resolveAvailableModel(provider, model.id, model.requiresExplicitModel);
+    return this.resolveAvailableModel(
+      provider,
+      model.id,
+      model.requiresExplicitModel,
+      settings.model.defaults.reasoning,
+    );
   }
 
   private async listProviderTarget(
     providerId: ProviderId,
     providerName: string,
     globalDefaultModel: string | undefined,
+    userReasoning: ReasoningLevel,
   ): Promise<ThreadTargetListResult["providers"][number] | undefined> {
     try {
       this.availability?.assertUsable(providerId);
@@ -75,10 +98,14 @@ export class DelegationTargetResolver {
       return {
         providerId,
         name: providerName,
-        models: models.slice(0, 100).map((model) => ({
-          id: model.id,
-          name: model.name.trim() || model.id,
-        })),
+        models: models.slice(0, 100).map((model) => {
+          const option = reasoningEffortOption(model, userReasoning);
+          return {
+            id: model.id,
+            name: model.name.trim() || model.id,
+            ...(option ? { options: [option] } : {}),
+          };
+        }),
         ...(defaultModelId ? { defaultModelId } : {}),
       };
     } catch {
@@ -114,14 +141,22 @@ export class DelegationTargetResolver {
     provider: IAgentProvider,
     modelId: string,
     requiresExplicitModel: boolean,
+    userReasoning: ReasoningLevel,
   ): Promise<DelegationTargetResolution> {
     try {
       this.availability?.assertUsable(provider.id);
       const models = this.usableModels(await this.models.listModels(provider.id));
-      if (!models.some((model) => model.id === modelId)) {
+      const model = models.find((candidate) => candidate.id === modelId);
+      if (!model) {
         return requiresExplicitModel ? { status: "model_required" } : { status: "invalid_model" };
       }
-      return { status: "resolved", providerId: provider.id, modelId };
+      const option = reasoningEffortOption(model, userReasoning);
+      return {
+        status: "resolved",
+        providerId: provider.id,
+        modelId,
+        ...(option ? { reasoningEffortOption: option } : {}),
+      };
     } catch (error) {
       return error instanceof Error && error.message.startsWith("No provider registered")
         ? { status: "invalid_provider" }

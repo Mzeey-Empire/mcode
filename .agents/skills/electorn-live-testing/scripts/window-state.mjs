@@ -3,6 +3,10 @@ import * as NodeChildProcess from "node:child_process";
 // SW_SHOWMINNOACTIVE and SW_SHOWNOACTIVATE: neither takes focus from the window the user is in.
 const SHOW_COMMANDS = { minimized: 7, normal: 4 };
 
+// The dev build opens DevTools, which draws a "900px × 700px" label over the page after each
+// resize. Screenshots include it until it fades, measured at under 1 s after the resize settles.
+const DEVTOOLS_SIZE_LABEL_MS = 1200;
+
 const WINDOW_SOURCE = String.raw`
 using System;
 using System.Collections.Generic;
@@ -63,4 +67,43 @@ export function setElectronWindowState(pid, windowState) {
   );
   if (result.status !== 0) throw new Error(result.stderr.trim() || "PowerShell could not change the window state");
   return result.stdout.trim();
+}
+
+/** Resizes the real Electron window and waits for its page layout to match before capture. */
+export async function setElectronWindowSize(page, { width, height }) {
+  for (const [name, value] of Object.entries({ width, height })) {
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new Error(`${name} must be a positive safe integer; received ${value}`);
+    }
+  }
+
+  const sizes = await readElectronWindowSizes(page);
+  if (sizes.inner !== sizes.outer) {
+    throw new Error(`The page lays out at ${sizes.inner} but the window is ${sizes.outer}. A minimized window or an earlier page.setViewportSize call causes this. Restore the window with setElectronWindowState(pid, "normal"), or restart Electron with stop-electron.mjs and start-electron.mjs to clear a fake size.`);
+  }
+
+  // window.resizeTo moves the real BrowserWindow in Electron, unlike page.setViewportSize.
+  await page.evaluate(({ width, height }) => {
+    window.resizeTo(width, height);
+  }, { width, height });
+  try {
+    await page.waitForFunction(({ width, height }) => (
+      window.innerWidth === width && window.innerHeight === height
+      && window.outerWidth === width && window.outerHeight === height
+    ), { width, height }, { timeout: 2000 });
+  } catch (error) {
+    if (error?.name !== "TimeoutError") throw error;
+    const reached = await readElectronWindowSizes(page);
+    throw new Error(`Asked for ${width}x${height}, but the window reached ${reached.outer} and the page ${reached.inner}. The screen's work area is ${reached.available}; choose a size that fits.`);
+  }
+  await page.waitForTimeout(DEVTOOLS_SIZE_LABEL_MS);
+  return { width, height };
+}
+
+async function readElectronWindowSizes(page) {
+  return page.evaluate(() => ({
+    inner: `${window.innerWidth}x${window.innerHeight}`,
+    outer: `${window.outerWidth}x${window.outerHeight}`,
+    available: `${screen.availWidth}x${screen.availHeight}`,
+  }));
 }

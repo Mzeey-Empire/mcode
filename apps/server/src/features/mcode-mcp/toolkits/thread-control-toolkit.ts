@@ -155,7 +155,7 @@ function createTools(context: ToolContext): McodeTool<McodeSession>[] {
     ...createTaskTools(context),
     serviceTool(context, {
       name: "thread_target_list",
-      description: "List provider and model targets currently usable for delegated tasks. Call before choosing a provider or model; pass exact returned providerId/modelId to delegate_task. Never assume a static provider list or target the active source thread.",
+      description: "List provider and model targets currently usable for delegated tasks. Call before choosing a provider or model; pass exact returned providerId/modelId to delegate_task. Never assume a static provider list or target the active source thread. A model's options list the settings delegate_task accepts in options, with the default used when one is omitted; a model without options accepts none.",
       input: ThreadTargetListInputSchema(),
       result: ThreadTargetListResultSchema(),
       run: (service, authority) => service.threadTargetList(authority),
@@ -168,7 +168,7 @@ function createTaskTools(context: ToolContext): McodeTool<McodeSession>[] {
   return [
     serviceTool(context, {
       name: "delegate_task",
-      description: "Delegate child work in the Coordinator's Project. Prefer Provider-native sub-agents when they support the chosen model. Call thread_target_list and use its exact providerId/modelId. Choose shared for the Coordinator's checkout or worktree for a new checkout at its local commit with project setup. Omitted permissionMode inherits the Coordinator's mode; a broader mode is forbidden. Run each review round as a fresh task carrying the brief, prior findings and open objections. The call returns immediately. The Coordinator is woken on finish, failure or a question; task_status reads acknowledge results. Retry the same input with the same clientRequestId to return the existing task. Interrupted tasks may resume.",
+      description: "Delegate child work in the Coordinator's Project. Prefer Provider-native sub-agents when they support the chosen model. Call thread_target_list and use its exact providerId/modelId. Choose shared for the Coordinator's checkout or worktree for a new checkout at its local commit with project setup. Omitted permissionMode inherits the Coordinator's mode; a broader mode is forbidden. Run each review round as a fresh task carrying the brief, prior findings and open objections. The call returns immediately. The Coordinator is woken on finish, failure or a question; task_status reads acknowledge results. Retry the same input with the same clientRequestId to return the existing task. Interrupted tasks may resume. options.reasoningEffort is optional and must be one of that model's listed values.",
       input: DelegateTaskInputSchema(), result: DelegateTaskResultSchema(),
       run: (service, authority, input) => service.delegate(authority, input),
     }),
