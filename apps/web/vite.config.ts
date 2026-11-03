@@ -147,8 +147,24 @@ export default defineConfig({
     // component tests get it. A .ts file that needs the DOM opts in with a
     // `// @vitest-environment jsdom` docblock.
     projects: [
-      { extends: true, test: { name: "dom", environment: "jsdom", include: ["src/**/*.test.tsx"] } },
-      { extends: true, test: { name: "node", environment: "node", include: ["src/**/*.test.ts"] } },
+      {
+        extends: true,
+        test: {
+          name: "dom",
+          environment: "jsdom",
+          include: ["src/**/*.test.tsx"],
+          benchmark: { include: ["src/**/*.bench.tsx"] },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: ["src/**/*.test.ts"],
+          benchmark: { include: ["src/**/*.bench.ts"] },
+        },
+      },
     ],
   },
 });

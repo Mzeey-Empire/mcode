@@ -21,6 +21,7 @@
     "prod:desktop": "cd apps/desktop && bun run prod",
     "build": "turbo run build",
     "test": "turbo run test",
+    "bench": "bun scripts/perf/run-bench.mjs",
     "lint": "bun run --cwd packages/oxlint-plugin build && oxlint",
     "lint:architecture": "bun --bun dependency-cruiser apps packages",
     "test:oxlint-plugin": "bun --cwd packages/oxlint-plugin test",
