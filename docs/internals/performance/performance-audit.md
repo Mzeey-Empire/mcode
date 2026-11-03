@@ -17,6 +17,10 @@ Use this guide as the source of truth for Mcode budgets and verification.
 5. Make the smallest change that removes the measured cost.
 6. Repeat the same measurement and behavior gates under the same conditions.
 
+### Benchmarks
+
+Put a micro-benchmark in a `*.bench.ts` file next to the code it measures. `bun run bench -- apps/server` runs that workspace's benchmarks with `vitest bench`. It saves the results, the commit, and the host's CPU, memory, OS, and runtime versions to `.dev/verification/performance/`. To measure a change, save a report before it, then pass that report to the run after it with `--baseline <report>`. The runner refuses a baseline from another host or runtime version, because those numbers are not comparable. Run each side several times before you trust a difference. On one Windows desktop, six runs of the unchanged handoff benchmark ranged from 339 to 404 operations per second, a 19% spread, while each run reported an error margin of about 5%. In `apps/web`, a `*.bench.ts` file runs in Node and a `*.bench.tsx` file runs in jsdom. CI never runs benchmarks, because a shared runner's timings vary with its load.
+
 ### Paired frontend runner
 
 Use the maintained paired runner for chat and panel changes:
