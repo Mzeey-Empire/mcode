@@ -253,7 +253,9 @@ jobs:
       # tasks oversubscribe the runner and starve timing-sensitive tests.
       # On GitHub Actions Turbo defaults to grouped logs, which hold a task's
       # output until it ends, so a one-task job prints nothing for minutes.
-      - run: bun run test --log-order=stream ${{ matrix.args }}
+      # GitHub reads a `::error` annotation only at the start of a line, so
+      # Turbo's task prefix would hide Vitest's failing-test annotations.
+      - run: bun run test --log-order=stream --log-prefix=none ${{ matrix.args }}
 
   # Branch protection requires `Test`. A matrix reports one check per suite, so
   # this job turns them into the single required check.

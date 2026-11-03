@@ -120,6 +120,7 @@ Procedures for agents operating this repository.
 - [Domain](agents/domain.md): domain docs for agent consumption
 - [Issue tracker](agents/issue-tracker.md): GitHub issue workflows
 - [Triage labels](agents/triage-labels.md)
+- [CI failures](agents/ci-failures.md): find the failing test in a CI job without downloading its whole log
 
 ## User docs
 

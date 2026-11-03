@@ -158,6 +158,7 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 - Lint and complexity check: `bun run lint`
 - Type checking: `bun run typecheck`
 - Do not run repo wide checks, CI owns the full test suite
+- When a CI job fails, find its failing tests with [docs/agents/ci-failures.md](docs/agents/ci-failures.md) instead of downloading the whole log.
 
 ## Documentation
 
