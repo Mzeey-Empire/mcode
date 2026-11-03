@@ -103,6 +103,7 @@ Mcode must feel snappy and look like one product. Where a rule can be checked, `
 | Mock the web transport through its shared fake. | `mcode/no-inline-module-mock` |
 | Test behaviour, not source text. | `mcode/no-source-text-test` |
 | Use fake timers instead of real sleeps in web tests. | `mcode/no-real-timer-sleep` |
+| Keep each web test under 200 React act warnings, so one test cannot flood the CI log. | `apps/web/src/test-setup.ts` |
 
 ## Dev servers & Runtime contract
 
