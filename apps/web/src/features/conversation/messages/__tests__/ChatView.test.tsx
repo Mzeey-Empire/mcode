@@ -205,6 +205,7 @@ import {
   __resetThreadSwitchTelemetryForTests,
   getThreadSwitchTelemetryCounters,
 } from "@/lib/thread-switch-telemetry";
+import { OVERVIEW_CANVAS_RESERVE_CSS } from "@/lib/composer-layout";
 import { ChatView } from "../ChatView";
 import { KEPT_ALIVE_THREAD_COUNT } from "../chat-view/useChatViewState";
 
@@ -410,7 +411,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     setupWorkspaceMock(defaultWorkspaceState());
     view.rerender(<ChatView />);
 
-    expect(screen.getByTestId("chat-composer-stage")).toHaveStyle({ paddingRight: "328px" });
+    expect(screen.getByTestId("chat-composer-stage")).toHaveStyle({ paddingRight: OVERVIEW_CANVAS_RESERVE_CSS });
   });
 
   it("keeps the Overview docked and the composer beside it while a thread is preparing", () => {
@@ -426,7 +427,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     const shell = screen.getByTestId("thread-preparing-shell");
     expect(within(shell).getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "docked");
-    expect(within(shell).getByTestId("chat-composer-stage")).toHaveStyle({ paddingRight: "328px" });
+    expect(within(shell).getByTestId("chat-composer-stage")).toHaveStyle({ paddingRight: OVERVIEW_CANVAS_RESERVE_CSS });
   });
 
   it("shows the starting thread's target in the docked card without opening a picker", async () => {

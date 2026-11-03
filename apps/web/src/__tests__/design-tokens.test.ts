@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import { READING_RAIL_WIDTH } from "@/lib/composer-layout";
 import paperExport from "../design-tokens.paper.json";
 
 const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
@@ -187,6 +188,10 @@ describe("design tokens match the Paper export", () => {
     for (const container of ["sidebar", "right-rail", "right-rail-expanded"]) {
       expect(toPx(theme.get(`--container-${container}`)!), container).toBe(toPx(paper(`--container-${container}`)));
     }
+  });
+
+  it("gives the docked Overview's reserve the reading rail's width", () => {
+    expect(toPx(theme.get("--container-reading")!)).toBe(READING_RAIL_WIDTH);
   });
 
   it("leads both font stacks with Paper's families", () => {

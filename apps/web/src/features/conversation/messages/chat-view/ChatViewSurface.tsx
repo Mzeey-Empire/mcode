@@ -24,7 +24,7 @@ import { OverviewLayer } from "@/features/thread-overview/overview-layer";
 import { newThreadOverviewScope, threadOverviewScope, useOverviewPresentation } from "@/features/thread-overview/overview-presentation";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import type { ViewportInsets } from "@/components/ui/virtual-viewport";
-import { OVERVIEW_CANVAS_RESERVE } from "@/lib/composer-layout";
+import { OVERVIEW_CANVAS_RESERVE_CSS } from "@/lib/composer-layout";
 import { StartupStepsTrail, editStartupMessage, editStartupSetupScript, openStartupSetupTerminal, startupDecision, useFirstSendMotion, useStartingThread, useStartupAgentRetry, useThreadStartup } from "@/features/thread-startup";
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
@@ -244,9 +244,9 @@ function PreparingThreadSurface({
   const overviewScope = useMemo(() => newThreadOverviewScope(thread.workspace_id), [thread.workspace_id]);
   const overview = useOverviewPresentation(overviewScope, paneWidth);
   const overviewDocked = overview.presentation === "docked";
-  const overviewReserve = overviewDocked ? `${OVERVIEW_CANVAS_RESERVE}px` : undefined;
+  const overviewReserve = overviewDocked ? OVERVIEW_CANVAS_RESERVE_CSS : undefined;
   return (
-    <div ref={paneRef} className={cn("relative flex h-full flex-col bg-background", overviewDocked && "[--chat-gutter:--spacing(6)]")} data-testid="thread-preparing-shell" data-thread-view>
+    <div ref={paneRef} className={cn("@container relative flex h-full flex-col bg-background", overviewDocked && "[--chat-gutter:--spacing(6)]")} data-testid="thread-preparing-shell" data-thread-view>
       <OverviewLayer>
         <ThreadHeader state={state} actions={<NewThreadOverview scope={overviewScope} overview={overview} readOnly />} />
         <div className="min-h-0 flex-1 overflow-y-auto pt-4" style={{ paddingRight: overviewReserve }}>
@@ -631,14 +631,14 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
   const paneRef = useRef<HTMLDivElement>(null);
   const paneWidth = useElementWidth(paneRef, thread.id);
   const overviewDocked = useOverviewPresentation(threadOverviewScope(thread), paneWidth).presentation === "docked";
-  const overviewReserve = overviewDocked ? `${OVERVIEW_CANVAS_RESERVE}px` : undefined;
+  const overviewReserve = overviewDocked ? OVERVIEW_CANVAS_RESERVE_CSS : undefined;
   const topChromeRef = useRef<HTMLDivElement>(null);
   const bottomChromeRef = useRef<HTMLDivElement>(null);
   const chromeInsets = useChromeInsets(topChromeRef, bottomChromeRef);
   return (
     // The docked card's reserve takes the right gutter's room, so rows and the composer use 24px
     // gutters while docked. That keeps the composer at 520 or wider down to OVERVIEW_DOCK_MIN_CANVAS.
-    <div ref={paneRef} className={cn("relative flex h-full flex-col bg-background", overviewDocked && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view" data-thread-view>
+    <div ref={paneRef} className={cn("@container relative flex h-full flex-col bg-background", overviewDocked && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view" data-thread-view>
       <OverviewLayer>
         {/* The transcript fills the pane and scrolls under both chrome blocks. The top block takes the
             sticky layer so it paints over the transcript that follows it in the DOM. */}

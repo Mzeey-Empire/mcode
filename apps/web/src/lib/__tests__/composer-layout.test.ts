@@ -1,4 +1,4 @@
-// @vitest-environment node
+// @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import {
   LAYOUT_COLUMN_GAP_PX,
@@ -7,8 +7,11 @@ import {
   minContentWidthForSideBySidePanel,
   minOuterWidthForInlineSidebar,
   OVERVIEW_CANVAS_RESERVE,
+  OVERVIEW_CANVAS_RESERVE_CSS,
   OVERVIEW_DOCK_MIN_CANVAS,
+  overviewCanvasReserve,
   preferredSplitPanelWidth,
+  READING_RAIL_WIDTH,
 } from "@/lib/composer-layout";
 import { COMPOSER_MIN_WIDTH, PANEL_MIN_WIDTH, PANEL_SPLIT_GAP_PX } from "@/stores/diffStore";
 import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
@@ -61,7 +64,24 @@ describe("composer-layout", () => {
   });
 
   it("docks the Overview only where the composer keeps its minimum width beside the reserve", () => {
-    expect(OVERVIEW_DOCK_MIN_CANVAS - OVERVIEW_CANVAS_RESERVE).toBeGreaterThanOrEqual(COMPOSER_MIN_WIDTH);
+    expect(OVERVIEW_DOCK_MIN_CANVAS - overviewCanvasReserve(OVERVIEW_DOCK_MIN_CANVAS)).toBeGreaterThanOrEqual(COMPOSER_MIN_WIDTH);
+  });
+
+  it("keeps the reading rail centred beside the docked Overview until it would reach the card's column", () => {
+    const railRight = (canvas: number) => (canvas - overviewCanvasReserve(canvas) + READING_RAIL_WIDTH) / 2;
+    expect(overviewCanvasReserve(2000)).toBe(0);
+    for (const canvas of [1232, 1300, 1416]) {
+      expect(railRight(canvas), `${canvas}px canvas`).toBe(canvas - OVERVIEW_CANVAS_RESERVE);
+    }
+    expect(overviewCanvasReserve(OVERVIEW_DOCK_MIN_CANVAS)).toBe(OVERVIEW_CANVAS_RESERVE);
+  });
+
+  it("resolves the conversation's CSS reserve to the width the toast lane computes", () => {
+    const probe = document.createElement("div");
+    for (const canvas of [OVERVIEW_DOCK_MIN_CANVAS, 1088, 1232, 1300, 1416, 2000]) {
+      probe.style.paddingRight = OVERVIEW_CANVAS_RESERVE_CSS.replace("var(--container-reading)", `${READING_RAIL_WIDTH}px`).replace("100cqw", `${canvas}px`);
+      expect(probe.style.paddingRight, `${canvas}px canvas`).toBe(`calc(${overviewCanvasReserve(canvas)}px)`);
+    }
   });
 
   it("reports inline sidebar fit from outer-row width", () => {

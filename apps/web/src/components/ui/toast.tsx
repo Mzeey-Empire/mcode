@@ -15,7 +15,7 @@ import {
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusMark, type StatusMarkState } from "@/components/ui/status-mark";
-import { OVERVIEW_CANVAS_RESERVE, OVERVIEW_DOCK_MIN_CANVAS } from "@/lib/composer-layout";
+import { OVERVIEW_DOCK_MIN_CANVAS, overviewCanvasReserve } from "@/lib/composer-layout";
 import { SwipeVelocity } from "@/lib/swipe-velocity";
 import {
   FRONT_PLACEMENT,
@@ -60,7 +60,7 @@ interface LaneColumn {
 function measureColumn(element: HTMLElement | null, reserveOverview: boolean): LaneColumn {
   if (!element) return { left: 0, top: 0, width: window.innerWidth };
   const rect = element.getBoundingClientRect();
-  const reserve = reserveOverview && rect.width >= OVERVIEW_DOCK_MIN_CANVAS ? OVERVIEW_CANVAS_RESERVE : 0;
+  const reserve = reserveOverview && rect.width >= OVERVIEW_DOCK_MIN_CANVAS ? overviewCanvasReserve(rect.width) : 0;
   return { left: rect.left, top: rect.top, width: rect.width - reserve };
 }
 

@@ -11,7 +11,7 @@ import {
 } from "@/features/thread-overview/overview-presentation";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useElementWidth } from "@/hooks/useElementWidth";
-import { OVERVIEW_CANVAS_RESERVE } from "@/lib/composer-layout";
+import { OVERVIEW_CANVAS_RESERVE_CSS } from "@/lib/composer-layout";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { cn } from "@/lib/utils";
 import { recordFirstSend } from "@/features/thread-startup";
@@ -41,7 +41,7 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewT
   const docked = overview.presentation === "docked";
   return (
     // While docked, the card's reserve takes the right gutter's room, as on a running thread's canvas.
-    <div ref={canvasRef} className={cn("relative flex h-full min-h-0 flex-col bg-background", docked && "[--chat-gutter:--spacing(6)]")}>
+    <div ref={canvasRef} className={cn("@container relative flex h-full min-h-0 flex-col bg-background", docked && "[--chat-gutter:--spacing(6)]")}>
       <OverviewLayer>
         <CanvasHeader>
           <CanvasBreadcrumb projectName={projectName} workspaceId={workspaceId}>
@@ -53,7 +53,7 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewT
           ref={columnRef}
           data-testid="new-thread-start-column"
           className="flex min-h-0 flex-1 flex-col justify-center-safe overflow-y-auto"
-          style={{ paddingRight: docked ? `${OVERVIEW_CANVAS_RESERVE}px` : undefined }}
+          style={{ paddingRight: docked ? OVERVIEW_CANVAS_RESERVE_CSS : undefined }}
         >
           <div className="px-4 pb-4 sm:px-8">
             <div key={projectName ?? "projectless"} className={cn(PRIMARY_CONTENT_RAIL_CLASS, "animate-fade-up-in flex justify-center")}>
