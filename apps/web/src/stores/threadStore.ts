@@ -740,6 +740,14 @@ export function getExecutingThreadIds(threadState: ThreadExecutionState): string
   return [...candidates].filter((threadId) => isThreadExecuting(threadId, threadState));
 }
 
+/** Whether the user has input queued on a thread: waiting, being sent, or open in the editor. */
+function hasQueuedInput(threadId: string): boolean {
+  const queue = useQueueStore.getState();
+  return Boolean(queue.queues[threadId]?.length)
+    || Boolean(queue.inFlightQueuedMessages[threadId])
+    || queue.editingThreadId === threadId;
+}
+
 function canAutoDrainQueuedMessage(threadId: string): boolean {
   const threadExists = useWorkspaceStore.getState().threads.some(
     (thread) => thread.id === threadId && thread.deleted_at == null,
@@ -3209,10 +3217,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       throw new TurnAdmissionError("busy", `Thread ${threadId} already has an active agent session`);
     }
     if (!isControlCommand) {
-      const queue = useQueueStore.getState();
-      if (!queue.queues[threadId]?.length && !queue.inFlightQueuedMessages[threadId] && queue.editingThreadId !== threadId) {
-        queue.resumeAutoDrain(threadId);
-      }
+      if (!hasQueuedInput(threadId)) useQueueStore.getState().resumeAutoDrain(threadId);
       invalidateDeferredNarrativeEvents(threadId);
       useTaskStore.getState().prepareTaskBubbleForNewTurn(threadId);
     }
@@ -3875,7 +3880,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   /** Request exact active turn stop and apply authoritative runtime result. */
   stopAgent: async (threadId) => {
     clearDequeueTimer(threadId);
-    useQueueStore.getState().suppressAutoDrain(threadId, "Stopped by you");
+    // Stop holds what was queued before the click. A message sent while the turn stops is the user's
+    // next instruction, so it goes out once the stop settles (see the turn-end hold below).
+    if (hasQueuedInput(threadId)) useQueueStore.getState().suppressAutoDrain(threadId, "Stopped by you");
     set((state) => ({
       pendingStopCounts: {
         ...state.pendingStopCounts,
@@ -3905,6 +3912,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         return { pendingStopCounts };
       });
       invalidateDeferredNarrativeEvents(threadId);
+      // A drain asked for while the stop was pending saw the thread as busy and gave up.
+      scheduleDrainAfterEdit(threadId);
     }
   },
 
@@ -4615,6 +4624,25 @@ function clearSettledStopFailures(state: ThreadState, previous: ThreadState): vo
   }
 }
 
+/** Whether the user's own Stop, from this window, ended the thread's latest turn. */
+function endedByUserStop(threadId: string, record: ThreadRecord, state: ThreadState): boolean {
+  if ((state.pendingStopCounts[threadId] ?? 0) > 0) return true;
+  return record.stopRequestedExecutionId !== undefined && record.stopRequestedExecutionId === record.turnExecutionId;
+}
+
+function holdQueueAfterUnfinishedTurn(threadId: string, record: ThreadRecord, state: ThreadState): void {
+  clearDequeueTimer(threadId);
+  // `stopAgent` already held what was queued at the click; anything left was sent while it stopped.
+  if (endedByUserStop(threadId, record, state)) {
+    scheduleDrainAfterEdit(threadId);
+    return;
+  }
+  const queue = useQueueStore.getState();
+  if (queue.autoDrainSuppressedThreadIds.has(threadId)) return;
+  const phase = getThreadRuntimePhase(threadId, record);
+  queue.suppressAutoDrain(threadId, phase === "errored" ? "Turn failed" : "Turn interrupted");
+}
+
 /**
  * Holds a thread's queued follow-ups when its latest turn ends without completing.
  * Observing the phase catches every writer that settles a turn (events, persistence, canonical
@@ -4633,14 +4661,7 @@ useThreadStore.subscribe((state, previous) => {
     if (!record || record === before) continue;
     const ended = endedWithoutCompleting(getThreadRuntimePhase(threadId, record));
     const wasEnded = before !== undefined && endedWithoutCompleting(getThreadRuntimePhase(threadId, before));
-    if (ended && !wasEnded) {
-      clearDequeueTimer(threadId);
-      const queue = useQueueStore.getState();
-      if (!queue.autoDrainSuppressedThreadIds.has(threadId)) {
-        const phase = getThreadRuntimePhase(threadId, record);
-        queue.suppressAutoDrain(threadId, phase === "errored" ? "Turn failed" : "Turn interrupted");
-      }
-    }
+    if (ended && !wasEnded) holdQueueAfterUnfinishedTurn(threadId, record, state);
   }
 });
 
