@@ -58,7 +58,6 @@ describe("genieShape", () => {
   });
 });
 
-/** Where a row spanning the popup's full width at `band.mid` lands, by CSS `translate` and `scale` about the band's pivot. */
 function landedRow(openness: number, band: GenieBand) {
   const squeeze = genieBandSqueeze(openness, geometry, band);
   const landX = (x: number) => band.pivotX + squeeze.x + squeeze.scaleX * (x - band.pivotX);
@@ -113,7 +112,6 @@ describe("genieBandSqueeze", () => {
 
   it("lands a band in the same place whatever point it scales about", () => {
     const fromCentre = landedRow(0.55, centred(300));
-    // A sliding highlight sits at the top-left of its list and is moved onto its row, so it scales about a far point.
     const fromCorner = landedRow(0.55, { mid: 300, pivotX: 12, pivotY: 40 });
     expect(fromCorner.left).toBeCloseTo(fromCentre.left);
     expect(fromCorner.right).toBeCloseTo(fromCentre.right);

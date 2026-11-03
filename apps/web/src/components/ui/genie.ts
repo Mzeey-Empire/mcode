@@ -12,18 +12,12 @@ export const GENIE_CLOSE_MS = 160;
 const SHADOW_SIDE = 44;
 const SHADOW_UP = 28;
 const SHADOW_DOWN = 60;
-/**
- * The squeeze at which a row's shadow room is gone. The popup's own background is not squeezed, so any room left
- * beside a narrowed row shows that background past it; the shadow is cut there instead.
- */
 const SHADOW_GONE = 0.1;
 /** Points sampled down each side of the outline: enough for a smooth S-curve, few enough to write every frame. */
 const EDGE_POINTS = 24;
 /** Hides an open's popup until its first frame, when it has its place and can be measured. */
 const UNMEASURED_CLIP = "inset(50%)";
-/** Bands this close to the trigger's centre line flatten as they enter it. */
 const THROAT = 24;
-/** Boxes up to this tall squeeze as one band; a taller box squeezes its children instead. */
 const BAND_MAX_HEIGHT = 48;
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
@@ -73,7 +67,6 @@ export interface GenieSqueeze {
   readonly scaleY: number;
 }
 
-/** How far the popup has slid toward the trigger at `openness`, and how hard the funnel squeezes the row at `y`. */
 function pourAt(openness: number, geometry: GenieGeometry) {
   const { originY } = geometry;
   const p = 1 - clamp01(openness);
@@ -86,7 +79,6 @@ function pourAt(openness: number, geometry: GenieGeometry) {
   return { shift, squeezeAt };
 }
 
-/** The funnel's row at one squeeze: its centre, and its width as a share of the popup's. */
 function funnelRow(squeeze: number, geometry: GenieGeometry) {
   const { width, originX, originWidth } = geometry;
   return { centre: width / 2 + squeeze * (originX - width / 2), scale: 1 - squeeze * (1 - originWidth / width) };
@@ -129,7 +121,6 @@ export function genieBandSqueeze(openness: number, geometry: GenieGeometry, band
   const { shift, squeezeAt } = pourAt(openness, geometry);
   const row = funnelRow(squeezeAt(band.mid), geometry);
   const scaleY = clamp01((geometry.originY - (band.mid + shift)) / THROAT);
-  // CSS scales about the band's pivot, so the translate also undoes the pivot's own drift.
   return {
     x: row.centre - (geometry.width / 2) * row.scale - band.pivotX * (1 - row.scale),
     y: (band.mid - band.pivotY) * (1 - scaleY),
@@ -162,19 +153,16 @@ export function opennessAt(clock: GenieClock, elapsed: number): number {
   return clock.from + (clock.to - clock.from) * t;
 }
 
-/** A band and the element that draws it. */
 interface MeasuredBand {
   readonly element: HTMLElement | SVGElement;
   readonly band: GenieBand;
 }
 
-/** What a run measures once: where the popup and its trigger sit, and the rows it squeezes. */
 interface Measured {
   readonly geometry: GenieGeometry;
   readonly bands: readonly MeasuredBand[];
 }
 
-/** Where `popup` and `origin` sit now. Read only while the popup and its bands have no shift of the Genie's own. */
 function measure(popup: HTMLElement, origin: HTMLElement): Measured | null {
   const box = popup.getBoundingClientRect();
   if (box.width === 0 || box.height === 0) return null;
@@ -189,10 +177,6 @@ function measure(popup: HTMLElement, origin: HTMLElement): Measured | null {
   return { geometry, bands: measureBands(popup, box) };
 }
 
-/**
- * The popup's rows: each visible box no taller than a band, or a taller box with no child boxes. CSS cannot bend
- * content, so the Genie squeezes these whole while the outline curves around them.
- */
 function measureBands(popup: HTMLElement, box: DOMRect): MeasuredBand[] {
   const bands: MeasuredBand[] = [];
   const visit = (element: Element) => {
@@ -213,10 +197,6 @@ function showsIn(rect: DOMRect, box: DOMRect): boolean {
   return rect.width > 0 && rect.height > 0 && rect.bottom > box.top && rect.top < box.bottom;
 }
 
-/**
- * Where a band's transform origin sits on screen: its layout box, found by taking its own translation back off its
- * rect, plus `transform-origin`, which defaults to the centre. Null when the band also scales or turns itself.
- */
 function pivotOf(style: CSSStyleDeclaration, rect: DOMRect): GeniePoint | null {
   const moved = translationOf(style);
   if (!moved) return null;
@@ -227,11 +207,6 @@ function pivotOf(style: CSSStyleDeclaration, rect: DOMRect): GeniePoint | null {
   };
 }
 
-/**
- * How far a band's own `transform` moves it, or null when the band scales or turns itself: the squeeze would overwrite
- * its `translate` or `scale`, and its sums assume a band that is only moved. A sliding highlight is why a translation
- * is allowed: it sits at its list's top-left and a `translate()` moves it onto its row.
- */
 function translationOf(style: CSSStyleDeclaration): GeniePoint | null {
   const own = [style.translate, style.scale, style.rotate].some((value) => value && value !== "none");
   if (own) return null;
@@ -416,7 +391,6 @@ export class GenieMotion {
   private finish(): void {
     const run = this.run;
     if (!run) return;
-    // A finished close stays folded: the popup is about to unmount, and unfolding it would flash it whole.
     if (run.direction === "close") {
       this.stopFrame();
       this.run = null;

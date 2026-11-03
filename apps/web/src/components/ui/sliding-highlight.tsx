@@ -46,10 +46,6 @@ export function SlidingHighlight({ follow }: { readonly follow: HighlightFollow 
   return <span ref={fillRef} aria-hidden="true" data-slot="sliding-highlight" className={FILL_CLASS} />;
 }
 
-/**
- * Coalesces changes to one placement per frame; a rebuild in the frame wins over a move so it snaps. While the group's
- * popup pours (`data-pouring`), its rows are squeezed and their rects are not where they rest, so placement waits.
- */
 function frameScheduler(group: HTMLElement, place: (cause: Cause) => void) {
   let frame = 0;
   let pending: Cause | null = null;

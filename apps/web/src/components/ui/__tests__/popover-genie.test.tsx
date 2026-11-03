@@ -28,7 +28,6 @@ function stubReducedMotion(reduce: boolean): void {
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: reduce, media: query, addEventListener() {}, removeEventListener() {} }));
 }
 
-/** The popup at (100,100), 200x240; each of its rows a 32px strip near its top; the trigger 60x30 below it. */
 function stubPopupWithRows(): void {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (this.dataset.slot === "popover-content") return new DOMRect(100, 100, 200, 240);
