@@ -49,9 +49,9 @@ export function SlidingHighlight({ follow }: { readonly follow: HighlightFollow 
 function frameScheduler(group: HTMLElement, place: (cause: Cause) => void) {
   let frame = 0;
   let pending: Cause | null = null;
-  const run = () => {
+  const placeAfterPour = () => {
     if (group.closest("[data-pouring]")) {
-      frame = requestAnimationFrame(run);
+      frame = requestAnimationFrame(placeAfterPour);
       return;
     }
     frame = 0;
@@ -62,7 +62,7 @@ function frameScheduler(group: HTMLElement, place: (cause: Cause) => void) {
   const schedule = (cause: Cause) => {
     pending = pending === "rebuilt" ? "rebuilt" : cause;
     if (frame) return;
-    frame = requestAnimationFrame(run);
+    frame = requestAnimationFrame(placeAfterPour);
   };
   const cancel = () => {
     if (frame) cancelAnimationFrame(frame);

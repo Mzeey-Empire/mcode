@@ -121,12 +121,10 @@ export function genieBandSqueeze(openness: number, geometry: GenieGeometry, band
   const { shift, squeezeAt } = pourAt(openness, geometry);
   const row = funnelRow(squeezeAt(band.mid), geometry);
   const scaleY = clamp01((geometry.originY - (band.mid + shift)) / THROAT);
-  return {
-    x: row.centre - (geometry.width / 2) * row.scale - band.pivotX * (1 - row.scale),
-    y: (band.mid - band.pivotY) * (1 - scaleY),
-    scaleX: row.scale,
-    scaleY,
-  };
+  const rowLeft = row.centre - (geometry.width / 2) * row.scale;
+  const leftAfterScale = band.pivotX * (1 - row.scale);
+  const midAfterScale = band.pivotY + (band.mid - band.pivotY) * scaleY;
+  return { x: rowLeft - leftAfterScale, y: band.mid - midAfterScale, scaleX: row.scale, scaleY };
 }
 
 function clipPathOf(shape: GenieShape): string {
@@ -163,7 +161,7 @@ interface Measured {
   readonly bands: readonly MeasuredBand[];
 }
 
-function measure(popup: HTMLElement, origin: HTMLElement): Measured | null {
+function measureAtRest(popup: HTMLElement, origin: HTMLElement): Measured | null {
   const box = popup.getBoundingClientRect();
   if (box.width === 0 || box.height === 0) return null;
   const trigger = origin.getBoundingClientRect();
@@ -198,7 +196,7 @@ function showsIn(rect: DOMRect, box: DOMRect): boolean {
 }
 
 function pivotOf(style: CSSStyleDeclaration, rect: DOMRect): GeniePoint | null {
-  const moved = translationOf(style);
+  const moved = pureTranslationOf(style);
   if (!moved) return null;
   const [x = Number.NaN, y = Number.NaN] = style.transformOrigin.split(" ").map(parseFloat);
   return {
@@ -207,7 +205,7 @@ function pivotOf(style: CSSStyleDeclaration, rect: DOMRect): GeniePoint | null {
   };
 }
 
-function translationOf(style: CSSStyleDeclaration): GeniePoint | null {
+function pureTranslationOf(style: CSSStyleDeclaration): GeniePoint | null {
   const own = [style.translate, style.scale, style.rotate].some((value) => value && value !== "none");
   if (own) return null;
   if (!style.transform || style.transform === "none") return { x: 0, y: 0 };
@@ -289,7 +287,7 @@ export class GenieMotion {
     const popup = this.popup;
     const origin = this.movingOrigin();
     if (!popup || !origin) return false;
-    const measured = this.run?.measured ?? measure(popup, origin);
+    const measured = this.run?.measured ?? measureAtRest(popup, origin);
     if (!measured) return false;
     this.start(popup, "close", startClock(this.run ? this.run.openness : 1, 0, GENIE_CLOSE_MS), origin, measured, onDone);
     return true;
@@ -359,7 +357,7 @@ export class GenieMotion {
       this.finish();
       return;
     }
-    run.measured ??= measure(popup, run.origin);
+    run.measured ??= measureAtRest(popup, run.origin);
     if (!run.measured) {
       this.cancel();
       return;
@@ -391,14 +389,15 @@ export class GenieMotion {
   private finish(): void {
     const run = this.run;
     if (!run) return;
-    if (run.direction === "close") {
-      this.stopFrame();
-      this.run = null;
-      if (this.popup) delete this.popup.dataset.pouring;
-    } else {
-      this.stop();
-    }
+    if (run.direction === "close") this.stopFoldedForUnmount();
+    else this.stop();
     run.onDone?.();
+  }
+
+  private stopFoldedForUnmount(): void {
+    this.stopFrame();
+    this.run = null;
+    if (this.popup) delete this.popup.dataset.pouring;
   }
 
   private stop(): void {
