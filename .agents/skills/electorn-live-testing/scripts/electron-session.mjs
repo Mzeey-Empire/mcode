@@ -3,8 +3,13 @@ import * as NodePath from "node:path";
 
 const SESSION_FILE_NAME = "electron-live-testing.json";
 
-/** Connects Playwright to the Electron process owned by start-electron.mjs. */
-export async function connectElectronSession({ playwright, repoRoot, sessionFileName = SESSION_FILE_NAME }) {
+/**
+ * Connects Playwright to the Electron process owned by start-electron.mjs.
+ *
+ * The first connection reloads the app so it signs in with the seeded login cookie. Pass
+ * `reload: false` to reconnect from a later step script without losing the app's state.
+ */
+export async function connectElectronSession({ playwright, repoRoot, sessionFileName = SESSION_FILE_NAME, reload = true }) {
   validateConnectionArguments(playwright, repoRoot, sessionFileName);
   const root = NodePath.resolve(repoRoot);
   const sessionFile = NodePath.join(root, ".dev", sessionFileName);
@@ -12,7 +17,7 @@ export async function connectElectronSession({ playwright, repoRoot, sessionFile
   const ports = readRuntimePorts(root, record.appUrlPrefix);
   const connection = await connectToElectron(playwright, record, ports);
   const page = await waitForAppPage(connection.context, record.appUrlPrefix);
-  const livePage = await reloadElectronAppPage(connection.context, page, record.appUrlPrefix);
+  const livePage = reload ? await reloadElectronAppPage(connection.context, page, record.appUrlPrefix) : page;
   return {
     appUrl: ports?.appUrl ?? null,
     ...connection,

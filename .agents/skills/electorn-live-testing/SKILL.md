@@ -1,6 +1,6 @@
 ---
 name: electorn-live-testing
-description: Keep one Mcode Electron application open and control it across many Playwright commands through the persistent Node REPL. Use when inspecting, debugging, benchmarking, or verifying desktop-only behavior, including existing Browser tabs, background tabs, tab switching, popups, provider selection, reloads, and restart boundaries.
+description: Keep one Mcode Electron application open and control it across many Playwright commands through the persistent Node REPL or step scripts. Use when inspecting, debugging, benchmarking, or verifying desktop-only behavior, including existing Browser tabs, background tabs, tab switching, popups, provider selection, reloads, restart boundaries, app store state, per-frame motion, and minimizing.
 ---
 
 # Electron Live Testing
@@ -52,6 +52,23 @@ var electronRequire = electronModule.createRequire(
 var electronPlaywright = electronRequire("playwright");
 ```
 
+Without a persistent Node REPL, write each step as a script under `.dev/verification/` and run it with `node` from the repository root. Electron keeps the app and its state between steps. Only the first connection needs the reload that signs the app in, so later steps pass `reload: false`:
+
+```js
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+
+const repoRoot = process.cwd();
+const playwright = createRequire(`${repoRoot}/.dev/playwright-scratch/package.json`)("playwright");
+// Windows needs a file URL to import an absolute path.
+const skill = (name) => import(pathToFileURL(`${repoRoot}/.agents/skills/electorn-live-testing/scripts/${name}`).href);
+const { connectElectronSession, disconnectElectronSession } = await skill("electron-session.mjs");
+
+const session = await connectElectronSession({ playwright, repoRoot, reload: false });
+// act on session.page
+await disconnectElectronSession(session);
+```
+
 ## Operate directly
 
 Run each observation or action as a new `mcp__node_repl__js` call against `electronPage`, `electronSession.context`, or `electronSession.browser`.
@@ -69,11 +86,30 @@ For Browser lifecycle changes, cover the states that can regress:
 - Popup behavior preserves the expected automation target.
 - A clean Electron restart restores or reloads only the states promised by the issue.
 
-Select any requested provider or model inside Mcode before starting the test turn. The provider selected in the app is independent from the model running this testing workflow.
+Select the in-app model before the test turn. Exploratory turns run on Haiku or Sonnet: `pickModel(electronPage, { model: "Haiku" })` from `scripts/pick-model.mjs` selects one in the composer and throws on any other model. Select another provider by hand when the test needs it. The model selected in the app is independent from the model running this testing workflow.
+
+To minimize or restore the app window on Windows, call `setElectronWindowState(electronSession.pid, "minimized")` or `"normal"` from `scripts/window-state.mjs`. It changes only the app window and leaves focus where it is. The desktop window turns off background throttling, so a minimized page still reports `visible` and keeps painting. A minimize test therefore checks that the chat keeps up and shows the latest state at restore. Install a frame probe or a store subscription before you minimize.
+
+## Read app state
+
+Read a store through the module instance the app uses. `appModuleUrl` from `scripts/app-probes.mjs` returns the URL the page loaded a module from; import that URL inside `evaluate`:
+
+```js
+var appProbes = await import("./.agents/skills/electorn-live-testing/scripts/app-probes.mjs");
+var threadStoreUrl = await appProbes.appModuleUrl(electronPage, "/src/stores/threadStore.ts");
+var currentThreadId = await electronPage.evaluate(
+  async (url) => (await import(url)).useThreadStore.getState().currentThreadId,
+  threadStoreUrl,
+);
+```
+
+Once a module is edited while Vite runs, the app imports it as `<path>?t=<edit time>`, and importing the bare path creates a second, empty store. Ask for the URL again after an edit or a reload.
 
 ## Measure and capture evidence
 
 Warm each path before timing it. Record multiple samples with `performance.now()` around the exact user-visible transition, then report the sample count, median, minimum, and maximum. Do not claim a performance change from a single run.
+
+Measure motion on every frame inside the page. A screen recording holds only the frames that repainted. Run `electronPage.evaluate(appProbes.installFrameProbe, { selector, label })` before the action, then `electronPage.evaluate(appProbes.readFrameProbe, label)`. Each sample holds the frame time, the match count, and the position, size, opacity, and visibility of the first four matches.
 
 Store screenshots, logs, and measurements under `.dev/verification/`. Keep exploratory specifications under `.dev/playwright-scratch/`; do not commit them.
 
