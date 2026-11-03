@@ -7,6 +7,7 @@ import { backgroundHeldToolIds } from "@/features/conversation/narrative/backgro
 import type { ThreadRecord } from "./thread-record";
 import { appendThoughtSegment } from "./thread-store/narrative-projection";
 import { getCanonicalRuntimeTurn } from "./thread-lifecycle";
+import { queuePendingTurnPersistMessage } from "./turn-response-projection";
 
 /** Restores a parent's active narrative or terminal response at the subscription boundary. */
 export function recoverParentNarrative(threadId: string, state: AgentModelState, record?: ThreadRecord): Partial<ThreadRecord> {
@@ -216,13 +217,14 @@ function recoveredResponse(threadId: string, turn: AgentTurn, state: AgentModelS
   const message = persisted ?? terminalMessage(threadId, turn, record, text, id, previous);
   const replaced = replacedMessageIds(record, id);
   const { responseKey, claimsLiveKey } = recoveredResponseKey(record, replaced, turn, terminal);
+  const unreplaced = { ...record, pendingTurnPersistMessageIds: record.pendingTurnPersistMessageIds.filter((pending) => !replaced.has(pending)) };
   return {
     messages: [...record.messages.filter((candidate) => !replaced.has(candidate.id)), message],
     ...(responseTextIsOpen(turn, state)
       ? {} : { responseTextIsStreaming: false }),
     currentTurnMessageId: id,
     ...(claimsLiveKey ? { currentTurnResponseKey: "" } : {}),
-    pendingTurnPersistMessageIds: [...new Set([...record.pendingTurnPersistMessageIds.filter((pending) => !replaced.has(pending)), id])],
+    ...queuePendingTurnPersistMessage(unreplaced, id),
     assistantResponseKeys: { ...record.assistantResponseKeys, [id]: responseKey },
   };
 }

@@ -22,13 +22,19 @@ export function resolveTurnPersistLocalMessageId(
   return record.pendingTurnPersistMessageIds[0] ?? serverMessageId;
 }
 
-/** Queue a local response row until its corresponding persistence signal arrives. */
+/**
+ * Queue a local response row until its corresponding persistence signal arrives.
+ * A row the canonical model records as `message:<id>` already carries its server id, so it is
+ * never queued: its signal finds it by id. Its signal may also have been handled already, before
+ * the row existed, and then the entry would wait forever and claim the next turn's signal.
+ */
 export function queuePendingTurnPersistMessage(
   record: ThreadRecord,
   localMessageId: string,
 ): Pick<ThreadRecord, "pendingTurnPersistMessageIds"> {
+  const carriesServerId = record.canonicalAgent.state.items[`message:${localMessageId}`] !== undefined;
   return {
-    pendingTurnPersistMessageIds: record.pendingTurnPersistMessageIds.includes(localMessageId)
+    pendingTurnPersistMessageIds: carriesServerId || record.pendingTurnPersistMessageIds.includes(localMessageId)
       ? record.pendingTurnPersistMessageIds
       : [...record.pendingTurnPersistMessageIds, localMessageId],
   };
