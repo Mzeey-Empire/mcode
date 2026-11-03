@@ -251,6 +251,7 @@ async function runElectron(context) {
     playwright: context.playwright,
     repoRoot: context.repoRoot,
     sessionFileName: context.electronSessionFile,
+    allowViewportEmulation: true,
   });
   await electronSession.page.setViewportSize(VIEWPORT);
   const metrics = await readElectronStartupMetrics(electronSession.page, context.mode);

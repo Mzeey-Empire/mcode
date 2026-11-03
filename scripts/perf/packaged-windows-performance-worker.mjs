@@ -92,6 +92,7 @@ async function run() {
       playwright: context.playwright,
       repoRoot: context.repoRoot,
       sessionFileName: context.sessionFileName,
+      allowViewportEmulation: true,
     });
     const result = await measurePackagedSession(electronSession, context);
     await NodeFSPromises.writeFile(context.outputFile, `${JSON.stringify(result, null, 2)}\n`, "utf8");
