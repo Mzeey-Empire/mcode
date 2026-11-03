@@ -5,6 +5,7 @@ import { ThoughtRow } from "./ThoughtRow";
 import { ToolSummaryLine } from "./ToolSummaryLine";
 import { HookRow } from "./HookRow";
 import { ApprovalReceiptRow } from "./ApprovalReceiptRow";
+import { TimelineNote } from "./TimelineNote";
 import { SubagentRow } from "./SubagentRow";
 import { ActiveToolRow } from "./ActiveToolRow";
 import { DeltaBlock } from "./DeltaBlock";
@@ -62,6 +63,23 @@ function sameNarrativeItems(left: NarrativeItem, right: NarrativeItem): boolean 
         sameItems(leftGroup.group.calls, right.group.calls),
       ]);
     }
+    case "subagent": {
+      const leftSubagent = left as Extract<NarrativeItem, { type: "subagent" }>;
+      return sameValues([
+        sameVisibleSubagentState(leftSubagent, right),
+        leftSubagent.activities === right.activities,
+      ]);
+    }
+    default:
+      return sameSingleValueItems(left, right);
+  }
+}
+
+function sameSingleValueItems(
+  left: NarrativeItem,
+  right: Extract<NarrativeItem, { type: "hook" | "approval" | "notice" | "active-tool" | "delta" }>,
+): boolean {
+  switch (right.type) {
     case "hook": {
       const leftHook = left as Extract<NarrativeItem, { type: "hook" }>;
       return sameValues([leftHook.hook === right.hook]);
@@ -70,12 +88,9 @@ function sameNarrativeItems(left: NarrativeItem, right: NarrativeItem): boolean 
       const leftApproval = left as Extract<NarrativeItem, { type: "approval" }>;
       return sameValues([leftApproval.receipt === right.receipt]);
     }
-    case "subagent": {
-      const leftSubagent = left as Extract<NarrativeItem, { type: "subagent" }>;
-      return sameValues([
-        sameVisibleSubagentState(leftSubagent, right),
-        leftSubagent.activities === right.activities,
-      ]);
+    case "notice": {
+      const leftNotice = left as Extract<NarrativeItem, { type: "notice" }>;
+      return sameValues([leftNotice.notice === right.notice]);
     }
     case "active-tool": {
       const leftActiveTool = left as Extract<NarrativeItem, { type: "active-tool" }>;
@@ -117,6 +132,8 @@ function renderItem(
       return <HookRow hook={item.hook} />;
     case "approval":
       return <ApprovalReceiptRow receipt={item.receipt} />;
+    case "notice":
+      return <TimelineNote text={item.notice.text} />;
     case "subagent":
       return (
         <SubagentRow

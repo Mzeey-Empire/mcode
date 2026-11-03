@@ -1,6 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
-import type { Message } from "@mcode/contracts/models/message";
+import { CONTEXT_COMPACTED_NOTICE, type Message } from "@mcode/contracts/models/message";
 import type { ToolCall } from "@/transport/types";
 import type { ToolCallTransition } from "../useToolCallTransitions";
 import { expandTranscriptNarrative, expandTranscriptToolGroups } from "../transcript-narrative-items";
@@ -262,6 +262,82 @@ describe("transcript narrative rows", () => {
     expect(toolRows[0]).toMatchObject({ toolCall: { id: "tool-138" } });
     expect(toolRows.at(-1)).toMatchObject({ toolCall: { id: "tool-169" } });
   });
+});
+
+describe("context compaction notice", () => {
+  const turn = { threadId: "thread", executionId: "execution" };
+
+  it("shows a compaction among the running turn's rows at the time it happened", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [prompt(), compacted(1500)], currentTurn: turn,
+      agentDisplayState: { phase: "streaming" }, agentStartTime: 1000, streamingText: undefined,
+      toolCalls: [bash("before", 1200), bash("after", 1800)],
+    });
+    expect(expandTranscriptNarrative(projected, {}, new Set(), turn).map(transcriptLabel))
+      .toEqual(["Refactor", "tool-group", "notice", "tool-group", "narrative-indicator"]);
+  });
+
+  it("opens a saved turn's fold with the compaction where it happened", () => {
+    const records = { answer: { approvals: [], hooks: [], thoughts: [], tools: [savedBash("before", 1200, 0), savedBash("after", 1800, 1)] } };
+    const projected = createTranscriptItemProjector()({
+      messages: [prompt(), compacted(1500), answer()],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(expandTranscriptNarrative(projected, records, new Set()).map(transcriptLabel))
+      .toEqual(["Refactor", "work-fold", "Done", "turn-meta-line"]);
+    expect(expandTranscriptNarrative(projected, records, new Set(["work-fold:answer"])).map(transcriptLabel))
+      .toEqual(["Refactor", "work-fold", "tool-group", "notice", "tool-group", "Done", "turn-meta-line"]);
+  });
+
+  it("keeps the compaction in place when the running turn settles", () => {
+    const settled = { ...turn, messageId: "answer" };
+    const projected = createTranscriptItemProjector()({
+      messages: [prompt(), compacted(1500), answer()], currentTurn: settled,
+      agentDisplayState: { phase: "completed" }, agentStartTime: 1000, streamingText: undefined,
+      toolCalls: [bash("before", 1200), bash("after", 1800)], committedAssistantBody: "Done",
+    });
+    expect(expandTranscriptNarrative(projected, {}, new Set(["work-fold:answer"]), settled).map(transcriptLabel))
+      .toEqual(["Refactor", "work-fold", "tool-group", "notice", "tool-group", "Done"]);
+  });
+
+  it.each([
+    ["its turn did no work", [prompt(), compacted(1500), answer()], ["Refactor", CONTEXT_COMPACTED_NOTICE, "Done"]],
+    ["it came between turns", [prompt(), answer(), compacted(3500, 4), prompt("Next", 5)], ["Refactor", "Done", CONTEXT_COMPACTED_NOTICE, "Next"]],
+  ])("keeps a compaction on its own row when %s", (_, messages, expected) => {
+    const projected = createTranscriptItemProjector()({ messages, agentStartTime: undefined, streamingText: undefined, toolCalls: [] });
+    expect(expandTranscriptNarrative(projected, {}, new Set()).map(transcriptLabel)).toEqual(expected);
+  });
+
+  function prompt(content = "Refactor", sequence = 1): Message {
+    return turnMessage(`prompt-${sequence}`, "user", content, sequence, 1000);
+  }
+
+  function compacted(at: number, sequence = 2): Message {
+    return turnMessage(`compacted-${sequence}`, "system", CONTEXT_COMPACTED_NOTICE, sequence, at);
+  }
+
+  function answer(): Message {
+    return turnMessage("answer", "assistant", "Done", 3, 3000);
+  }
+
+  function turnMessage(id: string, role: Message["role"], content: string, sequence: number, at: number): Message {
+    return createMockMessage({ id, thread_id: "thread", role, content, sequence, timestamp: new Date(at).toISOString() });
+  }
+
+  function bash(id: string, startedAt: number): ToolCall {
+    return { id, toolName: "Bash", toolInput: { command: id }, output: "done", isError: false, isComplete: true, startedAt };
+  }
+
+  function savedBash(id: string, startedAt: number, sortOrder: number) {
+    return {
+      id, message_id: "answer", parent_tool_call_id: null, tool_name: "Bash", input_summary: id, output_summary: "done",
+      status: "completed" as const, started_at: new Date(startedAt).toISOString(), completed_at: new Date(startedAt + 100).toISOString(), sort_order: sortOrder,
+    };
+  }
+
+  function transcriptLabel(row: { type: string; item?: { type: string }; message?: Message }): string {
+    return row.type === "message" && row.message ? row.message.content : rowLabel(row);
+  }
 });
 
 function fold(key: string, messageId: string, messageContent: string): Extract<ChatVirtualItem, { type: "work-fold" }> {

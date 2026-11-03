@@ -1,6 +1,6 @@
 import { AgentEventIdSchema, AgentEventRoutingSchema, CanonicalTimestampSchema, AgentThreadIdSchema } from "@mcode/contracts/compat/agent-model";
 import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
-import { MessageSchema, type Message } from "@mcode/contracts/models/message";
+import { CONTEXT_COMPACTED_NOTICE, MessageSchema, type Message } from "@mcode/contracts/models/message";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { HTML_VISUAL_SYSTEM_SUBTYPE, htmlVisualContent } from "@mcode/contracts/models/html-visual";
 import { v5 as uuidv5 } from "uuid";
@@ -42,7 +42,7 @@ export function prepareAcceptedSystemObservation(input: {
     case "system": return systemObservation({ ...input, threadId: input.execution.threadId }, event);
     case "compacting": return event.active
       ? { event, compacting: true }
-      : { event, compacting: false, message: systemMessage({ ...input, threadId: input.execution.threadId }, "Context compacted") };
+      : { event, compacting: false, message: systemMessage({ ...input, threadId: input.execution.threadId }, CONTEXT_COMPACTED_NOTICE) };
     case "compactSummary": return { event, compacting: false, threadPatch: { compactSummary: event.summary } };
     case "contextEstimate":
     case "turnComplete": return contextObservation(input, event);

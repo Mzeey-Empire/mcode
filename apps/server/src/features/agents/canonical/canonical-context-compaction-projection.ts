@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { CONTEXT_COMPACTED_NOTICE } from "@mcode/contracts/models/message";
 
 import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
@@ -51,6 +52,6 @@ export class CanonicalContextCompactionProjection {
 
   private persistDivider(threadId: string): void {
     const sequence = this.messages.getLatestSequenceIncludingInternal(threadId) + 1;
-    this.messages.create(threadId, "system", "Context compacted", sequence);
+    this.messages.create(threadId, "system", CONTEXT_COMPACTED_NOTICE, sequence);
   }
 }
