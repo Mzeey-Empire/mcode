@@ -85,17 +85,15 @@ export function SteppedSlider({
             aria-label={ariaLabel}
             // Base UI clamps an unmatched -1 to the first stop; the controlled value keeps the real label.
             getAriaValueText={() => getStopLabel(value)}
-            className={cn(
-              "size-(--slider-thumb-size) rounded-full outline-none has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus",
-              SNAP_MOTION_CLASS,
-            )}
+            className={cn("group/thumb size-(--slider-thumb-size) rounded-full outline-none", SNAP_MOTION_CLASS)}
           >
             {/* The Thumb spans the track's height so it stays edge-aligned; the visible knob is a smaller disc
                 inset 3px inside it. Press feedback scales this disc, not the Thumb: Base UI measures the Thumb's
-                box to place it, so scaling the Thumb would shift it off its stop. */}
+                box to place it, so scaling the Thumb would shift it off its stop. The focus ring goes on the disc
+                too, because `outline-none` on the Thumb sets the outline style every later outline width reads. */}
             <span
               aria-hidden="true"
-              className="m-[3px] block size-3.5 rounded-full bg-primary transition-transform duration-(--duration-fast) ease-(--ease-standard) group-active/slider:scale-105 motion-reduce:transition-none"
+              className="m-[3px] block size-3.5 rounded-full bg-primary transition-transform duration-(--duration-fast) ease-(--ease-standard) group-active/slider:scale-105 group-has-focus-visible/thumb:outline-2 group-has-focus-visible/thumb:outline-offset-2 group-has-focus-visible/thumb:outline-focus motion-reduce:transition-none"
             />
           </SliderPrimitive.Thumb>
         </SliderPrimitive.Track>
