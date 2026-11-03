@@ -108,6 +108,49 @@ describe("recoverParentNarrative", () => {
     ]);
   });
 
+  describe("keeps the answer row's key when the saved answer replaces it", () => {
+    const LIVE_KEY = `turn-response:${THREAD}:live`;
+    function withSavedAnswer(): AgentModelState {
+      const state = turnState("Completed");
+      state.items.answer = {
+        id: "answer", threadId: THREAD, turnId: "parent", kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+        payload: { projection: "message", message: createMockMessage({ id: "server-answer", thread_id: THREAD, role: "assistant", content: "Done" }) },
+      };
+      return state;
+    }
+
+    it("takes the live key the streaming row was drawn with, and releases it", () => {
+      const patch = recoverParentNarrative(THREAD, withSavedAnswer(), finishedRecord({ currentTurnResponseKey: LIVE_KEY }));
+
+      expect(patch.assistantResponseKeys?.["server-answer"]).toBe(LIVE_KEY);
+      expect(patch.currentTurnResponseKey).toBe("");
+    });
+
+    it("takes the key the local answer it replaces already holds", () => {
+      const record = finishedRecord({
+        currentTurnMessageId: "local-answer",
+        currentTurnResponseKey: `turn-response:${THREAD}:next`,
+        assistantResponseKeys: { "local-answer": LIVE_KEY },
+        serverMessageIds: { "local-answer": "server-answer" },
+      });
+
+      const patch = recoverParentNarrative(THREAD, withSavedAnswer(), record);
+
+      expect(patch.assistantResponseKeys?.["server-answer"]).toBe(LIVE_KEY);
+      expect(patch.currentTurnResponseKey).toBeUndefined();
+    });
+
+    it("keeps the id a loaded answer already draws with", () => {
+      const loaded = createMockMessage({ id: "server-answer", thread_id: THREAD, role: "assistant", content: "Done" });
+      const record = finishedRecord({ messages: [loaded], currentTurnResponseKey: LIVE_KEY });
+
+      const patch = recoverParentNarrative(THREAD, withSavedAnswer(), record);
+
+      expect(patch.assistantResponseKeys?.["server-answer"]).toBe("server-answer");
+      expect(patch.currentTurnResponseKey).toBeUndefined();
+    });
+  });
+
   it("leaves the cache alone while the turn is still running", () => {
     const record = finishedRecord({ runtimePhase: "idle" });
 
