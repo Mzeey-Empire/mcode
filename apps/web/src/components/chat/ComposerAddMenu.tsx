@@ -58,8 +58,6 @@ export function ComposerAddMenu({
     setAnchor(rect ? { getBoundingClientRect: () => rect } : undefined);
   };
 
-  // Deferred a frame so the click closes the menu first. The menu returns focus to + only after its exit animation,
-  // and only if focus is still inside it, so each action moves focus to the draft itself.
   const afterClose = (action: () => void) => () => requestAnimationFrame(action);
 
   const addButton = (
