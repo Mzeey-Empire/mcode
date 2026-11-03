@@ -534,15 +534,21 @@ describe("TurnFileTracker", () => {
       afterText: "after\n",
     }));
 
-    const startedAt = performance.now();
-    const observation = observeToolUse(tracker, "t", "cursor-bulk", "edit", {
+    const captured = tracker.captureToolUseObservation("t", "cursor-bulk", "edit", {
       _mcodeFileMutations: mutations,
     });
-    const synchronousDurationMs = performance.now() - startedAt;
-    await observation;
+    expect(captured?.observations).toEqual([null]);
+
+    if (captured) {
+      await tracker.observeCapturedToolUse({
+        threadId: "t",
+        toolCallId: "cursor-bulk",
+        toolName: "edit",
+        toolInput: { _mcodeFileMutations: mutations },
+      }, captured);
+    }
     await tracker.observeToolResult("t", "cursor-bulk");
 
-    expect(synchronousDurationMs).toBeLessThan(250);
     expect((await tracker.finalizeTurn("t")).effects).toHaveLength(1);
   });
 
@@ -556,14 +562,14 @@ describe("TurnFileTracker", () => {
       kind: "rename",
     }));
 
-    const startedAt = performance.now();
-    const observation = observeToolUse(tracker, "t", "bulk-renames", "rename", {
+    const captured = tracker.captureToolUseObservation("t", "bulk-renames", "rename", {
       _mcodeFileMutations: mutations,
     });
-    const synchronousDurationMs = performance.now() - startedAt;
-    await observation;
 
-    expect(synchronousDurationMs).toBeLessThan(250);
+    const observed = captured?.observations.map((observation) => observation !== null);
+    expect(observed?.slice(0, 2)).toEqual([true, true]);
+    expect(observed?.slice(2)).not.toContain(true);
+    expect(observed?.length).toBeGreaterThan(2);
   });
 
   it("keeps captured pre-edit observations within the path and byte budgets", async () => {
