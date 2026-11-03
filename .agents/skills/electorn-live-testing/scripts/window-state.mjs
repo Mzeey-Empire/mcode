@@ -3,6 +3,10 @@ import * as NodeChildProcess from "node:child_process";
 // SW_SHOWMINNOACTIVE and SW_SHOWNOACTIVATE: neither takes focus from the window the user is in.
 const SHOW_COMMANDS = { minimized: 7, normal: 4 };
 
+// The dev build opens DevTools, which draws a "900px × 700px" label over the page after each
+// resize. Screenshots include it until it fades, measured at under 1 s after the resize settles.
+const DEVTOOLS_SIZE_LABEL_MS = 1200;
+
 const WINDOW_SOURCE = String.raw`
 using System;
 using System.Collections.Generic;
@@ -92,9 +96,7 @@ export async function setElectronWindowSize(page, { width, height }) {
     const reached = await readElectronWindowSizes(page);
     throw new Error(`Asked for ${width}x${height}, but the window reached ${reached.outer} and the page ${reached.inner}. The screen's work area is ${reached.available}; choose a size that fits.`);
   }
-  await page.evaluate(() => new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(resolve));
-  }));
+  await page.waitForTimeout(DEVTOOLS_SIZE_LABEL_MS);
   return { width, height };
 }
 
