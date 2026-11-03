@@ -37,7 +37,7 @@ export const noWallClockBudget = defineRule({
     type: "problem",
     messages: {
       wallClockBudget:
-        "Do not assert an upper bound on elapsed wall-clock time in a test. A loaded CI runner fails it at random. Count the work instead (reads, calls, or collection sizes). In apps/web, a budget may live in a *.perf.test.ts file, which runs only under MCODE_PERF_GATE=1.",
+        "Do not assert an upper bound on elapsed wall-clock time in a test. A loaded CI runner fails it at random. Count the work instead (reads, calls, or collection sizes). To measure speed, write a *.bench.ts file and run `bun run bench -- <workspace>` on your machine.",
     },
   },
   create(context) {
