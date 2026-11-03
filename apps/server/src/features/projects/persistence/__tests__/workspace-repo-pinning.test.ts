@@ -28,9 +28,12 @@ describe("WorkspaceStore pinning + recency", () => {
   it("touchLastOpened bumps last_opened_at without changing updated_at", () => {
     const ws = repo.create("a", "/a", true);
     const before = repo.findById(ws.id)!;
+    const touchedFrom = Date.now();
     repo.touchLastOpened(ws.id);
+    const touchedUntil = Date.now();
     const after = repo.findById(ws.id)!;
-    expect(after.last_opened_at).toBeGreaterThanOrEqual(Date.now() - 1000);
+    expect(after.last_opened_at).toBeGreaterThanOrEqual(touchedFrom);
+    expect(after.last_opened_at).toBeLessThanOrEqual(touchedUntil);
     expect(after.updated_at).toBe(before.updated_at);
   });
 

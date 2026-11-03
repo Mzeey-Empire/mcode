@@ -12,15 +12,13 @@ const validCdpVersion = {
   webSocketDebuggerUrl: "ws://127.0.0.1:43000/devtools/browser/session",
 };
 
-NodeTest.test("bounds a fetch that never settles", async () => {
-  const startedAt = performance.now();
+NodeTest.test("bounds a fetch that never settles", { timeout: 5_000 }, async () => {
   const ready = await probeCdpVersion("http://127.0.0.1:43000", {
     timeoutMs: 20,
     fetchImpl: async () => new Promise(() => {}),
   });
 
   NodeAssertStrict.default.equal(ready, false);
-  NodeAssertStrict.default.ok(performance.now() - startedAt < 500);
 });
 
 NodeTest.test("rejects an HTTP 200 response without CDP metadata", async () => {

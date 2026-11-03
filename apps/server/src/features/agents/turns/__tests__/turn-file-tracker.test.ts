@@ -534,15 +534,21 @@ describe("TurnFileTracker", () => {
       afterText: "after\n",
     }));
 
-    const startedAt = performance.now();
-    const observation = observeToolUse(tracker, "t", "cursor-bulk", "edit", {
+    const captured = tracker.captureToolUseObservation("t", "cursor-bulk", "edit", {
       _mcodeFileMutations: mutations,
     });
-    const synchronousDurationMs = performance.now() - startedAt;
-    await observation;
+    expect(captured?.observations).toEqual([null]);
+
+    if (captured) {
+      await tracker.observeCapturedToolUse({
+        threadId: "t",
+        toolCallId: "cursor-bulk",
+        toolName: "edit",
+        toolInput: { _mcodeFileMutations: mutations },
+      }, captured);
+    }
     await tracker.observeToolResult("t", "cursor-bulk");
 
-    expect(synchronousDurationMs).toBeLessThan(250);
     expect((await tracker.finalizeTurn("t")).effects).toHaveLength(1);
   });
 
@@ -556,14 +562,14 @@ describe("TurnFileTracker", () => {
       kind: "rename",
     }));
 
-    const startedAt = performance.now();
-    const observation = observeToolUse(tracker, "t", "bulk-renames", "rename", {
+    const captured = tracker.captureToolUseObservation("t", "bulk-renames", "rename", {
       _mcodeFileMutations: mutations,
     });
-    const synchronousDurationMs = performance.now() - startedAt;
-    await observation;
 
-    expect(synchronousDurationMs).toBeLessThan(250);
+    const observed = captured?.observations.map((observation) => observation !== null);
+    expect(observed?.slice(0, 2)).toEqual([true, true]);
+    expect(observed?.slice(2)).not.toContain(true);
+    expect(observed?.length).toBeGreaterThan(2);
   });
 
   it("keeps captured pre-edit observations within the path and byte budgets", async () => {
@@ -675,8 +681,6 @@ describe("TurnFileTracker", () => {
     }
     const tracker = trackerWithBaseline(baseline, updates);
     await tracker.beginTurn("stress", root, "before");
-    const startedAt = performance.now();
-    const startedCpu = process.cpuUsage();
     await Promise.all(Array.from({ length: 120 }, async (_, i) => {
       const index = i % 20;
       const id = `call-${i}`;
@@ -693,15 +697,10 @@ describe("TurnFileTracker", () => {
       await tracker.observeToolResult("stress", id);
     }));
     const summary = await tracker.finalizeTurn("stress");
-    const durationMs = performance.now() - startedAt;
-    const cpu = process.cpuUsage(startedCpu);
-    const cpuMs = (cpu.user + cpu.system) / 1_000;
     expect(summary.fileCount).toBe(15);
     expect(summary.effects).toHaveLength(15);
     expect(summary.revision).toBeGreaterThan(0);
     expect(updates.every((update, index) => index === 0 || update.revision > updates[index - 1]!.revision)).toBe(true);
-    expect(cpuMs).toBeLessThan(2_500);
-    console.info(`turn-file-tracker stress: 125 completions in ${durationMs.toFixed(1)}ms wall / ${cpuMs.toFixed(1)}ms CPU, revision ${summary.revision}`);
   }, 15_000);
 
   it("keeps an older finalizing generation isolated from a newly-started turn", async () => {

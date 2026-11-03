@@ -466,6 +466,32 @@ describe("killProcessTree", () => {
     );
   });
 
+  it("rejects when a captured Windows process remains after the verification timeout", async () => {
+    let now = 0;
+    const sleep = vi.fn(async (ms: number) => {
+      if (sleep.mock.calls.length > 100) throw new Error("Verification exceeded the sleep cap");
+      now += ms;
+    });
+    mockExecFile.mockResolvedValue({ stdout: "", stderr: "" });
+
+    await expect(
+      killProcessTree(1234, {
+        platform: "win32",
+        execFile: mockExecFile,
+        getWindowsProcessSnapshot: vi.fn().mockResolvedValue(ROOT_SNAPSHOT),
+        isProcessAlive: () => true,
+        sleep,
+        now: () => now,
+      }),
+    ).rejects.toThrow("termination verification timed out");
+
+    expect(sleep).toHaveBeenCalledTimes(40);
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+      "killProcessTree: termination verification timed out",
+      expect.objectContaining({ pid: 1234, remainingPids: [1234] }),
+    );
+  });
+
   it("kills and verifies on Windows without invoking wmic", async () => {
     const processKill = vi.fn(() => {
       throw Object.assign(new Error("gone"), { code: "ESRCH" });

@@ -288,10 +288,11 @@ describe("BrowserSessionDriver", () => {
     const startedAt = Date.now();
     const originalDeadline = startedAt + 60_000;
     await driver.execute(evaluateDispatch(observationRef, { deadline: originalDeadline, deadlineMs: 1_000 }), new AbortController().signal);
+    const finishedAt = Date.now();
     const evaluateRequest = electron.mock.calls[1]![0].request;
     expect(evaluateRequest.deadline).toBeLessThan(originalDeadline);
-    expect(evaluateRequest.deadline).toBeGreaterThanOrEqual(startedAt + 900);
-    expect(evaluateRequest.deadline).toBeLessThanOrEqual(startedAt + 1_100);
+    expect(evaluateRequest.deadline).toBeGreaterThanOrEqual(startedAt + 1_000);
+    expect(evaluateRequest.deadline).toBeLessThanOrEqual(finishedAt + 1_000);
   });
 
   it("stops before Electron evaluate when the live document revision changed", async () => {

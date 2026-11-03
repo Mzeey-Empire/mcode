@@ -83,6 +83,34 @@ describe("terminal workload corpus", () => {
     ]));
   });
 
+  it("reports exceeded time limits without failing correctness checks", () => {
+    const workload = getTerminalWorkload("reconnect-recovery");
+    const capture: TerminalWorkloadCapture = {
+      output: "WF:reconnect:before\nWF:reconnect:after\n",
+      outputBytes: 40,
+      outputTruncated: false,
+      detachedOutputBytes: 21,
+      resizeTrace: [{ kind: "initial", cols: 80, rows: 24, elapsedMs: 0 }],
+      durationMs: TERMINAL_WORKLOAD_LIMITS.maxDurationMs + 1,
+      synchronizationObserved: true,
+      exitObserved: true,
+      exitCode: 0,
+      childPids: [],
+      childPidsAliveAfterKill: [],
+      childPidsAliveAfterCleanup: [],
+      cleanupDurationMs: TERMINAL_WORKLOAD_LIMITS.maxProcessLifetimeMs + 1,
+    };
+
+    const result = evaluateTerminalWorkload(workload, capture);
+
+    expect(result.passed).toBe(false);
+    expect(result.failedChecks).toEqual([]);
+    expect(result.exceededTimeLimits).toEqual([
+      "workload exceeded its duration budget",
+      "process cleanup exceeded its lifetime bound",
+    ]);
+  });
+
   it("fails a capture that exceeds the byte budget or leaves a child alive", () => {
     const workload = getTerminalWorkload("process-cleanup");
     const capture: TerminalWorkloadCapture = {

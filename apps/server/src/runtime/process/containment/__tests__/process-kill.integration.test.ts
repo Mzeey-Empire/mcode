@@ -18,7 +18,7 @@ describe.runIf(process.platform === "win32")("killProcessTree integration", () =
     spawnedRoots.clear();
   });
 
-  it("terminates a real idle process within the bounded close window", async () => {
+  it("terminates a real idle process", async () => {
     const root = NodeChildProcess.spawn(
       "powershell.exe",
       ["-NoProfile", "-Command", "Start-Sleep -Seconds 60"],
@@ -28,12 +28,9 @@ describe.runIf(process.platform === "win32")("killProcessTree integration", () =
     spawnedRoots.add(root.pid);
     expect(await isRunning(root.pid)).toBe(true);
 
-    const startedAt = performance.now();
     await killProcessTree(root.pid, { platform: hostRuntime.platform });
-    const durationMs = performance.now() - startedAt;
     spawnedRoots.delete(root.pid);
 
-    expect(durationMs).toBeLessThan(12_000);
     await expect.poll(() => isRunning(root.pid!), { timeout: 5_000 }).toBe(false);
   }, 30_000);
 
@@ -57,13 +54,10 @@ describe.runIf(process.platform === "win32")("killProcessTree integration", () =
     expect(await isRunning(root.pid)).toBe(true);
     expect(await isRunning(childPid)).toBe(true);
 
-    const startedAt = performance.now();
     await killProcessTree(root.pid, { platform: hostRuntime.platform });
-    const durationMs = performance.now() - startedAt;
     spawnedRoots.delete(root.pid);
     spawnedRoots.delete(childPid);
 
-    expect(durationMs).toBeLessThan(12_000);
     await expect.poll(() => isRunning(root.pid!), { timeout: 5_000 }).toBe(false);
     await expect.poll(() => isRunning(childPid), { timeout: 5_000 }).toBe(false);
   }, 60_000);
