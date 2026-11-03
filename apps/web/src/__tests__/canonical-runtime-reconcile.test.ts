@@ -1,7 +1,7 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { createAgentModelState, reduceAgentEventBatch, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { createAgentModelState, reduceAgentEventBatch, type AgentItem, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { type Message } from "@mcode/contracts/models/message";
 import { type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
@@ -120,6 +120,26 @@ async function sendOptimisticPrompt(content: string): Promise<Message> {
   return prompt;
 }
 
+/** Holds animation frames until the returned drain runs them, so paced canonical progress stays queued. */
+function holdAnimationFrames(): () => void {
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    frameId += 1;
+    frames.set(frameId, callback);
+    return frameId;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.delete(id); });
+  return () => {
+    while (frames.size > 0) {
+      const next = frames.entries().next().value;
+      if (!next) break;
+      frames.delete(next[0]);
+      next[1](performance.now());
+    }
+  };
+}
+
 function pendingSave(accepted: number, saved: number): TurnSavingStatus {
   return { threadId: THREAD_ID, executionId: EXECUTION_ID, mode: "saving",
     accepted: { epoch: "runtime-1", sequence: accepted }, saved: { epoch: "runtime-1", sequence: saved },
@@ -181,22 +201,7 @@ describe("canonical runtime reconciliation", () => {
   it.each(["cancelled", "interrupted"] as const)("reconciles a user stop with queued progress and a %s Ended", (outcome) => {
     seedRuntime("running", EXECUTION_ID, true);
     useThreadStore.setState({ currentThreadId: THREAD_ID });
-    const frames = new Map<number, FrameRequestCallback>();
-    let frameId = 0;
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      frameId += 1;
-      frames.set(frameId, callback);
-      return frameId;
-    });
-    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.delete(id); });
-    const drainFrames = () => {
-      while (frames.size > 0) {
-        const next = frames.entries().next().value;
-        if (!next) break;
-        frames.delete(next[0]);
-        next[1](performance.now());
-      }
-    };
+    const drainFrames = holdAnimationFrames();
     const epoch = "user-stop";
     const events = turnEvents(EXECUTION_ID);
     let receivedThrough = 0;
@@ -255,6 +260,80 @@ describe("canonical runtime reconciliation", () => {
     expect(record.streaming).toBe("");
     expect(record.streamingPreview).toBe("");
     expect(record.responseTextIsStreaming).toBe(false);
+  });
+
+  // Canonical progress waits for a frame (a throttled timer while minimized), but turn.persisted
+  // applies on arrival, so a turn's saved signal can land before the answer it saves.
+  it.each([
+    { first: "finished before the window opened", next: "before" },
+    { first: "finished before the window opened", next: "after" },
+    { first: "was saved before its answer arrived", next: "before" },
+  ] as const)("keeps the first answer when it $first and the next turn's saved signal arrives $next its answer", async ({ first, next }) => {
+    seedRuntime("idle", null, false);
+    useThreadStore.setState({ currentThreadId: THREAD_ID });
+    const drainFrames = holdAnimationFrames();
+    const epoch = "runtime-1";
+    const events: CanonicalAgentEventEnvelope[] = [];
+    let receivedThrough = 0;
+    // One frame per event, as the server streams them; a burst of frames queues behind the frame pacer.
+    const deliver = () => {
+      for (const { durableRevision: _revision, ...event } of events.slice(receivedThrough)) {
+        useThreadStore.getState().handleCanonicalProgress({ phase: "accepted", threadId: THREAD_ID, epoch,
+          from: receivedThrough, through: receivedThrough + 1,
+          events: [{ ...event, progressPosition: { epoch, sequence: event.acceptedSequence } }] });
+        receivedThrough += 1;
+      }
+    };
+    const save = () => useThreadStore.getState().handleCanonicalProgress({ phase: "saved", threadId: THREAD_ID, epoch,
+      through: events.length, revision: { conversationRevision: events.length, rosterRevision: 0 },
+      events: events.map((event) => ({ ...event, progressPosition: { epoch, sequence: event.acceptedSequence } })) });
+    const answeredTurn = async (turnId: string, executionId: string, content: string, answer: string) => {
+      const prompt = await sendOptimisticPrompt(content);
+      const record = (eventId: string, payload: CanonicalAgentEventEnvelope["payload"]) => {
+        const event = envelope(`${turnId}:${eventId}`, events.length + 1, executionId, payload);
+        events.push({ ...event, routing: { ...event.routing, turnId } });
+      };
+      const item = (message: Message): AgentItem => ({ id: `message:${message.id}`, threadId: THREAD_ID, turnId, kind: "message",
+        providerIdentities: [], createdAt: NOW, updatedAt: NOW, payload: { projection: "message", message } });
+      if (events.length === 0) events.push(...turnEvents(executionId).slice(0, 1));
+      record("created", { type: "turn.created", turn: { id: turnId, threadId: THREAD_ID, status: "Pending", trigger: { kind: "user" },
+        permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null, providerIdentities: [],
+        startedAt: null, providerStartedAt: null, ending: null, endedAt: null, createdAt: NOW, updatedAt: NOW } });
+      record("started", { type: "turn.started", startedAt: NOW });
+      record("prompt", { type: "item.recorded", item: item(prompt) });
+      for (let length = 1; length <= answer.length * 4; length += 1) {
+        record(`text-${length}`, { type: "item.recorded", item: { id: `assistant-response-text:${executionId}`, threadId: THREAD_ID, turnId,
+          kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+          payload: { projection: "assistantText", content: answer.repeat(4).slice(0, length), isStreaming: true } } });
+      }
+      const saved = createMockMessage({ id: `${turnId}:answer`, thread_id: THREAD_ID, role: "assistant", content: answer.repeat(4),
+        timestamp: NOW, sequence: prompt.sequence + 1 });
+      record("answer", { type: "item.recorded", item: item(saved) });
+      record("bound", { type: "turn.response-bound", messageId: saved.id, outcome: "completed", endedAt: NOW });
+      record("completed", { type: "turn.completed", endedAt: NOW });
+      record("ended", { type: "publication.recorded", publicationId: String(events.length + 1), event: { type: "ended",
+        threadId: THREAD_ID, turnExecutionId: executionId, outcome: "completed" } });
+      return () => useThreadStore.getState().handleTurnPersisted({ threadId: THREAD_ID, messageId: saved.id,
+        settledMessage: { id: saved.id, sequence: saved.sequence }, executionId, outcome: "completed",
+        toolCallCount: 0, filesChanged: [] });
+    };
+
+    const persistFirst = await answeredTurn(TURN_ID, EXECUTION_ID, "first", "alpha");
+    deliver();
+    // A turn that finished before this window opened never sends this window its saved signal.
+    if (first === "was saved before its answer arrived") persistFirst();
+    drainFrames();
+    save();
+
+    const persistSecond = await answeredTurn("turn-2", OTHER_EXECUTION_ID, "second", "bravo");
+    deliver();
+    if (next === "after") drainFrames();
+    persistSecond();
+    drainFrames();
+    save();
+
+    expect(readThreadField(THREAD_ID, (record) => record.messages.map((message) => message.content)))
+      .toEqual(["first", "alpha".repeat(4), "second", "bravo".repeat(4)]);
   });
 
   it("restores partial final text and a closed full answer while its native turn remains active", () => {

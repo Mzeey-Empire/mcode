@@ -889,7 +889,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     view.rerender(<ChatView />);
 
     expect(screen.getByTestId("chat-message-stage")).toBeInTheDocument();
-    const visible = screen.getAllByTestId("message-list").find((el) => el.style.display !== "none");
+    const visible = screen.getAllByTestId("message-list").find((el) => !el.closest(`[aria-hidden="true"]`));
     expect(visible).toBeDefined();
     expect(visible).toHaveAttribute("data-display-thread-id", persisted.id);
     expect(visible).toHaveAttribute("data-has-after-first-user-content", "false");
@@ -1387,7 +1387,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     act(() => rerender(<ChatView />));
 
     expect(screen.queryByTestId("conversation-hold-overlay")).not.toBeInTheDocument();
-    const visible = screen.getAllByTestId("message-list").find((el) => el.style.display !== "none");
+    const visible = screen.getAllByTestId("message-list").find((el) => !el.closest(`[aria-hidden="true"]`));
     expect(visible).toBeDefined();
     expect(visible).toHaveAttribute("data-display-thread-id", thread2.id);
   });

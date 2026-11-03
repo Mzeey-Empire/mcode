@@ -31,6 +31,8 @@ export function buildPersistedNarrativeItems(
   const approvals = inputs.approvals ?? NO_APPROVALS;
   if (hasNoRecords(inputs, approvals)) return [];
 
+  // Only turns that compacted carry notices, so they skip the identity memo rather than widen its key.
+  if (inputs.notices?.length) return projectPersistedNarrativeItems(preparePersistedNarrative(inputs));
   const messageContent = (inputs.messageContent ?? "").trim();
   const cached = readMemoizedItems(inputs, approvals, messageContent);
   if (cached) return cached;

@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, useSyncExternalStore, lazy, Suspense, type ReactNode } from "react";
 import type { Message } from "@/transport";
-import { ImageIcon, RotateCcw, Copy, Check, Target } from "lucide-react";
+import { ImageIcon, Copy, Check, Target } from "lucide-react";
 import { WarningIcon } from "@/components/ui/icon-map";
 import { cn } from "@/lib/utils";
 import { useToastStore } from "@/stores/toastStore";
@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { DeltaBlock } from "../narrative/DeltaBlock";
 import { TURN_PROSE_CLASS } from "../narrative/narrative-layout";
 import { PersistedTurnHooks } from "../narrative/PersistedTurnHooks";
+import { TimelineNote } from "../narrative/TimelineNote";
 import { parseGoalStatusNotice } from "@/lib/goal-message";
 import { useRetriableAttachmentImage } from "@/components/chat/useRetriableAttachmentImage";
 import { EntityToken } from "@/components/chat/EntityToken";
@@ -831,20 +832,6 @@ function SystemNoticeContent({ message }: Pick<MessageBubbleProps, "message">) {
     );
   }
   return <TimelineNote text={message.content} />;
-}
-
-/** A centered divider line carrying one short timeline note. */
-function TimelineNote({ text }: { text: string }) {
-  return (
-    <div className="flex items-center gap-3 py-2" role="note">
-      <div className="h-px flex-1 bg-border" aria-hidden="true" />
-      <div className="flex items-center gap-1.5 text-xs text-muted">
-        <RotateCcw size={12} aria-hidden="true" />
-        <span>{text}</span>
-      </div>
-      <div className="h-px flex-1 bg-border" aria-hidden="true" />
-    </div>
-  );
 }
 
 /** Renders assistant goal control notices outside the normal assistant response. */

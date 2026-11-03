@@ -21,6 +21,10 @@ vi.mock("@/transport", async () => ({
   getTransport: () => mockTransport,
 }));
 
+function setVisibility(state: DocumentVisibilityState): void {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+}
+
 describe("threadStore textDelta batching", () => {
   beforeEach(() => {
     clearRecordCache();
@@ -30,6 +34,8 @@ describe("threadStore textDelta batching", () => {
   });
 
   afterEach(() => {
+    setVisibility("visible");
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -279,5 +285,21 @@ describe("threadStore textDelta batching", () => {
 
     expect(mockTransport.loadTurn).not.toHaveBeenCalled();
     expect(getTestThreadThoughtSegments(tid)).toEqual([]);
+  });
+
+  it.each(["hidden", "visible"] as const)("applies streamed text while a %s window paints no frame", (visibility) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    setVisibility(visibility);
+    const tid = "thread-unpainted";
+    resetThreadStoreForTests({ currentThreadId: tid, runningThreadIds: new Set([tid]) });
+    for (let i = 0; i < 8; i++) {
+      useThreadStore.getState().handleAgentEvent({ type: "textDelta", threadId: tid, delta: String(i) } satisfies AgentEvent);
+    }
+
+    vi.runOnlyPendingTimers();
+
+    expect(getTestThreadStreaming(tid)).toBe("01234567");
   });
 });

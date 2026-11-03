@@ -119,6 +119,9 @@ export const ProviderSwitchMarkerSchema = lazySchema(() => z.object({
 /** The provider switch a system message records. */
 export type ProviderSwitchMarker = z.infer<ReturnType<typeof ProviderSwitchMarkerSchema>>;
 
+/** Content of the system message written when a context compaction ends; clients find it by this text. */
+export const CONTEXT_COMPACTED_NOTICE = "Context compacted";
+
 /** Message schema matching the SQLite row shape. */
 export const MessageSchema = lazySchema(() =>
   z.object({

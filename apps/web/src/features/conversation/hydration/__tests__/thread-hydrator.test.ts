@@ -1134,6 +1134,57 @@ describe("ThreadHydrator", () => {
     expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
   });
 
+  it("refetches history when a reconnect invalidates the first load of a running thread", async () => {
+    mockTransport.loadConversationTail = undefined;
+    const earlier = createMockMessage({ id: "a-earlier", thread_id: THREAD_A, role: "assistant", sequence: 6 });
+    const prompt = createMockMessage({ id: "a-prompt", thread_id: THREAD_A, role: "user", sequence: 7 });
+    const pages: Array<(page: ConversationPage) => void> = [];
+    vi.mocked(mockTransport.loadConversationPage).mockImplementation(() => new Promise((resolve) => { pages.push(resolve); }));
+    resetThreadStoreForTests({ currentThreadId: THREAD_A, runningThreadIds: new Set([THREAD_A]) });
+
+    const firstLoad = hydrator.hydrate(THREAD_A, "active");
+    await vi.waitFor(() => expect(pages).toHaveLength(1));
+    // Reconnect recovery replays the running turn's tools, invalidates, then forces a refresh.
+    useThreadStore.setState((state) => ({
+      records: patchThreadRecord(state.records, THREAD_A, {
+        toolCalls: [{ id: "tc1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false }],
+      }),
+    }));
+    hydrator.invalidateConversation(THREAD_A);
+    const refresh = hydrator.hydrate(THREAD_A, "active", { force: true });
+    pages[0]({ messages: [earlier, prompt], hasMore: true, narrativeByMessage: {} });
+    await vi.waitFor(() => expect(pages).toHaveLength(2));
+    pages[1]({ messages: [earlier, prompt], hasMore: true, narrativeByMessage: {} });
+    await Promise.all([firstLoad, refresh]);
+
+    expect(getTestActiveMessages().map((message) => message.id)).toEqual(["a-earlier", "a-prompt"]);
+    expect(readActiveThreadField((record) => record.hasMoreMessages)).toBe(true);
+  });
+
+  it("commits a running thread's history when live tool and text updates land during the fetch", async () => {
+    mockTransport.loadConversationTail = undefined;
+    const prompt = createMockMessage({ id: "a-prompt", thread_id: THREAD_A, role: "user", sequence: 7 });
+    let resolvePage!: (page: ConversationPage) => void;
+    vi.mocked(mockTransport.loadConversationPage).mockImplementation(() => new Promise((resolve) => { resolvePage = resolve; }));
+    resetThreadStoreForTests({ currentThreadId: THREAD_A, runningThreadIds: new Set([THREAD_A]) });
+
+    const load = hydrator.hydrate(THREAD_A, "active");
+    await vi.waitFor(() => expect(mockTransport.loadConversationPage).toHaveBeenCalledTimes(1));
+    useThreadStore.setState((state) => ({
+      records: patchThreadRecord(state.records, THREAD_A, {
+        streaming: "Running the next command",
+        toolCalls: [{ id: "tc1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false }],
+      }),
+    }));
+    resolvePage({ messages: [prompt], hasMore: true, narrativeByMessage: {} });
+    await load;
+
+    expect(getTestActiveMessages().map((message) => message.id)).toEqual(["a-prompt"]);
+    expect(readActiveThreadField((record) => record.hasMoreMessages)).toBe(true);
+    expect(getTestThreadStreaming(THREAD_A)).toBe("Running the next command");
+    expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
+  });
+
   it("refreshes a resident thread when its cache was invalidated", async () => {
     resetThreadStoreForTests({
       currentThreadId: THREAD_B,

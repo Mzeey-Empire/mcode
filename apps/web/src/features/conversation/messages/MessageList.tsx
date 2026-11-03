@@ -38,6 +38,8 @@ const MAX_FILL_PAGES = 3;
 /** Bounds a Show in chat search so a message that history no longer holds ends in a miss, not endless paging. */
 const MAX_REVEAL_PAGES = 20;
 const TRANSCRIPT_TOP_GAP = 16;
+/** A strip this thin under the composer holds a row's bottom spacing, not text the reader missed. */
+const END_IN_VIEW_SLACK = 8;
 /**
  * Row edges are measured from the top inset's edge, TRANSCRIPT_TOP_GAP below the sticky message's top,
  * so a prompt whose row starts above this line is the one the sticky message stands in for.
@@ -335,6 +337,18 @@ function restoreTranscriptPosition(view: TranscriptViewport, threadId: string | 
   else view.restoreOffset(saved.scrollTop);
 }
 
+/**
+ * Top-up pages already spent on the loaded window. The record cache trims a kept-alive thread back to its
+ * tail page while it is not selected, so a window that now starts at a later message gets a fresh budget.
+ */
+function fillPagesForWindow(used: number, previousOldest: number | undefined, oldest: number | undefined): number {
+  return oldest !== undefined && previousOldest !== undefined && oldest > previousOldest ? 0 : used;
+}
+
+function canTopUp(data: MessageListData, pagesUsed: number): boolean {
+  return !data.loading && !data.isLoadingMore && data.hasMore && pagesUsed < MAX_FILL_PAGES;
+}
+
 function loadHistoryAtBoundary(viewport: HTMLElement, data: MessageListData, direction: "older" | "newer"): boolean {
   if (!data.renderedThreadId) return false;
   const isOlder = direction === "older";
@@ -405,7 +419,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const controllerRef = useRef<TranscriptViewport | null>(null);
   const turnExpandRef = useRef(new Map<string, boolean>());
   const [hosts, setHosts] = useState<readonly TranscriptHost[]>([]);
-  const [atTail, setAtTail] = useState(true);
+  const [endInView, setEndInView] = useState(true);
   const [stickyVisible, setStickyVisible] = useState(false);
   const [stickyKey, setStickyKey] = useState<string>();
   const [highlightedKey, setHighlightedKey] = useState<string>();
@@ -441,8 +455,10 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
 
   const syncPosition = useCallback((position: TranscriptPosition) => {
     positionRef.current = position;
-    setAtTail(position.kind === "end");
     const view = controllerRef.current;
+    // A disclosure holds its row in place, so the reader can stop following the end while the
+    // last row stays in view. The pill appears only once rows actually sit below the edge.
+    setEndInView(position.kind === "end" || (view !== null && view.contentBelow() <= END_IN_VIEW_SLACK));
     if (!view) return;
     const current = latest.current;
     const userRow = findReadingUserRow(view, current.userRows, STICKY_BOUNDARY);
@@ -494,6 +510,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   }, [items, data.loading, data.renderedThreadId, data.activeThreadId]);
 
   const fillPages = useRef(0);
+  const fillOldestSequence = useRef<number | undefined>(undefined);
   useEffect(() => {
     fillPages.current = 0;
   }, [data.renderedThreadId]);
@@ -502,11 +519,18 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     const view = controllerRef.current;
     const current = latest.current.data;
     if (!view || !restored.current || !current.isRenderedVisible || !current.renderedThreadId) return;
-    if (current.loading || current.isLoadingMore || !current.hasMore || fillPages.current >= MAX_FILL_PAGES) return;
+    const oldest = current.messages[0]?.sequence;
+    fillPages.current = fillPagesForWindow(fillPages.current, fillOldestSequence.current, oldest);
+    fillOldestSequence.current = oldest;
+    if (!canTopUp(current, fillPages.current)) return;
     const viewport = view.viewport;
     if (viewport.scrollHeight >= viewport.clientHeight * FILL_VIEWPORT_RATIO) return;
     fillPages.current += 1;
-    void current.loadOlderMessages(current.renderedThreadId);
+    // A skip means another load owns the page, so it spends none of the budget. Without the
+    // refund, skips can use up the budget while the transcript is still too short to scroll.
+    void current.loadOlderMessages(current.renderedThreadId).then((result) => {
+      if (result === "skipped") fillPages.current = Math.max(0, fillPages.current - 1);
+    });
   }, [items, data.isLoadingMore, data.hasMore, data.renderedThreadId]);
 
   const loadRequestedHistory = useCallback(() => {
@@ -636,7 +660,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
         selectedTextCommentEditor={props.selectedTextCommentEditor} selectedTextCommentEditorScope={props.selectedTextCommentEditorScope}
         viewportRef={viewportRef} renderedThreadId={data.renderedThreadId} stickyPreview={stickyPreview}
         isStickyVisible={stickyVisible} onJumpToUserMessage={jumpToUser} chromeInsets={chrome}
-        showJumpToLatest={!atTail}
+        showJumpToLatest={!endInView}
         onJumpToLatest={() => controllerRef.current?.moveTo({ kind: "end" }, true)}
       />
     </div>

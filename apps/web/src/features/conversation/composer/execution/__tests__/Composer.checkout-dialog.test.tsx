@@ -99,10 +99,12 @@ vi.mock("@/transport", async () => ({
 vi.mock("@/components/chat/lexical", () => ({
   ComposerEditor: ({
     onChange,
+    onSubmit,
     editorRef,
     ariaLabel,
   }: {
     onChange: (text: string, mentions: []) => void;
+    onSubmit: () => void;
     editorRef: React.MutableRefObject<{ update: (fn: () => void) => void; focus: () => void } | null>;
     ariaLabel?: string;
   }) => {
@@ -119,6 +121,11 @@ vi.mock("@/components/chat/lexical", () => ({
         onChange={(event) => {
           lastComposerText = event.target.value;
           onChange(event.target.value, []);
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" || event.shiftKey) return;
+          event.preventDefault();
+          onSubmit();
         }}
       />
     );
@@ -1429,6 +1436,34 @@ describe("Composer checkout confirmation", () => {
       },
     ]);
     expect(usePreviewDesignModeStore.getState().isActive(thread.id)).toBe(true);
+  });
+
+  it("keeps typing in the composer after Stop is clicked, so Enter queues the message", async () => {
+    const workspace = createMockWorkspace({ id: "ws-1", is_git_repo: true });
+    const thread = createMockThread({ id: "thread-1", workspace_id: workspace.id });
+    useWorkspaceStore.setState({
+      workspaces: [workspace],
+      activeWorkspaceId: workspace.id,
+      threads: [thread],
+      activeThreadId: thread.id,
+      newThreadMode: "direct",
+      newThreadBranch: "main",
+      selectedWorktree: null,
+    });
+    resetThreadStoreForTests({ currentThreadId: thread.id, runningThreadIds: new Set([thread.id]) });
+    useThreadStore.setState({ records: seedThreadRecord(thread.id, { runtimePhase: "running", turnExecutionId: "exec-a" }) });
+    vi.mocked(mockTransport.stopAgent).mockReturnValueOnce(new Promise(() => {}));
+    render(<Composer threadId={thread.id} workspaceId={workspace.id} />);
+
+    const user = userEvent.setup();
+    // The run button is Stop only while the draft is empty, so the instruction is typed after the click.
+    await user.click(screen.getByLabelText("Message Mcode"));
+    await user.click(screen.getByLabelText("Stop agent"));
+    await user.keyboard("Do this instead{Enter}");
+
+    await waitFor(() => {
+      expect(useQueueStore.getState().queues[thread.id]?.map((message) => message.content)).toEqual(["Do this instead"]);
+    });
   });
 
   it("keeps rendered stop control through stale A terminal and B text", async () => {

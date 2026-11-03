@@ -423,6 +423,23 @@ describe("killProcessTree", () => {
     })).resolves.toBeUndefined();
   });
 
+  it("treats a Windows root that exits while taskkill runs as successful termination", async () => {
+    const snapshot = vi.fn()
+      .mockResolvedValueOnce(ROOT_SNAPSHOT)
+      .mockResolvedValueOnce(ROOT_SNAPSHOT)
+      .mockResolvedValue([]);
+    const stderr = "ERROR: The process with PID 1234 (child process of PID 1) could not be terminated.\r\nReason: There is no running instance of the task.\r\n";
+    mockExecFile.mockRejectedValue(Object.assign(new Error(`Command failed: taskkill /T /F /PID 1234\n${stderr}`), { code: 1, stderr }));
+
+    await expect(killProcessTree(1234, {
+      platform: "win32",
+      execFile: mockExecFile,
+      getWindowsProcessSnapshot: snapshot,
+      isProcessAlive: () => false,
+    })).resolves.toBeUndefined();
+    expect(vi.mocked(logger.warn)).not.toHaveBeenCalled();
+  });
+
   it("rejects when a captured process remains after the verification timeout", async () => {
     let now = 0;
     const sleep = vi.fn(async (ms: number) => {

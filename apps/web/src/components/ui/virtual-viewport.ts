@@ -96,6 +96,8 @@ function contentAtLine(host: Element, line: number): Element {
   }
 }
 
+/** Measured heights kept for rows that left the list, beyond the rows it holds now. */
+const DETACHED_HEIGHT_LIMIT = 1000;
 const FLIP_DURATION_MS = 180;
 const FLIP_EASING = "cubic-bezier(0.2, 0, 0, 1)";
 
@@ -328,8 +330,15 @@ export class VirtualViewport {
     this.rows = rows.map((row) => previous.get(row.id) ?? row);
     this.rowIndexes.clear();
     this.rows.forEach((row, index) => this.rowIndexes.set(row.id, index));
+    // A row that leaves keeps its measured height: history windows trim and page back in, and a
+    // returning row laid out at its estimate overlaps its neighbours until it is measured again.
+    // The oldest detached heights go first once the limit is reached.
+    let excess = this.heights.size - this.rows.length - DETACHED_HEIGHT_LIMIT;
     for (const key of this.heights.keys()) {
-      if (!this.rowIndexes.has(key)) this.heights.delete(key);
+      if (excess <= 0) break;
+      if (this.rowIndexes.has(key)) continue;
+      this.heights.delete(key);
+      excess -= 1;
     }
   }
 
@@ -362,6 +371,27 @@ export class VirtualViewport {
       this.context.updateContentSize(this.context.sizeCache.getTotalSize());
       this.applyPosition(true);
     });
+  }
+
+  /**
+   * Measures published hosts that have no height yet. Call it once React has filled them, before the
+   * frame paints: the resize observer reports a new row a frame late, and until then the row sits at its
+   * estimate, so a transcript opening at its end shows the wrong place for that frame. Rows measured
+   * before are left to the observer, so a streaming commit forces no layout here.
+   */
+  measureNewHosts(): void {
+    if (this.disposed) return;
+    let changed = false;
+    for (const { id, element } of this.publishedHosts) {
+      if (this.heights.has(id)) continue;
+      const height = element.getBoundingClientRect().height;
+      if (height <= 0) continue;
+      this.heights.set(id, height);
+      changed = true;
+    }
+    if (!changed) return;
+    this.context.rebuildSizeCache();
+    this.applyPosition(true);
   }
 
   private updateViewportHeight(): boolean {
@@ -447,12 +477,16 @@ export class VirtualViewport {
     return true;
   }
 
+  private endScrollTop(): number {
+    return this.insets.top + this.context.sizeCache.getTotalSize() + this.insets.bottom - this.viewportHeight;
+  }
+
   private targetScrollTop(): number {
     const cache = this.context.sizeCache;
     const { top: insetTop, bottom: insetBottom } = this.insets;
     const height = this.viewportHeight;
     if (this.position.kind === "offset") return this.position.top;
-    if (this.position.kind === "end") return insetTop + cache.getTotalSize() + insetBottom - height;
+    if (this.position.kind === "end") return this.endScrollTop();
     const index = this.rowIndexes.get(this.position.key);
     if (index === undefined) return this.viewport.scrollTop;
     const offset = cache.getOffset(index);
@@ -474,6 +508,9 @@ export class VirtualViewport {
   private readonly interrupt = (): void => {
     this.context.cancelScroll();
     this.animating = false;
+    // Input cannot move rows that fit the scroller, so the reader has not left the end. Taking the
+    // first row as the reading position would stop a short page from following rows added below it.
+    if (this.viewport.scrollHeight <= this.viewport.clientHeight) return;
     this.position = this.readingPosition();
     this.pinReadingAnchor();
     this.onPosition(this.position);
@@ -498,7 +535,9 @@ export class VirtualViewport {
     this.scheduleLayout();
     const top = this.viewport.scrollTop;
     if (Math.abs(top - this.expectedScrollTop) < 1) return;
-    const atEnd = this.viewport.scrollHeight - this.viewportHeight - top <= 2;
+    // A taller window pulls scrollTop in, and that scroll can arrive before the resize observer
+    // updates the cached height. The live height reads the clamp as still at the end.
+    const atEnd = this.viewport.scrollHeight - this.viewport.clientHeight - top <= 2;
     const anchor = this.readingPosition();
     this.position = this.options.positionOnScroll?.(anchor, atEnd) ?? anchor;
     this.pinReadingAnchor();
@@ -575,6 +614,14 @@ export class VirtualViewport {
       this.pinnedAnchor = { ...this.pinnedAnchor, top: this.pinnedAnchor.top + shift, hostTop: this.pinnedAnchor.hostTop + shift };
     }
     this.applyPosition();
+  }
+
+  /**
+   * Height of rows below the bottom inset's edge. Blank space padded below a reading row does not
+   * count, so a reader who is not following the end but can see the last row reads 0.
+   */
+  contentBelow(): number {
+    return Math.max(0, this.endScrollTop() - this.viewport.scrollTop);
   }
 
   /** Returns a row's measured or estimated top, measured from the top inset's edge. */

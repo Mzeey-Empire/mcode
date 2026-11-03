@@ -359,12 +359,13 @@ async function killWindowsProcessTreeRoot(
   root: ProcessIdentity | undefined,
   context: WindowsKillContext,
 ): Promise<void> {
-  const beforeKill = indexWindowsSnapshot(await context.getSnapshot());
-  if (!root || beforeKill.get(root.pid)?.startMarker !== root.startMarker) return;
+  if (!root || !(await windowsIdentityStillRunning(root, context))) return;
   try {
     await context.execFile("taskkill", ["/T", "/F", "/PID", String(pid)], { timeout: TASKKILL_TIMEOUT_MS, windowsHide: true });
   } catch (error) {
-    if (isProcessGoneError(error)) {
+    // A root that exits after the snapshot but before taskkill reaches it fails with "There is no
+    // running instance of the task" rather than "not found". Survivor checks still verify the tree.
+    if (isProcessGoneError(error) || !(await windowsIdentityStillRunning(root, context).catch(() => true))) {
       logger.debug("killProcessTree: process already gone", { pid });
       return;
     }
@@ -373,6 +374,10 @@ async function killWindowsProcessTreeRoot(
     });
     throw error;
   }
+}
+
+async function windowsIdentityStillRunning(identity: ProcessIdentity, context: WindowsKillContext): Promise<boolean> {
+  return indexWindowsSnapshot(await context.getSnapshot()).get(identity.pid)?.startMarker === identity.startMarker;
 }
 
 async function killWindowsSurvivors(

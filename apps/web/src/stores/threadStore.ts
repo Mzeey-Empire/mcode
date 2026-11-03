@@ -24,7 +24,7 @@ import { recoverParentNarrative, steeredUserMessages } from "./parent-narrative-
 import { backgroundHeldToolIds, stepsSettledWith, type ToolCallLink } from "@/features/conversation/narrative/background-held-tools";
 import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
 import { CANONICAL_AGENT_PROGRESS_BATCH_MAX } from "@mcode/contracts/models/canonical-agent-progress";
-import { MessageSchema } from "@mcode/contracts/models/message";
+import { CONTEXT_COMPACTED_NOTICE, MessageSchema } from "@mcode/contracts/models/message";
 import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts/models/enums";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { isGoalOpen } from "@mcode/contracts/models/goal";
@@ -134,6 +134,7 @@ import {
 export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
 import { endedWithoutCompleting, getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
+import { createFramePacer } from "./frame-pacer";
 
 function activeCanonicalExecutionId(turn: AgentTurn | undefined): string | undefined {
   if (!turn || (turn.status !== "Pending" && turn.status !== "Running")) return undefined;
@@ -154,62 +155,45 @@ type PendingCanonicalPublication = {
 };
 
 const CANONICAL_PUBLICATION_INLINE_MAX = 32;
-const CANONICAL_PUBLICATION_FRAME_MAX = 32;
 const CANONICAL_PUBLICATION_BURST_WINDOW_MS = 1000;
 const CANONICAL_PROGRESS_INLINE_MAX = 16;
-const CANONICAL_PROGRESS_FRAME_MAX = 1;
 const CANONICAL_PROGRESS_MERGE_EVENT_MAX = 64;
-let canonicalPublicationFlushRaf: number | null = null;
-let canonicalProgressFlushRaf: number | null = null;
+const canonicalPublicationPacer = createFramePacer(flushPendingCanonicalPublications);
+const canonicalProgressPacer = createFramePacer(flushPendingCanonicalProgress);
 let flushingCanonicalProgress = false;
 const pendingCanonicalPublications: PendingCanonicalPublication[] = [];
 const pendingCanonicalProgressFrames: CanonicalAgentProgressFrame[] = [];
 const canonicalPublicationBurstByThread = new Map<string, { readonly startedAt: number; readonly count: number }>();
 const canonicalProgressBurstByThread = new Map<string, { readonly startedAt: number; readonly count: number }>();
 
-function cancelCanonicalPublicationFlush(): void {
-  if (canonicalPublicationFlushRaf == null) return;
-  cancelAnimationFrame(canonicalPublicationFlushRaf);
-  canonicalPublicationFlushRaf = null;
-}
-
-function flushPendingCanonicalPublications(limit = Number.POSITIVE_INFINITY): void {
-  cancelCanonicalPublicationFlush();
-  let remaining = limit;
-  while (remaining > 0 && pendingCanonicalPublications.length > 0) {
-    remaining -= 1;
+function flushPendingCanonicalPublications(deadline = Number.POSITIVE_INFINITY): void {
+  canonicalPublicationPacer.cancel();
+  while (pendingCanonicalPublications.length > 0) {
     const publication = pendingCanonicalPublications.shift();
     if (!publication) continue;
     const state = useThreadStore.getState();
-    if (!state.records.has(publication.event.threadId) && state.currentThreadId !== publication.event.threadId) {
-      continue;
+    if (state.records.has(publication.event.threadId) || state.currentThreadId === publication.event.threadId) {
+      state.handleAgentEvent(publication.event, publication.canonical);
     }
-    state.handleAgentEvent(publication.event, publication.canonical);
+    if (performance.now() >= deadline) break;
   }
-  if (pendingCanonicalPublications.length > 0) scheduleCanonicalPublicationFlush();
+  if (pendingCanonicalPublications.length > 0) canonicalPublicationPacer.schedule();
 }
 
-function cancelCanonicalProgressFlush(): void {
-  if (canonicalProgressFlushRaf == null) return;
-  cancelAnimationFrame(canonicalProgressFlushRaf);
-  canonicalProgressFlushRaf = null;
-}
-
-function flushPendingCanonicalProgress(limit = Number.POSITIVE_INFINITY): void {
-  cancelCanonicalProgressFlush();
-  let remaining = limit;
+function flushPendingCanonicalProgress(deadline = Number.POSITIVE_INFINITY): void {
+  canonicalProgressPacer.cancel();
   flushingCanonicalProgress = true;
   try {
-    while (remaining > 0 && pendingCanonicalProgressFrames.length > 0) {
-      remaining -= 1;
+    while (pendingCanonicalProgressFrames.length > 0) {
       const frame = shiftMergedCanonicalProgressFrame();
       if (frame) useThreadStore.getState().handleCanonicalProgress(frame);
+      if (performance.now() >= deadline) break;
     }
   } finally {
     flushingCanonicalProgress = false;
   }
   if (pendingCanonicalProgressFrames.length > 0) {
-    scheduleCanonicalProgressFlush();
+    canonicalProgressPacer.schedule();
     return;
   }
   canonicalProgressBurstByThread.clear();
@@ -240,22 +224,6 @@ function canMergeAcceptedProgress(
     && left.events.length + right.events.length <= Math.min(CANONICAL_AGENT_PROGRESS_BATCH_MAX, CANONICAL_PROGRESS_MERGE_EVENT_MAX);
 }
 
-function scheduleCanonicalPublicationFlush(): void {
-  if (canonicalPublicationFlushRaf != null) return;
-  canonicalPublicationFlushRaf = requestAnimationFrame(() => {
-    canonicalPublicationFlushRaf = null;
-    flushPendingCanonicalPublications(CANONICAL_PUBLICATION_FRAME_MAX);
-  });
-}
-
-function scheduleCanonicalProgressFlush(): void {
-  if (canonicalProgressFlushRaf != null) return;
-  canonicalProgressFlushRaf = requestAnimationFrame(() => {
-    canonicalProgressFlushRaf = null;
-    flushPendingCanonicalProgress(CANONICAL_PROGRESS_FRAME_MAX);
-  });
-}
-
 function dispatchCanonicalPublicationEvent(event: AgentEvent, canonical: CanonicalPublicationIdentity, forceYield = false): void {
   const shouldYield = forceYield || pendingCanonicalPublications.length > 0 || shouldYieldCanonicalPublication(event.threadId);
   if (shouldYield && hasCanonicalToolProjection(event)) {
@@ -267,7 +235,7 @@ function dispatchCanonicalPublicationEvent(event: AgentEvent, canonical: Canonic
     return;
   }
   pendingCanonicalPublications.push({ event, canonical });
-  scheduleCanonicalPublicationFlush();
+  canonicalPublicationPacer.schedule();
 }
 
 function queueCanonicalPublicationEvent(event: AgentEvent, canonical: CanonicalPublicationIdentity): void {
@@ -393,7 +361,7 @@ function shouldDeferCanonicalProgress(frame: CanonicalAgentProgressFrame): boole
 
 function queueCanonicalProgressFrame(frame: CanonicalAgentProgressFrame): void {
   pendingCanonicalProgressFrames.push(frame);
-  scheduleCanonicalProgressFlush();
+  canonicalProgressPacer.schedule();
 }
 
 function canReceiveCanonicalProgress(
@@ -770,6 +738,14 @@ function isExecutingPhase(phase: ThreadRecord["runtimePhase"] | undefined): bool
 export function getExecutingThreadIds(threadState: ThreadExecutionState): string[] {
   const candidates = new Set([...threadState.runningThreadIds, ...Object.keys(threadState.pendingStopCounts)]);
   return [...candidates].filter((threadId) => isThreadExecuting(threadId, threadState));
+}
+
+/** Whether the user has input queued on a thread: waiting, being sent, or open in the editor. */
+function hasQueuedInput(threadId: string): boolean {
+  const queue = useQueueStore.getState();
+  return Boolean(queue.queues[threadId]?.length)
+    || Boolean(queue.inFlightQueuedMessages[threadId])
+    || queue.editingThreadId === threadId;
 }
 
 function canAutoDrainQueuedMessage(threadId: string): boolean {
@@ -1266,7 +1242,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         : deriveRunningThreadIds(records);
     return { ...next, runningThreadIds: preserveRunningThreadIds(state.runningThreadIds, runningThreadIds) };
   })) as typeof zustandSet;
-  let textDeltaFlushRaf: number | null = null;
+  const textDeltaPacer = createFramePacer(() => flushPendingTextDeltas());
   const pendingTextDeltaByThread = new Map<string, PendingTextChunk[]>();
   const streamingTextByteSizes = new Map<string, number>();
   const textEncoder = new TextEncoder();
@@ -1312,14 +1288,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   /**
-   * Applies coalesced `session.textDelta` chunks batched on `requestAnimationFrame`.
+   * Applies coalesced `session.textDelta` chunks batched on the next painted frame.
    * `isFinalResponse` spans update streaming buffers only so they stay out of thought segments.
    */
   const flushPendingTextDeltas = () => {
-    if (textDeltaFlushRaf != null) {
-      cancelAnimationFrame(textDeltaFlushRaf);
-      textDeltaFlushRaf = null;
-    }
+    textDeltaPacer.cancel();
     if (pendingTextDeltaByThread.size === 0) {
       const activeThreadId = get().currentThreadId;
       if (activeThreadId) promoteDeferredNarrativeEvents(activeThreadId);
@@ -1448,10 +1421,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         deferredNarrativeGenerations.delete(threadId);
       }
     }
-    if (dropped && pendingTextDeltaByThread.size === 0 && textDeltaFlushRaf != null) {
-      cancelAnimationFrame(textDeltaFlushRaf);
-      textDeltaFlushRaf = null;
-    }
+    if (dropped && pendingTextDeltaByThread.size === 0) textDeltaPacer.cancel();
   };
 
   const invalidateDeferredNarrativeEvents = (threadId: string): void => {
@@ -1506,14 +1476,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       (latestSequence, message) => Math.max(latestSequence, message.sequence),
       0,
     ) + 1;
-
-  const scheduleTextDeltaFlush = () => {
-    if (textDeltaFlushRaf != null) return;
-    textDeltaFlushRaf = requestAnimationFrame(() => {
-      textDeltaFlushRaf = null;
-      flushPendingTextDeltas();
-    });
-  };
 
   // The hydrator and residency authorities close over each other for lease guards.
   // eslint-disable-next-line prefer-const
@@ -2410,7 +2372,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       : [...chunks, { delta, textItemId: event.textItemId, isFinalResponse, deferNarrative }];
     pendingTextDeltaByThread.set(event.threadId, next);
     if (!runtime.isActiveThread) queueDeferredNarrativeEvent(event.threadId, normalizedEvent);
-    scheduleTextDeltaFlush();
+    textDeltaPacer.schedule();
   };
 
   /** Batches reasoning into the text queue so its order against narration and answer text holds. */
@@ -2434,7 +2396,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       ? [...chunks.slice(0, -1), { ...tail, delta: tail.delta + delta, reasoning }]
       : [...chunks, { delta, reasoning }];
     pendingTextDeltaByThread.set(event.threadId, next);
-    scheduleTextDeltaFlush();
+    textDeltaPacer.schedule();
   };
 
   const handleAssistantMessageBoundary = (
@@ -2931,7 +2893,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   const compactedSystemMessage = (threadId: string): void => {
     if (!getRec(threadId).isCompacting) return;
-    appendMessageToThread(threadId, createSystemMessage(threadId, "Context compacted"));
+    appendMessageToThread(threadId, createSystemMessage(threadId, CONTEXT_COMPACTED_NOTICE));
   };
 
   const handleCompacting = (event: Extract<AgentEvent, { type: "compacting" }>): void => {
@@ -3241,10 +3203,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       throw new TurnAdmissionError("busy", `Thread ${threadId} already has an active agent session`);
     }
     if (!isControlCommand) {
-      const queue = useQueueStore.getState();
-      if (!queue.queues[threadId]?.length && !queue.inFlightQueuedMessages[threadId] && queue.editingThreadId !== threadId) {
-        queue.resumeAutoDrain(threadId);
-      }
+      if (!hasQueuedInput(threadId)) useQueueStore.getState().resumeAutoDrain(threadId);
       invalidateDeferredNarrativeEvents(threadId);
       useTaskStore.getState().prepareTaskBubbleForNewTurn(threadId);
     }
@@ -3907,7 +3866,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   /** Request exact active turn stop and apply authoritative runtime result. */
   stopAgent: async (threadId) => {
     clearDequeueTimer(threadId);
-    useQueueStore.getState().suppressAutoDrain(threadId, "Stopped by you");
+    // Stop holds what was queued before the click. A message sent while the turn stops is the user's
+    // next instruction, so it goes out once the stop settles (see the turn-end hold below).
+    if (hasQueuedInput(threadId)) useQueueStore.getState().suppressAutoDrain(threadId, "Stopped by you");
     set((state) => ({
       pendingStopCounts: {
         ...state.pendingStopCounts,
@@ -3937,6 +3898,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         return { pendingStopCounts };
       });
       invalidateDeferredNarrativeEvents(threadId);
+      // A drain asked for while the stop was pending saw the thread as busy and gave up.
+      scheduleDrainAfterEdit(threadId);
     }
   },
 
@@ -4647,6 +4610,25 @@ function clearSettledStopFailures(state: ThreadState, previous: ThreadState): vo
   }
 }
 
+/** Whether the user's own Stop, from this window, ended the thread's latest turn. */
+function endedByUserStop(threadId: string, record: ThreadRecord, state: ThreadState): boolean {
+  if ((state.pendingStopCounts[threadId] ?? 0) > 0) return true;
+  return record.stopRequestedExecutionId !== undefined && record.stopRequestedExecutionId === record.turnExecutionId;
+}
+
+function holdQueueAfterUnfinishedTurn(threadId: string, record: ThreadRecord, state: ThreadState): void {
+  clearDequeueTimer(threadId);
+  // `stopAgent` already held what was queued at the click; anything left was sent while it stopped.
+  if (endedByUserStop(threadId, record, state)) {
+    scheduleDrainAfterEdit(threadId);
+    return;
+  }
+  const queue = useQueueStore.getState();
+  if (queue.autoDrainSuppressedThreadIds.has(threadId)) return;
+  const phase = getThreadRuntimePhase(threadId, record);
+  queue.suppressAutoDrain(threadId, phase === "errored" ? "Turn failed" : "Turn interrupted");
+}
+
 /**
  * Holds a thread's queued follow-ups when its latest turn ends without completing.
  * Observing the phase catches every writer that settles a turn (events, persistence, canonical
@@ -4665,14 +4647,7 @@ useThreadStore.subscribe((state, previous) => {
     if (!record || record === before) continue;
     const ended = endedWithoutCompleting(getThreadRuntimePhase(threadId, record));
     const wasEnded = before !== undefined && endedWithoutCompleting(getThreadRuntimePhase(threadId, before));
-    if (ended && !wasEnded) {
-      clearDequeueTimer(threadId);
-      const queue = useQueueStore.getState();
-      if (!queue.autoDrainSuppressedThreadIds.has(threadId)) {
-        const phase = getThreadRuntimePhase(threadId, record);
-        queue.suppressAutoDrain(threadId, phase === "errored" ? "Turn failed" : "Turn interrupted");
-      }
-    }
+    if (ended && !wasEnded) holdQueueAfterUnfinishedTurn(threadId, record, state);
   }
 });
 

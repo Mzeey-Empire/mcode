@@ -528,8 +528,9 @@ before reporting the change done:
   chronological order.
 - **Reasoning:** each reasoning block shows as a collapsed `Thought` row
   between the tools around it, and opens to show its text.
-- **Streaming response:** text appears a paragraph at a time, with no typing
-  caret; open code blocks and tables show an "assembling" skeleton.
+- **Streaming response:** text appears a paragraph or list item at a time,
+  with no typing caret; open code blocks and tables show an "assembling"
+  skeleton.
 - **Turn completion:** the activity folds under "Worked for <duration>" above
   the answer, fork and copy show at rest, and the meta line shows the
   step and sub-agent counts.

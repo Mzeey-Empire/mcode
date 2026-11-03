@@ -89,6 +89,21 @@ describe("transcript viewport", () => {
     expect(position).toEqual({ kind: "end" });
   });
 
+  it("keeps following the end when a taller window pulls the scroll in before the resize is observed", async () => {
+    expect(view.viewport.scrollTop).toBe(1800);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+    view.viewport.scrollTop = 1700;
+    view.viewport.dispatchEvent(new Event("scroll"));
+    LayoutObserver.resize(view.viewport, 300);
+    await nextFrame();
+    expect(position).toEqual({ kind: "end" });
+
+    const tail = hosts.find((host) => host.id === "19")!;
+    LayoutObserver.resize(tail.element, 180);
+    await nextFrame();
+    expect(view.viewport.scrollTop).toBe(1780);
+  });
+
   it("applies every measurement delivered within the same frame", async () => {
     const tail = hosts.find((host) => host.id === "19")!;
     const penultimate = hosts.find((host) => host.id === "18")!;
@@ -96,6 +111,28 @@ describe("transcript viewport", () => {
     LayoutObserver.resize(penultimate.element, 140);
     await nextFrame();
     expect(view.viewport.scrollTop).toBe(1920);
+    expect(position).toEqual({ kind: "end" });
+  });
+
+  it("lays a row that leaves and returns out at its measured height before it is measured again", async () => {
+    LayoutObserver.resize(hosts.find((host) => host.id === "18")!.element, 300);
+    await nextFrame();
+    expect(view.viewport.scrollTop).toBe(2000);
+
+    // The record trims to its tail on selection, then the viewport fill pages the rest back in.
+    view.setRows(rows.slice(19));
+    view.setRows(rows);
+    expect(view.viewport.scrollTop).toBe(2000);
+    expect(position).toEqual({ kind: "end" });
+  });
+
+  it("places rows that were just filled at their real heights before the next frame", () => {
+    // The resize observer reports a new row a frame late; a transcript opening at its end would show
+    // that frame at the row's estimate, often the top of the thread.
+    const tail = hosts.find((host) => host.id === "19")!;
+    vi.spyOn(tail.element, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 600, 300));
+    view.measureNewHosts();
+    expect(view.viewport.scrollTop).toBe(2000);
     expect(position).toEqual({ kind: "end" });
   });
 
@@ -222,7 +259,7 @@ describe("transcript viewport", () => {
   it("preserves the reading row when history fills a previously short viewport", () => {
     const recent = [{ id: "recent", height: 120 }];
     view.setRows(recent);
-    view.viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 }));
+    view.moveTo({ kind: "reading", key: "recent", offset: 0 });
     view.setRows([{ id: "older", height: 300 }, ...recent]);
     expect(view.rowTop("recent")).toBe(0);
     expect(position).toEqual({ kind: "reading", key: "recent", offset: 0 });
@@ -245,6 +282,20 @@ describe("transcript viewport", () => {
         expect(host.element.parentElement?.getAttribute("data-id"), host.id).toBe(host.id);
       }
     }
+  });
+
+  it("keeps following the end after scroll input on a page too short to scroll", async () => {
+    view.setRows([{ id: "answer", height: 120 }]);
+    view.viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
+    view.viewport.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp" }));
+    view.viewport.dispatchEvent(new Event("touchstart"));
+    expect(position).toEqual({ kind: "end" });
+
+    const answer = hosts.find((host) => host.id === "answer")!;
+    LayoutObserver.resize(answer.element, 400);
+    await nextFrame();
+    expect(view.viewport.scrollTop).toBe(200);
+    expect(position).toEqual({ kind: "end" });
   });
 
   it("does not resume tail following after an upward gesture and an append", () => {
@@ -307,6 +358,24 @@ describe("transcript viewport", () => {
     LayoutObserver.resize(tail.element, 100);
     await nextFrame();
     expect(view.rowTop("19")).toBe(before);
+  });
+
+  it("reports no content below when a collapsed disclosure leaves the last row in view", async () => {
+    const row = hosts.find((host) => host.id === "18")!;
+    const button = document.createElement("button");
+    button.setAttribute("aria-expanded", "true");
+    row.element.append(button);
+    button.click();
+    LayoutObserver.resize(row.element, 40);
+    await nextFrame();
+    expect(position.kind).toBe("reading");
+    expect(view.rowTop("18")).toBe(0);
+    expect(view.rowBottom("19")).toBe(140);
+    expect(view.contentBelow()).toBe(0);
+
+    view.setRows([...rows, { id: "20", height: 100 }]);
+    expect(view.rowBottom("20")).toBe(240);
+    expect(view.contentBelow()).toBe(40);
   });
 
   it("cancels smooth navigation when the user scrolls", async () => {

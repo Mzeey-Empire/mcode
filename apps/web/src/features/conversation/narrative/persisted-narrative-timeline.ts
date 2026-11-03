@@ -27,7 +27,7 @@ import {
 } from "./narrative-builder-helpers";
 import { filterPersistedFinalResponseThoughts, isReasoningSegment } from "./narrative-thought-classification";
 import { approvalSubjectLabel } from "./tool-detail";
-import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment } from "./types";
+import type { ApprovalReceipt, NarrativeItem, SubagentActivity, ThoughtSegment, TurnNotice } from "./types";
 
 const NATIVE_AGENT_TOOL_NAME = "Agent";
 
@@ -38,6 +38,8 @@ export interface PersistedNarrativeInputs {
   hooks: readonly HookExecutionRecord[];
   /** Persisted approval receipts; absent when the message has none. */
   approvals?: readonly ApprovalReceiptRecord[];
+  /** Notes such as a context compaction, placed by time among the saved rows. */
+  notices?: readonly TurnNotice[];
   messageContent?: string;
 }
 
@@ -47,7 +49,10 @@ export type PersistedTimelineEvent =
   | { kind: "tool"; call: ToolCall; sortOrder: number }
   | { kind: "subagent"; call: ToolCall; marker?: ToolCall; lifecycle: SubagentLifecycle; sortOrder: number }
   | { kind: "hook"; hook: HookExecution; sortOrder: number }
-  | { kind: "approval"; receipt: ApprovalReceipt; sortOrder: number };
+  | { kind: "approval"; receipt: ApprovalReceipt; sortOrder: number }
+  | { kind: "notice"; notice: TurnNotice };
+
+type SavedTimelineEvent = Exclude<PersistedTimelineEvent, { kind: "notice" }>;
 
 /** Normalized persisted state that preserves durable ordering and parent groups. */
 export interface PersistedNarrativePreparation {
@@ -158,14 +163,14 @@ export function preparePersistedNarrative(
     allToolCalls,
     liveHooks,
     childrenByParent: hierarchy.childrenByParent,
-    timeline: createPersistedTimeline(
+    timeline: insertNoticeEvents(createPersistedTimeline(
       filteredThoughts,
       hierarchy.topLevel,
       toolRecords,
       hierarchy.childrenByParent,
       inputs.hooks,
       inputs.approvals ?? [],
-    ),
+    ), inputs.notices ?? []),
   };
 }
 
@@ -190,6 +195,10 @@ export function projectPersistedNarrativeItems(
       case "approval":
         flushToolGroup(items, pendingToolCalls);
         items.push({ type: "approval", receipt: event.receipt });
+        break;
+      case "notice":
+        flushToolGroup(items, pendingToolCalls);
+        items.push({ type: "notice", notice: event.notice });
         break;
       case "subagent": {
         flushToolGroup(items, pendingToolCalls);
@@ -345,7 +354,7 @@ function createPersistedTimeline(
   childrenByParent: ReadonlyMap<string, readonly ToolCallRecord[]>,
   hooks: readonly HookExecutionRecord[],
   approvals: readonly ApprovalReceiptRecord[],
-): PersistedTimelineEvent[] {
+): SavedTimelineEvent[] {
   const timeline = createPersistedThoughtEvents(thoughts)
     .concat(createPersistedTopLevelToolEvents(topLevelRecords))
     .concat(createPersistedSubagentEvents(toolRecords, childrenByParent))
@@ -354,9 +363,32 @@ function createPersistedTimeline(
   return timeline.sort((left, right) => left.sortOrder - right.sortOrder);
 }
 
+/** A notice has a time but no saved sort order, so it goes before the first saved event that started after it. */
+function insertNoticeEvents(
+  timeline: readonly SavedTimelineEvent[],
+  notices: readonly TurnNotice[],
+): PersistedTimelineEvent[] {
+  const merged: PersistedTimelineEvent[] = [...timeline];
+  for (const notice of [...notices].sort((left, right) => left.at - right.at)) {
+    const index = merged.findIndex((event) => event.kind !== "notice" && savedEventStartedAt(event) > notice.at);
+    merged.splice(index === -1 ? merged.length : index, 0, { kind: "notice", notice });
+  }
+  return merged;
+}
+
+function savedEventStartedAt(event: SavedTimelineEvent): number {
+  switch (event.kind) {
+    case "thought": return event.segment.startedAt;
+    case "tool":
+    case "subagent": return event.call.startedAt ?? 0;
+    case "hook": return event.hook.startedAt;
+    case "approval": return event.receipt.decidedAt;
+  }
+}
+
 function createPersistedThoughtEvents(
   thoughts: readonly ThoughtSegmentRecord[],
-): PersistedTimelineEvent[] {
+): SavedTimelineEvent[] {
   return thoughts.map((thought) => ({
     kind: "thought",
     segment: recordToThoughtSegment(thought),
@@ -366,7 +398,7 @@ function createPersistedThoughtEvents(
 
 function createPersistedTopLevelToolEvents(
   topLevelRecords: readonly ToolCallRecord[],
-): PersistedTimelineEvent[] {
+): SavedTimelineEvent[] {
   return topLevelRecords.flatMap((toolRecord) => isSubagentLaunchRecord(toolRecord)
     ? []
     : [{ kind: "tool" as const, call: recordToToolCall(toolRecord), sortOrder: toolRecord.sort_order }]);
@@ -375,7 +407,7 @@ function createPersistedTopLevelToolEvents(
 function createPersistedSubagentEvents(
   toolRecords: readonly ToolCallRecord[],
   childrenByParent: ReadonlyMap<string, readonly ToolCallRecord[]>,
-): PersistedTimelineEvent[] {
+): SavedTimelineEvent[] {
   return toolRecords.flatMap((toolRecord) => {
     if (!isSubagentLaunchRecord(toolRecord)) return [];
     const marker = latestPersistedLifecycleMarker(childrenByParent.get(toolRecord.id) ?? []);
@@ -402,7 +434,7 @@ function latestPersistedLifecycleMarker(
 
 function createPersistedHookEvents(
   hooks: readonly HookExecutionRecord[],
-): PersistedTimelineEvent[] {
+): SavedTimelineEvent[] {
   return hooks.flatMap((hook) => hook.phase === "stop"
     ? []
     : [{ kind: "hook" as const, hook: recordToHookExecution(hook), sortOrder: hook.sort_order }]);

@@ -1165,8 +1165,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
     if (active.lostStreamFinish) {
       await active.lostStreamFinish;
-      return this.alreadyTerminal({ ...prepared,
-        runtime: this.turnRuntime.snapshot(prepared.threadId) ?? prepared.runtime });
+      return this.alreadyTerminal(prepared);
     }
     if (!isRunningRuntime(prepared.runtime)) {
       await this.releaseWorkerTurn(active);
@@ -1174,8 +1173,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
     if (active.deliveryFailureHandling) {
       await active.deliveryFailureHandling;
-      return this.alreadyTerminal({ ...prepared,
-        runtime: this.turnRuntime.snapshot(prepared.threadId) ?? prepared.runtime });
+      return this.alreadyTerminal(prepared);
     }
     active.stopInProgress = true;
     this.requireWorkerFiles().fence(prepared.threadId, executionId, active.deliveryAttempt);
@@ -1364,9 +1362,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   private async finalizeStoppedTurn(prepared: PreparedStop): Promise<AgentStopResult> {
     const current = this.turnRuntime.snapshot(prepared.threadId) ?? prepared.runtime;
-    if (!ownsStoppedExecution(current, prepared.runtime.turnExecutionId)) return this.alreadyTerminal({ ...prepared, runtime: current });
+    if (!ownsStoppedExecution(current, prepared.runtime.turnExecutionId)) return this.alreadyTerminal(prepared);
     if (!this.turnRuntime.terminalize(prepared.threadId, prepared.runtime.turnExecutionId!, "cancelled")) {
-      return this.alreadyTerminal({ ...prepared, runtime: this.turnRuntime.snapshot(prepared.threadId) ?? idleRuntime(prepared.threadId) });
+      return this.alreadyTerminal(prepared);
     }
     this.clearTurnDispatch(prepared.threadId);
     this.clearTurnEndedState(prepared.threadId);
@@ -1383,12 +1381,18 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     };
   }
 
+  /**
+   * Reports the thread's runtime as it is now, not as `prepareStop` saw it: the turn can end
+   * by itself while the stop waits on its events, and a client that applies the earlier running
+   * snapshot shows the turn as stopping forever.
+   */
   private alreadyTerminal(prepared: PreparedStop): AgentStopResult {
     this.clearTurnDispatch(prepared.threadId);
+    const snapshot = this.turnRuntime.snapshot(prepared.threadId) ?? idleRuntime(prepared.threadId);
     return {
       threadId: prepared.threadId,
-      turnExecutionId: prepared.runtime.turnExecutionId,
-      snapshot: prepared.runtime,
+      turnExecutionId: snapshot.turnExecutionId,
+      snapshot,
       status: "already-terminal",
       dispatchState: prepared.dispatchState,
     };

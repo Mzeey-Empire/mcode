@@ -8,6 +8,7 @@ import { hasResidentContent } from "../../hydration/resident-content";
 import { getConversationResidency } from "../../residency/conversation-residency";
 import { useActiveThreadRecord, useThreadRecord } from "../../state";
 import { useOutgoingTranscriptHold } from "./useOutgoingTranscriptHold";
+import { keepThreadAlive, NO_KEPT_ALIVE_THREADS } from "./kept-alive-threads";
 
 const EMPTY_DISPLAYED_THREAD_IDS: readonly string[] = [];
 
@@ -24,19 +25,15 @@ function getDisplayedConversationSnapshot(): readonly string[] {
   return getConversationResidency().getDisplayConversationSnapshot();
 }
 
-/** Tracks the most recently selected thread IDs, capped for bounded transcript retention. */
-function useRecentThreadIds(activeThreadId: string | null | undefined): string[] {
-  const [recentThreadIds, setRecentThreadIds] = useState<string[]>([]);
+/** Tracks the most recently selected thread IDs in a stable render order, capped for bounded transcript retention. */
+function useRecentThreadIds(activeThreadId: string | null | undefined): readonly string[] {
+  const [kept, setKept] = useState(NO_KEPT_ALIVE_THREADS);
   const previousActiveThreadId = useRef<string | null>(null);
   if (activeThreadId !== previousActiveThreadId.current) {
     previousActiveThreadId.current = activeThreadId ?? null;
-    if (activeThreadId) {
-      setRecentThreadIds((ids) =>
-        [activeThreadId, ...ids.filter((id) => id !== activeThreadId)]
-          .slice(0, KEPT_ALIVE_THREAD_COUNT));
-    }
+    if (activeThreadId) setKept((current) => keepThreadAlive(current, activeThreadId, KEPT_ALIVE_THREAD_COUNT));
   }
-  return recentThreadIds;
+  return kept.mounted;
 }
 
 /** Selects bounded subscriptions for the active, visible, and running conversations. */

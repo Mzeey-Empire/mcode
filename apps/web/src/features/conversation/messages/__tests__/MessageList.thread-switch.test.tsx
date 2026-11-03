@@ -1508,6 +1508,54 @@ describe("MessageList thread switch", () => {
     expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("tops up again after the record trims a kept transcript back to its tail", async () => {
+    fakeAnimationFrames();
+    const message = (sequence: number) => ({
+      id: `thread-A-${sequence}`, thread_id: "thread-A", sequence,
+      role: "assistant" as const, content: `Message ${sequence}`,
+    });
+    messagesValue = [message(10), message(11)];
+    hasMoreMessagesValue = true;
+    loadOlderMessagesSpy.mockImplementation(async () => {
+      messagesValue = [message(messagesValue[0]!.sequence - 1), ...messagesValue];
+      return "loaded";
+    });
+    const { container, rerender } = render(<MessageList />);
+    for (let pages = 1; pages <= 3; pages += 1) {
+      await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(pages));
+      act(() => rerender(<MessageList />));
+      await measureRows(container);
+    }
+    expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(3);
+
+    messagesValue = messagesValue.slice(-2);
+    act(() => rerender(<MessageList />));
+    await measureRows(container);
+    await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(4));
+  });
+
+  it("keeps topping up after loads that another request already owned", async () => {
+    fakeAnimationFrames();
+    messagesValue = [10, 11].map((sequence) => ({
+      id: `thread-A-${sequence}`, thread_id: "thread-A", sequence,
+      role: "assistant" as const, content: `Message ${sequence}`,
+    }));
+    hasMoreMessagesValue = true;
+    loadOlderMessagesSpy.mockResolvedValue("skipped");
+    const { container, rerender } = render(<MessageList />);
+    await measureRows(container);
+    for (let skips = 1; skips <= 3; skips += 1) {
+      await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(skips));
+      await act(async () => {});
+      // The request that owned the page publishes its loading flag, then gives the page up uncommitted.
+      recordOverridesByThread["thread-A"] = { isLoadingMore: true };
+      act(() => rerender(<MessageList />));
+      recordOverridesByThread = {};
+      act(() => rerender(<MessageList />));
+    }
+    await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(4));
+  });
+
   it("loads older and newer history only after a gesture reaches its boundary", async () => {
     fakeAnimationFrames();
     // Tall content keeps the viewport-fill effect out and leaves room to sit
