@@ -1,7 +1,7 @@
 import { createMockThreadPullRequest, createMockThread } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { StrictMode } from "react";
-import { render, screen, act, fireEvent, within } from "@testing-library/react";
+import { render, screen, act, fireEvent, within, cleanup } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { ThreadAttention, ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
 import type { ThreadStartup } from "@mcode/contracts/thread-startup";
@@ -329,6 +329,8 @@ describe("ProjectSidebar thread interactions", () => {
   });
 
   afterEach(() => {
+    // Testing Library's automatic cleanup runs after this hook, too late to stop mounted rows ticking.
+    cleanup();
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
     vi.clearAllMocks();
