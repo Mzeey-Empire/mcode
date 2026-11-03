@@ -6,6 +6,7 @@ import * as NodeURL from "node:url";
 
 import { probeCdpVersion } from "../../.agents/skills/electorn-live-testing/scripts/start-electron.mjs";
 import { isOwnedElectronProcess } from "../../.agents/skills/electorn-live-testing/scripts/stop-electron.mjs";
+import { checkBuildStamp, describeBuildStamp } from "./build-stamp.mjs";
 import { MANAGED_DESKTOP_SESSION_FILE } from "./managed-desktop.mjs";
 import { waitForDesktopPage, waitForHttpOk } from "./agent-up.mjs";
 import { getRuntimePaths, readPortsFile, resolveRepoRoot } from "./runtime-contract.mjs";
@@ -122,6 +123,8 @@ if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]
   try {
     const result = await agentReady();
     process.stdout.write(`Agent runtime is ready${result.desktop ? " with desktop" : ""}.\n`);
+    const staleBundles = describeBuildStamp(checkBuildStamp(resolveRepoRoot()));
+    if (staleBundles) process.stderr.write(staleBundles);
   } catch (error) {
     process.stderr.write(`Agent runtime is not ready: ${error.message}\n`);
     process.exitCode = 1;

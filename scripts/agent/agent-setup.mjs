@@ -7,6 +7,7 @@ import * as NodeURL from "node:url";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 
+import { captureBuildInputs, clearBuildStamp, writeBuildStamp } from "./build-stamp.mjs";
 import { isFixtureRepo, seedFixtureRepo } from "./fixture-repo.mjs";
 import {
   assertRuntimeDirectorySafe,
@@ -54,8 +55,12 @@ export async function agentSetup(repoRoot = resolveRepoRoot()) {
   if (!operations.fixtureIsReady(repoRoot)) {
     operations.seedFixture(repoRoot);
   }
+  // Capture before building: an edit made during the build then reads as stale, never as current.
+  const inputs = captureBuildInputs(repoRoot);
+  clearBuildStamp(repoRoot);
   await operations.rebuildBundle({ repoRoot });
   await operations.buildMain(repoRoot);
+  writeBuildStamp(repoRoot, inputs);
 }
 
 function getSetupOperations() {
