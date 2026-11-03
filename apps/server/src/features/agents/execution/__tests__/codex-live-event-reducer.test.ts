@@ -480,6 +480,22 @@ describe("CodexLiveEventReducer", () => {
     expect(completed.publication.after).toBe("terminal");
   });
 
+  it("lets a non-final boundary move hint-final preamble out of the answer", () => {
+    const reducer = new CodexLiveEventReducer(execution);
+    reduceEvent(reducer, "turnStarted");
+    reduceEvent(reducer, "toolUse", { toolCallId: "first", toolName: "Read", toolInput: {} });
+    reduceEvent(reducer, "toolResult", { toolCallId: "first", output: "contents", isError: false });
+    reduceEvent(reducer, "textDelta", { delta: "On it.", isFinalResponse: true });
+    const boundary = reduceEvent(reducer, "assistantMessageBoundary", { isFinalResponse: false });
+    expect(boundary.writer).toContainEqual({ kind: "assistant-text-reclassify", text: "On it.", classification: "narration" });
+    reduceEvent(reducer, "toolUse", { toolCallId: "second", toolName: "Bash", toolInput: { command: "ls" } });
+    reduceEvent(reducer, "textDelta", { delta: "Writing now.", isFinalResponse: true });
+    const failed = reduceEvent(reducer, "error", { error: "Provider failed", failure: { kind: "fatal" } });
+    const projection = failed.writer.find((intent) => intent.kind === "terminal-projection");
+    expect(projection?.assistant.content).toBe("Writing now.");
+    expect(projection?.narrative.flatMap((item) => item.kind === "narrationSegment" ? [item.record.text] : [])).toEqual(["On it."]);
+  });
+
   it("rejects unbound session events and reduces explicitly bound notices and cursors", () => {
     const mapper = new CodexEventMapper(execution.threadId);
     const reducer = new CodexLiveEventReducer(execution);
