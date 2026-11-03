@@ -4,7 +4,7 @@ import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { PermissionModeSchema } from "@mcode/contracts/models/enums";
-import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { ProviderIdSchema, ReasoningLevelSchema } from "@mcode/contracts/models/settings";
 import { CanonicalAgentEventEnvelopeSchema } from "@mcode/contracts/compat/agent-model";
 import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
 import { isDelegateTaskToolName } from "@mcode/contracts/models/subagent-roster";
@@ -19,7 +19,8 @@ export const NoticeCandidateSchema = z.object({ taskId: z.string(), key: z.strin
 /** Immutable launch snapshot, captured before any approval or startup side effect. */
 export const DelegatedTaskPlanSchema = z.object({
   workspaceId: z.string(), title: z.string(), prompt: z.string(),
-  providerId: ProviderIdSchema, modelId: z.string(), permissionMode: PermissionModeSchema,
+  providerId: ProviderIdSchema, modelId: z.string(), reasoningLevel: ReasoningLevelSchema.optional(),
+  permissionMode: PermissionModeSchema,
   coordinatorPermissionMode: PermissionModeSchema,
   checkout: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("direct"), branch: z.string() }),

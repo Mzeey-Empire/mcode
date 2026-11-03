@@ -224,6 +224,34 @@ describe("thread-control toolkit", () => {
     });
   });
 
+  it("publishes delegate_task options.reasoningEffort as a closed enum of the seven levels", () => {
+    const { bound } = setup({ lease: "none" });
+    const schema = bound?.tools.find((tool) => tool.name === "delegate_task")?.inputSchema;
+    expect(schema?.properties?.options).toMatchObject({
+      type: "object",
+      properties: { reasoningEffort: { type: "string", enum: expect.arrayContaining(["none", "minimal", "low", "medium", "high", "xhigh", "max"]) } },
+      additionalProperties: false,
+    });
+    const options = schema?.properties?.options as { properties: { reasoningEffort: { enum: string[] } } } | undefined;
+    expect(options?.properties.reasoningEffort.enum).toHaveLength(7);
+    expect(schema?.required ?? []).not.toContain("options");
+  });
+
+  it("accepts delegate_task options and passes them to the service unchanged", async () => {
+    const { call, service } = setup();
+    service.delegate.mockResolvedValue(DelegateTaskResultSchema().parse({
+      taskId: "00000000-0000-4000-8000-000000000001", effectivePermissionMode: "full",
+      state: { status: "working", phase: "preparing" }, effectiveOptions: { reasoningEffort: "xhigh" },
+    }));
+    const input = {
+      clientRequestId: "review-1", title: "Review", prompt: "Find bugs", providerId: "codex", modelId: "gpt-test",
+      isolation: "worktree", options: { reasoningEffort: "xhigh" },
+    };
+    await call("delegate_task", input);
+    expect(service.delegate).toHaveBeenCalledWith(expect.anything(), input);
+    await expect(call("delegate_task", { ...input, options: { effort: "high" } })).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
+  });
+
   it("returns each thread_send and thread_stop result variant", async () => {
     const { call, service } = setup();
     const sent = (value: unknown) => ThreadSendResultSchema().parse(value);

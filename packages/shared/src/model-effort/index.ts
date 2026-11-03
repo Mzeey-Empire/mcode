@@ -155,13 +155,29 @@ function normalizeToAllowedTier(
   allowed: ReadonlySet<ReasoningLevel>,
   fallback: ReasoningLevel,
 ): ReasoningLevel {
-  if (allowed.has(level)) return level;
+  return reasoningLevelAtOrBelow(level, [...allowed]) ?? fallback;
+}
+
+/** Returns the distinct levels in ladder order, lowest first. */
+export function orderReasoningLevels(levels: readonly ReasoningLevel[]): ReasoningLevel[] {
+  return TIER_LADDER.filter((tier) => levels.includes(tier));
+}
+
+/**
+ * Returns the highest declared level at or below `level` on the ladder, or
+ * `undefined` when every declared level is above it. Never walks up, so a
+ * request is never silently escalated.
+ */
+export function reasoningLevelAtOrBelow(
+  level: ReasoningLevel,
+  declared: readonly ReasoningLevel[],
+): ReasoningLevel | undefined {
   const index = TIER_LADDER.indexOf(level);
-  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+  for (let cursor = index; cursor >= 0; cursor -= 1) {
     const tier = TIER_LADDER[cursor];
-    if (tier && allowed.has(tier)) return tier;
+    if (tier && declared.includes(tier)) return tier;
   }
-  return fallback;
+  return undefined;
 }
 
 /**
@@ -248,18 +264,5 @@ export function normalizeReasoningLevelForModel(
   if (isXhighEffortModel(modelId)) {
     allowed.add("xhigh");
   }
-  if (allowed.has(level)) {
-    return level;
-  }
-
-  // Walk down from the requested tier to find the best supported level.
-  const idx = TIER_LADDER.indexOf(level);
-  for (let i = idx - 1; i >= 0; i--) {
-    if (allowed.has(TIER_LADDER[i])) {
-      return TIER_LADDER[i];
-    }
-  }
-
-  // Unreachable in practice: the base set always contains "low", "medium", "high".
-  return "high";
+  return reasoningLevelAtOrBelow(level, [...allowed]) ?? "high";
 }

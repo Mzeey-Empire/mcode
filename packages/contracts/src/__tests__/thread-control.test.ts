@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DelegateTaskInputSchema,
   THREAD_CREATE_BATCH_MAX_ITEMS,
   THREAD_CREATE_PROMPT_MAX_LENGTH,
   ThreadCreateBatchInputSchema,
@@ -18,6 +19,7 @@ import {
   ThreadTargetListInputSchema,
   ThreadTargetListResultSchema,
   ThreadLaunchInputSchema,
+  ThreadTargetModelOptionSchema,
 } from "../thread-control.js";
 
 describe("thread launch input", () => {
@@ -30,6 +32,56 @@ describe("thread launch input", () => {
     expect(ThreadLaunchInputSchema().safeParse({ title: "Independent work", prompt: "Implement it",
       workspace: { type: "existing_worktree", worktreePath: "/repo/worktree", baseRef: "main" },
     }).success).toBe(false);
+  });
+});
+
+const delegateInput = {
+  clientRequestId: "review-1", title: "Review", prompt: "Find bugs",
+  providerId: "codex", modelId: "gpt-test", isolation: "worktree",
+};
+
+describe("delegate task options", () => {
+  it("accepts a reasoning effort and maps the ultra alias to max", () => {
+    expect(DelegateTaskInputSchema().parse({ ...delegateInput, options: { reasoningEffort: "xhigh" } }).options)
+      .toEqual({ reasoningEffort: "xhigh" });
+    expect(DelegateTaskInputSchema().parse({ ...delegateInput, options: { reasoningEffort: "ultra" } }).options)
+      .toEqual({ reasoningEffort: "max" });
+  });
+
+  it("rejects an unknown level, an unknown option key and an unknown top-level key", () => {
+    expect(DelegateTaskInputSchema().safeParse({ ...delegateInput, options: { reasoningEffort: "turbo" } }).success).toBe(false);
+    expect(DelegateTaskInputSchema().safeParse({ ...delegateInput, options: { effort: "high" } }).success).toBe(false);
+    expect(DelegateTaskInputSchema().safeParse({ ...delegateInput, reasoningEffort: "high" }).success).toBe(false);
+  });
+
+  it("stays valid without options", () => {
+    expect(DelegateTaskInputSchema().parse(delegateInput).options).toBeUndefined();
+  });
+});
+
+describe("thread target model options", () => {
+  const model = (options: unknown) => ({ id: "gpt-test", name: "Test", options });
+  const list = (options: unknown) => ThreadTargetListResultSchema().safeParse({
+    providers: [{ providerId: "codex", name: "Codex", models: [model(options)] }],
+  });
+  const effort = { id: "reasoningEffort", values: ["low", "high"], default: "high" };
+
+  it("accepts a reasoning effort option and a model without options", () => {
+    expect(list([effort]).success).toBe(true);
+    expect(list(undefined).success).toBe(true);
+  });
+
+  it("rejects a default outside the listed values", () => {
+    expect(list([{ ...effort, default: "max" }]).success).toBe(false);
+    expect(ThreadTargetModelOptionSchema().safeParse({ ...effort, default: "medium" }).success).toBe(false);
+  });
+
+  it("rejects duplicate values, an empty list, an unknown id and more than one option", () => {
+    expect(ThreadTargetModelOptionSchema().safeParse({ ...effort, values: ["low", "low", "high"] }).success).toBe(false);
+    expect(list([{ ...effort, values: [], default: "high" }]).success).toBe(false);
+    expect(list([{ ...effort, id: "effort" }]).success).toBe(false);
+    expect(list([effort, effort]).success).toBe(false);
+    expect(list([]).success).toBe(false);
   });
 });
 
