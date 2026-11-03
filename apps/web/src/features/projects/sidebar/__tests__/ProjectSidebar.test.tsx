@@ -329,8 +329,7 @@ describe("ProjectSidebar thread interactions", () => {
   });
 
   afterEach(() => {
-    // Testing Library unmounts after this hook. Flushing first would run the sidebar's
-    // 14-day aging timer with rows mounted and fire their minute ticks 20,160 times.
+    // Testing Library's automatic cleanup runs after this hook, too late to stop mounted rows ticking.
     cleanup();
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
