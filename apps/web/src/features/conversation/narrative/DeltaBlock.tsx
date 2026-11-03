@@ -9,8 +9,9 @@ interface DeltaBlockProps {
   /** The streamed response text to display. */
   text: string;
   /**
-   * When true, the unfinished paragraph stays hidden until a blank line or
-   * closing fence commits it; open fences and tables show a skeleton instead.
+   * When true, the unfinished paragraph or list item stays hidden until a blank
+   * line, the next list item, or a closing fence commits it; open fences and
+   * tables show a skeleton instead.
    * When false, the full text renders. Defaults to true.
    */
   isStreaming?: boolean;

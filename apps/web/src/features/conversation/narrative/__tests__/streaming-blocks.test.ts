@@ -189,12 +189,33 @@ describe("committedStreamingText", () => {
     expect(committedStreamingText(text)).toEqual({ committed: "```ts\nconst a = 1;\n```\n", tail: "After" });
   });
 
+  it("commits each finished list item once the next item starts", () => {
+    expect(committedStreamingText("Steps:\n1. One\n2. Two\n3. Thr")).toEqual({
+      committed: "Steps:\n1. One\n2. Two\n",
+      tail: "3. Thr",
+    });
+    expect(committedStreamingText("- a\n- b\n- c")).toEqual({ committed: "- a\n- b\n", tail: "- c" });
+  });
+
+  it("holds a list item's continuation line with its item", () => {
+    expect(committedStreamingText("1. One\n   more\n2. Tw")).toEqual({ committed: "1. One\n   more\n", tail: "2. Tw" });
+    expect(committedStreamingText("1. One\n   mo")).toEqual({ committed: "", tail: "1. One\n   mo" });
+  });
+
+  it("does not treat a list marker inside an open fence as a boundary", () => {
+    expect(committedStreamingText("```md\n- a\n- b")).toEqual({ committed: "", tail: "```md\n- a\n- b" });
+  });
+
+  it("keeps a setext heading's underline with its text", () => {
+    expect(committedStreamingText("Title\n---\nMore")).toEqual({ committed: "", tail: "Title\n---\nMore" });
+  });
+
   it("finds blank-line boundaries in CRLF text", () => {
     expect(committedStreamingText("One.\r\n\r\nTwo")).toEqual({ committed: "One.\r\n\r\n", tail: "Two" });
   });
 
   it("splits every prefix of a stream without losing or adding characters", () => {
-    const text = "Lead.\r\n\r\n```js\nx();\n\n```\n| A |\n| - |\n\n  \nEnd";
+    const text = "Lead.\r\n\r\n```js\nx();\n\n```\n| A |\n| - |\n\n  \n1. a\r\n2. b\n- c\nEnd";
     for (let end = 0; end <= text.length; end++) {
       const { committed, tail } = committedStreamingText(text.slice(0, end));
       expect(committed + tail).toBe(text.slice(0, end));

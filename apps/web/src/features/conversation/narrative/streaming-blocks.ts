@@ -9,6 +9,8 @@ const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 // A GFM separator row: only pipes, dashes, colons and whitespace, and it must
 // contain both a pipe and a dash so a bare "---" horizontal rule is not one.
 const TABLE_SEPARATOR_RE = /^\s*\|?[\s:|-]*-[\s:|-]*\|[\s:|-]*$/;
+// The marker must be followed by whitespace, so a "---" setext underline or "**bold**" is not one.
+const LIST_ITEM_START_RE = /^\s*(?:[-*+]|\d{1,9}[.)])[ \t]+\S/;
 
 interface Line {
   text: string;
@@ -134,11 +136,22 @@ export function splitStreamingBlocks(text: string): StreamingBlockPart[] {
   return parts;
 }
 
+/** The furthest block boundary once a line outside a fence has been read. */
+function blockBoundaryAfter(line: Line, terminated: boolean, boundary: number): number {
+  if (terminated && line.text.trim() === "") return line.end + 1;
+  if (line.start > 0 && LIST_ITEM_START_RE.test(line.text)) return line.start;
+  return boundary;
+}
+
 /**
  * The prefix of streamed markdown that can no longer change shape: everything
  * up to the last block boundary outside an open fence. A boundary is the end
- * of a newline-terminated whitespace-only line outside a fence, or the end of
- * a newline-terminated fence closing line. `committed + tail === text` always.
+ * of a newline-terminated whitespace-only line outside a fence, the start of
+ * a list item line outside a fence, or the end of a newline-terminated fence
+ * closing line. `committed + tail === text` always.
+ *
+ * List items count because answers often write a long list with no blank
+ * lines, which would otherwise stay hidden until the turn ends.
  */
 export function committedStreamingText(text: string): { committed: string; tail: string } {
   let boundary = 0;
@@ -153,7 +166,7 @@ export function committedStreamingText(text: string): { committed: string; tail:
       continue;
     }
     fence = matchFenceOpen(line.text);
-    if (!fence && terminated && line.text.trim() === "") boundary = line.end + 1;
+    if (!fence) boundary = blockBoundaryAfter(line, terminated, boundary);
   }
   return { committed: text.slice(0, boundary), tail: text.slice(boundary) };
 }
