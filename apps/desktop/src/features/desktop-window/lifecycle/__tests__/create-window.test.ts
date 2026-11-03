@@ -112,6 +112,7 @@ describe("Desktop Window creation", () => {
         spellcheck: true,
         webviewTag: true,
         devTools: false,
+        backgroundThrottling: false,
       },
     });
     expect(String(options.webPreferences.preload)).toContain("preload.cjs");

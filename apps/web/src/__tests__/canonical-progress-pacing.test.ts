@@ -141,6 +141,16 @@ describe("canonical progress pacing", () => {
     expect(isThreadExecuting(THREAD_ID)).toBe(false);
   });
 
+  it("settles a turn while a visible window paints no frame, as a minimized window does", () => {
+    deliver(streamedTurn());
+    expect(phase()).toBe("running");
+
+    vi.runOnlyPendingTimers();
+
+    expect(phase()).toBe("errored");
+    expect(isThreadExecuting(THREAD_ID)).toBe(false);
+  });
+
   it("drains a streamed backlog in one painted frame when its work fits the frame", () => {
     vi.spyOn(performance, "now").mockReturnValue(0);
     deliver(streamedTurn());

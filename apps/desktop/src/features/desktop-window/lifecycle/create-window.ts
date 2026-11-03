@@ -121,6 +121,9 @@ export function createWindow(
       // Chromium DevTools only in `bun run dev:desktop` (ELECTRON_RENDERER_URL).
       // Packaged releases and local `bun run prod` keep DevTools disabled.
       devTools: dependencies.isDesktopDev(),
+      // Agents keep streaming while the window is minimized. With throttling, a minimized window's
+      // renderer barely runs, so the chat falls behind and takes seconds to catch up on restore.
+      backgroundThrottling: false,
     },
   });
 

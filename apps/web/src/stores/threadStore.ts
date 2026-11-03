@@ -1242,7 +1242,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         : deriveRunningThreadIds(records);
     return { ...next, runningThreadIds: preserveRunningThreadIds(state.runningThreadIds, runningThreadIds) };
   })) as typeof zustandSet;
-  let textDeltaFlushRaf: number | null = null;
+  const textDeltaPacer = createFramePacer(() => flushPendingTextDeltas());
   const pendingTextDeltaByThread = new Map<string, PendingTextChunk[]>();
   const streamingTextByteSizes = new Map<string, number>();
   const textEncoder = new TextEncoder();
@@ -1288,14 +1288,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   /**
-   * Applies coalesced `session.textDelta` chunks batched on `requestAnimationFrame`.
+   * Applies coalesced `session.textDelta` chunks batched on the next painted frame.
    * `isFinalResponse` spans update streaming buffers only so they stay out of thought segments.
    */
   const flushPendingTextDeltas = () => {
-    if (textDeltaFlushRaf != null) {
-      cancelAnimationFrame(textDeltaFlushRaf);
-      textDeltaFlushRaf = null;
-    }
+    textDeltaPacer.cancel();
     if (pendingTextDeltaByThread.size === 0) {
       const activeThreadId = get().currentThreadId;
       if (activeThreadId) promoteDeferredNarrativeEvents(activeThreadId);
@@ -1424,10 +1421,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         deferredNarrativeGenerations.delete(threadId);
       }
     }
-    if (dropped && pendingTextDeltaByThread.size === 0 && textDeltaFlushRaf != null) {
-      cancelAnimationFrame(textDeltaFlushRaf);
-      textDeltaFlushRaf = null;
-    }
+    if (dropped && pendingTextDeltaByThread.size === 0) textDeltaPacer.cancel();
   };
 
   const invalidateDeferredNarrativeEvents = (threadId: string): void => {
@@ -1482,14 +1476,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       (latestSequence, message) => Math.max(latestSequence, message.sequence),
       0,
     ) + 1;
-
-  const scheduleTextDeltaFlush = () => {
-    if (textDeltaFlushRaf != null) return;
-    textDeltaFlushRaf = requestAnimationFrame(() => {
-      textDeltaFlushRaf = null;
-      flushPendingTextDeltas();
-    });
-  };
 
   // The hydrator and residency authorities close over each other for lease guards.
   // eslint-disable-next-line prefer-const
@@ -2386,7 +2372,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       : [...chunks, { delta, textItemId: event.textItemId, isFinalResponse, deferNarrative }];
     pendingTextDeltaByThread.set(event.threadId, next);
     if (!runtime.isActiveThread) queueDeferredNarrativeEvent(event.threadId, normalizedEvent);
-    scheduleTextDeltaFlush();
+    textDeltaPacer.schedule();
   };
 
   /** Batches reasoning into the text queue so its order against narration and answer text holds. */
@@ -2410,7 +2396,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       ? [...chunks.slice(0, -1), { ...tail, delta: tail.delta + delta, reasoning }]
       : [...chunks, { delta, reasoning }];
     pendingTextDeltaByThread.set(event.threadId, next);
-    scheduleTextDeltaFlush();
+    textDeltaPacer.schedule();
   };
 
   const handleAssistantMessageBoundary = (
