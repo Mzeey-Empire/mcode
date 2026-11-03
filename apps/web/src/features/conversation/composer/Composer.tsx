@@ -408,6 +408,12 @@ export function Composer({
   const focusEditor = useCallback(() => {
     editorRef.current?.focus();
   }, [editorRef]);
+  // Focus leaves the + menu for the draft, as the capability rows do. Left in the menu, it goes back to + once the
+  // menu's exit animation ends, with the file dialog already open, and the window rings + when the dialog closes.
+  const attachFromMenu = useCallback(() => {
+    focusEditor();
+    handleAttachPick();
+  }, [focusEditor, handleAttachPick]);
   const agentControls = useComposerAgentControlState({
     threadId,
     provider: surfaceState.effectiveProviderId,
@@ -697,7 +703,7 @@ export function Composer({
             onMarkRestoredPreviewAnnotationsCleared: markRestoredPreviewAnnotationsCleared,
             onRemoveAttachment: removeAttachment,
             onAttachmentInputChange: handleAttachmentInputChange,
-            onAttachPick: handleAttachPick,
+            onAttachPick: attachFromMenu,
             onAttachCapability: agentControls.attachCapability,
             onSelectionChange: updateSelection,
             onSelectionTouched: markAgentSettingsTouched,

@@ -28,11 +28,13 @@ vi.mock("@/components/chat/lexical", () => ({
     disabled?: boolean;
     placeholder?: string;
   }) => {
+    const textarea = React.useRef<HTMLTextAreaElement>(null);
     React.useEffect(() => {
-      editorRef.current = { update: vi.fn(), focus: vi.fn() };
+      editorRef.current = { update: vi.fn(), focus: () => textarea.current?.focus() };
     }, [editorRef]);
     return (
       <textarea
+        ref={textarea}
         aria-label={ariaLabel}
         disabled={disabled}
         placeholder={placeholder}
@@ -140,6 +142,16 @@ describe("Composer capsule", () => {
     const remove = await screen.findByRole("button", { name: "Remove notes.txt" });
     expect(screen.getByTestId("composer-tray")).toContainElement(remove);
     expect(screen.getByTestId("composer-surface")).not.toContainElement(remove);
+  });
+
+  it("moves focus to the draft when Files opens the file dialog, so + is not focused when the dialog closes", async () => {
+    const user = userEvent.setup();
+    render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+
+    await user.click(screen.getByRole("button", { name: "Add to composer" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Files/ }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message Mcode" })).toHaveFocus());
   });
 
   it("shows Plan by name beside +, and Remove turns it off", async () => {
