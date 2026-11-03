@@ -55,12 +55,12 @@ export function SteppedSlider({
       )}
       data-slot="slider"
     >
-      <SliderPrimitive.Control className="flex w-full cursor-pointer items-center py-1">
+      <SliderPrimitive.Control className="flex w-full cursor-pointer items-center py-[3px]">
         <SliderPrimitive.Track className="relative h-5 w-full rounded-full bg-selected dark:bg-control-border/30">
           {/* At the first stop the fill sits wholly under the thumb, yet anti-aliasing leaves a
               sliver showing at the shared left edge, so it is hidden there instead. */}
           <SliderPrimitive.Indicator
-            className={cn("rounded-full bg-primary/25", SNAP_MOTION_CLASS, valuePercent <= 0 && "opacity-0")}
+            className={cn("rounded-full bg-primary/26", SNAP_MOTION_CLASS, valuePercent <= 0 && "opacity-0")}
           />
           <span
             aria-hidden="true"
@@ -71,7 +71,7 @@ export function SteppedSlider({
                 key={index}
                 className={cn(
                   "absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full",
-                  index <= value ? "bg-primary-ink/50" : "bg-muted/60",
+                  index <= value ? "bg-primary/70" : "bg-muted/55",
                 )}
                 style={{ left: `${stopPercent(index, stops)}%` }}
               />
