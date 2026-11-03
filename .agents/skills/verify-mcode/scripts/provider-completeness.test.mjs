@@ -1050,7 +1050,7 @@ NodeTest.test("includes an available warning stability proof failure in the aggr
 });
 
 NodeTest.test("accepts a retained public interrupted runtime terminal", async () => {
-  const terminal = await waitForInterruptionTerminal({ rpc: async () => [{ threadId: "interruption-thread", turnExecutionId: "execution", phase: "interrupted" }] }, "interruption-thread", Date.now() + 10);
+  const terminal = await waitForInterruptionTerminal({ rpc: async () => [{ threadId: "interruption-thread", turnExecutionId: "execution", phase: "interrupted" }] }, "interruption-thread", Date.now() + 5_000);
   NodeAssertStrict.equal(terminal.phase, "interrupted");
 });
 
@@ -1060,14 +1060,14 @@ NodeTest.test("selects only the new exact Codex thread", async () => {
     { id: "new", provider: "codex", model: "gpt-5.6-terra" },
     { id: "other", provider: "cursor", model: "gpt-5.6-terra" },
   ] };
-  const thread = await waitForNewThread(socket, "workspace", new Set(["old"]), "codex", "gpt-5.6-terra", { ownedThreadIds: [] }, Date.now() + 10);
+  const thread = await waitForNewThread(socket, "workspace", new Set(["old"]), "codex", "gpt-5.6-terra", { ownedThreadIds: [] }, Date.now() + 5_000);
   NodeAssertStrict.equal(thread.id, "new");
 });
 
 NodeTest.test("retains every ambiguous thread candidate for cleanup", async () => {
   const run = { ownedThreadIds: [] };
   const socket = { rpc: async () => [{ id: "first", provider: "codex", model: "gpt-5.6-terra" }, { id: "second", provider: "codex", model: "gpt-5.6-terra" }] };
-  await NodeAssertStrict.rejects(waitForNewThread(socket, "workspace", new Set(), "codex", "gpt-5.6-terra", run, Date.now() + 10), /more than one/);
+  await NodeAssertStrict.rejects(waitForNewThread(socket, "workspace", new Set(), "codex", "gpt-5.6-terra", run, Date.now() + 5_000), /more than one/);
   NodeAssertStrict.deepEqual(run.ownedThreadIds, ["first", "second"]);
 });
 
