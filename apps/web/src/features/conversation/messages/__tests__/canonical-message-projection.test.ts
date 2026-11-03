@@ -65,25 +65,26 @@ function item(
 }
 
 describe("projectCanonicalMessageList", () => {
-  it("projects a long streaming turn without sorting its private provider history", () => {
+  it("reads each private provider record a bounded number of times when projecting a long turn", () => {
+    const PRIVATE_RECORD_COUNT = 1_000;
+    const MAX_READS_PER_PRIVATE_RECORD = 4;
     const state = createAgentModelState();
     state.turns[TURN_ID] = turn("Completed", "2026-08-18T12:00:05.000Z");
     const prompt = message();
     const answer = message({ id: "answer", role: "assistant", content: "Repository summary", sequence: 1 });
     state.items.prompt = item("prompt", "message", { projection: "message", message: prompt }, STARTED_AT);
     state.items.answer = item("answer", "message", { projection: "message", message: answer }, STARTED_AT);
-    for (let index = 0; index < 8_000; index += 1) {
+    let reads = 0;
+    for (let index = 0; index < PRIVATE_RECORD_COUNT; index += 1) {
       const id = `provider-${index}`;
-      state.items[id] = item(id, "message", { projection: "providerRuntimeEvent", event: { type: "text-delta", text: "xy" } }, STARTED_AT);
+      const record = item(id, "message", { projection: "providerRuntimeEvent", event: { type: "text-delta", text: "xy" } }, STARTED_AT);
+      state.items[id] = new Proxy(record, { get(target, property, receiver) { reads += 1; return Reflect.get(target, property, receiver); } });
     }
-    const startedAt = performance.now();
-    for (let index = 0; index < 200; index += 1) {
-      const projection = projectCanonicalMessageList({ threadId: THREAD_ID, state, messages: [], toolCalls: [], thoughtSegments: [] });
-      expect(projection?.messages.map(entry => entry.id)).toEqual(["child-prompt", "answer"]);
-      expect(projection?.turnSummariesByMessageId.answer?.counts).toEqual({ steps: 0, thoughts: 0, subagents: 0 });
-    }
-    expect(performance.now() - startedAt).toBeLessThan(1_000);
-  }, 30_000);
+    const projection = projectCanonicalMessageList({ threadId: THREAD_ID, state, messages: [], toolCalls: [], thoughtSegments: [] });
+    expect(projection?.messages.map(entry => entry.id)).toEqual(["child-prompt", "answer"]);
+    expect(projection?.turnSummariesByMessageId.answer?.counts).toEqual({ steps: 0, thoughts: 0, subagents: 0 });
+    expect(reads).toBeLessThanOrEqual(PRIVATE_RECORD_COUNT * MAX_READS_PER_PRIVATE_RECORD);
+  });
 
   it("still ends child reasoning when a later private provider record arrives", () => {
     const state = createAgentModelState();
