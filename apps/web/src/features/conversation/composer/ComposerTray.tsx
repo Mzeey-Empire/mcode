@@ -149,12 +149,20 @@ export interface ComposerTrayProps {
   readonly covered?: boolean;
 }
 
+/** The panel the tray and the new-thread tab share above the capsule. */
+export const TRAY_SURFACE_CLASS = "mx-(--tray-inset) rounded-t-[14px] bg-panel";
+
 /**
  * Tray look: inset by `--tray-inset` from the capsule, which the slash menu shares, with the panel fill and top corners.
+ * Under the new-thread tab it drops its top corners, so the tab and the tray read as one panel.
  * Covered by the menu, the tray hides its rows but keeps its panel, so a menu shorter than the tray reads as one surface.
  */
 export function composerTrayClass(covered: boolean): string {
-  return cn("mx-(--tray-inset) flex flex-col gap-1 rounded-t-[14px] bg-panel px-2 pt-1 pb-2", covered && "*:invisible");
+  return cn(
+    TRAY_SURFACE_CLASS,
+    "flex flex-col gap-1 px-2 pt-1 pb-2 [[data-tray-tab]+&]:rounded-t-none",
+    covered && "*:invisible",
+  );
 }
 
 /**

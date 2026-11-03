@@ -1223,13 +1223,16 @@ are provider-native, so they show the parent thread's provider.
   breakdown card, which adds a "Provider quota: Low" line when quota is low.
 - Trays that belong to the composer (the task row, queued messages, file and
   image tiles) dock flush on its top edge with the panel fill and no border.
+  A new thread's tab (Local, the branch) has the same look. With tiles under
+  it, the tray squares its top corners, so the tab and the tray read as one
+  panel.
 - `/` at the start of a word opens the slash menu, and `$`, `£` or `₦` opens
   it with only skills and plugins (a digit after them stays text). It sits in
   the tray's place and look: the same inset and top corners, 8px padding, its
-  bottom edge on the capsule's top border. Over an open tray, the tray keeps
-  its panel and hides its rows, so a shorter menu still reads as one surface,
-  and the covered controls are inert. The list scrolls past 262px with no
-  scrollbar. Rows are
+  bottom edge on the capsule's top border. Over an open tray or a new
+  thread's tab, each keeps its panel and hides its contents, so a shorter
+  menu still reads as one surface, and the covered controls are inert. The
+  list scrolls past 262px with no scrollbar. Rows are
   32px pills with a 14px icon (`muted`, `ink` on the active row), the name in
   Body small with the matched part semibold, and the description in Compact
   `muted`, both

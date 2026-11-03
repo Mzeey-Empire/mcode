@@ -87,8 +87,8 @@ function seedThread() {
   });
 }
 
-async function renderComposer() {
-  render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+async function renderComposer(composer = <Composer threadId="thread-1" workspaceId="ws-1" />) {
+  render(composer);
   const editorElement = await screen.findByRole("textbox", { name: "Message Mcode" });
   const editor = getNearestEditorFromDOMNode(editorElement);
   if (!editor) throw new Error("composer textbox is not a Lexical editor");
@@ -281,5 +281,16 @@ describe("SlashCommandPlugin /plan in the composer", () => {
     await waitFor(() => expect(slashTray()).toBeInTheDocument());
 
     expect(remove.closest("[inert]")).not.toBeNull();
+  });
+
+  it("makes the new-thread tab's controls inert while the menu covers it", async () => {
+    const { type } = await renderComposer(<Composer isNewThread workspaceId="ws-1" />);
+    const local = within(screen.getByTestId("new-thread-target-rail")).getByTestId("workspace-target-trigger");
+    expect(local.closest("[inert]")).toBeNull();
+
+    await type("/");
+    await waitFor(() => expect(slashTray()).toBeInTheDocument());
+
+    expect(local.closest("[inert]")).not.toBeNull();
   });
 });

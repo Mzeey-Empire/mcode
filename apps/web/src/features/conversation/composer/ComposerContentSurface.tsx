@@ -200,6 +200,7 @@ function ComposerNewThreadSurface({
       workspaceId={model.workspaceId}
       mode={model.composerMode}
       onModeChange={actions.onComposerModeChange}
+      covered={model.slashCommand.isOpen}
     />
   );
 }
@@ -728,7 +729,6 @@ function ComposerInputSurface({
         // Hidden, not unmounted, while approvals wait, so the draft and editor state survive.
         // Its popups and control-bar menus do unmount: they anchor to the hidden box and would float or keep focus.
         hidden && "hidden",
-        model.isNewThread && "-mt-px",
         model.isDragOver && "ring-2 ring-primary",
       )}
       onDragEnter={actions.onDragEnter}
