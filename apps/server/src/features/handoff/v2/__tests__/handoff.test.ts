@@ -270,11 +270,7 @@ describe("selectHandoffHistory", () => {
   it("retains the latest user message in a 5,000-message thread at the default budget", () => {
     const items = Array.from({ length: 5_000 }, (_, index) => message(index + 1, "user", `request ${index + 1}`));
     const budgetBytes = handoffBudgetBytes({ contextWindow: null, nativeContextTokens: null, userText: "", attachments: [] });
-    const started = performance.now();
     const result = selectHandoffHistory({ items, coverage: { ...coverage, toSequence: 5_000 }, budgetBytes });
-    const elapsed = performance.now() - started;
-    // Stderr remains visible under the brief's passed-only reporter.
-    process.stderr.write(`5,000-message selection: ${elapsed.toFixed(2)} ms\n`);
     expect(result.selectedSequences).toContain(5_000);
     expect(result.text).toContain("\nrequest 5000");
     expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(budgetBytes);
