@@ -10,6 +10,7 @@ import { noRawColor } from "./rules/no-raw-color.ts";
 import { noRawShadow } from "./rules/no-raw-shadow.ts";
 import { noRowOverlayRoot } from "./rules/no-row-overlay-root.ts";
 import { noRealTimerSleep } from "./rules/no-real-timer-sleep.ts";
+import { noWallClockBudget } from "./rules/no-wall-clock-budget.ts";
 import { noInlineModuleMock } from "./rules/no-inline-module-mock.ts";
 import { noSourceTextTest } from "./rules/no-source-text-test.ts";
 import { requireLazyNontrivialSchema } from "./rules/require-lazy-nontrivial-schema.ts";
@@ -29,6 +30,7 @@ export const mcodePlugin = definePlugin({
     "no-raw-color": noRawColor,
     "no-raw-shadow": noRawShadow,
     "no-real-timer-sleep": noRealTimerSleep,
+    "no-wall-clock-budget": noWallClockBudget,
     "no-row-overlay-root": noRowOverlayRoot,
     "no-inline-module-mock": noInlineModuleMock,
     "no-source-text-test": noSourceTextTest,

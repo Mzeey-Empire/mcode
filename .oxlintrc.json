@@ -107,7 +107,14 @@
     {
       "files": ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
       "rules": {
-        "mcode/no-real-timer-sleep": "error"
+        "mcode/no-real-timer-sleep": "error",
+        "mcode/no-wall-clock-budget": "error"
+      }
+    },
+    {
+      "files": ["apps/web/src/**/*.perf.test.ts"],
+      "rules": {
+        "mcode/no-wall-clock-budget": "off"
       }
     },
     {
