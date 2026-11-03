@@ -19,20 +19,22 @@ export function resolveTurnPersistLocalMessageId(
   }
 
   if (record.messages.some((message) => message.id === serverMessageId)) return serverMessageId;
-  // Only a local row can still be waiting for its server id. A pending row the server already knows
-  // is a finished answer, such as an opened thread's last one, and pairing it with a newer turn's id
-  // would let that turn's answer replace it.
-  return record.pendingTurnPersistMessageIds.find((messageId) => record.serverMessageIds[messageId] === undefined)
-    ?? serverMessageId;
+  return record.pendingTurnPersistMessageIds[0] ?? serverMessageId;
 }
 
-/** Queue a local response row until its corresponding persistence signal arrives. */
+/**
+ * Queue a local response row until its corresponding persistence signal arrives.
+ * A row the canonical model records as `message:<id>` already carries its server id, so it is
+ * never queued: its signal finds it by id. Its signal may also have been handled already, before
+ * the row existed, and then the entry would wait forever and claim the next turn's signal.
+ */
 export function queuePendingTurnPersistMessage(
   record: ThreadRecord,
   localMessageId: string,
 ): Pick<ThreadRecord, "pendingTurnPersistMessageIds"> {
+  const carriesServerId = record.canonicalAgent.state.items[`message:${localMessageId}`] !== undefined;
   return {
-    pendingTurnPersistMessageIds: record.pendingTurnPersistMessageIds.includes(localMessageId)
+    pendingTurnPersistMessageIds: carriesServerId || record.pendingTurnPersistMessageIds.includes(localMessageId)
       ? record.pendingTurnPersistMessageIds
       : [...record.pendingTurnPersistMessageIds, localMessageId],
   };

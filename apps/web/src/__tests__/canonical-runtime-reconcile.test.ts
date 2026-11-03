@@ -264,7 +264,11 @@ describe("canonical runtime reconciliation", () => {
 
   // Canonical progress waits for a frame (a throttled timer while minimized), but turn.persisted
   // applies on arrival, so a turn's saved signal can land before the answer it saves.
-  it.each(["before", "after"] as const)("keeps an opened thread's last answer when the next turn's saved signal arrives %s its answer", async (arrives) => {
+  it.each([
+    { first: "finished before the window opened", next: "before" },
+    { first: "finished before the window opened", next: "after" },
+    { first: "was saved before its answer arrived", next: "before" },
+  ] as const)("keeps the first answer when it $first and the next turn's saved signal arrives $next its answer", async ({ first, next }) => {
     seedRuntime("idle", null, false);
     useThreadStore.setState({ currentThreadId: THREAD_ID });
     const drainFrames = holdAnimationFrames();
@@ -314,15 +318,16 @@ describe("canonical runtime reconciliation", () => {
         toolCallCount: 0, filesChanged: [] });
     };
 
-    // The first turn finished before this window opened, so no saved signal reaches it.
-    await answeredTurn(TURN_ID, EXECUTION_ID, "first", "alpha");
+    const persistFirst = await answeredTurn(TURN_ID, EXECUTION_ID, "first", "alpha");
     deliver();
+    // A turn that finished before this window opened never sends this window its saved signal.
+    if (first === "was saved before its answer arrived") persistFirst();
     drainFrames();
     save();
 
     const persistSecond = await answeredTurn("turn-2", OTHER_EXECUTION_ID, "second", "bravo");
     deliver();
-    if (arrives === "after") drainFrames();
+    if (next === "after") drainFrames();
     persistSecond();
     drainFrames();
     save();
