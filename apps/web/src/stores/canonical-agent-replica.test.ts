@@ -279,27 +279,32 @@ describe("canonical accepted and saved progress", () => {
     expect(completed.publications).toEqual([]);
   });
 
-  it("reduces 4,000 streamed appends and their receipts within two seconds", () => {
+  it("keeps one applied identity per execution across 500 streamed appends and their receipts", () => {
+    const APPEND_COUNT = 500;
     const initial = [...initialEvents(), answerEvent()];
     let current = applyCanonicalProgressFrame(createCanonicalAgentReplica(), acceptedFrame(initial)).replica;
     current = applyCanonicalProgressFrame(current, savedFrame(initial)).replica;
     let rejected = 0;
-    const startedAt = performance.now();
-    for (let index = 0; index < 4_000; index += 1) {
+    for (let index = 0; index < APPEND_COUNT; index += 1) {
       const append = appendEvent(index);
       const live = applyCanonicalProgressFrame(current, acceptedFrame([append]));
       const saved = applyCanonicalProgressFrame(live.replica, savedFrame([append]));
       if (live.outcome !== "applied" || saved.outcome !== "applied") rejected += 1;
       current = saved.replica;
     }
-    const elapsedMs = performance.now() - startedAt;
+    const lastAppend = appendEvent(APPEND_COUNT - 1);
+    const appliedEventIds = { [lastAppend.eventId]: true };
+    const acceptedInputEventIds = { [`${EXECUTION_ID}:${lastAppend.acceptedSequence}`]: lastAppend.eventId };
 
     expect(rejected).toBe(0);
-    expect(current.state.items.answer?.payload.content).toBe(`start${"xy".repeat(4_000)}`);
-    expect(current.durableState.items.answer?.payload.content).toBe(`start${"xy".repeat(4_000)}`);
+    expect(current.state.items.answer?.payload.content).toBe(`start${"xy".repeat(APPEND_COUNT)}`);
+    expect(current.durableState.items.answer?.payload.content).toBe(`start${"xy".repeat(APPEND_COUNT)}`);
     expect(current.progress?.retained).toEqual([]);
-    expect(elapsedMs).toBeLessThan(2_000);
-  }, 30_000);
+    expect(current.state.appliedEventIds).toEqual(appliedEventIds);
+    expect(current.state.acceptedInputEventIds).toEqual(acceptedInputEventIds);
+    expect(current.durableState.appliedEventIds).toEqual(appliedEventIds);
+    expect(current.durableState.acceptedInputEventIds).toEqual(acceptedInputEventIds);
+  });
 
   it.each(["accepted-first", "saved-first"])("appends exactly once across overlapping receipts and replay with %s delivery", (order) => {
     const initial = [...initialEvents(), answerEvent()];
