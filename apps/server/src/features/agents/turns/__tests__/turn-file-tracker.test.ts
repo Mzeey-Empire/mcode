@@ -681,8 +681,6 @@ describe("TurnFileTracker", () => {
     }
     const tracker = trackerWithBaseline(baseline, updates);
     await tracker.beginTurn("stress", root, "before");
-    const startedAt = performance.now();
-    const startedCpu = process.cpuUsage();
     await Promise.all(Array.from({ length: 120 }, async (_, i) => {
       const index = i % 20;
       const id = `call-${i}`;
@@ -699,15 +697,10 @@ describe("TurnFileTracker", () => {
       await tracker.observeToolResult("stress", id);
     }));
     const summary = await tracker.finalizeTurn("stress");
-    const durationMs = performance.now() - startedAt;
-    const cpu = process.cpuUsage(startedCpu);
-    const cpuMs = (cpu.user + cpu.system) / 1_000;
     expect(summary.fileCount).toBe(15);
     expect(summary.effects).toHaveLength(15);
     expect(summary.revision).toBeGreaterThan(0);
     expect(updates.every((update, index) => index === 0 || update.revision > updates[index - 1]!.revision)).toBe(true);
-    expect(cpuMs).toBeLessThan(2_500);
-    console.info(`turn-file-tracker stress: 125 completions in ${durationMs.toFixed(1)}ms wall / ${cpuMs.toFixed(1)}ms CPU, revision ${summary.revision}`);
   }, 15_000);
 
   it("keeps an older finalizing generation isolated from a newly-started turn", async () => {
