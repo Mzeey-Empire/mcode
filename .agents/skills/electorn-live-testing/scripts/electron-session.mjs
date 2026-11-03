@@ -8,7 +8,8 @@ const SESSION_FILE_NAME = "electron-live-testing.json";
  *
  * The first connection reloads the app so it signs in with the seeded login cookie. Pass
  * `reload: false` to reconnect from a later step script without losing the app's state.
- * Only a disposable session with its own session file, such as the perf workers, may pass `allowViewportEmulation: true`.
+ * Only a disposable session with its own session file, such as the perf workers, may pass
+ * `allowViewportEmulation: true`.
  */
 export async function connectElectronSession({
   playwright,
@@ -51,13 +52,9 @@ export async function reloadElectronAppPage(context, page, appUrl) {
 }
 
 function blockViewportEmulation(page) {
-  Object.defineProperty(page, "setViewportSize", {
-    configurable: true,
-    writable: true,
-    value: async () => {
-      throw new Error("page.setViewportSize lays the page out at a fake size inside the unchanged Electron window, and the fake lasts until Electron restarts. Resize the real window with setElectronWindowSize(page, { width, height }) from window-state.mjs.");
-    },
-  });
+  page.setViewportSize = async () => {
+    throw new Error("page.setViewportSize lays the page out at a fake size inside the unchanged Electron window, and the fake lasts until Electron restarts. Resize the real window with setElectronWindowSize(page, { width, height }) from window-state.mjs.");
+  };
 }
 
 function validateConnectionArguments(playwright, repoRoot, sessionFileName, allowViewportEmulation) {
