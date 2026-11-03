@@ -1,0 +1,26 @@
+name: PR Title
+
+# Separate from CI so that editing a title re-runs this check alone. CI cancels its
+# in-progress run on every new event, so an `edited` trigger there would cancel the tests.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-title:
+    name: PR Title
+    # A few seconds of work is billed as a full Blacksmith minute.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
