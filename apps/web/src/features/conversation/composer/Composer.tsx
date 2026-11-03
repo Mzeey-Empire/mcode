@@ -408,6 +408,10 @@ export function Composer({
   const focusEditor = useCallback(() => {
     editorRef.current?.focus();
   }, [editorRef]);
+  const focusDraftThenPickFiles = useCallback(() => {
+    focusEditor();
+    handleAttachPick();
+  }, [focusEditor, handleAttachPick]);
   const agentControls = useComposerAgentControlState({
     threadId,
     provider: surfaceState.effectiveProviderId,
@@ -465,7 +469,8 @@ export function Composer({
       if (action === "attach-plan") {
         agentControls.attachCapability("plan");
       } else if (action === "attach-goal") {
-        agentControls.attachCapability("goal");
+        // A goal is one-way from the menu: picking `/goal` again never drops the pending goal.
+        agentControls.enableGoal();
       } else if (action === "attach-orchestration") {
         agentControls.attachCapability("orchestration");
       }
@@ -562,15 +567,16 @@ export function Composer({
     }
   }, [editorRef, slashCommand]);
 
-  // Typing `/plan ` means "plan this": it only turns Plan on, and only where the
-  // provider offers Plan. Any other command stays literal text.
-  const { capabilities: agentCapabilities, enablePlan } = agentControls;
+  // Typing `/plan ` means "plan this" and `/goal ` means "aim at this": each only turns its mode on, and only
+  // where the provider offers it. Any other command stays literal text.
+  const { capabilities: agentCapabilities, enablePlan, enableGoal } = agentControls;
   const handleInlineSlashCommand = useCallback((commandName: string): boolean => {
-    const planCapability = agentCapabilities.find((capability) => capability.id === "plan");
-    if (!planCapability || planCapability.slashCommand !== commandName) return false;
-    enablePlan();
+    const capability = agentCapabilities.find((candidate) => candidate.slashCommand === commandName);
+    if (capability?.id === "plan") enablePlan();
+    else if (capability?.id === "goal") enableGoal();
+    else return false;
     return true;
-  }, [agentCapabilities, enablePlan]);
+  }, [agentCapabilities, enablePlan, enableGoal]);
 
   // Unified popup keyboard handler for Lexical's KeyboardPlugin.
   // Delegates to the file tag popup or slash command popup depending on which is open.
@@ -662,11 +668,11 @@ export function Composer({
               reasoningLevels: agentControls.reasoningLevels,
               capabilities: agentControls.capabilities,
               attachedCapabilityIds: agentControls.attachedCapabilityIds,
+              lockedCapabilityIds: agentControls.lockedCapabilityIds,
               permissionLocked: agentControls.permissionLocked,
               approvalReviewSupported: agentControls.approvalReviewSupported,
             },
             activeGoal,
-            isModelFullyLocked: surfaceState.isModelFullyLocked,
             isProviderLocked: surfaceState.isProviderLocked,
             contextWindow,
             settingsDefaultContextWindow,
@@ -695,7 +701,7 @@ export function Composer({
             onMarkRestoredPreviewAnnotationsCleared: markRestoredPreviewAnnotationsCleared,
             onRemoveAttachment: removeAttachment,
             onAttachmentInputChange: handleAttachmentInputChange,
-            onAttachPick: handleAttachPick,
+            onAttachPick: focusDraftThenPickFiles,
             onAttachCapability: agentControls.attachCapability,
             onSelectionChange: updateSelection,
             onSelectionTouched: markAgentSettingsTouched,

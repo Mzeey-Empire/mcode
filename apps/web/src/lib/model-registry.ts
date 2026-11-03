@@ -228,6 +228,11 @@ export function registerProviderModels(providerId: string, defs: ModelDefinition
     .sort((a, b) => b.id.length - a.id.length);
 }
 
+/** A provider's models in the order it lists them: its fetched defs once registered, otherwise its static defs. */
+export function listProviderModels(providerId: string): readonly ModelDefinition[] {
+  return DYNAMIC_MODEL_DEFS.get(providerId) ?? MODEL_PROVIDERS.find((provider) => provider.id === providerId)?.models ?? [];
+}
+
 /**
  * Matches a dated SDK variant ID (e.g. `claude-haiku-4-5-20251001`) to its base
  * model definition by prefix. Longest-first order ensures a more specific ID is

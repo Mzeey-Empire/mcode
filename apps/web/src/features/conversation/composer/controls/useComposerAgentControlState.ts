@@ -39,13 +39,17 @@ export interface UseComposerAgentControlStateOptions {
 export interface ComposerAgentControlState {
   capabilities: ReturnType<typeof resolveComposerCapabilities>;
   attachedCapabilityIds: ReadonlySet<ComposerCapabilityId>;
+  /** On, but turned off from their own chip rather than the `+` menu: a running goal and orchestration. */
+  lockedCapabilityIds: ReadonlySet<ComposerCapabilityId>;
   reasoningLevels: ReasoningLevel[];
   permissionLocked: boolean;
   approvalReviewSupported: boolean;
-  /** Toggles Plan, and attaches Goal or orchestration. */
+  /** Toggles Plan and a pending Goal, and attaches orchestration. */
   attachCapability(capabilityId: ComposerCapabilityId): void;
   /** Turns Plan on and never off, for the inline `/plan ` conversion. */
   enablePlan(): void;
+  /** Turns a pending Goal on and never off, for `/goal`; does nothing while a goal runs. */
+  enableGoal(): void;
   detachPlan(): void;
   detachGoal(): void;
   detachOrchestration(): void;
@@ -86,6 +90,12 @@ export function useComposerAgentControlState({
     if (orchestrationMode === ORCHESTRATION_MODES.PROACTIVE) ids.add("orchestration");
     return ids;
   }, [activeGoal, goalPending, interactionMode, orchestrationMode]);
+  const lockedCapabilityIds = useMemo(() => {
+    const ids = new Set<ComposerCapabilityId>();
+    if (isGoalOpen(activeGoal)) ids.add("goal");
+    if (orchestrationMode === ORCHESTRATION_MODES.PROACTIVE) ids.add("orchestration");
+    return ids;
+  }, [activeGoal, orchestrationMode]);
   const reasoningLevels = useMemo<ReasoningLevel[]>(
     () => getReasoningLevels(provider, modelId),
     [modelId, provider],
@@ -132,6 +142,9 @@ export function useComposerAgentControlState({
     onGoalPendingChange(true);
     focusEditor();
   }, [activeGoal, focusEditor, goalCapability, onGoalPendingChange]);
+  const enableGoal = useCallback(() => {
+    if (!goalPending) attachGoal();
+  }, [attachGoal, goalPending]);
   const attachOrchestration = useCallback(() => {
     if (!orchestrationCapability) return;
     onSelectionChange({ orchestrationMode: ORCHESTRATION_MODES.PROACTIVE });
@@ -147,11 +160,12 @@ export function useComposerAgentControlState({
       if (interactionMode === INTERACTION_MODES.PLAN) detachPlan();
       else attachPlan();
     } else if (capabilityId === "goal") {
-      attachGoal();
+      if (goalPending) detachGoal();
+      else attachGoal();
     } else {
       attachOrchestration();
     }
-  }, [attachGoal, attachOrchestration, attachPlan, detachPlan, interactionMode]);
+  }, [attachGoal, attachOrchestration, attachPlan, detachGoal, detachPlan, goalPending, interactionMode]);
 
   useEffect(() => {
     if (!permissionLocked || permissionMode === PERMISSION_MODES.FULL) return;
@@ -194,11 +208,13 @@ export function useComposerAgentControlState({
   return {
     capabilities,
     attachedCapabilityIds,
+    lockedCapabilityIds,
     reasoningLevels,
     permissionLocked,
     approvalReviewSupported,
     attachCapability,
     enablePlan,
+    enableGoal,
     detachPlan,
     detachGoal,
     detachOrchestration,

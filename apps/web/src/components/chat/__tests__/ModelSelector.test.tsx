@@ -49,6 +49,7 @@ beforeEach(() => {
 });
 
 import { ModelSelector } from "../ModelSelector";
+import { useProviderModelsStore } from "@/stores/providerModelsStore";
 
 function setProviders(enabled: Record<string, boolean>) {
   useProviderAvailabilityStore.setState({
@@ -79,6 +80,7 @@ function optionNames(): string[] {
 
 beforeEach(() => {
   listProviderModels.mockReset().mockResolvedValue([]);
+  useProviderModelsStore.setState(useProviderModelsStore.getInitialState());
   useModelFavoritesStore.setState({ entries: [] });
   setProviders({ claude: true, codex: false });
 });
@@ -92,7 +94,7 @@ describe("ModelSelector", () => {
     ]);
     const onSelect = vi.fn();
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={onSelect} locked={false} />);
+      onSelect={onSelect} />);
     await openPicker();
     await userEvent.click(screen.getByRole("radio", { name: "Codex" }));
     await waitFor(() => expect(optionNames()).toEqual(["GPT-9 Zeta", "GPT-9 Alpha"]));
@@ -103,7 +105,7 @@ describe("ModelSelector", () => {
   it("lands focus in search on open and keeps the query across tabs", async () => {
     setProviders({ claude: true, codex: true });
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} locked={false} />);
+      onSelect={vi.fn()} />);
     await openPicker();
     const search = screen.getByRole("combobox", { name: "Search models" });
     await waitFor(() => expect(search).toHaveFocus());
@@ -117,7 +119,7 @@ describe("ModelSelector", () => {
 
   it("closes on Escape and returns focus to the trigger", async () => {
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} locked={false} />);
+      onSelect={vi.fn()} />);
     await openPicker();
     await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus());
 
@@ -129,7 +131,7 @@ describe("ModelSelector", () => {
 
   it("disables a provider tab that is turned off in settings and says why", async () => {
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} locked={false} />);
+      onSelect={vi.fn()} />);
     const dialog = await openPicker();
 
     expect(within(dialog).getByRole("radio", { name: "Codex" })).toBeDisabled();
@@ -139,7 +141,7 @@ describe("ModelSelector", () => {
 
   it("names each provider tab and marks the active one", async () => {
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} locked={false} />);
+      onSelect={vi.fn()} />);
     await openPicker();
 
     const tabs = screen.getAllByRole("radio").map((tab) => tab.textContent);
@@ -150,7 +152,7 @@ describe("ModelSelector", () => {
 
   it("keeps only the thread's provider tab when the provider is locked", async () => {
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} locked={false} providerLocked />);
+      onSelect={vi.fn()} providerLocked />);
     await openPicker();
 
     expect(screen.getAllByRole("radio").map((tab) => tab.textContent)).toEqual(["Claude"]);
@@ -159,7 +161,7 @@ describe("ModelSelector", () => {
   it("marks the selected row and stars a model without choosing it", async () => {
     const onSelect = vi.fn();
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={onSelect} locked={false} />);
+      onSelect={onSelect} />);
     await openPicker();
 
     const selected = screen.getByRole("option", { selected: true });
@@ -176,7 +178,7 @@ describe("ModelSelector", () => {
   it("stars the highlighted model with Ctrl+D and keeps the picker open", async () => {
     const onSelect = vi.fn();
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={onSelect} locked={false} />);
+      onSelect={onSelect} />);
     await openPicker();
     await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus());
 
@@ -196,7 +198,7 @@ describe("ModelSelector", () => {
     });
     const onSelect = vi.fn();
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={onSelect} locked={false} />);
+      onSelect={onSelect} />);
     await openPicker();
 
     await userEvent.click(screen.getByRole("radio", { name: opencode?.name ?? "" }));
@@ -212,7 +214,7 @@ describe("ModelSelector", () => {
     });
     const onSelect = vi.fn();
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={onSelect} locked={false} />);
+      onSelect={onSelect} />);
     await openPicker();
     await userEvent.click(screen.getByRole("radio", { name: "Favourites" }));
 
@@ -231,7 +233,7 @@ describe("ModelSelector", () => {
     });
     const onSelect = vi.fn();
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={onSelect} locked={false} />);
+      onSelect={onSelect} />);
     await openPicker();
 
     const gated = await screen.findByRole("option", { name: /Claude Retired 1/ });
@@ -252,7 +254,7 @@ describe("ModelSelector", () => {
     });
     const onSelect = vi.fn();
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={onSelect} locked={false} />);
+      onSelect={onSelect} />);
     await openPicker();
     await userEvent.click(screen.getByRole("radio", { name: "Favourites" }));
 
@@ -280,7 +282,7 @@ describe("ModelSelector", () => {
     );
 
     render(<ModelSelector selectedModelId="gpt-5.6-sol" selectedProviderId="codex"
-      onSelect={vi.fn()} locked={false} />);
+      onSelect={vi.fn()} />);
     const dialog = await openPicker();
     expect(within(dialog).getByRole("option", { name: /GPT-5.6 Sol/ })).toBeInTheDocument();
     expect(within(dialog).queryByLabelText("Loading")).toBeNull();
@@ -289,32 +291,14 @@ describe("ModelSelector", () => {
     expect(within(dialog).getByRole("option", { name: /GPT-5.6 Sol/ })).toBeInTheDocument();
   });
 
-  it("shows the locked label instead of a picker while the agent runs", () => {
-    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} locked />);
-    expect(screen.queryByTestId("model-selector-trigger")).toBeNull();
-    expect(screen.getByRole("img", { name: "Sonnet 4.6" })).toBeInTheDocument();
-  });
-
   it("shows the model's settings summary on the trigger and its settings under the catalog", async () => {
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} locked={false} detail="High" settings={<button type="button">Reasoning high</button>} />);
+      onSelect={vi.fn()} detail="High" settings={<button type="button">Reasoning high</button>} />);
 
     expect(screen.getByTestId("model-selector-trigger")).toHaveTextContent("Sonnet 4.6High");
     const dialog = await openPicker();
     expect(within(dialog).getByRole("button", { name: "Reasoning high" })).toBeInTheDocument();
     expect(within(dialog).getAllByRole("option").length).toBeGreaterThan(0);
-  });
-
-  it("keeps the settings editable without the catalog while the agent runs", async () => {
-    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} locked detail="High" settings={<button type="button">Reasoning high</button>} />);
-
-    await userEvent.click(screen.getByTestId("model-selector-trigger"));
-    const dialog = screen.getByRole("dialog", { name: "Model settings" });
-    expect(within(dialog).getByRole("button", { name: "Reasoning high" })).toBeInTheDocument();
-    expect(within(dialog).queryByRole("option")).toBeNull();
-    expect(screen.getByLabelText("Model locked while the agent runs")).toBeInTheDocument();
   });
 
   async function openCodexTab(onSelect: () => void) {
@@ -324,7 +308,7 @@ describe("ModelSelector", () => {
       { id: "gpt-9-alpha", name: "GPT-9 Alpha", group: "OpenAI" },
     ]);
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={onSelect} locked={false} />);
+      onSelect={onSelect} />);
     await openPicker();
     await userEvent.click(screen.getByRole("radio", { name: "Codex" }));
     await waitFor(() => expect(optionNames()).toEqual(["GPT-9 Zeta", "GPT-9 Alpha"]));
@@ -367,7 +351,7 @@ describe("ModelSelector", () => {
     async function openClaudeTab(selectedModelId: string, onSelect = vi.fn()) {
       listProviderModels.mockResolvedValue(LIVE_CLAUDE);
       render(<ModelSelector selectedModelId={selectedModelId} selectedProviderId="claude"
-        onSelect={onSelect} locked={false} />);
+        onSelect={onSelect} />);
       await openPicker();
       await waitFor(() => expect(optionNames()[0]).toBe("Claude Opus 5.5"));
     }
@@ -430,7 +414,7 @@ describe("ModelSelector", () => {
     it("shows no fold for a catalog without legacy models", async () => {
       listProviderModels.mockResolvedValue(LIVE_CLAUDE.filter((model) => model.lifecycle === undefined));
       render(<ModelSelector selectedModelId="claude-opus-5-5" selectedProviderId="claude"
-        onSelect={vi.fn()} locked={false} />);
+        onSelect={vi.fn()} />);
       await openPicker();
 
       await waitFor(() => expect(optionNames()).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5"]));

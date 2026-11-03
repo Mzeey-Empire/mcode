@@ -480,7 +480,7 @@ Paper defines six 50 to 950 ramps (neutral, amber, blue, sage, clay, violet) on 
 ### Secondary
 - **Focus** (`focus`, blue-500 dark / blue-600 light): The keyboard focus ring in both themes. A cooler blue-violet used only for focus affordance, never as a second brand voice.
 - **Link** (`link`, blue-400 dark / blue-700 light): Hyperlinks and link-styled actions. Links are navigational plumbing, not brand moments, so they take the surface's own cool hue at higher chroma rather than borrowing the amber lamp.
-- **Information** (`info`) and **Warning** (`warning`): feedback notices only, always paired with an icon and text.
+- **Information** (`info`) and **Warning** (`warning`): feedback notices, always paired with an icon and text. Warning also marks two composer states to notice before sending: the context label from 70% and the access part's icon while Don't ask is on.
 - **Merged PR** (`pr-merged`, violet): the merged state of a pull request. Nothing else uses violet.
 
 ### Tertiary
@@ -540,7 +540,7 @@ The control boundary tokens are solid 1px colors, not translucent hints.
 `light-background`. Recheck the light value after any token change.
 
 ### Named Rules
-**The One Lamp Rule.** Filament Amber is Mcode's primary brand color. Each state has at most one amber primary action. Amber also marks a live mode the user turned on (Design mode, an agent acting in the Browser) and a thread that needs the user (the needs-you ring and its label). Everything else is neutral: selected rows, the access-mode picker's selected row, the Plan chip, the Full access chip, the Stop button, toggles, update and notification buttons, and status icons. Links use the link color, never amber. Keyboard focus uses the focus blue.
+**The One Lamp Rule.** Filament Amber is Mcode's primary brand color. Each state has at most one amber primary action. Amber also marks a live mode the user turned on (Design mode, an agent acting in the Browser) and a thread that needs the user (the needs-you ring and its label). Everything else is neutral: selected rows, the access-mode picker's selected row, the Plan chip, the access part (its Don't ask icon takes `warning`, not the lamp), the Stop button, toggles, update and notification buttons, and status icons. Links use the link color, never amber. Keyboard focus uses the focus blue.
 
 **The Earned-Color Rule.** Neutrals are the surface default. A bounded region may carry color to clarify state, ownership, mode, or task posture. Area color must carry meaning.
 
@@ -568,6 +568,7 @@ The control boundary tokens are solid 1px colors, not translucent hints.
 | Body | Public Sans | `1.6rem / 2.4rem` | 400 | Forms, dialogs, and readable UI copy. |
 | Prose | Public Sans | `1.6rem / 2.8rem` | 400 | Agent answers, narration, plans, and other long reading. |
 | Body small | Public Sans | `1.4rem / 2rem` | 400 | Navigation rows, menus, inputs, dense rows, and helper text. |
+| Compact | Public Sans | `1.3rem / 2rem` | 400 | The composer capsule's parts, mode chips, context label, and slash menu descriptions, a step quieter than the draft. |
 | Caption | Public Sans | `1.2rem / 1.6rem` | 400 | Meta lines, timestamps, fine print. |
 | Label | Public Sans | `1.4rem / 2rem` | 500 | Field labels, row titles, toast titles. |
 | Button | Public Sans | `1.4rem / 2rem` | 500 | Text inside every button size. |
@@ -963,9 +964,9 @@ Paper's "04 · Components" page holds the full state matrix for every variant.
   view control in a panel header's second row. When it toggles something on,
   the fill becomes `control-border` and the icon stays `ink`. A round button
   that floats over content is 40px and takes the `floating` shadow.
-- **Composer Send:** a round primary button. While a turn runs the same slot
-  holds Stop: an `ink` circle with a `background`-colored square, never amber
-  or red.
+- **Composer Send:** a 32px round primary button. While a turn runs, the same
+  slot holds Stop (an `ink` circle with a `background` square, never amber or
+  red), or Queue once there is a draft. The Composer section has every state.
 - **Split button:** one control with the action on the left and a chevron on
   the right that opens a menu of alternate methods ("Implement v2 ⌄",
   "Commit 3 files ⌄"). The menu lists the alternates by name with their
@@ -1016,7 +1017,20 @@ holds equal-width segments with the `badge` radius. The active segment has the
 `selected` fill and an `ink` Label; inactive segments are `muted` Body small.
 Use them for sibling sources of one list (Branches | Pull requests, Local |
 Origin) and for view modes (unified | split). Segments show names only, no
-counts.
+counts. A hovered or focus-visible segment takes the sliding highlight, under
+the active segment's own fill.
+
+**Sliding highlight.** Every menu, picker, and segmented control has one
+`hover` fill per group, never a fill per row. When the highlighted row
+changes, the fill slides to it over `--duration-standard` (180ms) on
+`--ease-standard`, taking the row's size and radius. When nothing is
+highlighted it fades out where it is, and when a row is highlighted again it
+fades in where it lands instead of sliding from a stale spot. A filtered or
+rebuilt list puts the fill on its highlighted row in place, with no slide and
+no flash. A group with one option shows no fill. The fill scrolls with its
+row and never scrolls the list: the arrow keys scroll a row into view, hover
+does not. Under reduced motion only the opacity fade remains. Checks and the
+`selected` fill stay on their rows, separate from the transient fill.
 
 ### Cards / Panels
 - **Workspace panes:** Edge-to-edge, square to the app shell, and resizable where the user compares or inspects content. Do not wrap a primary work area in a decorative card.
@@ -1147,15 +1161,95 @@ are provider-native, so they show the parent thread's provider.
   submission. Before the first send the thread overview hosts the workspace
   and branch selectors; after it, the overview carries mode, branch, and
   tasks.
+- An empty composer is one fully rounded capsule row: `+`, the modes, the
+  draft (one 24px line), then the split pill, which holds model, reasoning,
+  access, the context label, and the run button. The row has 5px padding (6px on the left) and a 4px gap.
+  Once the draft wraps, it takes the full width on top and the controls drop
+  to a row below; the radius becomes 22px and the draft scrolls past 240px.
+  The capsule also takes two rows whenever the one-row draft column would be
+  under 120px, and returns to one row only when the draft, as a single line,
+  fits the one-row column with 48px to spare, so editing near the wrap point
+  does not flip it back and forth.
+- Width tiers are container queries on the capsule. Below 680px the model
+  part shows its short name, the reasoning part shows rising bars (one per
+  level, filled up to the current one), the parts tighten to 7px padding,
+  and the modes show icons only. Below 480px the model part shows only its
+  logo.
+- Plan and Goal, when on, sit beside `+` as modes in a 36px pill with the
+  panel fill and the split's 1px by 14px dividers. Each mode is 32px high
+  with a 14px icon, its name in Compact, and a 24px remove button; removing it returns
+  focus to the draft. One mode shows its name; two, or a narrow capsule,
+  show icons only, with the name in a tooltip. With no mode on, `+` is a
+  bare 32px button. The `+` menu toggles Plan and a goal not yet sent. A
+  running goal and orchestration stay checked there but turn off only from
+  their own chip.
+- Model, reasoning, and access share one 36px rounded pill on the right of
+  the capsule, with the panel fill and 2px padding. Each part is 32px high in
+  Compact with 9px side padding, separated by 1px by 14px `border` dividers,
+  and one sliding highlight moves across the parts and over the dividers.
+  The model part shows its 14px provider mark and name in `ink`, the
+  reasoning part its level in `muted`, and the access part a 16px icon in
+  `muted`, or `warning` while Don't ask is on. The context label and the run
+  button share the pill after the parts, outside the highlight. Popovers keep
+  the prototype widths: the model picker at its own width, reasoning 224px,
+  access 232px, and the `+` menu 232px. Every part's popover opens in one spot: 8px above the right edge of the
+  capsule, covering any tray, so it never moves when content above
+  changes. With a popover open, resting 100ms on another part switches to
+  its popover, as in a menu bar. Picking a model that has reasoning levels
+  swaps to the reasoning popover in place. The reasoning part is as wide as
+  the model's widest level, so dragging the bar never resizes the pill. The
+  part whose popover is open keeps the `button-secondary-hover` fill, a step
+  above the hover, so it still reads as open while the pointer rests on
+  another part. Each part names its
+  setting in a tooltip, which stays hidden while a popover is open.
 - Separate configuration from the draft with tone and spacing, not a stack of
   chips. Use chips only for removable attached entities such as files, images,
   comments, or enabled capabilities. Capability chips such as Plan use the
   neutral selected fill.
-- The submit control owns pending state. While a turn is running, the same
-  location exposes the neutral Stop or queue behavior according to the
-  product contract.
-- Trays that belong to the composer (the task row, queued messages, the slash
-  command list) dock flush on its top edge with the panel fill and no border.
+- One run button ends the split pill: a 32px circle with a 16px icon, 2px
+  after the context label. Idle with something to send it is Send in the
+  amber fill. Idle and empty it is a disabled Send in the `selected` fill
+  with a `muted` icon that does not look pressable. While a turn runs with
+  an empty draft it is Stop: an `ink` circle with a 12px `background` square
+  of 2px radius. While a turn runs with a draft, a file, or an annotation it
+  is Queue, with the Send look. A running thread never shows a second
+  button.
+- The context label replaces the old ring. It shows nothing below 70% of the
+  context window or when the window is unknown. From 70% it reads "72%
+  context" in `warning`, and from 90% in `destructive`; below the 680px tier
+  it reads only "72%". A low provider quota shows it below 70% in `warning`.
+  It sits behind a divider after the access part, 32px high in Compact with
+  tabular numbers, and hover or focus opens the token
+  breakdown card, which adds a "Provider quota: Low" line when quota is low.
+- Trays that belong to the composer (the task row, queued messages, file and
+  image tiles) dock flush on its top edge with the panel fill and no border.
+  A new thread's tab (Local, the branch) has the same look. With tiles under
+  it, the tray squares its top corners, so the tab and the tray read as one
+  panel.
+- `/` at the start of a word opens the slash menu, and `$`, `£` or `₦` opens
+  it with only skills and plugins (a digit after them stays text). It sits in
+  the tray's place and look: the same inset and top corners, 8px padding, its
+  bottom edge on the capsule's top border. Over an open tray or a new
+  thread's tab, each keeps its panel and hides its contents, so a shorter
+  menu still reads as one surface, and the covered controls are inert. The
+  list scrolls past 262px with no scrollbar. Rows are
+  32px pills with a 14px icon (`muted`, `ink` on the active row), the name in
+  Body small with the matched part semibold, and the description in Compact
+  `muted`, both
+  fade-truncated. A 1px `border` rule separates Mcode commands, provider
+  commands, skills and plugins; an empty result reads "No matches". The active
+  row takes the sliding highlight in `ink` at 7%. Arrows move it, hover moves
+  it without scrolling, Enter or Tab picks. Escape closes the menu and keeps
+  the text, and it stays closed until a trigger starts a new word.
+- Tray size: inset 22px from each side of the capsule (`--tray-inset`,
+  shared with the slash menu and the tab above a new thread's composer, so
+  all three have one footprint), 14px top corners,
+  4px 8px 8px padding, and a 4px gap between rows. Tiles are 56px high with
+  a 10px radius, a 1px border and the hover fill: an image tile is 56px
+  square with its thumbnail, a file tile is 156px wide with its name (16px
+  icon, fade truncation) over its size in muted. Each tile has a 20px round
+  remove button at its top right, shown on hover or keyboard focus. The tile
+  row scrolls sideways with no scrollbar.
 - A request that needs the user (approval, plan questions) docks in place of
   the composer surface and names the waiting state in the status line.
 
@@ -1193,7 +1287,7 @@ against each other (`badge` radius, 12px inset). A row holds the name in Body
 small and, only when it improves scanning, a 16px `muted` icon in a 20px slot.
 Shortcuts sit right-aligned in `muted` caption. Rows show names only: no descriptions, counts, operands, or
 group labels. Groups are separated by 1px dividers. The highlighted row takes
-the `hover` fill. A checked row shows a check. Destructive rows use `error`
+the `hover` fill as the sliding highlight. A checked row shows a check. Destructive rows use `error`
 for icon and label. An unavailable row stays listed and dimmed, and its reason
 appears in a tooltip ("Nothing staged"). A submenu opens to the side.
 
@@ -1208,7 +1302,8 @@ commit, model, project):
 3. A flat list with no section labels and no per-row type icons or counts.
    The selected row shows a trailing check, with a `muted` tag when it helps
    ("current", "worktree"). About five rows are visible; the list scrolls
-   with top and bottom fades.
+   with top and bottom fades. The highlighted row takes the sliding
+   highlight; the selected row keeps its own `selected` fill.
 4. Silent paging: more rows load as the user scrolls, and a `muted` footer
    reads "Showing 50 of 568". A search across all history may read
    "N matches in M commits" instead.
@@ -1352,7 +1447,7 @@ behavior for components where agents must not invent an interaction model.
 | Switch | Native checkbox semantics or `role="switch"` with an accessible label, `aria-checked`, and visible consequence text. | Space toggles the focused switch. Do not bind Enter unless the underlying native control already supports it. Focus remains on the switch after change. | Disable repeat input only while persistence is pending. On failure, restore the confirmed value and place the reason beside the control. | The knob changes position instantly; color and checked state still update. |
 | Tabs | `tablist`, `tab`, and `tabpanel` with stable IDs and relationships. Use manual activation when changing tabs performs work. | Left and Right Arrow (Up and Down for the vertical rail) move roving focus; Home and End reach the first and last tab; Enter or Space activates. Tab then enters the active panel. | Keep the active tab selected while its panel refreshes. Mark failure inside that panel and retain a retry path. | Replace the active fill instantly; do not slide it between tabs. |
 | Pane resizer | Focusable `separator` with vertical orientation and `aria-valuemin`, `aria-valuenow`, and `aria-valuemax`. | Use the resize keys and focus behavior defined in Responsive posture. The seam remains in the tab order whenever resizing is available. | If persistence fails, keep the usable current width for the session and report that it was not saved. Never collapse the pane as a fallback. | Direct resizing is instant. Dock, float, and full-surface transitions use the reduced posture rule. |
-| Menu, picker, or popover | Use `menu` and `menuitem` only for commands. Use a labeled listbox for pickers, and form controls or a plain region for inspection. The trigger exposes `aria-expanded` and `aria-controls`. | Opening a menu moves focus to the current or first enabled item; opening a picker focuses its search field. Arrow keys move between items; Home and End reach the boundaries; Enter or Space invokes; Escape closes and returns focus to the trigger. A non-menu popover follows normal tab order. | Keep the trigger stable while an action runs. Prevent duplicate invocation and place a failed action beside its origin; do not leave a dead menu open as a success-shaped fallback. | Use `instant` or a `fast` opacity fade. Do not scale or slide a menu from its trigger. |
+| Menu, picker, or popover | Use `menu` and `menuitem` only for commands. Use a labeled listbox for pickers, and form controls or a plain region for inspection. The trigger exposes `aria-expanded` and `aria-controls`. | Opening a menu moves focus to the current or first enabled item; opening a picker focuses its search field. Arrow keys move between items; Home and End reach the boundaries; Enter or Space invokes; Escape closes and returns focus to the trigger. A non-menu popover follows normal tab order. | Keep the trigger stable while an action runs. Prevent duplicate invocation and place a failed action beside its origin; do not leave a dead menu open as a success-shaped fallback. | Use `instant` or a `fast` opacity fade. Do not scale or slide a menu from its trigger. The one exception is the Genie on the composer's model, reasoning, and access popovers (see Product motion patterns). |
 | Dialog | Labeled `dialog` with `aria-modal="true"`; destructive scope appears in its accessible description. | Move focus to the first task control, or the least destructive action for a destructive confirmation. Trap focus while open. Escape cancels when cancellation is safe and returns focus to the trigger. | The initiating action owns pending state and blocks duplicates. Preserve entered values. Put validation beside its field and blocking failure in a focusable summary inside the dialog. | Use `instant` or a `fast` opacity fade for dialog and backdrop; remove scale and spatial movement. |
 | Toast | A `status` live region for finished events and `alert` for needs-you and failed events; the toast itself is one button named by its title and state, with a separate close button. | Toasts never take focus. A keyboard user reaches them through the region landmark; Enter opens the object, Escape on a focused toast closes it. | A failed open leaves the toast in place. | Appear and leave with a `fast` opacity fade; no slide and no swipe animation. |
 
@@ -1411,6 +1506,13 @@ enhances a state change and may not gate rendering.
   distance; releasing past 35% of its width, or a flick, sends it off that
   side in 160ms, otherwise it returns to rest. The stack closes the gap in
   200ms. Close and auto-hide reverse the entry.
+- **Genie.** Popovers fade, with one exception: the composer's model,
+  reasoning, and access popovers pour out of their trigger in 200ms and back
+  into it in 160ms, like a window minimising to the Dock. The popover takes
+  focus and keys from the first frame; typing during the pour ends it at once.
+  Switching between these popovers swaps them in place without a pour, and
+  reopening mid-close turns the pour around from where it is. Reduced motion
+  keeps the fade.
 - `prefers-reduced-motion: reduce` removes movement and looping animation. The
   composer docks instantly, toasts and messages fade over `fast`, spinners hold
   still, and all information remains available, including visible progress

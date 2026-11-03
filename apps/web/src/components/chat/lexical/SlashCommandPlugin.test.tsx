@@ -45,7 +45,6 @@ vi.mock("@/features/conversation/composer/composer-capabilities", async () => {
 vi.mock("@/components/chat/ModelSelector", () => ({ ModelSelector: () => <div /> }));
 vi.mock("@/components/chat/SpellcheckContextMenu", () => ({ SpellcheckContextMenu: () => <div /> }));
 vi.mock("@/components/chat/ComposerQueueList", () => ({ ComposerQueueList: () => <div /> }));
-vi.mock("@/components/chat/ContextTracker", () => ({ ContextTracker: () => <div /> }));
 
 const originalResizeObserver = globalThis.ResizeObserver;
 const originalScrollIntoView = Element.prototype.scrollIntoView;
@@ -88,8 +87,8 @@ function seedThread() {
   });
 }
 
-async function renderComposer() {
-  render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+async function renderComposer(composer = <Composer threadId="thread-1" workspaceId="ws-1" />) {
+  render(composer);
   const editorElement = await screen.findByRole("textbox", { name: "Message Mcode" });
   const editor = getNearestEditorFromDOMNode(editorElement);
   if (!editor) throw new Error("composer textbox is not a Lexical editor");
@@ -118,8 +117,12 @@ async function renderComposer() {
   return { editor: editorElement, user, type };
 }
 
-function planChip() {
-  return screen.queryByRole("button", { name: "Turn off Plan" });
+function planMode() {
+  return screen.queryByRole("button", { name: "Remove Plan" });
+}
+
+function goalMode() {
+  return screen.queryByRole("button", { name: "Remove Goal" });
 }
 
 function slashTray() {
@@ -148,7 +151,7 @@ describe("SlashCommandPlugin /plan in the composer", () => {
     const row = within(tray).getByRole("option", { name: /^\/plan Enter plan mode/ });
     expect(row).toHaveTextContent("/plan");
     expect(row).toHaveTextContent("Enter plan mode");
-    expect(planChip()).toBeNull();
+    expect(planMode()).toBeNull();
   });
 
   it.each(["{Enter}", "{Tab}"])("removes /pl and turns Plan on with %s", async (key) => {
@@ -158,7 +161,7 @@ describe("SlashCommandPlugin /plan in the composer", () => {
     await screen.findByRole("option", { name: /^\/plan Enter plan mode/ });
     await user.keyboard(key);
 
-    await waitFor(() => expect(planChip()).toBeInTheDocument());
+    await waitFor(() => expect(planMode()).toBeInTheDocument());
     expect(editor.textContent ?? "").not.toContain("/pl");
     expect(slashTray()).toBeNull();
   });
@@ -168,20 +171,20 @@ describe("SlashCommandPlugin /plan in the composer", () => {
 
     await type("/plan fix the menu");
 
-    await waitFor(() => expect(planChip()).toBeInTheDocument());
+    await waitFor(() => expect(planMode()).toBeInTheDocument());
     expect(editor).toHaveTextContent(/^fix the menu$/);
   });
 
   it("offers Exit plan mode while Plan is on and turns it off on Enter", async () => {
     const { editor, user, type } = await renderComposer();
     await type("/plan ");
-    await waitFor(() => expect(planChip()).toBeInTheDocument());
+    await waitFor(() => expect(planMode()).toBeInTheDocument());
 
     await type("/pl");
     await screen.findByRole("option", { name: /^\/plan Exit plan mode/ });
     await user.keyboard("{Enter}");
 
-    await waitFor(() => expect(planChip()).toBeNull());
+    await waitFor(() => expect(planMode()).toBeNull());
     expect(editor.textContent ?? "").not.toContain("/pl");
   });
 
@@ -192,13 +195,13 @@ describe("SlashCommandPlugin /plan in the composer", () => {
     await type("/pl");
     await screen.findByRole("option", { name: /^\/plan Enter plan mode/ });
     await user.keyboard("{Enter}");
-    await waitFor(() => expect(planChip()).toBeInTheDocument());
+    await waitFor(() => expect(planMode()).toBeInTheDocument());
     expect(editor).toHaveTextContent(/^fix the menu\s*$/);
 
     await type("/pl");
     await screen.findByRole("option", { name: /^\/plan Exit plan mode/ });
     await user.keyboard("{Enter}");
-    await waitFor(() => expect(planChip()).toBeNull());
+    await waitFor(() => expect(planMode()).toBeNull());
     expect(editor).toHaveTextContent(/^fix the menu\s*$/);
   });
 
@@ -208,7 +211,7 @@ describe("SlashCommandPlugin /plan in the composer", () => {
     await type("/foo bar");
 
     expect(editor).toHaveTextContent(/^\/foo bar$/);
-    expect(planChip()).toBeNull();
+    expect(planMode()).toBeNull();
   });
 
   it("leaves /plan literal when the provider does not offer Plan", async () => {
@@ -218,6 +221,76 @@ describe("SlashCommandPlugin /plan in the composer", () => {
     await type("/plan fix the menu");
 
     expect(editor).toHaveTextContent(/^\/plan fix the menu$/);
-    expect(planChip()).toBeNull();
+    expect(planMode()).toBeNull();
+  });
+
+  it("turns Goal on and removes the text when /goal is typed inline", async () => {
+    const { editor, type } = await renderComposer();
+
+    await type("/goal ");
+
+    await waitFor(() => expect(goalMode()).toBeInTheDocument());
+    expect(editor.textContent ?? "").not.toContain("/goal");
+  });
+
+  it("keeps Goal on when /goal is picked while a goal is pending", async () => {
+    const { user, type } = await renderComposer();
+    await type("/goal ");
+    await waitFor(() => expect(goalMode()).toBeInTheDocument());
+
+    await type("/goa");
+    await screen.findByRole("option", { name: /^\/goal / });
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(slashTray()).toBeNull());
+    expect(goalMode()).toBeInTheDocument();
+  });
+
+  it("closes on Escape, keeps the text, and stays closed while the word grows", async () => {
+    const { editor, user, type } = await renderComposer();
+    await type("/pl");
+    await waitFor(() => expect(slashTray()).toBeInTheDocument());
+
+    await user.keyboard("{Escape}");
+    await type("a");
+
+    expect(slashTray()).toBeNull();
+    expect(editor).toHaveTextContent(/^\/pla$/);
+
+    await type(" /co");
+    await waitFor(() => expect(slashTray()).toBeInTheDocument());
+  });
+
+  it("makes the tray's remove buttons inert while the menu covers it", async () => {
+    useComposerDraftStore.setState({
+      drafts: {
+        "thread-1": {
+          input: "",
+          attachments: [{ id: "file-1", name: "notes.txt", mimeType: "text/plain", sizeBytes: 2048, previewUrl: "", filePath: "/tmp/notes.txt" }],
+          modelId: "",
+          reasoning: "medium",
+        },
+      },
+      pendingPrefill: null,
+    });
+    const { type } = await renderComposer();
+    const remove = screen.getByRole("button", { name: "Remove notes.txt" });
+    expect(remove.closest("[inert]")).toBeNull();
+
+    await type("/");
+    await waitFor(() => expect(slashTray()).toBeInTheDocument());
+
+    expect(remove.closest("[inert]")).not.toBeNull();
+  });
+
+  it("makes the new-thread tab's controls inert while the menu covers it", async () => {
+    const { type } = await renderComposer(<Composer isNewThread workspaceId="ws-1" />);
+    const local = within(screen.getByTestId("new-thread-target-rail")).getByTestId("workspace-target-trigger");
+    expect(local.closest("[inert]")).toBeNull();
+
+    await type("/");
+    await waitFor(() => expect(slashTray()).toBeInTheDocument());
+
+    expect(local.closest("[inert]")).not.toBeNull();
   });
 });

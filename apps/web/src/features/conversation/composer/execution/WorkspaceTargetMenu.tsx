@@ -56,7 +56,7 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, cla
           </Button>
         }
       />
-      <DropdownMenuContent align="start" className="w-[28.8rem]">
+      <DropdownMenuContent align="start" side="top" className="w-[28.8rem]">
         <WorkspaceModeMenuGroup mode={mode} folder={folder} onModeChange={onModeChange} />
       </DropdownMenuContent>
     </DropdownMenu>

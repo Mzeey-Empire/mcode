@@ -12,6 +12,9 @@
    drop Paper's `--color-` prefix so they never shadow Tailwind's default palette.
    Feature code uses the semantic roles below, enforced by mcode/no-raw-color. */
 :root {
+  /* The composer tray, the slash menu and a new thread's target rail share one footprint above the capsule,
+     so the menu covers whichever of them it overlaps edge to edge. */
+  --tray-inset: 22px;
   --neutral-50: oklch(99% 0.005 260);
   --neutral-100: oklch(95.5% 0.005 260);
   --neutral-200: oklch(90% 0.005 260);
@@ -242,6 +245,10 @@
   --text-caption: 1.2rem;
   --text-caption--line-height: 1.6rem;
   --text-caption--font-weight: 400;
+  /* The composer capsule's controls and slash menu descriptions: a step under body small, so they stay quieter than the draft. */
+  --text-compact: 1.3rem;
+  --text-compact--line-height: 2rem;
+  --text-compact--font-weight: 400;
   --text-label: 1.4rem;
   --text-label--line-height: 2rem;
   --text-label--font-weight: 500;
@@ -605,10 +612,6 @@
   z-index: 40;
   transform-origin: bottom left;
 }
-.composer-add-menu-surface {
-  z-index: 45;
-}
-
 .composer-provider-notice-surface {
   /* Autocomplete must stay available while a notice is visible. */
   z-index: 30;

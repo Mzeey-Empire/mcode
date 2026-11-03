@@ -16,9 +16,10 @@ import {
   type MenuRowContent,
 } from "./menu-row"
 import { POPOVER_FADE_CLASS, POPOVER_SURFACE_CLASS } from "./overlay-surface"
+import { SlidingHighlight } from "./sliding-highlight"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip"
 
-const MENU_ITEM_ROW_CLASS = cn(MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS, "data-highlighted:bg-hover")
+const MENU_ITEM_ROW_CLASS = cn(MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS)
 const MENU_ITEM_DESCRIBED_CLASS = "h-auto min-h-row-default py-0.5"
 
 /**
@@ -43,6 +44,7 @@ function DropdownMenuContent({
   alignOffset,
   anchor,
   collisionAvoidance,
+  children,
   ...props
 }: MenuPrimitive.Popup.Props &
   Pick<
@@ -64,14 +66,17 @@ function DropdownMenuContent({
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
           className={cn(
-            "pointer-events-auto max-h-(--available-height) min-w-[8rem] overflow-y-auto",
+            "pointer-events-auto relative max-h-(--available-height) min-w-[8rem] overflow-y-auto",
             MENU_LIST_CLASS,
             POPOVER_SURFACE_CLASS,
             POPOVER_FADE_CLASS,
             className,
           )}
           {...props}
-        />
+        >
+          <SlidingHighlight follow="data-highlighted" />
+          {children}
+        </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>
   )
@@ -280,6 +285,7 @@ function DropdownMenuSubContent({
   className,
   sideOffset = 4,
   collisionPadding = 8,
+  children,
   ...props
 }: MenuPrimitive.Popup.Props &
   Pick<MenuPrimitive.Positioner.Props, "sideOffset" | "collisionPadding">) {
@@ -297,14 +303,17 @@ function DropdownMenuSubContent({
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-sub-content"
           className={cn(
-            "pointer-events-auto max-h-(--available-height) min-w-[8rem] overflow-y-auto",
+            "pointer-events-auto relative max-h-(--available-height) min-w-[8rem] overflow-y-auto",
             MENU_LIST_CLASS,
             POPOVER_SURFACE_CLASS,
             POPOVER_FADE_CLASS,
             className,
           )}
           {...props}
-        />
+        >
+          <SlidingHighlight follow="data-highlighted" />
+          {children}
+        </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>
   )

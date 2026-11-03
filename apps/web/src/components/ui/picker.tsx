@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { Kbd } from "./kbd";
 import { Button } from "./button";
 import { SegmentedControl } from "./segmented-control";
+import { SlidingHighlight } from "./sliding-highlight";
 import { Spinner } from "./spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
@@ -461,8 +462,9 @@ function PickerList<T>(props: PickerListProps<T>) {
       id={listId}
       role="listbox"
       onScroll={measure}
-      className="scroll-fade-y flex max-h-[17.2rem] flex-col gap-px pt-2"
+      className="scroll-fade-y relative flex max-h-[17.2rem] flex-col gap-px pt-2"
     >
+      <SlidingHighlight follow="data-active" />
       {rows.map((entry, index) => (
         <Fragment key={entry.row.key}>
           <PickerGroupStart row={entry.row} previous={rows[index - 1]?.row} hairlines={hairlines} />
@@ -571,7 +573,7 @@ function PickerOptionItem({ id, row, digit, active, selected, selectedCheck, onH
       // Keeps focus in the search field so typing and arrow keys keep working after a click.
       onMouseDown={(event) => event.preventDefault()}
       className={cn(
-        "group/option flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-active:bg-hover data-selected:bg-selected",
+        "group/option relative flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-selected:bg-selected",
         row.description == null ? "h-8" : "min-h-8 py-1.5",
         row.disabled && "cursor-default opacity-50",
       )}

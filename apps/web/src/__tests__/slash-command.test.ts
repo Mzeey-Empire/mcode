@@ -118,6 +118,21 @@ describe("trigger detection", () => {
     expect(result.current.isOpen).toBe(false);
   });
 
+  it("stays closed when Escape and the next keystroke on the same word land in one batch", async () => {
+    const ref = makeAnchor();
+    const { result } = renderHook(() => useSlashCommand({ anchorRef: ref }));
+    await act(async () => {
+      result.current.onInputChange("/pl");
+    });
+    expect(result.current.isOpen).toBe(true);
+
+    await act(async () => {
+      result.current.onDismiss();
+      result.current.onInputChange("/pla");
+    });
+    expect(result.current.isOpen).toBe(false);
+  });
+
   it("closes when trigger text is deleted", async () => {
     const ref = makeAnchor();
     const { result } = renderHook(() =>

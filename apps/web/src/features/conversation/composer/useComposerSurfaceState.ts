@@ -68,7 +68,6 @@ function getComposerLocks(
     startingThread: Boolean(
       input.activeThread?.clientPreparing || input.activeThread?.clientError || startupPending,
     ),
-    isModelFullyLocked: input.isAgentRunning && !input.branchFromMessageId,
     isProviderLocked: Boolean(
       input.threadId && !input.isNewThread && !input.branchFromMessageId
         && input.activeThread?.provider,

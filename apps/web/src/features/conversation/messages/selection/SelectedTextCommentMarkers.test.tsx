@@ -130,7 +130,6 @@ function SourceEditorHarness({
         <ComposerEditor
           ariaLabel="Message Mcode"
           isMentionPopupOpen={false}
-          isSlashPopupOpen={false}
           onChange={() => {}}
           onMentionDismiss={() => {}}
           onMentionTrigger={() => {}}

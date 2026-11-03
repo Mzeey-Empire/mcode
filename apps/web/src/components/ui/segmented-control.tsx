@@ -2,6 +2,7 @@ import { useRef, type KeyboardEvent, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 import { FOCUS_RING_CLASS } from "./focus-ring";
+import { SlidingHighlight } from "./sliding-highlight";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
 
 /** One choice in a {@link SegmentedControl}. */
@@ -81,11 +82,10 @@ function trayClass(layout: Layout, size: SegmentedControlSize): string {
   return cn("gap-0.5 rounded-control bg-ink/[0.07] p-0.5", TRAY_HEIGHT[size]);
 }
 
-// Dark hover sits one step under selected, so a filled hover would read as a second choice.
 const INACTIVE_TRAY_SEGMENT = "text-muted enabled:hover:text-ink";
 
 const SEGMENT_BASE =
-  "inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap transition-colors duration-(--duration-fast) ease-(--ease-standard)";
+  "relative inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap transition-colors duration-(--duration-fast) ease-(--ease-standard)";
 
 function segmentClass(layout: Layout, size: SegmentedControlSize, isActive: boolean, fill: boolean): string {
   if (layout === "icon") {
@@ -102,6 +102,9 @@ function tooltipWrapperClass(layout: Layout, fill: boolean): string {
   if (layout === "icon") return "flex min-w-0";
   return layout === "pill" && !fill ? "flex shrink-0" : "flex min-w-0 flex-1";
 }
+
+// Segments carry no highlight marker of their own, so the fill follows the pointer and the focus-visible segment.
+const SEGMENT_HOVER = { pointer: '[role="radio"]' } as const;
 
 const NEXT_KEYS: Record<string, 1 | -1> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
 
@@ -164,12 +167,13 @@ export function SegmentedControl({
         aria-label={ariaLabel}
         onKeyDown={handleKeyDown}
         className={cn(
-          "items-center",
+          "relative items-center",
           trayClass(layout, size),
           fill ? "flex w-full" : "inline-flex",
           className,
         )}
       >
+        <SlidingHighlight follow={SEGMENT_HOVER} />
         {options.map((option, index) => {
           const isActive = index === activeIndex;
           const segment = (

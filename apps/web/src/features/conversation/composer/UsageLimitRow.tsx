@@ -74,7 +74,6 @@ function LimitContent({ threadId, state, actions, now }: LimitContentProps) {
           selectedModelId={thread.model ?? ""}
           selectedProviderId={thread.provider}
           onSelect={(modelId) => actions.resume(modelId)}
-          locked={false}
           // A resume continues on the thread's provider, so only the model can change.
           providerLocked
           trigger={(

@@ -1,14 +1,17 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
-import { Check, FilePlusCorner, Goal, ListChecks, Network, Plus } from "lucide-react";
+import { useState } from "react";
+import { FilePlusCorner, Goal, ListChecks, Network, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuGroupLabel,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ComposerOverlaySurface } from "./ComposerOverlaySurface";
 import type {
   ComposerCapabilityId,
   ResolvedComposerCapability,
@@ -19,10 +22,12 @@ interface ComposerAddMenuProps {
   onAttachFiles: () => void;
   capabilities: readonly ResolvedComposerCapability[];
   attachedCapabilityIds: ReadonlySet<ComposerCapabilityId>;
+  /** Attached capabilities the menu shows checked but cannot turn off; their own chip does. */
+  lockedCapabilityIds: ReadonlySet<ComposerCapabilityId>;
+  /** Toggles Plan and a pending Goal, and attaches orchestration. */
   onAttachCapability: (capabilityId: ComposerCapabilityId) => void;
   getComposerRect: () => DOMRect | null;
 }
-
 
 const CAPABILITY_ICONS = {
   plan: ListChecks,
@@ -30,19 +35,8 @@ const CAPABILITY_ICONS = {
   orchestration: Network,
 } satisfies Record<ComposerCapabilityId, typeof ListChecks>;
 
-interface ComposerAddMenuLabelProps {
-  title: string;
-  description: string;
-}
-
-function ComposerAddMenuLabel({ title, description }: ComposerAddMenuLabelProps) {
-  return (
-    <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
-      <span className="shrink-0 text-sm font-medium leading-none text-ink">{title}</span>
-      <span className="flex-1 text-fade text-xs font-normal leading-none text-muted">{description}</span>
-    </span>
-  );
-}
+/** Opens above the composer's left edge rather than under the small `+` button. */
+type ComposerAnchor = { readonly getBoundingClientRect: () => DOMRect };
 
 /**
  * Compact menu for adding files or attaching capabilities to the composer.
@@ -52,190 +46,78 @@ export function ComposerAddMenu({
   onAttachFiles,
   capabilities,
   attachedCapabilityIds,
+  lockedCapabilityIds,
   onAttachCapability,
   getComposerRect,
 }: ComposerAddMenuProps) {
-  const [open, setOpen] = useState(false);
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<ComposerAnchor | undefined>(undefined);
 
-  useEffect(() => {
+  const handleOpenChange = (open: boolean) => {
     if (!open) return;
-
-    const dismiss = (event: MouseEvent) => {
-      const target = event.target as Element;
-      if (triggerRef.current?.contains(target) || target.closest("[data-composer-autocomplete]")) {
-        return;
-      }
-      setOpen(false);
-      setAnchorRect(null);
-    };
-    document.addEventListener("mousedown", dismiss);
-    return () => document.removeEventListener("mousedown", dismiss);
-  }, [open]);
-
-  const closeFromEscape = () => {
-    setOpen(false);
-    setAnchorRect(null);
-    triggerRef.current?.focus();
+    const rect = getComposerRect();
+    setAnchor(rect ? { getBoundingClientRect: () => rect } : undefined);
   };
 
-  useEffect(() => {
-    if (!open || !anchorRect) return;
-    const frame = requestAnimationFrame(() => {
-      menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [anchorRect, open]);
-
-  const toggleMenu = () => {
-    if (open) {
-      setOpen(false);
-      setAnchorRect(null);
-      return;
-    }
-    setAnchorRect(getComposerRect());
-    setOpen(true);
-  };
-
-  const handleAttachFiles = () => {
-    setOpen(false);
-    setAnchorRect(null);
-    requestAnimationFrame(onAttachFiles);
-  };
-
-  const handleAttachCapability = (capabilityId: ComposerCapabilityId) => {
-    setOpen(false);
-    setAnchorRect(null);
-    requestAnimationFrame(() => onAttachCapability(capabilityId));
-  };
-
-  const handleMenuKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (!menuRef.current || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      return;
-    }
-    const buttons = Array.from(
-      menuRef.current.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
-    );
-    if (buttons.length === 0) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    const currentIndex = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    const nextIndex =
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? buttons.length - 1
-          : event.key === "ArrowDown"
-            ? (Math.max(currentIndex, -1) + 1) % buttons.length
-            : (currentIndex <= 0 ? buttons.length : currentIndex) - 1;
-    buttons[nextIndex]?.focus();
-  }, []);
+  const nextFrame = (action: () => void) => () => requestAnimationFrame(action);
 
   const addButton = (
     <Button
-      ref={triggerRef}
       type="button"
       variant="ghost"
       size="icon-compact"
       aria-label="Add to composer"
-      aria-expanded={open}
-      aria-haspopup="menu"
       data-testid="composer-add"
       disabled={disabled}
-      onClick={toggleMenu}
-      className="size-8 shrink-0 rounded-lg text-muted hover:bg-hover/40 hover:text-ink disabled:pointer-events-none disabled:opacity-50"
+      className="size-8 shrink-0 rounded-full text-muted hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-50"
     >
       <Plus size={16} aria-hidden />
     </Button>
   );
+  const trigger = <DropdownMenuTrigger render={addButton} />;
 
   return (
-    <>
+    <DropdownMenu onOpenChange={handleOpenChange}>
       <Tooltip>
-        <TooltipTrigger
-          render={disabled ? <span className="inline-flex">{addButton}</span> : addButton}
-        />
+        <TooltipTrigger render={disabled ? <span className="inline-flex">{trigger}</span> : trigger} />
         <TooltipContent>Add to composer</TooltipContent>
       </Tooltip>
-      {open && anchorRect ? (
-        <ComposerOverlaySurface
-          data-testid="composer-add-menu"
-          role="menu"
-          aria-label="Add to composer"
-          anchorRect={anchorRect}
-          className="composer-add-menu-surface"
-          onEscapeKeyDown={closeFromEscape}
-        >
-          <div ref={menuRef} className="p-1" onKeyDown={handleMenuKeyDown}>
-            <div
-              role="presentation"
-              className="px-2 pb-1 pt-0.5 text-xs font-medium text-muted"
-            >
-              Attach
-            </div>
-            <Button
-              type="button"
-              role="menuitem"
-              variant="ghost"
-              size="compact"
-              onClick={handleAttachFiles}
-              className="h-auto w-full justify-start gap-2 rounded-md px-2 py-2 text-left hover:bg-selected/70"
-            >
-              <FilePlusCorner size={15} className="shrink-0 text-muted" aria-hidden />
-              <ComposerAddMenuLabel
-                title="Files"
-                description="Images, PDFs, documents, and code"
-              />
-            </Button>
-            {capabilities.length > 0 ? (
-              <>
-                <div role="separator" className="mx-2 my-1 h-px bg-border/60" />
-                <div
-                  role="presentation"
-                  className="px-2 pb-1 pt-0.5 text-xs font-medium text-muted"
-                >
-                  Capabilities
-                </div>
-                {capabilities.map((capability) => {
-                  const Icon = CAPABILITY_ICONS[capability.id];
-                  const attached = attachedCapabilityIds.has(capability.id);
-                  return (
-                    <Button
-                      key={capability.id}
-                      type="button"
-                      role="menuitemcheckbox"
-                      variant="ghost"
-                      size="compact"
-                      onClick={() => handleAttachCapability(capability.id)}
-                      disabled={attached}
-                      aria-checked={attached}
-                      className="h-auto w-full justify-start gap-2 rounded-md px-2 py-2 text-left hover:bg-selected/70 disabled:bg-selected/45 disabled:opacity-100"
-                    >
-                      <Icon
-                        size={15}
-                        className={
-                          attached ? "shrink-0 text-primary" : "shrink-0 text-muted"
-                        }
-                        aria-hidden
-                      />
-                      <ComposerAddMenuLabel
-                        title={capability.label}
-                        description={capability.description}
-                      />
-                      {attached ? (
-                        <Check size={14} className="shrink-0 text-primary" aria-hidden />
-                      ) : null}
-                    </Button>
-                  );
-                })}
-              </>
-            ) : null}
-          </div>
-        </ComposerOverlaySurface>
-      ) : null}
-    </>
+      <DropdownMenuContent
+        data-testid="composer-add-menu"
+        aria-label="Add to composer"
+        anchor={anchor}
+        side="top"
+        align="start"
+        sideOffset={8}
+        className="w-58"
+      >
+        <DropdownMenuGroup>
+          <DropdownMenuGroupLabel>Attach</DropdownMenuGroupLabel>
+          <DropdownMenuItem label="Files" icon={<FilePlusCorner />} onClick={nextFrame(onAttachFiles)} />
+        </DropdownMenuGroup>
+        {capabilities.length > 0 ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuGroupLabel>Capabilities</DropdownMenuGroupLabel>
+              {capabilities.map((capability) => {
+                const Icon = CAPABILITY_ICONS[capability.id];
+                const attached = attachedCapabilityIds.has(capability.id);
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={capability.id}
+                    label={capability.label}
+                    icon={<Icon />}
+                    checked={attached}
+                    disabled={lockedCapabilityIds.has(capability.id)}
+                    closeOnClick
+                    onCheckedChange={nextFrame(() => onAttachCapability(capability.id))}
+                  />
+                );
+              })}
+            </DropdownMenuGroup>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

@@ -37,6 +37,13 @@ async function openMenu() {
   return { user, onPick };
 }
 
+describe("DropdownMenuContent", () => {
+  it("paints one shared highlight fill for the whole menu instead of one per row", async () => {
+    await openMenu();
+    expect(screen.getByRole("menu").querySelectorAll('[data-slot="sliding-highlight"]')).toHaveLength(1);
+  });
+});
+
 describe("DropdownMenuItem", () => {
   it("marks the checked row as the current radio choice with a check", async () => {
     await openMenu();

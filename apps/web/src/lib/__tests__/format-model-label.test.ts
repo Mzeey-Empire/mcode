@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatModelLabel, resolveModelDisplayLabel } from "../format-model-label";
+import { formatModelLabel, narrowModelLabel, resolveModelDisplayLabel } from "../format-model-label";
 import type { ModelDefinition } from "../model-registry";
 
 describe("formatModelLabel", () => {
@@ -78,5 +78,24 @@ describe("resolveModelDisplayLabel", () => {
 
   it("falls back to heuristics for unknown ids", () => {
     expect(resolveModelDisplayLabel("composer-9-beta")).toBe("Composer 9 Beta");
+  });
+});
+
+describe("narrowModelLabel", () => {
+  const codex = ["GPT-6 Sol", "GPT-6 Luna", "GPT-5.6 Sol", "GPT-5.6 Terra", "GPT-5.6 Luna"];
+
+  it("gives the newest model of a family its bare name", () => {
+    expect(narrowModelLabel("GPT-6 Sol", codex)).toBe("Sol");
+    expect(narrowModelLabel("GPT-5.6 Terra", codex)).toBe("Terra");
+    expect(narrowModelLabel("Opus 5.5", ["Opus 5.5", "Sonnet 5.5", "Opus 4.7"])).toBe("Opus");
+  });
+
+  it("keeps the version on an older model that shares a newer one's name", () => {
+    expect(narrowModelLabel("GPT-5.6 Luna", codex)).toBe("5.6 Luna");
+    expect(narrowModelLabel("Opus 4.7", ["Opus 5.5", "Opus 4.7"])).toBe("Opus 4.7");
+  });
+
+  it("keeps a label that is only a version", () => {
+    expect(narrowModelLabel("GPT-4.1", ["GPT-4.1"])).toBe("GPT-4.1");
   });
 });

@@ -229,7 +229,7 @@ describe("SlashCommandTray selection indicator", () => {
   });
 
   it.each([
-    ["empty", "No commands match"],
+    ["empty", "No matches"],
     ["loading", "Loading commands..."],
     ["error", "Couldn't load commands: network failed"],
   ] as const)("positions the %s state above the anchor", async (state, text) => {

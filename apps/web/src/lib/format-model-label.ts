@@ -113,3 +113,25 @@ export function formatModelLabel(modelId: string): string {
   if (id === "cursor-agent") return "Cursor";
   return formatSegmentLabel(id);
 }
+
+const VERSION_WORD = /^v?\d+(?:\.\d+)*$/i;
+/** A brand fused to its version, as in "GPT-5.6"; the version is the part worth keeping. */
+const BRANDED_VERSION_WORD = /^[a-z]+-(\d+(?:\.\d+)*)$/i;
+
+/** The label's words with any fused brand dropped, and the words left once versions go too. */
+function labelWords(label: string): { readonly versioned: string; readonly bare: string } {
+  const words = label.split(" ").map((word) => BRANDED_VERSION_WORD.exec(word)?.[1] ?? word);
+  return { versioned: words.join(" "), bare: words.filter((word) => !VERSION_WORD.test(word)).join(" ") };
+}
+
+/**
+ * A model's name for a narrow control: the newest model of a family reads by its bare name ("GPT-6 Sol" reads "Sol"),
+ * and an older one that shares that name keeps its version ("GPT-5.6 Luna" reads "5.6 Luna"). `siblings` are the
+ * provider's model labels, newest first, as the provider lists them.
+ */
+export function narrowModelLabel(label: string, siblings: readonly string[]): string {
+  const own = labelWords(label);
+  if (own.bare === "") return label;
+  const newest = siblings.find((sibling) => labelWords(sibling).bare === own.bare);
+  return newest === undefined || newest === label ? own.bare : own.versioned;
+}

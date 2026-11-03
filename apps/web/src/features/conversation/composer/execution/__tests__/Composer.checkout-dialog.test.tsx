@@ -264,9 +264,6 @@ vi.mock("@/components/chat/ComposerQueueList", () => ({
   },
 }));
 
-vi.mock("@/components/chat/ContextTracker", () => ({
-  ContextTracker: () => <div />,
-}));
 
 vi.mock("@/components/chat/SlashCommandTray", () => ({
   SlashCommandTray: () => <div />,
@@ -1459,9 +1456,10 @@ describe("Composer checkout confirmation", () => {
     render(<Composer threadId={thread.id} workspaceId={workspace.id} />);
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Message Mcode"), "Do this instead");
+    // The run button is Stop only while the draft is empty, so the instruction is typed after the click.
+    await user.click(screen.getByLabelText("Message Mcode"));
     await user.click(screen.getByLabelText("Stop agent"));
-    await user.keyboard("{Enter}");
+    await user.keyboard("Do this instead{Enter}");
 
     await waitFor(() => {
       expect(useQueueStore.getState().queues[thread.id]?.map((message) => message.content)).toEqual(["Do this instead"]);
@@ -1690,7 +1688,7 @@ describe("Composer checkout confirmation", () => {
     });
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
     expect(getTestThreadMessages(thread.id)).toEqual([]);
-    expect(screen.getByTestId("attachment-preview")).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("attachment-preview")).not.toBeInTheDocument();
   });
 
   it("reserves capacity for delayed pathless image persistence", async () => {
@@ -1889,7 +1887,7 @@ describe("Composer checkout confirmation", () => {
       await firstPersistence;
     });
 
-    expect(screen.getByTestId("attachment-preview")).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("attachment-preview")).not.toBeInTheDocument();
     await user.upload(screen.getByTestId("composer-attachment-input"), secondImage);
     await waitFor(() => expect(saveClipboardFile).toHaveBeenCalledTimes(2));
     await user.click(
@@ -1908,7 +1906,7 @@ describe("Composer checkout confirmation", () => {
     });
 
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
-    expect(screen.getByTestId("attachment-preview")).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("attachment-preview")).not.toBeInTheDocument();
     expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 
@@ -2015,7 +2013,7 @@ describe("Composer checkout confirmation", () => {
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
     expect(getTestThreadMessages(threadA.id)).toEqual([]);
     expect(getTestThreadMessages(threadB.id)).toEqual([]);
-    expect(screen.getByTestId("attachment-preview")).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("attachment-preview")).not.toBeInTheDocument();
     expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 });

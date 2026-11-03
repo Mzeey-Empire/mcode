@@ -23,9 +23,8 @@ interface ComposerEditorProps {
   onMentionDismiss: () => void;
   isMentionPopupOpen: boolean;
   /** Called when / trigger is detected - drives slash command tray */
-  onSlashTrigger: (value: string) => void;
+  onSlashTrigger: (textBeforeCaret: string, nodeKey: string) => void;
   onSlashDismiss: () => void;
-  isSlashPopupOpen: boolean;
   /** Called when `/name` is closed by a space; return true to consume the typed command. */
   onInlineSlashCommand?: (commandName: string) => boolean;
   /** Ref callback to expose the LexicalEditor instance */
@@ -46,6 +45,8 @@ interface ComposerEditorProps {
   compact?: boolean;
   /** Caps the compact editor content without affecting the full composer. */
   compactMaxHeight?: number;
+  /** One 24px line that grows with its content; the composer capsule's cell clips or scrolls it. */
+  capsule?: boolean;
   /** When true, intercept navigation keys for popup keyboard handling. */
   isPopupOpen?: boolean;
   /** Called when a navigation key is pressed while popup is open. Returns true if handled. */
@@ -64,6 +65,27 @@ const EDITOR_THEME = {
 const COMPACT_EDITOR_THEME = {
   paragraph: "min-h-0",
 };
+
+// The composer capsule's cell clips or scrolls the draft, so the editor itself only grows.
+const CAPSULE_EDITOR_STYLE = { minHeight: "24px" } as const;
+
+type EditorSizing = "compact" | "capsule" | "card";
+
+const PLACEHOLDER_CLASS: Record<EditorSizing, string> = {
+  compact: "pointer-events-none absolute left-2 top-2.5 text-sm text-muted",
+  capsule: "text-fade pointer-events-none absolute inset-x-0 top-0 whitespace-nowrap text-body text-muted",
+  card: "pointer-events-none absolute left-0 top-0 text-body text-muted",
+};
+
+function editorSizing(compact: boolean, capsule: boolean): EditorSizing {
+  if (compact) return "compact";
+  return capsule ? "capsule" : "card";
+}
+
+function editorStyle(sizing: EditorSizing, compactMaxHeight: number | undefined) {
+  if (sizing === "capsule") return CAPSULE_EDITOR_STYLE;
+  return { ...editorHeightStyle(sizing === "compact", compactMaxHeight), overflowY: "auto" as const };
+}
 
 function editorHeightStyle(compact: boolean, compactMaxHeight: number | undefined) {
   const maximumCompactHeight = compactMaxHeight === undefined ? undefined : Math.max(0, compactMaxHeight);
@@ -151,7 +173,6 @@ export function ComposerEditor({
   isMentionPopupOpen,
   onSlashTrigger,
   onSlashDismiss,
-  isSlashPopupOpen,
   onInlineSlashCommand,
   editorRef,
   contentEditableRef,
@@ -163,16 +184,17 @@ export function ComposerEditor({
   submitOnEnter,
   compact = false,
   compactMaxHeight,
+  capsule = false,
   isPopupOpen,
   onPopupKeyDown,
 }: ComposerEditorProps) {
   const internalRef = useRef<LexicalEditor | null>(null);
   const ref = editorRef ?? internalRef;
-  const heightStyle = editorHeightStyle(compact, compactMaxHeight);
+  const sizing = editorSizing(compact, capsule);
 
   const initialConfig = useRef({
     namespace: "McodeComposer",
-    theme: compact ? COMPACT_EDITOR_THEME : EDITOR_THEME,
+    theme: sizing === "card" ? EDITOR_THEME : COMPACT_EDITOR_THEME,
     nodes: [MentionNode, SlashCommandNode],
     onError: (error: Error) => {
       console.error("[ComposerEditor]", error);
@@ -203,16 +225,11 @@ export function ComposerEditor({
               aria-label={ariaLabel}
               aria-placeholder={placeholder}
               placeholder={
-                <div className={compact
-                  ? "pointer-events-none absolute left-2 top-2.5 text-sm text-muted"
-                  : "pointer-events-none absolute left-0 top-0 text-body text-muted"}>
+                <div className={PLACEHOLDER_CLASS[sizing]}>
                   {placeholder}
                 </div>
               }
-              style={{
-                ...heightStyle,
-                overflowY: "auto",
-              }}
+              style={editorStyle(sizing, compactMaxHeight)}
             />
           }
           ErrorBoundary={LexicalErrorBoundary}
@@ -229,7 +246,6 @@ export function ComposerEditor({
         <SlashCommandPlugin
           onTrigger={onSlashTrigger}
           onDismiss={onSlashDismiss}
-          isPopupOpen={isSlashPopupOpen}
           onInlineCommand={onInlineSlashCommand}
         />
         <KeyboardPlugin

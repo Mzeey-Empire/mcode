@@ -10,6 +10,7 @@ import { invalidateBranchTargets } from "@/features/conversation/composer/execut
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { rememberComposerMode } from "@/lib/composer-mode-preference";
 import { useDiffStore } from "@/stores/diffStore";
+import { OVERVIEW_CANVAS_RESERVE_CSS } from "@/lib/composer-layout";
 import { useOverviewStore } from "@/stores/overviewStore";
 import { useThreadDraftStore } from "@/stores/threadDraftStore";
 import { INTERACTION_MODES, PERMISSION_MODES } from "@/transport";
@@ -75,7 +76,6 @@ vi.mock("@/components/chat/FileTagPopup", () => ({
 }));
 vi.mock("@/components/chat/SpellcheckContextMenu", () => ({ SpellcheckContextMenu: () => <div /> }));
 vi.mock("@/components/chat/ComposerQueueList", () => ({ ComposerQueueList: () => <div /> }));
-vi.mock("@/components/chat/ContextTracker", () => ({ ContextTracker: () => <div /> }));
 vi.mock("@/components/chat/SlashCommandTray", () => ({ SlashCommandTray: () => <div /> }));
 
 const WORKSPACE_ID = "ws-1";
@@ -162,7 +162,7 @@ describe("new-thread Overview", () => {
     expect(within(card).getByTestId("overview-target-workspace")).toHaveTextContent("New worktree · Create");
     await waitFor(() => expect(within(card).getByTestId("overview-target-branch")).toHaveTextContent("From main"));
     expect(screen.getByTestId("new-thread-target-rail")).toBeInTheDocument();
-    expect(screen.getByTestId("new-thread-start-column")).toHaveStyle({ paddingRight: "328px" });
+    expect(screen.getByTestId("new-thread-start-column")).toHaveStyle({ paddingRight: OVERVIEW_CANVAS_RESERVE_CSS });
   });
 
   it("keeps the rail with the targets while the card is open, closed, and reopened", async () => {

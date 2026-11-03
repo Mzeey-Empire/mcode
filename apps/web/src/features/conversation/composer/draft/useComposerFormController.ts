@@ -817,13 +817,11 @@ export function useComposerFormController({
   useEffect(() => {
     const savedDraft = threadId ? getDraft(threadId) : undefined;
     const hasDraft = savedDraft !== undefined && !isNextMessageOnlyDraft(savedDraft);
-    const isRunning = threadId ? useThreadStore.getState().runningThreadIds.has(threadId) : false;
     const reconciliation = reconcileComposerThreadModel({
       activeThreadModel: activeThread?.model,
       activeThreadProvider: activeThread?.provider,
       threadSwitchPending: threadSwitchRef.current,
       hasDraft,
-      isRunning,
       lastServerThreadModelKey: lastServerThreadModelKeyRef.current,
       selection,
     });

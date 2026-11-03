@@ -21,16 +21,15 @@ import {
   type MentionNodeData,
 } from "./MentionNode";
 import type { ProviderCapabilityIdentity } from "@mcode/contracts/providers/capability-catalog";
-import { SLASH_TRIGGER_RE, type Command } from "../useSlashCommand";
+import type { Command } from "../useSlashCommand";
+import { readMenuTrigger } from "../menu-trigger";
 
-/** Props for the SlashCommandPlugin that detects /-triggers in the editor. */
+/** Props for the SlashCommandPlugin that detects menu triggers in the editor. */
 interface SlashCommandPluginProps {
-  /** Called when a /command trigger is detected, with the full text content. */
-  readonly onTrigger: (value: string) => void;
-  /** Called to close the slash tray when the trigger is no longer valid. */
+  /** Called when the caret sits on a menu trigger, with the text before it and its text node's key. */
+  readonly onTrigger: (textBeforeCaret: string, nodeKey: string) => void;
+  /** Called whenever the caret is not on a trigger, so the owner can close the menu and forget an Escape. */
   readonly onDismiss: () => void;
-  /** Whether the slash command tray is currently visible. */
-  readonly isPopupOpen: boolean;
   /**
    * Called when the user types a space right after `/name`. Returning true
    * consumes the command: the plugin removes the `/name ` text from the draft.
@@ -69,12 +68,12 @@ function $findActiveSlashTrigger(): ActiveSlashTrigger | null {
   const caret = $getCollapsedTextCaret();
   if (!caret) return null;
   const textContent = caret.node.getTextContent();
-  const match = SLASH_TRIGGER_RE.exec(textContent.slice(0, caret.offset));
-  if (!match) return null;
+  const trigger = readMenuTrigger(caret.node.getKey(), textContent.slice(0, caret.offset));
+  if (!trigger) return null;
   return {
     node: caret.node,
     textContent,
-    triggerStart: match.index + match[1].length,
+    triggerStart: trigger.anchor.start,
     cursorOffset: caret.offset,
   };
 }
@@ -121,7 +120,6 @@ function removeInlineCommand(editor: LexicalEditor, command: InlineCommandMatch)
 export function SlashCommandPlugin({
   onTrigger,
   onDismiss,
-  isPopupOpen,
   onInlineCommand,
 }: SlashCommandPluginProps): null {
   const [editor] = useLexicalComposerContext();
@@ -130,8 +128,6 @@ export function SlashCommandPlugin({
   onTriggerRef.current = onTrigger;
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
-  const isPopupOpenRef = useRef(isPopupOpen);
-  isPopupOpenRef.current = isPopupOpen;
   const onInlineCommandRef = useRef(onInlineCommand);
   onInlineCommandRef.current = onInlineCommand;
 
@@ -140,12 +136,11 @@ export function SlashCommandPlugin({
       const inlineCommand = editorState.read(() => {
         const caret = $getCollapsedTextCaret();
         const textBeforeCursor = caret?.node.getTextContent().slice(0, caret.offset);
-        if (caret && textBeforeCursor !== undefined && SLASH_TRIGGER_RE.test(textBeforeCursor)) {
-          // Pass only text before the cursor so the regex $ anchor matches
-          onTriggerRef.current(textBeforeCursor);
+        if (caret && textBeforeCursor !== undefined && readMenuTrigger(caret.node.getKey(), textBeforeCursor)) {
+          onTriggerRef.current(textBeforeCursor, caret.node.getKey());
           return null;
         }
-        if (isPopupOpenRef.current) onDismissRef.current();
+        onDismissRef.current();
         // Undo and redo replay history, so they must not re-run a command.
         if (!caret || dirtyLeaves.size === 0 || tags.has("historic")) return null;
         return $matchInlineCommand(prevEditorState, caret);

@@ -10,6 +10,10 @@ describe("cn", () => {
     expect(cn("text-muted", "text-code-small")).toBe("text-muted text-code-small");
   });
 
+  it("keeps the text colour beside the compact type role", () => {
+    expect(cn("text-muted", "text-compact")).toBe("text-muted text-compact");
+  });
+
   it("lets a later type role replace an earlier font size", () => {
     expect(cn("text-sm text-ink", "text-body-small")).toBe("text-ink text-body-small");
   });

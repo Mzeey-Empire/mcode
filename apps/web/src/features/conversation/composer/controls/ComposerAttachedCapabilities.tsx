@@ -1,4 +1,4 @@
-import { Goal, ListTodo, Network } from "lucide-react";
+import { Network } from "lucide-react";
 import { ComposerCapabilityChip } from "@/components/chat/ComposerCapabilityChip";
 import { ActiveGoalChip } from "../ActiveGoalChip";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
@@ -13,52 +13,7 @@ export interface ComposerAttachedCapabilitiesProps {
   selection: ComposerAgentSelection;
   capabilities: ResolvedComposerCapability[];
   activeGoal: GoalState | null | undefined;
-  goalPending: boolean;
-  onDetachPlan(): void;
-  onDetachGoal(): void;
   onDetachOrchestration(): void;
-}
-
-function ComposerPlanCapability({
-  selection,
-  capability,
-  onDetach,
-}: {
-  selection: ComposerAgentSelection;
-  capability: ResolvedComposerCapability | undefined;
-  onDetach(): void;
-}) {
-  if (selection.interactionMode !== "plan" || !capability) return null;
-  return (
-    <ComposerCapabilityChip
-      label={capability.label}
-      icon={ListTodo}
-      turnOffLabel={`Turn off ${capability.label}`}
-      onTurnOff={onDetach}
-      testId="composer-capability-plan"
-    />
-  );
-}
-
-function ComposerPendingGoalCapability({
-  goalPending,
-  capability,
-  onDetach,
-}: {
-  goalPending: boolean;
-  capability: ResolvedComposerCapability | undefined;
-  onDetach(): void;
-}) {
-  if (!goalPending || !capability) return null;
-  return (
-    <ComposerCapabilityChip
-      label={capability.label}
-      icon={Goal}
-      turnOffLabel={`Turn off ${capability.label}`}
-      onTurnOff={onDetach}
-      testId="composer-capability-goal-pending"
-    />
-  );
 }
 
 function ComposerOrchestrationCapability({
@@ -91,26 +46,19 @@ function ComposerActiveGoalCapability({
   return <ActiveGoalChip threadId={threadId} goal={activeGoal} />;
 }
 
-/** Renders the selected Plan, Goal, and orchestration capabilities. */
+/** Renders orchestration and an open goal; Plan and a pending Goal sit beside `+` as modes. */
 export function ComposerAttachedCapabilities({
   threadId,
   isNewThread,
   selection,
   capabilities,
   activeGoal,
-  goalPending,
-  onDetachPlan,
-  onDetachGoal,
   onDetachOrchestration,
 }: ComposerAttachedCapabilitiesProps) {
-  const planCapability = capabilities.find((capability) => capability.id === "plan");
-  const goalCapability = capabilities.find((capability) => capability.id === "goal");
   const orchestrationCapability = capabilities.find((capability) => capability.id === "orchestration");
 
   return (
     <>
-      <ComposerPlanCapability selection={selection} capability={planCapability} onDetach={onDetachPlan} />
-      <ComposerPendingGoalCapability goalPending={goalPending} capability={goalCapability} onDetach={onDetachGoal} />
       <ComposerOrchestrationCapability
         selection={selection}
         capability={orchestrationCapability}

@@ -6,7 +6,6 @@ export interface ComposerThreadModelReconciliationInput {
   activeThreadProvider: string | null | undefined;
   threadSwitchPending: boolean;
   hasDraft: boolean;
-  isRunning: boolean;
   lastServerThreadModelKey: string;
   selection: Pick<ComposerAgentSelection, "modelId" | "provider">;
 }
@@ -30,18 +29,6 @@ function selectionMatchesServerModel(
   return selection.modelId === modelId && selection.provider === provider;
 }
 
-function shouldKeepDraftSelection(hasDraft: boolean, isRunning: boolean): boolean {
-  return hasDraft && !isRunning;
-}
-
-function shouldKeepCurrentSelection(
-  isRunning: boolean,
-  serverRowChanged: boolean,
-  selectionMatches: boolean,
-): boolean {
-  return !isRunning && !serverRowChanged && !selectionMatches;
-}
-
 function createServerSelectionPatch(
   modelId: string,
   provider: string | null | undefined,
@@ -58,7 +45,6 @@ export function reconcileComposerThreadModel({
   activeThreadProvider,
   threadSwitchPending,
   hasDraft,
-  isRunning,
   lastServerThreadModelKey,
   selection,
 }: ComposerThreadModelReconciliationInput): ComposerThreadModelReconciliation {
@@ -71,13 +57,14 @@ export function reconcileComposerThreadModel({
   if (threadSwitchPending) {
     return { serverModelKey, consumeThreadSwitch: true, selectionPatch: null };
   }
-  if (shouldKeepDraftSelection(hasDraft, isRunning)) {
+  if (hasDraft) {
     return { serverModelKey: null, consumeThreadSwitch: false, selectionPatch: null };
   }
 
   const serverRowChanged = lastServerThreadModelKey !== serverModelKey;
   const selectionMatches = selectionMatchesServerModel(selection, activeThreadModel, serverProvider);
-  if (shouldKeepCurrentSelection(isRunning, serverRowChanged, selectionMatches)) {
+  // The user's pick outlives an unchanged server row, even mid-run; only a new server model replaces it.
+  if (!serverRowChanged && !selectionMatches) {
     return { serverModelKey, consumeThreadSwitch: false, selectionPatch: null };
   }
   return {

@@ -77,8 +77,28 @@ export const OVERVIEW_CARD_TOP = 56;
 /** Overview card offset from the right edge of the chat canvas. */
 export const OVERVIEW_CARD_INSET = 16;
 
-/** Right padding the conversation reserves while the card is docked, from the Paper board. */
+/** The docked card's column at the canvas's right edge, card and gap, from the Paper board. */
 export const OVERVIEW_CANVAS_RESERVE = 328;
+
+/** The reading rail's width in px: `--container-reading` (76rem) at the app's 10px root. */
+export const READING_RAIL_WIDTH = 760;
+
+/**
+ * Right padding the conversation takes beside the docked card. It is zero while the centred reading rail clears the
+ * card's column, and otherwise just enough to pull the rail's right edge out of it. Padding moves a centred rail by
+ * half its width, hence twice the column.
+ */
+export function overviewCanvasReserve(canvasWidth: number): number {
+  const needed = READING_RAIL_WIDTH + 2 * OVERVIEW_CANVAS_RESERVE - canvasWidth;
+  return Math.min(OVERVIEW_CANVAS_RESERVE, Math.max(0, needed));
+}
+
+/**
+ * {@link overviewCanvasReserve} as CSS, for an element inside a canvas marked `@container` so `100cqw` is the canvas
+ * width. Layout resolves it in the frame the canvas resizes. A reserve computed from a measured width lands a frame
+ * late and slides the composer under the card while the sidebar animates.
+ */
+export const OVERVIEW_CANVAS_RESERVE_CSS = `clamp(0px, calc(var(--container-reading) + ${2 * OVERVIEW_CANVAS_RESERVE}px - 100cqw), ${OVERVIEW_CANVAS_RESERVE}px)`;
 
 /** Narrowest chat canvas that docks the card and still leaves the composer its minimum width. */
 export const OVERVIEW_DOCK_MIN_CANVAS = 896;

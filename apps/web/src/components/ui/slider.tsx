@@ -15,7 +15,7 @@ export interface SteppedSliderProps {
   readonly className?: string;
 }
 
-// Base UI places the thumb with `inset-inline-start` and sizes the fill with `width`, so
+// Base UI places the thumb with `inset-inline-start` and the fill is sized with `width`, so
 // transitioning both makes the thumb glide onto a stop instead of teleporting there.
 const SNAP_MOTION_CLASS =
   "transition-[inset-inline-start,width] duration-(--duration-fast) ease-(--ease-standard) motion-reduce:transition-none";
@@ -37,7 +37,7 @@ export function SteppedSlider({
   onValueChange,
   className,
 }: SteppedSliderProps) {
-  const valuePercent = stopPercent(value, stops);
+  const thumbStartFraction = Math.max(0, stopPercent(value, stops)) / 100;
 
   return (
     <SliderPrimitive.Root
@@ -50,17 +50,21 @@ export function SteppedSlider({
         if (typeof next === "number" && next !== value) onValueChange(next);
       }}
       className={cn(
-        "group/slider flex w-full touch-none select-none items-center [--slider-thumb-size:2.4rem]",
+        "group/slider flex w-full touch-none select-none items-center [--slider-thumb-size:2rem]",
         className,
       )}
       data-slot="slider"
     >
-      <SliderPrimitive.Control className="flex w-full cursor-pointer items-center py-1">
-        <SliderPrimitive.Track className="relative h-4.5 w-full rounded-full bg-selected dark:bg-control-border/30">
-          {/* At the first stop the fill sits wholly under the thumb, yet anti-aliasing leaves a
-              sliver showing at the shared left edge, so it is hidden there instead. */}
-          <SliderPrimitive.Indicator
-            className={cn("rounded-full bg-primary", SNAP_MOTION_CLASS, valuePercent <= 0 && "opacity-0")}
+      <SliderPrimitive.Control className="flex w-full cursor-pointer items-center py-[3px]">
+        <SliderPrimitive.Track className="relative h-5 w-full rounded-full bg-selected dark:bg-control-border/30">
+          {/* Base UI's Indicator ends at the thumb's centre, leaving the knob's right half outside the tint. This fill
+              ends at the thumb's right edge instead, so the tint wraps the knob with the same 3px it is inset by. */}
+          <span
+            aria-hidden="true"
+            className={cn("absolute inset-y-0 left-0 rounded-full bg-primary/26", SNAP_MOTION_CLASS)}
+            style={{
+              width: `calc((100% - var(--slider-thumb-size)) * ${thumbStartFraction} + var(--slider-thumb-size))`,
+            }}
           />
           <span
             aria-hidden="true"
@@ -71,7 +75,7 @@ export function SteppedSlider({
                 key={index}
                 className={cn(
                   "absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full",
-                  index <= value ? "bg-primary-ink/50" : "bg-muted/60",
+                  index <= value ? "bg-primary/70" : "bg-muted/55",
                 )}
                 style={{ left: `${stopPercent(index, stops)}%` }}
               />
@@ -81,16 +85,15 @@ export function SteppedSlider({
             aria-label={ariaLabel}
             // Base UI clamps an unmatched -1 to the first stop; the controlled value keeps the real label.
             getAriaValueText={() => getStopLabel(value)}
-            className={cn(
-              "size-(--slider-thumb-size) rounded-full outline-none has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus",
-              SNAP_MOTION_CLASS,
-            )}
+            className={cn("group/thumb size-(--slider-thumb-size) rounded-full outline-none", SNAP_MOTION_CLASS)}
           >
-            {/* Press feedback scales this inner disc, not the Thumb: Base UI measures the Thumb's
-                box to place it, so scaling the Thumb would shift it off its stop. */}
+            {/* The Thumb spans the track's height so it stays edge-aligned; the visible knob is a smaller disc
+                inset 3px inside it. Press feedback scales this disc, not the Thumb: Base UI measures the Thumb's
+                box to place it, so scaling the Thumb would shift it off its stop. The focus ring goes on the disc
+                too, because `outline-none` on the Thumb sets the outline style every later outline width reads. */}
             <span
               aria-hidden="true"
-              className="block size-full rounded-full bg-background ring-1 ring-control-border/70 transition-transform duration-(--duration-fast) ease-(--ease-standard) group-active/slider:scale-105 motion-reduce:transition-none dark:bg-ink dark:ring-0"
+              className="m-[3px] block size-3.5 rounded-full bg-primary transition-transform duration-(--duration-fast) ease-(--ease-standard) group-active/slider:scale-105 group-has-focus-visible/thumb:outline-2 group-has-focus-visible/thumb:outline-offset-2 group-has-focus-visible/thumb:outline-focus motion-reduce:transition-none"
             />
           </SliderPrimitive.Thumb>
         </SliderPrimitive.Track>

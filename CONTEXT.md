@@ -1394,9 +1394,12 @@ Provider commands are distinct from Codex custom prompts, even when both use
 the slash-command gesture in the composer.
 _Avoid_: Codex custom prompt, Skill
 
-Slash commands use `/` as their composer gesture. Providers with their own
-native invocation syntax (Codex's `$` mentions) get a translation at the
-provider boundary; the user never types the native syntax in Mcode.
+In the composer, `/` at the start of a word opens every command. `$`, `£`
+and `₦` open the same menu filtered to skills and plugins; followed by a
+digit they stay plain text, so `$5` is money. A pick from either becomes the
+same token, and providers with their own native invocation syntax (Codex's
+`$` mentions) still get a translation at the provider boundary, so the user
+never types the native syntax in Mcode.
 
 Slash commands sit in one of three availability layers:
 
