@@ -15,7 +15,7 @@ export interface SteppedSliderProps {
   readonly className?: string;
 }
 
-// Base UI places the thumb with `inset-inline-start` and sizes the fill with `width`, so
+// Base UI places the thumb with `inset-inline-start` and the fill is sized with `width`, so
 // transitioning both makes the thumb glide onto a stop instead of teleporting there.
 const SNAP_MOTION_CLASS =
   "transition-[inset-inline-start,width] duration-(--duration-fast) ease-(--ease-standard) motion-reduce:transition-none";
@@ -37,7 +37,7 @@ export function SteppedSlider({
   onValueChange,
   className,
 }: SteppedSliderProps) {
-  const valuePercent = stopPercent(value, stops);
+  const thumbStartFraction = Math.max(0, stopPercent(value, stops)) / 100;
 
   return (
     <SliderPrimitive.Root
@@ -57,10 +57,14 @@ export function SteppedSlider({
     >
       <SliderPrimitive.Control className="flex w-full cursor-pointer items-center py-[3px]">
         <SliderPrimitive.Track className="relative h-5 w-full rounded-full bg-selected dark:bg-control-border/30">
-          {/* At the first stop the fill sits wholly under the thumb, yet anti-aliasing leaves a
-              sliver showing at the shared left edge, so it is hidden there instead. */}
-          <SliderPrimitive.Indicator
-            className={cn("rounded-full bg-primary/26", SNAP_MOTION_CLASS, valuePercent <= 0 && "opacity-0")}
+          {/* Base UI's Indicator ends at the thumb's centre, leaving the knob's right half outside the tint. This fill
+              ends at the thumb's right edge instead, so the tint wraps the knob with the same 3px it is inset by. */}
+          <span
+            aria-hidden="true"
+            className={cn("absolute inset-y-0 left-0 rounded-full bg-primary/26", SNAP_MOTION_CLASS)}
+            style={{
+              width: `calc((100% - var(--slider-thumb-size)) * ${thumbStartFraction} + var(--slider-thumb-size))`,
+            }}
           />
           <span
             aria-hidden="true"
