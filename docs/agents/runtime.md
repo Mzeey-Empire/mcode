@@ -35,6 +35,8 @@ bun run agent:ready
 
 `agent:ready` polls `healthUrl` and `appUrl` from the contract. When `.dev/electron-agent-runtime.json` exists, it also verifies the managed worktree app page through the loopback CDP endpoint. The ports file assigns endpoints. It does not prove readiness on its own.
 
+Vite serves the web app from the working tree, but the server and the Electron main process run the bundles `agent:setup` built. `agent:setup` records the content of their sources in `.dev/build-stamp.json`, and `agent:ready` warns and names the files when any of them has changed since. The running server and desktop then lack those changes until you run `agent:down`, `agent:setup`, and `agent:up`.
+
 Use `bun run --shell system` so Windows preserves the final startup contract. Run direct `dev:*` commands only for a specific foreground need, and keep them in the background.
 
 ## Runtime contract and ownership

@@ -50,6 +50,7 @@ export function getRuntimePaths(repoRoot = resolveRepoRoot()) {
     repoRoot: root,
     devDir,
     portsFile: NodePath.join(devDir, PORTS_FILE_NAME),
+    buildStampFile: NodePath.join(devDir, "build-stamp.json"),
     fixtureRepoDir: NodePath.join(devDir, "fixture-repo"),
     dbDir,
     dbPath: NodePath.join(dbDir, "app.sqlite"),
