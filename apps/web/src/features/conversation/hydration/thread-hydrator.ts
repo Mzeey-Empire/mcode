@@ -108,6 +108,8 @@ interface FetchCommitContext {
   epoch: number;
   invalidationGeneration: number;
   conversationRevision: number;
+  /** Resident rows when the fetch started. */
+  messages: ThreadRecord["messages"];
   noticeState: NoticeCollectionSnapshot;
 }
 
@@ -319,6 +321,8 @@ export const ACTIVE_HYDRATION_MAX_DELAY_MS = 500;
 export class ThreadHydrator {
   private readonly auxiliaryHydrator: AuxiliaryHydrator;
   private readonly activeHydrates = new Map<string, Promise<void>>();
+  /** Invalidation generation each active hydrate started under. */
+  private readonly activeHydrateGenerations = new WeakMap<Promise<void>, number>();
   private readonly backgroundHydrates = new Map<string, Promise<void>>();
   private readonly residentHydrates = new Map<string, Promise<void>>();
   private readonly residentHydrateGenerations = new Map<string, number>();
@@ -782,7 +786,9 @@ export class ThreadHydrator {
   private async hydrateActive(threadId: string, opts?: ThreadHydratorOptions): Promise<void> {
     const residentContent = this.prepareActiveThreadSelection(threadId);
     const inFlight = this.activeHydrates.get(threadId);
-    if (inFlight) {
+    // An invalidated hydrate discards its page, so joining it would leave the thread without history.
+    // Reconnect recovery for a running thread invalidates and then refreshes during the first load.
+    if (inFlight && this.activeHydrateGenerations.get(inFlight) === (this.invalidationGenerations.get(threadId) ?? 0)) {
       await this.joinActiveHydration(threadId, opts, residentContent, inFlight);
       return;
     }
@@ -878,6 +884,7 @@ export class ThreadHydrator {
       this.pruneInvalidationGeneration(threadId);
     });
     this.activeHydrates.set(threadId, hydrate);
+    this.activeHydrateGenerations.set(hydrate, this.invalidationGenerations.get(threadId) ?? 0);
     await hydrate;
   }
 
@@ -1274,7 +1281,7 @@ export class ThreadHydrator {
     const context = this.startFetchCommit(threadId, commitOpts);
     try {
       const loaded = await this.loadActiveConversation(threadId, commitOpts);
-      if (!this.fetchCommitContextMatches(threadId, context)) return this.settleDiscardedFetch(threadId, context);
+      if (!this.fetchedPageCanCommit(threadId, context)) return this.settleDiscardedFetch(threadId, context);
       this.commitFetchedConversation(threadId, loaded.page, context);
       recordThreadCommit(threadId, "network-fetch");
       // Fires concurrently with the tail followup so detail lands as close to
@@ -1296,6 +1303,7 @@ export class ThreadHydrator {
       epoch: record.loadEpoch,
       invalidationGeneration: this.invalidationGenerations.get(threadId) ?? 0,
       conversationRevision: conversationRevision(record),
+      messages: record.messages,
       noticeState: noticeCollectionSnapshot(record),
     };
   }
@@ -1340,6 +1348,20 @@ export class ThreadHydrator {
       && record.loadEpoch === context.epoch
       && (this.invalidationGenerations.get(threadId) ?? 0) === context.invalidationGeneration
       && conversationRevision(record) === context.conversationRevision;
+  }
+
+  /**
+   * The page merges into the resident record, so only a change to the resident rows makes it stale.
+   * A running turn changes streaming text, tools and narrative faster than a page round trip, and
+   * discarding on those would leave a reloaded running thread with no history.
+   */
+  private fetchedPageCanCommit(threadId: string, context: FetchCommitContext): boolean {
+    const state = this.deps.getState();
+    const record = getThreadRecord(state.records, threadId);
+    return state.currentThreadId === threadId
+      && record.loadEpoch === context.epoch
+      && (this.invalidationGenerations.get(threadId) ?? 0) === context.invalidationGeneration
+      && record.messages === context.messages;
   }
 
   private settleDiscardedFetch(threadId: string, context: FetchCommitContext): void {
@@ -1397,7 +1419,7 @@ export class ThreadHydrator {
 
   private currentFetchCommitContext(threadId: string): FetchCommitContext {
     const record = getThreadRecord(this.deps.getState().records, threadId);
-    return { epoch: record.loadEpoch, invalidationGeneration: this.invalidationGenerations.get(threadId) ?? 0, conversationRevision: conversationRevision(record), noticeState: noticeCollectionSnapshot(record) };
+    return { epoch: record.loadEpoch, invalidationGeneration: this.invalidationGenerations.get(threadId) ?? 0, conversationRevision: conversationRevision(record), messages: record.messages, noticeState: noticeCollectionSnapshot(record) };
   }
 
   private async hydrateTailNarrative(threadId: string, context: FetchCommitContext): Promise<boolean> {

@@ -137,13 +137,19 @@ function createAtomicRequest(
   };
 }
 
-function atomicResponseIsCurrent(refs: SubscriptionRefs, request: AtomicRequestContext): boolean {
+function isLatestAtomicRequest(refs: SubscriptionRefs, request: AtomicRequestContext): boolean {
   const currentRequest = refs.atomicRequest.current;
   return [
     refs.mounted.current,
     refs.epoch.current === request.epoch,
     currentRequest?.epoch === request.epoch,
     currentRequest?.id === request.requestId,
+  ].every(Boolean);
+}
+
+function atomicResponseIsCurrent(refs: SubscriptionRefs, request: AtomicRequestContext): boolean {
+  const currentRequest = refs.atomicRequest.current;
+  return isLatestAtomicRequest(refs, request) && [
     currentRequest?.signature === request.targetSignature,
     refs.targetSignature.current === request.targetSignature,
     sameThreadIds(refs.desiredThreadIds.current, request.sentThreadIds),
@@ -174,12 +180,14 @@ function refreshConversation(threadId: string): void {
 function applyCanonicalRecovery(
   recovery: CanonicalAgentProgressRecovery,
   revisions: NonNullable<SetThreadSubscriptionsInput["revisions"]>,
-  activeThreadId: string | null,
 ): void {
   if (!canonicalRecoveryChanged(recovery, revisions)) return;
   const residency = getConversationResidency();
   residency.invalidateConversation(recovery.threadId);
-  if (recovery.threadId === activeThreadId || residency.isDisplayConversationLeased(recovery.threadId)) {
+  // Read the selection when the response lands. After a page reload the request goes out before the
+  // route selects the thread, and the invalidation above discards the selected thread's first load.
+  const selected = useThreadStore.getState().currentThreadId === recovery.threadId;
+  if (selected || residency.isDisplayConversationLeased(recovery.threadId)) {
     refreshConversation(recovery.threadId);
   }
 }
@@ -189,16 +197,20 @@ function applyAtomicResponse(
   request: AtomicRequestContext,
   context: SubscriptionReconcileContext,
 ): void {
+  if (!isLatestAtomicRequest(context.refs, request)) return;
+  // The server replaced its set with this request's threads even if the target moved on in flight.
+  // An older confirmed set can equal the new target and skip the follow-up. The server would then
+  // miss threads outside this request, and a replica reset since that older set would never recover.
+  context.refs.confirmedThreadIds.current = request.sentThreadIds;
   if (!atomicResponseIsCurrent(context.refs, request)) return;
   const canonicalRecoveries = result.canonicalRecoveries ?? [];
   if (canonicalRecoveries.length > 0) {
     useThreadStore.getState().applyCanonicalReconnectRecoveries(canonicalRecoveries);
   }
   for (const recovery of canonicalRecoveries) {
-    applyCanonicalRecovery(recovery, request.revisions, context.activeThreadId);
+    applyCanonicalRecovery(recovery, request.revisions);
   }
   if (!atomicResponseIsCurrent(context.refs, request)) return;
-  context.refs.confirmedThreadIds.current = request.sentThreadIds;
   context.refs.retryAttempt.current = 0;
   context.refs.retryExhausted.current = false;
 }

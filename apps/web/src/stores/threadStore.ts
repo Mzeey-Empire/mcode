@@ -134,6 +134,7 @@ import {
 export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
 import { endedWithoutCompleting, getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
+import { createFramePacer } from "./frame-pacer";
 
 function activeCanonicalExecutionId(turn: AgentTurn | undefined): string | undefined {
   if (!turn || (turn.status !== "Pending" && turn.status !== "Running")) return undefined;
@@ -154,62 +155,45 @@ type PendingCanonicalPublication = {
 };
 
 const CANONICAL_PUBLICATION_INLINE_MAX = 32;
-const CANONICAL_PUBLICATION_FRAME_MAX = 32;
 const CANONICAL_PUBLICATION_BURST_WINDOW_MS = 1000;
 const CANONICAL_PROGRESS_INLINE_MAX = 16;
-const CANONICAL_PROGRESS_FRAME_MAX = 1;
 const CANONICAL_PROGRESS_MERGE_EVENT_MAX = 64;
-let canonicalPublicationFlushRaf: number | null = null;
-let canonicalProgressFlushRaf: number | null = null;
+const canonicalPublicationPacer = createFramePacer(flushPendingCanonicalPublications);
+const canonicalProgressPacer = createFramePacer(flushPendingCanonicalProgress);
 let flushingCanonicalProgress = false;
 const pendingCanonicalPublications: PendingCanonicalPublication[] = [];
 const pendingCanonicalProgressFrames: CanonicalAgentProgressFrame[] = [];
 const canonicalPublicationBurstByThread = new Map<string, { readonly startedAt: number; readonly count: number }>();
 const canonicalProgressBurstByThread = new Map<string, { readonly startedAt: number; readonly count: number }>();
 
-function cancelCanonicalPublicationFlush(): void {
-  if (canonicalPublicationFlushRaf == null) return;
-  cancelAnimationFrame(canonicalPublicationFlushRaf);
-  canonicalPublicationFlushRaf = null;
-}
-
-function flushPendingCanonicalPublications(limit = Number.POSITIVE_INFINITY): void {
-  cancelCanonicalPublicationFlush();
-  let remaining = limit;
-  while (remaining > 0 && pendingCanonicalPublications.length > 0) {
-    remaining -= 1;
+function flushPendingCanonicalPublications(deadline = Number.POSITIVE_INFINITY): void {
+  canonicalPublicationPacer.cancel();
+  while (pendingCanonicalPublications.length > 0) {
     const publication = pendingCanonicalPublications.shift();
     if (!publication) continue;
     const state = useThreadStore.getState();
-    if (!state.records.has(publication.event.threadId) && state.currentThreadId !== publication.event.threadId) {
-      continue;
+    if (state.records.has(publication.event.threadId) || state.currentThreadId === publication.event.threadId) {
+      state.handleAgentEvent(publication.event, publication.canonical);
     }
-    state.handleAgentEvent(publication.event, publication.canonical);
+    if (performance.now() >= deadline) break;
   }
-  if (pendingCanonicalPublications.length > 0) scheduleCanonicalPublicationFlush();
+  if (pendingCanonicalPublications.length > 0) canonicalPublicationPacer.schedule();
 }
 
-function cancelCanonicalProgressFlush(): void {
-  if (canonicalProgressFlushRaf == null) return;
-  cancelAnimationFrame(canonicalProgressFlushRaf);
-  canonicalProgressFlushRaf = null;
-}
-
-function flushPendingCanonicalProgress(limit = Number.POSITIVE_INFINITY): void {
-  cancelCanonicalProgressFlush();
-  let remaining = limit;
+function flushPendingCanonicalProgress(deadline = Number.POSITIVE_INFINITY): void {
+  canonicalProgressPacer.cancel();
   flushingCanonicalProgress = true;
   try {
-    while (remaining > 0 && pendingCanonicalProgressFrames.length > 0) {
-      remaining -= 1;
+    while (pendingCanonicalProgressFrames.length > 0) {
       const frame = shiftMergedCanonicalProgressFrame();
       if (frame) useThreadStore.getState().handleCanonicalProgress(frame);
+      if (performance.now() >= deadline) break;
     }
   } finally {
     flushingCanonicalProgress = false;
   }
   if (pendingCanonicalProgressFrames.length > 0) {
-    scheduleCanonicalProgressFlush();
+    canonicalProgressPacer.schedule();
     return;
   }
   canonicalProgressBurstByThread.clear();
@@ -240,22 +224,6 @@ function canMergeAcceptedProgress(
     && left.events.length + right.events.length <= Math.min(CANONICAL_AGENT_PROGRESS_BATCH_MAX, CANONICAL_PROGRESS_MERGE_EVENT_MAX);
 }
 
-function scheduleCanonicalPublicationFlush(): void {
-  if (canonicalPublicationFlushRaf != null) return;
-  canonicalPublicationFlushRaf = requestAnimationFrame(() => {
-    canonicalPublicationFlushRaf = null;
-    flushPendingCanonicalPublications(CANONICAL_PUBLICATION_FRAME_MAX);
-  });
-}
-
-function scheduleCanonicalProgressFlush(): void {
-  if (canonicalProgressFlushRaf != null) return;
-  canonicalProgressFlushRaf = requestAnimationFrame(() => {
-    canonicalProgressFlushRaf = null;
-    flushPendingCanonicalProgress(CANONICAL_PROGRESS_FRAME_MAX);
-  });
-}
-
 function dispatchCanonicalPublicationEvent(event: AgentEvent, canonical: CanonicalPublicationIdentity, forceYield = false): void {
   const shouldYield = forceYield || pendingCanonicalPublications.length > 0 || shouldYieldCanonicalPublication(event.threadId);
   if (shouldYield && hasCanonicalToolProjection(event)) {
@@ -267,7 +235,7 @@ function dispatchCanonicalPublicationEvent(event: AgentEvent, canonical: Canonic
     return;
   }
   pendingCanonicalPublications.push({ event, canonical });
-  scheduleCanonicalPublicationFlush();
+  canonicalPublicationPacer.schedule();
 }
 
 function queueCanonicalPublicationEvent(event: AgentEvent, canonical: CanonicalPublicationIdentity): void {
@@ -393,7 +361,7 @@ function shouldDeferCanonicalProgress(frame: CanonicalAgentProgressFrame): boole
 
 function queueCanonicalProgressFrame(frame: CanonicalAgentProgressFrame): void {
   pendingCanonicalProgressFrames.push(frame);
-  scheduleCanonicalProgressFlush();
+  canonicalProgressPacer.schedule();
 }
 
 function canReceiveCanonicalProgress(
