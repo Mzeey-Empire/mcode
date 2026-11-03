@@ -58,7 +58,7 @@ export function ComposerAddMenu({
     setAnchor(rect ? { getBoundingClientRect: () => rect } : undefined);
   };
 
-  const afterClose = (action: () => void) => () => requestAnimationFrame(action);
+  const nextFrame = (action: () => void) => () => requestAnimationFrame(action);
 
   const addButton = (
     <Button
@@ -92,7 +92,7 @@ export function ComposerAddMenu({
       >
         <DropdownMenuGroup>
           <DropdownMenuGroupLabel>Attach</DropdownMenuGroupLabel>
-          <DropdownMenuItem label="Files" icon={<FilePlusCorner />} onClick={afterClose(onAttachFiles)} />
+          <DropdownMenuItem label="Files" icon={<FilePlusCorner />} onClick={nextFrame(onAttachFiles)} />
         </DropdownMenuGroup>
         {capabilities.length > 0 ? (
           <>
@@ -110,7 +110,7 @@ export function ComposerAddMenu({
                     checked={attached}
                     disabled={lockedCapabilityIds.has(capability.id)}
                     closeOnClick
-                    onCheckedChange={afterClose(() => onAttachCapability(capability.id))}
+                    onCheckedChange={nextFrame(() => onAttachCapability(capability.id))}
                   />
                 );
               })}

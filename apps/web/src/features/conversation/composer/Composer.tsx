@@ -408,7 +408,7 @@ export function Composer({
   const focusEditor = useCallback(() => {
     editorRef.current?.focus();
   }, [editorRef]);
-  const attachFromMenu = useCallback(() => {
+  const focusDraftThenPickFiles = useCallback(() => {
     focusEditor();
     handleAttachPick();
   }, [focusEditor, handleAttachPick]);
@@ -701,7 +701,7 @@ export function Composer({
             onMarkRestoredPreviewAnnotationsCleared: markRestoredPreviewAnnotationsCleared,
             onRemoveAttachment: removeAttachment,
             onAttachmentInputChange: handleAttachmentInputChange,
-            onAttachPick: attachFromMenu,
+            onAttachPick: focusDraftThenPickFiles,
             onAttachCapability: agentControls.attachCapability,
             onSelectionChange: updateSelection,
             onSelectionTouched: markAgentSettingsTouched,
