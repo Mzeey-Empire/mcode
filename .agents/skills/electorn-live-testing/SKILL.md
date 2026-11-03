@@ -135,7 +135,7 @@ Photos are `electronPage.screenshot({ path })` under `.dev/verification/`. For v
    nodeRepl.write(await recording.stop());
    ```
 
-The screencast captures web contents only — no native menus or OS dialogs — and emits frames only on repaint, so interact before stopping or the clip is empty. For window-level capture use `ffmpeg -f gdigrab -i "title=<window title>"` with the title from `electronPage.title()`. `docs/research/electron-video-capture.md` covers the approach and the rejected alternatives.
+The screencast captures web contents only — no native menus or OS dialogs. Clips play at real speed. Each frame holds until the page repaints, and the last frame holds until `stop()`. For window-level capture use `ffmpeg -f gdigrab -i "title=<window title>"` with the title from `electronPage.title()`. `docs/research/electron-video-capture.md` covers the approach and the rejected alternatives.
 
 Keep clips to 10–20 seconds; GitHub caps free-plan video attachments at 10 MB. Attach at creation with `gh pr create --attach <file>` so evidence lands in the PR body, not in a follow-up comment — and confirm the upload renders. A local path is not evidence.
 
