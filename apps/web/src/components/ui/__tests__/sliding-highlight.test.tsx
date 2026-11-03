@@ -130,6 +130,27 @@ describe("SlidingHighlight", () => {
     expect(slides(fill)).toBe(false);
   });
 
+  it("holds the fill while its popup pours, then places it on the row marked by then", async () => {
+    const PouringList = ({ pouring, active }: { readonly pouring: boolean; readonly active: number }) => (
+      <div data-pouring={pouring ? "" : undefined}>
+        <List rows={["a", "b", "c"]} active={active} />
+      </div>
+    );
+    const { container, rerender } = render(<PouringList pouring active={0} />);
+    const fill = fillOf(container);
+    await nextFrame();
+    expect(showing(fill)).toBe(false);
+
+    rerender(<PouringList pouring active={2} />);
+    await nextFrame();
+    expect(showing(fill)).toBe(false);
+
+    rerender(<PouringList pouring={false} active={2} />);
+    await nextFrame();
+    expect(fill.style.transform).toBe(`translate(4px,${4 + 2 * ROW_HEIGHT}px)`);
+    expect(showing(fill)).toBe(true);
+  });
+
   it("shows no fill in a group with one option", async () => {
     const { container } = render(<List rows={["only"]} active={0} />);
     await nextFrame();

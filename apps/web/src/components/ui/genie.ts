@@ -12,10 +12,19 @@ export const GENIE_CLOSE_MS = 160;
 const SHADOW_SIDE = 44;
 const SHADOW_UP = 28;
 const SHADOW_DOWN = 60;
+/**
+ * The squeeze at which a row's shadow room is gone. The popup's own background is not squeezed, so any room left
+ * beside a narrowed row shows that background past it; the shadow is cut there instead.
+ */
+const SHADOW_GONE = 0.1;
 /** Points sampled down each side of the outline: enough for a smooth S-curve, few enough to write every frame. */
 const EDGE_POINTS = 24;
 /** Hides an open's popup until its first frame, when it has its place and can be measured. */
 const UNMEASURED_CLIP = "inset(50%)";
+/** Bands this close to the trigger's centre line flatten as they enter it. */
+const THROAT = 24;
+/** Boxes up to this tall squeeze as one band; a taller box squeezes its children instead. */
+const BAND_MAX_HEIGHT = 48;
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const smoothstep = (value: number) => value * value * (3 - 2 * value);
@@ -47,6 +56,42 @@ export interface GenieShape {
   readonly right: readonly GeniePoint[];
 }
 
+/** A row of the popup that squeezes as one piece, in the popup's own pixels before its shift. */
+export interface GenieBand {
+  /** The band's vertical middle. */
+  readonly mid: number;
+  /** The point the band scales about: its transform origin. */
+  readonly pivotX: number;
+  readonly pivotY: number;
+}
+
+/** A band's CSS `translate` and `scale` at one openness. */
+export interface GenieSqueeze {
+  readonly x: number;
+  readonly y: number;
+  readonly scaleX: number;
+  readonly scaleY: number;
+}
+
+/** How far the popup has slid toward the trigger at `openness`, and how hard the funnel squeezes the row at `y`. */
+function pourAt(openness: number, geometry: GenieGeometry) {
+  const { originY } = geometry;
+  const p = 1 - clamp01(openness);
+  const funnel = smoothstep(clamp01(p / 0.45));
+  const shift = clamp01((p - 0.2) / 0.8) ** 2 * originY;
+  const squeezeAt = (y: number) => {
+    const distance = originY - (y + shift);
+    return distance <= 0 ? funnel : funnel * (1 - smoothstep(clamp01(distance / originY)));
+  };
+  return { shift, squeezeAt };
+}
+
+/** The funnel's row at one squeeze: its centre, and its width as a share of the popup's. */
+function funnelRow(squeeze: number, geometry: GenieGeometry) {
+  const { width, originX, originWidth } = geometry;
+  return { centre: width / 2 + squeeze * (originX - width / 2), scale: 1 - squeeze * (1 - originWidth / width) };
+}
+
 /**
  * The popup's outline at `openness` (0 is folded into the trigger, 1 is the open popup). Each point narrows toward the
  * trigger by an amount set by its distance from it: near points pinch to the trigger's width, far ones stay full width,
@@ -55,17 +100,11 @@ export interface GenieShape {
  * the trigger rather than covering it.
  */
 export function genieShape(openness: number, geometry: GenieGeometry): GenieShape {
-  const { width, height, originX, originY, originWidth } = geometry;
-  const p = 1 - clamp01(openness);
-  const funnel = smoothstep(clamp01(p / 0.45));
-  const shift = clamp01((p - 0.2) / 0.8) ** 2 * originY;
-  const squeezeAt = (y: number) => {
-    const distance = originY - (y + shift);
-    return distance <= 0 ? funnel : funnel * (1 - smoothstep(clamp01(distance / originY)));
-  };
-  // The shadow room shrinks as its edge pinches, so a folded popup leaves no shadow outside the throat.
-  const top = -SHADOW_UP * (1 - squeezeAt(0));
-  const bottom = height + SHADOW_DOWN * (1 - squeezeAt(height));
+  const { width, height, originY } = geometry;
+  const { shift, squeezeAt } = pourAt(openness, geometry);
+  const shadowRoom = (squeeze: number) => 1 - clamp01(squeeze / SHADOW_GONE);
+  const top = -SHADOW_UP * shadowRoom(squeezeAt(0));
+  const bottom = height + SHADOW_DOWN * shadowRoom(squeezeAt(height));
   // Only content that has slid is cut at the line; the open popup's shadow may still fall across the trigger.
   const line = shift > 0 ? originY - shift : Number.POSITIVE_INFINITY;
   const left: GeniePoint[] = [];
@@ -73,12 +112,30 @@ export function genieShape(openness: number, geometry: GenieGeometry): GenieShap
   for (let i = 0; i < EDGE_POINTS; i++) {
     const y = Math.min(top + ((bottom - top) * i) / (EDGE_POINTS - 1), line);
     const squeeze = squeezeAt(y);
-    const half = (width / 2) * (1 - squeeze * (1 - originWidth / width)) + SHADOW_SIDE * (1 - squeeze);
-    const centre = width / 2 + squeeze * (originX - width / 2);
-    left.push({ x: centre - half, y });
-    right.push({ x: centre + half, y });
+    const row = funnelRow(squeeze, geometry);
+    const half = (width / 2) * row.scale + SHADOW_SIDE * shadowRoom(squeeze);
+    left.push({ x: row.centre - half, y });
+    right.push({ x: row.centre + half, y });
   }
   return { shift, left, right };
+}
+
+/**
+ * How `band` moves at `openness`: the popup's full width at the band's middle lands on the outline's row there, so
+ * the content narrows and drifts with the funnel, and the band flattens as it nears the trigger's centre line. A band
+ * that has slid past that line is flat; the outline cuts there anyway.
+ */
+export function genieBandSqueeze(openness: number, geometry: GenieGeometry, band: GenieBand): GenieSqueeze {
+  const { shift, squeezeAt } = pourAt(openness, geometry);
+  const row = funnelRow(squeezeAt(band.mid), geometry);
+  const scaleY = clamp01((geometry.originY - (band.mid + shift)) / THROAT);
+  // CSS scales about the band's pivot, so the translate also undoes the pivot's own drift.
+  return {
+    x: row.centre - (geometry.width / 2) * row.scale - band.pivotX * (1 - row.scale),
+    y: (band.mid - band.pivotY) * (1 - scaleY),
+    scaleX: row.scale,
+    scaleY,
+  };
 }
 
 function clipPathOf(shape: GenieShape): string {
@@ -105,18 +162,82 @@ export function opennessAt(clock: GenieClock, elapsed: number): number {
   return clock.from + (clock.to - clock.from) * t;
 }
 
-/** Where `popup` and `origin` sit now. Read only while the popup has no shift of the Genie's own. */
-function measure(popup: HTMLElement, origin: HTMLElement): GenieGeometry | null {
+/** A band and the element that draws it. */
+interface MeasuredBand {
+  readonly element: HTMLElement | SVGElement;
+  readonly band: GenieBand;
+}
+
+/** What a run measures once: where the popup and its trigger sit, and the rows it squeezes. */
+interface Measured {
+  readonly geometry: GenieGeometry;
+  readonly bands: readonly MeasuredBand[];
+}
+
+/** Where `popup` and `origin` sit now. Read only while the popup and its bands have no shift of the Genie's own. */
+function measure(popup: HTMLElement, origin: HTMLElement): Measured | null {
   const box = popup.getBoundingClientRect();
   if (box.width === 0 || box.height === 0) return null;
   const trigger = origin.getBoundingClientRect();
-  return {
+  const geometry = {
     width: box.width,
     height: box.height,
     originX: trigger.left + trigger.width / 2 - box.left,
     originY: trigger.top + trigger.height / 2 - box.top,
     originWidth: trigger.width,
   };
+  return { geometry, bands: measureBands(popup, box) };
+}
+
+/**
+ * The popup's rows: each visible box no taller than a band, or a taller box with no child boxes. CSS cannot bend
+ * content, so the Genie squeezes these whole while the outline curves around them.
+ */
+function measureBands(popup: HTMLElement, box: DOMRect): MeasuredBand[] {
+  const bands: MeasuredBand[] = [];
+  const visit = (element: Element) => {
+    if (!(element instanceof HTMLElement || element instanceof SVGElement)) return;
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const tall = rect.height > BAND_MAX_HEIGHT && element.children.length > 0;
+    if (style.display === "contents" || tall) return [...element.children].forEach(visit);
+    const pivot = showsIn(rect, box) ? pivotOf(style, rect) : null;
+    if (!pivot) return;
+    bands.push({ element, band: { mid: rect.top - box.top + rect.height / 2, pivotX: pivot.x - box.left, pivotY: pivot.y - box.top } });
+  };
+  [...popup.children].forEach(visit);
+  return bands;
+}
+
+function showsIn(rect: DOMRect, box: DOMRect): boolean {
+  return rect.width > 0 && rect.height > 0 && rect.bottom > box.top && rect.top < box.bottom;
+}
+
+/**
+ * Where a band's transform origin sits on screen: its layout box, found by taking its own translation back off its
+ * rect, plus `transform-origin`, which defaults to the centre. Null when the band also scales or turns itself.
+ */
+function pivotOf(style: CSSStyleDeclaration, rect: DOMRect): GeniePoint | null {
+  const moved = translationOf(style);
+  if (!moved) return null;
+  const [x = Number.NaN, y = Number.NaN] = style.transformOrigin.split(" ").map(parseFloat);
+  return {
+    x: rect.left - moved.x + (Number.isFinite(x) ? x : rect.width / 2),
+    y: rect.top - moved.y + (Number.isFinite(y) ? y : rect.height / 2),
+  };
+}
+
+/**
+ * How far a band's own `transform` moves it, or null when the band scales or turns itself: the squeeze would overwrite
+ * its `translate` or `scale`, and its sums assume a band that is only moved. A sliding highlight is why a translation
+ * is allowed: it sits at its list's top-left and a `translate()` moves it onto its row.
+ */
+function translationOf(style: CSSStyleDeclaration): GeniePoint | null {
+  const own = [style.translate, style.scale, style.rotate].some((value) => value && value !== "none");
+  if (own) return null;
+  if (!style.transform || style.transform === "none") return { x: 0, y: 0 };
+  const match = /^matrix\(1, 0, 0, 1, ([^,]+), ([^)]+)\)$/.exec(style.transform);
+  return match ? { x: Number(match[1]), y: Number(match[2]) } : null;
 }
 
 function prefersReducedMotion(): boolean {
@@ -127,7 +248,7 @@ interface Run {
   readonly direction: "open" | "close";
   readonly clock: GenieClock;
   /** Read on the run's first frame, because Base UI places a new popup only after it mounts. A turnaround keeps it. */
-  geometry: GenieGeometry | null;
+  measured: Measured | null;
   /** The trigger the run pours from or into. An open whose popover switches to another trigger stops pouring. */
   readonly origin: HTMLElement;
   openness: number;
@@ -138,8 +259,9 @@ interface Run {
 
 /**
  * Runs the Genie for one popover root. The wrapper tells it when the popup mounts, opens and closes; it owns the frame
- * loop and the real popup's inline clip and shift. Each frame writes only `clip-path` and `transform`. Every method is
- * safe to call twice.
+ * loop, the real popup's inline clip and shift, and its rows' inline `translate` and `scale`. While a run is under way
+ * the popup carries `data-pouring`, so anything that measures the rows can wait for them to rest. Every method is safe
+ * to call twice.
  */
 export class GenieMotion {
   private popup: HTMLElement | null = null;
@@ -192,9 +314,9 @@ export class GenieMotion {
     const popup = this.popup;
     const origin = this.movingOrigin();
     if (!popup || !origin) return false;
-    const geometry = this.run?.geometry ?? measure(popup, origin);
-    if (!geometry) return false;
-    this.start(popup, "close", startClock(this.run ? this.run.openness : 1, 0, GENIE_CLOSE_MS), origin, geometry, onDone);
+    const measured = this.run?.measured ?? measure(popup, origin);
+    if (!measured) return false;
+    this.start(popup, "close", startClock(this.run ? this.run.openness : 1, 0, GENIE_CLOSE_MS), origin, measured, onDone);
     return true;
   }
 
@@ -221,7 +343,7 @@ export class GenieMotion {
   private startOpen(popup: HTMLElement, from: number): void {
     const origin = this.movingOrigin();
     if (!origin) return;
-    this.start(popup, "open", startClock(from, 1, GENIE_OPEN_MS), origin, this.run?.geometry ?? null, undefined);
+    this.start(popup, "open", startClock(from, 1, GENIE_OPEN_MS), origin, this.run?.measured ?? null, undefined);
   }
 
   /** The trigger to pour from or into, or null when the popup should just fade. */
@@ -234,7 +356,7 @@ export class GenieMotion {
     direction: Run["direction"],
     clock: GenieClock,
     origin: HTMLElement,
-    geometry: GenieGeometry | null,
+    measured: Measured | null,
     onDone: Run["onDone"],
   ): void {
     this.stopFrame();
@@ -245,10 +367,11 @@ export class GenieMotion {
     popup.style.animation = "none";
     popup.dataset.genie = "";
     popup.style.willChange = "transform";
-    const run: Run = { direction, clock, geometry, origin, openness: clock.from, frame: 0, start: null, onDone };
+    popup.dataset.pouring = "";
+    const run: Run = { direction, clock, measured, origin, openness: clock.from, frame: 0, start: null, onDone };
     this.run = run;
     // Set now, from the layout effect or the ref, so the popup never paints whole before its first frame.
-    if (geometry) this.draw(run, geometry);
+    if (measured) this.draw(run, measured);
     else popup.style.clipPath = UNMEASURED_CLIP;
     run.frame = requestAnimationFrame(this.tick);
   }
@@ -261,24 +384,29 @@ export class GenieMotion {
       this.finish();
       return;
     }
-    run.geometry ??= measure(popup, run.origin);
-    if (!run.geometry) {
+    run.measured ??= measure(popup, run.origin);
+    if (!run.measured) {
       this.cancel();
       return;
     }
     run.start ??= now;
     run.openness = opennessAt(run.clock, now - run.start);
-    this.draw(run, run.geometry);
+    this.draw(run, run.measured);
     if (run.openness === run.clock.to) this.finish();
     else run.frame = requestAnimationFrame(this.tick);
   };
 
-  private draw(run: Run, geometry: GenieGeometry): void {
+  private draw(run: Run, { geometry, bands }: Measured): void {
     const popup = this.popup;
     if (!popup) return;
     const shape = genieShape(run.openness, geometry);
     popup.style.clipPath = clipPathOf(shape);
     popup.style.transform = `translateY(${shape.shift.toFixed(1)}px)`;
+    for (const { element, band } of bands) {
+      const squeeze = genieBandSqueeze(run.openness, geometry, band);
+      element.style.translate = `${squeeze.x.toFixed(2)}px ${squeeze.y.toFixed(2)}px`;
+      element.style.scale = `${squeeze.scaleX.toFixed(4)} ${squeeze.scaleY.toFixed(4)}`;
+    }
   }
 
   private readonly endOpenEarly = (): void => {
@@ -288,10 +416,11 @@ export class GenieMotion {
   private finish(): void {
     const run = this.run;
     if (!run) return;
-    // A finished close keeps its folded clip: the popup is about to unmount, and unclipping it would flash it whole.
+    // A finished close stays folded: the popup is about to unmount, and unfolding it would flash it whole.
     if (run.direction === "close") {
       this.stopFrame();
       this.run = null;
+      if (this.popup) delete this.popup.dataset.pouring;
     } else {
       this.stop();
     }
@@ -300,12 +429,17 @@ export class GenieMotion {
 
   private stop(): void {
     this.stopFrame();
+    for (const { element } of this.run?.measured?.bands ?? []) {
+      element.style.translate = "";
+      element.style.scale = "";
+    }
     this.run = null;
     const popup = this.popup;
     if (!popup) return;
     popup.style.clipPath = "";
     popup.style.transform = "";
     popup.style.willChange = "";
+    delete popup.dataset.pouring;
   }
 
   private stopFrame(): void {

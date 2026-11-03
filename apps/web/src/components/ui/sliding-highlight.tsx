@@ -46,19 +46,27 @@ export function SlidingHighlight({ follow }: { readonly follow: HighlightFollow 
   return <span ref={fillRef} aria-hidden="true" data-slot="sliding-highlight" className={FILL_CLASS} />;
 }
 
-/** Coalesces changes to one placement per frame; a rebuild in the frame wins over a move so it snaps. */
-function frameScheduler(place: (cause: Cause) => void) {
+/**
+ * Coalesces changes to one placement per frame; a rebuild in the frame wins over a move so it snaps. While the group's
+ * popup pours (`data-pouring`), its rows are squeezed and their rects are not where they rest, so placement waits.
+ */
+function frameScheduler(group: HTMLElement, place: (cause: Cause) => void) {
   let frame = 0;
   let pending: Cause | null = null;
+  const run = () => {
+    if (group.closest("[data-pouring]")) {
+      frame = requestAnimationFrame(run);
+      return;
+    }
+    frame = 0;
+    const next = pending ?? "moved";
+    pending = null;
+    place(next);
+  };
   const schedule = (cause: Cause) => {
     pending = pending === "rebuilt" ? "rebuilt" : cause;
     if (frame) return;
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      const next = pending ?? "moved";
-      pending = null;
-      place(next);
-    });
+    frame = requestAnimationFrame(run);
   };
   const cancel = () => {
     if (frame) cancelAnimationFrame(frame);
@@ -69,7 +77,7 @@ function frameScheduler(place: (cause: Cause) => void) {
 function followMarker(group: HTMLElement, fill: HTMLElement, marker: string): () => void {
   const markedSelector = `[${marker}]:not([${marker}="false"])`;
   let pointerInside = false;
-  const { schedule, cancel } = frameScheduler((cause) => {
+  const { schedule, cancel } = frameScheduler(group, (cause) => {
     if (countItems(group, MARKED_ITEM_ROLES) <= 1) return place(fill, group, null, cause);
     const marked = group.querySelector(markedSelector);
     // A menu unmarks its rows while the pointer crosses a rule or gap; the fill waits there and slides to the next row.
@@ -105,7 +113,7 @@ function followPointer(group: HTMLElement, fill: HTMLElement, selector: string):
     if (countItems(group, selector) <= 1) return null;
     return hovered ?? group.querySelector(`${selector}:focus-visible`);
   };
-  const { schedule, cancel } = frameScheduler((cause) => place(fill, group, target(), cause));
+  const { schedule, cancel } = frameScheduler(group, (cause) => place(fill, group, target(), cause));
   const onPointer = (event: PointerEvent) => {
     if (event.pointerType === "touch" || !(event.target instanceof Element)) return;
     const item = event.target.closest(selector);

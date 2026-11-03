@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GENIE_CLOSE_MS } from "../genie";
+import { GENIE_CLOSE_MS, GENIE_OPEN_MS } from "../genie";
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverRootActions } from "../popover";
 
@@ -26,6 +26,19 @@ function clipOf(popup: HTMLElement | null): string {
 
 function stubReducedMotion(reduce: boolean): void {
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: reduce, media: query, addEventListener() {}, removeEventListener() {} }));
+}
+
+/** The popup at (100,100), 200x240; each of its rows a 32px strip near its top; the trigger 60x30 below it. */
+function stubPopupWithRows(): void {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.dataset.slot === "popover-content") return new DOMRect(100, 100, 200, 240);
+    if (this.closest('[data-slot="popover-content"]')) return new DOMRect(100, 140, 200, 32);
+    return new DOMRect(150, 400, 60, 30);
+  });
+}
+
+function widthScaleOf(element: HTMLElement): number {
+  return Number(element.style.scale.split(" ")[0] || 1);
 }
 
 /** Records whether any element ever had an inline clip-path written, even for a single frame. */
@@ -162,6 +175,25 @@ describe("Popover genie motion", () => {
     for (let i = 0; i < 16; i++) frame();
     expect(clipOf(realPopup())).toBe("");
     expect(realPopup()?.style.transform).toBe("");
+  });
+
+  it("squeezes the popup's rows into the trigger while it pours either way, and leaves them untouched while open", () => {
+    stubPopupWithRows();
+    render(<SearchPopover genie />);
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    const row = screen.getByRole("button", { name: "Pick" });
+    frame(0);
+    frame(GENIE_OPEN_MS / 2);
+    expect(widthScaleOf(row)).toBeLessThan(1);
+
+    for (let i = 0; i < 16; i++) frame();
+    expect(row.style.scale).toBe("");
+    expect(row.style.translate).toBe("");
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search models" }), { key: "Escape" });
+    frame(0);
+    frame(GENIE_CLOSE_MS / 2);
+    expect(widthScaleOf(row)).toBeLessThan(1);
   });
 
   it("aims the pour at the trigger from where the popup lands, not where it first mounts", () => {
