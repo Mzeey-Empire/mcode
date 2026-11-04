@@ -7,6 +7,7 @@ import { and, asc, between, desc, eq, getTableColumns, inArray, isNotNull, isNul
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CanonicalAgentEventEnvelopeSchema, CollaborationActionSchema, ProviderIdentitySchema, createAgentModelState, reduceAgentEvent, reduceAgentEventBatch, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn, type CanonicalAgentEvent, type CanonicalAgentEventEnvelope, type AcceptedCanonicalAgentEventEnvelope, type CollaborationAction, type InterruptionCause, type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
 import { canonicalSubagentTerminalOutcome, type CanonicalSubagentStopRequest, CANONICAL_SUBAGENT_LINEAGE_MAX_DEPTH, CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN } from "@mcode/contracts/models/canonical-subagent-roster";
+import { diag } from "@mcode/shared/diagnostics";
 import { MAX_TURN_RECOVERIES } from "@mcode/contracts/models/turn-recovery";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts/ws/channels";
@@ -361,6 +362,12 @@ export const publishCanonicalAgentEvents: CanonicalAgentEventPublisher = (events
   if (!threadId) throw new Error("Canonical publication requires at least one event");
   const last = events.at(-1);
   if (!last) throw new Error("Canonical publication lost its durable head");
+  diag.emit("push.canonical", { th: threadId }, () => ({
+    phase: "saved",
+    through: last.progressPosition?.sequence ?? 0,
+    events: events.length,
+    children: 0,
+  }));
   broadcast("agent.canonical", { phase: "saved", threadId, epoch: last.progressPosition?.epoch ?? `durable:${threadId}`,
     through: last.progressPosition?.sequence ?? 0,
     revision: { conversationRevision: last.durableRevision, rosterRevision: 0 }, events: [...events] });

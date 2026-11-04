@@ -2,6 +2,7 @@ import { ApprovalRequestBodySchema, ApprovalRequestSchema, ApprovalResponseSchem
 import { type IAgentProvider, type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { type TurnStopCause } from "@mcode/contracts/compat/agent-model";
 import { logger } from "@mcode/shared";
+import { diag } from "@mcode/shared/diagnostics";
 import { inject, injectable } from "tsyringe";
 
 type ApprovalProvider = Pick<IAgentProvider, "id" | "on" | "resolveApproval" | "listPendingApprovals">;
@@ -41,13 +42,20 @@ export class ApprovalService {
 
   /** Publish only bodies accepted by the same validator used for listing. */
   publish(envelope: ApprovalRequestEnvelope, owner: ApprovalOwner): void {
+    diag.begin("approval", envelope.requestId, { th: envelope.threadId }, () => ({ provider: owner.id }));
     const request = this.toApprovalRequest(envelope, owner);
-    if (request) this.effects().publishApprovalRequest(request);
+    if (request) {
+      this.effects().publishApprovalRequest(request);
+    } else {
+      diag.end("approval", envelope.requestId, "rejected");
+    }
   }
 
   /** Publish an acknowledged native outcome unless an automatic answer owns it. */
   resolved(payload: Resolution): void {
-    if (!this.automatic.has(payload.requestId)) this.effects().publishApprovalResolved(payload);
+    if (this.automatic.has(payload.requestId)) return;
+    diag.end("approval", payload.requestId, "ok", () => ({ status: payload.outcome.status }));
+    this.effects().publishApprovalResolved(payload);
   }
 
   /** Coalesce concurrent answers and return the adapter's acknowledged result. */
@@ -143,6 +151,7 @@ export class ApprovalService {
     try {
       const result = await owner.resolveApproval?.(envelope.requestId, { autoDeny: reason });
       if (result?.status === "resolved") {
+        diag.end("approval", envelope.requestId, "ok", () => ({ status: "auto_denied" }));
         this.effects().publishApprovalResolved({ requestId: envelope.requestId, threadId: envelope.threadId, outcome: { status: "auto_denied", reason } });
         this.automatic.delete(envelope.requestId);
         return result;
@@ -155,6 +164,7 @@ export class ApprovalService {
     } catch {
       logger.error("Could not stop unanswerable approval turn", { providerId: owner.id, requestId: envelope.requestId, threadId: envelope.threadId });
     } finally {
+      diag.end("approval", envelope.requestId, "ok", () => ({ status: "cancelled" }));
       this.effects().publishApprovalResolved({ requestId: envelope.requestId, threadId: envelope.threadId, outcome: { status: "cancelled", reason: "unanswerable" } });
       this.automatic.delete(envelope.requestId);
     }
