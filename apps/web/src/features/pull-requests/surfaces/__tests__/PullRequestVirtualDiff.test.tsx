@@ -75,6 +75,7 @@ vi.mock("@/features/pull-requests/hooks/usePullRequestDiffHighlighter", () => ({
 
 vi.mock("@/hooks/useTheme", () => ({
   useShikiTheme: () => "github-dark",
+  useAppearance: () => "dark",
 }));
 
 const fileRow: PullRequestDiffFileRow = {

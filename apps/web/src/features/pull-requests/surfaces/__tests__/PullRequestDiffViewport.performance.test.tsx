@@ -50,7 +50,7 @@ vi.mock("@/features/pull-requests/hooks/usePullRequestDiffHighlighter", () => ({
   }),
 }));
 
-vi.mock("@/hooks/useTheme", () => ({ useShikiTheme: () => "github-dark" }));
+vi.mock("@/hooks/useTheme", () => ({ useShikiTheme: () => "github-dark", useAppearance: () => "dark" }));
 
 function file(index: number): PullRequestFile {
   const path = `src/file-${index}.ts`;
