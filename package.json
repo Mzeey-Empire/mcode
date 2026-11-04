@@ -9,6 +9,7 @@
     "apps/server"
   ],
   "scripts": {
+    "diag": "bun apps/server/src/runtime/diagnostics/reader/cli.ts",
     "deps:ensure": "bun scripts/agent/ensure-dependencies.mjs",
     "postinstall": "bun scripts/postinstall.mjs",
     "setup": "bun scripts/setup-env.mjs",
