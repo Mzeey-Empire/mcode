@@ -48,7 +48,6 @@ function nativeSessionEntry(pushMessage: ReturnType<typeof vi.fn>, pendingToolUs
     model: "claude-sonnet-4-6",
     permissionMode: "default",
     contextWindowMode: undefined,
-    lastUsedAt: Date.now(),
     pendingToolUses,
     backgroundTools: new Map<string, string>(),
     hasFiredToolThisTurn: false,
