@@ -1922,7 +1922,15 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     } catch {
       // best-effort
     }
-    if (active) await this.waitForStoppingWorker(active);
+    if (active) {
+      await this.waitForStoppingWorker(active);
+      diag.emit("agent.stopped", { th: threadId }, () => ({
+        execution: active.execution.executionId,
+        turn: active.execution.turnId,
+        phase: this.turnRuntime.snapshot(threadId)?.phase ?? "idle",
+        terminal: active.terminalCommitted,
+      }));
+    }
   }
 }
 

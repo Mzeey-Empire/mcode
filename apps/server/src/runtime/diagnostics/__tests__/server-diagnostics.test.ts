@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { diag } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -34,6 +35,22 @@ function dailyLogFiles(): string[] {
 }
 
 describe("recordFatalError", () => {
+  it("records bounded inner failures on an explicit failed exit", () => {
+    const result = NodeChildProcess.spawnSync("bun", ["-e", `
+      import { diag } from "@mcode/shared/diagnostics";
+      import { installServerDiagnostics, recordServerExitError } from ${JSON.stringify(NodePath.resolve("src/runtime/diagnostics/server-diagnostics.ts"))};
+      diag.configure({ dir: ${JSON.stringify(dir)}, enabled: true });
+      installServerDiagnostics();
+      recordServerExitError(new AggregateError([new TypeError("first\\nprivate detail"), new Error("second\\r\\nmore detail")], "Provider shutdown failed"));
+      process.exit(1);
+    `], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(1);
+    const rows = NodeFS.readdirSync(NodePath.join(dir, "p")).flatMap((file) =>
+      NodeFS.readFileSync(NodePath.join(dir, "p", file), "utf8").split("\n").map(parseDiagLine));
+    expect(rows.filter((row) => row?.ch === "app.exit").map((row) => row?.d)).toEqual([
+      expect.objectContaining({ code: 1, errors: [{ name: "TypeError", message: "first" }, { name: "Error", message: "second" }] }),
+    ]);
+  });
   it("writes the fatal record to today's log and server-fatal.log", () => {
     recordFatalError("uncaughtException", new Error("boom"));
 

@@ -141,7 +141,8 @@ export const DIAG_CATALOG = {
   "app.phase": event<{ phase: string }>()([]),
   // Makes a recorded exit distinguishable from a run that simply stopped recording.
   // `control` names the app.control record whose command ended the process.
-  "app.exit": event<{ code: number; phase: string; uptimeMs: number; fatal?: "uncaughtException" | "unhandledRejection"; control?: string }>()([]),
+  // Errors retain the failed cleanup cause even when later shutdown phases completed.
+  "app.exit": event<{ code: number; phase: string; uptimeMs: number; fatal?: "uncaughtException" | "unhandledRejection"; control?: string; errors?: { name: string; message: string }[] }>()([]),
   // Bounds a late callback without claiming an exact stall onset.
   "app.stall": event<{ lastOnTimeAt: number; lateCallbackAt: number; intervalMs: number; lateMs: number }>()([]),
   // Preserves intentional harness faults before they affect the server; `id` links the effects they cause.
@@ -166,6 +167,12 @@ export const DIAG_CATALOG = {
   "cursor.wire": event<CursorWirePayload>()(["th"]),
   "cursor.session": event<{ operation: string }>()(["th"]),
   "approval": span<{ provider: string | null }, { status: string } | undefined>()(["th"], null),
+  // Separates server publication delay from time spent waiting on clients or people.
+  "approval.push": event<{ request: string; kind: "requested" | "resolved"; conns: string[] }>()(["th"]),
+  // Links restart interruptions to their durable recovery provenance.
+  "turn.recovered": event<{ turn: string; execution: string; incident: string; cause: "app_closed"; reason: string }>()(["th"]),
+  // Shows whether provider shutdown left an execution for startup recovery.
+  "agent.stopped": event<{ execution: string; turn: string; phase: string; terminal: boolean }>()(["th"]),
   "agent.send": span<ActionPayload>()(["th"], 30_000),
   "agent.created": event<ActionPayload>()(["th"]),
   "agent.stop": span<ActionPayload>()(["th"], 10_000),

@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeEvents from "node:events";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import { createMockApproval } from "@mcode/contracts/testing";
 import { WebSocket } from "ws";
 import {
   addClient,
@@ -68,6 +73,32 @@ function fakeOpenSocket(received: Array<{ buf: Buffer; binary: boolean }>, compl
 }
 
 describe("broadcastTerminalData", () => {
+  it("records approval writes with the receiving connection identity", () => {
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "approval-push-"));
+    diag.configure({ dir, enabled: true });
+    try {
+      const received: Array<{ buf: Buffer; binary: boolean }> = [];
+      const ws = fakeOpenSocket(received);
+      addClient(ws, "conn-approval");
+      subscribeClientToThread(ws, "thread-1");
+      broadcast("approval.requested", createMockApproval());
+      broadcast("approval.resolved", { threadId: "thread-1", requestId: "req-1", outcome: { status: "cancelled", reason: "turn_ended" } });
+      // Closed sockets must not appear as recipients of a later publication.
+      removeClient(ws);
+      broadcast("approval.requested", createMockApproval());
+      diag.flushSync();
+      const rows = NodeFS.readFileSync(NodePath.join(dir, "t", "thread-1.jsonl"), "utf8").split("\n").map(parseDiagLine);
+      expect(rows.filter((row) => row?.ch === "approval.push").map((row) => row?.d)).toEqual([
+        { request: "req-1", kind: "requested", conns: ["conn-approval"] },
+        { request: "req-1", kind: "resolved", conns: ["conn-approval"] },
+        { request: "req-1", kind: "requested", conns: [] },
+      ]);
+      expect(received.map((frame) => JSON.parse(frame.buf.toString()).channel)).toEqual(["approval.requested", "approval.resolved"]);
+    } finally {
+      diag.configure({ enabled: false });
+      NodeFS.rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it("scopes subagent changes to subscribers of the owning parent", () => {
     const parent: Array<{ buf: Buffer; binary: boolean }> = [];
     const other: Array<{ buf: Buffer; binary: boolean }> = [];

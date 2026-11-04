@@ -236,7 +236,8 @@ export function createWsServer(deps: WsServerDeps): {
     }
 
     logger.info("WebSocket client connected");
-    addClient(ws);
+    const conn = NodeCrypto.randomUUID().slice(0, 8);
+    addClient(ws, conn);
     let browserAutomationDesktopInstanceId: string | null = null;
 
     const resolveCurrentBrowserAutomationAuthorization = (): ReturnType<WsServerDeps["resolveBrowserAutomationHostAuthorization"]> => {
@@ -254,7 +255,7 @@ export function createWsServer(deps: WsServerDeps): {
     };
 
     const messageContext: WsMessageContext = {
-      connection: { conn: NodeCrypto.randomUUID().slice(0, 8), client: requestClient(req) },
+      connection: { conn, client: requestClient(req) },
       ws,
       deps,
       resolveCurrentBrowserAutomationAuthorization,

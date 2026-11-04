@@ -118,6 +118,21 @@ export function startEventLoopLagWatch(): ReturnType<typeof setInterval> {
 let installed = false;
 let getPhase = () => "not started";
 let exitControl: string | undefined;
+let exitError: unknown;
+
+/** Retains the failure that caused an explicit shutdown exit as well as fatal exits. */
+export function recordServerExitError(error: unknown): void {
+  exitError = error;
+}
+
+function exitErrors(): { name: string; message: string }[] | undefined {
+  if (exitError === undefined) return undefined;
+  const errors: unknown[] = exitError instanceof AggregateError ? exitError.errors.slice(0, 3) : [exitError];
+  return errors.map((error) => ({
+    name: error instanceof Error ? error.name : "Error",
+    message: (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0].slice(0, 200),
+  }));
+}
 
 /** Names the app.control record whose command is about to end the process, so app.exit can cite it. */
 export function attributeExitToControl(controlId: string): void {
@@ -141,11 +156,13 @@ export function installServerDiagnostics(): void {
 
   process.on("uncaughtException", (error) => {
     fatal = "uncaughtException";
+    recordServerExitError(error);
     recordFatalError("uncaughtException", error);
     process.exit(1);
   });
   process.on("unhandledRejection", (reason) => {
     fatal = "unhandledRejection";
+    recordServerExitError(reason);
     recordFatalError("unhandledRejection", reason);
     process.exit(1);
   });
@@ -156,6 +173,7 @@ export function installServerDiagnostics(): void {
       uptimeMs: process.uptime() * 1000,
       ...(fatal ? { fatal } : {}),
       ...(exitControl ? { control: exitControl } : {}),
+      ...(exitError !== undefined ? { errors: exitErrors() } : {}),
     }));
     diag.flushSync();
     appendDailyLogSync({

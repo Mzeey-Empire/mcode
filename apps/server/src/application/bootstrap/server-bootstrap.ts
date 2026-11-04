@@ -14,7 +14,7 @@ import { appDisplayName } from "@mcode/contracts/build-stage";
 import { IpcPushServer, generateIpcPath } from "../transport/ipc-push-server.js";
 import { logger, getMcodeDir } from "@mcode/shared";
 import { diag } from "@mcode/shared/diagnostics";
-import { setServerDiagnosticsPhaseReader } from "../../runtime/diagnostics/server-diagnostics.js";
+import { recordServerExitError, setServerDiagnosticsPhaseReader } from "../../runtime/diagnostics/server-diagnostics.js";
 import type { ShutdownTrigger } from "../../runtime/lifecycle/shutdown-coordinator.js";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import * as NodeFS from "node:fs";
@@ -1372,6 +1372,7 @@ shutdownCoordinator = createShutdownCoordinator({
 /** Initiate server shutdown once, regardless of which trigger won the race. */
 function requestShutdown(trigger: ShutdownTrigger): void {
   shutdownCoordinator.requestShutdown(trigger)?.catch((err) => {
+    recordServerExitError(err);
     logger.error("Shutdown error", { error: String(err) });
     process.exit(1);
   });
