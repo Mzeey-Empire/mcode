@@ -146,7 +146,7 @@ export const DIAG_CATALOG = {
   // Bounds a late callback without claiming an exact stall onset.
   "app.stall": event<{ lastOnTimeAt: number; lateCallbackAt: number; intervalMs: number; lateMs: number }>()([]),
   // Preserves intentional harness faults before they affect the server; `id` links the effects they cause.
-  "app.control": event<{ id: string; control: string; durationMs?: number }>()([]),
+  "app.control": event<{ id: string; control: string; durationMs?: number; client: string }>()([]),
   "app.hang": event<{ control: string; startedAt: number; endedAt: number; elapsedMs: number }>()([]),
   "rpc.request": event<RpcRequestPayload>()([]),
   "codex.wire": event<CodexWirePayload>()(["th"]),

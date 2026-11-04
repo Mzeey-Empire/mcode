@@ -135,6 +135,7 @@ describe("reliability harness server adapter", () => {
       const control = rows.find((row) => row.ch === "app.control");
       const hang = rows.find((row) => row.ch === "app.hang");
       expect(hang?.d.control).toBe(control?.d.id);
+      expect(control?.d.client).toBe("mcode-diag-eval/1");
       expect(hang?.d.elapsedMs).toBe(6000);
     } finally {
       diag.configure({ enabled: false });
@@ -146,7 +147,7 @@ describe("reliability harness server adapter", () => {
 
 function requestStub(body: string, token: string): NodeHTTP.IncomingMessage {
   const request = new ReadableRequest(body) as unknown as NodeHTTP.IncomingMessage;
-  request.headers = { "x-mcode-reliability-token": token };
+  request.headers = { "x-mcode-reliability-token": token, "user-agent": "mcode-diag-eval/1" };
   request.method = "POST";
   request.url = "/__mcode/reliability";
   request.socket = { remoteAddress: "127.0.0.1" } as never;

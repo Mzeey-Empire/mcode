@@ -4,6 +4,7 @@ import * as NodePath from "node:path";
 import * as NodeHTTP from "node:http";
 import { diag } from "@mcode/shared/diagnostics";
 import { attributeExitToControl } from "../diagnostics/server-diagnostics.js";
+import { requestClient } from "../diagnostics/request-client.js";
 import type { ApplicationDatabaseWriter } from "../persistence/sqlite/application-database-writer.js";
 import type { WebSocketServer } from "ws";
 
@@ -106,7 +107,7 @@ export function createReliabilityHarnessAdapter(
       const body = await readReliabilityCommand(request, response);
       if (!body) return true;
       try {
-        persistenceFailure = await executeReliabilityControl(body, sockets, block, writer, persistenceFailure, closeSockets);
+        persistenceFailure = await executeReliabilityControl({ ...body, client: requestClient(request) }, sockets, block, writer, persistenceFailure, closeSockets);
       } catch {
         response.writeHead(500);
         response.end("Reliability control failed");
@@ -150,7 +151,7 @@ async function readReliabilityCommand(
 }
 
 async function executeReliabilityControl(
-  command: ReliabilityHarnessCommand,
+  command: ReliabilityHarnessCommand & { client: string },
   sockets: WebSocketServer["clients"],
   block: (durationMs: number) => void,
   writer: Pick<ApplicationDatabaseWriter, "setQueryOnlyForReliability">,

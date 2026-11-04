@@ -25,6 +25,7 @@ import type { BrowserAutomationHostConnectionAuthorization } from "../../feature
 import { EXTERNAL_THREAD_CONTROL_MCP_PATH } from "../../features/thread-control/index.js";
 import { MCODE_MCP_PATH, type McodeMcpServer } from "../../features/mcode-mcp/index.js";
 import type { ReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
+import { requestClient } from "../../runtime/diagnostics/request-client.js";
 import type { ExecutionMailboxDepth } from "../../features/agents/execution/execution-mailbox-scheduler.js";
 
 /** Match stored thread IDs used for the custom attachment protocol (UUID, lowercase hex). */
@@ -630,13 +631,6 @@ async function routeWsMessage(raw: string, context: WsMessageContext): Promise<v
     browserAutomationAuthorization: context.resolveCurrentBrowserAutomationAuthorization(),
   });
   await sendWsResponse(terminalCreateMethod, response, context);
-}
-
-function requestClient(req: NodeHTTP.IncomingMessage): string {
-  const userAgent = req.headers["user-agent"] ?? "";
-  if (userAgent.includes("Electron/")) return "desktop";
-  if (req.headers.origin !== undefined) return "browser";
-  return userAgent.trim().split(/\s+/, 1)[0]?.slice(0, 40) || "unknown";
 }
 
 type TerminalCreateMethod = DisconnectedTerminalCreate["method"];
