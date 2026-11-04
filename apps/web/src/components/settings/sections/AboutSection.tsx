@@ -81,7 +81,7 @@ function HardwareAccelerationSetting() {
 function DiagnosticsRecordingSetting() {
   const recording = useSettingsStore((s) => s.settings.diagnostics?.recording ?? true);
   const updateSettings = useSettingsStore((s) => s.update);
-  return <SettingRow label="Record diagnostics" hint="Keep a local log of agent activity for 7 days so stuck threads can be traced."><Switch aria-label="Record diagnostics" checked={recording} onCheckedChange={(value) => void updateSettings({ diagnostics: { recording: value } })} /></SettingRow>;
+  return <SettingRow label="Troubleshooting logs" hint="Keeps a 7-day record of what your agents did, so you can find out why a thread got stuck. It stays on this computer and leaves out your messages and code."><Switch aria-label="Troubleshooting logs" checked={recording} onCheckedChange={(value) => void updateSettings({ diagnostics: { recording: value } })} /></SettingRow>;
 }
 
 function getUpdatePreferences(settings: Settings): { autoDownload: boolean; autoInstallOnQuit: boolean; checkInterval: UpdateCheckInterval; releaseLine: UpdateReleaseLine } {

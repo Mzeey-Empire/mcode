@@ -1,6 +1,6 @@
 # Diagnose a Stuck Thread from Its Recording
 
-When a thread hangs, a turn never finishes, or an approval never appears, read what the app recorded instead of reproducing it. The server writes a bounded recording for every thread while Settings > About > Record diagnostics is on, which is the default. The reader joins those recordings with the canonical events in the database and prints one timeline.
+When a thread hangs, a turn never finishes, or an approval never appears, read what the app recorded instead of reproducing it. The server writes a bounded recording for every thread while Settings > About > Troubleshooting logs is on, which is the default. The reader joins those recordings with the canonical events in the database and prints one timeline.
 
 ## Find the recording
 

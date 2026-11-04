@@ -134,7 +134,7 @@ describe("AboutSection diagnostics recording", () => {
 
   it("defaults on and saves the setting when switched off", async () => {
     render(<AboutSection />);
-    const toggle = screen.getByRole("switch", { name: "Record diagnostics" });
+    const toggle = screen.getByRole("switch", { name: "Troubleshooting logs" });
     expect(toggle).toBeChecked();
 
     fireEvent.click(toggle);
@@ -144,7 +144,7 @@ describe("AboutSection diagnostics recording", () => {
   it("reads a saved off setting and saves it back on", async () => {
     persisted.diagnostics = { recording: false };
     render(<AboutSection />);
-    const toggle = screen.getByRole("switch", { name: "Record diagnostics" });
+    const toggle = screen.getByRole("switch", { name: "Troubleshooting logs" });
     expect(toggle).not.toBeChecked();
 
     fireEvent.click(toggle);
