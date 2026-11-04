@@ -180,40 +180,22 @@ jobs:
 
   # Server and web take nearly all of the test time, so each runs in two shards
   # on its own runner instead of after the other on one.
-  test-suite:
-    name: Test ${{ matrix.suite }}
+  # These are separate jobs, not a matrix: a run cancelled before a matrix
+  # expands leaves a `Test ${{ matrix.suite }}` check that no later run
+  # replaces, so the PR keeps a stray failure. Static names are replaced.
+  test-packages:
+    name: Test packages
     needs: [changes, pick-runner]
     # Skipped required checks count as passing, so skip only for Markdown-only changes and otherwise run and fail.
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ${{ needs.pick-runner.outputs[matrix.size] || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.pick-runner.outputs.small || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - suite: packages
-            id: packages
-            size: small
-            args: "--concurrency=1 --filter=!@mcode/server --filter=!mcode-frontend"
-          - suite: server 1/2
-            id: server-1
-            size: large
-            args: "--filter=@mcode/server -- --shard=1/2"
-          - suite: server 2/2
-            id: server-2
-            size: large
-            args: "--filter=@mcode/server -- --shard=2/2"
-          - suite: web 1/2
-            id: web-1
-            size: large
-            args: "--filter=mcode-frontend -- --shard=1/2"
-          - suite: web 2/2
-            id: web-2
-            size: large
-            args: "--filter=mcode-frontend -- --shard=2/2"
-    steps:
+    env:
+      SUITE_ID: packages
+      SUITE_ARGS: "--concurrency=1 --filter=!@mcode/server --filter=!mcode-frontend"
+    steps: &test-suite-steps
       - name: Require a runner choice
         if: needs.pick-runner.result != 'success'
         run: |
@@ -245,9 +227,9 @@ jobs:
         continue-on-error: true
         with:
           path: .turbo/cache
-          key: ${{ runner.os }}-turbo-test-${{ matrix.id }}-${{ github.sha }}
+          key: ${{ runner.os }}-turbo-test-${{ env.SUITE_ID }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-turbo-test-${{ matrix.id }}-
+            ${{ runner.os }}-turbo-test-${{ env.SUITE_ID }}-
       - run: bun install --frozen-lockfile
       # Every Vitest run sizes its worker pool to all cores, so parallel package
       # tasks oversubscribe the runner and starve timing-sensitive tests.
@@ -255,13 +237,70 @@ jobs:
       # output until it ends, so a one-task job prints nothing for minutes.
       # GitHub reads a `::error` annotation only at the start of a line, so
       # Turbo's task prefix would hide Vitest's failing-test annotations.
-      - run: bun run test --log-order=stream --log-prefix=none ${{ matrix.args }}
+      # SUITE_ARGS is unquoted on purpose: it holds several arguments.
+      - run: bun run test --log-order=stream --log-prefix=none $SUITE_ARGS
 
-  # Branch protection requires `Test`. A matrix reports one check per suite, so
+  test-server-1:
+    name: Test server 1/2
+    needs: [changes, pick-runner]
+    # Skipped required checks count as passing, so skip only for Markdown-only changes and otherwise run and fail.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ${{ needs.pick-runner.outputs.large || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SUITE_ID: server-1
+      SUITE_ARGS: "--filter=@mcode/server -- --shard=1/2"
+    steps: *test-suite-steps
+
+  test-server-2:
+    name: Test server 2/2
+    needs: [changes, pick-runner]
+    # Skipped required checks count as passing, so skip only for Markdown-only changes and otherwise run and fail.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ${{ needs.pick-runner.outputs.large || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SUITE_ID: server-2
+      SUITE_ARGS: "--filter=@mcode/server -- --shard=2/2"
+    steps: *test-suite-steps
+
+  test-web-1:
+    name: Test web 1/2
+    needs: [changes, pick-runner]
+    # Skipped required checks count as passing, so skip only for Markdown-only changes and otherwise run and fail.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ${{ needs.pick-runner.outputs.large || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SUITE_ID: web-1
+      SUITE_ARGS: "--filter=mcode-frontend -- --shard=1/2"
+    steps: *test-suite-steps
+
+  test-web-2:
+    name: Test web 2/2
+    needs: [changes, pick-runner]
+    # Skipped required checks count as passing, so skip only for Markdown-only changes and otherwise run and fail.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ${{ needs.pick-runner.outputs.large || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SUITE_ID: web-2
+      SUITE_ARGS: "--filter=mcode-frontend -- --shard=2/2"
+    steps: *test-suite-steps
+
+  # Branch protection requires `Test`. Each suite reports its own check, so
   # this job turns them into the single required check.
   test:
     name: Test
-    needs: [changes, test-suite]
+    needs: [changes, test-packages, test-server-1, test-server-2, test-web-1, test-web-2]
     # `always()`: a cancelled or skipped suite must still produce a failing check.
     if: ${{ always() }}
     # A few seconds of work is billed as a full Blacksmith minute.
@@ -270,16 +309,23 @@ jobs:
     steps:
       - name: Require every test suite to pass
         env:
-          RESULT: ${{ needs.test-suite.result }}
+          RESULTS: >-
+            ${{ needs.test-packages.result }}
+            ${{ needs.test-server-1.result }}
+            ${{ needs.test-server-2.result }}
+            ${{ needs.test-web-1.result }}
+            ${{ needs.test-web-2.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
         run: |
-          if [ "$DOCS_ONLY" = true ] && [ "$RESULT" = skipped ]; then
+          for result in $RESULTS; do
+            if [ "$DOCS_ONLY" = true ] && [ "$result" = skipped ]; then continue; fi
+            if [ "$result" != success ]; then
+              echo "::error::A test suite finished with result '$result'."
+              exit 1
+            fi
+          done
+          if [ "$DOCS_ONLY" = true ]; then
             echo "Markdown-only change, so the test suites were skipped."
-            exit 0
-          fi
-          if [ "$RESULT" != success ]; then
-            echo "::error::Test suites finished with result '$RESULT'."
-            exit 1
           fi
 
   build-check:
