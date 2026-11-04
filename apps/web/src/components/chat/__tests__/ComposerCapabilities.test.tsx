@@ -52,7 +52,7 @@ describe("composer capabilities", () => {
 
     await user.click(screen.getByRole("button", { name: "Add to composer" }));
 
-    const menu = screen.getByRole("menu", { name: "Add to composer" });
+    const menu = await screen.findByRole("menu", { name: "Add to composer" });
     expect(menu).toHaveAttribute("data-slot", "dropdown-menu-content");
     await waitFor(() => expect(menu.parentElement).toHaveAttribute("data-side", "top"));
     expect(screen.getByTestId("composer-overlay-host")).toBeEmptyDOMElement();
@@ -82,7 +82,7 @@ describe("composer capabilities", () => {
     const trigger = screen.getByRole("button", { name: "Add to composer" });
     await user.click(trigger);
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
-    expect(screen.getByRole("menu", { name: "Add to composer" })).toBeVisible();
+    expect(await screen.findByRole("menu", { name: "Add to composer" })).toBeVisible();
     await user.click(screen.getByRole("menuitemcheckbox", { name: new RegExp(label) }));
 
     await waitFor(() => expect(onAttachCapability).toHaveBeenCalledWith(capabilityId));
