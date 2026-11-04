@@ -40,7 +40,18 @@ Findings come before the timeline. Each one has a certainty:
 
 Timeline rows read `L<n> +<ms> <lane> <kind> <channel> <payload>`. Offsets count from the first row shown. `db.canonical` rows come from the database; every other channel comes from the recording.
 
-For a parent that delegated work, follow these rows in its lane: `mcp.tool` for each Mcode tool call, `delegate.launch` for the child's start (its end names the child thread), `delegate.steer` for a result pushed into the parent's running turn, and `delegate.wake` for whether the child's result reached the parent or why it was held. In a Claude thread, `claude.stream` rows name the tool calls they start or finish, and `parent` names the sub-agent tool call a message belongs to.
+For a parent that delegated work, follow these rows in its lane: `mcp.tool` for each Mcode tool call, `delegate.launch` for the child's start (its end names the child thread), `delegate.steer` for a result pushed into the parent's running turn, and `delegate.wake` for whether the child's result reached the parent or why it was held. `reached` is stamped when the result's message is saved, which can trail the moment the provider received it. In a Claude thread, `claude.stream` rows name the tool calls they start or finish, and `parent` names the sub-agent tool call a message belongs to.
+
+## Confirm in the database
+
+The reader's `db.canonical` rows carry only an event type and sequence. For a turn's state, query the database read-only with `bun:sqlite`:
+
+| Table | What it answers |
+|---|---|
+| `canonical_agent_turns` | The turn's `status`, its start and end, and `ending_json` |
+| `canonical_agent_ingest_checkpoints` | The execution's `phase`, `terminal_outcome`, and `error` |
+| `canonical_agent_events` | Each event's `accepted_at` and `persisted_at`; a growing gap means writes fell behind |
+| `turn_steers` | Each steered message's `state` and when it changed |
 
 ## Record something new
 
