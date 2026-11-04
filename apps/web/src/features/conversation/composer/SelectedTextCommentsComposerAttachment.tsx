@@ -478,7 +478,7 @@ export function ComposerCommentAttachmentShell({
           align={readOnly ? "end" : "start"}
           collisionAvoidance={{ side: "flip", align: "shift" }}
           initialFocus={false}
-          className="w-[min(38rem,calc(100vw-1.5rem))] p-3"
+          className="max-h-[min(28rem,var(--available-height))] w-[min(38rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain p-3"
           data-testid={previewTestId}
         >
           <ol className="min-w-0">{children}</ol>
