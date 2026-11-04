@@ -1,38 +1,37 @@
 /**
  * @internal
- * Redacts and summarizes Cursor ACP `session/update` traffic for troubleshooting
+ * Summarizes Cursor ACP `session/update` traffic for troubleshooting without recording its content
  */
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
-/** Long strings inside rawInput/rawOutput swamp logs; truncate with a footprint note. */
-const MAX_TRACE_CHARS = 2_048;
+/**
+ * Recording is on by default, so Cursor envelopes keep their shape and protocol state but no
+ * message text, tool input, or tool output. Strings under these keys name protocol state.
+ */
+const VERBATIM_STRING_KEYS = new Set(["sessionUpdate", "toolCallId", "kind", "status", "type", "priority", "stopReason"]);
 /** Arrays longer than this are summarized with `{ head, omitted }`. */
 const MAX_TRACE_ARRAY_ITEMS = 40;
 const MAX_SUMMARY_DEPTH = 8;
 
 /**
- * Produce a structured JSON-safe blob for server logs without huge payloads.
+ * Reduce an ACP payload to its structure: key names, array sizes, protocol state, and string lengths.
  *
  * @param value Arbitrary Cursor / ACP JSON shape.
+ * @param key The property name `value` was read from, which decides whether a string is kept.
  */
-export function sanitizeCursorTraceValue(value: unknown, depth = 0): unknown {
+export function sanitizeCursorTraceValue(value: unknown, depth = 0, key = ""): unknown {
   if (depth >= MAX_SUMMARY_DEPTH) return "[max-depth]";
-  const scalar = sanitizeCursorTraceScalar(value);
-  if (scalar.handled) return scalar.value;
   if (Array.isArray(value)) return sanitizeCursorTraceArray(value, depth);
-  if (typeof value === "object") return sanitizeCursorTraceRecord(value as Record<string, unknown>, depth);
-  return String(value);
+  if (value !== null && typeof value === "object") return sanitizeCursorTraceRecord(value as Record<string, unknown>, depth);
+  return sanitizeCursorTraceScalar(value, key);
 }
 
-function sanitizeCursorTraceScalar(value: unknown): { handled: boolean; value: unknown } {
-  if (value === null || typeof value === "boolean" || typeof value === "number") {
-    return { handled: true, value };
-  }
-  if (typeof value !== "string") return { handled: false, value: undefined };
-  if (value.length <= MAX_TRACE_CHARS) return { handled: true, value };
-  return { handled: true, value: `${value.slice(0, MAX_TRACE_CHARS)}... (${value.length} chars total)` };
+function sanitizeCursorTraceScalar(value: unknown, key: string): unknown {
+  if (typeof value === "string") return VERBATIM_STRING_KEYS.has(key) ? value : `[${value.length} chars]`;
+  if (value === null || typeof value === "boolean" || typeof value === "number") return value;
+  return typeof value;
 }
 
 function sanitizeCursorTraceArray(value: unknown[], depth: number): unknown {
@@ -43,7 +42,7 @@ function sanitizeCursorTraceArray(value: unknown[], depth: number): unknown {
 
 function sanitizeCursorTraceRecord(value: Record<string, unknown>, depth: number): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) sanitized[key] = sanitizeCursorTraceValue(entry, depth + 1);
+  for (const [key, entry] of Object.entries(value)) sanitized[key] = sanitizeCursorTraceValue(entry, depth + 1, key);
   return sanitized;
 }
 

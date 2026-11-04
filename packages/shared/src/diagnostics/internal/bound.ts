@@ -1,7 +1,13 @@
 const MAX_STRING_LENGTH = 512;
 const MAX_COLLECTION_ITEMS = 32;
 const MAX_DEPTH = 4;
-const SECRET_KEY = /^(token|api[_-]?key|secret|password|authorization)$/i;
+// Matches the suffix of a normalized key, so "accessToken" and "client_secret" redact while counters such as "tokensIn" stay readable.
+const SECRET_KEY_SUFFIX = /(token|secret|password|passwd|apikey|privatekey|authorization|cookie|credentials?)$/;
+const PROVIDER_TOKEN = /\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/g;
+
+function isSecretKey(key: string): boolean {
+  return SECRET_KEY_SUFFIX.test(key.toLowerCase().replace(/[_-]/g, ""));
+}
 
 /** Secret redaction shared by every diagnostics channel. */
 export function redactDiagnostic(value: string): string {
@@ -11,12 +17,13 @@ export function redactDiagnostic(value: string): string {
     "$1=[redacted]",
   );
   const withoutJwts = withoutAssignments.replace(/\beyJ[A-Za-z0-9_-]{20,}\b/g, "[redacted]");
-  return withoutJwts.replace(/\b[A-Fa-f0-9]{32,}\b/g, "[redacted]");
+  const withoutProviderTokens = withoutJwts.replace(PROVIDER_TOKEN, "[redacted]");
+  return withoutProviderTokens.replace(/\b[A-Fa-f0-9]{32,}\b/g, "[redacted]");
 }
 
 function boundEntry(key: string, item: unknown, depth: number): [string, unknown] {
   const boundKey = key.slice(0, MAX_STRING_LENGTH);
-  if (SECRET_KEY.test(key)) return [boundKey, "[redacted]"];
+  if (isSecretKey(key)) return [boundKey, "[redacted]"];
   return [boundKey, boundPayload(item, depth + 1)];
 }
 

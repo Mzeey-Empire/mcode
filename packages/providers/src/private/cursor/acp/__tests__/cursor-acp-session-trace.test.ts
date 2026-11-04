@@ -2,24 +2,36 @@ import { describe, expect, it } from "vitest";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import {
-  sanitizeCursorTraceValue,
   shouldEmitCursorSessionTrace,
+  summarizeCursorSessionNotification,
   summarizeEmittedAgentEventsForTrace,
 } from "../cursor-acp-session-trace.js";
 
 describe("cursor-acp-session-trace", () => {
-  it("truncates oversized strings inside nested objects", () => {
-    const long = "z".repeat(5_000);
-    const sanitized = sanitizeCursorTraceValue({
-      nested: long,
-      short: "ok",
-    }) as Record<string, unknown>;
+  it("records the envelope's structure and protocol state but none of its text", () => {
+    const raw = summarizeCursorSessionNotification({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call-7",
+        status: "completed",
+        rawInput: { path: "/home/me/.env" },
+        rawOutput: { content: "OPENAI_KEY=abc123" },
+        content: [{ type: "content", content: { type: "text", text: "file body" } }],
+      },
+    } as SessionNotification);
 
-    expect(typeof sanitized.nested).toBe("string");
-    const sn = sanitized.nested as string;
-    expect(sn.length).toBeLessThan(4_500);
-    expect(sn).toContain("5000 chars total");
-    expect(sanitized.short).toBe("ok");
+    expect(raw).toEqual({
+      sessionId: "[2 chars]",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call-7",
+        status: "completed",
+        rawInput: { path: "[13 chars]" },
+        rawOutput: { content: "[17 chars]" },
+        content: [{ type: "content", content: { type: "text", text: "[9 chars]" } }],
+      },
+    });
   });
 
   it("summarizes AgentEvent payloads without dumping large tool outputs", () => {

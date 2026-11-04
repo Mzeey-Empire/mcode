@@ -23,6 +23,16 @@ describe("codex-trace", () => {
     });
   });
 
+  it("records message deltas by length without their text", () => {
+    const text = "the contents of secrets.txt";
+    const raw = summarizeCodexNotificationParams("item/agentMessage/delta", { itemId: "i1", delta: text });
+    const mapped = summarizeAgentEventsForTrace([{ type: AgentEventType.TextDelta, threadId: "t1", delta: text }]);
+
+    expect(raw).toEqual({ itemId: "i1", deltaLen: text.length });
+    expect(JSON.stringify(mapped)).not.toContain("secrets");
+    expect(mapped[0]).toMatchObject({ type: "textDelta", len: text.length });
+  });
+
   it("summarizeAgentEventsForTrace includes parentToolCallId when present", () => {
     const toolUse: AgentEvent = {
       type: AgentEventType.ToolUse,

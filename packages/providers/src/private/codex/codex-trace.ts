@@ -5,7 +5,7 @@ import { redactDiagnostic } from "@mcode/shared/diagnostics";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
-function previewText(s: string, max = 72): string {
+function previewText(s: string, max: number): string {
   const t = s.replace(/\s+/g, " ").trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max)}…`;
@@ -67,7 +67,7 @@ function summarizeCompletedCodexItem(
 
 function summarizeCodexDelta(params: Record<string, unknown>, ids: Record<string, string>): Record<string, unknown> {
   const delta = codexTraceString(params.delta) ?? codexTraceString(params.text) ?? "";
-  return { ...ids, deltaLen: delta.length, deltaPreview: delta.length > 0 ? previewText(delta, 64) : "" };
+  return { ...ids, deltaLen: delta.length };
 }
 
 function summarizeStartedCodexItem(params: Record<string, unknown>, ids: Record<string, string>): Record<string, unknown> {
@@ -106,7 +106,6 @@ export function summarizeAgentEventsForTrace(events: readonly AgentEvent[]): Rec
           type: "textDelta",
           isFinalResponse: e.isFinalResponse === true,
           len: e.delta.length,
-          preview: e.delta.length > 0 ? previewText(e.delta, 64) : "",
         };
       case AgentEventType.ReasoningDelta:
         return { type: "reasoningDelta", reasoningItemId: e.reasoningItemId, done: e.done === true, len: e.delta.length };
