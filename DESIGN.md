@@ -71,6 +71,11 @@ colors:
   light-diff-remove-gutter: "oklch(0.78 0.11 25)"
   light-diff-remove-text: "oklch(0.48 0.15 25)"
   light-diff-remove-emphasis: "oklch(0.93 0.065 25)"
+  # Owned here until Paper adds them: entity token hues.
+  capability: "oklch(0.78 0.105 328)"
+  file-reference: "oklch(0.80 0.07 205)"
+  light-capability: "oklch(0.50 0.15 328)"
+  light-file-reference: "oklch(0.48 0.08 205)"
 typography:
   h1:
     fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
@@ -482,6 +487,8 @@ Paper defines six 50 to 950 ramps (neutral, amber, blue, sage, clay, violet) on 
 - **Link** (`link`, blue-400 dark / blue-700 light): Hyperlinks and link-styled actions. Links are navigational plumbing, not brand moments, so they take the surface's own cool hue at higher chroma rather than borrowing the amber lamp.
 - **Information** (`info`) and **Warning** (`warning`): feedback notices, always paired with an icon and text. Warning also marks two composer states to notice before sending: the context label from 70% and the access part's icon while Don't ask is on.
 - **Merged PR** (`pr-merged`, violet): the merged state of a pull request. Nothing else uses violet.
+- **Capability** (`capability`, orchid): skill, plugin, command and sub-agent tokens in the composer and transcript. A quiet hue so a reference never competes with the lamp.
+- **File reference** (`file-reference`, mist teal): file tokens. Kept apart from `link` so a file reads as part of the workspace, not a web page.
 
 ### Tertiary
 - **Success** (`success`, sage-400 dark / sage-600 light): Additions, completed state, the finished status mark, and the "Finished" label.
@@ -527,6 +534,8 @@ token values, never component anatomy, status meaning, or action priority.
 | Warning | `warning` (amber-400) | `light-warning` (amber-700) |
 | Information | `info` (blue-400) | `light-info` (blue-700) |
 | Merged PR | `pr-merged` (violet-400) | `light-pr-merged` (violet-700) |
+| Capability | `capability` (owned here) | `light-capability` (owned here) |
+| File reference | `file-reference` (owned here) | `light-file-reference` (owned here) |
 | Diff addition | `diff-add-bg` (sage-900), plus the frontmatter gutter, text, and emphasis colors | Matching `light-*` tokens. |
 | Diff removal | `diff-remove-bg` (clay-900), plus the frontmatter gutter, text, and emphasis colors | Matching `light-*` tokens. |
 
@@ -540,7 +549,7 @@ The control boundary tokens are solid 1px colors, not translucent hints.
 `light-background`. Recheck the light value after any token change.
 
 ### Named Rules
-**The One Lamp Rule.** Filament Amber is Mcode's primary brand color. Each state has at most one amber primary action. Amber also marks a live mode the user turned on (Design mode, an agent acting in the Browser) and a thread that needs the user (the needs-you ring and its label). Everything else is neutral: selected rows, the access-mode picker's selected row, the Plan chip, the access part (its Don't ask icon takes `warning`, not the lamp), the Stop button, toggles, update and notification buttons, and status icons. Links use the link color, never amber. Keyboard focus uses the focus blue.
+**The One Lamp Rule.** Filament Amber is Mcode's primary brand color. Each state has at most one amber primary action. Amber also marks a live mode the user turned on (Design mode, an agent acting in the Browser) and a thread that needs the user (the needs-you ring and its label). Everything else is neutral: selected rows, the access-mode picker's selected row, the Plan chip, the access part (its Don't ask icon takes `warning`, not the lamp), the Stop button, toggles, update and notification buttons, and status icons. Links use the link color, never amber. Entity tokens use `capability` or `file-reference`, never amber. Keyboard focus uses the focus blue.
 
 **The Earned-Color Rule.** Neutrals are the surface default. A bounded region may carry color to clarify state, ownership, mode, or task posture. Area color must carry meaning.
 
