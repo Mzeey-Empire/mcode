@@ -245,7 +245,7 @@ describe("BrowseView", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("This folder doesn't exist.");
     expect(mocks.palette.close).not.toHaveBeenCalled();
     expect(mocks.workspace.beginNewThread).not.toHaveBeenCalled();
-    expect(mocks.getPendingConfirm()).toBeNull();
+    await waitFor(() => expect(mocks.getPendingConfirm()).toBeNull());
   });
 
   it("shows fixed copy instead of a transport failure and lets the user retry", async () => {
