@@ -35,7 +35,8 @@ describe("getIconName", () => {
     ["types.d.ts", "typescript-def"],
     ["App.TSX", "react_ts"],
     [".env", "tune"],
-    ["AGENTS.md", "agent"],
+    ["AGENTS.md", "agents-md"],
+    ["AGENTS.override.md", "agents-md"],
     ["CLAUDE.md", "claude"],
     ["CLAUDE.local.md", "claude"],
   ])("matches %s to the %s icon, file name first, then the longest extension", (fileName, icon) => {
@@ -77,6 +78,16 @@ describe("resolveIcon", () => {
     globalThis.fetch = vi.fn();
 
     expect((await resolveIcon("file.xyzabc123", "dark")).type).toBe("lucide");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("serves the bundled AGENTS.md icon without touching the CDN", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline"));
+
+    const resolved = await resolveIcon("AGENTS.md", "dark");
+
+    expect(resolved).toEqual({ type: "image", url: getIconUrl("AGENTS.md", "dark") });
+    expect(resolved).not.toMatchObject({ url: expect.stringContaining("cdn.jsdelivr.net") });
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 

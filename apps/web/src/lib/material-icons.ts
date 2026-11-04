@@ -7,6 +7,7 @@
 import type { LucideIcon } from "lucide-react";
 import { fileExtensions, fileNames, light } from "material-icon-theme/dist/material-icons.json";
 import { version } from "material-icon-theme/package.json";
+import agentsMdIconUrl from "@/assets/file-icons/agents-md.svg?url";
 import type { Appearance } from "@/hooks/useTheme";
 import { getFileIcon } from "./file-icons";
 
@@ -30,13 +31,18 @@ const LIGHT_ICON_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Agent instruction files Material leaves on its generic Markdown icon. Mcode marks them with
- * the provider's icon, which the theme already ships for the provider's folder.
+ * Agent instruction files Mcode marks with the agent that reads them. Material draws CLAUDE.md
+ * as plain Markdown and AGENTS.md as a generic robot.
  */
 const AGENT_FILE_ICONS: IconTable = {
   "claude.md": "claude",
   "claude.local.md": "claude",
+  "agents.md": "agents-md",
+  "agents.override.md": "agents-md",
 };
+
+/** Icons the theme lacks, shipped with the app and never fetched. */
+const BUNDLED_ICON_URLS: IconTable = { "agents-md": agentsMdIconUrl };
 
 function lookup(table: keyof IconTables, key: string, appearance: Appearance): string | undefined {
   return (appearance === "light" ? LIGHT_TABLES[table][key] : undefined) ?? DARK_TABLES[table][key];
@@ -58,14 +64,14 @@ export function getIconName(fileName: string, appearance: Appearance): string | 
   return null;
 }
 
-/** Get the jsDelivr CDN URL for a file's Material icon, or null when the theme has none. */
+/** Get the URL of a file's icon, or null when the theme has none. */
 export function getIconUrl(fileName: string, appearance: Appearance): string | null {
   const iconName = getIconName(fileName, appearance);
   return iconName ? iconUrl(iconName) : null;
 }
 
 function iconUrl(iconName: string): string {
-  return `${CDN_BASE}/${iconName}.svg`;
+  return BUNDLED_ICON_URLS[iconName] ?? `${CDN_BASE}/${iconName}.svg`;
 }
 
 /** Icon resolved to either a fetched SVG blob URL or a Lucide fallback component. */
@@ -114,6 +120,8 @@ export async function resolveIconByName(
 }
 
 async function resolveFromCdn(iconName: string, fallback: LucideIcon): Promise<ResolvedIcon> {
+  const bundled = BUNDLED_ICON_URLS[iconName];
+  if (bundled) return { type: "image", url: bundled };
   const cached = blobCache.get(iconName);
   if (cached) return { type: "image", url: cached };
   if (failedCache.has(iconName)) return { type: "lucide", icon: fallback };
