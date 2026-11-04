@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
@@ -143,6 +143,24 @@ afterEach(() => {
 });
 
 describe("ComposerCapsuleSplit", () => {
+  // Live tests choose their model through these exact names in
+  // .agents/skills/electorn-live-testing/scripts/pick-model.mjs, so a rename here must update that helper too.
+  it("keeps the names the live-testing model picker helper drives", async () => {
+    vi.mocked(mockTransport.listProviderModels).mockImplementation(async (providerId) =>
+      providerId === "claude" ? [{ id: "claude-haiku-9", name: "Haiku 9" }] : CODEX_MODELS);
+    const onSelectionChange = await renderSplit();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Model: / }));
+    await act(async () => {});
+    const picker = screen.getByRole("dialog", { name: "Choose model and provider" });
+    fireEvent.click(within(picker).getByRole("radio", { name: "Claude" }));
+    await act(async () => {});
+    fireEvent.change(within(picker).getByPlaceholderText("Search models"), { target: { value: "Haiku" } });
+    fireEvent.click(within(picker).getAllByRole("option", { name: /\bHaiku\b/ })[0]);
+
+    expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({ provider: "claude", modelId: "claude-haiku-9" }));
+  });
+
   it("keeps the model search and its focus across hover switches", async () => {
     // Base UI returns focus only to an element `tabbable` sees, and it sees nothing in a layout-free jsdom.
     vi.spyOn(Element.prototype, "getClientRects").mockReturnValue(Object.assign([new DOMRect(0, 0, 10, 10)], { item: () => null }));

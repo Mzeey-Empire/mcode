@@ -11,6 +11,7 @@ export async function pickModel(scope, { model = "Haiku" } = {}) {
     throw new Error(`Test turns run on ${TEST_MODELS.join(" or ")}, not ${model}`);
   }
   // The composer capsule's model part is named "Model: <short label>", e.g. "Model: Haiku 4.5".
+  // ComposerCapsuleSplit.test.tsx fails when the app renames anything this helper selects by.
   const trigger = scope.getByRole("button", { name: /^Model: / }).last();
   const selectedModel = async () => ((await trigger.getAttribute("aria-label")) ?? "").trim();
   if (!(await selectedModel()).includes(model)) {
