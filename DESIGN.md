@@ -488,7 +488,7 @@ Paper defines six 50 to 950 ramps (neutral, amber, blue, sage, clay, violet) on 
 - **Information** (`info`) and **Warning** (`warning`): feedback notices, always paired with an icon and text. Warning also marks two composer states to notice before sending: the context label from 70% and the access part's icon while Don't ask is on.
 - **Merged PR** (`pr-merged`, violet): the merged state of a pull request. Nothing else uses violet.
 - **Capability** (`capability`, orchid): skill, plugin, command and sub-agent tokens in the composer and transcript. A quiet hue so a reference never competes with the lamp.
-- **File reference** (`file-reference`, mist teal): file tokens. Kept apart from `link` so a file reads as part of the workspace, not a web page.
+- **File reference** (`file-reference`, mist teal): file tokens, which open the file in Files when clicked. Kept apart from `link` so a file reads as part of the workspace, not a web page.
 
 ### Tertiary
 - **Success** (`success`, sage-400 dark / sage-600 light): Additions, completed state, the finished status mark, and the "Finished" label.

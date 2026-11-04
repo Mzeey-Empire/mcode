@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import type { Message } from "@/transport";
 import { EntityToken } from "@/components/chat/EntityToken";
 import { basename } from "@/lib/path";
+import { openFileInFiles } from "@/features/files/open-file-command";
 
 /** Props for {@link MentionedText}. */
 export interface MentionedTextProps {
@@ -66,6 +67,22 @@ function createMentionToken(mention: NonNullable<Message["mentions"]>[number], r
       title={rawMention}
       tone="user"
       invocation={mention.kind === "command"}
+      {...(mention.kind === "file" ? fileLinkProps(mention.path) : {})}
     />
   );
+}
+
+/** Makes a file token act as a link that opens its file in the Files tool. */
+function fileLinkProps(path: string) {
+  return {
+    role: "link",
+    tabIndex: 0,
+    className: "cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-focus",
+    onClick: () => openFileInFiles(path),
+    onKeyDown: (event: KeyboardEvent<HTMLSpanElement>) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      openFileInFiles(path);
+    },
+  };
 }
