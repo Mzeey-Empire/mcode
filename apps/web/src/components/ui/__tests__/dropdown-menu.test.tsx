@@ -103,7 +103,7 @@ describe("DropdownMenuItem", () => {
     await user.keyboard("{Enter}");
     await user.click(commit);
     expect(onPick).not.toHaveBeenCalled();
-    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
   });
 
   it("shows the reason in a tooltip when the disabled row is hovered", async () => {

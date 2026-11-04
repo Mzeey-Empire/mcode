@@ -171,7 +171,7 @@ describe("composer capabilities", () => {
     const trigger = screen.getByRole("button", { name: "Add to composer" });
     await user.click(trigger);
     await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menu", { name: "Add to composer" }).contains(document.activeElement)).toBe(true);
+    expect((await screen.findByRole("menu", { name: "Add to composer" })).contains(document.activeElement)).toBe(true);
 
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("menu", { name: "Add to composer" })).not.toBeInTheDocument());
