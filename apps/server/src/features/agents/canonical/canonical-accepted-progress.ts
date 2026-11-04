@@ -1050,6 +1050,15 @@ export class CanonicalAcceptedProgress {
     logger.error(source === "receipt" ? "Accepted progress receipt processing failed" : "Accepted progress save failed", { threadId: batch.execution.threadId,
       executionId: batch.execution.executionId, operationId: batch.operationId, error: describeSaveFailure(failure.error),
       exhausted: failure.exhausted, queue: this.depth() });
+    diag.emit("progress.save-failed", { th: batch.execution.threadId }, () => ({
+      turn: batch.execution.turnId,
+      execution: batch.execution.executionId,
+      source,
+      error: failure.error.message.slice(0, 200),
+      exhausted: failure.exhausted,
+      events: batch.events.length,
+      types: [...new Set(batch.events.map((event) => event.draft.payload.type))].slice(0, 8),
+    }));
     this.publishSaving(batch.execution.threadId);
     // Disk failure retains the accepted stream; invalid receipt application still invalidates execution ownership.
     if (failure.exhausted && source === "receipt") await this.stopFailedOwner(thread, failure.error);

@@ -161,6 +161,8 @@ export const DIAG_CATALOG = {
   >()(["th"]),
   // Identifies late batches rejected after their execution lost admission.
   "provider.refused": event<{ turn: string; execution: string; phase: string; events: number; types: string[] }>()(["th"]),
+  // Names accepted events a save left on disk unwritten; `exhausted` means no retry follows.
+  "progress.save-failed": event<{ turn: string; execution: string; source: "storage" | "receipt"; error: string; exhausted: boolean; events: number; types: string[] }>()(["th"]),
   "cursor.wire": event<CursorWirePayload>()(["th"]),
   "cursor.session": event<{ operation: string }>()(["th"]),
   "approval": span<{ provider: string | null }, { status: string } | undefined>()(["th"], null),
