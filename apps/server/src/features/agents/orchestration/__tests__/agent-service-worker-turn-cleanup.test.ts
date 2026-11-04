@@ -357,6 +357,18 @@ describe("AgentService cleanup through production worker composition", { timeout
     expect(fixture.sent.map((sent) => sent.message)).toEqual(["Do the work", "replacement"]);
   });
 
+  it("ends a Claude turn Interrupted when its stream is lost before its reply text is classified", async () => {
+    const fixture = await openFixture("claude");
+    const turn = await sendTurn(fixture);
+    await fixture.emit({ type: "textDelta", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, delta: "partial reply" });
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
+    expect(fixture.service.runtimeAccess().activeThreadIds()).not.toContain(fixture.thread.id);
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Interrupted");
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "interrupted", cause: "provider_exited" });
+    expect(fixture.threads.findById(fixture.thread.id)?.status).toBe("interrupted");
+    expect(fixture.assistant()).toMatchObject({ content: "partial reply", outcome: "interrupted", outcomeExecutionId: turn.turnExecutionId });
+  });
+
   it("ends a provider_lost turn during graceful stopAll with app_closed", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);

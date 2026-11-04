@@ -100,6 +100,33 @@ describe("ClaudeProvider turn end", () => {
     const types = events.map(({ event }) => event.type);
     expect(types.slice(types.indexOf(AgentEventType.TurnComplete))).toEqual([AgentEventType.TurnComplete, AgentEventType.Ended]);
     expect(events.at(-1)?.event).toMatchObject({ type: AgentEventType.Ended, turnExecutionId: EXECUTION_ID });
+    expect(events.at(-1)?.event).not.toHaveProperty("reason");
+  });
+
+  it("reports the provider lost when the stream ends before the turn does", async () => {
+    mockQuery.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+      const stream = (async function* () {
+        await prompt[Symbol.asyncIterator]().next();
+        yield { type: "system", subtype: "init", session_id: "sdk-lost" };
+        yield { type: "assistant", message: { content: [{ type: "text", text: "Partial reply" }] } };
+      })();
+      return Object.assign(stream, { close: vi.fn(() => { void stream.return(); }) });
+    });
+    const events: ProviderRuntimeEvent[] = [];
+    const provider = new ClaudeProvider(
+      stubEnvService(), stubJobObject(), undefined, undefined, undefined,
+      mockShutdownHost((event) => events.push(event)),
+    );
+    try {
+      await provider.sendTurn(turnRequest(EXECUTION_ID));
+      await vi.waitFor(() => expect(events.some(({ event }) => event.type === AgentEventType.Ended)).toBe(true));
+    } finally {
+      await provider.shutdown();
+    }
+
+    const ended = events.filter(({ event }) => event.type === AgentEventType.Ended).map(({ event }) => event);
+    expect(ended).toEqual([expect.objectContaining({ turnExecutionId: EXECUTION_ID, reason: "provider_lost" })]);
+    expect(ended[0]).not.toHaveProperty("outcome");
   });
 
   it("ends a failed turn while the SDK session stays open", async () => {
