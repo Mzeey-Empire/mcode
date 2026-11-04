@@ -1,7 +1,6 @@
 /**
  * @internal
  * Redacts and summarizes Cursor ACP `session/update` traffic for troubleshooting
- * when `provider.cursor.traceSessionUpdates` is enabled (see `cursor-provider`).
  */
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";

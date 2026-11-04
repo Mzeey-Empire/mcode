@@ -1,3 +1,4 @@
+import { diag } from "@mcode/shared/diagnostics";
 import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
 /**
  * Claude Agent SDK provider adapter.
@@ -587,6 +588,7 @@ interface ClaudeSpawnBrowserAccess {
 }
 
 interface ClaudeStreamLoopState {
+  threadId: string;
   subagentApprovalOrigins: Map<string, Extract<ApprovalRequestBody["origin"], { kind: "subagent" }>>;
   currentTurnExecutionId: string;
   currentRouting: ClaudeCanonicalEventRouting;
@@ -605,6 +607,13 @@ interface ClaudeStreamLoopState {
   /** A result was kept from ending the turn because a steer was still unanswered. */
   absorbedSteeredSegmentEnd: boolean;
   mapper: ClaudeEventMapper;
+}
+
+function streamEventType(message: Record<string, unknown>): string | undefined {
+  if (message.type !== "stream_event") return undefined;
+  const event = message.event;
+  if (!event || typeof event !== "object" || !("type" in event)) return undefined;
+  return String(event.type);
 }
 
 /** Explains the wake without turning the subagent's report into a user prompt. */
@@ -2093,6 +2102,7 @@ export class ClaudeProvider
       ? sessionId.slice(6)
       : sessionId;
     const state: Omit<ClaudeStreamLoopState, "mapper"> = {
+      threadId,
       subagentApprovalOrigins: new Map(),
       currentTurnExecutionId: routing.executionId,
       currentRouting: routing,
@@ -2189,6 +2199,11 @@ export class ClaudeProvider
     state: ClaudeStreamLoopState,
     message: Record<string, unknown>,
   ): Promise<boolean> {
+    diag.emit("claude.stream", { th: state.threadId }, () => ({
+      type: String(message.type ?? ""),
+      subtype: typeof message.subtype === "string" ? message.subtype : undefined,
+      eventType: streamEventType(message),
+    }));
     if (!state.sessionInitialized && message.type !== "result") {
       state.sessionInitialized = true;
       this.emit(`_resumeOk:${sessionId}`);

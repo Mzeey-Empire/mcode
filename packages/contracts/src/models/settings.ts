@@ -401,13 +401,6 @@ export const SettingsSchema = lazySchema(() =>
             /** Attach stderr tail excerpts to Cursor failure logs (debugging only). */
             verboseFailureLogs: z.boolean().default(true),
             /**
-             * Log sanitized `session/update` envelopes plus mapped `AgentEvent` summaries while
-             * handling Cursor ACP traffic (daily server log files).
-             *
-             * **Note:** `agent_message_chunk` updates are intentionally skipped as they are too chatty.
-             */
-            traceSessionUpdates: z.boolean().default(false),
-            /**
              * Respond to blocking `cursor/ask_question` with automatic option picks derived
              * from prompts (recommended-first). When false, answer `skipped`.
              */
@@ -644,7 +637,6 @@ export const PartialSettingsSchema = lazySchema(() =>
             retryTransientFailuresOnce: z.boolean().optional(),
             rateLimitRetryBackoffMs: z.number().int().min(0).max(60_000).optional(),
             verboseFailureLogs: z.boolean().optional(),
-            traceSessionUpdates: z.boolean().optional(),
             autoAnswerAskQuestions: z.boolean().optional(),
             echoAskQuestionsToTimeline: z.boolean().optional(),
           })

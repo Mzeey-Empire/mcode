@@ -1,3 +1,4 @@
+import { diag } from "@mcode/shared/diagnostics";
 import type * as NodeChildProcess from "node:child_process";
 import { logger } from "@mcode/shared";
 import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
@@ -120,13 +121,8 @@ export class CursorAcpProcessSpawner {
       ignoreAuthenticationErrors: true,
       recoveryFailurePolicy: "fail-without-replacement",
       recoveryInactivityTimeoutMs: 20_000,
-      onSessionOperation: ({ operation, sessionId }) => {
-        if (!this.deps.getSettings().provider.cursor.traceSessionUpdates) return;
-        logger.info("Cursor ACP session operation", {
-          operation,
-          threadId,
-          logicalSessionId: sessionId,
-        });
+      onSessionOperation: ({ operation }) => {
+        diag.emit("cursor.session", { th: threadId }, () => ({ operation }));
       },
       processes: this.deps.host.processes,
     });
