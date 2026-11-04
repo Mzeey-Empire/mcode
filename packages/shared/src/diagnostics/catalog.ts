@@ -104,6 +104,8 @@ export const DIAG_CATALOG = {
   "delegate.task": event<DelegateStep>()(["th"]),
   "delegate.wake": event<DelegateWake>()(["th"]),
   "delegate.launch": span<{ taskId: string }, { child: string }>()(["th"], 60_000),
+  // Starts when results are steered into a running Coordinator turn; delegate.wake records whether they reached it.
+  "delegate.steer": span<{ wake: string }>()(["th"], 30_000),
 };
 
 type Catalog = typeof DIAG_CATALOG;

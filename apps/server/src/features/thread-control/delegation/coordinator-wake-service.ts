@@ -41,10 +41,6 @@ const systemClock: CoordinatorWakeClock = {
 
 type HoldReason = Extract<EventPayload<"delegate.wake">, { outcome: "held" }>["reason"];
 
-function hold(coordinatorId: string, reason: HoldReason): void {
-  diag.emit("delegate.wake", { th: coordinatorId }, () => ({ outcome: "held", reason }));
-}
-
 const SETTLE_DELAY_MS = 1_000;
 const MAX_BACKOFF_MS = 300_000;
 
@@ -111,25 +107,31 @@ export class CoordinatorWakeService {
     this.failures.clear();
   }
 
+  /** Every task change nudges the Coordinator, so a hold is only worth recording while a result is waiting on it. */
+  private hold(coordinatorId: string, reason: HoldReason): void {
+    if (!this.deps.tasks.hasUncoveredNotices(coordinatorId)) return;
+    diag.emit("delegate.wake", { th: coordinatorId }, () => ({ outcome: "held", reason }));
+  }
+
   private async reconcile(coordinatorId: string): Promise<void> {
     const thread = this.deps.threads.findById(coordinatorId);
     if (this.disposed || !thread || thread.deleted_at) return;
     const turn = this.deps.runtime.runningTurn(coordinatorId);
     if (turn) {
       // A turn without the lease cannot call task_status for detail, so the result waits for a turn that can.
-      if (!turn.steer || !turn.holdsDelegationLease) return hold(coordinatorId, "turn-without-lease");
-      if (this.noSteer.get(coordinatorId) === turn.turnExecutionId) return hold(coordinatorId, "steer-refused");
+      if (!turn.steer || !turn.holdsDelegationLease) return this.hold(coordinatorId, "turn-without-lease");
+      if (this.noSteer.get(coordinatorId) === turn.turnExecutionId) return this.hold(coordinatorId, "steer-refused");
       await this.deliverSteer(coordinatorId, turn.turnExecutionId);
       return;
     }
-    if (this.deps.runtime.isActive(coordinatorId)) return hold(coordinatorId, "busy");
+    if (this.deps.runtime.isActive(coordinatorId)) return this.hold(coordinatorId, "busy");
     await this.deliverIdle(thread);
   }
 
   private async deliverIdle(thread: Thread): Promise<void> {
     const coordinatorId = thread.id;
     const ending = this.deps.canonical.loadLatestTurn(coordinatorId)?.ending;
-    if (ending?.outcome === "cancelled" && ending.stop.by === "user") return hold(coordinatorId, "user-stopped");
+    if (ending?.outcome === "cancelled" && ending.stop.by === "user") return this.hold(coordinatorId, "user-stopped");
     this.noSteer.delete(coordinatorId);
     const batch = await this.deps.tasks.claimNotices(coordinatorId, NodeCrypto.randomUUID());
     if (!batch) return;
@@ -147,8 +149,8 @@ export class CoordinatorWakeService {
     if (!batch) return;
     if (this.disposed) return this.deps.tasks.returnNotices(batch.wakeId);
     try {
-      const result = await this.deps.steer.steer({ threadId: coordinatorId, turnExecutionId,
-        messageId: batch.wakeId, content: batch.content }, { systemNotice: batch.systemNotice });
+      const result = await diag.run("delegate.steer", { th: coordinatorId }, () => this.deps.steer.steer({ threadId: coordinatorId,
+        turnExecutionId, messageId: batch.wakeId, content: batch.content }, { systemNotice: batch.systemNotice }), () => ({ wake: batch.wakeId }));
       if (result.status === "delivered" || result.status === "delivery_unknown") {
         diag.emit("delegate.wake", { th: coordinatorId }, () => ({ outcome: "steered", wake: batch.wakeId, reached: true }));
         await this.deps.tasks.settleNotices(batch.wakeId);

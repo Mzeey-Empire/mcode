@@ -96,18 +96,21 @@ export class DelegatedTaskService {
   coordinatorsWithUncoveredNotices(): string[] {
     const coordinators = new Set<string>();
     for (const task of this.deps.tasks.listAll()) {
-      const entry = this.noticeEntry(task);
-      if (entry && !task.noticeClaim && !noticeCovered(task.noticeDelivered, entry.key)) coordinators.add(task.coordinatorThreadId);
+      if (this.uncoveredNotice(task)) coordinators.add(task.coordinatorThreadId);
     }
     return [...coordinators];
+  }
+
+  /** Whether a Coordinator has task state it has not been sent and no wake is carrying. */
+  hasUncoveredNotices(coordinatorThreadId: string): boolean {
+    return this.deps.tasks.listByCoordinator(coordinatorThreadId).some((task) => this.uncoveredNotice(task) !== null);
   }
 
   /** Reserve uncovered snapshots against their delivered basis. */
   async claimNotices(coordinatorThreadId: string, wakeId: string) {
     const candidates = this.deps.tasks.listByCoordinator(coordinatorThreadId).flatMap((task) => {
-      const entry = this.noticeEntry(task);
-      if (!entry || task.noticeClaim || noticeCovered(task.noticeDelivered, entry.key)) return [];
-      return [{ entry, taskId: task.taskId, key: entry.key, basis: task.noticeDelivered }];
+      const entry = this.uncoveredNotice(task);
+      return entry ? [{ entry, taskId: task.taskId, key: entry.key, basis: task.noticeDelivered }] : [];
     });
     if (!candidates.length) return null;
     const fitting = selectEntriesWithinBudget(candidates.slice(0, 32).map((candidate) => candidate.entry));
@@ -414,6 +417,12 @@ export class DelegatedTaskService {
   private async cancelReport(task: DelegatedTask, origin: CancelOrigin) {
     const { taskId, state } = origin === "coordinator" ? await this.report(task) : this.snapshot(task);
     return { taskId, state };
+  }
+
+  private uncoveredNotice(task: DelegatedTask): TaskNoticeEntry | null {
+    const entry = this.noticeEntry(task);
+    if (!entry || task.noticeClaim || noticeCovered(task.noticeDelivered, entry.key)) return null;
+    return entry;
   }
 
   private noticeEntry(task: DelegatedTask, snapshot = this.snapshot(task)): TaskNoticeEntry | null {
