@@ -36,6 +36,7 @@ import { useCapsuleRows } from "./capsule/capsule-layout";
 import type { ComposerMode } from "./execution/composer-mode";
 import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
 import { ComposerTray, composerTrayClass } from "./ComposerTray";
+import { ComposerTaskTab } from "./tasks/ComposerTaskTab";
 import { clearVisibleBrowserNotes } from "./draft/draft-browser-notes";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { ApprovalAnnouncer, ApprovalDock, useDelegatedThreadTitles, useDockApprovals } from "@/features/conversation/approvals/ApprovalDock";
@@ -704,6 +705,11 @@ function ComposerCapsuleRow({ model, actions, rowRef, leftRef, rightRef, onDraft
   );
 }
 
+function ComposerTaskTabSurface({ model }: Pick<ComposerContentSurfaceProps, "model">) {
+  if (!model.threadId || model.isNewThread || model.branchFromMessageId) return null;
+  return <ComposerTaskTab key={model.threadId} threadId={model.threadId} covered={model.slashCommand.isOpen} />;
+}
+
 function ComposerInputSurface({
   model,
   actions,
@@ -755,6 +761,7 @@ function ComposerInputSurface({
       <ComposerAttachmentSurface model={model} actions={actions} />
       <ComposerCapsuleRow model={model} actions={actions} rowRef={rowRef} leftRef={leftRef} rightRef={rightRef} onDraftChange={remeasure} hidden={hidden} />
       {!hidden && <ComposerEditorPopups model={model} actions={actions} />}
+      {!hidden && <ComposerTaskTabSurface model={model} />}
     </div>
   );
 }

@@ -15,6 +15,9 @@
   /* The composer tray, the slash menu and a new thread's target rail share one footprint above the capsule,
      so the menu covers whichever of them it overlaps edge to edge. */
   --tray-inset: 22px;
+  /* The task tab's left offset and its widest content, a check and 99/99; the composer tray clears both. */
+  --task-tab-left: 28px;
+  --task-tab-max-width: 76px;
   --neutral-50: oklch(99% 0.005 260);
   --neutral-100: oklch(95.5% 0.005 260);
   --neutral-200: oklch(90% 0.005 260);
@@ -358,6 +361,35 @@
    Without scroll-driven animation support the text clips with no fade; the
    animation sits behind @supports because a timeline-less 0s animation with
    fill `both` would pin the mask on text that fits. */
+/* Concave fillets where the task tab and tray meet the capsule's top edge, so the outline flows into them.
+   Set --tab-edge to recolour the fillet edge with the border. */
+@utility tab-fillets {
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    width: 8px;
+    height: 8px;
+    pointer-events: none;
+    background: radial-gradient(
+      circle at var(--fillet-x) 0,
+      transparent 7px,
+      var(--tab-edge, var(--color-border)) 7px,
+      var(--tab-edge, var(--color-border)) 8px,
+      var(--color-selected) 8px
+    );
+  }
+  &::before {
+    left: -8px;
+    --fillet-x: 0;
+  }
+  &::after {
+    right: -8px;
+    --fillet-x: 100%;
+  }
+}
+
 @utility text-fade {
   overflow: hidden;
   white-space: nowrap;

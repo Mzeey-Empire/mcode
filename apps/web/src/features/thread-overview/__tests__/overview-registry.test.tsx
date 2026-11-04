@@ -59,7 +59,6 @@ describe("overview registry", () => {
     expect(getOverviewEntries(subject).map(({ id, section, order }) => [id, section, order])).toEqual([
       ["save-recovery", "activity", 10],
       ["changes", "activity", 20],
-      ["tasks", "activity", 40],
       ["plan", "activity", 45],
       ["local", "lane", 50],
       ["create-branch", "lane", 60],

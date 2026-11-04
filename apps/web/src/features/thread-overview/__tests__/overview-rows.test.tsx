@@ -93,7 +93,7 @@ describe("overview Changes, Tasks and Usage rows", () => {
       recapByThread: {},
       runningThreadIds: new Set(),
     });
-    useTaskStore.setState({ taskBubbleByThread: {}, tasksByThread: {}, trayExpandedByThread: {} });
+    useTaskStore.setState({ taskBubbleByThread: {}, tasksByThread: {} });
     usePlanStore.setState({ plansByThread: {} });
   });
 
@@ -222,37 +222,12 @@ describe("overview Changes, Tasks and Usage rows", () => {
     expect(commits).toBe(settledCommits);
   });
 
-  it("titles the Tasks row from the implemented plan and opens the composer tray list", async () => {
-    useTaskStore.getState().setTasks(
-      thread.id,
-      [task("1", "completed"), task("2", "completed"), task("3", "cancelled"), task("4", "in_progress")],
-      "accepted-message",
-    );
-    usePlanStore.setState({
-      plansByThread: {
-        [thread.id]: [{ title: "Tidy thread actions menu", acceptedMessageId: "accepted-message" } as PlanVersion],
-      },
-    });
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
-
-    const row = screen.getByTestId("thread-overview-tasks");
-    expect(row).toHaveTextContent("Tidy thread actions menu");
-    expect(row).toHaveTextContent("3/4");
-    expect(row).not.toHaveTextContent(thread.title);
-    expect(screen.queryByText("Plans")).not.toBeInTheDocument();
-
-    fireEvent.click(row);
-    expect(useTaskStore.getState().trayExpandedByThread[thread.id]).toBe(true);
-  });
-
-  it("titles a task list without a plan as Tasks and hides the row without tasks", () => {
-    const { unmount } = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
-    expect(screen.queryByTestId("thread-overview-tasks")).not.toBeInTheDocument();
-    unmount();
-
+  it("shows no Tasks row for a thread with tasks", () => {
     useTaskStore.getState().setTasks(thread.id, [task("1", "pending"), task("2", "completed")], null);
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
-    expect(screen.getByTestId("thread-overview-tasks")).toHaveTextContent("Tasks1/2");
+
+    expect(screen.queryByText("Tasks")).not.toBeInTheDocument();
+    expect(screen.queryByText("1/2")).not.toBeInTheDocument();
   });
 
   it("shows the plan row only with a version and opens the Plan tab in place of the docked card", () => {
