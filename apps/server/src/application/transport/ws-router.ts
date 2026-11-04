@@ -15,6 +15,7 @@ import { WebSocketRequestSchema, type WebSocketRequest, type WebSocketResponse }
 import { type IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import { workspaceEnvironmentValidationIssues } from "@mcode/contracts/models/workspace-environment";
 import { logger } from "@mcode/shared";
+import { recordRequest } from "./request-diagnostics.js";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type {
   ApprovalService,
@@ -366,8 +367,9 @@ export interface RouterDeps {
 export async function routeMessage(
   raw: string,
   deps: RouterDeps,
-  context: { client?: WebSocket; browserAutomationAuthorization?: BrowserAutomationHostConnectionAuthorization | null } = {},
+  context: { client?: WebSocket; connection?: { conn: string; client: string }; browserAutomationAuthorization?: BrowserAutomationHostConnectionAuthorization | null } = {},
 ): Promise<WebSocketResponse> {
+  const receivedAt = Date.now();
   const parsedRequest = parseWebSocketRequest(raw);
   if (!parsedRequest.ok) return parsedRequest.response;
   const request = parsedRequest.request;
@@ -411,9 +413,22 @@ export async function routeMessage(
       methodDef.result,
     );
 
+    if (context.connection) {
+      recordRequest(request.method, validatedParams.params, result, {
+        method: request.method, req: request.id, ...context.connection,
+        receivedAt, ms: Date.now() - receivedAt, outcome: "ok",
+      });
+    }
     return { id: request.id, result };
   } catch (error) {
-    return mapRouteError(request, error);
+    const response = mapRouteError(request, error);
+    if (context.connection) {
+      recordRequest(request.method, validatedParams.params, undefined, {
+        method: request.method, req: request.id, ...context.connection,
+        receivedAt, ms: Date.now() - receivedAt, outcome: "error", error: response.error?.code,
+      });
+    }
+    return response;
   }
 }
 

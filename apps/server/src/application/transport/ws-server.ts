@@ -5,6 +5,7 @@
  */
 
 import * as NodeHTTP from "node:http";
+import * as NodeCrypto from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { logger } from "@mcode/shared";
 import {
@@ -83,6 +84,7 @@ type InstanceCheckResult =
 type InstanceAttachmentExpectation = Pick<WsServerDeps, "singleInstance" | "authToken" | "instanceToken" | "worktreeIdentity">;
 
 interface WsMessageContext {
+  readonly connection: { conn: string; client: string };
   readonly ws: WebSocket;
   readonly deps: WsServerDeps;
   readonly resolveCurrentBrowserAutomationAuthorization: () => BrowserAutomationHostConnectionAuthorization | null;
@@ -252,6 +254,7 @@ export function createWsServer(deps: WsServerDeps): {
     };
 
     const messageContext: WsMessageContext = {
+      connection: { conn: NodeCrypto.randomUUID().slice(0, 8), client: requestClient(req) },
       ws,
       deps,
       resolveCurrentBrowserAutomationAuthorization,
@@ -622,9 +625,17 @@ async function routeWsMessage(raw: string, context: WsMessageContext): Promise<v
   const terminalCreateMethod = parseTerminalCreateMethod(raw);
   const response = await routeMessage(raw, context.deps, {
     client: context.ws,
+    connection: context.connection,
     browserAutomationAuthorization: context.resolveCurrentBrowserAutomationAuthorization(),
   });
   await sendWsResponse(terminalCreateMethod, response, context);
+}
+
+function requestClient(req: NodeHTTP.IncomingMessage): string {
+  const userAgent = req.headers["user-agent"] ?? "";
+  if (userAgent.includes("Electron/")) return "desktop";
+  if (req.headers.origin !== undefined) return "browser";
+  return userAgent.trim().split(/\s+/, 1)[0]?.slice(0, 40) || "unknown";
 }
 
 type TerminalCreateMethod = DisconnectedTerminalCreate["method"];

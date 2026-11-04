@@ -26,7 +26,10 @@ function inWindow(row: DiagRecord, q: DiagQuery): boolean {
 }
 
 function windowRows(evidence: Evidence, q: DiagQuery): DiagRecord[] {
-  const rows = evidence.threads.flatMap((view) => view.rows);
+  const rows = [
+    ...evidence.threads.flatMap((view) => view.rows),
+    ...evidence.records.filter((row) => !row.th && row.k !== "run"),
+  ];
   return rows.filter((row) => inWindow(row, q)).sort(compareByTime);
 }
 

@@ -30,6 +30,8 @@ Start without a scope to find the thread, then rerun with `--thread` or `--works
 
 ## Read the output
 
+`rpc.request` rows record when the server received a send, stop, steer, retry, resume, question answer, or approval answer, over which connection (`conn`) and from which kind of client, and the request's outcome. Rows on lane `-` are process records with no thread, such as an approval answer, which links to its thread's `approval` span by the approval id.
+
 The header states what the evidence covers: the window, the first and last record, each run's recording intervals, and any dropped records. Check it first. A gap in the timeline means nothing happened only when recording was on throughout. A quiet line that ends in `(recording off at ...)` means the gap was not recorded.
 
 Findings come before the timeline. Each one has a certainty:

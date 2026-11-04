@@ -56,6 +56,27 @@ describe("diagnostics reader", () => {
     return [...new Set(ids)].sort();
   }
 
+  it("includes process records on lane - in a scoped timeline, including channel and JSON selection", () => {
+    write("a", [begin("a")]);
+    const row: DiagRecord = { t: 3000, n: 2, k: "ev", ch: "rpc.request", d: { approval: "request", outcome: "ok" } };
+    writeLines(recordingPath("p", "run.jsonl"), [row, { ...row, t: WINDOW_END + 1, n: 3 }]);
+    q.thread = "a";
+    expect(render()).toContain("L2 +1000ms - ev rpc.request");
+    const evidence = loadEvidence(q);
+    const jsonRows = renderJson(evidence, [], { ...q, channels: ["rpc.request"], json: true }).split("\n").slice(1).map((line) => JSON.parse(line));
+    expect(jsonRows).toEqual([row]);
+    expect(renderText(evidence, [], { ...q, channels: ["approval"] })).not.toContain("ev rpc.request");
+  });
+
+  it("keeps run markers in the coverage header without rendering timeline rows", () => {
+    write("a", [begin("a")]);
+    writeLines(recordingPath("p", "run.jsonl"), [{ t: 1500, n: 1, k: "run", ch: "diag", run: "run-1", pid: 1, state: "on" }]);
+    q.thread = "a";
+    expect(render()).toContain("run=run-1");
+    expect(render().split("\n").filter((line) => /^L\d+ /.test(line))).toHaveLength(1);
+    expect(renderJson(loadEvidence(q), [], q).split("\n").slice(1).map((line) => JSON.parse(line))).toEqual([begin("a")]);
+  });
+
   it("distinguishes a human wait from an overdue action and sorts the summary", () => {
     write("waiting", [begin("waiting")]);
     write("stuck", [begin("stuck", "agent.send", 30_000)]);

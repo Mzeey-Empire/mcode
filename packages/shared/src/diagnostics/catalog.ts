@@ -41,6 +41,18 @@ type ActionPayload = {
   reason?: string;
 };
 
+type RpcRequestPayload = {
+  method: string;
+  req: string;
+  conn: string;
+  client: string;
+  receivedAt: number;
+  ms: number;
+  outcome: "ok" | "error";
+  error?: string;
+  approval?: string;
+};
+
 type CodexWirePayload = {
   method: string;
   raw: Record<string, unknown>;
@@ -89,6 +101,8 @@ type DelegateWake =
 
 /** One declaration per channel; readers use the budgets stamped into records. */
 export const DIAG_CATALOG = {
+  // Records when a request arrived and from which connection.
+  "rpc.request": event<RpcRequestPayload>()([]),
   "codex.wire": event<CodexWirePayload>()(["th"]),
   "claude.stream": event<ClaudeStreamPayload>()(["th"]),
   "cursor.wire": event<CursorWirePayload>()(["th"]),
