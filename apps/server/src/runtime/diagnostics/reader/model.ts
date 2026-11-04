@@ -26,6 +26,8 @@ export interface ThreadView {
   id: string;
   workspace?: string;
   title?: string;
+  /** The thread that delegated this one. */
+  coordinator?: string;
   rows: DiagRecord[];
   checkpoint?: ThreadCheckpoint;
 }

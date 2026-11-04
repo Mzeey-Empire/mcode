@@ -5,12 +5,18 @@ import { openReadOnlyDatabase } from "../../persistence/sqlite/read-only-databas
 import type { DiagQuery, Evidence } from "./model.js";
 
 const idRowSchema = z.object({ id: z.string() });
-const threadRowSchema = z.object({ id: z.string(), workspace_id: z.string(), title: z.string() });
+const threadRowSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  delegation_coordinator_thread_id: z.string().nullable(),
+});
 const eventRowSchema = z.object({
   thread_id: z.string(),
   accepted_at: z.string(),
   accepted_sequence: z.number(),
   type: z.string().nullable(),
+  item_kind: z.string().nullable(),
 });
 const checkpointRowSchema = z.object({
   thread_id: z.string(),
@@ -24,6 +30,8 @@ export interface ThreadSummary {
   id: string;
   workspaceId: string;
   title: string;
+  /** The thread that delegated this one, when it is a delegated child. */
+  coordinatorId: string | null;
 }
 
 /** One accepted canonical event, reduced to what the timeline shows. */
@@ -32,6 +40,8 @@ export interface CanonicalEventSummary {
   t: number;
   sequence: number;
   type: string;
+  /** Kind of the item an `item.recorded` event stores, such as `tool-call`. */
+  itemKind: string | null;
 }
 
 /** The latest ingest checkpoint of one thread. */
@@ -110,6 +120,21 @@ export function findWorkspaceThreadIds(db: Database, workspaceId: string): strin
   return rows.map((row) => idRowSchema.parse(row).id);
 }
 
+/** Every thread delegated from the given threads, at any depth, excluding the given threads. */
+export function findDelegatedDescendants(db: Database, threadIds: readonly string[]): string[] {
+  const rows = db
+    .query(
+      `WITH RECURSIVE delegated(id) AS (
+         SELECT id FROM threads WHERE delegation_coordinator_thread_id IN (SELECT value FROM json_each(?))
+         UNION
+         SELECT threads.id FROM threads JOIN delegated ON threads.delegation_coordinator_thread_id = delegated.id
+       )
+       SELECT id FROM delegated`,
+    )
+    .all(JSON.stringify(threadIds));
+  return rows.map((row) => idRowSchema.parse(row).id);
+}
+
 /** Threads whose ingest checkpoint changed inside the window. */
 export function findThreadIdsWithCheckpointIn(db: Database, since: number, until: number): string[] {
   const rows = db
@@ -127,11 +152,19 @@ const THREAD_ID_LIST = "thread_id IN (SELECT value FROM json_each(?))";
 /** Titles and workspaces for a set of threads, in one query. */
 export function readThreadSummaries(db: Database, threadIds: readonly string[]): ThreadSummary[] {
   const rows = db
-    .query("SELECT id, workspace_id, title FROM threads WHERE id IN (SELECT value FROM json_each(?))")
+    .query(
+      `SELECT id, workspace_id, title, delegation_coordinator_thread_id
+       FROM threads WHERE id IN (SELECT value FROM json_each(?))`,
+    )
     .all(JSON.stringify(threadIds));
   return rows.map((raw) => {
     const row = threadRowSchema.parse(raw);
-    return { id: row.id, workspaceId: row.workspace_id, title: row.title };
+    return {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      title: row.title,
+      coordinatorId: row.delegation_coordinator_thread_id,
+    };
   });
 }
 
@@ -174,7 +207,8 @@ export function readCanonicalEvents(
   const rows = db
     .query(
       `SELECT thread_id, accepted_at, accepted_sequence,
-              json_extract(envelope_json, '$.payload.type') AS type
+              json_extract(envelope_json, '$.payload.type') AS type,
+              json_extract(envelope_json, '$.payload.item.kind') AS item_kind
        FROM canonical_agent_events
        WHERE ${THREAD_ID_LIST} AND accepted_at >= ? AND accepted_at <= ?
        ORDER BY accepted_at, accepted_sequence`,
@@ -187,6 +221,7 @@ export function readCanonicalEvents(
       t: Date.parse(row.accepted_at),
       sequence: row.accepted_sequence,
       type: row.type ?? "unknown",
+      itemKind: row.item_kind,
     };
   });
 }

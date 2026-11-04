@@ -189,7 +189,9 @@ function summary(evidence: Evidence, findings: Finding[], q: DiagQuery): string[
 
 function laneLegend(evidence: Evidence, lanes: Map<string, string>): string {
   const entries = evidence.threads.map((view) => {
-    return lanes.get(view.id) + "=" + view.id + " " + lineText(view.title ?? "");
+    const parentLane = view.coordinator ? lanes.get(view.coordinator) : undefined;
+    const delegatedBy = parentLane ? " (delegated by " + parentLane + ")" : "";
+    return lanes.get(view.id) + "=" + view.id + " " + lineText(view.title ?? "") + delegatedBy;
   });
   return "lanes: " + entries.join("; ");
 }

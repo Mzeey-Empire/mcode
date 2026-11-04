@@ -265,13 +265,18 @@ describe("diagnostics reader", () => {
       );
     }
 
-    function seedEvent(threadId: string, sequence: number, acceptedAt: number): void {
+    function seedEvent(
+      threadId: string,
+      sequence: number,
+      acceptedAt: number,
+      envelope = '{"payload":{"type":"textDelta"}}',
+    ): void {
       const stamp = new Date(acceptedAt).toISOString();
       db.run(
         `INSERT INTO canonical_agent_events
            (event_id, thread_id, execution_id, accepted_sequence, durable_revision, envelope_json, accepted_at, persisted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [`event-${threadId}-${sequence}`, threadId, "exec-" + threadId, sequence, sequence, '{"payload":{"type":"textDelta"}}', stamp, stamp],
+        [`event-${threadId}-${sequence}`, threadId, "exec-" + threadId, sequence, sequence, envelope, stamp, stamp],
       );
     }
 
@@ -279,6 +284,43 @@ describe("diagnostics reader", () => {
       seedThread(id, workspaceId);
       seedCanonicalThread(id, workspaceId);
     }
+
+    function delegate(childId: string, coordinatorId: string): void {
+      db.run("UPDATE threads SET delegation_coordinator_thread_id = ? WHERE id = ?", [coordinatorId, childId]);
+    }
+
+    it("follows delegation from a thread query into child lanes in any workspace", () => {
+      seedWorkspace("ws");
+      seedWorkspace("ws-child-worktree");
+      seedThread("parent", "ws");
+      seedThread("child", "ws-child-worktree");
+      seedThread("grandchild", "ws-child-worktree");
+      seedThread("bystander", "ws");
+      delegate("child", "parent");
+      delegate("grandchild", "child");
+      write("grandchild", [begin("grandchild", "mcp.tool", 60_000)]);
+      write("child", [begin("child", "delegate.launch", 60_000)]);
+      write("parent", [{ t: 1500, n: 1, th: "parent", k: "ev", ch: "delegate.task", d: { step: "claimed" } }]);
+      write("bystander", [begin("bystander")]);
+      q = { ...q, thread: "parent" };
+
+      const text = render();
+
+      expect(text).toContain("A=parent");
+      expect(text).toMatch(/B=child .*\(delegated by A\)/);
+      expect(text).toMatch(/C=grandchild .*\(delegated by B\)/);
+      expect(text).toContain("C observed open-span mcp.tool#request");
+      expect(text).not.toContain("bystander");
+    });
+
+    it("names the item kind of a recorded item", () => {
+      seedWorkspace("ws");
+      seedActiveThread("a", "ws");
+      seedEvent("a", 1, 3000, '{"payload":{"type":"item.recorded","item":{"kind":"tool-call"}}}');
+      q = { ...q, thread: "a" };
+
+      expect(render()).toContain('db.canonical {"type":"item.recorded","item":"tool-call","sequence":1}');
+    });
 
     it("joins workspace membership and interleaves lanes", () => {
       seedWorkspace("ws");
