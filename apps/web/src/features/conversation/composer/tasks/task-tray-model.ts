@@ -26,21 +26,21 @@ function isSettled(task: TaskItem): boolean {
   return task.status === "completed" || task.status === "cancelled";
 }
 
-/** Tray rows, and the settled count folded into one row, or null when nothing folds. */
+/** The tray's always-listed rows, and the settled tasks it lists under a Done toggle after them. */
 export interface TaskTrayRows {
-  readonly folded: number | null;
   readonly rows: readonly TaskItem[];
+  readonly done: readonly TaskItem[];
 }
 
 /**
- * Settled tasks fold into one count while work remains. Nothing folds when no
- * task or every task is settled. `showDone` lists every task.
+ * While work remains, settled tasks move below the open ones, under a Done
+ * toggle. Once every task is settled there is nothing left to separate, so
+ * every task is listed and `done` is empty.
  */
-export function taskTrayRows(tasks: readonly TaskItem[], showDone: boolean): TaskTrayRows {
-  const settled = tasks.filter(isSettled).length;
-  const folded = settled > 0 && settled < tasks.length ? settled : null;
-  const rows = folded !== null && !showDone ? tasks.filter((task) => !isSettled(task)) : tasks;
-  return { folded, rows };
+export function taskTrayRows(tasks: readonly TaskItem[]): TaskTrayRows {
+  const done = tasks.filter(isSettled);
+  if (done.length === tasks.length) return { rows: tasks, done: [] };
+  return { rows: tasks.filter((task) => !isSettled(task)), done };
 }
 
 /** Accessible name of the tab and the tray header, e.g. "Tasks, 2 of 9 done". */

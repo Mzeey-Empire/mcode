@@ -1,5 +1,5 @@
-import { useState, type ReactNode, type RefObject } from "react";
-import { Check, ChevronDown, X } from "lucide-react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TaskItem, TaskProgress, TaskSegment, TaskStatus } from "@/stores/taskStore";
 import { taskProgressLabel, taskTrayRows } from "./task-tray-model";
@@ -65,19 +65,49 @@ function TaskTrayBar({ segments }: { segments: readonly TaskSegment[] }) {
   );
 }
 
-function TaskFoldRow({ count, showDone, onToggle }: { count: number; showDone: boolean; onToggle: () => void }) {
+interface TaskDoneToggleProps {
+  readonly count: number;
+  readonly open: boolean;
+  readonly toggleRef: RefObject<HTMLLIElement | null>;
+  readonly onToggle: () => void;
+}
+
+/** Matches the sidebar's Older toggle: label, count, and a chevron that turns down when open. */
+function TaskDoneToggle({ count, open, toggleRef, onToggle }: TaskDoneToggleProps) {
+  const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <button
-      type="button"
-      aria-expanded={showDone}
-      onClick={onToggle}
-      className="flex h-[32px] w-full items-center gap-[8px] rounded-full px-[8px] text-compact text-muted hover:bg-hover hover:text-ink"
-    >
-      <Check className="size-[14px] shrink-0" aria-hidden />
-      <span className="flex-1 text-left">{count} done</span>
-      <ChevronDown className={cn("size-[14px] shrink-0", showDone && "rotate-180")} aria-hidden />
-    </button>
+    <li ref={toggleRef} role="none">
+      <button
+        type="button"
+        aria-label={`${count} done`}
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex h-[32px] w-full items-center gap-[8px] px-[8px] text-caption text-muted outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70"
+      >
+        <span className="min-w-0 flex-1 text-left">Done</span>
+        <span className="tabular-nums">{count}</span>
+        <Chevron className="size-[14px] shrink-0" aria-hidden />
+      </button>
+    </li>
   );
+}
+
+/**
+ * Opening the Done toggle scrolls it to the list's top, so the rows it reveals
+ * below it come into view. The list's scroll padding matches its top fade, so
+ * the toggle stops below the fade instead of under it.
+ */
+function useRevealDone(open: boolean) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const toggleRef = useRef<HTMLLIElement>(null);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const toggle = toggleRef.current;
+    if (!open || !list || !toggle) return;
+    const fade = Number.parseFloat(getComputedStyle(list).scrollPaddingTop) || 0;
+    list.scrollTop = toggle.offsetTop - fade;
+  }, [open]);
+  return { listRef, toggleRef };
 }
 
 /** Props for {@link TaskTray}. */
@@ -93,11 +123,12 @@ export interface TaskTrayProps {
 
 /**
  * The tray that grows out of the task tab: a header that closes it, the
- * segment bar, the settled tasks folded into one row, and the task list.
+ * segment bar, and the task list with settled tasks under a Done toggle at its end.
  */
 export function TaskTray({ id, progress, tasks, trayRef, headerRef, bodyRef, onClose }: TaskTrayProps) {
   const [showDone, setShowDone] = useState(false);
-  const { folded, rows } = taskTrayRows(tasks, showDone);
+  const { rows, done } = taskTrayRows(tasks);
+  const { listRef, toggleRef } = useRevealDone(showDone);
   return (
     <div
       ref={trayRef}
@@ -126,18 +157,20 @@ export function TaskTray({ id, progress, tasks, trayRef, headerRef, bodyRef, onC
       </button>
       <div ref={bodyRef}>
         <TaskTrayBar segments={progress.segments} />
-        {folded !== null && (
-          <TaskFoldRow count={folded} showDone={showDone} onToggle={() => setShowDone(!showDone)} />
-        )}
         {/* Focusable so keyboard users can scroll a list taller than five rows. */}
         <ul
+          ref={listRef}
           aria-label="Tasks"
           tabIndex={0}
-          className="scroll-fade-y m-0 max-h-[164px] list-none overflow-y-auto rounded-control p-0 outline-none focus-visible:ring-2 focus-visible:ring-focus/50"
+          className="scroll-fade-y relative m-0 max-h-[164px] list-none overflow-y-auto rounded-control p-0 outline-none focus-visible:ring-2 focus-visible:ring-focus/50 motion-safe:scroll-smooth"
         >
           {rows.map((task) => (
             <TaskListRow key={task.id} task={task} />
           ))}
+          {done.length > 0 && (
+            <TaskDoneToggle count={done.length} open={showDone} toggleRef={toggleRef} onToggle={() => setShowDone(!showDone)} />
+          )}
+          {showDone && done.map((task) => <TaskListRow key={task.id} task={task} />)}
         </ul>
       </div>
     </div>

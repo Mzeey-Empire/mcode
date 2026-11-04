@@ -96,7 +96,7 @@ describe("ComposerTaskTab", () => {
     expect(tab()).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("opens a tray that folds settled tasks until the fold is opened", () => {
+  it("opens a tray that lists settled tasks last, under a Done toggle", () => {
     useTaskStore.getState().setTasks(THREAD, NINE_TASKS, "msg-1");
     render(<ComposerTaskTab threadId={THREAD} covered={false} />);
 
@@ -104,9 +104,9 @@ describe("ComposerTaskTab", () => {
 
     expect(tab()).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("region", { name: "Tasks" })).toBeInTheDocument();
-    const fold = screen.getByRole("button", { name: "2 done" });
-    expect(fold).toHaveAttribute("aria-expanded", "false");
-    expect(listedTasks()).toEqual([
+    const done = screen.getByRole("button", { name: "2 done" });
+    expect(done).toHaveAttribute("aria-expanded", "false");
+    const open = [
       "In progress: Adding Archive",
       "Pending: Add shortcut",
       "Pending: Wire the store",
@@ -114,16 +114,16 @@ describe("ComposerTaskTab", () => {
       "Pending: Run lint",
       "Pending: Run typecheck",
       "Pending: Open PR",
-    ]);
+    ];
+    expect(listedTasks()).toEqual(open);
 
-    fireEvent.click(fold);
+    fireEvent.click(done);
 
-    expect(fold).toHaveAttribute("aria-expanded", "true");
-    expect(listedTasks()).toHaveLength(9);
-    expect(listedTasks()[0]).toBe("Completed: Read the menu");
+    expect(done).toHaveAttribute("aria-expanded", "true");
+    expect(listedTasks()).toEqual([...open, "Completed: Read the menu", "Cancelled: Drop the old row"]);
   });
 
-  it("lists every task without a fold when the list is fully settled", () => {
+  it("lists every task without a Done toggle when the list is fully settled", () => {
     useTaskStore.getState().setTasks(THREAD, [item("1", "completed", "Read"), item("2", "cancelled", "Drop")], "msg-1");
     render(<ComposerTaskTab threadId={THREAD} covered={false} />);
 
