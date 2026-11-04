@@ -117,6 +117,12 @@ export function startEventLoopLagWatch(): ReturnType<typeof setInterval> {
 
 let installed = false;
 let getPhase = () => "not started";
+let exitControl: string | undefined;
+
+/** Names the app.control record whose command is about to end the process, so app.exit can cite it. */
+export function attributeExitToControl(controlId: string): void {
+  exitControl = controlId;
+}
 
 /** Connects exit capture once bootstrap has created the shutdown coordinator. */
 export function setServerDiagnosticsPhaseReader(reader: () => string): void {
@@ -144,7 +150,13 @@ export function installServerDiagnostics(): void {
     process.exit(1);
   });
   process.on("exit", (code) => {
-    diag.emit("app.exit", {}, () => ({ code, phase: getPhase(), uptimeMs: process.uptime() * 1000, ...(fatal ? { fatal } : {}) }));
+    diag.emit("app.exit", {}, () => ({
+      code,
+      phase: getPhase(),
+      uptimeMs: process.uptime() * 1000,
+      ...(fatal ? { fatal } : {}),
+      ...(exitControl ? { control: exitControl } : {}),
+    }));
     diag.flushSync();
     appendDailyLogSync({
       level: "info",

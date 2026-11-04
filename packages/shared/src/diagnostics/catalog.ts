@@ -106,11 +106,14 @@ export const DIAG_CATALOG = {
   // Retains every shutdown requester, including requests that lost the race.
   "app.shutdown": event<{ trigger: "http" | "signal" | "idle"; signal?: string; client?: string; accepted: boolean }>()([]),
   // Makes a recorded exit distinguishable from a run that simply stopped recording.
-  "app.exit": event<{ code: number; phase: string; uptimeMs: number; fatal?: "uncaughtException" | "unhandledRejection" }>()([]),
+  // `control` names the app.control record whose command ended the process.
+  "app.exit": event<{ code: number; phase: string; uptimeMs: number; fatal?: "uncaughtException" | "unhandledRejection"; control?: string }>()([]),
   // Bounds a late callback without claiming an exact stall onset.
   "app.stall": event<{ lastOnTimeAt: number; lateCallbackAt: number; intervalMs: number; lateMs: number }>()([]),
-  // Preserves intentional harness faults before they affect the server.
-  "app.control": event<{ control: string; durationMs?: number }>()([]),
+  // Preserves intentional harness faults before they affect the server; `id` links the effects they cause.
+  "app.control": event<{ id: string; control: string; durationMs?: number }>()([]),
+  // Measures a harness hang as it ran, so a stall window can be attributed to it rather than inferred.
+  "app.hang": event<{ control: string; startedAt: number; endedAt: number; elapsedMs: number }>()([]),
   // Records when a request arrived and from which connection.
   "rpc.request": event<RpcRequestPayload>()([]),
   "codex.wire": event<CodexWirePayload>()(["th"]),

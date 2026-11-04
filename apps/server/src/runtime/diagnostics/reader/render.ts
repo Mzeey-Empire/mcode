@@ -88,6 +88,7 @@ function runEnding(rows: DiagRecord[]): string {
     const d = payloadOf(exit);
     ended = "exit code " + d.code + " at " + isoTime(exit.t) + " after " + d.phase;
     if (d.fatal) ended += ", fatal " + d.fatal;
+    if (d.control) ended += ", by control " + d.control;
   }
   if (shutdown) {
     const d = payloadOf(shutdown);

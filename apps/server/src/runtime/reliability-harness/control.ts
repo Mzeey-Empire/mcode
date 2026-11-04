@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeHTTP from "node:http";
 import { diag } from "@mcode/shared/diagnostics";
+import { attributeExitToControl } from "../diagnostics/server-diagnostics.js";
 import type { ApplicationDatabaseWriter } from "../persistence/sqlite/application-database-writer.js";
 import type { WebSocketServer } from "ws";
 
@@ -156,14 +157,16 @@ async function executeReliabilityControl(
   persistenceFailure: boolean,
   closeSockets: (sockets: WebSocketServer["clients"]) => void,
 ): Promise<boolean> {
-  diag.emit("app.control", {}, () => ({ ...command }));
-  if (command.control === "server-exit") diag.flushSync();
+  const id = NodeCrypto.randomUUID().slice(0, 8);
+  diag.emit("app.control", {}, () => ({ id, ...command }));
   switch (command.control) {
     case "server-exit":
+      attributeExitToControl(id);
+      diag.flushSync();
       setImmediate(() => process.exit(137));
       return persistenceFailure;
     case "server-hang":
-      setImmediate(() => block(command.durationMs ?? 1_000));
+      setImmediate(() => recordHang(id, block, command.durationMs ?? 1_000));
       return persistenceFailure;
     case "transport-loss":
       closeSockets(sockets);
@@ -172,6 +175,14 @@ async function executeReliabilityControl(
       if (!persistenceFailure) await writer.setQueryOnlyForReliability(true);
       return true;
   }
+}
+
+function recordHang(controlId: string, block: (durationMs: number) => void, durationMs: number): void {
+  const startedAt = Date.now();
+  const startedMonotonic = performance.now();
+  block(durationMs);
+  const elapsedMs = performance.now() - startedMonotonic;
+  diag.emit("app.hang", {}, () => ({ control: controlId, startedAt, endedAt: Date.now(), elapsedMs }));
 }
 
 async function readCommand(request: NodeHTTP.IncomingMessage): Promise<ReliabilityHarnessCommand> {
