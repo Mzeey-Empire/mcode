@@ -10,18 +10,20 @@ export async function pickModel(scope, { model = "Haiku" } = {}) {
   if (!TEST_MODELS.includes(model)) {
     throw new Error(`Test turns run on ${TEST_MODELS.join(" or ")}, not ${model}`);
   }
-  const trigger = scope.getByTestId("model-selector-trigger").last();
-  if (!(await trigger.innerText()).includes(model)) {
+  // The composer capsule's model part is named "Model: <short label>", e.g. "Model: Haiku 4.5".
+  const trigger = scope.getByRole("button", { name: /^Model: / }).last();
+  const selectedModel = async () => ((await trigger.getAttribute("aria-label")) ?? "").trim();
+  if (!(await selectedModel()).includes(model)) {
     await trigger.click();
     // The picker opens in a portal, outside a locator scope.
     const page = typeof scope.page === "function" ? scope.page() : scope;
     const picker = page.getByRole("dialog", { name: "Choose model and provider" });
     await picker.getByRole("radio", { name: "Claude", exact: true }).click();
-    await picker.getByRole("combobox", { name: "Search models" }).fill(model);
+    await picker.getByPlaceholder("Search models").fill(model);
     await picker.getByRole("option", { name: new RegExp(`\\b${model}\\b`) }).first().click();
     await picker.waitFor({ state: "hidden" });
   }
-  const label = (await trigger.innerText()).replace(/\s+/g, " ").trim();
+  const label = await selectedModel();
   if (!label.includes(model)) throw new Error(`The composer shows ${label}, not ${model}`);
   return label;
 }

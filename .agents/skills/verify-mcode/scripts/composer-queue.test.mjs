@@ -3,6 +3,11 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { expect, test } from "bun:test";
 
+// Matches the composer capsule's model part only when found the way a user names it.
+function isModelTrigger(role, name) {
+  return role === "button" && name instanceof RegExp && name.test("Model: Haiku 4.5");
+}
+
 import {
   parseComposerQueueArguments,
   prepareCursorForVerifier,
@@ -723,10 +728,6 @@ test("keeps an already selected provider model and verifies its final UI selecti
   let expanded = false;
   const page = {
     getByTestId: (id) => {
-      if (id === "model-selector-trigger") return {
-        click: async () => { expanded = !expanded; operations.push("trigger"); },
-        getAttribute: async () => String(expanded),
-      };
       if (id === "model-group-codex") {
         return {
           getAttribute: async () => "true",
@@ -742,7 +743,11 @@ test("keeps an already selected provider model and verifies its final UI selecti
       }
       throw new Error(`Unexpected test id ${id}`);
     },
-    getByRole: (_role, { name }) => {
+    getByRole: (role, { name }) => {
+      if (isModelTrigger(role, name)) return { last: () => ({
+        click: async () => { expanded = !expanded; operations.push("trigger"); },
+        getAttribute: async () => String(expanded),
+      }) };
       if (name === "Model, selected") {
         return {
           getAttribute: async () => "true",
@@ -775,10 +780,6 @@ test("selects an unselected model, then verifies the selected provider and model
   let expanded = false;
   const page = {
     getByTestId: (id) => {
-      if (id === "model-selector-trigger") return {
-        click: async () => { expanded = !expanded; operations.push("trigger"); },
-        getAttribute: async () => String(expanded),
-      };
       if (id === "model-group-codex") {
         return {
           click: async () => { providerSelected = true; operations.push("select:provider"); },
@@ -795,7 +796,11 @@ test("selects an unselected model, then verifies the selected provider and model
       }
       throw new Error(`Unexpected test id ${id}`);
     },
-    getByRole: (_role, { name }) => {
+    getByRole: (role, { name }) => {
+      if (isModelTrigger(role, name)) return { last: () => ({
+        click: async () => { expanded = !expanded; operations.push("trigger"); },
+        getAttribute: async () => String(expanded),
+      }) };
       if (name === "Model, selected") {
         return {
           getAttribute: async () => modelSelected ? "true" : null,
@@ -1111,12 +1116,6 @@ test("keeps the model panel open while it asserts an already selected model", as
   let expanded = false;
   const page = {
     getByTestId: (id) => {
-      if (id === "model-selector-trigger") {
-        return {
-          click: async () => { expanded = !expanded; operations.push(`toggle:${expanded}`); },
-          getAttribute: async (name) => name === "aria-expanded" ? String(expanded) : null,
-        };
-      }
       if (id === "model-group-codex") return {
         getAttribute: async () => "true",
         isDisabled: async () => false,
@@ -1128,7 +1127,11 @@ test("keeps the model panel open while it asserts an already selected model", as
       };
       throw new Error(`Unexpected test id ${id}`);
     },
-    getByRole: (_role, { name }) => {
+    getByRole: (role, { name }) => {
+      if (isModelTrigger(role, name)) return { last: () => ({
+        click: async () => { expanded = !expanded; operations.push(`toggle:${expanded}`); },
+        getAttribute: async (attribute) => attribute === "aria-expanded" ? String(expanded) : null,
+      }) };
       if (name === "Model, selected") return {
         getAttribute: async () => "true",
         isVisible: async () => expanded,

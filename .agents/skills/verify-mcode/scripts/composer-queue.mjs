@@ -931,13 +931,18 @@ async function assertSelectedProviderModel(page, target, label) {
   await closeModelSelector(page);
 }
 
+// The composer capsule's model part is named "Model: <short label>".
+function modelSelectorTrigger(page) {
+  return page.getByRole("button", { name: /^Model: / }).last();
+}
+
 async function ensureModelSelectorOpen(page) {
-  const trigger = page.getByTestId("model-selector-trigger");
+  const trigger = modelSelectorTrigger(page);
   if (await trigger.getAttribute("aria-expanded") !== "true") await trigger.click();
 }
 
 async function closeModelSelector(page) {
-  const trigger = page.getByTestId("model-selector-trigger");
+  const trigger = modelSelectorTrigger(page);
   if (await trigger.getAttribute("aria-expanded") === "true") await trigger.click();
 }
 
