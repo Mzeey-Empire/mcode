@@ -62,7 +62,8 @@ import {
   nativeCollabSpawnThreadIds,
   nativeSubAgentThreadId,
 } from "./codex-input-mapper.js";
-import { traceCodexIngest } from "./codex-trace.js";
+import { diag } from "@mcode/shared/diagnostics";
+import { summarizeCodexNotificationParams, summarizeAgentEventsForTrace } from "./codex-trace.js";
 import type {
   AskForApproval,
   CodexNotification,
@@ -1974,7 +1975,14 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       if (event.planCapture) this.emit("plan_captured", { threadId, ...event.planCapture });
     }
     const events = [...generatedImageEvents, ...mapperEvents];
-    traceCodexIngest(threadId, rawNotification.method, rawNotification.params, events.map((event) => event.event));
+    diag.emit("codex.wire", { th: threadId }, () => {
+      const method = rawNotification.method ?? "";
+      return {
+        method,
+        raw: summarizeCodexNotificationParams(method, rawNotification.params),
+        mapped: summarizeAgentEventsForTrace(events.map((event) => event.event)),
+      };
+    });
     return events;
   }
 
@@ -2320,7 +2328,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     metadata: NonNullable<Awaited<ReturnType<CodexAppServer["getChildThreadMetadata"]>>>,
   ): void {
     const events = args.mapper.applyChildThreadMetadata(args.childThreadId, metadata);
-    traceCodexIngest(args.threadId, "child/thread-read", { childThreadId: args.childThreadId }, events.map((event) => event.event));
+    diag.emit("codex.wire", { th: args.threadId }, () => ({
+      method: "child/thread-read",
+      raw: summarizeCodexNotificationParams("child/thread-read", { childThreadId: args.childThreadId }),
+      mapped: summarizeAgentEventsForTrace(events.map((event) => event.event)),
+    }));
     const executionId = args.turnExecutionId ?? state.nativeThreadExecutionIds.get(args.childThreadId);
     for (const event of events) { this.recordGoalEvent(args.sessionId, event.event); this.emitRuntimeEvent(withTurnExecutionId(event, executionId)); }
   }

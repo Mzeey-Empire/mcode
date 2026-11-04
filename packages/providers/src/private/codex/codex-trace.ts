@@ -1,36 +1,18 @@
 /**
- * Opt-in Codex protocol tracing for debugging narrative and sub-agent wiring.
- *
- * Set `MCODE_CODEX_TRACE=1` before starting the server. Logs one `info` line per
- * ingested notification with redacted summaries (lengths and short previews only).
  */
 
-import { logger } from "@mcode/shared";
+import { redactDiagnostic } from "@mcode/shared/diagnostics";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 
-const TRUTHY = new Set(["1", "true", "yes"]);
-
-/** Returns true when `MCODE_CODEX_TRACE` requests Codex ingest logging. */
-export function isCodexTraceEnabled(): boolean {
-  const v = process.env.MCODE_CODEX_TRACE;
-  if (v == null || v === "") return false;
-  return TRUTHY.has(v.trim().toLowerCase());
-}
-
-function previewText(s: string, max = 72): string {
+function previewText(s: string, max: number): string {
   const t = s.replace(/\s+/g, " ").trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max)}…`;
 }
 
 function previewDiagnostic(s: string): string {
-  const redacted = s
-    .replace(/\bBearer\s+[^\s,;}]+/gi, "Bearer [redacted]")
-    .replace(/\b(token|api[_-]?key|secret|password|authorization)\s*[:=]\s*["']?[^\s,;}"']+/gi, "$1=[redacted]")
-    .replace(/\beyJ[A-Za-z0-9_-]{20,}\b/g, "[redacted]")
-    .replace(/\b[A-Fa-f0-9]{32,}\b/g, "[redacted]");
-  return previewText(redacted, 256);
+  return previewText(redactDiagnostic(s), 256);
 }
 
 /** Pulls correlation ids from notification params when present (Codex app-server payloads). */
@@ -85,7 +67,7 @@ function summarizeCompletedCodexItem(
 
 function summarizeCodexDelta(params: Record<string, unknown>, ids: Record<string, string>): Record<string, unknown> {
   const delta = codexTraceString(params.delta) ?? codexTraceString(params.text) ?? "";
-  return { ...ids, deltaLen: delta.length, deltaPreview: delta.length > 0 ? previewText(delta, 64) : "" };
+  return { ...ids, deltaLen: delta.length };
 }
 
 function summarizeStartedCodexItem(params: Record<string, unknown>, ids: Record<string, string>): Record<string, unknown> {
@@ -116,7 +98,7 @@ function codexTraceString(value: unknown): string | undefined {
 /**
  * Maps emitted `AgentEvent` objects to compact trace records (ToolUse parent ids, delta flags).
  */
-export function summarizeAgentEventsForTrace(events: readonly AgentEvent[]): unknown[] {
+export function summarizeAgentEventsForTrace(events: readonly AgentEvent[]): Record<string, unknown>[] {
   return events.map((e) => {
     switch (e.type) {
       case AgentEventType.TextDelta:
@@ -124,7 +106,6 @@ export function summarizeAgentEventsForTrace(events: readonly AgentEvent[]): unk
           type: "textDelta",
           isFinalResponse: e.isFinalResponse === true,
           len: e.delta.length,
-          preview: e.delta.length > 0 ? previewText(e.delta, 64) : "",
         };
       case AgentEventType.ReasoningDelta:
         return { type: "reasoningDelta", reasoningItemId: e.reasoningItemId, done: e.done === true, len: e.delta.length };
@@ -155,24 +136,5 @@ export function summarizeAgentEventsForTrace(events: readonly AgentEvent[]): unk
       default:
         return { type: e.type };
     }
-  });
-}
-
-/**
- * Logs a single notification and its mapped agent events when tracing is enabled.
- */
-export function traceCodexIngest(
-  threadId: string,
-  method: string | undefined,
-  params: Record<string, unknown> | undefined,
-  events: readonly AgentEvent[],
-): void {
-  if (!isCodexTraceEnabled()) return;
-  logger.info("Codex trace ingest", {
-    threadId,
-    method: method ?? "",
-    raw: summarizeCodexNotificationParams(method ?? "", params),
-    mapped: summarizeAgentEventsForTrace(events),
-    mappedCount: events.length,
   });
 }

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./diagnostics": "./src/diagnostics/index.ts",
     ".": "./src/index.ts",
     "./paths": "./src/paths/index.ts",
     "./node/host-runtime": "./src/node/host-runtime.ts",

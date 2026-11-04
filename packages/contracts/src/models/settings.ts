@@ -241,6 +241,9 @@ export const SettingsSchema = lazySchema(() =>
     terminal: TerminalSettingsSchema().default(() =>
       getDefaultTerminalSettingsDocument().terminal),
 
+    /** Persist bounded diagnostic recordings for after-the-fact diagnosis. */
+    diagnostics: z.object({ recording: z.boolean().default(true) }).default({}),
+
     /** Notification settings. */
     notifications: z
       .object({
@@ -397,13 +400,6 @@ export const SettingsSchema = lazySchema(() =>
             rateLimitRetryBackoffMs: z.number().int().min(0).max(60_000).default(3000),
             /** Attach stderr tail excerpts to Cursor failure logs (debugging only). */
             verboseFailureLogs: z.boolean().default(true),
-            /**
-             * Log sanitized `session/update` envelopes plus mapped `AgentEvent` summaries while
-             * handling Cursor ACP traffic (daily server log files).
-             *
-             * **Note:** `agent_message_chunk` updates are intentionally skipped as they are too chatty.
-             */
-            traceSessionUpdates: z.boolean().default(false),
             /**
              * Respond to blocking `cursor/ask_question` with automatic option picks derived
              * from prompts (recommended-first). When false, answer `skipped`.
@@ -564,6 +560,7 @@ export const PartialSettingsSchema = lazySchema(() =>
       })
       .strict()
       .optional(),
+    diagnostics: z.object({ recording: z.boolean().optional() }).optional(),
     notifications: z
       .object({
         enabled: z.boolean().optional(),
@@ -640,7 +637,6 @@ export const PartialSettingsSchema = lazySchema(() =>
             retryTransientFailuresOnce: z.boolean().optional(),
             rateLimitRetryBackoffMs: z.number().int().min(0).max(60_000).optional(),
             verboseFailureLogs: z.boolean().optional(),
-            traceSessionUpdates: z.boolean().optional(),
             autoAnswerAskQuestions: z.boolean().optional(),
             echoAskQuestionsToTimeline: z.boolean().optional(),
           })

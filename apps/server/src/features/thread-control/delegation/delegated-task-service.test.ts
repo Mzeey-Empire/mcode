@@ -2,8 +2,11 @@ import "reflect-metadata";
 import * as NodeCrypto from "node:crypto";
 import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { container } from "tsyringe";
+import { diag, parseDiagLine, recordingFileId, type DiagRecord } from "@mcode/shared/diagnostics";
 import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
 import { SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
 import { delegatedTaskRosterEntryId } from "@mcode/contracts/models/subagent-roster";
@@ -494,6 +497,48 @@ describe("Coordinator task notices", { timeout: 30_000 }, () => {
     await w.tick();
     expect(w.messages()).toHaveLength(1);
     expect(w.state.sends).toBe(1);
+  });
+
+  it("records a held result only while one is waiting, then times the steer that delivers it", async () => {
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-wake-diag-"));
+    diag.configure({ dir, enabled: true });
+    disposables.push(() => {
+      diag.configure({ enabled: false });
+      diag.flushSync();
+      NodeFS.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    });
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const wakeRows = (): Array<Pick<DiagRecord, "ch" | "k" | "d">> => {
+      diag.flushSync();
+      const file = NodePath.join(dir, "t", recordingFileId(f.coordinator.id) + ".jsonl");
+      const lines = NodeFS.existsSync(file) ? NodeFS.readFileSync(file, "utf8").split("\n") : [];
+      return lines.flatMap((line) => parseDiagLine(line) ?? [])
+        .filter((row) => row.ch === "delegate.wake" || row.ch === "delegate.steer")
+        .map((row) => ({ ch: row.ch, k: row.k, d: row.k === "run" ? undefined : row.d }));
+    };
+    w.state.leased = false;
+    await startCoordinator(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(wakeRows()).toEqual([]);
+
+    await finish(f, task.threadId, task.taskId);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(wakeRows()).toEqual([{ ch: "delegate.wake", k: "ev", d: { outcome: "held", reason: "turn-without-lease" } }]);
+
+    w.state.leased = true;
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+    expect(wakeRows().slice(1)).toEqual([
+      { ch: "delegate.steer", k: "beg", d: { wake: expect.any(String) } },
+      { ch: "delegate.steer", k: "end", d: undefined },
+      { ch: "delegate.wake", k: "ev", d: { outcome: "steered", wake: expect.any(String), reached: true } },
+    ]);
   });
 
   it("backs off a persistently failing wake with growing gaps, and resets after a delivery", async () => {

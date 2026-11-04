@@ -127,7 +127,6 @@ describe("settings.provider.cursor", () => {
       retryTransientFailuresOnce: true,
       rateLimitRetryBackoffMs: 3000,
       verboseFailureLogs: true,
-      traceSessionUpdates: false,
       autoAnswerAskQuestions: true,
       echoAskQuestionsToTimeline: false,
     });

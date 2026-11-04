@@ -70,7 +70,7 @@ Codex models come from the app-server `model/list` catalog. The model picker and
 
 ## 4. Success criteria (acceptance)
 
-1. With **`MCODE_CODEX_TRACE=1`**, a dev can confirm which methods fire (`item/plan/delta` vs `item/reasoning/*` vs neither) for a real turn.
+1. Turn on Settings diagnostics recording and run `bun run diag --thread <id> --ch codex.wire` to confirm which methods fire (`item/plan/delta` vs `item/reasoning/*` vs neither) for a real turn.
 
 2. On a run that uses sub-agents, **at least one** child `commandExecution` (or equivalent) appears under an **Agent** row when the app-server delivers `item/started` for collabs **or** delivers collab completion before its children in the notification stream.
 

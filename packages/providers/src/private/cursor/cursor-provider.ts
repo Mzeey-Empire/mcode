@@ -1,3 +1,4 @@
+import { diag } from "@mcode/shared/diagnostics";
 import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
 /**
  * @internal
@@ -459,12 +460,7 @@ export class CursorProvider
     operation: "reuse",
     entry: CursorSessionState,
   ): void {
-    if (!this.settingsService.get().provider.cursor.traceSessionUpdates) return;
-    logger.info("Cursor ACP session operation", {
-      operation,
-      threadId: entry.threadId,
-      logicalSessionId: entry.acpSessionId,
-    });
+    diag.emit("cursor.session", { th: entry.threadId }, () => ({ operation }));
   }
 
   private async prepareBrowserLeaseForTurn(

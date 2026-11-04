@@ -1,29 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import {
-  isCodexTraceEnabled,
   summarizeAgentEventsForTrace,
   summarizeCodexNotificationParams,
 } from "../../private/codex/codex-trace.js";
 
 describe("codex-trace", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("isCodexTraceEnabled is false when unset", () => {
-    vi.stubEnv("MCODE_CODEX_TRACE", "");
-    expect(isCodexTraceEnabled()).toBe(false);
-  });
-
-  it("isCodexTraceEnabled accepts 1 true yes case-insensitive", () => {
-    vi.stubEnv("MCODE_CODEX_TRACE", "1");
-    expect(isCodexTraceEnabled()).toBe(true);
-    vi.stubEnv("MCODE_CODEX_TRACE", "TRUE");
-    expect(isCodexTraceEnabled()).toBe(true);
-  });
-
   it("summarizeCodexNotificationParams extracts collab item fields", () => {
     const s = summarizeCodexNotificationParams("item/completed", {
       item: {
@@ -38,6 +21,16 @@ describe("codex-trace", () => {
       toolKind: "delegate",
       functionName: undefined,
     });
+  });
+
+  it("records message deltas by length without their text", () => {
+    const text = "the contents of secrets.txt";
+    const raw = summarizeCodexNotificationParams("item/agentMessage/delta", { itemId: "i1", delta: text });
+    const mapped = summarizeAgentEventsForTrace([{ type: AgentEventType.TextDelta, threadId: "t1", delta: text }]);
+
+    expect(raw).toEqual({ itemId: "i1", deltaLen: text.length });
+    expect(JSON.stringify(mapped)).not.toContain("secrets");
+    expect(mapped[0]).toMatchObject({ type: "textDelta", len: text.length });
   });
 
   it("summarizeAgentEventsForTrace includes parentToolCallId when present", () => {

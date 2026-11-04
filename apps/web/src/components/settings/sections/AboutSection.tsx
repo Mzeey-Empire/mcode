@@ -78,6 +78,12 @@ function HardwareAccelerationSetting() {
   return <SettingRow label="Hardware acceleration" hint="Applies after Mcode restarts."><div className="flex items-center gap-3 min-[80rem]:flex-row-reverse"><Switch aria-label="Hardware acceleration" checked={savedEnabled} onCheckedChange={(value) => void updateSettings({ graphics: { hardwareAcceleration: value } })} />{needsRestart && <Button variant="secondary" size="compact" onClick={() => void bridge.relaunch?.()}>Restart</Button>}</div></SettingRow>;
 }
 
+function DiagnosticsRecordingSetting() {
+  const recording = useSettingsStore((s) => s.settings.diagnostics?.recording ?? true);
+  const updateSettings = useSettingsStore((s) => s.update);
+  return <SettingRow label="Troubleshooting logs" hint="Keeps a 7-day record of what your agents did, so you can find out why a thread got stuck. It stays on this computer and leaves out your messages and code."><Switch aria-label="Troubleshooting logs" checked={recording} onCheckedChange={(value) => void updateSettings({ diagnostics: { recording: value } })} /></SettingRow>;
+}
+
 function getUpdatePreferences(settings: Settings): { autoDownload: boolean; autoInstallOnQuit: boolean; checkInterval: UpdateCheckInterval; releaseLine: UpdateReleaseLine } {
   return { autoDownload: settings.updates?.autoDownload ?? true, autoInstallOnQuit: settings.updates?.autoInstallOnQuit ?? true, checkInterval: settings.updates?.checkInterval ?? "4hours", releaseLine: settings.updates?.channel ?? "stable" };
 }
@@ -275,6 +281,7 @@ export function AboutSection() {
       <SectionHeading>About</SectionHeading>
       <AboutSettingsRows version={version} stage={stage} updatesHint={updatesHint} status={status} statusLabel={statusLabel} canCheck={Boolean(bridge)} isBusy={isBusy} onInstall={() => void handleInstall()} onCheck={() => void handleCheck()} releaseLine={releaseLine} onReleaseLineChange={(value) => void handleChannelChange(value)} checkInterval={checkInterval} onCheckIntervalChange={(value) => void updateSettings({ updates: { checkInterval: value } })} autoDownload={autoDownload} onAutoDownloadChange={(value) => void updateSettings({ updates: { autoDownload: value } })} providerCliChecks={providerCliChecks} onProviderCliChecksChange={(value) => void updateSettings({ updates: { providerCliChecks: value } })} autoInstallOnQuit={autoInstallOnQuit} onAutoInstallOnQuitChange={(value) => void updateSettings({ updates: { autoInstallOnQuit: value } })} />
       <HardwareAccelerationSetting />
+      <DiagnosticsRecordingSetting />
       {pendingDowngrade && (
         <ConfirmChannelDowngradeDialog
           currentVersion={pendingDowngrade.currentVersion}

@@ -1,4 +1,5 @@
 import { inject, injectable } from "tsyringe";
+import { diag } from "@mcode/shared/diagnostics";
 import type { AgentStopResult, TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
 import type { Thread } from "@mcode/contracts/models/thread";
 import type { TurnStopCause } from "@mcode/contracts/compat/agent-model";
@@ -20,12 +21,20 @@ export class AgentService {
 
   /** Send one admitted turn through its selected provider. */
   sendMessage(command: import("../turns/turn-admission-dispatch-coordinator.js").SendMessageCommand): Promise<void> {
-    return this.runtime.sendMessage(command);
+    return diag.run(
+      "agent.send",
+      { th: command.threadId },
+      () => this.runtime.sendMessage(command),
+      () => ({ provider: command.provider, mode: command.interactionMode }),
+    );
   }
 
   /** Create a thread and start its first turn when its lifecycle permits. */
   createAndSend(command: import("../turns/thread-creation-coordinator.js").CreateAndSendCommand): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[] }> {
-    return this.runtime.createAndSend(command);
+    return this.runtime.createAndSend(command).then((thread) => {
+      diag.emit("agent.created", { th: thread.id }, () => ({ provider: command.provider, mode: command.mode }));
+      return thread;
+    });
   }
 
   /** Start one automatic setup turn after its durable queue submission commits. */
@@ -35,7 +44,12 @@ export class AgentService {
 
   /** Stop one active turn, recording who stopped it. A concurrent stop keeps the first caller's cause. */
   stopSession(threadId: string, stop: TurnStopCause): Promise<AgentStopResult> {
-    return this.runtime.stopSession(threadId, stop);
+    return diag.run(
+      "agent.stop",
+      { th: threadId },
+      () => this.runtime.stopSession(threadId, stop),
+      () => ({ ...stop }),
+    );
   }
 
   /** Stop and discard the provider session for a deleted thread. */

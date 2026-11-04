@@ -1,6 +1,7 @@
 import { type CanonicalChildRosterRequest } from "./canonical-child-roster.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
+import { diag } from "@mcode/shared/diagnostics";
 import { AcceptedCanonicalAgentEventEnvelopeSchema, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState, type AgentProgressPosition, type CanonicalAgentEventEnvelope, type CollaborationObservationChange } from "@mcode/contracts/compat/agent-model";
 import { type CanonicalAgentProgressRecovery, type CanonicalAgentProgressFrame } from "@mcode/contracts/models/canonical-agent-progress";
 import { type CanonicalAgentRevision } from "@mcode/contracts/models/canonical-agent-reconnect";
@@ -184,8 +185,10 @@ export class CanonicalAcceptedProgress {
     thread.publicationSequence = thread.features.publicationSequence;
     thread.collaboration = undefined;
     if (operation?.mutation.kind === "begin") thread.head = seedAcceptedExecution(operation, thread.state);
+    const through = thread.owner.recoveryCut().saved.sequence;
+    diag.emit("push.canonical", { th: threadId }, () => ({ phase: "saved", through, events: events.length, children: 0 }));
     broadcast("agent.canonical", { phase: "saved", threadId, epoch: thread.epoch,
-      through: thread.owner.recoveryCut().saved.sequence, revision: thread.revision, events: [...events] });
+      through, revision: thread.revision, events: [...events] });
     notifyCommittedCanonicalEvents(events);
   }
 
@@ -1113,11 +1116,27 @@ export class CanonicalAcceptedProgress {
     }
     broadcast("agent.canonical", frame);
     const thread = this.threads.get(frame.threadId);
+    const childIds = thread ? this.familyTargets(frame.threadId, thread) : [];
+    diag.emit("push.canonical", { th: frame.threadId }, () => describeCanonicalPush(frame, childIds.length));
     if (!thread) return;
-    for (const childId of this.familyTargets(frame.threadId, thread)) {
+    for (const childId of childIds) {
       broadcast("agent.canonical", { ...frame, threadId: childId, ownerThreadId: frame.threadId });
     }
   }
+}
+
+function describeCanonicalPush(frame: CanonicalAgentProgressFrame, children: number) {
+  if (frame.phase === "recovery") {
+    return {
+      phase: frame.phase,
+      acceptedThrough: frame.acceptedThrough,
+      savedThrough: frame.savedThrough,
+      events: frame.retained.length,
+      children,
+    };
+  }
+  const from = frame.phase === "accepted" ? frame.from : undefined;
+  return { phase: frame.phase, from, through: frame.through, events: frame.events.length, children };
 }
 
 function changesPlanPhase(write: AcceptedExecutionWriteIntent): boolean {

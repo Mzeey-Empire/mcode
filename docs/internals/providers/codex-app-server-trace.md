@@ -4,7 +4,7 @@ Source traces: `/tmp/codex-trace/A.ndjson`, `/tmp/codex-trace/B.ndjson` captured
 
 Trace harness: `scripts/providers/codex/codex-trace.mjs` (spawns `codex app-server`, NDJSON JSON-RPC 2.0, records every inbound notification in order).
 
-Runtime trace: set `MCODE_CODEX_TRACE=1` to log each app-server notification plus mapped `AgentEvent` summaries while reproducing narrative issues in Mcode.
+Runtime trace: turn on Settings diagnostics recording and run `bun run diag --thread <id> --ch codex.wire`.
 
 ## Executive summary
 

@@ -1,3 +1,4 @@
+import { diag } from "@mcode/shared/diagnostics";
 import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
 /**
  * Claude Agent SDK provider adapter.
@@ -85,6 +86,7 @@ import {
   type ClaudeUsageMetrics,
   type ClaudeEventEvidence,
 } from "./claude-event-mapper.js";
+import { summarizeClaudeStreamMessage } from "./claude-stream-trace.js";
 import {
   ClaudeCanonicalEventPublisher,
   type ClaudeCanonicalEventRouting,
@@ -587,6 +589,7 @@ interface ClaudeSpawnBrowserAccess {
 }
 
 interface ClaudeStreamLoopState {
+  threadId: string;
   subagentApprovalOrigins: Map<string, Extract<ApprovalRequestBody["origin"], { kind: "subagent" }>>;
   currentTurnExecutionId: string;
   currentRouting: ClaudeCanonicalEventRouting;
@@ -2093,6 +2096,7 @@ export class ClaudeProvider
       ? sessionId.slice(6)
       : sessionId;
     const state: Omit<ClaudeStreamLoopState, "mapper"> = {
+      threadId,
       subagentApprovalOrigins: new Map(),
       currentTurnExecutionId: routing.executionId,
       currentRouting: routing,
@@ -2189,6 +2193,7 @@ export class ClaudeProvider
     state: ClaudeStreamLoopState,
     message: Record<string, unknown>,
   ): Promise<boolean> {
+    diag.emit("claude.stream", { th: state.threadId }, () => summarizeClaudeStreamMessage(message));
     if (!state.sessionInitialized && message.type !== "result") {
       state.sessionInitialized = true;
       this.emit(`_resumeOk:${sessionId}`);

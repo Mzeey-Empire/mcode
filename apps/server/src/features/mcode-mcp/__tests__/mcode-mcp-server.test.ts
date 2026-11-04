@@ -1,5 +1,9 @@
+import * as NodeFS from "node:fs";
 import * as NodeHTTP from "node:http";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { diag, parseDiagLine, recordingFileId, type DiagRecord } from "@mcode/shared/diagnostics";
 import { ThreadSendResultSchema, ThreadWaitResultSchema } from "@mcode/contracts/thread-control";
 import { type BrowserAutomationPublicOperation } from "@mcode/contracts/models/browser-automation";
 import { BrowserAutomationSessionLease } from "../../browser-automation/access/browser-automation-session-lease.js";
@@ -482,6 +486,58 @@ describe("McodeMcpServer sessions", () => {
       expect.objectContaining({ sourceToolCallId: "42" }),
       expect.anything(),
     );
+  });
+});
+
+describe("McodeMcpServer diagnostics", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-mcp-diag-"));
+    diag.configure({ dir, enabled: true });
+  });
+
+  afterEach(() => {
+    diag.configure({ enabled: false });
+    diag.flushSync();
+    NodeFS.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function toolSpans(threadId: string): DiagRecord[] {
+    diag.flushSync();
+    const file = NodePath.join(dir, "t", recordingFileId(threadId) + ".jsonl");
+    const lines = NodeFS.readFileSync(file, "utf8").split("\n").filter((line) => line !== "");
+    return lines.flatMap((line) => parseDiagLine(line) ?? []).filter((record) => record.ch.startsWith("mcp."));
+  }
+
+  it("records each tool call against the calling thread with its outcome", async () => {
+    const harness = createHarness();
+    const token = harness.attach(SESSION_A);
+    harness.activateTurn(SESSION_A);
+    harness.service.workspaceSearch.mockReturnValueOnce({ workspaces: [] });
+    harness.service.workspaceSearch.mockRejectedValueOnce(new Error("search index unavailable"));
+    harness.service.threadWait.mockResolvedValue(ThreadWaitResultSchema().parse({ status: "success", timedOut: true, results: [] }));
+    const { call } = await listen(harness);
+
+    await call(token, "workspace_search", {}, 1);
+    await call(token, "workspace_search", {}, 2);
+    await call(token, "thread_wait", { threadIds: ["destination"], timeoutSeconds: 10 }, 3);
+
+    const spans = toolSpans(SESSION_A.threadId).map((record) => ({
+      ch: record.ch,
+      k: record.k,
+      ok: record.k === "end" ? record.ok : undefined,
+      exp: record.k === "beg" ? record.exp : undefined,
+      d: record.d,
+    }));
+    expect(spans).toEqual([
+      { ch: "mcp.tool", k: "beg", ok: undefined, exp: 60_000, d: { tool: "workspace_search", callId: "1" } },
+      { ch: "mcp.tool", k: "end", ok: "ok", exp: undefined, d: { isError: false } },
+      { ch: "mcp.tool", k: "beg", ok: undefined, exp: 60_000, d: { tool: "workspace_search", callId: "2" } },
+      { ch: "mcp.tool", k: "end", ok: "error", exp: undefined, d: expect.anything() },
+      { ch: "mcp.wait", k: "beg", ok: undefined, exp: null, d: { tool: "thread_wait", callId: "3" } },
+      { ch: "mcp.wait", k: "end", ok: "ok", exp: undefined, d: { isError: false } },
+    ]);
   });
 });
 

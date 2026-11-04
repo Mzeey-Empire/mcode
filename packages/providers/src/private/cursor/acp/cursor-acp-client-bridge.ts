@@ -1,3 +1,4 @@
+import { diag } from "@mcode/shared/diagnostics";
 import * as NodeFS from "node:fs";
 import { approvalReceipt } from "../../../approvals/approval-receipt.js";
 import * as NodePath from "node:path";
@@ -299,14 +300,11 @@ export class CursorAcpClientBridge {
       turnState,
       entry.todoSnapshot,
     );
-    const cursorCfg = this.deps.settings.get().provider.cursor;
-    if (cursorCfg.traceSessionUpdates && shouldEmitCursorSessionTrace(params, mapped.length)) {
-      logger.info("Cursor ACP session/update trace", {
-        threadId: entry.threadId,
-        mappedCount: mapped.length,
-        notification: summarizeCursorSessionNotification(params),
-        mappedEvents: summarizeEmittedAgentEventsForTrace(mapped),
-      });
+    if (shouldEmitCursorSessionTrace(params, mapped.length)) {
+      diag.emit("cursor.wire", { th: entry.threadId }, () => ({
+        raw: summarizeCursorSessionNotification(params),
+        mapped: summarizeEmittedAgentEventsForTrace(mapped),
+      }));
     }
     for (const event of mapped) {
       this.deps.publishEvent(entry, event);
