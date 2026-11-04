@@ -57,7 +57,7 @@ Each channel's entry in [`DIAG_CATALOG`](../../packages/shared/src/diagnostics/c
 
 ## Confirm in the database
 
-The reader's `db.canonical` rows carry only an event type and sequence. For a turn's state, query the database read-only with `bun:sqlite`:
+The reader's `db.canonical` rows carry only an event type and sequence. For a turn's state, query the database read-only with `bun run db:query -- "<sql>" [--db <path>]`, which prints rows as JSON and defaults to the `agent:up` database:
 
 | Table | What it answers |
 |---|---|
