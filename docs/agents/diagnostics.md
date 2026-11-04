@@ -24,7 +24,7 @@ bun run diag --thread <threadId> --since 2h --ch agent.send,agent.stop,approval
 bun run diag --data-dir ~/.mcode --db ~/.mcode/mcode.db --thread <threadId>
 ```
 
-`--since` takes a duration such as `20m` or an ISO time. `--limit` caps the timeline at its newest rows, 400 by default. `--json` prints the same evidence for a script.
+`--since` takes a duration such as `20m` or an ISO time. `--limit` caps the timeline at its newest rows, 400 by default. Without `--ch`, the timeline hides high-volume rows (`push.canonical`, streamed deltas, and status ticks) and its last line counts them. Name a channel with `--ch` to see all of its rows. `--json` prints the newest rows up to the limit, hidden ones included, for a script.
 
 Start without a scope to find the thread, then rerun with `--thread` or `--workspace`. A scoped query also reads every thread delegated from the scope with `delegate_task`, at any depth and in any workspace, and labels each one `(delegated by <lane>)`.
 
@@ -40,7 +40,7 @@ Findings come before the timeline. Each one has a certainty:
 
 Timeline rows read `L<n> +<ms> <lane> <kind> <channel> <payload>`. Offsets count from the first row shown. `db.canonical` rows come from the database; every other channel comes from the recording.
 
-For a parent that delegated work, follow these rows in its lane: `mcp.tool` for each Mcode tool call, `delegate.launch` for the child's start (its end names the child thread), and `delegate.wake` for whether the child's result reached the parent or why it was held. In a Claude thread, `claude.stream` rows name the tool calls they start or finish, and `parent` names the sub-agent tool call a message belongs to.
+For a parent that delegated work, follow these rows in its lane: `mcp.tool` for each Mcode tool call, `delegate.launch` for the child's start (its end names the child thread), `delegate.steer` for a result pushed into the parent's running turn, and `delegate.wake` for whether the child's result reached the parent or why it was held. In a Claude thread, `claude.stream` rows name the tool calls they start or finish, and `parent` names the sub-agent tool call a message belongs to.
 
 ## Record something new
 
