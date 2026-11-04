@@ -84,6 +84,8 @@ function runEnding(rows: DiagRecord[]): string {
   const exit = rows.find((row) => row.ch === "app.exit");
   const shutdown = rows.find((row) => row.ch === "app.shutdown" && payloadOf(row).accepted === true);
   let ended = "no exit record; last record at " + isoTime(rows[rows.length - 1].t) + " (killed or crashed, or still running at capture)";
+  const lastPhase = rows.filter((row) => row.ch === "app.phase").at(-1);
+  if (!exit && lastPhase) ended += ", last shutdown phase " + payloadOf(lastPhase).phase + " began at " + isoTime(lastPhase.t);
   if (exit) {
     const d = payloadOf(exit);
     ended = "exit code " + d.code + " at " + isoTime(exit.t) + " after " + d.phase;

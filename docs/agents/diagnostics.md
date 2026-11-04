@@ -30,7 +30,7 @@ Start without a scope to find the thread, then rerun with `--thread` or `--works
 
 ## Read the output
 
-Each per-run header gives the PID, start, previous-run classification, shutdown requester and exit; `no exit record` means the process may have been killed, crashed, or still running at capture, and does not identify a killer. `app.stall` bounds a late-callback window, not an exact stall onset. `app.control` rows are accepted reliability-harness commands; their `id` reappears on the `app.hang` that measured a hang and on the `app.exit` of a harness-ended run. An `agent.stop` span with `by: "shutdown"` marks each thread the server stopped while shutting down.
+Each per-run header gives the PID, start, previous-run classification, shutdown requester and exit; `no exit record` means the process may have been killed, crashed, or still running at capture, and does not identify a killer; when the run had begun shutting down, the header also names the last `app.phase` it reached. `app.stall` bounds a late-callback window, not an exact stall onset. `app.control` rows are accepted reliability-harness commands; their `id` reappears on the `app.hang` that measured a hang and on the `app.exit` of a harness-ended run. An `agent.stop` span with `by: "shutdown"` marks each thread the server stopped while shutting down.
 
 `rpc.request` rows record when the server received a send, stop, steer, retry, resume, question answer, or approval answer, over which connection (`conn`) and from which kind of client, and the request's outcome. Rows on lane `-` are process records with no thread, such as an approval answer, which links to its thread's `approval` span by the approval id.
 

@@ -78,6 +78,17 @@ describe("diagnostics reader", () => {
     expect(render()).toContain("run missing-exit pid 42: started 1970-01-01T00:00:01.500Z (previous first); ended no exit record; last record at 1970-01-01T00:00:04.000Z (killed or crashed, or still running at capture)");
   });
 
+  it("names the last shutdown phase a run reached when it has no exit record", () => {
+    writeLines(recordingPath("p", "killed-in-shutdown.jsonl"), [
+      { t: 1500, n: 1, k: "ev", ch: "app.run", d: { pid: 42, previous: "clean" } },
+      { t: 2000, n: 2, k: "ev", ch: "app.shutdown", d: { trigger: "http", client: "desktop", accepted: true } },
+      { t: 2001, n: 3, k: "ev", ch: "app.phase", d: { phase: "begin shutdown" } },
+      { t: 2002, n: 4, k: "ev", ch: "app.phase", d: { phase: "stop agent sessions" } },
+      { t: 2500, n: 5, k: "ev", ch: "app.stall", d: { lastOnTimeAt: 2000, lateCallbackAt: 2500, intervalMs: 500, lateMs: 250 } },
+    ]);
+    expect(render()).toContain("ended no exit record; last record at 1970-01-01T00:00:02.500Z (killed or crashed, or still running at capture), last shutdown phase stop agent sessions began at 1970-01-01T00:00:02.002Z, shutdown requested by http desktop");
+  });
+
   it("includes process records on lane - in a scoped timeline, including channel and JSON selection", () => {
     write("a", [begin("a")]);
     const row: DiagRecord = { t: 3000, n: 2, k: "ev", ch: "rpc.request", d: { approval: "request", outcome: "ok" } };

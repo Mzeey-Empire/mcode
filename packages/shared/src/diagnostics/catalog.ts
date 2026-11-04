@@ -127,6 +127,8 @@ export const DIAG_CATALOG = {
   "app.run": event<{ pid: number; previous: "clean" | "unclean" | "first"; previousPid?: number }>()([]),
   // Retains every shutdown requester, including requests that lost the race.
   "app.shutdown": event<{ trigger: "http" | "signal" | "idle"; signal?: string; client?: string; accepted: boolean }>()([]),
+  // Shows how far a shutdown got when the process is killed before it can record its exit.
+  "app.phase": event<{ phase: string }>()([]),
   // Makes a recorded exit distinguishable from a run that simply stopped recording.
   // `control` names the app.control record whose command ended the process.
   "app.exit": event<{ code: number; phase: string; uptimeMs: number; fatal?: "uncaughtException" | "unhandledRejection"; control?: string }>()([]),

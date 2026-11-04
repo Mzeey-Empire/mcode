@@ -32,6 +32,25 @@ describe("createShutdownCoordinator", () => {
       NodeFS.rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("records each shutdown phase as it begins", () => {
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-shutdown-phase-"));
+    diag.configure({ dir, enabled: true });
+    try {
+      const coordinator = createShutdownCoordinator({ shutdown: async () => undefined });
+      coordinator.setPhase("begin shutdown");
+      coordinator.setPhase("stop agent sessions");
+      diag.flushSync();
+      const rows = NodeFS.readdirSync(NodePath.join(dir, "p")).flatMap((file) => NodeFS.readFileSync(NodePath.join(dir, "p", file), "utf8").split("\n").map(parseDiagLine));
+      expect(rows.filter((row) => row?.ch === "app.phase").map((row) => row?.d)).toEqual([
+        { phase: "begin shutdown" },
+        { phase: "stop agent sessions" },
+      ]);
+    } finally {
+      diag.configure({ enabled: false });
+      NodeFS.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("exits with the current phase when a shutdown phase exceeds the deadline", async () => {
     let trigger: (() => void) | undefined;
     const exit = vi.fn(() => undefined as never);

@@ -58,6 +58,7 @@ export function createShutdownCoordinator(
     },
     setPhase(nextPhase) {
       phase = nextPhase;
+      diag.emit("app.phase", {}, () => ({ phase: nextPhase }));
     },
     getPhase() {
       return phase;
