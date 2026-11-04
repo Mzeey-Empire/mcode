@@ -161,7 +161,7 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 - Type checking: `bun run typecheck`
 - Do not run repo wide checks, CI owns the full test suite
 - When a CI job fails, find its failing tests with [docs/agents/ci-failures.md](docs/agents/ci-failures.md) instead of downloading the whole log.
-- When a thread is stuck or a flow is slow, read its recording with [docs/agents/diagnostics.md](docs/agents/diagnostics.md) instead of reproducing it.
+- When a thread is stuck or a flow is slow, diagnose it from its recording with [the diagnose-thread skill](.agents/skills/diagnose-thread/SKILL.md) instead of reproducing it.
 
 ## Documentation
 
