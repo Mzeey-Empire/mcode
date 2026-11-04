@@ -27,8 +27,7 @@ import { PersistedTurnHooks } from "../narrative/PersistedTurnHooks";
 import { TimelineNote } from "../narrative/TimelineNote";
 import { parseGoalStatusNotice } from "@/lib/goal-message";
 import { useRetriableAttachmentImage } from "@/components/chat/useRetriableAttachmentImage";
-import { EntityToken } from "@/components/chat/EntityToken";
-import { basename } from "@/lib/path";
+import { MentionedText } from "@/components/chat/MentionedText";
 import { SelectedTextCommentsComposerAttachment } from "../composer/SelectedTextCommentsComposerAttachment";
 import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
 import { TURN_REVERT_NOTICE_KINDS, TurnRevertReceipt } from "../turn-revert/TurnRevertReceipt";
@@ -71,67 +70,6 @@ function parseUserGoalCommand(content: string): { condition: string } | null {
   const lower = arg.toLowerCase();
   if (lower === "clear" || lower === "reset" || lower === "show") return null;
   return { condition: arg };
-}
-
-function MentionedUserText({
-  text,
-  mentions,
-}: {
-  text: string;
-  mentions: NonNullable<Message["mentions"]>;
-}) {
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  const sorted = [...mentions].sort((a, b) => a.range.start - b.range.start);
-
-  for (const mention of sorted) {
-    const rawMention = getRawMention(mention);
-    if (!isVisibleMention(text, cursor, mention.range, rawMention)) continue;
-    addLeadingText(nodes, text, cursor, mention.range.start);
-    nodes.push(createMentionToken(mention, rawMention));
-    cursor = mention.range.end;
-  }
-
-  if (cursor < text.length) nodes.push(text.slice(cursor));
-  return <p className="mb-2 whitespace-pre-wrap leading-relaxed">{nodes}</p>;
-}
-
-/** Gets the unmodified transcript text for a mention. */
-function getRawMention(mention: NonNullable<Message["mentions"]>[number]): string {
-  return mention.kind === "command" ? `/${mention.label}` : `@${mention.label}`;
-}
-
-/** Checks that a mention range still points at the user-entered mention text. */
-function isVisibleMention(
-  text: string,
-  cursor: number,
-  range: { start: number; end: number },
-  rawMention: string,
-): boolean {
-  return range.start >= cursor
-    && range.end <= text.length
-    && text.slice(range.start, range.end) === rawMention;
-}
-
-/** Appends text that appears before the next mention token. */
-function addLeadingText(nodes: ReactNode[], text: string, cursor: number, mentionStart: number): void {
-  if (mentionStart > cursor) nodes.push(text.slice(cursor, mentionStart));
-}
-
-/** Creates the user-tone entity token for one valid mention. */
-function createMentionToken(mention: NonNullable<Message["mentions"]>[number], rawMention: string): ReactNode {
-  const label = mention.kind === "file" ? `@${basename(mention.path)}` : rawMention;
-  return (
-    <EntityToken
-      key={`${mention.id}-${mention.range.start}`}
-      kind={mention.kind === "command" ? mention.namespace : mention.kind}
-      label={label}
-      filePath={mention.kind === "file" ? mention.path : undefined}
-      title={rawMention}
-      tone="user"
-      invocation={mention.kind === "command"}
-    />
-  );
 }
 
 /**
@@ -648,7 +586,7 @@ function UserMessageText({ message, displayText, userGoal }: { message: Message;
       data-selected-text-eligible="true"
     >
       {hasMentions ? (
-        <MentionedUserText text={displayText} mentions={message.mentions!} />
+        <p className="mb-2 whitespace-pre-wrap leading-relaxed"><MentionedText text={displayText} mentions={message.mentions!} /></p>
       ) : (
         <Suspense fallback={<p className="whitespace-pre-wrap leading-relaxed">{displayText}</p>}>
           <LazyMarkdownContent content={displayText} isStreaming={false} variant="user" />

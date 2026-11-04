@@ -1,5 +1,6 @@
 import { Spinner } from "@/components/ui/spinner";
 import { StickyUserMessage } from "@/components/chat/StickyUserMessage";
+import type { UserMessagePreview } from "@/components/chat/user-message-preview";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import { useEffect, useMemo, useState, type RefObject } from "react";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
@@ -30,7 +31,7 @@ interface MessageListOverlaysProps {
   readonly viewportRef: RefObject<HTMLElement | null>;
   /** Thread whose transcript is currently rendered in the viewport. */
   readonly renderedThreadId: string | null | undefined;
-  readonly stickyPreview: string | null;
+  readonly stickyPreview: UserMessagePreview | null;
   readonly contentPaddingRight?: string;
   readonly isStickyVisible: boolean;
   readonly onJumpToUserMessage: () => void;
@@ -92,7 +93,7 @@ export function MessageListOverlays({
         {isLoadingMore && <PaginationIndicator placement="top" delayMs={300} />}
         {stickyPreview && (
           <StickyUserMessage
-            key={stickyPreview}
+            key={stickyPreview.text}
             preview={stickyPreview}
             contentPaddingRight={contentPaddingRight}
             visible={isStickyVisible}
