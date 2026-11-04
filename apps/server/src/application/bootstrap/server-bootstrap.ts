@@ -13,6 +13,7 @@ import { resolveServerBuildStage } from "../transport/application-rpc.js";
 import { appDisplayName } from "@mcode/contracts/build-stage";
 import { IpcPushServer, generateIpcPath } from "../transport/ipc-push-server.js";
 import { logger, getMcodeDir } from "@mcode/shared";
+import { diag } from "@mcode/shared/diagnostics";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -440,6 +441,11 @@ const legacyConversationMigration = container.resolve(LegacyConversationMigratio
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
 const settingsService = container.resolve(SettingsService);
+diag.configure({
+  dir: NodePath.join(getMcodeDir(), "diagnostics"),
+  enabled: settingsService.get().diagnostics.recording,
+});
+process.on("exit", () => diag.flushSync());
 const GRACE_PERIOD_MS = resolveGracePeriodMs(
   settingsService.get().server.gracePeriod.seconds,
   process.env.NODE_ENV === "production",
@@ -471,6 +477,7 @@ await seedAgentRuntimeWorkspace({
 let lastCliPathsForModelCache = settingsService.get().provider.cli;
 let lastProviderUsageWarmupSnapshot = JSON.stringify(settingsService.get().provider);
 settingsService.on("change", (next) => {
+  diag.configure({ enabled: next.diagnostics.recording });
   if (next.provider.cli.cursor !== lastCliPathsForModelCache.cursor) {
     void modelCacheService.invalidate("cursor").catch((error: unknown) => {
       logger.error("Failed to invalidate Cursor model cache", { error });

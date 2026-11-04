@@ -241,6 +241,9 @@ export const SettingsSchema = lazySchema(() =>
     terminal: TerminalSettingsSchema().default(() =>
       getDefaultTerminalSettingsDocument().terminal),
 
+    /** Persist bounded diagnostic recordings for after-the-fact diagnosis. */
+    diagnostics: z.object({ recording: z.boolean().default(true) }).default({}),
+
     /** Notification settings. */
     notifications: z
       .object({
@@ -564,6 +567,7 @@ export const PartialSettingsSchema = lazySchema(() =>
       })
       .strict()
       .optional(),
+    diagnostics: z.object({ recording: z.boolean().optional() }).optional(),
     notifications: z
       .object({
         enabled: z.boolean().optional(),

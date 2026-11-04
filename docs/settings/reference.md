@@ -8,6 +8,7 @@ Per-setting reference for Mcode's `settings.json`. For schema conventions and st
 
 | Setting | Type | Default | Range | Env Override | Description |
 |---------|------|---------|-------|-------------|-------------|
+| `diagnostics.recording` | boolean | `true` | - | - | Record bounded diagnostic evidence for the reader CLI. Buffered records may be lost on a hard kill. |
 | `appearance.theme` | enum | `"system"` | `"system"` \| `"dark"` \| `"light"` | - | Color theme preference |
 | `agent.maxConcurrent` | integer | `5` | > 0 | - | Maximum concurrent agent sessions |
 | `agent.defaults.mode` | enum | `"build"` | `"plan"` \| `"build"` \| `"agent"` | - | Default interaction mode for new agents |
