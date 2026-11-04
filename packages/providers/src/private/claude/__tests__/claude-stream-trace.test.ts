@@ -2,6 +2,35 @@ import { describe, expect, it } from "vitest";
 import { summarizeClaudeStreamMessage } from "../claude-stream-trace.js";
 
 describe("summarizeClaudeStreamMessage", () => {
+  it("keeps result termination flags without result text", () => {
+    const summary = summarizeClaudeStreamMessage({
+      type: "result", terminal_reason: "aborted_streaming", stop_reason: "tool_use",
+      is_error: false, result: "private answer",
+    });
+    expect(JSON.parse(JSON.stringify(summary))).toEqual({
+      type: "result", terminalReason: "aborted_streaming", stopReason: "tool_use", isError: false,
+    });
+  });
+
+  it("keeps task notification ids and status without its report or file path", () => {
+    const summary = summarizeClaudeStreamMessage({
+      type: "system", subtype: "task_notification", task_id: "task-1", tool_use_id: "tool-1",
+      status: "completed", summary: "private report", output_file: "/private/output",
+    });
+    expect(JSON.parse(JSON.stringify(summary))).toEqual({
+      type: "system", subtype: "task_notification", taskId: "task-1", toolUseId: "tool-1", status: "completed",
+    });
+  });
+
+  it("keeps an unknown command lifecycle's uuid and state and ignores fields of the wrong type", () => {
+    const summary = summarizeClaudeStreamMessage({
+      type: "command_lifecycle", uuid: "message-1", state: "aborted", phase: 1, status: {},
+      task_id: false, tool_use_id: [], terminal_reason: {}, stop_reason: false, is_error: "true", aborted: "false",
+      description: "private command",
+    });
+    expect(JSON.parse(JSON.stringify(summary))).toEqual({ type: "command_lifecycle", uuid: "message-1", state: "aborted" });
+  });
+
   it("places a sub-agent's tool call under its parent without recording text or input", () => {
     const summary = summarizeClaudeStreamMessage({
       type: "assistant",

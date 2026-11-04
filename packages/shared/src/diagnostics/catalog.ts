@@ -63,11 +63,33 @@ type ClaudeStreamPayload = {
   type: string;
   subtype?: string;
   eventType?: string;
+  uuid?: string;
+  taskId?: string;
+  toolUseId?: string;
+  status?: string;
+  state?: string;
+  phase?: string;
+  terminalReason?: string;
+  stopReason?: string;
+  isError?: boolean;
+  aborted?: boolean;
   /** The sub-agent tool call this message belongs to; absent for the main agent. */
   parent?: string;
   tools?: readonly { name: string; id: string }[];
   results?: readonly { id: string; isError: boolean }[];
 };
+
+type ClaudeTurnPayload =
+  // Links the queued prompt to SDK frames carrying its UUID.
+  | { step: "steer-queued"; steer: string }
+  // Distinguishes a confirmed answer from a refused or uncertain delivery.
+  | { step: "steer-outcome"; steer: string; outcome: string }
+  // Explains why an SDK result did not end the Mcode turn.
+  | { step: "segment-absorbed"; terminalReason?: string; waitingSteers: number }
+  // Preserves the user's stop even when no session exists yet.
+  | { step: "stop-requested"; hadSession: boolean }
+  // Separates discarded streams from other endings; a stop shows as `stop-requested` before `ended`.
+  | { step: "stream-ended"; cause: "discarded" | "ended" };
 
 type CursorWirePayload = {
   raw: unknown;
@@ -118,6 +140,8 @@ export const DIAG_CATALOG = {
   "rpc.request": event<RpcRequestPayload>()([]),
   "codex.wire": event<CodexWirePayload>()(["th"]),
   "claude.stream": event<ClaudeStreamPayload>()(["th"]),
+  // Explains adapter decisions that SDK frames alone cannot establish.
+  "claude.turn": event<ClaudeTurnPayload>()(["th"]),
   "cursor.wire": event<CursorWirePayload>()(["th"]),
   "cursor.session": event<{ operation: string }>()(["th"]),
   "approval": span<{ provider: string | null }, { status: string } | undefined>()(["th"], null),

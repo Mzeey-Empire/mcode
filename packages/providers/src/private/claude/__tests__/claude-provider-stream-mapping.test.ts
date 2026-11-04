@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: mockQuery }));
@@ -142,8 +146,17 @@ function reasoningAndText(events: readonly ProviderRuntimeEvent[]) {
 
 describe("ClaudeProvider stream mapping", () => {
   let provider: ClaudeProvider | undefined;
+  let recordingDir: string | undefined;
 
-  afterEach(() => provider?.shutdown());
+  afterEach(async () => {
+    await provider?.shutdown();
+    if (recordingDir) {
+      diag.configure({ enabled: false });
+      diag.flushSync();
+      NodeFS.rmSync(recordingDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      recordingDir = undefined;
+    }
+  });
 
   async function playStream(sessionId: string, messages: Array<Record<string, unknown>>) {
     mockQuery.mockImplementation(sdkStream([
@@ -255,6 +268,8 @@ describe("ClaudeProvider stream mapping", () => {
   );
 
   it("steers with priority now and keeps the turn open across the segment it cut short", async () => {
+    recordingDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-steer-diag-"));
+    diag.configure({ dir: recordingDir, enabled: true });
     const stream = steeredStream([
       { type: "result", subtype: "success", is_error: false, terminal_reason: "aborted_streaming",
         user_message_uuids: ["first-prompt"], usage: {}, modelUsage: {} },
@@ -276,6 +291,19 @@ describe("ClaudeProvider stream mapping", () => {
     await ended;
 
     expect(outcome).toEqual({ outcome: "accepted" });
+    diag.flushSync();
+    const rows = NodeFS.readFileSync(NodePath.join(recordingDir, "t", "steer.jsonl"), "utf8")
+      .split("\n").flatMap((line) => parseDiagLine(line) ?? [])
+      .filter((row) => row.ch === "claude.turn");
+    expect(rows.filter((row) => row.d && typeof row.d === "object" && "steer" in row.d)
+      .map((row) => ({ th: row.th, d: row.d }))).toEqual([
+      { th: "steer", d: { step: "steer-queued", steer: STEER_ID } },
+      { th: "steer", d: { step: "steer-outcome", steer: STEER_ID, outcome: "accepted" } },
+    ]);
+    expect(rows.filter((row) => row.d && typeof row.d === "object" && "waitingSteers" in row.d)
+      .map((row) => ({ th: row.th, d: row.d }))).toEqual([
+      { th: "steer", d: { step: "segment-absorbed", terminalReason: "aborted_streaming", waitingSteers: 1 } },
+    ]);
     expect(await stream.steered).toEqual({
       type: "user", message: { role: "user", content: "Reply with PINEAPPLE." }, parent_tool_use_id: null,
       session_id: sessionId, priority: "now", uuid: STEER_ID,
