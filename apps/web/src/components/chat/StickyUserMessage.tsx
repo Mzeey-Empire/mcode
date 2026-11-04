@@ -3,6 +3,8 @@ import { ArrowUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { Button } from "@/components/ui/button";
+import { MentionedText } from "@/components/chat/MentionedText";
+import type { UserMessagePreview } from "@/components/chat/user-message-preview";
 import {
   Tooltip,
   TooltipContent,
@@ -17,8 +19,8 @@ export const STICKY_USER_MESSAGE_ESTIMATED_HEIGHT = 90;
 
 /** Props for {@link StickyUserMessage}. */
 export interface StickyUserMessageProps {
-  /** Plain-text preview of the prompt for the turn in view. */
-  preview: string;
+  /** Preview of the prompt for the turn in view. */
+  preview: UserMessagePreview;
   /** When true, the chip is pinned above the scrolling transcript. */
   visible: boolean;
   /** Scrolls the transcript back to the original message bubble. */
@@ -82,7 +84,7 @@ export function StickyUserMessage({
               clamped && "[mask-image:linear-gradient(to_bottom,black_calc(100%-2rem),transparent)]",
             )}
           >
-            {preview}
+            {preview.kind === "mentions" ? <MentionedText text={preview.text} mentions={preview.mentions} /> : preview.text}
           </p>
           <div className="flex items-center justify-end gap-0.5 px-1 pb-1">
             {canToggle && (

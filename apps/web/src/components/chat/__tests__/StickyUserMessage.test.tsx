@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StickyUserMessage } from "../StickyUserMessage";
+import type { UserMessagePreview } from "../user-message-preview";
+
+const plain = (text: string): UserMessagePreview => ({ kind: "plain", text });
 
 describe("StickyUserMessage", () => {
   afterEach(() => {
@@ -12,7 +15,7 @@ describe("StickyUserMessage", () => {
     const onJumpToMessage = vi.fn();
     render(
       <StickyUserMessage
-        preview="Refactor the scroll container"
+        preview={plain("Refactor the scroll container")}
         visible
         onJumpToMessage={onJumpToMessage}
       />,
@@ -41,14 +44,14 @@ describe("StickyUserMessage", () => {
 
   it("offers no Show all when the prompt fits", () => {
     overflowWhenTaller({ scroll: 40 });
-    render(<StickyUserMessage preview="Short prompt" visible onJumpToMessage={vi.fn()} />);
+    render(<StickyUserMessage preview={plain("Short prompt")} visible onJumpToMessage={vi.fn()} />);
     expect(screen.queryByRole("button", { name: "Show full message" })).toBeNull();
   });
 
   it("offers Show all once a narrower transcript makes the prompt overflow", () => {
     const heights = { scroll: 40 };
     const resize = overflowWhenTaller(heights);
-    render(<StickyUserMessage preview={"word ".repeat(60)} visible onJumpToMessage={vi.fn()} />);
+    render(<StickyUserMessage preview={plain("word ".repeat(60))} visible onJumpToMessage={vi.fn()} />);
     expect(screen.queryByRole("button", { name: "Show full message" })).toBeNull();
     heights.scroll = 120;
     resize();
@@ -58,7 +61,7 @@ describe("StickyUserMessage", () => {
   it("toggles an overflowing prompt between Show all and Show less without jumping", () => {
     overflowWhenTaller({ scroll: 120 });
     const onJumpToMessage = vi.fn();
-    render(<StickyUserMessage preview={"word ".repeat(60)} visible onJumpToMessage={onJumpToMessage} />);
+    render(<StickyUserMessage preview={plain("word ".repeat(60))} visible onJumpToMessage={onJumpToMessage} />);
 
     const showAll = screen.getByRole("button", { name: "Show full message" });
     expect(showAll).toHaveAttribute("aria-expanded", "false");
@@ -75,7 +78,7 @@ describe("StickyUserMessage", () => {
     const onJumpToMessage = vi.fn();
     const { rerender } = render(
       <StickyUserMessage
-        preview="Short prompt"
+        preview={plain("Short prompt")}
         visible
         onJumpToMessage={onJumpToMessage}
       />,
@@ -84,12 +87,34 @@ describe("StickyUserMessage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Jump to your message" }));
     rerender(
       <StickyUserMessage
-        preview="Short prompt"
+        preview={plain("Short prompt")}
         visible={false}
         onJumpToMessage={onJumpToMessage}
       />,
     );
 
     expect(screen.queryByTestId("sticky-user-message")).not.toBeInTheDocument();
+  });
+
+  it("renders mention previews as entity tokens instead of raw text", () => {
+    render(
+      <StickyUserMessage
+        preview={{
+          kind: "mentions",
+          text: "/architect review @README.md",
+          mentions: [
+            { id: "command:skill:architect", kind: "command", label: "architect", namespace: "skill", range: { start: 0, end: 10 } },
+            { id: "file-1", kind: "file", label: "README.md", path: "README.md", range: { start: 18, end: 28 } },
+          ],
+        }}
+        visible
+        onJumpToMessage={vi.fn()}
+      />,
+    );
+
+    const bar = screen.getByTestId("sticky-user-message");
+    expect(bar.querySelector('[data-entity-token="skill"]')).toHaveTextContent("architect");
+    expect(bar.querySelector('[data-entity-token="file"]')).not.toBeNull();
+    expect(bar).not.toHaveTextContent("/architect");
   });
 });

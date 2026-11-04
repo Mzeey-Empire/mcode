@@ -67,10 +67,28 @@ function resolveAttachmentPreview(attachments: NonNullable<Message["attachments"
 }
 
 /**
- * Resolves plain-text preview copy for the sticky last-user-message chip.
+ * Sticky preview content. The `mentions` variant keeps the raw text because
+ * mention ranges index into it, matching what the message bubble renders.
+ */
+export type UserMessagePreview =
+  | { readonly kind: "plain"; readonly text: string }
+  | { readonly kind: "mentions"; readonly text: string; readonly mentions: NonNullable<Message["mentions"]> };
+
+/**
+ * Resolves preview content for the sticky last-user-message chip.
  * Returns null when the message renders nothing user-visible in the transcript.
  */
-export function resolveUserMessagePreview(message: Message): string | null {
+export function resolveUserMessagePreview(message: Message): UserMessagePreview | null {
+  const text = resolvePlainPreview(message);
+  if (text === null) return null;
+  const textContent = stripInjectedFiles(message.content);
+  if (message.mentions?.length && !parseUserGoalCommand(textContent)) {
+    return { kind: "mentions", text: textContent, mentions: message.mentions };
+  }
+  return { kind: "plain", text };
+}
+
+function resolvePlainPreview(message: Message): string | null {
   const textContent = stripInjectedFiles(message.content);
   const attachments = message.attachments ?? [];
   const hasAttachments = attachments.length > 0;
