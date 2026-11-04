@@ -443,7 +443,7 @@ describe("MessageBubble user messages", () => {
     expect(command).toHaveTextContent("impeccable");
     expect(command?.querySelector("[data-entity-icon='skill']")).toBeInTheDocument();
     expect(container.querySelector('[data-entity-token="agent"]')).toHaveTextContent("@reviewer_qa");
-    expect(container.querySelector('[data-entity-token="file"]')).toHaveTextContent("@App.ts");
+    expect(container.querySelector('[data-entity-token="file"]')).toHaveTextContent(/^App.ts$/);
   });
 
   it("renders leading /goal set commands as stripped user bubbles with a receipt", async () => {
