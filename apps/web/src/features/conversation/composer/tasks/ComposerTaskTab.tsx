@@ -89,7 +89,6 @@ export function ComposerTaskTab({ threadId, covered }: ComposerTaskTabProps) {
             "tab-fillets pointer-events-auto relative flex h-[21px] max-w-(--task-tab-max-width) shrink-0 items-center",
             "rounded-t-[10px] border border-b-0 border-border bg-selected px-[9px]",
             "text-caption text-muted tabular-nums hover:text-ink",
-            "group-focus-within/capsule:border-control-border group-focus-within/capsule:[--tab-edge:var(--color-control-border)]",
             mounted && "invisible",
           )}
         >
