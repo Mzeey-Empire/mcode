@@ -10,6 +10,9 @@ import { PtyHostSupervisor, type PtyHostChild } from "../pty-host-supervisor.js"
 import { PtyHostCleanupLedger } from "../../cleanup/terminal-cleanup-ledger.js";
 import { createOwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 
+/** The fake host reports made-up root PIDs, so cleanup must never probe or kill a real process on the test machine. */
+const reapNoHostProcess = async () => undefined;
+
 const UUID = "abcdef12-abcd-4abc-8abc-abcdefabcdef";
 const createRequest = {
   sessionId: UUID,
@@ -107,7 +110,7 @@ describe("PtyHostSupervisor", () => {
     const owned = createOwnedTestDatabase();
     const child = new FakeHostChild();
     const ledger = new PtyHostCleanupLedger(owned.db, owned.writer);
-    const supervisor = new PtyHostSupervisor({ platform: "windows", spawnHost: () => child, cleanupLedger: ledger });
+    const supervisor = new PtyHostSupervisor({ platform: "windows", reapProcessTree: reapNoHostProcess, spawnHost: () => child, cleanupLedger: ledger });
     const peerId = "abcdef12-abcd-4abc-8abc-abcdefabcdea";
     const observed: PtyHostEvent[] = [];
     supervisor.subscribe((event) => observed.push(event));
@@ -150,7 +153,7 @@ describe("PtyHostSupervisor", () => {
     const owned = createOwnedTestDatabase();
     const child = new FakeHostChild();
     const ledger = new PtyHostCleanupLedger(owned.db, owned.writer);
-    const supervisor = new PtyHostSupervisor({ platform: "windows", spawnHost: () => child, cleanupLedger: ledger });
+    const supervisor = new PtyHostSupervisor({ platform: "windows", reapProcessTree: reapNoHostProcess, spawnHost: () => child, cleanupLedger: ledger });
     const observed: string[] = [];
     let locked = false;
     supervisor.subscribe((event) => {
@@ -192,6 +195,7 @@ describe("PtyHostSupervisor", () => {
     const child = new FakeHostChild();
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       spawnHost: () => child,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
     });
@@ -218,6 +222,7 @@ describe("PtyHostSupervisor", () => {
     const children: FakeHostChild[] = [];
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => {
         const child = new FakeHostChild();
@@ -273,6 +278,7 @@ describe("PtyHostSupervisor", () => {
     const children: FakeHostChild[] = [];
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => {
         const child = new FakeHostChild();
@@ -304,6 +310,7 @@ describe("PtyHostSupervisor", () => {
     const child = new FakeHostChild();
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       operationTimeoutMs: 10,
       heartbeatDegradedMs: 2_000,
@@ -338,6 +345,7 @@ describe("PtyHostSupervisor", () => {
     const child = new FakeHostChild();
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => child,
     });
@@ -378,6 +386,7 @@ describe("PtyHostSupervisor", () => {
     const child = new FakeHostChild();
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => child,
     });
@@ -409,6 +418,7 @@ describe("PtyHostSupervisor", () => {
     const ledger = new InMemoryPtyHostCleanupLedger();
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: ledger,
       operationTimeoutMs: 10,
       spawnHost: () => child,
@@ -464,6 +474,7 @@ describe("PtyHostSupervisor", () => {
     const child = new FakeHostChild();
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => child,
     });
@@ -520,6 +531,7 @@ describe("PtyHostSupervisor", () => {
     Object.defineProperty(child, "connected", { value: false });
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => child,
     });
@@ -534,6 +546,7 @@ describe("PtyHostSupervisor", () => {
     const spawnError = new Error("PTY host executable is unavailable");
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => {
         throw spawnError;
@@ -562,6 +575,7 @@ describe("PtyHostSupervisor", () => {
     });
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost,
     });
@@ -588,6 +602,7 @@ describe("PtyHostSupervisor", () => {
     child.respondToInspection = false;
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => child,
     });
@@ -737,6 +752,7 @@ describe("PtyHostSupervisor", () => {
     const children: FakeHostChild[] = [];
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => {
         const child = new FakeHostChild();
@@ -776,6 +792,7 @@ describe("PtyHostSupervisor", () => {
     const children: FakeHostChild[] = [];
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       startupTimeoutMs: 100,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => {
@@ -810,6 +827,7 @@ describe("PtyHostSupervisor", () => {
     const child = new FakeHostChild();
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       heartbeatDegradedMs: 750,
       heartbeatUnhealthyMs: 1_000,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
@@ -847,6 +865,7 @@ describe("PtyHostSupervisor", () => {
     child.respondToHandshake = false;
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      reapProcessTree: reapNoHostProcess,
       startupTimeoutMs: 100,
       heartbeatDegradedMs: 2_000,
       heartbeatUnhealthyMs: 3_000,
