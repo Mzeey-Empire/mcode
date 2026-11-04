@@ -5,7 +5,7 @@ description: Diagnose a stuck or slow Mcode thread from its local recording. Use
 
 # Diagnose a Thread
 
-Read what the app recorded and name the cause from that evidence. [The diagnostics runbook](../../../docs/agents/diagnostics.md) holds the data dirs, reader flags, database tables, and the meaning of every finding and channel; consult it at each step.
+Read what the app recorded and name the cause from that evidence. [The diagnostics runbook](../../../docs/agents/diagnostics.md) holds the data dirs, reader flags, database tables, and the meaning of every finding, and says where each channel's meaning lives; consult it at each step.
 
 1. **Locate the recording.** Pick the data dir and database for the app the user ran from the runbook's table. Run `bun run diag --data-dir <dir> --db <db>`, and widen `--since` until the thread appears. Carry these three flags into every later command. Done when you have the thread id and its line in the summary.
 2. **Check coverage.** Run the reader with `--thread <id>` and read the header first. A restart shows as a new run turning `on` with no `off` from the previous run. Done when you can say whether recording was on for the whole thread window, and you name any `recording off` marker, dropped records, or restart inside it.

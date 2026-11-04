@@ -30,9 +30,7 @@ Start without a scope to find the thread, then rerun with `--thread` or `--works
 
 ## Read the output
 
-Each per-run header gives the PID, start, previous-run classification, whether provider processes end with the run (on Windows they sit in a job that kills them when the server exits, so an abrupt exit ends them too), shutdown requester and exit; its last record counts the run's thread records as well as its process records; `no exit record` means the process may have been killed, crashed, or still running at capture, and does not identify a killer; when the run had begun shutting down, the header also names the last `app.phase` it reached. `app.stall` bounds a late-callback window, not an exact stall onset. `app.control` rows are accepted reliability-harness commands; their `id` reappears on the `app.hang` that measured a hang and on the `app.exit` of a harness-ended run. An `agent.stop` span with `by: "shutdown"` marks each thread the server stopped while shutting down.
-
-`rpc.request` rows record when the server received a send, stop, steer, retry, resume, question answer, or approval answer, over which connection (`conn`) and from which kind of client, and the request's outcome. Rows on lane `-` are process records with no thread, such as an approval answer, which links to its thread's `approval` span by the approval id. `ws.connection` rows record when each `conn` opened, from which kind of client, and when it closed with which close code.
+Each per-run header gives the PID, start, previous-run classification, whether provider processes end with the run, the shutdown requester, and the exit. Its last record counts the run's thread and process records. `no exit record` means the process was killed, crashed, or was still running at capture; it does not identify a killer. When the run had begun shutting down, the header also names the last `app.phase` it reached.
 
 The header states what the evidence covers: the window, the first and last record, each run's recording intervals, and any dropped records. Check it first. A gap in the timeline means nothing happened only when recording was on throughout. A quiet line that ends in `(recording off at ...)` means the gap was not recorded.
 
@@ -42,9 +40,20 @@ Findings come before the timeline. Each one has a certainty:
 - `waiting`: an action waits on something outside the agent, such as an approval nobody answered or a `thread_wait` call on another thread.
 - `incomplete`: coverage was lost, such as `restart-mid-turn`, `dropped`, or recording switched off mid-action. Confirm these against the canonical events before you conclude anything.
 
-Timeline rows read `L<n> +<ms> <lane> <kind> <channel> <payload>`. Offsets count from the first row shown. `db.canonical` rows come from the database; every other channel comes from the recording. `approval.push` records when an approval request or resolution was written to sockets and names those connections; it does not confirm client receipt. `turn.recovered` names each execution the next start interrupted and its recovery incident, while `agent.stopped` records the runtime phase and whether a terminal outcome was committed when shutdown stop finished. `app.exit` lists up to three inner errors of a failed exit, with bounded first-line messages.
+Timeline rows read `L<n> +<ms> <lane> <kind> <channel> <payload>`. Offsets count from the first row shown. Rows on lane `-` are process records with no thread. `db.canonical` rows come from the database; every other channel comes from the recording.
 
-For a parent that delegated work, follow these rows in its lane: `mcp.tool` for each Mcode tool call, `delegate.launch` for the child's start (its end names the child thread), `delegate.steer` for a result pushed into the parent's running turn, and `delegate.wake` for whether the child's result reached the parent or why it was held. `reached` is stamped when the result's message is saved, which can trail the moment the provider received it. In a Claude thread, `claude.stream` rows name the tool calls they start or finish, and `parent` names the sub-agent tool call a message belongs to. `claude.stream` rows carry `uuid`, task and tool ids, and terminal reasons so a steer's id can be followed from `claude.turn steer-queued` through the frames that name it. `claude.turn` rows record the adapter's own decisions: steer queued and answered, a cut-short segment absorbed while named steers waited, stop requested, and stream ended with the cause known to the adapter. `steer-queued` and `stop-requested` name the tool calls open at that moment; `claude.process` records the Claude CLI process's spawn, exit code or signal, and tree termination for the thread. `provider.refused` names provider events the server refused because their execution had already ended. `progress.save-failed` names accepted events a save could not write, and `exhausted` says no retry follows, so events missing from the database after a shutdown can be traced to it.
+## Look up a channel
+
+Each channel's entry in [`DIAG_CATALOG`](../../packages/shared/src/diagnostics/catalog.ts) has an `about` text that says what one record means, and its payload type names the fields. That is the only description of a channel, so read it there. To follow one kind of story, read these channels in order:
+
+| Story | Channels |
+|---|---|
+| A server run | `app.run`, `app.shutdown`, `app.phase`, `app.exit`; `app.control` and `app.hang` for harness faults |
+| A client's action | `ws.connection`, `rpc.request`, then the `agent.send` or `agent.stop` span |
+| An approval | the `approval` span, `approval.push`, and the `rpc.request` that answered it |
+| Delegated work, in the parent's lane | `mcp.tool`, `delegate.launch`, `delegate.task`, `delegate.steer`, `delegate.wake` |
+| A Claude turn | `claude.turn`, `claude.stream`, `claude.process` |
+| Events missing from the database | `provider.refused`, `progress.save-failed`, `agent.stopped`, `turn.recovered` |
 
 ## Confirm in the database
 
@@ -59,6 +68,6 @@ The reader's `db.canonical` rows carry only an event type and sequence. For a tu
 
 ## Record something new
 
-Every channel is one entry in `DIAG_CATALOG` in [`packages/shared/src/diagnostics/catalog.ts`](../../packages/shared/src/diagnostics/catalog.ts). An entry declares the payload type, the ids each record must carry, and, for a span, its time budget. Use `null` for a span that waits on a person. Then call `diag.emit`, `diag.begin` and `diag.end`, or `diag.run` from `@mcode/shared/diagnostics`. The reader needs no change: span begins carry their budget, so it pairs and judges new spans by itself.
+Every channel is one entry in `DIAG_CATALOG` in [`packages/shared/src/diagnostics/catalog.ts`](../../packages/shared/src/diagnostics/catalog.ts). An entry declares the payload type, the ids each record must carry, for a span its time budget, and an `about` text that says what one record means. Use `null` for a span that waits on a person. Then call `diag.emit`, `diag.begin` and `diag.end`, or `diag.run` from `@mcode/shared/diagnostics`. The reader needs no change: span begins carry their budget, so it pairs and judges new spans by itself.
 
 Payloads are thunks, so recording costs one boolean check while it is off. The recorder bounds and redacts every payload, but keep prompts, file contents, and tokens out of payloads in the first place.
