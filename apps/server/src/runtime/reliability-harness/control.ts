@@ -2,6 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeHTTP from "node:http";
+import { diag } from "@mcode/shared/diagnostics";
 import type { ApplicationDatabaseWriter } from "../persistence/sqlite/application-database-writer.js";
 import type { WebSocketServer } from "ws";
 
@@ -155,6 +156,8 @@ async function executeReliabilityControl(
   persistenceFailure: boolean,
   closeSockets: (sockets: WebSocketServer["clients"]) => void,
 ): Promise<boolean> {
+  diag.emit("app.control", {}, () => ({ ...command }));
+  if (command.control === "server-exit") diag.flushSync();
   switch (command.control) {
     case "server-exit":
       setImmediate(() => process.exit(137));

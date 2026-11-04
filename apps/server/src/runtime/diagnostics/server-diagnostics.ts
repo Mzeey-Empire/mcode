@@ -12,6 +12,7 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir } from "@mcode/shared/paths";
+import { diag } from "@mcode/shared/diagnostics";
 
 /** Dedicated crash log, beside the rotated server-stderr logs under the data dir. */
 const FATAL_LOG_NAME = "server-fatal.log";
@@ -91,25 +92,36 @@ export function recordFatalError(
  * Warn-log event-loop stalls so synchronous work blocking Bun's single
  * thread becomes visible in the daily log with a duration attached.
  */
-function startEventLoopLagWatch(): void {
-  let last = Date.now();
+export function startEventLoopLagWatch(): ReturnType<typeof setInterval> {
+  let lastOnTimeAt = Date.now();
+  let lastMonotonic = performance.now();
   const timer = setInterval(() => {
     const now = Date.now();
-    const stalledMs = now - last;
-    last = now;
+    const monotonic = performance.now();
+    const stalledMs = monotonic - lastMonotonic;
     if (stalledMs - LAG_CHECK_MS >= LAG_WARN_MS) {
+      diag.emit("app.stall", {}, () => ({ lastOnTimeAt, lateCallbackAt: now, intervalMs: stalledMs, lateMs: stalledMs - LAG_CHECK_MS }));
       appendDailyLogSync({
         level: "warn",
         message: "Event loop stalled",
         stalledMs,
       });
     }
+    lastOnTimeAt = now;
+    lastMonotonic = monotonic;
   }, LAG_CHECK_MS);
   // Never let a diagnostics timer keep a shutdown process alive.
   timer.unref();
+  return timer;
 }
 
 let installed = false;
+let getPhase = () => "not started";
+
+/** Connects exit capture once bootstrap has created the shutdown coordinator. */
+export function setServerDiagnosticsPhaseReader(reader: () => string): void {
+  getPhase = reader;
+}
 
 /**
  * Install fatal-error capture, an exit record, and the event-loop lag watch.
@@ -119,16 +131,21 @@ let installed = false;
 export function installServerDiagnostics(): void {
   if (installed) return;
   installed = true;
+  let fatal: "uncaughtException" | "unhandledRejection" | undefined;
 
   process.on("uncaughtException", (error) => {
+    fatal = "uncaughtException";
     recordFatalError("uncaughtException", error);
     process.exit(1);
   });
   process.on("unhandledRejection", (reason) => {
+    fatal = "unhandledRejection";
     recordFatalError("unhandledRejection", reason);
     process.exit(1);
   });
   process.on("exit", (code) => {
+    diag.emit("app.exit", {}, () => ({ code, phase: getPhase(), uptimeMs: process.uptime() * 1000, ...(fatal ? { fatal } : {}) }));
+    diag.flushSync();
     appendDailyLogSync({
       level: "info",
       message: "Server process exiting",

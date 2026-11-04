@@ -55,7 +55,7 @@ export type WsServerDeps = RouterDeps & {
   singleInstance?: boolean;
   instanceToken?: string | null;
   worktreeIdentity?: string | null;
-  shutdown: () => void;
+  shutdown: (trigger: { trigger: "http"; client: string }) => void;
   /** Serves the loopback-only per-session `mcode` MCP route. */
   mcodeMcpServer?: McodeMcpServer;
   /** Optional opt-in packaged reliability controls. */
@@ -413,7 +413,7 @@ function handleShutdownRequest(req: NodeHTTP.IncomingMessage, res: NodeHTTP.Serv
     return true;
   }
   res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ status: "shutting_down" }), () => deps.shutdown());
+  res.end(JSON.stringify({ status: "shutting_down" }), () => deps.shutdown({ trigger: "http", client: requestClient(req) }));
   return true;
 }
 

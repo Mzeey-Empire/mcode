@@ -50,9 +50,14 @@ function processFiles(root: string): string[] {
 
 function readRecordingFile(file: string): DiagRecord[] {
   const records: DiagRecord[] = [];
+  const run = NodePath.basename(file).replace(/(?:\.1)?\.jsonl$/u, "");
+  const processFile = NodePath.basename(NodePath.dirname(file)) === "p";
   for (const line of NodeFS.readFileSync(file, "utf8").split("\n")) {
     const record = parseDiagLine(line);
-    if (record) records.push(record);
+    if (record) {
+      const attributed = processFile && record.k !== "run" ? { ...record, run } : record;
+      records.push(attributed);
+    }
   }
   return records;
 }

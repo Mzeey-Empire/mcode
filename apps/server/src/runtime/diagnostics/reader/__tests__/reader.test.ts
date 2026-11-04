@@ -56,6 +56,28 @@ describe("diagnostics reader", () => {
     return [...new Set(ids)].sort();
   }
 
+  it("summarizes a clean exit with its accepted HTTP shutdown request", () => {
+    writeLines(recordingPath("p", "server-one.jsonl"), [
+      { t: 1500, n: 1, k: "ev", ch: "app.run", d: { pid: 42, previous: "clean" } },
+      { t: 2000, n: 2, k: "ev", ch: "app.shutdown", d: { trigger: "http", client: "desktop", accepted: true } },
+      { t: 2100, n: 3, k: "ev", ch: "app.shutdown", d: { trigger: "signal", signal: "SIGTERM", accepted: false } },
+      { t: 3000, n: 4, k: "ev", ch: "app.exit", d: { code: 0, phase: "complete", uptimeMs: 1500 } },
+    ]);
+    expect(render()).toContain("run server-one pid 42: started 1970-01-01T00:00:01.500Z (previous clean); ended exit code 0 at 1970-01-01T00:00:03.000Z after complete, shutdown requested by http desktop at 1970-01-01T00:00:02.000Z");
+  });
+
+  it("reports the last record of a run without an exit, keeping reused PIDs separate", () => {
+    writeLines(recordingPath("p", "missing-exit.jsonl"), [
+      { t: 1500, n: 1, k: "ev", ch: "app.run", d: { pid: 42, previous: "first" } },
+      { t: 4000, n: 2, k: "ev", ch: "app.control", d: { control: "server-hang" } },
+    ]);
+    writeLines(recordingPath("p", "other-run.jsonl"), [
+      { t: 5000, n: 1, k: "ev", ch: "app.run", d: { pid: 42, previous: "unclean" } },
+      { t: 6000, n: 2, k: "ev", ch: "app.exit", d: { code: 0, phase: "complete", uptimeMs: 1000 } },
+    ]);
+    expect(render()).toContain("run missing-exit pid 42: started 1970-01-01T00:00:01.500Z (previous first); ended no exit record; last record at 1970-01-01T00:00:04.000Z (killed or crashed, or still running at capture)");
+  });
+
   it("includes process records on lane - in a scoped timeline, including channel and JSON selection", () => {
     write("a", [begin("a")]);
     const row: DiagRecord = { t: 3000, n: 2, k: "ev", ch: "rpc.request", d: { approval: "request", outcome: "ok" } };
@@ -64,7 +86,7 @@ describe("diagnostics reader", () => {
     expect(render()).toContain("L2 +1000ms - ev rpc.request");
     const evidence = loadEvidence(q);
     const jsonRows = renderJson(evidence, [], { ...q, channels: ["rpc.request"], json: true }).split("\n").slice(1).map((line) => JSON.parse(line));
-    expect(jsonRows).toEqual([row]);
+    expect(jsonRows).toEqual([{ ...row, run: "run" }]);
     expect(renderText(evidence, [], { ...q, channels: ["approval"] })).not.toContain("ev rpc.request");
   });
 

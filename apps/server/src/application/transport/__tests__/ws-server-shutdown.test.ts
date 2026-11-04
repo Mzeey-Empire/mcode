@@ -35,7 +35,7 @@ describe("transport admission and shutdown drain", () => {
     }
   });
 
-  async function startServer(handler: HttpHandler, shutdown: () => void = () => undefined) {
+  async function startServer(handler: HttpHandler, shutdown: (trigger: { trigger: "http"; client: string }) => void = () => undefined) {
     const server = createWsServer({
       authToken: "test-token",
       shutdown,
@@ -60,6 +60,13 @@ describe("transport admission and shutdown drain", () => {
     });
     return client;
   }
+
+  it("passes the authenticated HTTP shutdown origin to the shutdown dependency", async () => {
+    const origins: Array<{ trigger: "http"; client: string }> = [];
+    const server = await startServer(async () => undefined, (origin) => { origins.push(origin); });
+    await expect(httpRequest(server, "/shutdown", "POST", true)).resolves.toEqual({ status: 200, body: '{"status":"shutting_down"}' });
+    expect(origins).toEqual([{ trigger: "http", client: "unknown" }]);
+  });
 
   it.each(specialPaths)("waits for an admitted %s request and refuses late HTTP mutation requests", async (path) => {
     const started = deferred();

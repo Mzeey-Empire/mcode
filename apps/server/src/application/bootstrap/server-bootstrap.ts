@@ -14,6 +14,8 @@ import { appDisplayName } from "@mcode/contracts/build-stage";
 import { IpcPushServer, generateIpcPath } from "../transport/ipc-push-server.js";
 import { logger, getMcodeDir } from "@mcode/shared";
 import { diag } from "@mcode/shared/diagnostics";
+import { setServerDiagnosticsPhaseReader } from "../../runtime/diagnostics/server-diagnostics.js";
+import type { ShutdownTrigger } from "../../runtime/lifecycle/shutdown-coordinator.js";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -284,21 +286,38 @@ logger.info("Single-instance dev mode resolved", {
   worktreeIdentityPresent: WORKTREE_IDENTITY !== null,
 });
 
-/** Records an unclean previous exit, then clears a clean-shutdown marker. */
-function inspectCleanShutdownMarker(): void {
-  if (NodeFS.existsSync(SHUTDOWN_MARKER_PATH)) {
-    NodeFS.unlinkSync(SHUTDOWN_MARKER_PATH);
-    return;
+function readPreviousPid(): number | undefined {
+  try {
+    const lock: unknown = JSON.parse(NodeFS.readFileSync(LOCK_FILE_PATH, "utf8"));
+    if (lock && typeof lock === "object" && "pid" in lock && typeof lock.pid === "number") {
+      return lock.pid;
+    }
+  } catch {
+    // A torn or absent lock cannot supply a previous pid.
   }
-  if (NodeFS.existsSync(LOCK_FILE_PATH)) {
+  return undefined;
+}
+
+/** Records an unclean previous exit, then clears a clean-shutdown marker. */
+function inspectCleanShutdownMarker(): { previous: "clean" | "unclean" | "first"; previousPid?: number } {
+  const clean = NodeFS.existsSync(SHUTDOWN_MARKER_PATH);
+  const locked = NodeFS.existsSync(LOCK_FILE_PATH);
+  const previousPid = locked ? readPreviousPid() : undefined;
+  if (clean) {
+    NodeFS.unlinkSync(SHUTDOWN_MARKER_PATH);
+  } else if (locked) {
     logger.warn(
       "Previous server process did not shut down gracefully: no clean-shutdown marker found",
       { markerPath: SHUTDOWN_MARKER_PATH },
     );
   }
+  let previous: "clean" | "unclean" | "first" = "first";
+  if (clean) previous = "clean";
+  else if (locked) previous = "unclean";
+  return { previous, ...(previousPid === undefined ? {} : { previousPid }) };
 }
 
-inspectCleanShutdownMarker();
+const previousRun = inspectCleanShutdownMarker();
 recordStartupCheckpoint("configuration resolved and shutdown marker inspected");
 
 // Initialize DI container (PtyPidRegistry needs the data dir path at construction time)
@@ -445,7 +464,7 @@ diag.configure({
   dir: NodePath.join(getMcodeDir(), "diagnostics"),
   enabled: settingsService.get().diagnostics.recording,
 });
-process.on("exit", () => diag.flushSync());
+diag.emit("app.run", {}, () => ({ pid: process.pid, ...previousRun }));
 const GRACE_PERIOD_MS = resolveGracePeriodMs(
   settingsService.get().server.gracePeriod.seconds,
   process.env.NODE_ENV === "production",
@@ -1049,7 +1068,7 @@ function startServerAndSubscribe(): void {
     shutdownOnIdle: shouldShutdownOnIdle(process.env),
     sessionCount,
     isBusy,
-    shutdown: requestShutdown,
+    shutdown: () => requestShutdown({ trigger: "idle" }),
     logger,
   });
 
@@ -1351,17 +1370,19 @@ shutdownCoordinator = createShutdownCoordinator({
 });
 
 /** Initiate server shutdown once, regardless of which trigger won the race. */
-function requestShutdown(): void {
-  shutdownCoordinator.requestShutdown()?.catch((err) => {
+function requestShutdown(trigger: ShutdownTrigger): void {
+  shutdownCoordinator.requestShutdown(trigger)?.catch((err) => {
     logger.error("Shutdown error", { error: String(err) });
     process.exit(1);
   });
 }
 
+setServerDiagnosticsPhaseReader(() => shutdownCoordinator.getPhase());
+
 process.once("SIGTERM", () => {
-  requestShutdown();
+  requestShutdown({ trigger: "signal", signal: "SIGTERM" });
 });
 process.once("SIGINT", () => {
-  requestShutdown();
+  requestShutdown({ trigger: "signal", signal: "SIGINT" });
 });
 }

@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { diag } from "@mcode/shared/diagnostics";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { appendDailyLogSync, recordFatalError } from "../server-diagnostics.js";
+import { appendDailyLogSync, recordFatalError, startEventLoopLagWatch } from "../server-diagnostics.js";
 
 let dir: string;
 let originalDataDir: string | undefined;
@@ -74,6 +75,31 @@ describe("recordFatalError", () => {
 });
 
 describe("appendDailyLogSync", () => {
+  it("records late callbacks using monotonic intervals and wall-clock bounds", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const clock = vi.spyOn(performance, "now");
+    clock.mockReturnValue(0);
+    diag.configure({ dir: NodePath.join(dir, "diagnostics"), enabled: true });
+    const timer = startEventLoopLagWatch();
+    try {
+      clock.mockReturnValue(250);
+      vi.advanceTimersByTime(250);
+      clock.mockReturnValue(1250);
+      vi.advanceTimersByTime(250);
+      diag.flushSync();
+      const folder = NodePath.join(dir, "diagnostics", "p");
+      const rows = NodeFS.readdirSync(folder).flatMap((file) => readJsonl(NodePath.join(folder, file)));
+      expect(rows.filter((row) => row.ch === "app.stall").map((row) => row.d)).toEqual([
+        { lastOnTimeAt: 1250, lateCallbackAt: 1500, intervalMs: 1000, lateMs: 750 },
+      ]);
+    } finally {
+      clearInterval(timer);
+      diag.configure({ enabled: false });
+      clock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
   it("appends JSONL records to today's log file", () => {
     appendDailyLogSync({ level: "info", message: "one" });
     appendDailyLogSync({ level: "warn", message: "two" });

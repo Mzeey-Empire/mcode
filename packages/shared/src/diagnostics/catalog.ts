@@ -101,6 +101,16 @@ type DelegateWake =
 
 /** One declaration per channel; readers use the budgets stamped into records. */
 export const DIAG_CATALOG = {
+  // Distinguishes a fresh start from evidence left by the previous process.
+  "app.run": event<{ pid: number; previous: "clean" | "unclean" | "first"; previousPid?: number }>()([]),
+  // Retains every shutdown requester, including requests that lost the race.
+  "app.shutdown": event<{ trigger: "http" | "signal" | "idle"; signal?: string; client?: string; accepted: boolean }>()([]),
+  // Makes a recorded exit distinguishable from a run that simply stopped recording.
+  "app.exit": event<{ code: number; phase: string; uptimeMs: number; fatal?: "uncaughtException" | "unhandledRejection" }>()([]),
+  // Bounds a late callback without claiming an exact stall onset.
+  "app.stall": event<{ lastOnTimeAt: number; lateCallbackAt: number; intervalMs: number; lateMs: number }>()([]),
+  // Preserves intentional harness faults before they affect the server.
+  "app.control": event<{ control: string; durationMs?: number }>()([]),
   // Records when a request arrived and from which connection.
   "rpc.request": event<RpcRequestPayload>()([]),
   "codex.wire": event<CodexWirePayload>()(["th"]),
