@@ -35,6 +35,9 @@ describe("getIconName", () => {
     ["types.d.ts", "typescript-def"],
     ["App.TSX", "react_ts"],
     [".env", "tune"],
+    ["AGENTS.md", "agent"],
+    ["CLAUDE.md", "claude"],
+    ["CLAUDE.local.md", "claude"],
   ])("matches %s to the %s icon, file name first, then the longest extension", (fileName, icon) => {
     expect(getIconName(fileName, "dark")).toBe(icon);
   });

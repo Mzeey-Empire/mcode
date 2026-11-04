@@ -29,6 +29,15 @@ const LIGHT_ICON_NAMES: ReadonlySet<string> = new Set([
   ...Object.values(LIGHT_TABLES.fileExtensions),
 ]);
 
+/**
+ * Agent instruction files Material leaves on its generic Markdown icon. Mcode marks them with
+ * the provider's icon, which the theme already ships for the provider's folder.
+ */
+const AGENT_FILE_ICONS: IconTable = {
+  "claude.md": "claude",
+  "claude.local.md": "claude",
+};
+
 function lookup(table: keyof IconTables, key: string, appearance: Appearance): string | undefined {
   return (appearance === "light" ? LIGHT_TABLES[table][key] : undefined) ?? DARK_TABLES[table][key];
 }
@@ -40,7 +49,7 @@ function lookup(table: keyof IconTables, key: string, appearance: Appearance): s
  */
 export function getIconName(fileName: string, appearance: Appearance): string | null {
   const name = fileName.toLowerCase();
-  const byName = lookup("fileNames", name, appearance);
+  const byName = AGENT_FILE_ICONS[name] ?? lookup("fileNames", name, appearance);
   if (byName) return byName;
   for (let dot = name.indexOf("."); dot !== -1; dot = name.indexOf(".", dot + 1)) {
     const byExtension = lookup("fileExtensions", name.slice(dot + 1), appearance);
