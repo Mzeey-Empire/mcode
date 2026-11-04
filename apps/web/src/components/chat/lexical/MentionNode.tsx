@@ -49,7 +49,7 @@ function MentionChip({ mention }: { readonly mention: MentionNodeData }): JSX.El
   return (
     <EntityToken
       kind={mention.kind}
-      label={`@${name}`}
+      label={mention.kind === "file" ? name : `@${name}`}
       filePath={mention.path}
       tone="composer"
     />

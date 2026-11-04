@@ -57,7 +57,7 @@ function addLeadingText(nodes: ReactNode[], text: string, cursor: number, mentio
 
 /** Creates the user-tone entity token for one valid mention. */
 function createMentionToken(mention: NonNullable<Message["mentions"]>[number], rawMention: string): ReactNode {
-  const label = mention.kind === "file" ? `@${basename(mention.path)}` : rawMention;
+  const label = mention.kind === "file" ? basename(mention.path) : rawMention;
   return (
     <EntityToken
       key={`${mention.id}-${mention.range.start}`}
