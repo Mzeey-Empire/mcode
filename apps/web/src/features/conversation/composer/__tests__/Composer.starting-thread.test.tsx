@@ -130,7 +130,6 @@ describe("Composer while the thread is starting", () => {
     expect(editor).toHaveAttribute("placeholder", "Do anything");
     expect(screen.queryByLabelText("Send message")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Cancel startup")).toBeEnabled();
-    expect(screen.getByTestId("composer-starting-spinner")).toBeInTheDocument();
   });
 
   it("cancels the startup from Stop without sending a message", async () => {

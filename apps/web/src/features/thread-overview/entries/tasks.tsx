@@ -6,6 +6,7 @@ import { type Thread } from "@/transport";
 import { ListChecks } from "lucide-react";
 import { useCallback } from "react";
 import { OVERVIEW_ROW_CLASS, OverviewRowIcon } from "@/features/thread-overview/overview-row";
+import { OverviewTasksChecklist, TASKS_PROTOTYPE_ACTIVE, useTasksVariant } from "@/features/conversation/composer/tasks-prototype/TasksPrototype.prototype";
 
 function TasksEntry({ thread }: { thread: Thread }) {
   const progress = useTaskProgress(thread.id);
@@ -36,5 +37,9 @@ function TasksEntry({ thread }: { thread: Thread }) {
 
 /** Task list row in the thread overview. Clicking it opens the composer tray's full list. */
 export function TasksEntryBlock({ subject }: { subject: OverviewSubject }) {
-  return subject.kind === "thread" ? <TasksEntry thread={subject.thread} /> : null;
+  const variant = useTasksVariant();
+  if (subject.kind !== "thread") return null;
+  // PROTOTYPE: the overview carries tasks only in D, where the composer shows none; A to C keep them in the composer.
+  if (!TASKS_PROTOTYPE_ACTIVE) return <TasksEntry thread={subject.thread} />;
+  return variant === "D" ? <OverviewTasksChecklist threadId={subject.thread.id} /> : null;
 }

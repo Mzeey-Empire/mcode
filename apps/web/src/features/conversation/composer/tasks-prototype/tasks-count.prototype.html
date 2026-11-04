@@ -1,0 +1,720 @@
+<!doctype html>
+<!--
+  PROTOTYPE (throwaway): where the task count sits once the composer's own border carries task progress.
+  Open this file in a browser. Nothing is saved. Delete with the tasks-prototype folder once a placement wins.
+  Keys: ← / → placement, A completion animation, E tray or popover, Space finish a step, T theme, P auto-play.
+-->
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PROTOTYPE · Task count placement</title>
+<style>
+  /* Mcode tokens, copied from apps/web/src/index.css. */
+  :root {
+    --neutral-50: oklch(99% 0.005 260);
+    --neutral-100: oklch(95.5% 0.005 260);
+    --neutral-200: oklch(90% 0.005 260);
+    --neutral-300: oklch(65% 0.005 260);
+    --neutral-400: oklch(50% 0.010 260);
+    --neutral-500: oklch(28% 0.005 260);
+    --neutral-600: oklch(24% 0.005 260);
+    --neutral-700: oklch(22% 0.005 260);
+    --neutral-800: oklch(19% 0.005 260);
+    --neutral-900: oklch(16% 0.005 260);
+    --amber-500: oklch(72% 0.170 75);
+    --amber-700: oklch(52% 0.170 75);
+    --blue-500: oklch(62% 0.190 264);
+    --blue-600: oklch(52% 0.170 264);
+    --ease: cubic-bezier(0.2, 0, 0, 1);
+
+    --background: var(--neutral-50);
+    --ink: var(--neutral-800);
+    --panel: var(--neutral-50);
+    --primary: var(--amber-700);
+    --hover: var(--neutral-100);
+    --muted: var(--neutral-400);
+    --selected: var(--neutral-200);
+    --border: var(--neutral-200);
+    --control-border: var(--neutral-300);
+    --focus: var(--blue-600);
+    --glint: var(--neutral-300);
+    --elevation-popover: 0 12px 32px #1418201f, 0 2px 6px #1418200f;
+  }
+  .dark {
+    --background: var(--neutral-900);
+    --ink: var(--neutral-100);
+    --panel: var(--neutral-800);
+    --primary: var(--amber-500);
+    --hover: var(--neutral-700);
+    --muted: var(--neutral-300);
+    --selected: var(--neutral-600);
+    --border: var(--neutral-500);
+    --control-border: var(--neutral-400);
+    --focus: var(--blue-500);
+    --glint: oklch(100% 0 0);
+    --elevation-popover: 0 16px 40px oklch(0 0 0 / 0.45);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--background);
+    color: var(--ink);
+    font: 14px/20px "Public Sans Variable", "Public Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 180ms var(--ease);
+  }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  /* ---------------------------------------------------------------- page */
+  .stage { display: grid; grid-template-columns: 1fr; height: 100%; }
+  .column {
+    position: relative;
+    width: min(640px, calc(100vw - 340px));
+    margin: 0 auto 0 max(300px, calc(50vw - 320px));
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .transcript { flex: 1; overflow: hidden; padding: 56px 8px 24px; display: flex; flex-direction: column; justify-content: flex-end; gap: 14px; }
+  .bubble { align-self: flex-end; max-width: 80%; background: var(--selected); border-radius: 16px; padding: 8px 12px; }
+  .prose { line-height: 26px; font-size: 15px; }
+  .prose p { margin: 0 0 12px; }
+  .steps-rule { display: flex; align-items: center; gap: 10px; color: var(--muted); font: 12px ui-monospace, monospace; }
+  .steps-rule::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  /* ------------------------------------------------------------- composer */
+  .composer-wrap { position: relative; padding: 34px 0 20px; }
+  .capsule {
+    position: relative;
+    border: 1px solid var(--border);
+    background: var(--selected);
+    border-radius: 999px;
+    transition: border-color 180ms var(--ease);
+  }
+  .capsule:focus-within { border-color: var(--control-border); }
+  .capsule[data-rows="two"] { border-radius: 22px; }
+  .row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "L E R";
+    align-items: center;
+    column-gap: 4px;
+    padding: 5px 5px 5px 6px;
+  }
+  .capsule[data-rows="two"] .row { grid-template-areas: "E E E" "L . R"; row-gap: 2px; padding-top: 6px; }
+  .left { grid-area: L; display: flex; align-items: center; }
+  .draft { grid-area: E; min-width: 0; }
+  .right { grid-area: R; display: flex; align-items: center; gap: 4px; }
+  .icon-btn { width: 32px; height: 32px; border-radius: 999px; display: grid; place-items: center; color: var(--muted); }
+  .icon-btn:hover { background: var(--hover); color: var(--ink); }
+  textarea {
+    display: block; width: 100%; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink);
+    font: inherit; font-size: 15px; line-height: 24px; padding: 6px 8px; height: 36px; max-height: 240px; overflow: hidden;
+  }
+  textarea::placeholder { color: var(--muted); }
+  .model { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 999px; background: var(--background); font-size: 13px; }
+  .model .sep { width: 1px; height: 14px; background: var(--border); }
+  .send { width: 32px; height: 32px; border-radius: 999px; display: grid; place-items: center; background: var(--selected); color: var(--muted); margin-left: 2px; border: 1px solid var(--border); }
+  .send.ready { background: var(--primary); color: var(--neutral-900); border-color: transparent; }
+
+  /* ----------------------------------------------------------- the rim */
+  /* Segments sit on the straight top edge, 2px tall so they straddle the 1px border. */
+  .rim { position: absolute; top: -1px; left: 24px; right: 24px; height: 2px; display: flex; gap: 3px; pointer-events: none; }
+  .p-K1 .rim { right: calc(24px + var(--knob-w, 40px) + 6px); }
+  .p-K3 .rim { left: calc(28px + var(--tab-w, 52px) + 14px); }
+  .p-K3R .rim { right: calc(28px + var(--tab-w, 52px) + 14px); }
+  .p-K5 .rim { left: calc(24px + var(--knob-w, 40px) + 6px); }
+  .p-K4 .rim { display: none; }
+  .segs { display: flex; gap: 3px; }
+  .seg { position: relative; flex: 1; min-width: 1px; height: 100%; border-radius: 2px; overflow: hidden; background: transparent; transition: background-color 160ms var(--ease); }
+  .seg[data-state="current"] { background: var(--muted); }
+  .seg .fill { position: absolute; inset: 0; background: var(--ink); transform: scaleX(0); transform-origin: left center; }
+  .seg[data-state="done"] .fill { transform: scaleX(1); }
+  .seg[data-state="cancelled"] .fill { transform: scaleX(1); opacity: .45; }
+
+  /* ------------------------------------------------- count hosts (one per placement) */
+  .count { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .count svg { width: 12px; height: 12px; color: var(--ink); }
+  .host { display: none; }
+  .p-K1 .knob, .p-K2 .knob, .p-K5 .knob, .p-K3 .tab, .p-K3R .tab, .p-K4 .strip { display: flex; }
+
+  /* Knob: a small bead strung on the border line. */
+  .knob {
+    position: absolute; top: 0; height: 20px; padding: 0 7px; align-items: center;
+    transform: translate(0, -50%);
+    border-radius: 10px; background: var(--selected); border: 1px solid var(--border);
+    transition: border-color 160ms var(--ease), color 160ms var(--ease);
+  }
+  .capsule:focus-within .knob { border-color: var(--control-border); }
+  .knob:hover, .knob[aria-expanded="true"] { border-color: var(--control-border); }
+  .knob:hover .count, .knob[aria-expanded="true"] .count { color: var(--ink); }
+  .p-K1 .knob { right: 24px; }
+  .p-K5 .knob { left: 24px; }
+  .p-K2 .knob { left: 24px; transform: translate(-50%, -50%); transition: left 460ms var(--ease), border-color 160ms var(--ease); }
+
+  /* Tab: a compact extension of the capsule itself, with concave fillets so the outline flows into it. */
+  .tab {
+    position: absolute; bottom: calc(100% - 1px); height: 21px; padding: 0 9px; align-items: center;
+    background: var(--selected); border: 1px solid var(--border); border-bottom: 0; border-radius: 10px 10px 0 0;
+    transition: border-color 160ms var(--ease);
+  }
+  /* Clear of the capsule's rounded ends, so the fillets meet a straight edge. */
+  .p-K3 .tab { left: 28px; }
+  .p-K3R .tab { right: 28px; }
+  .tab::before, .tab::after, .xtray::before, .xtray::after {
+    content: ""; position: absolute; bottom: 0; width: 8px; height: 8px;
+    background: radial-gradient(circle at var(--fx) 0, transparent 7px, var(--tab-edge, var(--border)) 7px, var(--tab-edge, var(--border)) 8px, var(--selected) 8px);
+  }
+  .tab::before, .xtray::before { left: -8px; --fx: 0; }
+  .tab::after, .xtray::after { right: -8px; --fx: 100%; }
+  .capsule:focus-within .tab, .tab:hover, .tab[aria-expanded="true"] { border-color: var(--control-border); --tab-edge: var(--control-border); }
+  .tab:hover .count, .tab[aria-expanded="true"] .count { color: var(--ink); }
+
+  /* Strip: the existing tray language, cut down to one 24px line. */
+  .strip {
+    position: absolute; bottom: 100%; left: 22px; right: 22px; height: 24px; padding: 0 6px 0 12px;
+    align-items: center; gap: 10px; background: var(--panel); border-radius: 12px 12px 0 0;
+  }
+  .strip .segs { flex: 1; height: 3px; }
+  .strip .seg[data-state="pending"] { background: var(--border); }
+  .strip .count { height: 20px; padding: 0 6px; border-radius: 10px; }
+  .strip .count:hover, .strip [aria-expanded="true"] .count { background: var(--hover); color: var(--ink); }
+  .strip > button { display: flex; align-items: center; }
+
+  /* -------------------------------------------------- count roll */
+  .roll { display: inline-grid; overflow: hidden; }
+  .roll > span { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 4px; }
+  .animated .roll > .in { animation: roll-in 300ms var(--ease) both; }
+  .animated .roll > .out { animation: roll-out 300ms var(--ease) both; }
+  @keyframes roll-in { from { transform: translateY(80%); opacity: 0; } }
+  @keyframes roll-out { to { transform: translateY(-80%); opacity: 0; } }
+
+  /* ------------------------------------------------- completion animations */
+  .a-fill .seg .fill { transition: transform 460ms var(--ease); }
+  /* The next step lights up only once the fill lands, so the eye follows one movement. */
+  .a-fill .seg { transition: background-color 160ms var(--ease) 380ms; }
+
+  .seg.wave .fill { animation: seg-wave 640ms var(--ease) both; animation-delay: var(--d, 0ms); }
+  @keyframes seg-wave { 0%, 100% { background: var(--ink); } 35% { background: var(--glint); box-shadow: 0 0 6px var(--glint); } }
+
+  .seg.pop { animation: seg-pop 520ms var(--ease); overflow: visible; }
+  @keyframes seg-pop { 0% { transform: scaleY(1); } 30% { transform: scaleY(3); } 100% { transform: scaleY(1); } }
+  .pulse { animation: host-pulse 620ms var(--ease); }
+  @keyframes host-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--ink) 45%, transparent); }
+    100% { box-shadow: 0 0 0 8px color-mix(in oklch, var(--ink) 0%, transparent); }
+  }
+
+  .instant, .instant * { transition: none !important; animation: none !important; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+
+  /* ------------------------------------------------------- tray */
+  /* The expanded list: the capsule grows a tray out of the count, in the capsule's own fill and border. */
+  .xtray {
+    position: absolute; left: 24px; right: 24px; bottom: calc(100% - 1px); display: none; flex-direction: column;
+    padding: 4px 6px 6px; background: var(--selected); border: 1px solid var(--border); border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+  }
+  .xtray.open { display: flex; }
+  .capsule:focus-within .xtray { border-color: var(--control-border); --tab-edge: var(--control-border); }
+  /* The count moves into the tray's header while it is open. */
+  .tray-open .knob, .tray-open .tab, .tray-open .strip { visibility: hidden; }
+  .tray-head { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; border-radius: 999px; }
+  .tray-head.end { flex-direction: row-reverse; }
+  .tray-head:hover { background: var(--hover); }
+  .tray-head .title { flex: 1; text-align: left; font-size: 13px; }
+  .tray-head.end .title { text-align: right; }
+  .tray-head .count { color: var(--ink); }
+  .tray-head .chev { display: grid; color: var(--muted); }
+  .xtray .pop-bar { margin: 4px 8px 6px; }
+  /* The tray is filled with --selected, which matches --border in light theme. */
+  .xtray .pop-bar span:not(.done, .current) { background: color-mix(in oklch, var(--ink) 12%, transparent); }
+  /* About five rows: the tray stays an extension of the composer, not a page. */
+  .xtray .list { max-height: 164px; }
+
+  /* ------------------------------------------------------- popover */
+  .popover {
+    position: absolute; bottom: calc(100% - 22px); width: 400px; padding: 6px; display: none;
+    background: var(--panel); border-radius: 16px; box-shadow: var(--elevation-popover); outline: 1px solid var(--border);
+    animation: pop-in 180ms var(--ease) both;
+  }
+  .popover.open { display: block; }
+  @keyframes pop-in { from { opacity: 0; transform: translateY(4px); } }
+  .pop-head { display: flex; align-items: baseline; gap: 8px; padding: 4px 8px 0; }
+  .pop-head .title { flex: 1; font-size: 14px; }
+  .pop-head .n { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pop-bar { display: flex; gap: 2px; margin: 8px 8px 6px; height: 3px; }
+  .pop-bar span { flex: 1; border-radius: 2px; background: var(--border); }
+  .pop-bar span.done { background: var(--ink); }
+  .pop-bar span.current { background: var(--muted); }
+  .fold { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 8px; border-radius: 999px; color: var(--muted); font-size: 13px; }
+  .fold:hover { background: var(--hover); color: var(--ink); }
+  .fold span { flex: 1; text-align: left; }
+  .list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; }
+  .item { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 999px; color: var(--muted); font-size: 13px; }
+  .item .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+  .item.current { height: auto; align-items: flex-start; padding: 6px 8px; border-radius: 12px; background: color-mix(in oklch, var(--ink) 7%, transparent); color: var(--ink); font-size: 14px; }
+  .item.current .t { white-space: normal; mask-image: none; }
+  .item.cancelled .t { text-decoration: line-through; }
+  .mark { width: 14px; height: 20px; flex: none; display: grid; place-items: center; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; border: 1px solid var(--muted); }
+  .item.current .dot { background: var(--ink); border-color: var(--ink); }
+  .mark svg { width: 14px; height: 14px; }
+
+  /* ------------------------------------------------------- controls */
+  .controls {
+    position: fixed; left: 16px; top: 16px; bottom: 16px; width: 268px; overflow-y: auto;
+    background: var(--neutral-800); color: var(--neutral-100); border-radius: 18px; padding: 14px;
+    font-size: 13px; box-shadow: 0 8px 24px oklch(0 0 0 / .35);
+  }
+  html:not(.dark) .controls { background: var(--neutral-800); }
+  .controls h1 { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+  .controls .sub { color: var(--neutral-300); margin: 0 0 12px; font-size: 12px; line-height: 16px; }
+  .group { margin-top: 14px; }
+  .group-label { color: var(--neutral-300); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .opts { display: flex; flex-direction: column; gap: 2px; }
+  .opts.inline { flex-direction: row; flex-wrap: wrap; }
+  .opt { text-align: left; padding: 6px 10px; border-radius: 10px; color: var(--neutral-200); }
+  .opt:hover { background: var(--neutral-700); }
+  .opt[aria-pressed="true"] { background: var(--neutral-100); color: var(--neutral-900); }
+  .opt small { display: block; color: inherit; opacity: .65; font-size: 11px; line-height: 15px; }
+  .readout { margin-top: 14px; padding: 10px; border-radius: 12px; background: var(--neutral-900); font: 11px/16px ui-monospace, monospace; color: var(--neutral-200); white-space: pre-wrap; }
+  kbd { font: 11px ui-monospace, monospace; padding: 0 4px; border-radius: 4px; background: var(--neutral-700); }
+</style>
+</head>
+<body>
+<div class="stage">
+  <aside class="controls" aria-label="Prototype controls">
+    <h1>PROTOTYPE · task count</h1>
+    <p class="sub">The border carries progress. Where does the count live? Click the count to open the list.</p>
+
+    <div class="group">
+      <div class="group-label"><span>Count placement</span><span><kbd>←</kbd> <kbd>→</kbd></span></div>
+      <div class="opts" id="placements"></div>
+    </div>
+    <div class="group">
+      <div class="group-label"><span>When a task completes</span><span><kbd>A</kbd></span></div>
+      <div class="opts" id="anims"></div>
+    </div>
+    <div class="group">
+      <div class="group-label"><span>Clicking the count opens</span><span><kbd>E</kbd></span></div>
+      <div class="opts" id="expands"></div>
+    </div>
+    <div class="group">
+      <div class="group-label"><span>Tasks</span><span><kbd>Space</kbd> step</span></div>
+      <div class="opts inline" id="seeds"></div>
+    </div>
+    <div class="group">
+      <div class="group-label"><span>Try</span></div>
+      <div class="opts inline">
+        <button class="opt" id="autoplay" aria-pressed="false">Auto-play <kbd>P</kbd></button>
+        <button class="opt" id="longdraft" aria-pressed="false">Long draft</button>
+        <button class="opt" id="theme" aria-pressed="false">Light <kbd>T</kbd></button>
+      </div>
+    </div>
+    <div class="readout" id="readout" aria-live="polite"></div>
+  </aside>
+
+  <main class="column">
+    <div class="transcript">
+      <div class="bubble">Rework the tasks tray so it fits the composer.</div>
+      <div class="prose">
+        <p>I'll start by reading how task progress reaches the composer, then rework the tray header so it matches the capsule parts. After that I'll move the checklist behind the count and drop the overview row.</p>
+        <p>Each step updates the list as it finishes; you can keep typing a follow-up while it runs.</p>
+      </div>
+      <div class="steps-rule">1 step</div>
+    </div>
+
+    <div class="composer-wrap" id="wrap">
+      <div class="capsule" id="capsule" data-rows="one">
+        <div class="rim"><div class="segs" id="rimSegs" style="flex:1"></div></div>
+
+        <button class="host knob" id="knob" aria-expanded="false"><span class="count"><span class="roll"></span></span></button>
+        <button class="host tab" id="tab" aria-expanded="false"><span class="count"><span class="roll"></span></span></button>
+        <div class="host strip" id="strip">
+          <div class="segs" id="stripSegs"></div>
+          <button aria-expanded="false" id="stripBtn"><span class="count"><span class="roll"></span></span></button>
+        </div>
+
+        <div class="xtray" id="xtray" role="region" aria-label="Tasks"></div>
+
+        <div class="row">
+          <div class="left">
+            <button class="icon-btn" aria-label="Add">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+            </button>
+          </div>
+          <div class="draft"><textarea id="draft" rows="1" placeholder="Queue a follow-up" aria-label="Message"></textarea></div>
+          <div class="right">
+            <span class="model"><span style="color:var(--primary)">✳</span> Haiku <span class="sep"></span> Thinking</span>
+            <button class="send" id="send" aria-label="Send">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="popover" id="popover" role="dialog" aria-label="Tasks"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+const CHECK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5 6.5 11.5 12.5 4.5"/></svg>';
+const CROSS = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>';
+const CHEVRON = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>';
+
+const PLACEMENTS = [
+  { key: "K1", name: "Knob · end", note: "A bead on the border's right end" },
+  { key: "K2", name: "Knob · rides progress", note: "The bead sits where done meets to-do" },
+  { key: "K3", name: "Tab · left", note: "The capsule grows a small tab on the left" },
+  { key: "K3R", name: "Tab · right", note: "The same tab on the right" },
+  { key: "K4", name: "Strip · compact tray", note: "A 24px tray line holds bar + count" },
+  { key: "K5", name: "Knob · start", note: "Progress flows out of the bead" },
+];
+const ANIMS = [
+  { key: "fill", name: "Fill", note: "The segment fills, then the next lights" },
+  { key: "wave", name: "Wave", note: "A glint runs along every done segment" },
+  { key: "pop", name: "Pop", note: "The segment swells; the count host pings" },
+  { key: "none", name: "None", note: "State changes, no motion" },
+];
+const EXPANDS = [
+  { key: "tray", name: "Tray", note: "Grows up out of the count" },
+  { key: "popover", name: "Popover", note: "Floats above the composer" },
+];
+/* Hosts on the right edge put the count at the right of the tray header, so the count stays where the eye left it. */
+const END_HOSTS = new Set(["K1", "K3R", "K4"]);
+const TEXTS = [
+  ["Read the composer tray and task store to map how progress reaches the UI"],
+  ["Trace where TodoWrite events become task items in the Claude adapter"],
+  ["Rework the tray header into a 32px row that matches the capsule parts", "Reworking the tray header to match the capsule parts"],
+  ["Move the full checklist behind the count", "Moving the full checklist behind the count"],
+  ["Drop the Tasks row from the thread overview card", "Dropping the Tasks row from the overview card"],
+  ["Add a regression test for Escape closing the list", "Adding a regression test for Escape"],
+  ["Check the light and dark themes against the DESIGN.md tokens", "Checking both themes against the tokens"],
+  ["Record before and after captures in Electron", "Recording before and after captures"],
+  ["Open the pull request with the captures attached", "Opening the pull request"],
+];
+
+function seed(key) {
+  if (key === "clear") return [];
+  const n = key === "3" ? 3 : key === "24" ? 24 : 9;
+  const doneUntil = key === "done" ? n : key === "24" ? 10 : key === "3" ? 1 : 2;
+  return Array.from({ length: n }, (_, i) => {
+    const [content, active] = TEXTS[i % TEXTS.length];
+    const pass = i >= TEXTS.length ? ` (pass ${Math.floor(i / TEXTS.length) + 1})` : "";
+    const status = key === "done" && i === 6 ? "cancelled" : i < doneUntil ? "completed" : i === doneUntil ? "in_progress" : "pending";
+    return { id: String(i + 1), content: content + pass, active: (active ?? content) + pass, status };
+  });
+}
+
+const state = { placement: "K3", anim: "fill", expand: "tray", tasks: seed("9"), open: false, showDone: false, auto: null, light: false };
+const $ = (id) => document.getElementById(id);
+const capsule = $("capsule"), wrap = $("wrap"), popover = $("popover"), xtray = $("xtray");
+const hosts = { K1: $("knob"), K2: $("knob"), K5: $("knob"), K3: $("tab"), K3R: $("tab"), K4: $("stripBtn") };
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const settledOf = (t) => t.filter((x) => x.status === "completed" || x.status === "cancelled").length;
+const segState = (x) => x.status === "completed" ? "done" : x.status === "cancelled" ? "cancelled" : x.status === "in_progress" ? "current" : "pending";
+const isDone = (s) => s === "done" || s === "cancelled";
+
+/* ------------------------------------------------------------ segments */
+function ensureSegs(container, n) {
+  if (container.children.length === n) return;
+  container.replaceChildren(...Array.from({ length: n }, () => {
+    const seg = document.createElement("span");
+    seg.className = "seg";
+    seg.innerHTML = '<span class="fill"></span>';
+    return seg;
+  }));
+}
+
+function paintSegs(container, justDone) {
+  ensureSegs(container, state.tasks.length);
+  [...container.children].forEach((seg, i) => {
+    seg.dataset.state = segState(state.tasks[i]);
+  });
+  if (justDone == null) return;
+  const segs = [...container.children];
+  if (state.anim === "wave") {
+    segs.forEach((seg, i) => {
+      if (!isDone(seg.dataset.state)) return;
+      seg.style.setProperty("--d", `${i * 35}ms`);
+      restart(seg, "wave");
+    });
+  }
+  if (state.anim === "pop") restart(segs[justDone], "pop");
+}
+
+function restart(el, cls) {
+  if (!el) return;
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+  el.addEventListener("animationend", () => el.classList.remove(cls), { once: true });
+}
+
+/* --------------------------------------------------------------- count */
+function countHtml() {
+  const settled = settledOf(state.tasks), total = state.tasks.length;
+  return `${settled === total ? CHECK : ""}${settled}/${total}`;
+}
+
+function setCount(host, animate) {
+  const roll = host.querySelector(".roll");
+  const html = countHtml();
+  const current = roll.querySelector("span:not(.out)");
+  if (current && current.innerHTML === html) return;
+  const next = document.createElement("span");
+  next.innerHTML = html;
+  if (current && animate && state.anim !== "none") {
+    current.className = "out";
+    next.className = "in";
+    current.addEventListener("animationend", () => current.remove(), { once: true });
+    roll.append(next);
+  } else {
+    roll.replaceChildren(next);
+  }
+}
+
+/* The riding knob sits on the boundary between the last done segment and the next one. */
+function placeRidingKnob() {
+  const segs = [...$("rimSegs").children];
+  const rim = $("rimSegs").parentElement;
+  const boundary = state.tasks.findIndex((x) => !isDone(segState(x)));
+  const x = boundary === -1 ? rim.offsetWidth : boundary === 0 ? 0 : segs[boundary].offsetLeft - 1.5;
+  $("knob").style.left = `${rim.offsetLeft + x}px`;
+}
+
+/* ------------------------------------------------------------- popover */
+function markHtml(x) {
+  if (x.status === "completed") return CHECK;
+  if (x.status === "cancelled") return CROSS;
+  return '<span class="dot"></span>';
+}
+
+function barHtml() {
+  return `<div class="pop-bar">${state.tasks.map((x) => `<span class="${segState(x)}"></span>`).join("")}</div>`;
+}
+
+/* Finished steps fold into one row while work remains, so the step in flight leads. */
+function bodyHtml() {
+  const t = state.tasks, settled = settledOf(t);
+  const fold = settled > 0 && settled < t.length;
+  const visible = fold && !state.showDone ? t.filter((x) => !isDone(segState(x))) : t;
+  return `
+    ${fold ? `<button class="fold" id="fold">${CHECK.replace("<svg", '<svg width="14" height="14"')}<span>${settled} done</span>${CHEVRON}</button>` : ""}
+    <ul class="list">${visible.map((x) => `
+      <li class="item ${x.status === "in_progress" ? "current" : ""} ${x.status === "cancelled" ? "cancelled" : ""}">
+        <span class="mark">${markHtml(x)}</span><span class="t">${x.status === "in_progress" ? x.active : x.content}</span>
+      </li>`).join("")}</ul>`;
+}
+
+function renderExpanded() {
+  const asTray = state.expand === "tray";
+  const wasOpen = xtray.classList.contains("open");
+  Object.values(hosts).forEach((h) => h.setAttribute("aria-expanded", "false"));
+  popover.classList.toggle("open", state.open && !asTray);
+  xtray.classList.toggle("open", state.open && asTray);
+  document.documentElement.classList.toggle("tray-open", state.open && asTray);
+  if (!state.open) return;
+  hosts[state.placement].setAttribute("aria-expanded", "true");
+  if (asTray) {
+    const end = END_HOSTS.has(state.placement) ? " end" : "";
+    xtray.innerHTML = `
+      <button class="tray-head${end}" id="trayHead" aria-expanded="true" aria-label="Hide tasks">
+        <span class="count">${countHtml()}</span><span class="title">Tasks</span><span class="chev">${CHEVRON}</span>
+      </button>
+      ${barHtml()}<div class="tray-body">${bodyHtml()}</div>`;
+    $("trayHead").addEventListener("click", (e) => { e.stopPropagation(); closeExpanded(); });
+    if (!wasOpen) morphOpen();
+  } else {
+    const settled = settledOf(state.tasks);
+    popover.innerHTML = `<div class="pop-head"><span class="title">Tasks</span><span class="n">${settled} of ${state.tasks.length}</span></div>${barHtml()}${bodyHtml()}`;
+    positionPopover();
+  }
+  $("fold")?.addEventListener("click", (e) => { e.stopPropagation(); state.showDone = !state.showDone; renderExpanded(); });
+}
+
+/* The tray's clip, shrunk to the count it grows from. */
+function hostClip() {
+  const h = hosts[state.placement].getBoundingClientRect(), t = xtray.getBoundingClientRect();
+  return `inset(${h.top - t.top}px ${t.right - h.right}px ${t.bottom - h.bottom}px ${h.left - t.left}px round 10px)`;
+}
+const TRAY_CLIP = "inset(0px 0px 0px 0px round 14px 14px 0px 0px)";
+const EASE = "cubic-bezier(0.2, 0, 0, 1)";
+
+function morphOpen() {
+  if (reducedMotion()) return;
+  xtray.animate([{ clipPath: hostClip() }, { clipPath: TRAY_CLIP }], { duration: 280, easing: EASE });
+  xtray.querySelector(".tray-body").animate(
+    [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }],
+    { duration: 200, delay: 90, easing: EASE, fill: "backwards" },
+  );
+}
+
+/* Closing folds the tray back into the count before the count reappears. */
+function closeExpanded() {
+  state.open = false;
+  if (!xtray.classList.contains("open") || reducedMotion()) { renderExpanded(); return; }
+  xtray.animate([{ clipPath: TRAY_CLIP }, { clipPath: hostClip() }], { duration: 200, easing: EASE }).onfinish = renderExpanded;
+}
+
+function positionPopover() {
+  const host = hosts[state.placement].getBoundingClientRect();
+  const box = wrap.getBoundingClientRect();
+  const center = host.left + host.width / 2 - box.left;
+  const left = Math.max(0, Math.min(box.width - 400, center - 200));
+  popover.style.left = `${left}px`;
+  popover.style.bottom = `${box.bottom - host.top + 10}px`;
+}
+
+/* -------------------------------------------------------------- render */
+function render(justDone) {
+  const root = document.documentElement;
+  PLACEMENTS.forEach((p) => root.classList.toggle(`p-${p.key}`, p.key === state.placement));
+  ANIMS.forEach((a) => root.classList.toggle(`a-${a.key}`, a.key === state.anim));
+  const has = state.tasks.length > 0;
+  $("rimSegs").parentElement.style.visibility = has ? "" : "hidden";
+  Object.values(hosts).forEach((h) => { (h.id === "stripBtn" ? $("strip") : h).style.visibility = has ? "" : "hidden"; });
+  paintSegs($("rimSegs"), state.placement === "K4" ? null : justDone);
+  paintSegs($("stripSegs"), state.placement === "K4" ? justDone : null);
+  const animate = justDone != null;
+  ["knob", "tab", "stripBtn"].forEach((id) => setCount($(id), animate && hosts[state.placement].id === id));
+  root.style.setProperty("--knob-w", `${$("knob").offsetWidth}px`);
+  root.style.setProperty("--tab-w", `${$("tab").offsetWidth}px`);
+  // Only the riding knob is positioned from script; the others take their edge from CSS.
+  if (state.placement === "K2") placeRidingKnob(); else $("knob").style.left = "";
+  if (animate && state.anim === "pop") restart(hosts[state.placement], "pulse");
+  if (!has) state.open = false;
+  renderExpanded();
+  renderControls();
+}
+
+function step() {
+  const t = state.tasks;
+  const cur = t.findIndex((x) => x.status === "in_progress");
+  const from = cur === -1 ? t.findIndex((x) => x.status === "pending") : cur;
+  if (from === -1) return false;
+  if (cur === -1) { t[from].status = "in_progress"; render(); return true; }
+  t[cur].status = "completed";
+  const next = t.findIndex((x, i) => i > cur && x.status === "pending");
+  if (next !== -1) t[next].status = "in_progress";
+  document.documentElement.classList.add("animated");
+  render(cur);
+  return true;
+}
+
+function load(key) {
+  state.tasks = seed(key);
+  instant(() => render());
+}
+
+/* Seeds and placement switches should jump, not animate: only a finished step moves. */
+function instant(fn) {
+  const root = document.documentElement;
+  root.classList.add("instant");
+  fn();
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("instant")));
+}
+
+/* ------------------------------------------------------------ controls */
+function optionButtons(container, items, current, onPick, showKey = true) {
+  container.replaceChildren(...items.map((item) => {
+    const b = document.createElement("button");
+    b.className = "opt";
+    b.setAttribute("aria-pressed", String(item.key === current));
+    b.innerHTML = `${showKey ? `<b>${item.key}</b> · ` : ""}${item.name}${item.note ? `<small>${item.note}</small>` : ""}`;
+    b.addEventListener("click", () => onPick(item.key));
+    return b;
+  }));
+}
+
+function renderControls() {
+  optionButtons($("placements"), PLACEMENTS, state.placement, (k) => { state.placement = k; state.open = false; instant(() => render()); });
+  optionButtons($("anims"), ANIMS, state.anim, (k) => { state.anim = k; render(); }, false);
+  optionButtons($("expands"), EXPANDS, state.expand, (k) => { state.open = false; state.expand = k; render(); }, false);
+  const t = state.tasks, settled = settledOf(t), cur = t.find((x) => x.status === "in_progress");
+  $("readout").textContent = t.length
+    ? `${settled} of ${t.length} settled\nnow: ${cur ? cur.active : "—"}\nplacement ${state.placement} · ${state.anim} · ${state.expand}`
+    : "no tasks";
+  $("autoplay").setAttribute("aria-pressed", String(Boolean(state.auto)));
+  $("theme").setAttribute("aria-pressed", String(state.light));
+}
+
+const seeds = $("seeds");
+["3", "9", "24", "done", "clear"].forEach((key) => {
+  const b = document.createElement("button");
+  b.className = "opt";
+  b.textContent = key;
+  b.addEventListener("click", () => load(key));
+  seeds.append(b);
+});
+const stepBtn = document.createElement("button");
+stepBtn.className = "opt";
+stepBtn.textContent = "step";
+stepBtn.addEventListener("click", step);
+seeds.append(stepBtn);
+
+function toggleAuto() {
+  if (state.auto) { clearInterval(state.auto); state.auto = null; renderControls(); return; }
+  state.auto = setInterval(() => { if (!step()) load("9"); }, 2200);
+  renderControls();
+}
+function toggleTheme() {
+  state.light = !state.light;
+  document.documentElement.classList.toggle("dark", !state.light);
+  renderControls();
+}
+$("autoplay").addEventListener("click", toggleAuto);
+$("theme").addEventListener("click", toggleTheme);
+
+const draft = $("draft");
+function syncDraft() {
+  draft.style.height = "36px";
+  const two = draft.value.length > 46 || draft.value.includes("\n");
+  capsule.dataset.rows = two ? "two" : "one";
+  draft.style.height = `${Math.min(240, draft.scrollHeight)}px`;
+  $("send").classList.toggle("ready", draft.value.trim().length > 0);
+  $("longdraft").setAttribute("aria-pressed", String(two));
+  if (state.placement === "K2") placeRidingKnob();
+  if (state.open && state.expand === "popover") positionPopover();
+}
+draft.addEventListener("input", syncDraft);
+$("longdraft").addEventListener("click", () => {
+  draft.value = draft.value.length > 46 ? "" : "Once the list moves behind the count, also check that Escape closes it and focus returns to the count.";
+  syncDraft();
+});
+
+/* K1, K2 and K5 share the knob, and both tabs share #tab: bind each element once. */
+new Set(Object.values(hosts)).forEach((h) => h.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (state.open) { closeExpanded(); return; }
+  state.open = true;
+  renderExpanded();
+}));
+document.addEventListener("click", (e) => {
+  if (state.open && !popover.contains(e.target) && !xtray.contains(e.target)) closeExpanded();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.open) { closeExpanded(); hosts[state.placement].focus(); return; }
+  if (e.target === draft || e.metaKey || e.ctrlKey || e.altKey) return;
+  const i = PLACEMENTS.findIndex((p) => p.key === state.placement);
+  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+    state.placement = PLACEMENTS[(i + (e.key === "ArrowRight" ? 1 : -1) + PLACEMENTS.length) % PLACEMENTS.length].key;
+    state.open = false;
+    instant(() => render());
+  } else if (e.key === " ") { e.preventDefault(); step(); }
+  else if (e.key === "a" || e.key === "A") { state.anim = ANIMS[(ANIMS.findIndex((a) => a.key === state.anim) + 1) % ANIMS.length].key; render(); }
+  else if (e.key === "e" || e.key === "E") { state.open = false; state.expand = state.expand === "tray" ? "popover" : "tray"; render(); }
+  else if (e.key === "t" || e.key === "T") toggleTheme();
+  else if (e.key === "p" || e.key === "P") toggleAuto();
+});
+window.addEventListener("resize", () => { if (state.placement === "K2") placeRidingKnob(); if (state.open && state.expand === "popover") positionPopover(); });
+
+instant(() => render());
+</script>
+</body>
+</html>

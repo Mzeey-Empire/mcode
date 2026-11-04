@@ -1277,6 +1277,32 @@ describe("MessageList thread switch", () => {
     expect(hasRememberedHistoryPosition("thread-A")).toBe(true);
   });
 
+  it("keeps the reading position when a comment editor opens on text already on screen", async () => {
+    fakeAnimationFrames();
+    messagesValue = transcriptRows();
+    const editor = {
+      source: { threadId: "thread-A", messageId: "thread-A-5", sourceRole: "assistant" as const, start: 0, end: 7, quote: "Message" },
+      note: "",
+      mentions: [],
+      escapeWarned: false,
+      outsideWarned: false,
+      anchor: "source" as const,
+    };
+    const { container, rerender } = render(<MessageList onSelectedTextComment={vi.fn()} />);
+    // Rows taller than the viewport, so centering the source's row lands somewhere other than where the user reads.
+    await measureRows(container, 600);
+    const viewport = screen.getByTestId("transcript-viewport");
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1_000, 800));
+    readAt(viewport, 3_100);
+    expect(container.querySelector('[data-message-id="thread-A-5"]')).not.toBeNull();
+
+    act(() => rerender(<MessageList onSelectedTextComment={vi.fn()} selectedTextCommentEditor={editor} />));
+    await measureRows(container, 600);
+
+    expect(screen.getByRole("dialog", { name: "Comment on selected text" })).toBeVisible();
+    expect(viewport.scrollTop).toBe(3_100);
+  });
+
   it("restores a cached reading row without reusing the outgoing viewport", async () => {
     fakeAnimationFrames();
     messagesValue = transcriptRows();

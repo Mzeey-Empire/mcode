@@ -16,6 +16,7 @@ import { HeaderActions } from "@/components/chat/HeaderActions";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
 import { CanvasBreadcrumb } from "@/components/shell/CanvasBreadcrumb";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
+import { TasksHeaderChip } from "@/features/conversation/composer/tasks-prototype/TasksChips.prototype";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
@@ -341,6 +342,7 @@ function ThreadHeader({ state, rename, paneWidth, actions }: { state: ChatViewSt
             <TooltipContent side="bottom" className="text-xs">Go to parent thread</TooltipContent>
           </Tooltip>
         )}
+        <TasksHeaderChip threadId={thread.id} />
       </div>
       {paneWidth !== undefined ? <HeaderActions thread={thread} threadPaneWidth={paneWidth} /> : actions}
     </CanvasHeader>

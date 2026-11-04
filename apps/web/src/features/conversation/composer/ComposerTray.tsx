@@ -4,7 +4,6 @@ import { IconButton } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useQueueStore } from "@/stores/queueStore";
 import {
-  useTaskProgress,
   useTaskStore,
   type TaskItem,
   type TaskProgress,
@@ -12,6 +11,7 @@ import {
   type TaskStatus,
 } from "@/stores/taskStore";
 import { UsageLimitRow, useUsageLimitTray } from "./UsageLimitRow";
+import { CurrentStepTray, useTasksVariant, useTrayTaskProgress } from "./tasks-prototype/TasksPrototype.prototype";
 
 const SEGMENT_CLASS: Record<TaskSegment, string> = {
   done: "bg-ink",
@@ -28,22 +28,22 @@ interface TaskStatusView {
 const TASK_STATUS_VIEW: Record<TaskStatus, TaskStatusView> = {
   completed: {
     label: "Completed",
-    mark: <Check className="size-4 text-muted" aria-hidden />,
+    mark: <Check className="size-3.5 text-muted" aria-hidden />,
     textClass: "text-muted",
   },
   in_progress: {
     label: "In progress",
-    mark: <span className="size-2 rounded-full bg-ink" aria-hidden />,
+    mark: <span className="size-1.5 rounded-full bg-ink" aria-hidden />,
     textClass: "text-ink",
   },
   pending: {
     label: "Pending",
-    mark: <span className="size-2 rounded-full border-[1.5px] border-border" aria-hidden />,
-    textClass: "text-ink",
+    mark: <span className="size-1.5 rounded-full border border-muted" aria-hidden />,
+    textClass: "text-muted",
   },
   cancelled: {
     label: "Cancelled",
-    mark: <X className="size-4 text-muted" aria-hidden />,
+    mark: <X className="size-3.5 text-muted" aria-hidden />,
     textClass: "text-muted line-through",
   },
 };
@@ -54,9 +54,10 @@ function TaskListRow({ task }: { task: TaskItem }) {
   const view = TASK_STATUS_VIEW[task.status];
   const text = task.status === "in_progress" ? task.activeForm ?? task.content : task.content;
   return (
-    <li className="flex h-10 items-center gap-2">
-      <span className="flex size-4 shrink-0 items-center justify-center">{view.mark}</span>
-      <span className={cn("text-fade flex-1 text-body-small", view.textClass)}>
+    // The running task takes the slash menu's active-row fill, so the eye lands on it first.
+    <li className={cn("flex h-8 items-center gap-2 rounded-full px-2", task.status === "in_progress" && "bg-ink/7")}>
+      <span className="flex size-3.5 shrink-0 items-center justify-center">{view.mark}</span>
+      <span className={cn("text-fade flex-1 text-compact", view.textClass)}>
         <span className="sr-only">{view.label}: </span>
         {text}
       </span>
@@ -66,13 +67,13 @@ function TaskListRow({ task }: { task: TaskItem }) {
 
 function TaskList({ threadId, id }: { threadId: string; id: string }) {
   const tasks = useTaskStore((s) => s.taskBubbleByThread[threadId]?.tasks ?? EMPTY_TASKS);
-  // Focusable so keyboard users can scroll a list taller than six rows.
+  // Focusable so keyboard users can scroll a list taller than the 262px cap the slash menu shares.
   return (
     <ul
       id={id}
       aria-label="Tasks"
       tabIndex={0}
-      className="m-0 max-h-60 list-none overflow-y-auto rounded-control p-0 outline-none focus-visible:ring-2 focus-visible:ring-focus/50"
+      className="scroll-fade-y m-0 max-h-[262px] list-none rounded-control p-0 outline-none focus-visible:ring-2 focus-visible:ring-focus/50"
     >
       {tasks.map((task) => (
         <TaskListRow key={task.id} task={task} />
@@ -82,15 +83,15 @@ function TaskList({ threadId, id }: { threadId: string; id: string }) {
 }
 
 function SegmentLane({ segments }: { segments: readonly TaskSegment[] }) {
-  // Capped at the width of 20 segments; longer lists shrink each segment
-  // (down to 2px) so the lane stays on one line.
+  // Capped at the width of 12 segments; longer lists shrink each segment
+  // (down to 2px) so the lane stays a quiet accent beside the title.
   return (
-    <span className="flex max-w-[27.8rem] shrink-0 items-center gap-0.5 overflow-hidden" aria-hidden>
+    <span className="flex max-w-[8.2rem] shrink-0 items-center gap-0.5 overflow-hidden" aria-hidden>
       {segments.map((segment, index) => (
         <span
           key={index}
           data-segment={segment}
-          className={cn("h-1 w-3 min-w-0.5 shrink rounded-[0.2rem]", SEGMENT_CLASS[segment])}
+          className={cn("h-[3px] w-2.5 min-w-0.5 shrink rounded-full", SEGMENT_CLASS[segment])}
         />
       ))}
     </span>
@@ -111,29 +112,50 @@ function TaskRow({ progress, expanded, listId, chevronRef, onToggle }: TaskRowPr
     <div
       role="group"
       aria-label={`${progress.title}, ${progress.settled} of ${progress.total} done`}
-      className="flex h-10 cursor-pointer items-center gap-2"
+      className="flex h-8 cursor-pointer items-center gap-2 rounded-full pr-0.5 pl-2 hover:bg-hover"
       onClick={onToggle}
     >
-      <span className="flex size-4 shrink-0 items-center justify-center">
-        <ListChecks className="size-4 text-muted" aria-hidden />
+      <span className="flex size-3.5 shrink-0 items-center justify-center">
+        <ListChecks className="size-3.5 text-muted" aria-hidden />
       </span>
-      <span className="text-fade flex-1 text-label text-ink">{progress.title}</span>
+      <span className="text-fade flex-1 text-body-small text-ink">{progress.title}</span>
       <SegmentLane segments={progress.segments} />
-      <span className="shrink-0 text-body-small tabular-nums text-muted">
+      <span className="shrink-0 text-compact tabular-nums text-muted">
         {progress.settled}/{progress.total}
       </span>
       <IconButton
         ref={chevronRef}
+        size="inline-sm"
         aria-label={expanded ? "Hide tasks" : "Show tasks"}
         aria-expanded={expanded}
         aria-controls={expanded ? listId : undefined}
-        className="shrink-0 text-muted"
+        className="shrink-0 rounded-full text-muted"
       >
         <ChevronUp
-          className={cn("transition-transform duration-150", expanded && "rotate-180")}
+          className={cn("size-3.5 transition-transform duration-150", expanded && "rotate-180")}
         />
       </IconButton>
     </div>
+  );
+}
+
+interface DockedTaskListProps extends TaskRowProps {
+  readonly threadId: string;
+  readonly listContainerRef: RefObject<HTMLDivElement | null>;
+}
+
+/** The task row with its list expanded above it, so the list grows the tray upward. */
+function DockedTaskList({ threadId, listContainerRef, ...row }: DockedTaskListProps) {
+  return (
+    <>
+      {row.expanded && (
+        <div ref={listContainerRef} className="flex min-h-0 flex-col">
+          <TaskList threadId={threadId} id={row.listId} />
+          <div role="separator" className="mx-2 my-1 h-px bg-border" />
+        </div>
+      )}
+      <TaskRow {...row} />
+    </>
   );
 }
 
@@ -173,7 +195,8 @@ export function composerTrayClass(covered: boolean): string {
  */
 export function ComposerTray({ threadId, running, queue, tiles, covered = false }: ComposerTrayProps) {
   const usageLimit = useUsageLimitTray(threadId, running);
-  const progress = useTaskProgress(threadId);
+  const variant = useTasksVariant();
+  const progress = useTrayTaskProgress(threadId, variant);
   const expanded = useTaskStore((s) => s.trayExpandedByThread[threadId] ?? false);
   const setExpanded = (next: boolean) => useTaskStore.getState().setTrayExpanded(threadId, next);
   const listId = useId();
@@ -199,20 +222,17 @@ export function ComposerTray({ threadId, running, queue, tiles, covered = false 
       onKeyDown={handleKeyDown}
     >
       {usageLimit && <UsageLimitRow threadId={threadId} state={usageLimit} />}
-      {progress && expanded && (
-        <div ref={listContainerRef}>
-          <TaskList threadId={threadId} id={listId} />
-        </div>
-      )}
-      {progress && (
-        <TaskRow
+      {progress && (variant === "C" ? <CurrentStepTray threadId={threadId} /> : (
+        <DockedTaskList
+          threadId={threadId}
           progress={progress}
           expanded={expanded}
           listId={listId}
           chevronRef={chevronRef}
+          listContainerRef={listContainerRef}
           onToggle={() => setExpanded(!expanded)}
         />
-      )}
+      ))}
       {queue}
       {tiles}
     </div>

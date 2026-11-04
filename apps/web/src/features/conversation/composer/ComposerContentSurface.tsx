@@ -36,6 +36,9 @@ import { useCapsuleRows } from "./capsule/capsule-layout";
 import type { ComposerMode } from "./execution/composer-mode";
 import { NewThreadTargetRail } from "./execution/NewThreadTargetRail";
 import { ComposerTray, composerTrayClass } from "./ComposerTray";
+import { TasksPrototypeBar } from "./tasks-prototype/TasksPrototype.prototype";
+import { TasksCapsuleChip, TasksRightChip, useTasksPlaceholder } from "./tasks-prototype/TasksChips.prototype";
+import { TasksCapsuleOverlay } from "./tasks-prototype/TasksRim.prototype";
 import { clearVisibleBrowserNotes } from "./draft/draft-browser-notes";
 import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { ApprovalAnnouncer, ApprovalDock, useDelegatedThreadTitles, useDockApprovals } from "@/features/conversation/approvals/ApprovalDock";
@@ -171,6 +174,8 @@ function ComposerTraySurface({
   // Nothing may reach agent.send while the thread is starting, queued messages included.
   const paused = model.planPending || model.startingThread;
   return (
+    <>
+    <TasksPrototypeBar threadId={model.threadId} />
     <ComposerTray
       threadId={model.threadId}
       running={model.isAgentRunning}
@@ -186,6 +191,7 @@ function ComposerTraySurface({
         />
       )}
     />
+    </>
   );
 }
 
@@ -292,6 +298,7 @@ function ComposerDraftCell({
   onDraftChange,
 }: Pick<ComposerContentSurfaceProps, "model" | "actions"> & { readonly onDraftChange: () => void }) {
   const disabled = model.startingThread || model.planPending || model.isStaleWorktree || Boolean(model.providerReason);
+  const placeholder = useTasksPlaceholder(model.threadId, getEditorPlaceholder(model));
 
   return (
     <div
@@ -323,7 +330,7 @@ function ComposerDraftCell({
         disabled={disabled}
         isPopupOpen={model.fileAutocomplete.isOpen || model.slashCommand.isOpen}
         onPopupKeyDown={actions.onPopupKeyDown}
-        placeholder={getEditorPlaceholder(model)}
+        placeholder={placeholder}
         ariaLabel="Message Mcode"
       />
     </div>
@@ -412,18 +419,6 @@ function ComposerAttachmentSurface({
         </div>
       )}
     </>
-  );
-}
-
-function ComposerStartingSpinner({
-  startingThread,
-}: Pick<ComposerContentSurfaceProps["model"], "startingThread">) {
-  if (!startingThread) return null;
-
-  return (
-    <span className="flex size-8 items-center justify-center" data-testid="composer-starting-spinner">
-      <Spinner size={20} className="text-muted" />
-    </span>
   );
 }
 
@@ -654,6 +649,7 @@ function ComposerCapsuleLeft({ model, actions, leftRef }: Pick<ComposerCapsuleRo
           />
         )}
       />
+      {model.threadId && !model.isNewThread && <TasksCapsuleChip threadId={model.threadId} />}
       <ComposerAttachedCapabilities
         threadId={model.threadId}
         isNewThread={model.isNewThread}
@@ -670,7 +666,7 @@ function ComposerCapsuleLeft({ model, actions, leftRef }: Pick<ComposerCapsuleRo
 function ComposerCapsuleRight({ model, actions, rightRef }: Pick<ComposerCapsuleRowProps, "model" | "actions" | "rightRef">) {
   return (
     <div ref={rightRef} className="flex min-w-0 items-center justify-end gap-1 [grid-area:R]">
-      <ComposerStartingSpinner startingThread={model.startingThread} />
+      {model.threadId && !model.isNewThread && <TasksRightChip threadId={model.threadId} />}
       <ComposerCapsuleSplit
         anchorRef={model.composerContainerRef}
         threadId={model.threadId}
@@ -768,6 +764,7 @@ function ComposerInputSurface({
       <ComposerAttachmentSurface model={model} actions={actions} />
       <ComposerCapsuleRow model={model} actions={actions} rowRef={rowRef} leftRef={leftRef} rightRef={rightRef} onDraftChange={remeasure} hidden={hidden} />
       {!hidden && <ComposerEditorPopups model={model} actions={actions} />}
+      {!hidden && model.threadId && !model.isNewThread && <TasksCapsuleOverlay threadId={model.threadId} />}
     </div>
   );
 }

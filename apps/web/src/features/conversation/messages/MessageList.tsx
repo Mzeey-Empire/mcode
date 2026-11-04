@@ -13,7 +13,7 @@ import type { SubagentRosterTarget } from "../narrative";
 import { SubagentProviderScope } from "../narrative/subagent-provider";
 import { TranscriptNarrativeRow } from "./TranscriptNarrativeRow";
 import { narrativeRowMargin } from "../narrative/NarrativeRows";
-import { findSelectedTextCommentContent, reconstructCanonicalMessageRange } from "./selected-text-projection";
+import { findSelectedTextCommentContent, lastVisibleRangeRect, reconstructCanonicalMessageRange } from "./selected-text-projection";
 import { isMessageListPerformanceBuild, measureMessageListPerformance } from "@/performance/message-list-performance";
 import { TranscriptItemRenderer } from "./timeline/TranscriptItemRenderer";
 import { WorkFoldNote } from "../turn/WorkFold";
@@ -232,6 +232,20 @@ function requestMissingSourceHistory({
   }
   markSourceUnavailable(target, callbacks);
   return true;
+}
+
+/**
+ * True when part of the source range is already on screen. Centering its message then only moves the transcript:
+ * a comment opened on visible text would jump by however far the selection sits from the message's middle.
+ */
+function isSourceOnScreen(
+  viewport: HTMLElement | null,
+  source: SelectedTextComment["source"],
+  renderedThreadId: string | null | undefined,
+): boolean {
+  const content = viewport ? findSelectedTextCommentContent(source, viewport, renderedThreadId) : null;
+  const range = content ? reconstructCanonicalMessageRange(content, source.start, source.end, source.quote) : null;
+  return Boolean(viewport && range && lastVisibleRangeRect(range, viewport));
 }
 
 function inspectScrolledSource({
@@ -620,6 +634,10 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       loadOlderMessages: data.loadOlderMessages, loadNewerMessages: data.loadNewerMessages,
       callbacks: sourceCallbacks,
     })) return;
+    if (isSourceOnScreen(viewportRef.current, sourceTarget.source, data.renderedThreadId)) {
+      sourceCallbacks.onOpened?.(sourceTarget);
+      return;
+    }
     controllerRef.current?.moveTo({ kind: "target", key: items[index].key, align: "center" });
     return inspectScrolledSource({ containerRef: viewportRef, target: sourceTarget, renderedThreadId: data.renderedThreadId, callbacks: sourceCallbacks });
   }, [sourceTarget, sourceCallbacks, items, data.hasMore, data.hasNewer, data.isLoadingMore, data.isLoadingNewer, data.loadOlderMessages, data.loadNewerMessages, data.renderedThreadId]);
