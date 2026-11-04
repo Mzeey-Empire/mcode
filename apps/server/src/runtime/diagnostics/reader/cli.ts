@@ -5,8 +5,8 @@ import * as NodeURL from "node:url";
 import { getMcodeDir } from "@mcode/shared/paths";
 import { loadEvidence } from "./sources.js";
 import { findAnomalies } from "./anomalies.js";
-import { renderText, selectTimelineRows } from "./render.js";
-import type { DiagQuery, Evidence, Finding } from "./model.js";
+import { renderJson, renderText } from "./render.js";
+import type { DiagQuery } from "./model.js";
 
 const DEFAULT_WINDOW_MS = 15 * 60_000;
 const DEFAULT_LIMIT = 400;
@@ -98,29 +98,12 @@ async function buildQuery(values: Options): Promise<DiagQuery> {
   };
 }
 
-function renderJson(q: DiagQuery, evidence: Evidence, findings: Finding[]): string {
-  const coverage = {
-    dataDir: q.dataDir,
-    db: q.dbPath,
-    status: evidence.database,
-    since: q.since,
-    until: q.until,
-  };
-  const rows = selectTimelineRows(evidence, q).slice(0, q.limit);
-  const lines = [
-    JSON.stringify({ coverage }),
-    ...findings.map((item) => JSON.stringify({ finding: item })),
-    ...rows.map((row) => JSON.stringify(row)),
-  ];
-  return lines.join("\n");
-}
-
 /** Execute the reader without bootstrapping the application or mutating its DB. */
 export async function main(args: string[]): Promise<string> {
   const q = await buildQuery(parseOptions(args));
   const evidence = loadEvidence(q);
   const findings = findAnomalies(evidence, q);
-  if (q.json) return renderJson(q, evidence, findings);
+  if (q.json) return renderJson(evidence, findings, q);
   return renderText(evidence, findings, q);
 }
 

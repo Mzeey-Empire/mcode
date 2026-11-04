@@ -8,7 +8,7 @@ import { recordingFileId, type DiagRecord } from "@mcode/shared/diagnostics";
 import { openMigratedTestDatabase } from "../../../persistence/sqlite/testing/migrated-test-database.js";
 import { loadEvidence } from "../sources.js";
 import { findAnomalies } from "../anomalies.js";
-import { renderText } from "../render.js";
+import { renderJson, renderText } from "../render.js";
 import type { DiagQuery } from "../model.js";
 
 const WINDOW_START = 1000;
@@ -73,11 +73,11 @@ describe("diagnostics reader", () => {
   });
 
   it("keeps the newest rows when the timeline exceeds the limit, timed from the first shown row", () => {
-    const pushes: DiagRecord[] = Array.from({ length: 5 }, (_, i) => ({
-      t: 5000 + i * 100, n: i + 1, th: "a", k: "ev", ch: "push.canonical", d: { events: i },
+    const created: DiagRecord[] = Array.from({ length: 5 }, (_, i) => ({
+      t: 5000 + i * 100, n: i + 1, th: "a", k: "ev", ch: "agent.created", d: { mode: "m" + i },
     }));
     write("a", [
-      ...pushes,
+      ...created,
       { t: 6000, n: 6, th: "a", k: "beg", ch: "agent.stop", sp: "stop", exp: 10_000 },
       { t: 6250, n: 7, th: "a", k: "end", ch: "agent.stop", sp: "stop", ok: "ok", ms: 250 },
     ]);
@@ -87,9 +87,64 @@ describe("diagnostics reader", () => {
     const text = render();
 
     expect(text).toContain("(7 rows; 4 earlier rows elided)");
-    expect(text).toContain("L5 +0ms A ev push.canonical");
+    expect(text).toContain("L5 +0ms A ev agent.created");
     expect(text).toContain("L7 +850ms A end agent.stop#stop ok 250ms");
-    expect(text).not.toContain('{"events":0}');
+    expect(text).not.toContain('{"mode":"m0"}');
+  });
+
+  it("hides high-volume rows from the default timeline but still counts them as lane activity", () => {
+    const pushes: DiagRecord[] = Array.from({ length: 20 }, (_, i) => ({
+      t: 3000 + i * 1000, n: i + 2, th: "a", k: "ev", ch: "push.canonical", d: { phase: "running", events: 1, children: 0 },
+    }));
+    write("a", [
+      { t: 2000, n: 1, th: "a", k: "ev", ch: "agent.created" },
+      ...pushes,
+      { t: 23_000, n: 30, th: "a", k: "ev", ch: "claude.stream", d: { type: "stream_event", eventType: "content_block_delta" } },
+      { t: 23_100, n: 31, th: "a", k: "ev", ch: "claude.stream", d: { type: "assistant", tools: [{ name: "Agent", id: "toolu_1" }] } },
+    ]);
+    q.thread = "a";
+
+    const text = render();
+
+    expect(text).not.toContain("push.canonical");
+    expect(text).not.toContain("content_block_delta");
+    expect(text).toContain('L2 +21100ms A ev claude.stream {"type":"assistant","tools":[{"name":"Agent","id":"toolu_1"}]}');
+    expect(text).toMatch(/\nL1 [^\n]*\nL2 /);
+    expect(text).toContain("(2 rows; 0 earlier rows elided; 21 detail rows hidden");
+
+    q.channels = ["push.canonical"];
+    expect(render()).toContain("(20 rows; 0 earlier rows elided)");
+  });
+
+  it("points a finding at the line number the timeline prints when older rows are elided", () => {
+    write("a", [
+      begin("a", "agent.send", 30_000),
+      ...[3000, 4000, 5000].map((t, i): DiagRecord => ({ t, n: i + 2, th: "a", k: "ev", ch: "agent.created", d: { mode: "m" + i } })),
+    ]);
+    q.thread = "a";
+    q.limit = 2;
+
+    const text = render();
+
+    expect(text).toContain("A observed open-span");
+    expect(text).toMatch(/open-span .* \[L4\]/);
+    expect(text).toContain('L4 +1000ms A ev agent.created {"mode":"m2"}');
+  });
+
+  it("prints every row as JSON, hidden ones included, keeping the newest under the limit", () => {
+    write("a", [
+      { t: 2000, n: 1, th: "a", k: "ev", ch: "agent.created" },
+      { t: 3000, n: 2, th: "a", k: "ev", ch: "push.canonical", d: { phase: "running", events: 1, children: 0 } },
+      { t: 4000, n: 3, th: "a", k: "ev", ch: "agent.created", d: { mode: "last" } },
+    ]);
+
+    q.thread = "a";
+    q.limit = 2;
+    const evidence = loadEvidence(q);
+    const output = renderJson(evidence, findAnomalies(evidence, q), q);
+
+    const rows = output.split(String.fromCharCode(10)).map((line) => JSON.parse(line)).filter((line) => "ch" in line);
+    expect(rows.map((row) => [row.t, row.ch])).toEqual([[3000, "push.canonical"], [4000, "agent.created"]]);
   });
 
   it("names the recording state of each run marker in the timeline", () => {

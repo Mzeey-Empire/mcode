@@ -30,12 +30,47 @@ function windowRows(evidence: Evidence, q: DiagQuery): DiagRecord[] {
   return rows.filter((row) => inWindow(row, q)).sort(compareByTime);
 }
 
-/** Rows the timeline and the JSON output show: inside the window and on the requested channels. */
+/** Rows inside the window and on the requested channels; the JSON output prints all of them. */
 export function selectTimelineRows(evidence: Evidence, q: DiagQuery): DiagRecord[] {
   const channels = q.channels;
   const rows = windowRows(evidence, q);
   if (!channels) return rows;
   return rows.filter((row) => channels.includes(row.ch));
+}
+
+function payloadOf(row: DiagRecord): Record<string, unknown> {
+  const d = row.k === "run" ? undefined : row.d;
+  return d !== null && typeof d === "object" && !Array.isArray(d) ? { ...d } : {};
+}
+
+const QUIET_CLAUDE_SYSTEM = new Set(["status", "thinking_tokens", "hook_progress"]);
+const QUIET_CANONICAL = new Set(["publication.recorded", "item.content-appended"]);
+const QUIET_CANONICAL_ITEMS = new Set(["system", "reasoning"]);
+
+/**
+ * Rows a turn produces by the hundred: stream deltas, status ticks, and push acknowledgements.
+ * A two-minute delegated turn recorded about 2,600 of them, which pushed its tool calls and turn
+ * events out of the default timeline. Naming a channel with --ch shows them again.
+ */
+const DETAIL_ROWS: Partial<Record<string, (d: Record<string, unknown>) => boolean>> = {
+  "push.canonical": () => true,
+  "claude.stream": (d) => {
+    if (d.tools || d.results) return false;
+    return d.type === "stream_event" || d.type === "assistant" || (d.type === "system" && QUIET_CLAUDE_SYSTEM.has(String(d.subtype)));
+  },
+  "db.canonical": (d) => {
+    if (QUIET_CANONICAL.has(String(d.type))) return true;
+    return d.type === "item.recorded" && QUIET_CANONICAL_ITEMS.has(String(d.item));
+  },
+};
+
+function isDetailRow(row: DiagRecord): boolean {
+  return DETAIL_ROWS[row.ch]?.(payloadOf(row)) ?? false;
+}
+
+/** The rows the text timeline numbers: every requested channel, or everything but detail rows. */
+function displayedRows(rows: readonly DiagRecord[], q: DiagQuery): DiagRecord[] {
+  return q.channels ? [...rows] : rows.filter((row) => !isDetailRow(row));
 }
 
 function describeIntervals(markers: readonly RunMarker[]): string {
@@ -96,56 +131,86 @@ function quietTails(lastSeenByLane: Map<string, number>, until: number, processM
   return lines;
 }
 
-function timeline(evidence: Evidence, lanes: Map<string, string>, q: DiagQuery): string[] {
-  const lines = ["TIMELINE"];
+interface Displayed {
+  rows: DiagRecord[];
+  visible: DiagRecord[];
+  /** Index in `visible` of the first printed row; the limit keeps the newest rows. */
+  firstShown: number;
+}
+
+function displayed(evidence: Evidence, q: DiagQuery): Displayed {
   const rows = selectTimelineRows(evidence, q);
-  const processMarkers = evidence.records.filter(isRunMarker).filter((row) => !row.th);
-  const lastSeenByLane = new Map<string, number>();
+  const visible = displayedRows(rows, q);
+  // A stuck thread shows its fault at the end, so the limit keeps the newest rows.
+  return { rows, visible, firstShown: Math.max(0, visible.length - q.limit) };
+}
+
+/** Collapses consecutive identical rows into one line followed by an `xN` count. */
+function repeatCollapser(lines: string[]) {
   let previousText = "";
   let repeats = 0;
-
-  const flushRepeats = (): void => {
+  const flush = (): void => {
     if (repeats > 0) lines.push("x" + (repeats + 1));
     repeats = 0;
   };
+  const push = (text: string, line: string): void => {
+    if (text === previousText) {
+      repeats += 1;
+      return;
+    }
+    flush();
+    lines.push(line);
+    previousText = text;
+  };
+  return { flush, push };
+}
 
-  // A stuck thread shows its fault at the end, so the limit keeps the newest rows.
-  const firstShown = Math.max(0, rows.length - q.limit);
-  const shown = rows.slice(firstShown);
-  const origin = shown[0]?.t ?? q.since;
+function timeline(evidence: Evidence, lanes: Map<string, string>, q: DiagQuery, view: Displayed): string[] {
+  const lines = ["TIMELINE"];
+  const processMarkers = evidence.records.filter(isRunMarker).filter((row) => !row.th);
+  const lastSeenByLane = new Map<string, number>();
+  const shown = new Set(view.visible.slice(view.firstShown));
+  const rows = repeatCollapser(lines);
+  let lineNumber = view.firstShown;
+
+  const origin = view.visible[view.firstShown]?.t ?? q.since;
   lines.push("from " + isoTime(origin));
 
-  for (const [offset, row] of shown.entries()) {
+  // Hidden rows still count as activity, so a quiet line means the lane really went silent.
+  for (const row of view.rows) {
+    if (row.t < origin) continue;
     const lane = lanes.get(row.th ?? "") ?? "-";
     const lastSeen = lastSeenByLane.get(lane);
     if (lastSeen !== undefined && row.t - lastSeen > QUIET_GAP_MS) {
-      flushRepeats();
+      rows.flush();
       lines.push(quietLine(lane, lastSeen, row.t, processMarkers));
     }
     lastSeenByLane.set(lane, row.t);
-
+    if (!shown.has(row)) continue;
+    lineNumber += 1;
     const text = rowText(row, lane);
-    if (text === previousText) {
-      repeats += 1;
-      continue;
-    }
-    flushRepeats();
-    lines.push("L" + (firstShown + offset + 1) + " +" + (row.t - origin) + "ms " + text);
-    previousText = text;
+    rows.push(text, "L" + lineNumber + " +" + (row.t - origin) + "ms " + text);
   }
-  flushRepeats();
+  rows.flush();
 
   lines.push(...quietTails(lastSeenByLane, q.until, processMarkers));
-  lines.push("(" + rows.length + " rows; " + firstShown + " earlier rows elided)");
+  lines.push(footer(view));
   return lines;
 }
 
-function reference(finding: Finding, rows: readonly DiagRecord[], q: DiagQuery): string {
+function footer(view: Displayed): string {
+  const hidden = view.rows.length - view.visible.length;
+  const detail = hidden > 0 ? "; " + hidden + " detail rows hidden, name their channel with --ch to show them" : "";
+  return "(" + view.visible.length + " rows; " + view.firstShown + " earlier rows elided" + detail + ")";
+}
+
+/** Point a finding at the last displayed row of its thread at or before the finding's time. */
+function reference(finding: Finding, view: Displayed): string {
   let index = -1;
-  rows.forEach((row, position) => {
+  view.visible.forEach((row, position) => {
     if (row.th === finding.thread && row.t <= finding.t) index = position;
   });
-  if (index < 0 || index >= q.limit) return " [outside displayed rows]";
+  if (index < view.firstShown) return " [outside displayed rows]";
   return " [L" + (index + 1) + "]";
 }
 
@@ -206,11 +271,30 @@ export function renderText(evidence: Evidence, findings: Finding[], q: DiagQuery
   const lanes = new Map(evidence.threads.map((view, index) => [view.id, String.fromCharCode(65 + index)]));
   lines.push(laneLegend(evidence, lanes));
   lines.push("FINDINGS");
-  const referenceRows = windowRows(evidence, q);
+  const view = displayed(evidence, q);
   const ordered = [...findings].sort((a, b) => a.thread.localeCompare(b.thread));
   for (const item of ordered) {
     const lane = lanes.get(item.thread) ?? "-";
-    lines.push(lane + " " + item.certainty + " " + item.rule + " " + item.message + reference(item, referenceRows, q));
+    lines.push(lane + " " + item.certainty + " " + item.rule + " " + item.message + reference(item, view));
   }
-  return [...lines, ...timeline(evidence, lanes, q)].join("\n");
+  return [...lines, ...timeline(evidence, lanes, q, view)].join("\n");
+}
+
+/** Coverage, findings, then raw rows as JSON lines, with no row hidden. */
+export function renderJson(evidence: Evidence, findings: Finding[], q: DiagQuery): string {
+  const coverage = {
+    dataDir: q.dataDir,
+    db: q.dbPath,
+    status: evidence.database,
+    since: q.since,
+    until: q.until,
+  };
+  // Like the text timeline, keep the newest rows: a stuck thread shows its fault at the end.
+  const rows = selectTimelineRows(evidence, q).slice(-q.limit);
+  const lines = [
+    JSON.stringify({ coverage }),
+    ...findings.map((item) => JSON.stringify({ finding: item })),
+    ...rows.map((row) => JSON.stringify(row)),
+  ];
+  return lines.join("\n");
 }
