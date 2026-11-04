@@ -23,3 +23,9 @@ Run these commands in a POSIX shell, such as Git Bash on Windows.
    size=$(curl -sI "$url" | awk 'tolower($1) == "content-length:" { print $2 }' | tr -d '\r')
    curl -s -r $((size - 400000))-$((size - 1)) "$url" | tail -200
    ```
+
+4. To tell whether a failing test also fails on main, read the latest nightly test run on main. It runs only on nights when main has changed, so it can be up to a day behind.
+
+   ```sh
+   gh run list --workflow ci.yml --branch main --event workflow_dispatch --limit 1
+   ```
