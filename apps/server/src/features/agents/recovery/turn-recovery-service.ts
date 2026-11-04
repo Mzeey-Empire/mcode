@@ -1,4 +1,5 @@
 import * as NodeCrypto from "node:crypto";
+import { diag } from "@mcode/shared/diagnostics";
 import { inject, injectable } from "tsyringe";
 import { logger, newHandoffUlid } from "@mcode/shared";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
@@ -127,6 +128,10 @@ export class TurnRecoveryService {
       threadId: checkpoint.threadId, turnId: checkpoint.turnId, executionId: checkpoint.executionId,
       reason: UNPROVED_EXECUTION_REASON, cause: "app_closed", recoveryIncidentId: incident.id, endedAt: incident.createdAt,
     });
+    diag.emit("turn.recovered", { th: checkpoint.threadId }, () => ({
+      turn: checkpoint.turnId, execution: checkpoint.executionId, incident: incident.id,
+      cause: "app_closed", reason: UNPROVED_EXECUTION_REASON,
+    }));
     if (chunkCount > 0 && !await this.parentAssistantTextCheckpoints.retire(checkpoint.executionId)) {
       throw new Error(`Recovered assistant text checkpoint was not retired: ${checkpoint.executionId}`);
     }

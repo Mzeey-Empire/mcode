@@ -8,6 +8,7 @@
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
+import { diag } from "@mcode/shared/diagnostics";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { ProviderRuntimeEventSchema, isChildRoutedRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { isSessionEvictable, isTurnSteerCapable } from "@mcode/contracts/providers/interfaces";
@@ -1892,29 +1893,44 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.shuttingDown = true;
     const ids = [...this.activeSessionIds];
     await Promise.all(
-      ids.map(async (threadId) => {
-        const active = this.lifecycles.worker(threadId);
-        await this.featureEffects.stopDescendants(threadId);
-        const sessionId = `mcode-${threadId}`;
-        const providerId = this.activeProviderId(threadId);
-        if (!providerId) return;
-        try {
-          const provider = this.providerRegistry.resolve(providerId);
-          await Promise.race([
-            Promise.resolve(provider.stopSession(sessionId)).catch(() => {}),
-            new Promise<void>((resolve) => setTimeout(resolve, PROVIDER_STOP_SETTLE_TIMEOUT_MS)),
-          ]);
-        } catch {
-          // best-effort
-        }
-        if (active) await this.waitForStoppingWorker(active);
-      }),
+      ids.map((threadId) => diag.run(
+        "agent.stop",
+        { th: threadId },
+        () => this.stopForShutdown(threadId),
+        () => ({ by: "shutdown", provider: this.activeProviderId(threadId) }),
+      )),
     );
     this.activeSessionIds.clear();
     for (const [threadId, token] of this.activeMutationReservations) {
       this.mutationReservations.release(threadId, token);
     }
     this.activeMutationReservations.clear();
+  }
+
+  private async stopForShutdown(threadId: string): Promise<void> {
+    const active = this.lifecycles.worker(threadId);
+    await this.featureEffects.stopDescendants(threadId);
+    const sessionId = `mcode-${threadId}`;
+    const providerId = this.activeProviderId(threadId);
+    if (!providerId) return;
+    try {
+      const provider = this.providerRegistry.resolve(providerId);
+      await Promise.race([
+        Promise.resolve(provider.stopSession(sessionId)).catch(() => {}),
+        new Promise<void>((resolve) => setTimeout(resolve, PROVIDER_STOP_SETTLE_TIMEOUT_MS)),
+      ]);
+    } catch {
+      // best-effort
+    }
+    if (active) {
+      await this.waitForStoppingWorker(active);
+      diag.emit("agent.stopped", { th: threadId }, () => ({
+        execution: active.execution.executionId,
+        turn: active.execution.turnId,
+        phase: this.turnRuntime.snapshot(threadId)?.phase ?? "idle",
+        terminal: active.terminalCommitted,
+      }));
+    }
   }
 }
 

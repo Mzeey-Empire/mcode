@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { appendDailyLogSync, recordFatalError } from "../server-diagnostics.js";
+import { appendDailyLogSync, recordFatalError, startEventLoopLagWatch } from "../server-diagnostics.js";
 
 let dir: string;
 let originalDataDir: string | undefined;
@@ -33,6 +35,22 @@ function dailyLogFiles(): string[] {
 }
 
 describe("recordFatalError", () => {
+  it("records bounded inner failures on an explicit failed exit", () => {
+    const result = NodeChildProcess.spawnSync("bun", ["-e", `
+      import { diag } from "@mcode/shared/diagnostics";
+      import { installServerDiagnostics, recordServerExitError } from ${JSON.stringify(NodePath.resolve("src/runtime/diagnostics/server-diagnostics.ts"))};
+      diag.configure({ dir: ${JSON.stringify(dir)}, enabled: true });
+      installServerDiagnostics();
+      recordServerExitError(new AggregateError([new TypeError("first\\nprivate detail"), new Error("second\\r\\nmore detail")], "Provider shutdown failed"));
+      process.exit(1);
+    `], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(1);
+    const rows = NodeFS.readdirSync(NodePath.join(dir, "p")).flatMap((file) =>
+      NodeFS.readFileSync(NodePath.join(dir, "p", file), "utf8").split("\n").map(parseDiagLine));
+    expect(rows.filter((row) => row?.ch === "app.exit").map((row) => row?.d)).toEqual([
+      expect.objectContaining({ code: 1, errors: [{ name: "TypeError", message: "first" }, { name: "Error", message: "second" }] }),
+    ]);
+  });
   it("writes the fatal record to today's log and server-fatal.log", () => {
     recordFatalError("uncaughtException", new Error("boom"));
 
@@ -74,6 +92,31 @@ describe("recordFatalError", () => {
 });
 
 describe("appendDailyLogSync", () => {
+  it("records late callbacks using monotonic intervals and wall-clock bounds", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const clock = vi.spyOn(performance, "now");
+    clock.mockReturnValue(0);
+    diag.configure({ dir: NodePath.join(dir, "diagnostics"), enabled: true });
+    const timer = startEventLoopLagWatch();
+    try {
+      clock.mockReturnValue(250);
+      vi.advanceTimersByTime(250);
+      clock.mockReturnValue(1250);
+      vi.advanceTimersByTime(250);
+      diag.flushSync();
+      const folder = NodePath.join(dir, "diagnostics", "p");
+      const rows = NodeFS.readdirSync(folder).flatMap((file) => readJsonl(NodePath.join(folder, file)));
+      expect(rows.filter((row) => row.ch === "app.stall").map((row) => row.d)).toEqual([
+        { lastOnTimeAt: 1250, lateCallbackAt: 1500, intervalMs: 1000, lateMs: 750 },
+      ]);
+    } finally {
+      clearInterval(timer);
+      diag.configure({ enabled: false });
+      clock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
   it("appends JSONL records to today's log file", () => {
     appendDailyLogSync({ level: "info", message: "one" });
     appendDailyLogSync({ level: "warn", message: "two" });

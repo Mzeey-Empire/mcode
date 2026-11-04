@@ -41,6 +41,7 @@ import { ProgressAdmissionError } from "../../execution/execution-writer-failure
 import { persistTurnFailure } from "../turn-ending.js";
 import { TurnSteerStore } from "../../steering/persistence/turn-steer-store.js";
 import { TurnSavingStatusSchema, type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
+import { diag, parseDiagLine, recordingFileId } from "@mcode/shared/diagnostics";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -278,6 +279,30 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
         { threadId: execution.threadId, mode: "save-retrying" }, { threadId: child.id, mode: "save-retrying" },
       ]);
       await settle();
+    });
+
+    it("records which accepted events a failed save left unwritten", async () => {
+      const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "progress-save-failed-"));
+      diag.configure({ dir, enabled: true });
+      try {
+        await send(1, start("codex"));
+        await settle();
+        vi.spyOn(writer, "appendAccepted").mockRejectedValueOnce(new Error("Disk full"));
+        await send(2, { kind: "event", phase: "running", nativeCursor: null,
+          events: [draft("codex", 1, "textDelta", { delta: "pending", isFinalResponse: true })] });
+        await expect(settle()).rejects.toThrow();
+        diag.flushSync();
+        const file = NodePath.join(dir, "t", `${recordingFileId(execution.threadId)}.jsonl`);
+        const rows = NodeFS.readFileSync(file, "utf8").split("\n").map(parseDiagLine);
+        expect(rows.filter((row) => row?.ch === "progress.save-failed").map((row) => row?.d)).toEqual([{
+          turn: execution.turnId, execution: execution.executionId, source: "storage",
+          error: "Disk full", exhausted: true, events: 4,
+          types: ["turn.provider-started", "item.recorded", "publication.recorded"],
+        }]);
+      } finally {
+        diag.configure({ enabled: false });
+        NodeFS.rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it.each(["close", "discardThread", "evictSavedThread"])("flushes a final durable on %s", async (action) => {

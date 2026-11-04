@@ -7,12 +7,14 @@ import type { WebSocket } from "ws";
 import { WS_CHANNELS, type WsChannelName } from "@mcode/contracts/ws/channels";
 import { encodeTerminalDataFrame } from "@mcode/contracts/ws/terminal-legacy-binary";
 import { logger } from "@mcode/shared";
+import { diag } from "@mcode/shared/diagnostics";
 import { getTransportPayloadValidator } from "./payload-validation.js";
 
 /** Maximum unsent push bytes for one connected client, excluding RPC response bytes. */
 export const MAX_QUEUED_PUSH_BYTES = 16 * 1_024 * 1_024;
 
 const clients = new Set<WebSocket>();
+const connectionIds = new WeakMap<WebSocket, string>();
 const queuedPushBytes = new Map<WebSocket, number>();
 const threadSubscriptions = new Map<WebSocket, Set<string>>();
 const SUBSCRIPTION_SCOPED_CHANNELS = new Set<WsChannelName>([
@@ -51,7 +53,8 @@ export function onSessionChange(cb: (count: number) => void): () => void {
 }
 
 /** Register a WebSocket client for push event delivery. */
-export function addClient(ws: WebSocket): void {
+export function addClient(ws: WebSocket, conn?: string): void {
+  if (conn) connectionIds.set(ws, conn);
   clients.add(ws);
   queuedPushBytes.set(ws, 0);
   threadSubscriptions.set(ws, new Set());
@@ -62,6 +65,7 @@ export function addClient(ws: WebSocket): void {
 /** Remove a disconnected WebSocket client. No-op if already removed. */
 export function removeClient(ws: WebSocket): void {
   if (!clients.delete(ws)) return;
+  connectionIds.delete(ws);
   queuedPushBytes.delete(ws);
   threadSubscriptions.delete(ws);
   _sessionCount--;
@@ -142,17 +146,33 @@ export function broadcast(
     channel,
     data: validation.data,
   });
-  sendBroadcastPayload(channel, threadId, payload);
+  const approval = channel === "approval.requested" || channel === "approval.resolved";
+  const conns: string[] | undefined = approval ? [] : undefined;
+  sendBroadcastPayload(channel, threadId, payload, conns);
+  if (conns) recordApprovalPush(channel, threadId, data, conns);
   return validation.data;
 }
 
-function sendBroadcastPayload(channel: WsChannelName, threadId: string | undefined, payload: string): void {
+function recordApprovalPush(channel: WsChannelName, threadId: string | undefined, data: unknown, conns: string[]): void {
+  if (!threadId || !data || typeof data !== "object" || !("requestId" in data) || typeof data.requestId !== "string") return;
+  const request = data.requestId;
+  diag.emit("approval.push", { th: threadId }, () => ({
+    request,
+    kind: channel === "approval.requested" ? "requested" : "resolved",
+    conns,
+  }));
+}
+
+function sendBroadcastPayload(channel: WsChannelName, threadId: string | undefined, payload: string, conns?: string[]): void {
   const requiresThreadSubscription = SUBSCRIPTION_SCOPED_CHANNELS.has(channel);
   const payloadBytes = Buffer.byteLength(payload, "utf8");
   for (const ws of clients) {
     if (ws.readyState !== ws.OPEN) continue;
     if (requiresThreadSubscription && threadId && !threadSubscriptions.get(ws)?.has(threadId)) continue;
-    sendPush(ws, channel, payload, payloadBytes);
+    if (sendPush(ws, channel, payload, payloadBytes) && conns) {
+      const conn = connectionIds.get(ws);
+      if (conn) conns.push(conn);
+    }
   }
 }
 

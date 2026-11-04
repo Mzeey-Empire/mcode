@@ -1838,12 +1838,12 @@ export class ClaudeProvider
     return this.host.runtime;
   }
 
-  private createOwnedClaudeProcess(description: string): ClaudeOwnedProcess {
+  private createOwnedClaudeProcess(description: string, threadId?: string): ClaudeOwnedProcess {
     let tail = "";
     return new ClaudeOwnedProcess(this.host.processes, `Claude ${description}`, (chunk) => {
       tail = (tail + chunk).slice(-STDERR_CAPTURE_LIMIT);
       this.recentStderr.set(description, tail);
-    });
+    }, threadId);
   }
 
   private resolveClaudeExecutable(): string | undefined {
@@ -1977,7 +1977,7 @@ export class ClaudeProvider
       resumeId: staged.resumeId,
       cwd,
     });
-    const ownedProcess = this.createOwnedClaudeProcess(sessionId);
+    const ownedProcess = this.createOwnedClaudeProcess(sessionId, sessionId.replace(/^mcode-/, ""));
     // Without it, some startup failures end on stderr alone and reach us with no
     // startup_failure_reason to classify them by.
     options.env = { ...args.env, CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1" };
@@ -2215,6 +2215,11 @@ export class ClaudeProvider
       return true;
     }
     if (absorbsSteeredSegmentEnd(state, message)) {
+      diag.emit("claude.turn", { th: state.threadId }, () => ({
+        step: "segment-absorbed",
+        terminalReason: typeof message.terminal_reason === "string" ? message.terminal_reason : undefined,
+        steers: [...state.steersAwaitingTurn.keys()],
+      }));
       state.mapper.closeAbortedSegment(message);
       return true;
     }
@@ -2502,6 +2507,10 @@ export class ClaudeProvider
       this.suppressSessionStartHooks.delete(threadId);
     }
     logger.info("Session stream ended", { sessionId });
+    diag.emit("claude.turn", { th: state.threadId }, () => ({
+      step: "stream-ended",
+      cause: state.suppressEnded || suppressedQuery || current?.suppressEnded ? "discarded" : "ended",
+    }));
     this.emit(`_streamDone:${sessionId}`);
     if (
       !this.canEmitClaudeEnded(state, suppressedQuery, superseded, current, q)
@@ -2896,28 +2905,42 @@ export class ClaudeProvider
   async steerTurn(input: TurnSteerInput): Promise<TurnSteerOutcome> {
     const session = this.runtime.get(input.sessionId);
     const stream = session ? this.streamStates.get(session.query) : undefined;
-    if (!session || !stream) return CLAUDE_STEER_TURN_GONE;
+    const threadId = input.sessionId.replace(/^mcode-/, "");
+    const finish = (outcome: TurnSteerOutcome): TurnSteerOutcome => {
+      diag.emit("claude.turn", { th: threadId }, () => ({
+        step: "steer-outcome", steer: input.steerId, outcome: outcome.outcome,
+      }));
+      return outcome;
+    };
+    if (!session || !stream) return finish(CLAUDE_STEER_TURN_GONE);
     const refusal = claudeSteerRefusal(stream, input.turnExecutionId);
-    if (refusal) return refusal;
+    if (refusal) return finish(refusal);
     const steerId = input.steerId;
-    if (!isSdkMessageUuid(steerId)) return { outcome: "rejected", reason: "provider", detail: "Steer id is not a UUID." };
+    if (!isSdkMessageUuid(steerId)) return finish({ outcome: "rejected", reason: "provider", detail: "Steer id is not a UUID." });
     const answered = new Promise<boolean>((settle) => stream.steersAwaitingTurn.set(steerId, settle));
     let queued: QueuedRead;
     try {
       queued = session.pushAndAwaitRead({ ...toUserMessage(input.message, input.sessionId), priority: "now", uuid: steerId });
+      diag.emit("claude.turn", { th: stream.threadId }, () => ({
+        step: "steer-queued", steer: steerId, openTools: [...session.pendingToolUses],
+      }));
     } catch (error) {
       stream.steersAwaitingTurn.delete(steerId);
-      return { outcome: "rejected", reason: "provider", detail: error instanceof Error ? error.message : String(error) };
+      return finish({ outcome: "rejected", reason: "provider", detail: error instanceof Error ? error.message : String(error) });
     }
     const outcome = await awaitSteerAnswer(queued, answered);
     if (outcome.outcome === "rejected") stream.steersAwaitingTurn.delete(steerId);
-    return outcome;
+    return finish(outcome);
   }
 
   /** Abort a running session, or record a pending stop if the session hasn't been created yet. */
   async stopSession(sessionId: string): Promise<void> {
     // Normalize to the raw UUID that canUseTool stores as threadId.
     const tid = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
+    const entry = this.runtime.get(sessionId);
+    diag.emit("claude.turn", { th: tid }, () => ({
+      step: "stop-requested", hadSession: entry !== undefined, openTools: entry ? [...entry.pendingToolUses] : [],
+    }));
     // Reject all pending permission requests for this session and notify frontend.
     for (const [requestId, entry] of this.pendingPermissions) {
       if (entry.threadId === tid) {
@@ -2928,7 +2951,6 @@ export class ClaudeProvider
     }
     this.goalsBySession.delete(sessionId);
     this.nativeGoalsBySession.delete(sessionId);
-    const entry = this.runtime.get(sessionId);
     if (entry) {
       await this.runtime.stop(sessionId);
     } else if (this.pendingBrowserAccess.has(sessionId) || this.pendingSpawnTurns.has(sessionId)) {

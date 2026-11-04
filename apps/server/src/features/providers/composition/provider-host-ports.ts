@@ -7,6 +7,7 @@ import type {
   ProviderTurnPort,
 } from "@mcode/providers";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
+import { diag } from "@mcode/shared/diagnostics";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
 import type { EnvService } from "../../../runtime/environment/env-service.js";
 import type { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
@@ -123,7 +124,16 @@ async function submitProviderEvents(
     batch.executionId, batch.events[0]?.sourceProviderId,
   )
     ?? { kind: "rejected" };
-  if (route.kind === "rejected") throw new Error("Canonical event execution is no longer admitted");
+  if (route.kind === "rejected") {
+    diag.emit("provider.refused", { th: batch.threadId }, () => ({
+      turn: batch.turnId,
+      execution: batch.executionId,
+      phase: batch.phase,
+      events: batch.events.length,
+      types: [...new Set(batch.events.map((event) => event.payload.type))].slice(0, 8),
+    }));
+    throw new Error("Canonical event execution is no longer admitted");
+  }
   return await submitWorkerEvents(dependencies, route, batch);
 }
 

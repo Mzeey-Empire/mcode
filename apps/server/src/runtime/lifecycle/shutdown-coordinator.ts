@@ -1,4 +1,8 @@
 import { SERVER_SHUTDOWN_DEADLINE_MS } from "@mcode/shared/node/shutdown-deadlines";
+import { diag, type EventPayload } from "@mcode/shared/diagnostics";
+
+/** Origin retained for each explicit shutdown request. */
+export type ShutdownTrigger = Omit<EventPayload<"app.shutdown">, "accepted">;
 
 /** Hard deadline for explicit shutdown before the desktop supervisor fallback. */
 export const EXPLICIT_SHUTDOWN_DEADLINE_MS = SERVER_SHUTDOWN_DEADLINE_MS;
@@ -15,7 +19,7 @@ export interface ShutdownCoordinatorDependencies {
 
 /** Coordinates one shutdown request and force-exits if a phase hangs. */
 export interface ShutdownCoordinator {
-  requestShutdown(): Promise<void> | undefined;
+  requestShutdown(trigger: ShutdownTrigger): Promise<void> | undefined;
   setPhase(phase: string): void;
   getPhase(): string;
 }
@@ -31,6 +35,7 @@ export function createShutdownCoordinator(
   let phase = "not started";
   let shutdownPromise: Promise<void> | null = null;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
+  let requested = false;
 
   const clearWatchdog = () => {
     if (watchdog === null) return;
@@ -39,7 +44,10 @@ export function createShutdownCoordinator(
   };
 
   return {
-    requestShutdown() {
+    requestShutdown(trigger) {
+      const accepted = !requested;
+      requested = true;
+      diag.emit("app.shutdown", {}, () => ({ ...trigger, accepted }));
       if (shutdownPromise) return shutdownPromise;
       watchdog = schedule(() => {
         dependencies.onDeadline?.(phase);
@@ -50,6 +58,7 @@ export function createShutdownCoordinator(
     },
     setPhase(nextPhase) {
       phase = nextPhase;
+      diag.emit("app.phase", {}, () => ({ phase: nextPhase }));
     },
     getPhase() {
       return phase;

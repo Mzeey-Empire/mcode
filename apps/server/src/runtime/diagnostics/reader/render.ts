@@ -26,7 +26,10 @@ function inWindow(row: DiagRecord, q: DiagQuery): boolean {
 }
 
 function windowRows(evidence: Evidence, q: DiagQuery): DiagRecord[] {
-  const rows = evidence.threads.flatMap((view) => view.rows);
+  const rows = [
+    ...evidence.threads.flatMap((view) => view.rows),
+    ...evidence.records.filter((row) => !row.th && row.k !== "run"),
+  ];
   return rows.filter((row) => inWindow(row, q)).sort(compareByTime);
 }
 
@@ -77,6 +80,48 @@ function describeIntervals(markers: readonly RunMarker[]): string {
   return markers.map((row) => isoTime(row.t) + " " + row.state + " run=" + row.run).join(", ");
 }
 
+function runEnding(rows: DiagRecord[]): string {
+  const exit = rows.find((row) => row.ch === "app.exit");
+  const shutdown = rows.find((row) => row.ch === "app.shutdown" && payloadOf(row).accepted === true);
+  let ended = "no exit record; last record at " + isoTime(rows[rows.length - 1].t) + " (killed or crashed, or still running at capture)";
+  const lastPhase = rows.filter((row) => row.ch === "app.phase").at(-1);
+  if (!exit && lastPhase) ended += ", last shutdown phase " + payloadOf(lastPhase).phase + " began at " + isoTime(lastPhase.t);
+  if (exit) {
+    const d = payloadOf(exit);
+    ended = "exit code " + d.code + " at " + isoTime(exit.t) + " after " + d.phase;
+    if (d.fatal) ended += ", fatal " + d.fatal;
+    if (d.control) ended += ", by control " + d.control;
+  }
+  if (shutdown) {
+    const d = payloadOf(shutdown);
+    const detail = d.signal ?? d.client;
+    ended += ", shutdown requested by " + d.trigger + (detail ? " " + detail : "") + " at " + isoTime(shutdown.t);
+  }
+  return ended;
+}
+
+function runSummary(run: string, rows: DiagRecord[]): string {
+  const start = rows.find((row) => row.ch === "app.run");
+  const started = start ? payloadOf(start) : {};
+  const marker = rows.find(isRunMarker);
+  const pid = started.pid ?? marker?.pid ?? "unknown";
+  const startedAt = start ? isoTime(start.t) : "unknown";
+  const containment = started.children === "job" ? "; provider processes end with it" : "";
+  return "run " + run + " pid " + pid + ": started " + startedAt
+    + " (previous " + (started.previous ?? "unknown") + containment + "); ended " + runEnding(rows);
+}
+
+function runSummaries(records: DiagRecord[], q: DiagQuery): string[] {
+  const runs = new Map<string, DiagRecord[]>();
+  for (const row of records) {
+    if (!("run" in row) || typeof row.run !== "string") continue;
+    const rows = runs.get(row.run) ?? [];
+    rows.push(row);
+    runs.set(row.run, rows);
+  }
+  return [...runs].filter(([, rows]) => rows.some((row) => inWindow(row, q))).map(([run, rows]) => runSummary(run, rows));
+}
+
 function coverageHeader(evidence: Evidence, q: DiagQuery): string[] {
   const retained = evidence.records.filter((row) => row.t <= q.until);
   const recordedInWindow = retained.filter((row) => row.t >= q.since);
@@ -92,6 +137,7 @@ function coverageHeader(evidence: Evidence, q: DiagQuery): string[] {
     "records: first=" + (first ? isoTime(first.t) : "none") + " last=" + (last ? isoTime(last.t) : "none"),
     "recording intervals: " + describeIntervals(markers),
     "dropped: " + droppedTotal,
+    ...runSummaries(retained, q),
   ];
   if (evidence.dbError) lines.push("DB unavailable: " + lineText(evidence.dbError));
   return lines;

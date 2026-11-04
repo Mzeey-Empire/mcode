@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
+import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts/ws/channels";
@@ -141,6 +142,28 @@ describe("TurnRecoveryService", () => {
         ending: { failure: { kind: "fatal", provider: "codex", message: "Invalid model" } },
         projectTurn: () => ({ message: null, narrative: [] }) });
     }
+
+    it("records the persisted startup interruption incident and stays silent on a clean restart", async () => {
+      const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "turn-recovered-"));
+      diag.configure({ dir, enabled: true });
+      try {
+        expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
+        expect(await service.reconcileOnStartup()).toEqual({ interrupted: [] });
+        const incident = db.query<{ id: string }, [string]>(
+          "SELECT recovery_incident_id AS id FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?",
+        ).get(EXECUTION_ID);
+        expect(incident?.id).toEqual(expect.any(String));
+        diag.flushSync();
+        const rows = NodeFS.readFileSync(NodePath.join(dir, "t", `${THREAD_ID}.jsonl`), "utf8").split("\n").map(parseDiagLine);
+        expect(rows.filter((row) => row?.ch === "turn.recovered").map((row) => row?.d)).toEqual([{
+          turn: TURN_ID, execution: EXECUTION_ID, incident: incident?.id, cause: "app_closed",
+          reason: "The provider could not prove that this execution was still active after restart.",
+        }]);
+      } finally {
+        diag.configure({ enabled: false });
+        NodeFS.rmSync(dir, { recursive: true, force: true });
+      }
+    });
 
     async function admit(command: SendMessageCommand): Promise<void> {
       if (!command.sourceTurnId) throw new Error("Retry must assign its returned turn identity");

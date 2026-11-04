@@ -2,6 +2,9 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeHTTP from "node:http";
+import { diag } from "@mcode/shared/diagnostics";
+import { attributeExitToControl } from "../diagnostics/server-diagnostics.js";
+import { requestClient } from "../diagnostics/request-client.js";
 import type { ApplicationDatabaseWriter } from "../persistence/sqlite/application-database-writer.js";
 import type { WebSocketServer } from "ws";
 
@@ -104,7 +107,7 @@ export function createReliabilityHarnessAdapter(
       const body = await readReliabilityCommand(request, response);
       if (!body) return true;
       try {
-        persistenceFailure = await executeReliabilityControl(body, sockets, block, writer, persistenceFailure, closeSockets);
+        persistenceFailure = await executeReliabilityControl({ ...body, client: requestClient(request) }, sockets, block, writer, persistenceFailure, closeSockets);
       } catch {
         response.writeHead(500);
         response.end("Reliability control failed");
@@ -148,19 +151,23 @@ async function readReliabilityCommand(
 }
 
 async function executeReliabilityControl(
-  command: ReliabilityHarnessCommand,
+  command: ReliabilityHarnessCommand & { client: string },
   sockets: WebSocketServer["clients"],
   block: (durationMs: number) => void,
   writer: Pick<ApplicationDatabaseWriter, "setQueryOnlyForReliability">,
   persistenceFailure: boolean,
   closeSockets: (sockets: WebSocketServer["clients"]) => void,
 ): Promise<boolean> {
+  const id = NodeCrypto.randomUUID().slice(0, 8);
+  diag.emit("app.control", {}, () => ({ id, ...command }));
   switch (command.control) {
     case "server-exit":
+      attributeExitToControl(id);
+      diag.flushSync();
       setImmediate(() => process.exit(137));
       return persistenceFailure;
     case "server-hang":
-      setImmediate(() => block(command.durationMs ?? 1_000));
+      setImmediate(() => recordHang(id, block, command.durationMs ?? 1_000));
       return persistenceFailure;
     case "transport-loss":
       closeSockets(sockets);
@@ -169,6 +176,14 @@ async function executeReliabilityControl(
       if (!persistenceFailure) await writer.setQueryOnlyForReliability(true);
       return true;
   }
+}
+
+function recordHang(controlId: string, block: (durationMs: number) => void, durationMs: number): void {
+  const startedAt = Date.now();
+  const startedMonotonic = performance.now();
+  block(durationMs);
+  const elapsedMs = performance.now() - startedMonotonic;
+  diag.emit("app.hang", {}, () => ({ control: controlId, startedAt, endedAt: Date.now(), elapsedMs }));
 }
 
 async function readCommand(request: NodeHTTP.IncomingMessage): Promise<ReliabilityHarnessCommand> {

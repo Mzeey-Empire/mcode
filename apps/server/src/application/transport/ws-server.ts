@@ -5,6 +5,7 @@
  */
 
 import * as NodeHTTP from "node:http";
+import * as NodeCrypto from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { logger } from "@mcode/shared";
 import {
@@ -24,6 +25,8 @@ import type { BrowserAutomationHostConnectionAuthorization } from "../../feature
 import { EXTERNAL_THREAD_CONTROL_MCP_PATH } from "../../features/thread-control/index.js";
 import { MCODE_MCP_PATH, type McodeMcpServer } from "../../features/mcode-mcp/index.js";
 import type { ReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
+import { requestClient } from "../../runtime/diagnostics/request-client.js";
+import { diag } from "@mcode/shared/diagnostics";
 import type { ExecutionMailboxDepth } from "../../features/agents/execution/execution-mailbox-scheduler.js";
 
 /** Match stored thread IDs used for the custom attachment protocol (UUID, lowercase hex). */
@@ -54,7 +57,7 @@ export type WsServerDeps = RouterDeps & {
   singleInstance?: boolean;
   instanceToken?: string | null;
   worktreeIdentity?: string | null;
-  shutdown: () => void;
+  shutdown: (trigger: { trigger: "http"; client: string }) => void;
   /** Serves the loopback-only per-session `mcode` MCP route. */
   mcodeMcpServer?: McodeMcpServer;
   /** Optional opt-in packaged reliability controls. */
@@ -83,6 +86,7 @@ type InstanceCheckResult =
 type InstanceAttachmentExpectation = Pick<WsServerDeps, "singleInstance" | "authToken" | "instanceToken" | "worktreeIdentity">;
 
 interface WsMessageContext {
+  readonly connection: { conn: string; client: string };
   readonly ws: WebSocket;
   readonly deps: WsServerDeps;
   readonly resolveCurrentBrowserAutomationAuthorization: () => BrowserAutomationHostConnectionAuthorization | null;
@@ -234,7 +238,10 @@ export function createWsServer(deps: WsServerDeps): {
     }
 
     logger.info("WebSocket client connected");
-    addClient(ws);
+    const conn = NodeCrypto.randomUUID().slice(0, 8);
+    const client = requestClient(req);
+    diag.emit("ws.connection", {}, () => ({ step: "opened", conn, client }));
+    addClient(ws, conn);
     let browserAutomationDesktopInstanceId: string | null = null;
 
     const resolveCurrentBrowserAutomationAuthorization = (): ReturnType<WsServerDeps["resolveBrowserAutomationHostAuthorization"]> => {
@@ -252,6 +259,7 @@ export function createWsServer(deps: WsServerDeps): {
     };
 
     const messageContext: WsMessageContext = {
+      connection: { conn, client },
       ws,
       deps,
       resolveCurrentBrowserAutomationAuthorization,
@@ -261,7 +269,8 @@ export function createWsServer(deps: WsServerDeps): {
 
     ws.on("message", (data: Buffer | string, isBinary: boolean) => handleWsMessage(data, isBinary, messageContext));
 
-    ws.on("close", () => {
+    ws.on("close", (code: number) => {
+      diag.emit("ws.connection", {}, () => ({ step: "closed", conn, code }));
       logger.info("WebSocket client disconnected");
       deps.browserAutomationBroker?.disconnect(ws);
       deps.terminalService.disconnectClient(ws);
@@ -410,7 +419,7 @@ function handleShutdownRequest(req: NodeHTTP.IncomingMessage, res: NodeHTTP.Serv
     return true;
   }
   res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ status: "shutting_down" }), () => deps.shutdown());
+  res.end(JSON.stringify({ status: "shutting_down" }), () => deps.shutdown({ trigger: "http", client: requestClient(req) }));
   return true;
 }
 
@@ -622,6 +631,7 @@ async function routeWsMessage(raw: string, context: WsMessageContext): Promise<v
   const terminalCreateMethod = parseTerminalCreateMethod(raw);
   const response = await routeMessage(raw, context.deps, {
     client: context.ws,
+    connection: context.connection,
     browserAutomationAuthorization: context.resolveCurrentBrowserAutomationAuthorization(),
   });
   await sendWsResponse(terminalCreateMethod, response, context);

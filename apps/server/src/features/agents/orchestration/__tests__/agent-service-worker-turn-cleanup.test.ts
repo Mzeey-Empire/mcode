@@ -1,8 +1,10 @@
 import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { container } from "tsyringe";
+import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { CodexChildEvidence } from "@mcode/contracts/events/provider-runtime-event";
@@ -303,6 +305,31 @@ describe("AgentService cleanup through production worker composition", { timeout
     await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Interrupted");
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
+  });
+
+  it.each([true, false])("records shutdown execution state with provider terminal=%s", async (terminal) => {
+    const dir = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-stopall-"));
+    diag.configure({ dir, enabled: true });
+    try {
+      const fixture = await openFixture();
+      const turn = await sendTurn(fixture);
+      if (terminal) fixture.provider.stopSession.mockImplementation(() => fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, outcome: "cancelled" }));
+      await fixture.service.stopAll();
+      diag.flushSync();
+      const recording = await NodeFSPromises.readFile(NodePath.join(dir, "t", `${fixture.thread.id}.jsonl`), "utf8");
+      const stops = recording.split("\n").filter(Boolean)
+        .map((line) => JSON.parse(line) as { ch: string; k: string; d?: Record<string, unknown> })
+        .filter((row) => row.ch === "agent.stop");
+      expect(stops.map((row) => row.k)).toEqual(["beg", "end"]);
+      expect(stops[0].d).toMatchObject({ by: "shutdown", provider: "codex" });
+      expect(recording.split("\n").map(parseDiagLine).filter((row) => row?.ch === "agent.stopped").map((row) => row?.d)).toEqual([{
+        execution: turn.turnExecutionId, turn: fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.id,
+        phase: terminal ? "interrupted" : "running", terminal,
+      }]);
+    } finally {
+      diag.configure({ enabled: false });
+      await NodeFSPromises.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("ends an exact provider_lost turn Interrupted and releases it", async () => {

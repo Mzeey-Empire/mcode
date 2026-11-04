@@ -41,6 +41,18 @@ type ActionPayload = {
   reason?: string;
 };
 
+type RpcRequestPayload = {
+  method: string;
+  req: string;
+  conn: string;
+  client: string;
+  receivedAt: number;
+  ms: number;
+  outcome: "ok" | "error";
+  error?: string;
+  approval?: string;
+};
+
 type CodexWirePayload = {
   method: string;
   raw: Record<string, unknown>;
@@ -51,11 +63,43 @@ type ClaudeStreamPayload = {
   type: string;
   subtype?: string;
   eventType?: string;
+  uuid?: string;
+  taskId?: string;
+  toolUseId?: string;
+  status?: string;
+  state?: string;
+  phase?: string;
+  terminalReason?: string;
+  stopReason?: string;
+  isError?: boolean;
+  aborted?: boolean;
   /** The sub-agent tool call this message belongs to; absent for the main agent. */
   parent?: string;
   tools?: readonly { name: string; id: string }[];
   results?: readonly { id: string; isError: boolean }[];
 };
+
+type ClaudeTurnPayload =
+  // Links the queued prompt to SDK frames carrying its UUID. Steers queue at priority "now", which cuts open tools short.
+  | {
+      step: "steer-queued";
+      steer: string;
+      // Names tools a steer can cut short without inferring from timestamps.
+      openTools: string[];
+    }
+  // Distinguishes a confirmed answer from a refused or uncertain delivery.
+  | { step: "steer-outcome"; steer: string; outcome: string }
+  // Explains why an SDK result did not end the Mcode turn, naming the steers it was cut short for.
+  | { step: "segment-absorbed"; terminalReason?: string; steers: string[] }
+  // Preserves the user's stop even when no session exists yet.
+  | {
+      step: "stop-requested";
+      hadSession: boolean;
+      // Preserves tools open before session teardown clears them.
+      openTools: string[];
+    }
+  // Separates discarded streams from other endings; a stop shows as `stop-requested` before `ended`.
+  | { step: "stream-ended"; cause: "discarded" | "ended" };
 
 type CursorWirePayload = {
   raw: unknown;
@@ -89,11 +133,47 @@ type DelegateWake =
 
 /** One declaration per channel; readers use the budgets stamped into records. */
 export const DIAG_CATALOG = {
+  // `children: "job"` means provider processes die with this process, so an abrupt exit also ends them.
+  "app.run": event<{ pid: number; previous: "clean" | "unclean" | "first"; previousPid?: number; children: "job" | "none" }>()([]),
+  // Retains every shutdown requester, including requests that lost the race.
+  "app.shutdown": event<{ trigger: "http" | "signal" | "idle"; signal?: string; client?: string; accepted: boolean }>()([]),
+  // Shows how far a shutdown got when the process is killed before it can record its exit.
+  "app.phase": event<{ phase: string }>()([]),
+  // Makes a recorded exit distinguishable from a run that simply stopped recording.
+  // `control` names the app.control record whose command ended the process.
+  // Errors retain the failed cleanup cause even when later shutdown phases completed.
+  "app.exit": event<{ code: number; phase: string; uptimeMs: number; fatal?: "uncaughtException" | "unhandledRejection"; control?: string; errors?: { name: string; message: string }[] }>()([]),
+  // Bounds a late callback without claiming an exact stall onset.
+  "app.stall": event<{ lastOnTimeAt: number; lateCallbackAt: number; intervalMs: number; lateMs: number }>()([]),
+  // Preserves intentional harness faults before they affect the server; `id` links the effects they cause.
+  "app.control": event<{ id: string; control: string; durationMs?: number; client: string }>()([]),
+  "app.hang": event<{ control: string; startedAt: number; endedAt: number; elapsedMs: number }>()([]),
+  "rpc.request": event<RpcRequestPayload>()([]),
+  // `conn` matches rpc.request and approval.push, so a request or push can be tied to its socket's lifetime.
+  "ws.connection": event<{ step: "opened"; conn: string; client: string } | { step: "closed"; conn: string; code: number }>()([]),
   "codex.wire": event<CodexWirePayload>()(["th"]),
   "claude.stream": event<ClaudeStreamPayload>()(["th"]),
+  "claude.turn": event<ClaudeTurnPayload>()(["th"]),
+  // Links the owned CLI's lifetime and retirement outcome to its thread.
+  "claude.process": event<
+    | { step: "spawned"; pid: number }
+    | { step: "exited"; pid: number; code: number | null; signal: string | null }
+    | { step: "terminating"; pid: number }
+    | { step: "terminated"; pid: number; ok: boolean }
+  >()(["th"]),
+  // Identifies late batches rejected after their execution lost admission.
+  "provider.refused": event<{ turn: string; execution: string; phase: string; events: number; types: string[] }>()(["th"]),
+  // Names accepted events a save left on disk unwritten; `exhausted` means no retry follows.
+  "progress.save-failed": event<{ turn: string; execution: string; source: "storage" | "receipt"; error: string; exhausted: boolean; events: number; types: string[] }>()(["th"]),
   "cursor.wire": event<CursorWirePayload>()(["th"]),
   "cursor.session": event<{ operation: string }>()(["th"]),
   "approval": span<{ provider: string | null }, { status: string } | undefined>()(["th"], null),
+  // Separates server publication delay from time spent waiting on clients or people.
+  "approval.push": event<{ request: string; kind: "requested" | "resolved"; conns: string[] }>()(["th"]),
+  // Links restart interruptions to their durable recovery provenance.
+  "turn.recovered": event<{ turn: string; execution: string; incident: string; cause: "app_closed"; reason: string }>()(["th"]),
+  // Shows whether provider shutdown left an execution for startup recovery.
+  "agent.stopped": event<{ execution: string; turn: string; phase: string; terminal: boolean }>()(["th"]),
   "agent.send": span<ActionPayload>()(["th"], 30_000),
   "agent.created": event<ActionPayload>()(["th"]),
   "agent.stop": span<ActionPayload>()(["th"], 10_000),

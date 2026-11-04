@@ -2,9 +2,11 @@ import { createMockThreadPullRequest, createMockThread, createMockWorkspace } fr
 import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeEvents from "node:events";
+import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import { diag, parseDiagLine, recordingFileId } from "@mcode/shared/diagnostics";
 import type { WebSocket } from "ws";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { logger } from "@mcode/shared";
@@ -1476,6 +1478,71 @@ describe("routeMessage thread.delete teardown", () => {
       deleteThread,
     };
   }
+
+  describe("request diagnostics", () => {
+    let dir: string;
+
+    afterEach(() => {
+      diag.configure({ enabled: false });
+      diag.flushSync();
+      if (dir) NodeFS.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    });
+
+    function fixture() {
+      dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-request-diag-"));
+      diag.configure({ dir, enabled: true });
+      const sendMessage = vi.fn(async () => undefined);
+      const { deps } = createThreadDeleteDeps();
+      Object.assign(deps, { agentService: { sendMessage } });
+      const context = { connection: { conn: "conn-1", client: "browser" } };
+      const request = JSON.stringify({ id: "request-1", method: "agent.send", params: { threadId: "thread-1", content: "private prompt" } });
+      const rows = () => {
+        diag.flushSync();
+        const file = NodePath.join(dir, "t", recordingFileId("thread-1") + ".jsonl");
+        return NodeFS.existsSync(file)
+          ? NodeFS.readFileSync(file, "utf8").split("\n").flatMap((line) => parseDiagLine(line) ?? []).filter((row) => row.ch === "rpc.request")
+          : [];
+      };
+      return { deps, sendMessage, context, request, rows };
+    }
+
+    it("records the arrival and connection of a successful user request", async () => {
+      const f = fixture();
+      const before = Date.now();
+      expect(await routeMessage(f.request, f.deps, f.context)).toEqual({ id: "request-1", result: undefined });
+      const rows = f.rows();
+      expect(rows).toHaveLength(1);
+      const row = rows[0];
+      expect(row).toMatchObject({ th: "thread-1", k: "ev", d: {
+        method: "agent.send", req: "request-1", conn: "conn-1", client: "browser", outcome: "ok",
+      } });
+      if (!row || row.k !== "ev" || typeof row.d !== "object" || row.d === null || !("receivedAt" in row.d) || typeof row.d.receivedAt !== "number") {
+        throw new Error("Expected request arrival timestamp");
+      }
+      expect(row.d.receivedAt).toBeGreaterThanOrEqual(before);
+      expect(row.d.receivedAt).toBeLessThanOrEqual(row.t);
+      expect(row.d).not.toHaveProperty("content");
+      expect(row.d).not.toHaveProperty("params");
+    });
+
+    it("records the mapped code when a user request fails", async () => {
+      const f = fixture();
+      f.sendMessage.mockRejectedValueOnce(new ProviderDisabledError("codex"));
+      const response = await routeMessage(f.request, f.deps, f.context);
+      expect(response.error?.code).toBe("PROVIDER_DISABLED");
+      expect(f.rows()).toMatchObject([{ th: "thread-1", d: { outcome: "error", error: "PROVIDER_DISABLED" } }]);
+      expect(f.rows()[0]?.d).not.toHaveProperty("message");
+    });
+
+    it("does not record an unrecorded method", async () => {
+      const f = fixture();
+      await routeMessage(JSON.stringify({ id: "version", method: "app.version", params: {} }), f.deps, f.context);
+      diag.flushSync();
+      const files = NodeFS.readdirSync(dir, { recursive: true }).filter((file) => typeof file === "string" && file.endsWith(".jsonl"));
+      const rows = files.flatMap((file) => NodeFS.readFileSync(NodePath.join(dir, file), "utf8").split("\n").flatMap((line) => parseDiagLine(line) ?? []));
+      expect(rows.filter((row) => row.ch === "rpc.request")).toEqual([]);
+    });
+  });
 
   it("returns a lifecycle deletion failure", async () => {
     const { deps, deleteThread } = createThreadDeleteDeps({

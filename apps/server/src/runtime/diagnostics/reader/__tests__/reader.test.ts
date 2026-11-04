@@ -56,6 +56,77 @@ describe("diagnostics reader", () => {
     return [...new Set(ids)].sort();
   }
 
+  it("summarizes a clean exit with its accepted HTTP shutdown request", () => {
+    writeLines(recordingPath("p", "server-one.jsonl"), [
+      { t: 1500, n: 1, k: "ev", ch: "app.run", d: { pid: 42, previous: "clean" } },
+      { t: 2000, n: 2, k: "ev", ch: "app.shutdown", d: { trigger: "http", client: "desktop", accepted: true } },
+      { t: 2100, n: 3, k: "ev", ch: "app.shutdown", d: { trigger: "signal", signal: "SIGTERM", accepted: false } },
+      { t: 3000, n: 4, k: "ev", ch: "app.exit", d: { code: 0, phase: "complete", uptimeMs: 1500 } },
+    ]);
+    expect(render()).toContain("run server-one pid 42: started 1970-01-01T00:00:01.500Z (previous clean); ended exit code 0 at 1970-01-01T00:00:03.000Z after complete, shutdown requested by http desktop at 1970-01-01T00:00:02.000Z");
+  });
+
+  it("reports the last record of a run without an exit, keeping reused PIDs separate", () => {
+    writeLines(recordingPath("p", "missing-exit.jsonl"), [
+      { t: 1500, n: 1, k: "ev", ch: "app.run", d: { pid: 42, previous: "first" } },
+      { t: 4000, n: 2, k: "ev", ch: "app.control", d: { control: "server-hang" } },
+    ]);
+    writeLines(recordingPath("p", "other-run.jsonl"), [
+      { t: 5000, n: 1, k: "ev", ch: "app.run", d: { pid: 42, previous: "unclean" } },
+      { t: 6000, n: 2, k: "ev", ch: "app.exit", d: { code: 0, phase: "complete", uptimeMs: 1000 } },
+    ]);
+    expect(render()).toContain("run missing-exit pid 42: started 1970-01-01T00:00:01.500Z (previous first); ended no exit record; last record at 1970-01-01T00:00:04.000Z (killed or crashed, or still running at capture)");
+  });
+
+  it("names the last shutdown phase a run reached when it has no exit record", () => {
+    writeLines(recordingPath("p", "killed-in-shutdown.jsonl"), [
+      { t: 1500, n: 1, k: "ev", ch: "app.run", d: { pid: 42, previous: "clean" } },
+      { t: 2000, n: 2, k: "ev", ch: "app.shutdown", d: { trigger: "http", client: "desktop", accepted: true } },
+      { t: 2001, n: 3, k: "ev", ch: "app.phase", d: { phase: "begin shutdown" } },
+      { t: 2002, n: 4, k: "ev", ch: "app.phase", d: { phase: "stop agent sessions" } },
+      { t: 2500, n: 5, k: "ev", ch: "app.stall", d: { lastOnTimeAt: 2000, lateCallbackAt: 2500, intervalMs: 500, lateMs: 250 } },
+    ]);
+    expect(render()).toContain("ended no exit record; last record at 1970-01-01T00:00:02.500Z (killed or crashed, or still running at capture), last shutdown phase stop agent sessions began at 1970-01-01T00:00:02.002Z, shutdown requested by http desktop");
+  });
+
+  it("dates a run's last record from its thread records and says whether provider processes end with it", () => {
+    writeLines(recordingPath("p", "contained.jsonl"), [
+      { t: 1500, n: 1, k: "ev", ch: "app.run", d: { pid: 42, previous: "clean", children: "job" } },
+      { t: 2000, n: 2, k: "ev", ch: "rpc.request", d: { method: "agent.send", outcome: "ok" } },
+    ]);
+    write("a", [
+      { t: 1900, n: 3, th: "a", k: "run", ch: "diag", run: "earlier", pid: 41, state: "on" },
+      { t: 1950, n: 4, th: "a", k: "ev", ch: "agent.created", d: { provider: "claude" } },
+      { t: 2100, n: 5, th: "a", k: "run", ch: "diag", run: "contained", pid: 42, state: "on" },
+      { t: 2600, n: 6, th: "a", k: "ev", ch: "agent.created", d: { provider: "claude" } },
+    ]);
+    q.thread = "a";
+    const text = render();
+    expect(text).toContain("run contained pid 42: started 1970-01-01T00:00:01.500Z (previous clean; provider processes end with it); ended no exit record; last record at 1970-01-01T00:00:02.600Z");
+    expect(text).toContain("run earlier pid 41: started unknown (previous unknown); ended no exit record; last record at 1970-01-01T00:00:01.950Z");
+  });
+
+  it("includes process records on lane - in a scoped timeline, including channel and JSON selection", () => {
+    write("a", [begin("a")]);
+    const row: DiagRecord = { t: 3000, n: 2, k: "ev", ch: "rpc.request", d: { approval: "request", outcome: "ok" } };
+    writeLines(recordingPath("p", "run.jsonl"), [row, { ...row, t: WINDOW_END + 1, n: 3 }]);
+    q.thread = "a";
+    expect(render()).toContain("L2 +1000ms - ev rpc.request");
+    const evidence = loadEvidence(q);
+    const jsonRows = renderJson(evidence, [], { ...q, channels: ["rpc.request"], json: true }).split("\n").slice(1).map((line) => JSON.parse(line));
+    expect(jsonRows).toEqual([{ ...row, run: "run" }]);
+    expect(renderText(evidence, [], { ...q, channels: ["approval"] })).not.toContain("ev rpc.request");
+  });
+
+  it("keeps run markers in the coverage header without rendering timeline rows", () => {
+    write("a", [begin("a")]);
+    writeLines(recordingPath("p", "run.jsonl"), [{ t: 1500, n: 1, k: "run", ch: "diag", run: "run-1", pid: 1, state: "on" }]);
+    q.thread = "a";
+    expect(render()).toContain("run=run-1");
+    expect(render().split("\n").filter((line) => /^L\d+ /.test(line))).toHaveLength(1);
+    expect(renderJson(loadEvidence(q), [], q).split("\n").slice(1).map((line) => JSON.parse(line))).toEqual([begin("a")]);
+  });
+
   it("distinguishes a human wait from an overdue action and sorts the summary", () => {
     write("waiting", [begin("waiting")]);
     write("stuck", [begin("stuck", "agent.send", 30_000)]);

@@ -45,9 +45,20 @@ function streamEventType(message: Record<string, unknown>): string | undefined {
   return type === undefined ? undefined : String(type);
 }
 
+function stringField(message: Record<string, unknown>, key: string): string | undefined {
+  const value = message[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function booleanField(message: Record<string, unknown>, key: string): boolean | undefined {
+  const value = message[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
 /**
  * Keep what places a message in the turn: its kind, the sub-agent it belongs to, and the tool
- * calls it starts or finishes. Text, tool input, and tool output stay out of the recording.
+ * calls it starts or finishes, using ids, enum values, and flags only. Text, tool input,
+ * and tool output stay out of the recording.
  */
 export function summarizeClaudeStreamMessage(message: Record<string, unknown>): ClaudeStreamSummary {
   const blocks = contentBlocks(message);
@@ -56,6 +67,16 @@ export function summarizeClaudeStreamMessage(message: Record<string, unknown>): 
     type: String(message.type ?? ""),
     subtype: typeof message.subtype === "string" ? message.subtype : undefined,
     eventType: streamEventType(message),
+    uuid: stringField(message, "uuid"),
+    taskId: stringField(message, "task_id"),
+    toolUseId: stringField(message, "tool_use_id"),
+    status: stringField(message, "status"),
+    state: stringField(message, "state"),
+    phase: stringField(message, "phase"),
+    terminalReason: stringField(message, "terminal_reason"),
+    stopReason: stringField(message, "stop_reason"),
+    isError: booleanField(message, "is_error"),
+    aborted: booleanField(message, "aborted"),
     parent: typeof parent === "string" ? parent : undefined,
     tools: toolCalls(blocks),
     results: toolResults(blocks),
