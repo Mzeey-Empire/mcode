@@ -1,0 +1,34 @@
+# Starts CI's test suites on main once a night, and only when main has moved
+# since the last run they tested, so quiet nights cost one short job.
+name: Nightly Main Tests
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  dispatch:
+    name: Dispatch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Start CI on main if main has moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          head="$(gh api "repos/$REPO/commits/main" --jq .sha)"
+          # A queued or running dispatch counts as tested; a cancelled one does not.
+          tested="$(gh run list --repo "$REPO" --workflow ci.yml --branch main --event workflow_dispatch --limit 20 \
+            --json headSha,conclusion --jq '[.[] | select(.conclusion != "cancelled")][0].headSha // ""')"
+          if [ "$head" = "$tested" ]; then
+            echo "main is still at ${head:0:9}, which an earlier nightly run tested." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh workflow run ci.yml --repo "$REPO" --ref main
+          echo "Started CI on main at ${head:0:9}." >> "$GITHUB_STEP_SUMMARY"
