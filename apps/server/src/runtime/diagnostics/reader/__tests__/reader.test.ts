@@ -89,6 +89,23 @@ describe("diagnostics reader", () => {
     expect(render()).toContain("ended no exit record; last record at 1970-01-01T00:00:02.500Z (killed or crashed, or still running at capture), last shutdown phase stop agent sessions began at 1970-01-01T00:00:02.002Z, shutdown requested by http desktop");
   });
 
+  it("dates a run's last record from its thread records and says whether provider processes end with it", () => {
+    writeLines(recordingPath("p", "contained.jsonl"), [
+      { t: 1500, n: 1, k: "ev", ch: "app.run", d: { pid: 42, previous: "clean", children: "job" } },
+      { t: 2000, n: 2, k: "ev", ch: "rpc.request", d: { method: "agent.send", outcome: "ok" } },
+    ]);
+    write("a", [
+      { t: 1900, n: 3, th: "a", k: "run", ch: "diag", run: "earlier", pid: 41, state: "on" },
+      { t: 1950, n: 4, th: "a", k: "ev", ch: "agent.created", d: { provider: "claude" } },
+      { t: 2100, n: 5, th: "a", k: "run", ch: "diag", run: "contained", pid: 42, state: "on" },
+      { t: 2600, n: 6, th: "a", k: "ev", ch: "agent.created", d: { provider: "claude" } },
+    ]);
+    q.thread = "a";
+    const text = render();
+    expect(text).toContain("run contained pid 42: started 1970-01-01T00:00:01.500Z (previous clean; provider processes end with it); ended no exit record; last record at 1970-01-01T00:00:02.600Z");
+    expect(text).toContain("run earlier pid 41: started unknown (previous unknown); ended no exit record; last record at 1970-01-01T00:00:01.950Z");
+  });
+
   it("includes process records on lane - in a scoped timeline, including channel and JSON selection", () => {
     write("a", [begin("a")]);
     const row: DiagRecord = { t: 3000, n: 2, k: "ev", ch: "rpc.request", d: { approval: "request", outcome: "ok" } };

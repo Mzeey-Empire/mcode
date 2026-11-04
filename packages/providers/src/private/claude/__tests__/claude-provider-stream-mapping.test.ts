@@ -303,9 +303,9 @@ describe("ClaudeProvider stream mapping", () => {
       { th: "steer", d: { step: "steer-queued", steer: STEER_ID, openTools: ["open-bash"] } },
       { th: "steer", d: { step: "steer-outcome", steer: STEER_ID, outcome: "accepted" } },
     ]);
-    expect(rows.filter((row) => row.d && typeof row.d === "object" && "waitingSteers" in row.d)
+    expect(rows.filter((row) => row.d && typeof row.d === "object" && "steers" in row.d)
       .map((row) => ({ th: row.th, d: row.d }))).toEqual([
-      { th: "steer", d: { step: "segment-absorbed", terminalReason: "aborted_streaming", waitingSteers: 1 } },
+      { th: "steer", d: { step: "segment-absorbed", terminalReason: "aborted_streaming", steers: [STEER_ID] } },
     ]);
     expect(await stream.steered).toEqual({
       type: "user", message: { role: "user", content: "Reply with PINEAPPLE." }, parent_tool_use_id: null,

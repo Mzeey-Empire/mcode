@@ -106,14 +106,15 @@ function runSummary(run: string, rows: DiagRecord[]): string {
   const marker = rows.find(isRunMarker);
   const pid = started.pid ?? marker?.pid ?? "unknown";
   const startedAt = start ? isoTime(start.t) : "unknown";
+  const containment = started.children === "job" ? "; provider processes end with it" : "";
   return "run " + run + " pid " + pid + ": started " + startedAt
-    + " (previous " + (started.previous ?? "unknown") + "); ended " + runEnding(rows);
+    + " (previous " + (started.previous ?? "unknown") + containment + "); ended " + runEnding(rows);
 }
 
 function runSummaries(records: DiagRecord[], q: DiagQuery): string[] {
   const runs = new Map<string, DiagRecord[]>();
   for (const row of records) {
-    if (row.th || !("run" in row) || typeof row.run !== "string") continue;
+    if (!("run" in row) || typeof row.run !== "string") continue;
     const rows = runs.get(row.run) ?? [];
     rows.push(row);
     runs.set(row.run, rows);

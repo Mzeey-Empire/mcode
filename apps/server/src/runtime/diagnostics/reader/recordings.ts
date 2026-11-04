@@ -50,12 +50,18 @@ function processFiles(root: string): string[] {
 
 function readRecordingFile(file: string): DiagRecord[] {
   const records: DiagRecord[] = [];
-  const run = NodePath.basename(file).replace(/(?:\.1)?\.jsonl$/u, "");
   const processFile = NodePath.basename(NodePath.dirname(file)) === "p";
+  // A process file is named for its run. A thread file is shared by runs, and each run writes its
+  // marker before its first record there, so a record belongs to the marker above it.
+  let run: string | undefined = processFile ? NodePath.basename(file).replace(/(?:\.1)?\.jsonl$/u, "") : undefined;
   for (const line of NodeFS.readFileSync(file, "utf8").split("\n")) {
     const record = parseDiagLine(line);
-    if (record) {
-      const attributed = processFile && record.k !== "run" ? { ...record, run } : record;
+    if (!record) continue;
+    if (record.k === "run") {
+      if (!processFile) run = record.run;
+      records.push(record);
+    } else {
+      const attributed = run === undefined ? record : { ...record, run };
       records.push(attributed);
     }
   }

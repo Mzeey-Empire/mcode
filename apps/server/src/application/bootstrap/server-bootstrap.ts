@@ -464,7 +464,11 @@ diag.configure({
   dir: NodePath.join(getMcodeDir(), "diagnostics"),
   enabled: settingsService.get().diagnostics.recording,
 });
-diag.emit("app.run", {}, () => ({ pid: process.pid, ...previousRun }));
+diag.emit("app.run", {}, () => ({
+  pid: process.pid,
+  ...previousRun,
+  children: container.resolve<JobObject>("JobObject").killsAssignedOnExit ? "job" : "none",
+}));
 const GRACE_PERIOD_MS = resolveGracePeriodMs(
   settingsService.get().server.gracePeriod.seconds,
   process.env.NODE_ENV === "production",

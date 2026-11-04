@@ -80,7 +80,7 @@ type ClaudeStreamPayload = {
 };
 
 type ClaudeTurnPayload =
-  // Links the queued prompt to SDK frames carrying its UUID.
+  // Links the queued prompt to SDK frames carrying its UUID. Steers queue at priority "now", which cuts open tools short.
   | {
       step: "steer-queued";
       steer: string;
@@ -89,8 +89,8 @@ type ClaudeTurnPayload =
     }
   // Distinguishes a confirmed answer from a refused or uncertain delivery.
   | { step: "steer-outcome"; steer: string; outcome: string }
-  // Explains why an SDK result did not end the Mcode turn.
-  | { step: "segment-absorbed"; terminalReason?: string; waitingSteers: number }
+  // Explains why an SDK result did not end the Mcode turn, naming the steers it was cut short for.
+  | { step: "segment-absorbed"; terminalReason?: string; steers: string[] }
   // Preserves the user's stop even when no session exists yet.
   | {
       step: "stop-requested";
@@ -134,7 +134,8 @@ type DelegateWake =
 /** One declaration per channel; readers use the budgets stamped into records. */
 export const DIAG_CATALOG = {
   // Distinguishes a fresh start from evidence left by the previous process.
-  "app.run": event<{ pid: number; previous: "clean" | "unclean" | "first"; previousPid?: number }>()([]),
+  // `children: "job"` means provider processes die with this process, so an abrupt exit also ends them.
+  "app.run": event<{ pid: number; previous: "clean" | "unclean" | "first"; previousPid?: number; children: "job" | "none" }>()([]),
   // Retains every shutdown requester, including requests that lost the race.
   "app.shutdown": event<{ trigger: "http" | "signal" | "idle"; signal?: string; client?: string; accepted: boolean }>()([]),
   // Shows how far a shutdown got when the process is killed before it can record its exit.

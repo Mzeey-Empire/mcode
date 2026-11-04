@@ -64,6 +64,11 @@ export class JobObject {
     }
   }
 
+  /** True when assigned processes end with the server process, because the job kills them on close. */
+  get killsAssignedOnExit(): boolean {
+    return this.initialized;
+  }
+
   /** Attach a process to the job and report whether required Windows assignment succeeded. */
   assign(pid: number): boolean {
     if (!this.initialized) return !this.isWindowsJob;

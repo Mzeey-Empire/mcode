@@ -2218,7 +2218,7 @@ export class ClaudeProvider
       diag.emit("claude.turn", { th: state.threadId }, () => ({
         step: "segment-absorbed",
         terminalReason: typeof message.terminal_reason === "string" ? message.terminal_reason : undefined,
-        waitingSteers: state.steersAwaitingTurn.size,
+        steers: [...state.steersAwaitingTurn.keys()],
       }));
       state.mapper.closeAbortedSegment(message);
       return true;
