@@ -42,7 +42,7 @@ export interface TaskItem {
   readonly group: string;
 }
 
-/** The parent-agent task list shown in the composer tray, with the turn that last wrote it. */
+/** The parent-agent task list shown in the composer task tab, with the turn that last wrote it. */
 export interface TaskBubble {
   readonly tasks: readonly TaskItem[];
   /** Id of the user message of the turn that last wrote the parent "Tasks" list. */
@@ -53,7 +53,7 @@ export interface TaskBubble {
 interface TaskState {
   /** Task items keyed by thread ID. */
   tasksByThread: Record<string, readonly TaskItem[]>;
-  /** Parent-agent task list shown in the composer tray, keyed by thread ID. */
+  /** Parent-agent task list shown in the composer task tab, keyed by thread ID. */
   taskBubbleByThread: Record<string, TaskBubble>;
   /** Threads keeping unsettled prior tasks until the next turn reports parent tasks. */
   pendingTaskBubbleReplacementByThread: Record<string, boolean>;
@@ -213,7 +213,7 @@ function taskListTitle(
 }
 
 /**
- * Summarize a task list for the composer tray and overview task rows.
+ * Summarize a task list for the composer task tab and the overview plan row.
  * Returns null when there is nothing to show.
  */
 export function selectTaskProgress(
