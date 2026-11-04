@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { resolveIconByName, type ResolvedIcon } from "@/lib/vscode-icons";
+import { resolveIconByName, type ResolvedIcon } from "@/lib/material-icons";
+import { useAppearance } from "@/hooks/useTheme";
 import { ACTION_ICONS, resolveActionIconId } from "./action-icons";
 
 /** Props for {@link ActionIcon}. */
@@ -16,31 +17,32 @@ export interface ActionIconProps {
 
 /**
  * An action's icon in a fixed square slot. The Lucide glyph draws first and the tool's
- * vscode-icons mark swaps in when the CDN fetch lands, so the slot never changes size and
+ * Material icon swaps in when the CDN fetch lands, so the slot never changes size and
  * an offline machine keeps the glyph.
  */
 export function ActionIcon({ iconId, command, size = 16, className }: ActionIconProps) {
   const id = resolveActionIconId(iconId, command);
   const entry = ACTION_ICONS[id];
-  const toolFile = entry.kind === "tool" ? entry.file : null;
+  const toolIcon = entry.kind === "tool" ? entry.materialIcon : null;
   const fallback = entry.kind === "tool" ? entry.fallback : entry.icon;
   const Glyph = fallback;
-  const [resolved, setResolved] = useState<{ readonly file: string; readonly icon: ResolvedIcon } | null>(null);
+  const appearance = useAppearance();
+  const [resolved, setResolved] = useState<{ readonly name: string; readonly icon: ResolvedIcon } | null>(null);
 
   useEffect(() => {
-    if (!toolFile) return;
+    if (!toolIcon) return;
     let cancelled = false;
-    void resolveIconByName(toolFile, fallback).then((icon) => {
-      if (!cancelled) setResolved({ file: toolFile, icon });
+    void resolveIconByName(toolIcon, fallback, appearance).then((icon) => {
+      if (!cancelled) setResolved({ name: toolIcon, icon });
     });
     return () => {
       cancelled = true;
     };
-  }, [toolFile, fallback]);
+  }, [toolIcon, fallback, appearance]);
 
   const slot = cn("inline-flex shrink-0 items-center justify-center", className);
   const slotStyle = { width: size, height: size };
-  const image = resolved?.file === toolFile && resolved.icon.type === "vscode" ? resolved.icon.url : null;
+  const image = resolved?.name === toolIcon && resolved.icon.type === "image" ? resolved.icon.url : null;
 
   return (
     <span data-testid="action-icon" data-icon-id={id} className={slot} style={slotStyle}>

@@ -27,7 +27,8 @@ import {
 interface ToolIconEntry {
   readonly kind: "tool";
   readonly label: string;
-  readonly file: string;
+  /** Material Icon Theme icon name, without the `.svg` extension. */
+  readonly materialIcon: string;
   readonly fallback: LucideIcon;
   readonly tint: string;
 }
@@ -39,7 +40,7 @@ interface GlyphIconEntry {
   readonly tint: string;
 }
 
-/** How one icon id is drawn: a tool mark fetched from vscode-icons, or a tinted Lucide glyph. */
+/** How one icon id is drawn: a tool mark fetched from Material Icon Theme, or a tinted Lucide glyph. */
 export type ActionIconEntry = ToolIconEntry | GlyphIconEntry;
 
 /**
@@ -47,30 +48,30 @@ export type ActionIconEntry = ToolIconEntry | GlyphIconEntry;
  * Ids are stored, never SVG, so a build that does not know an id falls back to the derived default.
  */
 export const ACTION_ICONS = {
-  bun: { kind: "tool", label: "Bun", file: "file_type_bun.svg", fallback: Package, tint: "text-amber-200" },
-  npm: { kind: "tool", label: "npm", file: "file_type_npm.svg", fallback: Package, tint: "text-rose-300" },
-  pnpm: { kind: "tool", label: "pnpm", file: "file_type_pnpm.svg", fallback: Package, tint: "text-amber-300" },
-  node: { kind: "tool", label: "Node.js", file: "file_type_node.svg", fallback: Hexagon, tint: "text-emerald-300" },
-  docker: { kind: "tool", label: "Docker", file: "file_type_docker.svg", fallback: Container, tint: "text-sky-400" },
-  vite: { kind: "tool", label: "Vite", file: "file_type_vite.svg", fallback: Zap, tint: "text-violet-300" },
-  vitest: { kind: "tool", label: "Vitest", file: "file_type_vitest.svg", fallback: FlaskConical, tint: "text-emerald-300" },
-  jest: { kind: "tool", label: "Jest", file: "file_type_jest.svg", fallback: FlaskConical, tint: "text-rose-300" },
-  playwright: { kind: "tool", label: "Playwright", file: "file_type_playwright.svg", fallback: FlaskConical, tint: "text-emerald-300" },
-  storybook: { kind: "tool", label: "Storybook", file: "file_type_storybook.svg", fallback: BookOpen, tint: "text-pink-300" },
-  eslint: { kind: "tool", label: "ESLint", file: "file_type_eslint.svg", fallback: ShieldCheck, tint: "text-indigo-300" },
-  biome: { kind: "tool", label: "Biome", file: "file_type_biome.svg", fallback: ShieldCheck, tint: "text-sky-400" },
-  prettier: { kind: "tool", label: "Prettier", file: "file_type_prettier.svg", fallback: Sparkles, tint: "text-sky-300" },
-  typescript: { kind: "tool", label: "TypeScript", file: "file_type_typescript.svg", fallback: FileCodeCorner, tint: "text-sky-400" },
-  turbo: { kind: "tool", label: "Turborepo", file: "file_type_turbo.svg", fallback: Gauge, tint: "text-rose-300" },
-  prisma: { kind: "tool", label: "Prisma", file: "file_type_prisma.svg", fallback: Database, tint: "text-zinc-400" },
-  pgsql: { kind: "tool", label: "PostgreSQL", file: "file_type_pgsql.svg", fallback: Database, tint: "text-sky-300" },
-  git: { kind: "tool", label: "Git", file: "file_type_git.svg", fallback: GitBranch, tint: "text-orange-400" },
-  makefile: { kind: "tool", label: "Make", file: "file_type_makefile.svg", fallback: Hammer, tint: "text-zinc-400" },
-  shell: { kind: "tool", label: "Shell", file: "file_type_shell.svg", fallback: Terminal, tint: "text-zinc-400" },
-  powershell: { kind: "tool", label: "PowerShell", file: "file_type_powershell.svg", fallback: Terminal, tint: "text-sky-300" },
-  python: { kind: "tool", label: "Python", file: "file_type_python.svg", fallback: FileCodeCorner, tint: "text-amber-300" },
-  rust: { kind: "tool", label: "Rust", file: "file_type_rust.svg", fallback: Hexagon, tint: "text-orange-300" },
-  go: { kind: "tool", label: "Go", file: "file_type_go.svg", fallback: FileCodeCorner, tint: "text-cyan-300" },
+  bun: { kind: "tool", label: "Bun", materialIcon: "bun", fallback: Package, tint: "text-amber-200" },
+  npm: { kind: "tool", label: "npm", materialIcon: "npm", fallback: Package, tint: "text-rose-300" },
+  pnpm: { kind: "tool", label: "pnpm", materialIcon: "pnpm", fallback: Package, tint: "text-amber-300" },
+  node: { kind: "tool", label: "Node.js", materialIcon: "nodejs", fallback: Hexagon, tint: "text-emerald-300" },
+  docker: { kind: "tool", label: "Docker", materialIcon: "docker", fallback: Container, tint: "text-sky-400" },
+  vite: { kind: "tool", label: "Vite", materialIcon: "vite", fallback: Zap, tint: "text-violet-300" },
+  vitest: { kind: "tool", label: "Vitest", materialIcon: "vitest", fallback: FlaskConical, tint: "text-emerald-300" },
+  jest: { kind: "tool", label: "Jest", materialIcon: "jest", fallback: FlaskConical, tint: "text-rose-300" },
+  playwright: { kind: "tool", label: "Playwright", materialIcon: "playwright", fallback: FlaskConical, tint: "text-emerald-300" },
+  storybook: { kind: "tool", label: "Storybook", materialIcon: "storybook", fallback: BookOpen, tint: "text-pink-300" },
+  eslint: { kind: "tool", label: "ESLint", materialIcon: "eslint", fallback: ShieldCheck, tint: "text-indigo-300" },
+  biome: { kind: "tool", label: "Biome", materialIcon: "biome", fallback: ShieldCheck, tint: "text-sky-400" },
+  prettier: { kind: "tool", label: "Prettier", materialIcon: "prettier", fallback: Sparkles, tint: "text-sky-300" },
+  typescript: { kind: "tool", label: "TypeScript", materialIcon: "typescript", fallback: FileCodeCorner, tint: "text-sky-400" },
+  turbo: { kind: "tool", label: "Turborepo", materialIcon: "turborepo", fallback: Gauge, tint: "text-rose-300" },
+  prisma: { kind: "tool", label: "Prisma", materialIcon: "prisma", fallback: Database, tint: "text-zinc-400" },
+  pgsql: { kind: "tool", label: "PostgreSQL", materialIcon: "database", fallback: Database, tint: "text-sky-300" },
+  git: { kind: "tool", label: "Git", materialIcon: "git", fallback: GitBranch, tint: "text-orange-400" },
+  makefile: { kind: "tool", label: "Make", materialIcon: "makefile", fallback: Hammer, tint: "text-zinc-400" },
+  shell: { kind: "tool", label: "Shell", materialIcon: "console", fallback: Terminal, tint: "text-zinc-400" },
+  powershell: { kind: "tool", label: "PowerShell", materialIcon: "powershell", fallback: Terminal, tint: "text-sky-300" },
+  python: { kind: "tool", label: "Python", materialIcon: "python", fallback: FileCodeCorner, tint: "text-amber-300" },
+  rust: { kind: "tool", label: "Rust", materialIcon: "rust", fallback: Hexagon, tint: "text-orange-300" },
+  go: { kind: "tool", label: "Go", materialIcon: "go", fallback: FileCodeCorner, tint: "text-cyan-300" },
 
   play: { kind: "glyph", label: "Play", icon: Play, tint: "text-zinc-400" },
   hammer: { kind: "glyph", label: "Hammer", icon: Hammer, tint: "text-orange-300" },

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { getFileIcon, getFileIconColor } from "@/lib/file-icons";
-import { resolveIcon, type ResolvedIcon } from "@/lib/vscode-icons";
+import { resolveIcon, type ResolvedIcon } from "@/lib/material-icons";
+import { useAppearance } from "@/hooks/useTheme";
 
 /** Props for {@link FileTypeIcon}. */
 export interface FileTypeIconProps {
@@ -13,7 +14,7 @@ export interface FileTypeIconProps {
 }
 
 /**
- * Renders the VSCode file-type icon for a path, falling back to colored Lucide
+ * Renders the Material Icon Theme icon for a path, falling back to colored Lucide
  * icons when the CDN icon is unavailable.
  */
 export function FileTypeIcon({ filePath, className, size = 16 }: FileTypeIconProps) {
@@ -24,24 +25,25 @@ export function FileTypeIcon({ filePath, className, size = 16 }: FileTypeIconPro
   const [resolved, setResolved] = useState<ResolvedIcon | null>(null);
   const fallbackIcon = useMemo(() => getFileIcon(filePath), [filePath]);
   const fallbackColor = useMemo(() => getFileIconColor(filePath), [filePath]);
+  const appearance = useAppearance();
 
   useEffect(() => {
     let cancelled = false;
-    void resolveIcon(fileName).then((icon) => {
+    void resolveIcon(fileName, appearance).then((icon) => {
       if (!cancelled) setResolved(icon);
     });
     return () => {
       cancelled = true;
     };
-  }, [fileName]);
+  }, [fileName, appearance]);
 
-  if (resolved?.type === "vscode") {
+  if (resolved?.type === "image") {
     return (
       <img
         src={resolved.url}
         alt=""
         aria-hidden="true"
-        data-testid="file-type-icon-vscode"
+        data-testid="file-type-icon-image"
         className={cn("shrink-0", className)}
         width={size}
         height={size}

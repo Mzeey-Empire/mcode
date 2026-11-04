@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearIconCache } from "@/lib/vscode-icons";
+import { clearIconCache } from "@/lib/material-icons";
 import { ActionIcon } from "../ActionIcon";
 import { ActionIconPicker } from "../ActionIconPicker";
 
@@ -18,7 +18,7 @@ function cdnReturnsSvg() {
 }
 
 describe("ActionIcon", () => {
-  it("swaps the tool's vscode icon in once the CDN answers, inside the same slot", async () => {
+  it("swaps the tool's Material icon in once the CDN answers, inside the same slot", async () => {
     cdnReturnsSvg();
     render(<ActionIcon command="bun run dev" size={14} />);
 
