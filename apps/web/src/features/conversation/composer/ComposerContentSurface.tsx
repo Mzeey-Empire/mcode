@@ -415,18 +415,6 @@ function ComposerAttachmentSurface({
   );
 }
 
-function ComposerStartingSpinner({
-  startingThread,
-}: Pick<ComposerContentSurfaceProps["model"], "startingThread">) {
-  if (!startingThread) return null;
-
-  return (
-    <span className="flex size-8 items-center justify-center" data-testid="composer-starting-spinner">
-      <Spinner size={20} className="text-muted" />
-    </span>
-  );
-}
-
 /**
  * Leaves focus in the editor when a composer action is pressed with the pointer. Stop does not end the
  * conversation: the user often types the next instruction straight away, and a focused Stop button turns
@@ -670,7 +658,6 @@ function ComposerCapsuleLeft({ model, actions, leftRef }: Pick<ComposerCapsuleRo
 function ComposerCapsuleRight({ model, actions, rightRef }: Pick<ComposerCapsuleRowProps, "model" | "actions" | "rightRef">) {
   return (
     <div ref={rightRef} className="flex min-w-0 items-center justify-end gap-1 [grid-area:R]">
-      <ComposerStartingSpinner startingThread={model.startingThread} />
       <ComposerCapsuleSplit
         anchorRef={model.composerContainerRef}
         threadId={model.threadId}
