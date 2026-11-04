@@ -622,7 +622,7 @@ are not truncation and keep their ellipsis.
 
 Lucide is Mcode's product icon family. Use `lucide-react` with a 1.5px stroke on
 the 24px grid, round caps and joins. Provider marks, file-type icons, action
-icons from the vscode-icons set, and operating-system or third-party brand
+icons from the Material Icon Theme set, and operating-system or third-party brand
 marks remain their authentic assets. They are identity, not product controls.
 
 Every product icon renders at the 1.5px stroke. Do not set it per call site.
