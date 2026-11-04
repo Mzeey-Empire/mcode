@@ -469,7 +469,7 @@ describe("PullRequestDetailPane", () => {
     expect(action).not.toHaveAttribute("aria-disabled", "true");
     await user.click(action);
     expect(
-      screen.getByRole("dialog", { name: "Fork pull request" }),
+      await screen.findByRole("dialog", { name: "Fork pull request" }),
     ).toHaveTextContent("foreground");
     expect(getCommand("pullRequests.reviewChangeStack")).toBeDefined();
     act(() => getCommand("pullRequests.reviewChangeStack")?.handler());

@@ -155,7 +155,7 @@ describe("PullRequestLifecycleActions", () => {
         baseOid: detail.base.oid,
       },
     });
-    expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
+    expect(await screen.findByRole("dialog")).toHaveAttribute("aria-busy", "true");
     expect(
       screen.queryByRole("button", { name: "Close" }),
     ).not.toBeInTheDocument();
@@ -292,9 +292,9 @@ describe("PullRequestLifecycleActions", () => {
     actions.focus();
     await user.keyboard("{Enter}");
     await user.click(
-      screen.getByRole("menuitem", { name: "Convert to draft" }),
+      await screen.findByRole("menuitem", { name: "Convert to draft" }),
     );
-    const dialog = screen.getByRole("dialog", { name: "Convert to draft" });
+    const dialog = await screen.findByRole("dialog", { name: "Convert to draft" });
     expect(dialog).toHaveTextContent("Mzeey-Empire/mcode #42");
     expect(dialog).toHaveTextContent("Effect: Convert to draft");
     await user.click(
@@ -337,7 +337,7 @@ describe("PullRequestLifecycleActions", () => {
     await user.click(
       await screen.findByRole("menuitem", { name: "Close pull request" }),
     );
-    const dialog = screen.getByRole("dialog", { name: "Close pull request" });
+    const dialog = await screen.findByRole("dialog", { name: "Close pull request" });
     expect(dialog).toHaveTextContent("Mzeey-Empire/mcode #42");
     expect(dialog).toHaveTextContent("Effect: Close pull request");
     const confirm = within(dialog).getByRole("button", {

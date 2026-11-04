@@ -103,6 +103,7 @@ Mcode must feel snappy and look like one product. Where a rule can be checked, `
 | Mock the web transport through its shared fake. | `mcode/no-inline-module-mock` |
 | Test behaviour, not source text. | `mcode/no-source-text-test` |
 | Use fake timers instead of real sleeps in web tests. | `mcode/no-real-timer-sleep` |
+| Wait for a menu, dialog, or other popup with `findByRole` after a user action, because it can mount a tick later. | `mcode/no-sync-popup-query` |
 | Keep each web test under 200 React act warnings, so one test cannot flood the CI log. | `apps/web/src/test-setup.ts` |
 | Count the work in tests instead of timing it, so a slow CI runner cannot fail them. | `mcode/no-wall-clock-budget` |
 

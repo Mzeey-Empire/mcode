@@ -150,7 +150,7 @@ describe("PullRequestSubmitReviewDialog", () => {
         coordinate: { subjectType: "line", line: 7, side: "right" },
       }],
     });
-    expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
+    expect(await screen.findByRole("dialog")).toHaveAttribute("aria-busy", "true");
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
 
     resolve({

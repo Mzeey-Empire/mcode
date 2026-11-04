@@ -13,6 +13,7 @@ import { noRealTimerSleep } from "./rules/no-real-timer-sleep.ts";
 import { noWallClockBudget } from "./rules/no-wall-clock-budget.ts";
 import { noInlineModuleMock } from "./rules/no-inline-module-mock.ts";
 import { noSourceTextTest } from "./rules/no-source-text-test.ts";
+import { noSyncPopupQuery } from "./rules/no-sync-popup-query.ts";
 import { requireLazyNontrivialSchema } from "./rules/require-lazy-nontrivial-schema.ts";
 import { useTestBuilder } from "./rules/use-test-builder.ts";
 
@@ -34,6 +35,7 @@ export const mcodePlugin = definePlugin({
     "no-row-overlay-root": noRowOverlayRoot,
     "no-inline-module-mock": noInlineModuleMock,
     "no-source-text-test": noSourceTextTest,
+    "no-sync-popup-query": noSyncPopupQuery,
     "require-lazy-nontrivial-schema": requireLazyNontrivialSchema,
     "use-test-builder": useTestBuilder,
   },

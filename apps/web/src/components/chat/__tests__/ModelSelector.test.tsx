@@ -66,7 +66,7 @@ function setProviders(enabled: Record<string, boolean>) {
 
 async function openPicker() {
   await userEvent.click(screen.getByTestId("model-selector-trigger"));
-  return screen.getByRole("dialog", { name: "Choose model and provider" });
+  return screen.findByRole("dialog", { name: "Choose model and provider" });
 }
 
 function optionNames(): string[] {
@@ -185,7 +185,7 @@ describe("ModelSelector", () => {
     await userEvent.keyboard("{Control>}d{/Control}");
 
     expect(onSelect).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(useModelFavoritesStore.getState().entries).toHaveLength(1);
   });
 
@@ -204,7 +204,7 @@ describe("ModelSelector", () => {
     await userEvent.click(screen.getByRole("radio", { name: opencode?.name ?? "" }));
 
     expect(onSelect).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
   it("lists favourites with their provider on a second line", async () => {
@@ -370,7 +370,7 @@ describe("ModelSelector", () => {
       ]);
       expect(screen.getByRole("option", { name: /Legacy models/ })).toHaveAttribute("aria-expanded", "true");
       expect(onSelect).not.toHaveBeenCalled();
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
 
       await userEvent.click(screen.getByRole("option", { name: /Legacy models/ }));
       expect(optionNames()).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5", "Legacy models2"]);
