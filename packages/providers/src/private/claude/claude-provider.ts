@@ -116,8 +116,7 @@ type ClaudeNativeGoalSupport = "unknown" | "supported" | "unsupported";
 /**
  * Per-session state owned by the {@link SessionRuntime}. Holds the live SDK
  * `query`, its prompt-queue handles, and the per-turn bookkeeping the stream
- * loop and eviction guard read. The runtime owns the pool and idle eviction; `lastUsedAt` is retained here because the stream loop and
- * `resolveApproval` stamp it so SDK activity and user attention count.
+ * loop and eviction guard read. The runtime owns the pool and idle eviction.
  */
 interface ClaudeSessionState {
   /** Session id this state belongs to; lets adapter methods reference provider maps. */
@@ -151,7 +150,6 @@ interface ClaudeSessionState {
   contextWindowMode: ContextWindowMode | undefined;
   /** Session-scoped dynamic workflow orchestration state. */
   orchestrationMode: OrchestrationMode;
-  lastUsedAt: number;
   /** When true, the finally block in startStreamLoop should not emit an "ended" event. */
   suppressEnded?: boolean;
   /**
@@ -751,6 +749,7 @@ export class ClaudeProvider
       });
     });
     this.runtime = new SessionRuntime<ClaudeSessionState>(this, {
+      logger,
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       processes: host.processes,
       envService: { getEnv: () => ({ ...host.environment.snapshot() }) },
@@ -1205,7 +1204,7 @@ export class ClaudeProvider
       return "spawn";
     }
     this.releasePendingBrowserStage(context.params.sessionId);
-    this.markClaudeSessionUsed(context.params.sessionId, existing);
+    this.runtime.recordUsage(context.params.sessionId);
     if (!(await this.reconfigureReusableClaudeSession(context, existing)))
       return "retry_fresh";
     existing.planTurn = context.params.planTurn;
@@ -1361,14 +1360,6 @@ export class ClaudeProvider
     this.suppressEndedQueries.add(existing.query);
     this.suppressSessionStartHooks.add(threadId);
     await this.runtime.stop(sessionId);
-  }
-
-  private markClaudeSessionUsed(
-    sessionId: string,
-    existing: ClaudeSessionState,
-  ): void {
-    this.runtime.recordUsage(sessionId);
-    existing.lastUsedAt = Date.now();
   }
 
   private async pushClaudeMessage(
@@ -1920,7 +1911,6 @@ export class ClaudeProvider
       ],
       contextWindowMode: staged.contextWindowMode,
       orchestrationMode: staged.orchestrationMode,
-      lastUsedAt: Date.now(),
       pendingToolUses: new Set<string>(),
       backgroundTools: new Map<string, string>(),
       hasFiredToolThisTurn: false,
@@ -2006,10 +1996,10 @@ export class ClaudeProvider
   }
 
   /**
-   * Eviction guard: a session is busy while a tool_use awaits its result, while
-   * a background call it launched is still running, OR
+   * Eviction guard: a session is busy while its stream has a live turn, while a
+   * tool_use awaits its result, while a background call it launched is still running, OR
    * while it has a pending permission request the user may still answer (the
-   * user could be on another thread). Both keep the session out of idle
+   * user could be on another thread). These keep the session out of idle
    * eviction regardless of how long the SDK has been quiet.
    */
   isBusy(state: ClaudeSessionState): boolean {
@@ -2019,6 +2009,10 @@ export class ClaudeProvider
         pending: state.pendingToolUses.size,
         background: state.backgroundTools.size,
       });
+      return true;
+    }
+    const stream = this.streamStates.get(state.query);
+    if (stream && stream.endedTurnExecutionId !== stream.currentTurnExecutionId) {
       return true;
     }
     const tid = state.sessionId.startsWith("mcode-")
@@ -2176,7 +2170,6 @@ export class ClaudeProvider
       for await (const raw of q) {
         const current = this.runtime.get(sessionId);
         if (this.suppressEndedQueries.has(q) || this.isSupersededClaudeStream(current, q)) break;
-        if (current) current.lastUsedAt = Date.now();
         if (!(await this.handleClaudeStreamMessage(sessionId, state, raw as Record<string, unknown>))) break;
       }
     } catch (error: unknown) {
@@ -3090,8 +3083,6 @@ export class ClaudeProvider
     if (entry.signal?.aborted) return { status: "failed", message: "The permission callback is closed" };
     const choice = approvalChoice(entry.body, response);
     if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
-    const session = this.runtime.get(`mcode-${entry.threadId}`);
-    if (session) session.lastUsedAt = Date.now();
     entry.resolve(this.nativeApprovalDecision(choice, response));
     this.pendingPermissions.delete(requestId);
     await Promise.resolve();

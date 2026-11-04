@@ -51,7 +51,6 @@ function makeProvider(lease: BrowserAutomationSessionLease) {
     permissionMode: "default",
     contextWindowMode: undefined,
     orchestrationMode: "standard",
-    lastUsedAt: Date.now(),
     pendingToolUses: new Set<string>(),
     hasFiredToolThisTurn: false,
     workspaceId: "workspace-1",
