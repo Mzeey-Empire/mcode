@@ -51,6 +51,10 @@ type ClaudeStreamPayload = {
   type: string;
   subtype?: string;
   eventType?: string;
+  /** The sub-agent tool call this message belongs to; absent for the main agent. */
+  parent?: string;
+  tools?: readonly { name: string; id: string }[];
+  results?: readonly { id: string; isError: boolean }[];
 };
 
 type CursorWirePayload = {
@@ -68,6 +72,21 @@ type CanonicalPushPayload = {
   children: number;
 };
 
+type McpToolPayload = {
+  tool: string;
+  callId: string;
+};
+
+type DelegateStep =
+  | { step: "claimed"; taskId: string; provider: string; model: string; checkout: string }
+  | { step: "awaiting-approval"; taskId: string }
+  | { step: "cancelled"; taskId: string; by: string };
+
+/** Why a Coordinator did or did not receive its delegated tasks' results on one pass. */
+type DelegateWake =
+  | { outcome: "held"; reason: "turn-without-lease" | "steer-refused" | "busy" | "user-stopped" }
+  | { outcome: "sent" | "steered"; wake: string; reached: boolean };
+
 /** One declaration per channel; readers use the budgets stamped into records. */
 export const DIAG_CATALOG = {
   "codex.wire": event<CodexWirePayload>()(["th"]),
@@ -79,6 +98,12 @@ export const DIAG_CATALOG = {
   "agent.created": event<ActionPayload>()(["th"]),
   "agent.stop": span<ActionPayload>()(["th"], 10_000),
   "push.canonical": event<CanonicalPushPayload>()(["th"]),
+  "mcp.tool": span<McpToolPayload, { isError: boolean }>()(["th"], 60_000),
+  // thread_wait holds the call open until another thread needs attention, so it has no budget.
+  "mcp.wait": span<McpToolPayload, { isError: boolean }>()(["th"], null),
+  "delegate.task": event<DelegateStep>()(["th"]),
+  "delegate.wake": event<DelegateWake>()(["th"]),
+  "delegate.launch": span<{ taskId: string }, { child: string }>()(["th"], 60_000),
 };
 
 type Catalog = typeof DIAG_CATALOG;

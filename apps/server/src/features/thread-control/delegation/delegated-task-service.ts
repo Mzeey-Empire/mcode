@@ -1,4 +1,5 @@
 import * as NodeCrypto from "node:crypto";
+import { diag } from "@mcode/shared/diagnostics";
 import { DelegateTaskInputSchema, TaskStatusInputSchema, TaskCancelInputSchema, type DelegateTaskInput, type DelegateTaskResult, type TaskStatusInput, type TaskStatusResult, type TaskCancelInput, type TaskCancelResult, type ThreadControlError, type TaskState } from "@mcode/contracts/thread-control";
 import { delegatedTaskRosterEntryId, isLiveSubagentStatus, type SubagentRosterEntry, type SubagentStatus } from "@mcode/contracts/models/subagent-roster";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
@@ -191,6 +192,9 @@ export class DelegatedTaskService {
       inputFingerprint: fingerprint, plan,
     });
     if (claimed.kind === "conflict") return rejection("conflict", "clientRequestId already names a different task");
+    diag.emit("delegate.task", { th: authority.sourceThreadId }, () => ({
+      step: "claimed", taskId: claimed.task.taskId, provider: plan.providerId, model: plan.modelId, checkout: plan.checkout.kind,
+    }));
     this.notifyRoster(claimed.task.coordinatorThreadId);
     await this.advance(claimed.task);
     return this.receipt(claimed.task);
@@ -237,6 +241,7 @@ export class DelegatedTaskService {
       const taskId = task.taskId;
       const current = this.snapshot(task);
       if (current.state.status === "finished") return this.cancelReport(task, origin);
+      diag.emit("delegate.task", { th: task.coordinatorThreadId }, () => ({ step: "cancelled", taskId, by: origin }));
       if (this.deps.approvals.status(taskId) === "pending") {
         await this.deps.control.cancelDelegationApproval(taskId);
         return this.cancelReport(task, origin);
@@ -338,11 +343,23 @@ export class DelegatedTaskService {
             modelId: plan.modelId, isolation: "worktree", commit: plan.checkout.commit.slice(0, 12) },
         });
         this.deps.control.publishThreadApproval(task.taskId);
+        diag.emit("delegate.task", { th: task.coordinatorThreadId }, () => ({ step: "awaiting-approval", taskId: task.taskId }));
         approval = this.deps.approvals.status(task.taskId);
       }
       if (approval !== "approved" && !(accepted && approval === "processing")) return;
     }
-    await this.deps.commands.createAndSend(this.command(task), this.options(task));
+    await this.launchChild(task);
+  }
+
+  private async launchChild(task: DelegatedTask): Promise<void> {
+    const span = diag.begin("delegate.launch", undefined, { th: task.coordinatorThreadId }, () => ({ taskId: task.taskId }));
+    try {
+      const child = await this.deps.commands.createAndSend(this.command(task), this.options(task));
+      diag.end("delegate.launch", span, "ok", () => ({ child: child.id }));
+    } catch (error) {
+      diag.end("delegate.launch", span, "error", () => ({ error: error instanceof Error ? error.message : String(error) }));
+      throw error;
+    }
   }
 
   private command(task: DelegatedTask): CreateAndSendCommand {

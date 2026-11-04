@@ -9,6 +9,7 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { diag } from "@mcode/shared/diagnostics";
 import type { McodeSession, McodeSessionAuthority } from "./mcode-session-authority.js";
 import type { BoundTool, BoundToolkit, McodeToolkit } from "./mcode-toolkit.js";
 
@@ -293,7 +294,7 @@ export class McodeMcpServer {
     server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
       const tool = tools.find((candidate) => candidate.name === request.params.name);
       if (!tool) throw new McpError(ErrorCode.InvalidParams, `Tool ${request.params.name} not found`);
-      return this.callTool(tool, request.params.arguments, extra.requestId, AbortSignal.any([extra.signal, requestSignal]));
+      return this.callTool(session, tool, request.params.arguments, extra.requestId, AbortSignal.any([extra.signal, requestSignal]));
     });
     return server;
   }
@@ -306,6 +307,7 @@ export class McodeMcpServer {
   }
 
   private async callTool(
+    session: McodeSession,
     tool: BoundTool,
     args: unknown,
     requestId: JsonRpcId,
@@ -313,13 +315,23 @@ export class McodeMcpServer {
   ): Promise<CallToolResult> {
     const toolCallId = normalizeToolCallId(requestId);
     if (toolCallId === undefined) throw new McpError(ErrorCode.InvalidRequest, "Tool call id is invalid");
+    const channel = tool.name === "thread_wait" ? "mcp.wait" : "mcp.tool";
+    const span = diag.begin(channel, undefined, { th: session.threadId }, () => ({ tool: tool.name, callId: toolCallId }));
     try {
-      return await tool.call(args, { toolCallId, signal });
+      const result = await tool.call(args, { toolCallId, signal });
+      const isError = result.isError === true;
+      diag.end(channel, span, isError ? "error" : "ok", () => ({ isError }));
+      return result;
     } catch (error) {
+      diag.end(channel, span, signal.aborted ? "cancelled" : "error", () => ({ error: errorText(error) }));
       if (!(error instanceof McpError)) {
-        this.logger.error("Mcode MCP tool failed", { tool: tool.name, error: error instanceof Error ? error.message : String(error) });
+        this.logger.error("Mcode MCP tool failed", { tool: tool.name, error: errorText(error) });
       }
       throw error;
     }
   }
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
