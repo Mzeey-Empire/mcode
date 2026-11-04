@@ -86,6 +86,7 @@ import {
   type ClaudeUsageMetrics,
   type ClaudeEventEvidence,
 } from "./claude-event-mapper.js";
+import { summarizeClaudeStreamMessage } from "./claude-stream-trace.js";
 import {
   ClaudeCanonicalEventPublisher,
   type ClaudeCanonicalEventRouting,
@@ -607,13 +608,6 @@ interface ClaudeStreamLoopState {
   /** A result was kept from ending the turn because a steer was still unanswered. */
   absorbedSteeredSegmentEnd: boolean;
   mapper: ClaudeEventMapper;
-}
-
-function streamEventType(message: Record<string, unknown>): string | undefined {
-  if (message.type !== "stream_event") return undefined;
-  const event = message.event;
-  if (!event || typeof event !== "object" || !("type" in event)) return undefined;
-  return String(event.type);
 }
 
 /** Explains the wake without turning the subagent's report into a user prompt. */
@@ -2199,11 +2193,7 @@ export class ClaudeProvider
     state: ClaudeStreamLoopState,
     message: Record<string, unknown>,
   ): Promise<boolean> {
-    diag.emit("claude.stream", { th: state.threadId }, () => ({
-      type: String(message.type ?? ""),
-      subtype: typeof message.subtype === "string" ? message.subtype : undefined,
-      eventType: streamEventType(message),
-    }));
+    diag.emit("claude.stream", { th: state.threadId }, () => summarizeClaudeStreamMessage(message));
     if (!state.sessionInitialized && message.type !== "result") {
       state.sessionInitialized = true;
       this.emit(`_resumeOk:${sessionId}`);
