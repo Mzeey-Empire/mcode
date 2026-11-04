@@ -32,6 +32,7 @@
     "state:paths": "bun scripts/state-paths.mjs",
     "state:reset": "bun scripts/state-reset.mjs",
     "db:info": "bun scripts/db-info.mjs",
+    "db:query": "bun scripts/db-query.mjs",
     "db:seed": "bun scripts/db-seed.mjs",
     "perf:database": "bun apps/server/scripts/profile-sqlite.ts",
     "certify:database": "bun apps/server/scripts/profile-sqlite.ts --certify",
