@@ -88,7 +88,7 @@ const STEER_ID = "61c88901-8d40-407e-bdd3-984aa0cba6ab";
  * recorded result shapes come from a live SDK 0.3.291 run with `priority: "now"`. `holdOpen`
  * keeps the query open until its prompts close, as a warm session does.
  */
-function steeredStream(afterSteer: Array<Record<string, unknown>>, { holdOpen = false } = {}) {
+function steeredStream(afterSteer: Array<Record<string, unknown>>, { holdOpen = false, openTool = false } = {}) {
   let steerRead: (message: unknown) => void = () => undefined;
   const steered = new Promise<unknown>((resolve) => { steerRead = resolve; });
   let segmentPlayed: () => void = () => undefined;
@@ -98,6 +98,9 @@ function steeredStream(afterSteer: Array<Record<string, unknown>>, { holdOpen = 
     async function* play(): AsyncGenerator<Record<string, unknown>, void> {
       await prompts.next();
       yield* FIRST_SEGMENT;
+      if (openTool) {
+        yield { type: "assistant", message: { content: [{ type: "tool_use", id: "open-bash", name: "Bash", input: {} }] } };
+      }
       segmentPlayed();
       steerRead((await prompts.next()).value);
       yield* afterSteer;
@@ -277,7 +280,7 @@ describe("ClaudeProvider stream mapping", () => {
       { type: "assistant", message: { content: [{ type: "text", text: "PINEAPPLE" }] } },
       { type: "result", subtype: "success", is_error: false, terminal_reason: "completed",
         user_message_uuids: [STEER_ID], usage: {}, modelUsage: {} },
-    ]);
+    ], { openTool: true });
     mockQuery.mockImplementation(stream.factory);
     provider = new ClaudeProvider(stubEnvService(), stubJobObject());
     const events: ProviderRuntimeEvent[] = [];
@@ -297,7 +300,7 @@ describe("ClaudeProvider stream mapping", () => {
       .filter((row) => row.ch === "claude.turn");
     expect(rows.filter((row) => row.d && typeof row.d === "object" && "steer" in row.d)
       .map((row) => ({ th: row.th, d: row.d }))).toEqual([
-      { th: "steer", d: { step: "steer-queued", steer: STEER_ID } },
+      { th: "steer", d: { step: "steer-queued", steer: STEER_ID, openTools: ["open-bash"] } },
       { th: "steer", d: { step: "steer-outcome", steer: STEER_ID, outcome: "accepted" } },
     ]);
     expect(rows.filter((row) => row.d && typeof row.d === "object" && "waitingSteers" in row.d)
@@ -312,6 +315,26 @@ describe("ClaudeProvider stream mapping", () => {
       .toEqual(["one two", "PINEAPPLE"]);
     expect(events.filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(1);
     expect(events.at(-1)?.event).toMatchObject({ type: AgentEventType.Ended, turnExecutionId: "execution" });
+  });
+
+  it("records tools still open when a stop tears down the session", async () => {
+    recordingDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-stop-diag-"));
+    diag.configure({ dir: recordingDir, enabled: true });
+    const stream = steeredStream([], { openTool: true });
+    mockQuery.mockImplementation(stream.factory);
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    const ended = send(provider, "mcode-stop", events);
+    await stream.awaitingSteer;
+    await provider.stopSession("mcode-stop");
+    await ended;
+    diag.flushSync();
+    const rows = NodeFS.readFileSync(NodePath.join(recordingDir, "t", "stop.jsonl"), "utf8")
+      .split("\n").flatMap((line) => parseDiagLine(line) ?? []);
+    expect(rows.filter((row) => row.ch === "claude.turn" && row.d && typeof row.d === "object"
+      && "step" in row.d && row.d.step === "stop-requested").map((row) => ({ th: row.th, d: row.d })))
+      .toEqual([{ th: "stop", d: { step: "stop-requested", hadSession: true, openTools: ["open-bash"] } }]);
   });
 
   it("keeps the turn open when a segment completes before Claude took in a steer it read", async () => {

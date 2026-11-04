@@ -81,13 +81,23 @@ type ClaudeStreamPayload = {
 
 type ClaudeTurnPayload =
   // Links the queued prompt to SDK frames carrying its UUID.
-  | { step: "steer-queued"; steer: string }
+  | {
+      step: "steer-queued";
+      steer: string;
+      // Names tools a steer can cut short without inferring from timestamps.
+      openTools: string[];
+    }
   // Distinguishes a confirmed answer from a refused or uncertain delivery.
   | { step: "steer-outcome"; steer: string; outcome: string }
   // Explains why an SDK result did not end the Mcode turn.
   | { step: "segment-absorbed"; terminalReason?: string; waitingSteers: number }
   // Preserves the user's stop even when no session exists yet.
-  | { step: "stop-requested"; hadSession: boolean }
+  | {
+      step: "stop-requested";
+      hadSession: boolean;
+      // Preserves tools open before session teardown clears them.
+      openTools: string[];
+    }
   // Separates discarded streams from other endings; a stop shows as `stop-requested` before `ended`.
   | { step: "stream-ended"; cause: "discarded" | "ended" };
 
@@ -144,6 +154,15 @@ export const DIAG_CATALOG = {
   "claude.stream": event<ClaudeStreamPayload>()(["th"]),
   // Explains adapter decisions that SDK frames alone cannot establish.
   "claude.turn": event<ClaudeTurnPayload>()(["th"]),
+  // Links the owned CLI's lifetime and retirement outcome to its thread.
+  "claude.process": event<
+    | { step: "spawned"; pid: number }
+    | { step: "exited"; pid: number; code: number | null; signal: string | null }
+    | { step: "terminating"; pid: number }
+    | { step: "terminated"; pid: number; ok: boolean }
+  >()(["th"]),
+  // Identifies late batches rejected after their execution lost admission.
+  "provider.refused": event<{ turn: string; execution: string; phase: string; events: number; types: string[] }>()(["th"]),
   "cursor.wire": event<CursorWirePayload>()(["th"]),
   "cursor.session": event<{ operation: string }>()(["th"]),
   "approval": span<{ provider: string | null }, { status: string } | undefined>()(["th"], null),

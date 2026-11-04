@@ -1838,12 +1838,12 @@ export class ClaudeProvider
     return this.host.runtime;
   }
 
-  private createOwnedClaudeProcess(description: string): ClaudeOwnedProcess {
+  private createOwnedClaudeProcess(description: string, threadId?: string): ClaudeOwnedProcess {
     let tail = "";
     return new ClaudeOwnedProcess(this.host.processes, `Claude ${description}`, (chunk) => {
       tail = (tail + chunk).slice(-STDERR_CAPTURE_LIMIT);
       this.recentStderr.set(description, tail);
-    });
+    }, threadId);
   }
 
   private resolveClaudeExecutable(): string | undefined {
@@ -1977,7 +1977,7 @@ export class ClaudeProvider
       resumeId: staged.resumeId,
       cwd,
     });
-    const ownedProcess = this.createOwnedClaudeProcess(sessionId);
+    const ownedProcess = this.createOwnedClaudeProcess(sessionId, sessionId.replace(/^mcode-/, ""));
     // Without it, some startup failures end on stderr alone and reach us with no
     // startup_failure_reason to classify them by.
     options.env = { ...args.env, CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1" };
@@ -2921,7 +2921,9 @@ export class ClaudeProvider
     let queued: QueuedRead;
     try {
       queued = session.pushAndAwaitRead({ ...toUserMessage(input.message, input.sessionId), priority: "now", uuid: steerId });
-      diag.emit("claude.turn", { th: stream.threadId }, () => ({ step: "steer-queued", steer: steerId }));
+      diag.emit("claude.turn", { th: stream.threadId }, () => ({
+        step: "steer-queued", steer: steerId, openTools: [...session.pendingToolUses],
+      }));
     } catch (error) {
       stream.steersAwaitingTurn.delete(steerId);
       return finish({ outcome: "rejected", reason: "provider", detail: error instanceof Error ? error.message : String(error) });
@@ -2936,7 +2938,9 @@ export class ClaudeProvider
     // Normalize to the raw UUID that canUseTool stores as threadId.
     const tid = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
     const entry = this.runtime.get(sessionId);
-    diag.emit("claude.turn", { th: tid }, () => ({ step: "stop-requested", hadSession: entry !== undefined }));
+    diag.emit("claude.turn", { th: tid }, () => ({
+      step: "stop-requested", hadSession: entry !== undefined, openTools: entry ? [...entry.pendingToolUses] : [],
+    }));
     // Reject all pending permission requests for this session and notify frontend.
     for (const [requestId, entry] of this.pendingPermissions) {
       if (entry.threadId === tid) {
