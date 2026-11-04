@@ -96,6 +96,48 @@ describe("ClaudeProvider idle eviction with pending tool_use (#291)", () => {
     );
   });
 
+  it("does NOT evict a session while its turn streams a reply with no tool open", async () => {
+    mockQuery.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+      const it = prompt[Symbol.asyncIterator]();
+      let step = 0;
+      let resolvePause: (() => void) | null = null;
+      const paused = new Promise<void>((resolve) => { resolvePause = resolve; });
+      const gen: AsyncGenerator<Record<string, unknown>, void> = {
+        async next() {
+          if (step === 0) { await it.next(); step = 1;
+            return { value: { type: "system", subtype: "init", session_id: "sdk-3" }, done: false }; }
+          if (step === 1) { step = 2;
+            return { value: { type: "assistant", message: { content: [{ type: "text", text: "Still writing" }] } }, done: false }; }
+          await paused;
+          return { value: undefined as never, done: true };
+        },
+        async return() { resolvePause?.(); return { value: undefined as never, done: true }; },
+        async throw(e: unknown) { throw e; },
+        [Symbol.asyncIterator]() { return this; },
+      };
+      return Object.assign(gen, { ...queryMethodStubs(), close: vi.fn(() => resolvePause?.()) });
+    });
+
+    await provider.sendTurn({
+      turnExecutionId: "test-execution",
+      sessionId: "mcode-t3",
+      threadId: "t3",
+      message: "write a long reply",
+      cwd: "/tmp",
+      model: "claude-sonnet-4-6",
+      permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const runtime = (provider as any).runtime as { get: (id: string) => unknown };
+    expect(runtime.get("mcode-t3")).toBeDefined();
+  });
+
   it("evicts the session once the tool completes and the idle window elapses", async () => {
     let resolveTool: (() => void) | null = null;
     const toolDone = new Promise<void>((r) => { resolveTool = r; });
