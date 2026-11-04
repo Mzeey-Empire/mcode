@@ -83,7 +83,6 @@ describe("broadcastTerminalData", () => {
       subscribeClientToThread(ws, "thread-1");
       broadcast("approval.requested", createMockApproval());
       broadcast("approval.resolved", { threadId: "thread-1", requestId: "req-1", outcome: { status: "cancelled", reason: "turn_ended" } });
-      // Closed sockets must not appear as recipients of a later publication.
       removeClient(ws);
       broadcast("approval.requested", createMockApproval());
       diag.flushSync();

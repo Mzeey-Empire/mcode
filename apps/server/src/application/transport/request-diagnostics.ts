@@ -1,7 +1,6 @@
 import type { WsMethodName } from "@mcode/contracts/ws/methods";
 import { diag, type EventPayload } from "@mcode/shared/diagnostics";
 
-/** Where a request's record is filed: its thread, or for an approval answer, the approval it answers. */
 interface RequestTarget {
   th?: string;
   approval?: string;
@@ -17,7 +16,6 @@ function stringField(value: unknown, key: string): string | undefined {
 
 const threadFromParams: TargetResolver = (params) => ({ th: stringField(params, "threadId") });
 
-// The server creates the thread, so only the response knows its id.
 const threadFromResult: TargetResolver = (_params, result) => ({ th: stringField(result, "id") });
 
 // An approval answer names only the approval; its thread's `approval` span shares that id.

@@ -133,7 +133,6 @@ type DelegateWake =
 
 /** One declaration per channel; readers use the budgets stamped into records. */
 export const DIAG_CATALOG = {
-  // Distinguishes a fresh start from evidence left by the previous process.
   // `children: "job"` means provider processes die with this process, so an abrupt exit also ends them.
   "app.run": event<{ pid: number; previous: "clean" | "unclean" | "first"; previousPid?: number; children: "job" | "none" }>()([]),
   // Retains every shutdown requester, including requests that lost the race.
@@ -148,13 +147,10 @@ export const DIAG_CATALOG = {
   "app.stall": event<{ lastOnTimeAt: number; lateCallbackAt: number; intervalMs: number; lateMs: number }>()([]),
   // Preserves intentional harness faults before they affect the server; `id` links the effects they cause.
   "app.control": event<{ id: string; control: string; durationMs?: number }>()([]),
-  // Measures a harness hang as it ran, so a stall window can be attributed to it rather than inferred.
   "app.hang": event<{ control: string; startedAt: number; endedAt: number; elapsedMs: number }>()([]),
-  // Records when a request arrived and from which connection.
   "rpc.request": event<RpcRequestPayload>()([]),
   "codex.wire": event<CodexWirePayload>()(["th"]),
   "claude.stream": event<ClaudeStreamPayload>()(["th"]),
-  // Explains adapter decisions that SDK frames alone cannot establish.
   "claude.turn": event<ClaudeTurnPayload>()(["th"]),
   // Links the owned CLI's lifetime and retirement outcome to its thread.
   "claude.process": event<
