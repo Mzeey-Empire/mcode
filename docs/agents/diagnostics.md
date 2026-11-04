@@ -26,7 +26,7 @@ bun run diag --data-dir ~/.mcode --db ~/.mcode/mcode.db --thread <threadId>
 
 `--since` takes a duration such as `20m` or an ISO time. `--limit` caps the timeline at its newest rows, 400 by default. `--json` prints the same evidence for a script.
 
-Start without a scope to find the thread, then rerun with `--thread` or `--workspace`.
+Start without a scope to find the thread, then rerun with `--thread` or `--workspace`. A scoped query also reads every thread delegated from the scope with `delegate_task`, at any depth and in any workspace, and labels each one `(delegated by <lane>)`.
 
 ## Read the output
 
@@ -35,10 +35,12 @@ The header states what the evidence covers: the window, the first and last recor
 Findings come before the timeline. Each one has a certainty:
 
 - `observed`: the recording shows the fault, such as `open-span` (an action that started and never ended), `slow-span`, `error-end`, or `stall` (an unfinished turn with no activity for over a minute).
-- `waiting`: an action waits on a person, such as an approval nobody answered.
+- `waiting`: an action waits on something outside the agent, such as an approval nobody answered or a `thread_wait` call on another thread.
 - `incomplete`: coverage was lost, such as `restart-mid-turn`, `dropped`, or recording switched off mid-action. Confirm these against the canonical events before you conclude anything.
 
 Timeline rows read `L<n> +<ms> <lane> <kind> <channel> <payload>`. Offsets count from the first row shown. `db.canonical` rows come from the database; every other channel comes from the recording.
+
+For a parent that delegated work, follow these rows in its lane: `mcp.tool` for each Mcode tool call, `delegate.launch` for the child's start (its end names the child thread), and `delegate.wake` for whether the child's result reached the parent or why it was held. In a Claude thread, `claude.stream` rows name the tool calls they start or finish, and `parent` names the sub-agent tool call a message belongs to.
 
 ## Record something new
 
