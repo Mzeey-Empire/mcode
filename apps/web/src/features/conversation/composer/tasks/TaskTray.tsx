@@ -138,7 +138,6 @@ export function TaskTray({ id, progress, tasks, trayRef, headerRef, bodyRef, onC
       className={cn(
         "tab-fillets absolute right-[24px] bottom-[calc(100%-1px)] left-[24px] flex flex-col",
         "rounded-t-[14px] border border-b-0 border-border bg-selected px-[6px] pt-[4px] pb-[6px]",
-        "group-focus-within/capsule:border-control-border group-focus-within/capsule:[--tab-edge:var(--color-control-border)]",
       )}
     >
       <button

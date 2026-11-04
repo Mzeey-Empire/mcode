@@ -725,7 +725,7 @@ function ComposerInputSurface({
       data-testid="composer-surface"
       data-rows={rows}
       className={cn(
-        "group/capsule @container/capsule relative z-(--layer-sticky) border border-border bg-selected focus-within:border-control-border",
+        "group/capsule @container/capsule relative z-(--layer-sticky) border border-border bg-selected",
         rows === "one" ? "rounded-full" : "rounded-[22px]",
         // Whatever shows above the row inside the card (a bar, a notice, comment chips) keeps it from a full round.
         "has-[>:not(.sr-only,[data-drop-overlay])~[data-capsule-row]]:rounded-[22px]",
