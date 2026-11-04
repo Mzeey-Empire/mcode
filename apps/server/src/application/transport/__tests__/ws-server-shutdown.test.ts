@@ -8,6 +8,9 @@ import { WebSocket } from "ws";
 import { AttachmentMetaSchema } from "@mcode/contracts/models/attachment";
 import { WebSocketResponseSchema } from "@mcode/contracts/ws/protocol";
 import { getMcodeDir } from "@mcode/shared";
+import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import { createWsServer } from "../ws-server.js";
 
 function deferred() {
@@ -66,6 +69,32 @@ describe("transport admission and shutdown drain", () => {
     const server = await startServer(async () => undefined, (origin) => { origins.push(origin); });
     await expect(httpRequest(server, "/shutdown", "POST", true)).resolves.toEqual({ status: 200, body: '{"status":"shutting_down"}' });
     expect(origins).toEqual([{ trigger: "http", client: "unknown" }]);
+  });
+
+  it("records each socket's opening client and closing code under one connection id", async () => {
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "ws-connection-"));
+    diag.configure({ dir, enabled: true });
+    try {
+      const server = await startServer(async () => undefined);
+      const client = await openClient(server);
+      const closed = new Promise<void>((resolve) => server.wss.clients.forEach((socket) => socket.once("close", () => resolve())));
+      client.close(1000);
+      await closed;
+      diag.flushSync();
+      const folder = NodePath.join(dir, "p");
+      const rows = NodeFS.readdirSync(folder).flatMap((file) => NodeFS.readFileSync(NodePath.join(folder, file), "utf8").split("\n").map(parseDiagLine));
+      const steps = rows.filter((row) => row?.ch === "ws.connection").map((row) => row?.d);
+      const conn = expect.stringMatching(/^[0-9a-f]{8}$/);
+      expect(steps).toEqual([
+        { step: "opened", conn, client: "unknown" },
+        { step: "closed", conn, code: 1000 },
+      ]);
+      const conns = steps.map((step) => (typeof step === "object" && step !== null && "conn" in step ? step.conn : null));
+      expect(new Set(conns).size).toBe(1);
+    } finally {
+      diag.configure({ enabled: false });
+      NodeFS.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it.each(specialPaths)("waits for an admitted %s request and refuses late HTTP mutation requests", async (path) => {

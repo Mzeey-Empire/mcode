@@ -149,6 +149,8 @@ export const DIAG_CATALOG = {
   "app.control": event<{ id: string; control: string; durationMs?: number; client: string }>()([]),
   "app.hang": event<{ control: string; startedAt: number; endedAt: number; elapsedMs: number }>()([]),
   "rpc.request": event<RpcRequestPayload>()([]),
+  // `conn` matches rpc.request and approval.push, so a request or push can be tied to its socket's lifetime.
+  "ws.connection": event<{ step: "opened"; conn: string; client: string } | { step: "closed"; conn: string; code: number }>()([]),
   "codex.wire": event<CodexWirePayload>()(["th"]),
   "claude.stream": event<ClaudeStreamPayload>()(["th"]),
   "claude.turn": event<ClaudeTurnPayload>()(["th"]),

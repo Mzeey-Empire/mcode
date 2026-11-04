@@ -26,6 +26,7 @@ import { EXTERNAL_THREAD_CONTROL_MCP_PATH } from "../../features/thread-control/
 import { MCODE_MCP_PATH, type McodeMcpServer } from "../../features/mcode-mcp/index.js";
 import type { ReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
 import { requestClient } from "../../runtime/diagnostics/request-client.js";
+import { diag } from "@mcode/shared/diagnostics";
 import type { ExecutionMailboxDepth } from "../../features/agents/execution/execution-mailbox-scheduler.js";
 
 /** Match stored thread IDs used for the custom attachment protocol (UUID, lowercase hex). */
@@ -238,6 +239,8 @@ export function createWsServer(deps: WsServerDeps): {
 
     logger.info("WebSocket client connected");
     const conn = NodeCrypto.randomUUID().slice(0, 8);
+    const client = requestClient(req);
+    diag.emit("ws.connection", {}, () => ({ step: "opened", conn, client }));
     addClient(ws, conn);
     let browserAutomationDesktopInstanceId: string | null = null;
 
@@ -256,7 +259,7 @@ export function createWsServer(deps: WsServerDeps): {
     };
 
     const messageContext: WsMessageContext = {
-      connection: { conn, client: requestClient(req) },
+      connection: { conn, client },
       ws,
       deps,
       resolveCurrentBrowserAutomationAuthorization,
@@ -266,7 +269,8 @@ export function createWsServer(deps: WsServerDeps): {
 
     ws.on("message", (data: Buffer | string, isBinary: boolean) => handleWsMessage(data, isBinary, messageContext));
 
-    ws.on("close", () => {
+    ws.on("close", (code: number) => {
+      diag.emit("ws.connection", {}, () => ({ step: "closed", conn, code }));
       logger.info("WebSocket client disconnected");
       deps.browserAutomationBroker?.disconnect(ws);
       deps.terminalService.disconnectClient(ws);
