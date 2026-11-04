@@ -7,6 +7,7 @@ const { saves, persisted } = vi.hoisted(() => ({
   persisted: {
     updates: { channel: "stable" } as Record<string, unknown>,
     graphics: { hardwareAcceleration: false } as Record<string, unknown>,
+    diagnostics: {} as Record<string, unknown>,
   },
 }));
 
@@ -118,6 +119,36 @@ describe("AboutSection provider CLI checks", () => {
 
     fireEvent.click(toggle);
     await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ updates: { providerCliChecks: true } }]));
+  });
+});
+
+describe("AboutSection diagnostics recording", () => {
+  beforeEach(() => {
+    saves.length = 0;
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    persisted.diagnostics = {};
+  });
+
+  it("defaults on and saves the setting when switched off", async () => {
+    render(<AboutSection />);
+    const toggle = screen.getByRole("switch", { name: "Record diagnostics" });
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { recording: false } }]));
+  });
+
+  it("reads a saved off setting and saves it back on", async () => {
+    persisted.diagnostics = { recording: false };
+    render(<AboutSection />);
+    const toggle = screen.getByRole("switch", { name: "Record diagnostics" });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { recording: true } }]));
   });
 });
 
