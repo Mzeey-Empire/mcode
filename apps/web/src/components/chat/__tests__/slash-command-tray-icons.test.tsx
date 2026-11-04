@@ -142,7 +142,7 @@ describe("SlashCommandTray row presentation", () => {
     expect(within(localRow).getByText("Local")).toBeInTheDocument();
     expect(screen.queryByText("Project")).not.toBeInTheDocument();
     expect(screen.queryByText("Provider")).not.toBeInTheDocument();
-    expect(sharedRow.querySelector(".lucide-badge-check")).not.toBeNull();
+    expect(sharedRow.querySelector(".lucide-box")).not.toBeNull();
 
     const content = within(sharedRow).getByText("grill-with-docs").parentElement;
     expect(content).toContainElement(within(sharedRow).getByText("Interviewing workflow"));
@@ -276,10 +276,10 @@ describe("SlashCommandTray row presentation", () => {
 });
 
 describe("SlashCommandTray capability icons", () => {
-  it("skills render a fixed neutral BadgeCheck icon", () => {
+  it("skills render a fixed neutral Box icon", () => {
     renderPopup();
     const skillRow = screen.getByRole("option", { name: /my-skill/ });
-    expect(skillRow.querySelector(".lucide-badge-check")).not.toBeNull();
+    expect(skillRow.querySelector(".lucide-box")).not.toBeNull();
   });
 
   it("command namespace renders a square-terminal SVG", () => {
@@ -315,7 +315,7 @@ describe("SlashCommandTray capability icons", () => {
       const pluginRow = screen.getByRole("option", {
         name: new RegExp(`${name} reserved-name plugin`),
       });
-      expect(skillRow.querySelector(".lucide-badge-check")).not.toBeNull();
+      expect(skillRow.querySelector(".lucide-box")).not.toBeNull();
       expect(pluginRow.querySelector(".lucide-plug")).not.toBeNull();
     },
   );
@@ -323,14 +323,14 @@ describe("SlashCommandTray capability icons", () => {
   it("plugin-provided skills remain skill entries", () => {
     renderPopup();
     const pluginSkillRow = screen.getByRole("option", { name: /A plugin skill/ });
-    expect(pluginSkillRow.querySelector(".lucide-badge-check")).not.toBeNull();
+    expect(pluginSkillRow.querySelector(".lucide-box")).not.toBeNull();
     expect(pluginSkillRow.querySelector(".lucide-plug")).toBeNull();
   });
 
   it("command namespace does not render a skill icon", () => {
     renderPopup();
     const commandRow = screen.getByRole("option", { name: /deploy/ });
-    expect(commandRow.querySelector(".lucide-badge-check")).toBeNull();
+    expect(commandRow.querySelector(".lucide-box")).toBeNull();
   });
 
   it("skill namespace does not render a command icon", () => {

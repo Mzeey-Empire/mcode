@@ -414,7 +414,7 @@ function InlineWorkspaceFileCode({
       tone={isUser ? "user" : "assistant"}
       role="link"
       tabIndex={0}
-      className="cursor-pointer text-link hover:underline focus-visible:outline-none focus-visible:ring-focus"
+      className="cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-focus"
       onClick={(event) => handleLinkClick(event, previewUrl)}
       onKeyDown={(event) => { if (event.key === "Enter") handleLinkClick(event, previewUrl); }}
     />

@@ -21,7 +21,7 @@ describe("EntityToken command invocations", () => {
     expect(container.querySelector('[data-entity-token="command"] [data-entity-icon="command"]')).toBeInTheDocument();
     expect(container.querySelector('[data-entity-token="plugin"] [data-entity-icon="plugin"]')).toBeInTheDocument();
     expect(container.querySelector('[data-entity-token="mcode"] [data-entity-icon="mcode"]')).toBeInTheDocument();
-    expect(container.querySelector('[data-entity-token="skill"] .lucide-badge-check')).toBeInTheDocument();
+    expect(container.querySelector('[data-entity-token="skill"] .lucide-box')).toBeInTheDocument();
     expect(container.querySelector('[data-entity-token="command"] .lucide-square-terminal')).toBeInTheDocument();
     expect(container.querySelector('[data-entity-token="plugin"] .lucide-plug')).toBeInTheDocument();
     expect(container.querySelector('[data-entity-token="mcode"] .lucide-list-todo')).toBeInTheDocument();
@@ -52,5 +52,24 @@ describe("EntityToken inline references", () => {
       const token = container.querySelector(`[data-entity-token="${kind}"]`);
       expect(token?.querySelector(`[data-entity-icon="${kind}"]`)).toBeInTheDocument();
     }
+  });
+});
+
+describe("EntityToken colour roles", () => {
+  it("colours capability and file tokens with their own roles instead of the amber lamp", () => {
+    const { container } = render(
+      <div>
+        <EntityToken kind="skill" label="review" />
+        <EntityToken kind="plugin" label="@figma" />
+        <EntityToken kind="command" label="/plan" />
+        <EntityToken kind="file" label="index.ts" filePath="src/index.ts" />
+      </div>,
+    );
+
+    for (const kind of ["skill", "plugin", "command"]) {
+      expect(container.querySelector(`[data-entity-token="${kind}"]`)).toHaveClass("text-capability");
+    }
+    expect(container.querySelector('[data-entity-token="file"]')).toHaveClass("text-file-reference");
+    expect(container.querySelector(".text-primary")).toBeNull();
   });
 });

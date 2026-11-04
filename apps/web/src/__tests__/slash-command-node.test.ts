@@ -59,7 +59,7 @@ describe("SlashCommandNode", () => {
     const token = label.closest("[data-entity-token]");
     expect(screen.queryByText("/impeccable")).not.toBeInTheDocument();
     expect(token).toHaveAttribute("data-entity-token", "skill");
-    expect(token?.querySelector(".lucide-badge-check")).not.toBeNull();
+    expect(token?.querySelector(".lucide-box")).not.toBeNull();
   });
 
   it("exports to JSON with type, name, and namespace", () => {

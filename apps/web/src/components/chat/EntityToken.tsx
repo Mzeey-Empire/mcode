@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import {
-  BadgeCheck,
+  Box,
   Gauge,
   ListTodo,
   Minimize2,
@@ -21,7 +21,7 @@ const COMMAND_ICONS = {
 };
 
 const ENTITY_ICONS = {
-  skill: BadgeCheck,
+  skill: Box,
   plugin: Plug,
   mcode: Zap,
   command: SquareTerminal,
@@ -91,6 +91,15 @@ export function EntityIcon({
   );
 }
 
+const ENTITY_TEXT_CLASS: Record<EntityKind, string> = {
+  agent: "text-capability",
+  command: "text-capability",
+  file: "text-file-reference",
+  mcode: "text-capability",
+  plugin: "text-capability",
+  skill: "text-capability",
+};
+
 /** Props for an inline entity token shown inside drafted or persisted prose. */
 export interface EntityTokenProps extends ComponentProps<"span"> {
   /** Entity category that determines the icon and accessible label. */
@@ -127,7 +136,7 @@ export function EntityToken({
       data-entity-token={kind}
       className={cn(
         "mx-px inline-flex max-w-full items-center gap-1 align-[-0.2em] font-sans text-[length:inherit] font-medium leading-none",
-        "text-primary",
+        ENTITY_TEXT_CLASS[kind],
         className,
       )}
       {...props}

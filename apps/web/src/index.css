@@ -135,6 +135,11 @@
   /* Links stay blue so the amber accent is reserved for actions and live state
      (One Lamp Rule). */
   --link: var(--blue-700);
+  /* Capability and file tokens take their own hues so the amber lamp stays
+     reserved for actions and live state, and so a file reads as part of the
+     workspace rather than a web link. Paper has no ramp for these hues yet. */
+  --capability: oklch(50% 0.150 328);
+  --file-reference: oklch(48% 0.080 205);
   --success: var(--sage-600);
   --error: var(--clay-700);
   --warning: var(--amber-700);
@@ -184,6 +189,8 @@
   --control-border: var(--neutral-400);
   --focus: var(--blue-500);
   --link: var(--blue-400);
+  --capability: oklch(78% 0.105 328);
+  --file-reference: oklch(80% 0.070 205);
   --success: var(--sage-400);
   --error: var(--clay-400);
   --warning: var(--amber-400);
@@ -284,6 +291,8 @@
   --color-control-border: var(--control-border);
   --color-focus: var(--focus);
   --color-link: var(--link);
+  --color-capability: var(--capability);
+  --color-file-reference: var(--file-reference);
   --color-success: var(--success);
   --color-error: var(--error);
   --color-warning: var(--warning);
