@@ -2523,6 +2523,7 @@ export class ClaudeProvider
         type: AgentEventType.Ended,
         threadId,
         turnExecutionId: state.currentTurnExecutionId,
+        reason: "provider_lost",
       } satisfies AgentEvent,
     );
     await this.waitForCanonicalExecution(state.currentRouting);

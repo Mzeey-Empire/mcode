@@ -226,6 +226,7 @@ export class CodexLiveEventReducer {
   }
 
   private textRejection(event: AgentEvent): string | undefined {
+    if (event.type === "ended" && isLostProviderStream(event)) return undefined;
     switch (event.type) {
       case "textDelta": return this.deltaRejection(event);
       case "turnComplete":
