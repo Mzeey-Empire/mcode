@@ -32,7 +32,7 @@ const comment: SelectedTextComment = {
 
 describe("sendComposerThreadMessage", () => {
   it("sends existing-thread text and selected-text comment metadata together", async () => {
-    threadActions.sendMessage.mockResolvedValue(true);
+    threadActions.sendMessage.mockResolvedValue({ sent: true });
 
     await sendComposerThreadMessage("thread-1", {
       content: "Explain the tradeoff.",
@@ -50,7 +50,7 @@ describe("sendComposerThreadMessage", () => {
   });
 
   it("asks the thread's transcript to follow the prompt it sends", async () => {
-    threadActions.sendMessage.mockResolvedValue(true);
+    threadActions.sendMessage.mockResolvedValue({ sent: true });
 
     await sendComposerThreadMessage("thread-1", {
       content: "Next step.",
