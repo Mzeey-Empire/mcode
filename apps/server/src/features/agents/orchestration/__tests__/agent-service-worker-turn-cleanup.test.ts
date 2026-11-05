@@ -1,10 +1,12 @@
 import "reflect-metadata";
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { container } from "tsyringe";
 import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import { SERVER_SHUTDOWN_DEADLINE_MS, SHUTDOWN_PERSISTENCE_START_MS } from "@mcode/shared/node/shutdown-deadlines";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { CodexChildEvidence } from "@mcode/contracts/events/provider-runtime-event";
@@ -16,6 +18,9 @@ import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-st
 import { ThreadControlMutationReservationService } from "../../../thread-control/index.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
+import { SubagentRosterService } from "../../collaboration/subagent-roster-service.js";
+import { SessionRuntime } from "../../../providers/runtime/session-runtime.js";
+import { runShutdownPhases } from "../../../../runtime/lifecycle/shutdown-phases.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 import { TurnRuntimeController } from "../turn-runtime-controller.js";
 import { appendPreviewAnnotations, sendRecoveryAttempt } from "../../transport/turn-message-dispatch.js";
@@ -56,6 +61,16 @@ function captureTurnRelease(fixture: WorkerFixture) {
       await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
     }
   };
+}
+
+/** A provider that answers well after shutdown starts but inside the drain bound. */
+const SLOW_PROVIDER_MS = 6_000;
+
+/** Ends the process without a graceful agent stop and opens the same database, as the next server start does. */
+async function restart(fixture: WorkerFixture): Promise<WorkerFixture> {
+  await fixture.close({ graceful: false, keepDirectory: true });
+  activeFixture = await openWorkerServiceFixture("codex", { directory: fixture.directory, threadId: fixture.thread.id });
+  return activeFixture;
 }
 
 async function endTurn(fixture: WorkerFixture, event: Extract<AgentEvent, { type: "ended" }>) {
@@ -313,6 +328,144 @@ describe("AgentService cleanup through production worker composition", { timeout
     await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Interrupted");
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
+  });
+
+  it("writes every accepted save queued behind a busy database when shutdown closes persistence", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    const texts = Array.from({ length: 40 }, (_, index) => `received text ${index}. `);
+    const lock = new Database(NodePath.join(fixture.directory, "app.sqlite"));
+    lock.run("BEGIN IMMEDIATE");
+    const emitted = Promise.allSettled(texts.map((delta) => fixture.emit({ type: "textDelta", threadId: fixture.thread.id,
+      turnExecutionId: turn.turnExecutionId, delta })));
+    try {
+      await vi.waitFor(() => expect(fixture.deliveredCount()).toBe(texts.length));
+      const closing = fixture.workers.close();
+      lock.run("ROLLBACK");
+      await closing;
+    } finally {
+      if (lock.inTransaction) lock.run("ROLLBACK");
+      lock.close();
+    }
+    await emitted;
+    const restarted = await restart(fixture);
+    expect(await container.resolve(TurnRecoveryService).reconcileOnStartup()).toEqual({ interrupted: [turn.turnExecutionId] });
+    expect(restarted.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
+      status: "Interrupted", ending: { outcome: "interrupted", cause: "app_closed" },
+    });
+    expect(restarted.assistant()).toMatchObject({ content: texts.join(""), outcome: "interrupted" });
+  });
+
+  it("saves provider-queued text and its real end that a blocked delivery holds when shutdown starts", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    const releaseDeliveries = fixture.holdDeliveries();
+    const queued = Promise.allSettled([
+      fixture.emit({ type: "message", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
+        content: "text the provider received before shutdown", tokens: null }),
+      fixture.emit(turnComplete(fixture.thread.id, turn.turnExecutionId)),
+      fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId }),
+    ]);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const stopping = fixture.service.stopAll();
+    try {
+      await vi.waitFor(() => expect(fixture.provider.stopSession).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(SLOW_PROVIDER_MS);
+      releaseDeliveries();
+      await vi.waitFor(() => expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed"),
+        { timeout: 5_000 });
+    } finally {
+      vi.useRealTimers();
+      releaseDeliveries();
+    }
+    await stopping;
+    await queued;
+    expect(fixture.assistant()).toMatchObject({ content: "text the provider received before shutdown", outcome: "completed" });
+  });
+
+  it("saves the provider's real end that arrives while its stop still hangs", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    fixture.provider.stopSession.mockImplementation(() => new Promise<void>(() => {
+      setTimeout(() => {
+        void fixture.emit({ type: "message", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
+          content: "finished answer", tokens: null })
+          .then(() => fixture.emit(turnComplete(fixture.thread.id, turn.turnExecutionId)))
+          .then(() => fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId }));
+      }, SLOW_PROVIDER_MS);
+    }));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const stopping = fixture.service.stopAll();
+    try {
+      await vi.waitFor(() => expect(fixture.provider.stopSession).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(SLOW_PROVIDER_MS);
+      await vi.waitFor(() => expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed"),
+        { timeout: 5_000 });
+      // The hung stop still has to time out before stopAll returns.
+      await vi.advanceTimersByTimeAsync(SERVER_SHUTDOWN_DEADLINE_MS);
+      await stopping;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(fixture.assistant()).toMatchObject({ content: "finished answer", outcome: "completed" });
+  });
+
+  it("closes turn persistence before the watchdog when agent stop and provider teardown hang", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    await fixture.emit({ type: "message", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
+      content: "partial answer before shutdown", tokens: null });
+    const hang = () => new Promise<void>(() => undefined);
+    const descendants = vi.spyOn(SubagentRosterService.prototype, "stopDescendants").mockImplementation(hang);
+    fixture.provider.stopSession.mockImplementation(hang);
+    vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementation(hang);
+    const sessions = new SessionRuntime({ spawn: async () => ({ state: {}, pids: [] }), isBusy: () => false,
+      interrupt: async () => undefined, close: hang, isStale: () => false }, {
+      jobObject: { isWindowsJob: false, assign: () => true, setDescription: () => undefined },
+      envService: { getEnv: () => ({}) },
+    });
+    await sessions.acquire({ sessionId: "hanging-adapter", threadId: fixture.thread.id, cwd: fixture.directory, permissionMode: "default" });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let watchdogExpired = false;
+    setTimeout(() => { watchdogExpired = true; }, SERVER_SHUTDOWN_DEADLINE_MS);
+    let persistedInTime: boolean | undefined;
+    const shutdown = runShutdownPhases({
+      stopServices: async () => {
+        await fixture.service.stopAll();
+        await sessions.shutdown();
+      },
+      persist: (saveAttemptsUntil) => fixture.workers.close({ attemptsUntil: saveAttemptsUntil }),
+      onServicesOverrun: () => undefined,
+    }).then(() => { persistedInTime = !watchdogExpired; });
+    try {
+      await vi.waitFor(() => expect(descendants).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(SHUTDOWN_PERSISTENCE_START_MS);
+      await vi.waitFor(() => expect(persistedInTime !== undefined || watchdogExpired).toBe(true), { timeout: 10_000 });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(persistedInTime).toBe(true);
+    await shutdown;
+    const restarted = await restart(fixture);
+    expect(await container.resolve(TurnRecoveryService).reconcileOnStartup()).toEqual({ interrupted: [turn.turnExecutionId] });
+    expect(restarted.assistant()).toMatchObject({ content: "partial answer before shutdown", outcome: "interrupted" });
+  });
+
+  it("settles a turn a previous process left Running when the server starts again", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    await fixture.emit({ type: "message", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
+      content: "partial answer before the crash", tokens: null });
+    const restarted = await restart(fixture);
+    expect(restarted.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Running");
+
+    expect(await container.resolve(TurnRecoveryService).reconcileOnStartup()).toEqual({ interrupted: [turn.turnExecutionId] });
+
+    expect(restarted.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
+      status: "Interrupted", ending: { outcome: "interrupted", cause: "app_closed" },
+    });
+    expect(restarted.assistant()).toMatchObject({ content: "partial answer before the crash", outcome: "interrupted" });
+    expect(restarted.threads.findById(restarted.thread.id)?.status).toBe("interrupted");
   });
 
   it.each([true, false])("records shutdown execution state with provider terminal=%s", async (terminal) => {

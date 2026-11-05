@@ -130,10 +130,13 @@ export class WorkerOwnedTurnRuntime {
     }
   }
 
-  /** Stop mailbox admission and flush canonical receipts; application composition closes the shared writer. */
-  async close(): Promise<void> {
+  /**
+   * Stop mailbox admission and flush canonical receipts; application composition closes the shared writer.
+   * No accepted save attempt starts at or after `attemptsUntil`.
+   */
+  async close(options: { readonly attemptsUntil?: number } = {}): Promise<void> {
     this.scheduler.shutdown();
-    try { await this.progress?.close(); }
+    try { await this.progress?.close(options); }
     finally { await this.writer.close(); }
   }
 }
