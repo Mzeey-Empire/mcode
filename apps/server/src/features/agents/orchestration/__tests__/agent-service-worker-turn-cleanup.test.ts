@@ -5,6 +5,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { container } from "tsyringe";
+import { logger } from "@mcode/shared";
 import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
 import { SERVER_SHUTDOWN_DEADLINE_MS, SHUTDOWN_PERSISTENCE_START_MS } from "@mcode/shared/node/shutdown-deadlines";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
@@ -745,11 +746,16 @@ describe("AgentService cleanup through production worker composition", { timeout
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);
     const recover = vi.spyOn(fixture.workers, "recoverRejected");
+    const reported = vi.spyOn(logger, "error");
     const fenceError = new Error("Provider fence failed");
     vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockRejectedValueOnce(fenceError);
     await endTurn(fixture, { type: "ended", threadId: fixture.thread.id,
       turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
     expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined();
+    // The saved ending carries no message, so the log is where the fence failure must surface as the cause.
+    expect(reported).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      executionId: turn.turnExecutionId, error: fenceError.message,
+    }));
     expect(recover).toHaveBeenCalledWith(expect.objectContaining({ executionId: turn.turnExecutionId }));
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
       status: "Interrupted", ending: { outcome: "interrupted", cause: "saving_stopped" },
