@@ -931,14 +931,16 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     // The saved outcome carries this reason only if its own write succeeds, so log it for recovery.
     logger.warn("Worker provider start failed", { threadId, executionId: workerTurn.execution.executionId,
       error: error instanceof Error ? error.message : String(error) });
-    let failureSaved = false;
+    let ownEndingFinished = false;
     await this.endWorkerTurn(workerTurn, async () => {
       await this.failWorkerDispatch(workerTurn, error);
-      failureSaved = true;
+      ownEndingFinished = true;
     });
-    // Only the saved failure carries the provider's reason. When recovery or an earlier ending saved the
-    // outcome instead, the send reports the reason, or the user never learns why the turn did not start.
-    if (!failureSaved) throw error;
+    // This send's own ending either saved the start failure or found the provider's terminal already
+    // saved and released the turn; either way a saved outcome speaks for this send. When recovery or an
+    // earlier ending decided the outcome instead, nothing saved carries the start failure, so the send
+    // reports it, or the user never learns why the turn did not start.
+    if (!ownEndingFinished) throw error;
   }
 
   private async failWorkerDispatch(active: WorkerOwnedTurn, error: unknown): Promise<void> {
