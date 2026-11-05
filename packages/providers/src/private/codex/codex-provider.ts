@@ -279,6 +279,13 @@ interface CodexSessionState {
   turnStartPromise?: Promise<void>;
   /** In-flight user-stop drain; a follow-up sendTurn waits on it before reusing this session. */
   interruptDrain?: Promise<boolean>;
+  /**
+   * The turn whose bounded Stop or replacement interrupt wait expired. The session is discarded
+   * without sending it another interrupt, and its transport closing then ends it cancelled.
+   * Read only through {@link isAbandonedTurn}: the session can outlive this turn, and a later turn
+   * on it must still be interrupted.
+   */
+  abandonedTurnExecutionId?: string;
   cancelledTurnExecutionId?: string;
   /** Native turn notification buffered until the authoritative RPC response arrives. */
   pendingTurnStartNotification?: { nativeTurnId: string; executionId: string };
@@ -478,6 +485,11 @@ function executionForDrain(state: CodexSessionState): string | undefined {
   return state.currentTurnExecutionId
     ?? (state.pendingTurnId && state.turnExecutionIdsByNativeTurn.get(state.pendingTurnId))
     ?? state.activeParentTurnExecutionId;
+}
+
+/** Whether a bounded interrupt wait expired on exactly this execution. */
+function isAbandonedTurn(state: CodexSessionState, turnExecutionId: string | undefined): boolean {
+  return turnExecutionId !== undefined && state.abandonedTurnExecutionId === turnExecutionId;
 }
 
 function bufferPendingChildEvent(
@@ -1144,6 +1156,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * The method returns immediately; events stream via the `event` EventEmitter channel.
    */
   async sendTurn(req: TurnRequest<"codex">): Promise<void> {
+    this.supersedeWaitingCodexRequest(req);
     const pending = { executionId: req.turnExecutionId, controller: new AbortController() };
     this.pendingTurnRequests.set(req.sessionId, pending);
     const signal = pending.controller.signal;
@@ -1169,6 +1182,21 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     } finally {
       if (!dispatched) this.releasePendingCodexRequest(req.sessionId, signal);
     }
+  }
+
+  /**
+   * A request that has not started its native turn yet, such as one waiting behind a stuck turn's
+   * interrupt, was let go by the server when it admits the next turn. It ends cancelled now, while
+   * its routing is still reachable, because the next request takes over its routing and staging.
+   */
+  private supersedeWaitingCodexRequest(next: TurnRequest<"codex">): void {
+    const waiting = this.pendingTurnRequests.get(next.sessionId);
+    if (!waiting || waiting.executionId === next.turnExecutionId) return;
+    // A request whose native turn is running is the turn the next request interrupts and replaces.
+    if (this.runtime.get(next.sessionId)?.currentTurnExecutionId === waiting.executionId) return;
+    waiting.controller.abort();
+    this.releaseStagedCodexTurn(next.sessionId, waiting.controller.signal);
+    this.emitCancelledCodexRequest({ threadId: next.threadId, turnExecutionId: waiting.executionId });
   }
 
   private bindCanonicalCodexRequest(request: TurnRequest<"codex">): void {
@@ -1385,7 +1413,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return true;
   }
 
-  private emitCancelledCodexRequest(request: TurnRequest<"codex">): void {
+  private emitCancelledCodexRequest(request: Pick<TurnRequest<"codex">, "threadId" | "turnExecutionId">): void {
     this.emitRuntimeEvent(providerRuntimeEvent({ type: AgentEventType.Ended, threadId: request.threadId,
       turnExecutionId: request.turnExecutionId, outcome: "cancelled" } satisfies AgentEvent));
   }
@@ -1408,26 +1436,32 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   /**
-   * Wait for an in-flight user-stop drain before reusing the warm session. When
-   * the drain is wedged the send discards the session and respawns via the
-   * staged-turn path rather than queueing `turn/start` behind an interrupt that
-   * may never produce `turn/completed`.
+   * Start the turn on the warm session once the turn it replaces has ended. A user Stop's drain is
+   * awaited as it is; otherwise a still-running turn is interrupted here. Either wait is bounded by
+   * {@link STOP_DRAIN_REUSE_TIMEOUT_MS}. When it expires, the old turn is abandoned and the session
+   * discarded without a second interrupt, and this turn respawns through the staged-turn path
+   * rather than queueing `turn/start` behind an interrupt that may never produce `turn/completed`.
+   * The respawn resumes the same native thread, so it waits for the old process's teardown: at once
+   * if it exits on its first signal, otherwise until the kill's termination and output-drain bounds
+   * expire (up to 5 s more on POSIX, 7 s on Windows), even if the process never confirms exit.
+   * A failed interrupt discards the session only if the old turn is still running.
    */
   private async dispatchReusedCodexTurn(turn: PreparedCodexTurn, state: CodexSessionState): Promise<void> {
     const sessionId = turn.request.sessionId;
     if (this.consumePendingCodexStop(turn)) { this.releasePendingCodexRequest(sessionId, turn.signal); return; }
     const drain = this.codexReuseDrain(state);
     if (drain) {
-      const settled = await Promise.race([
-        drain.then((value) => value, () => false),
-        new Promise<false>((resolve) => {
-          const timer = setTimeout(() => resolve(false), this.stopDrainReuseTimeoutMs);
+      const drained = await Promise.race([
+        drain.then((settled) => settled ? "settled" as const : "timedOut" as const, () => "failed" as const),
+        new Promise<"timedOut">((resolve) => {
+          const timer = setTimeout(() => resolve("timedOut"), this.stopDrainReuseTimeoutMs);
           timer.unref?.();
         }),
       ]);
+      if (drained === "timedOut") state.abandonedTurnExecutionId = state.currentTurnExecutionId;
       if (this.consumePendingCodexStop(turn)) { this.releasePendingCodexRequest(sessionId, turn.signal); return; }
       const pooled = this.runtime.get(sessionId);
-      if (!settled || !this.isCurrentCodexSession(sessionId, state) || this.isBusy(state)) {
+      if (drained === "timedOut" || !this.isCurrentCodexSession(sessionId, state) || this.isBusy(state)) {
         // The drain wedged or the session was replaced mid-wait; teardown
         // failure must not lose the staged turn, so respawn regardless. Only
         // discard when the pool still holds this entry — a concurrent send may
@@ -2422,6 +2456,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * interrupted; a `turn/start` that fails ends its own turn.
    */
   async interrupt(state: CodexSessionState): Promise<void> {
+    // A bounded interrupt wait already expired on this turn, so asking again only delays the teardown.
+    if (isAbandonedTurn(state, state.currentTurnExecutionId)) return;
     if (!state.currentNativeTurnId && state.turnStartResponsePending) await state.turnStartPromise;
     const nativeTurnId = state.currentNativeTurnId;
     if (nativeTurnId) await state.server.interruptTurnAndDrain(nativeTurnId);
@@ -2467,7 +2503,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     else if (state.browserCredential) this.host.browser.revokeCredential(state.browserCredential.credentialId);
     const turnInFlight = this.isBusy(state);
     try {
-      await state.server.kill();
+      // An abandoned turn already left an interrupt unanswered, and a replacement resuming this
+      // native thread waits for this kill, so it skips the kill's own best-effort interrupt.
+      await state.server.kill({ interruptActiveTurn: !isAbandonedTurn(state, executionForDrain(state)) });
     } finally {
       this.endTurnAfterOutput(state, turnInFlight);
     }
@@ -2476,12 +2514,16 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /**
    * Ends what the killed server's turn left open, once its output has been read to the end. A real
    * `turn/completed` read during that drain has already ended the turn and closed its routing, so
-   * the synthetic end here is dropped and the real outcome stands.
+   * the synthetic end here is dropped and the real outcome stands. A turn abandoned after its
+   * interrupt wait expired ends cancelled rather than `provider_lost`.
    */
   private endTurnAfterOutput(state: CodexSessionState, turnInFlight: boolean): void {
     const turnExecutionId = executionForDrain(state);
     this.closeTurnAssistantText(state, turnExecutionId);
-    if (turnInFlight) this.emitProviderLostEnd(state, turnExecutionId);
+    if (turnInFlight && turnExecutionId && isAbandonedTurn(state, turnExecutionId)) {
+      // The user replaced or stopped this turn and its interrupt wedged; the provider was not lost.
+      this.emitCodexTurnEvent(state, { type: AgentEventType.Ended, threadId: state.threadId, turnExecutionId, outcome: "cancelled" }, turnExecutionId);
+    } else if (turnInFlight) this.emitProviderLostEnd(state, turnExecutionId);
     state.pendingTurnStartNotification = undefined;
     state.turnStartResponsePending = false;
     state.turnBindingPhase = "idle";
@@ -2791,13 +2833,17 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     completion: CodexTurnCompletionState,
   ): boolean {
     if (error instanceof CodexTurnSupersededError) return true;
-    if (!completion.serverDied && run.seq === run.entry.runTurnSeq) {
-      completion.endedOutcome = "errored";
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error("Codex turn failed", { sessionId, error: message });
-      this.emitCodexPendingAssistantBoundary(run.entry, turnExecutionId);
-      completion.deferredEnded = this.emitTurnFailure(threadId, message, classifyCodexLocalFailure(error), completion.endedOutcome, false, turnExecutionId);
+    if (completion.serverDied || run.seq !== run.entry.runTurnSeq) return false;
+    this.emitCodexPendingAssistantBoundary(run.entry, turnExecutionId);
+    if (isAbandonedTurn(run.entry, turnExecutionId)) {
+      // The user replaced or stopped this turn; the teardown closing its transport is not a turn failure.
+      completion.endedOutcome = "cancelled";
+      return false;
     }
+    completion.endedOutcome = "errored";
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Codex turn failed", { sessionId, error: message });
+    completion.deferredEnded = this.emitTurnFailure(threadId, message, classifyCodexLocalFailure(error), completion.endedOutcome, false, turnExecutionId);
     return false;
   }
 
@@ -3031,6 +3077,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
         }),
       ]);
       if (!timedOut) return true;
+      state.abandonedTurnExecutionId = state.currentTurnExecutionId;
       // Discard below kills the server, so a late interrupt rejection is expected.
       void attempt.catch(() => {});
       return false;
