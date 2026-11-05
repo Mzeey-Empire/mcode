@@ -187,9 +187,13 @@ describe("owned agent event reduction", () => {
       state.turns = counted(state.turns);
       state.lastAcceptedSequenceByExecution = counted(state.lastAcceptedSequenceByExecution);
 
-      ownedApplied(state, [textRecorded(3, "Hel"), textAppended(4, 3, "lo"), runningTool(5, "tool-1")]);
+      const observedContext = { sourceExecution: turnRouting, parentExecution: turnRouting };
+      ownedApplied(state, [textRecorded(3, "Hel"), textAppended(4, 3, "lo"), runningTool(5, "tool-1"),
+        envelope(6, turnRouting, { type: "collaboration.observed", changes: [
+          { kind: "item-recorded", ...observedContext, item: item("observed-1", { projection: "diagnostic" }) }] })]);
 
       expect(state.items[textItemId]?.payload.content).toBe("Hello");
+      expect(state.items["observed-1"]?.payload.projection).toBe("diagnostic");
       return counts;
     };
 

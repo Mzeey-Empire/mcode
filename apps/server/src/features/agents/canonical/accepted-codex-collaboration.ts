@@ -43,14 +43,22 @@ export type AcceptedCollaborationChange = AcceptedCollaborationContext & (
   | { readonly kind: "diagnostic"; readonly diagnostic: CodexChildRoutingDiagnosticInput; readonly item: AgentItem }
 );
 
-type StateMapName = "threads" | "turns" | "items" | "collaborationActions";
+type RecordsByMap = { threads: AgentThread; turns: AgentTurn; items: AgentItem; collaborationActions: CollaborationAction };
+type StateMapName = keyof RecordsByMap;
+type AcceptedRecordMaps = { readonly [Name in StateMapName]: Readonly<Record<string, RecordsByMap[Name]>> };
+/** Records this collaboration wrote over its accepted state, by map and id. A read prefers them. */
+type RecordOverlay = { [Name in StateMapName]: Map<string, RecordsByMap[Name]> };
 type IndexName = "nativeThreads" | "nativeTurns" | "executions" | "delegations" | "receivers" | "nativeActions";
 type CollaborationIndexes = Record<IndexName, Map<string, ReadonlySet<string>>>;
-type PreparationCheckpoint = { readonly state: AgentModelState; readonly indexes: CollaborationIndexes };
+type PreparationCheckpoint = { readonly overlay: RecordOverlay; readonly indexes: CollaborationIndexes };
 type LentAcceptedState = { readonly state: AgentModelState; readonly changes: number };
 
 function lend(state: AgentModelState): LentAcceptedState {
   return { state, changes: ownedStateChangeCount(state) };
+}
+
+function emptyOverlay(): RecordOverlay {
+  return { threads: new Map(), turns: new Map(), items: new Map(), collaborationActions: new Map() };
 }
 
 /**
@@ -59,18 +67,19 @@ function lend(state: AgentModelState): LentAcceptedState {
  * parent records can be supplied to the next fork without reindexing ordinary history.
  */
 export class AcceptedCodexCollaboration implements CodexCollaborationDurability, ChildThreadRecorder {
-  private current: AgentModelState;
   /** The accepted state this collaboration was handed, and its owner's change count at that moment. */
   private lent: LentAcceptedState;
+  // Writes land here, never in the lent state: copying an accepted record map per event would cost the whole
+  // thread history, and the owner applies these records itself only after admitting the prepared changes.
+  private overlay = emptyOverlay();
   private readonly adapters: { readonly [K in ProviderRuntimeExtensionKind]: ExtensionAdapter };
   private changes: AcceptedCollaborationChange[] = [];
   private indexes: CollaborationIndexes = { nativeThreads: new Map(), nativeTurns: new Map(), executions: new Map(),
     delegations: new Map(), receivers: new Map(), nativeActions: new Map() };
-  private readonly ownedStateMaps = new Set<StateMapName>();
+  private readonly ownedOverlayMaps = new Set<StateMapName>();
   private readonly ownedIndexes = new Set<IndexName>();
 
   constructor(hydrated: AgentModelState) {
-    this.current = hydrated;
     this.lent = lend(hydrated);
     for (const thread of Object.values(hydrated.threads)) this.indexThread(thread);
     for (const turn of Object.values(hydrated.turns)) this.indexTurn(turn);
@@ -87,23 +96,39 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   fork(currentAcceptedState?: AgentModelState): AcceptedCodexCollaboration {
     const candidate = new AcceptedCodexCollaboration(createAgentModelState());
     this.releaseOwnership();
-    candidate.state = currentAcceptedState ?? this.state;
-    candidate.lent = currentAcceptedState ? lend(currentAcceptedState) : this.lent;
+    if (currentAcceptedState) {
+      candidate.lent = lend(currentAcceptedState);
+    } else {
+      candidate.lent = this.lent;
+      candidate.overlay = this.overlay;
+    }
     candidate.indexes = this.indexes;
     return candidate;
   }
 
   // Every record read passes here. The accepted progress owner reduces into its state in place instead of copying
   // it per event, so a kept reference would otherwise silently show records admitted after this fork.
-  private get state(): AgentModelState {
+  private assertCurrent(): AcceptedRecordMaps {
     if (ownedStateChangeCount(this.lent.state) !== this.lent.changes) {
       throw new Error("Accepted collaboration state has changed since this fork; fork it with the current state");
     }
-    return this.current;
+    return this.lent.state;
   }
 
-  private set state(next: AgentModelState) {
-    this.current = next;
+  private record<Name extends StateMapName>(name: Name, id: string): RecordsByMap[Name] | undefined {
+    const accepted = this.assertCurrent();
+    return this.overlay[name].get(id) ?? accepted[name][id];
+  }
+
+  /** Every record of one map in accepted order, with this collaboration's writes in place and new records last. */
+  private records<Name extends StateMapName>(name: Name): RecordsByMap[Name][] {
+    const accepted = this.assertCurrent()[name];
+    const overlay = this.overlay[name];
+    const values = Object.entries(accepted).map(([id, record]) => overlay.get(id) ?? record);
+    for (const [id, record] of overlay) {
+      if (!Object.prototype.hasOwnProperty.call(accepted, id)) values.push(record);
+    }
+    return values;
   }
 
   /** Returns the adapter's sanitized projection and at most 256 changes within 2 MiB. */
@@ -153,7 +178,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   }
 
   private settleInterruptedChildItems(turn: AgentTurn, error: string): void {
-    const items = Object.values(this.state.items).filter((item) => item.turnId === turn.id && item.threadId === turn.threadId);
+    const items = this.records("items").filter((item) => item.turnId === turn.id && item.threadId === turn.threadId);
     const completedTools = new Set(items.filter((item) => item.payload.projection === "codexChildToolResult")
       .map((item) => childNativeItemId(item)));
     const context = this.context(turn);
@@ -191,7 +216,8 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   }
 
   private beginPreparation(): PreparationCheckpoint {
-    const checkpoint = { state: this.state, indexes: this.indexes };
+    this.assertCurrent();
+    const checkpoint = { overlay: this.overlay, indexes: this.indexes };
     this.releaseOwnership();
     this.changes = [];
     return checkpoint;
@@ -205,24 +231,24 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   }
 
   private restoreState(before: PreparationCheckpoint): void {
-    this.state = before.state;
+    this.overlay = before.overlay;
     this.indexes = before.indexes;
     this.releaseOwnership();
   }
 
   private releaseOwnership(): void {
-    this.ownedStateMaps.clear();
+    this.ownedOverlayMaps.clear();
     this.ownedIndexes.clear();
   }
 
-  loadThread(id: string): AgentThread | null { return this.state.threads[id] ?? null; }
-  loadTurn(id: string): AgentTurn | null { return this.state.turns[id] ?? null; }
+  loadThread(id: string): AgentThread | null { return this.record("threads", id) ?? null; }
+  loadTurn(id: string): AgentTurn | null { return this.record("turns", id) ?? null; }
   loadThreadByProviderIdentity(identity: ProviderIdentity): AgentThread | null {
     return this.loadThread(unique(this.indexes.nativeThreads, identityKey(identity), "Codex native thread") ?? "");
   }
   loadTurnByExecution(id: string): AgentTurn | null {
     if (!this.indexes.executions.has(id)) {
-      for (const turn of Object.values(this.state.turns)) if (turn.executionId === id) this.indexTurn(turn);
+      for (const turn of this.records("turns")) if (turn.executionId === id) this.indexTurn(turn);
     }
     return this.loadTurn(unique(this.indexes.executions, id, "Codex execution") ?? "");
   }
@@ -230,13 +256,13 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     return this.loadTurn(unique(this.indexes.nativeTurns, `${threadId}:${identityKey(identity)}`, "Codex native turn") ?? "");
   }
   loadLatestTurn(threadId: string): AgentTurn | null {
-    return Object.values(this.state.turns).filter((turn) => turn.threadId === threadId)
+    return this.records("turns").filter((turn) => turn.threadId === threadId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))[0] ?? null;
   }
   loadExecutionIdForTurn(turnId: string): string { return this.execution(this.requireTurn(turnId)).executionId; }
   loadCollaborationActionBySourceProviderIdentity(threadId: string, turnId: string, identity: ProviderIdentity): CollaborationAction | null {
     const id = unique(this.indexes.nativeActions, `${threadId}:${turnId}:${identityKey(identity)}`, "Codex native action");
-    return id ? this.state.collaborationActions[id] ?? null : null;
+    return id ? this.record("collaborationActions", id) ?? null : null;
   }
   loadCodexChildDelegation(threadId: string, itemId: string): CodexChildDelegation | null {
     return this.delegation(unique(this.indexes.delegations, `${threadId}:${itemId}`, "Codex delegation"));
@@ -305,7 +331,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     const record = childItemRecord(child.childThreadId, input);
     const key = input.kind === "message" ? "stream" : record.eventKey;
     const id = `item:child:${hash(JSON.stringify([turn.id, input.nativeItemId, key, input.kind]))}`;
-    const existing = this.state.items[id];
+    const existing = this.record("items", id);
     if (existing?.payload.eventKey === "stream-complete" && record.eventKey === "stream") return existing;
     if (existing && input.kind !== "message" && !NodeUtil.isDeepStrictEqual(existing.payload,
       { ...publicChildPayload(record.payload), nativeItemId: input.nativeItemId, eventKey: record.eventKey })) {
@@ -415,7 +441,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   }
 
   private recordItemInTurn(turn: AgentTurn, id: string, input: Omit<CodexChildItemInput, "nativeTurnId">, stream: boolean): AgentItem {
-    const existing = this.state.items[id];
+    const existing = this.record("items", id);
     if (existing) return this.updateChildItem(existing, input, turn, stream);
     if (isTerminal(turn)) throw new Error(`Codex child turn is terminal: ${turn.id}`);
     const now = timestamp();
@@ -432,7 +458,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     return this.finishTurn(this.childTurn(input.childThreadId, input.nativeTurnId), input.outcome, input.error);
   }
   finishCanonicalChildTurn(input: CanonicalChildTurnFinishInput): AgentTurn | null {
-    const turn = Object.values(this.state.turns).filter((entry) => entry.threadId === input.childThreadId && entry.status === "Running")
+    const turn = this.records("turns").filter((entry) => entry.threadId === input.childThreadId && entry.status === "Running")
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))[0];
     return turn ? this.finishTurn(turn, input.outcome, input.error) : null;
   }
@@ -442,7 +468,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   markUnresolvedCodexChildDeliveriesUnknown(executionId: string): string[] {
     const turn = this.loadTurnByExecution(executionId);
     if (!turn) throw new Error(`Codex owning execution was not found: ${executionId}`);
-    const actions = Object.values(this.state.collaborationActions).filter((action) => action.source.turnId === turn.id
+    const actions = this.records("collaborationActions").filter((action) => action.source.turnId === turn.id
       && ["Pending", "Dispatched"].includes(action.status) && !action.target.turnId && !action.deliveryUnknown);
     if (actions.length > MAX_CHANGES / 3) throw new Error("Accepted Codex unresolved delivery limit exceeded");
     for (const action of actions) this.markDelivery({ parentThreadId: turn.threadId, parentTurnId: turn.id,
@@ -462,11 +488,11 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     const turn = this.requireTurn(input.sourceTurnId);
     this.assertExecution(turn, input.sourceThreadId, input.sourceExecutionId);
     const target = this.collaborationTarget(input);
-    const existing = this.state.collaborationActions[input.actionId];
+    const existing = this.record("collaborationActions", input.actionId);
     const now = timestamp();
     const action = collaborationAction(input, target, existing, now);
     assertActionIdentity(existing, action);
-    const item = this.state.items[input.sourceItemId];
+    const item = this.record("items", input.sourceItemId);
     assertSourceItem(item, turn);
     const context = this.context(turn);
     if (!item) this.recordItem({ id: input.sourceItemId, threadId: turn.threadId, turnId: turn.id, kind: "tool-call",
@@ -487,7 +513,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     const turn = this.diagnosticTurn(input);
     if (!turn || turn.threadId !== input.threadId || !this.loadThread(turn.threadId)) return false;
     const id = `item:codex-child-routing-failure:${hash(`${turn.id}:${input.parentItemId ?? ""}:${input.reason}`)}`;
-    if (this.state.items[id]) return true;
+    if (this.record("items", id)) return true;
     const now = timestamp();
     const item: AgentItem = { id, threadId: turn.threadId, turnId: turn.id, kind: "error",
       ...(input.parentItemId ? { parentItemId: input.parentItemId } : {}), providerIdentities: [...turn.providerIdentities],
@@ -500,7 +526,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
 
   private diagnosticTurn(input: CodexChildRoutingDiagnosticInput): AgentTurn | null {
     if (input.executionId) return this.loadTurnByExecution(input.executionId);
-    const item = input.parentItemId ? this.state.items[input.parentItemId] : undefined;
+    const item = input.parentItemId ? this.record("items", input.parentItemId) : undefined;
     return item?.turnId ? this.loadTurn(item.turnId) : this.loadLatestTurn(input.threadId);
   }
   private markDelivery(input: CodexChildDeliveryInput, unknown: boolean): CodexChildDelegation {
@@ -532,7 +558,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   }
   private recordPrompt(turn: AgentTurn, action: CollaborationAction, prompt: string): void {
     const id = `item:codex-child-prompt:${hash(turn.id)}`;
-    if (this.state.items[id]) return;
+    if (this.record("items", id)) return;
     const now = timestamp();
     const message = MessageSchema().parse({ id: `codex-child-prompt:${hash(turn.id)}`, thread_id: turn.threadId,
       role: "user", content: prompt, tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null,
@@ -573,7 +599,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     return { ...payload, projection: "message", message };
   }
   private nextMessageSequence(threadId: string): number {
-    return Object.values(this.state.items).filter((item) => item.threadId === threadId && item.kind === "message" && item.payload.projection === "message").length;
+    return this.records("items").filter((item) => item.threadId === threadId && item.kind === "message" && item.payload.projection === "message").length;
   }
   private finishTurn(turn: AgentTurn, outcome: TurnOutcome, error?: string): AgentTurn {
     if (isTerminal(turn)) return turn;
@@ -591,7 +617,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     return turn;
   }
   private activeTurn(threadId: string): AgentTurn | null {
-    const turns = Object.values(this.state.turns).filter((turn) => turn.threadId === threadId && !isTerminal(turn));
+    const turns = this.records("turns").filter((turn) => turn.threadId === threadId && !isTerminal(turn));
     if (turns.length > 1) throw new Error(`Codex thread has conflicting active turns: ${threadId}`);
     return turns[0] ?? null;
   }
@@ -606,7 +632,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     return turn;
   }
   private requireAction(id: string): CollaborationAction {
-    const action = this.state.collaborationActions[id];
+    const action = this.record("collaborationActions", id);
     if (!action) throw new Error(`Codex collaboration action not found: ${id}`);
     return action;
   }
@@ -619,7 +645,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   private delegation(actionId: string | undefined): CodexChildDelegation | null {
     if (!actionId) return null;
     const action = this.requireAction(actionId);
-    const item = this.state.items[action.source.itemId];
+    const item = this.record("items", action.source.itemId);
     if (!item || item.threadId !== action.source.threadId || item.turnId !== action.source.turnId) throw new Error("Codex delegation parent item is incomplete");
     return { childThread: this.requireThread(action.target.threadId), parentItem: item, collaborationAction: action };
   }
@@ -637,25 +663,27 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     return { threadId: turn.threadId, turnId: turn.id, executionId: turn.executionId };
   }
   private context(turn: AgentTurn): AcceptedCollaborationContext {
-    const action = Object.values(this.state.collaborationActions).find((entry) => entry.kind === "delegate" && entry.target.threadId === turn.threadId);
+    const action = this.records("collaborationActions").find((entry) => entry.kind === "delegate" && entry.target.threadId === turn.threadId);
     return { sourceExecution: this.execution(turn), parentExecution: action ? this.execution(this.requireTurn(action.source.turnId)) : this.execution(turn) };
   }
   private putThread(thread: AgentThread): void {
-    this.writableStateMap("threads")[thread.id] = thread;
+    this.writableOverlay("threads").set(thread.id, thread);
     this.indexThread(thread);
   }
   private putTurn(turn: AgentTurn): void {
-    this.writableStateMap("turns")[turn.id] = turn;
+    this.writableOverlay("turns").set(turn.id, turn);
     this.indexTurn(turn);
   }
-  private putItem(item: AgentItem): void { this.writableStateMap("items")[item.id] = item; }
+  private putItem(item: AgentItem): void { this.writableOverlay("items").set(item.id, item); }
 
-  private writableStateMap<Name extends StateMapName>(name: Name): AgentModelState[Name] {
-    if (!this.ownedStateMaps.has(name)) {
-      this.state = { ...this.state, [name]: { ...this.state[name] } };
-      this.ownedStateMaps.add(name);
+  // Copy-on-write per preparation, like the indexes: a checkpoint keeps the previous overlay maps, and a fork without
+  // a newer accepted state shares them. The copy holds only this collaboration's writes, never accepted history.
+  private writableOverlay<Name extends StateMapName>(name: Name): RecordOverlay[Name] {
+    if (!this.ownedOverlayMaps.has(name)) {
+      this.overlay = { ...this.overlay, [name]: new Map(this.overlay[name]) };
+      this.ownedOverlayMaps.add(name);
     }
-    return this.state[name];
+    return this.overlay[name];
   }
 
   private writableIndex(name: IndexName): CollaborationIndexes[IndexName] {
@@ -674,7 +702,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     this.changes.push({ kind: "item-recorded", ...context, item });
   }
   private recordAction(action: CollaborationAction, context: AcceptedCollaborationContext): void {
-    this.writableStateMap("collaborationActions")[action.id] = action;
+    this.writableOverlay("collaborationActions").set(action.id, action);
     this.indexAction(action);
     this.changes.push({ kind: "action-recorded", ...context, action });
   }

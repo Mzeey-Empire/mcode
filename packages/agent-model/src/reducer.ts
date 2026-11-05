@@ -150,13 +150,9 @@ function decided(
 
 function reduceCollaborationObserved(state: AgentModelState, event: AgentEvent, acceptedInput: readonly AgentModelWrite[]): AgentEventDecision {
   if (event.payload.type !== "collaboration.observed" || !event.routing.turnId) return ROUTING_CONFLICT;
-  const candidate = applyCollaborationObservation(state, { ...event.routing, turnId: event.routing.turnId }, event.payload.changes);
-  if (!candidate) return ROUTING_CONFLICT;
-  return decided("applied", acceptedInput,
-    { map: "threads", replacement: candidate.threads },
-    { map: "turns", replacement: candidate.turns },
-    { map: "items", replacement: candidate.items },
-    { map: "collaborationActions", replacement: candidate.collaborationActions });
+  const writes = applyCollaborationObservation(state, { ...event.routing, turnId: event.routing.turnId }, event.payload.changes);
+  if (!writes) return ROUTING_CONFLICT;
+  return decided("applied", acceptedInput, ...writes);
 }
 
 /** Create an empty canonical reducer state. */

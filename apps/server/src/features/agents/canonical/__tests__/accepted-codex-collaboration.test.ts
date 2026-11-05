@@ -81,6 +81,66 @@ function continuation(executionId = CONTINUATION_EXECUTION, targetNativeThreadId
   } });
 }
 
+/** Wraps each record map so every key enumeration (a spread copy or an `Object.values` scan) is counted. */
+function countRecordEnumeration(state: AgentModelState): { readonly keys: () => number; readonly rewrap: () => void } {
+  const counted = new WeakSet<object>();
+  let keys = 0;
+  const wrap = <T extends object>(map: T): T => {
+    if (counted.has(map)) return map;
+    const proxy = new Proxy(map, { ownKeys: (target) => {
+      const own = Reflect.ownKeys(target);
+      keys += own.length;
+      return own;
+    } });
+    counted.add(proxy);
+    return proxy;
+  };
+  // A reduction that replaces a whole map hands back an uncounted copy, so wrap again after each one.
+  const rewrap = () => {
+    state.threads = wrap(state.threads);
+    state.turns = wrap(state.turns);
+    state.items = wrap(state.items);
+    state.collaborationActions = wrap(state.collaborationActions);
+  };
+  rewrap();
+  return { keys: () => keys, rewrap };
+}
+
+/** Streams child text the way accepted progress does: fork over the current state, prepare, then reduce in place. */
+function streamChildTextOverHistory(historySize: number, deltas: number): { readonly enumeratedKeys: number; readonly content: unknown } {
+  const state = initial();
+  for (let index = 0; index < historySize; index++) {
+    const id = `ordinary-tool-${index}`;
+    state.items[id] = { id, threadId: "parent", turnId: "parent-turn", kind: "tool-call", providerIdentities: [],
+      payload: { projection: "toolCall", completed: true }, createdAt: NOW, updatedAt: NOW };
+  }
+  let collaboration: AcceptedCodexCollaboration | undefined;
+  let sequence = 0;
+  const admit = (input: ProviderEventIngressEvent) => {
+    const candidate = collaboration?.fork(state) ?? new AcceptedCodexCollaboration(state);
+    const { changes } = candidate.prepare(input);
+    sequence += 1;
+    const reduced = applyOwnedAgentEventBatch(state, [CanonicalAgentSemanticEnvelopeSchema.parse({
+      eventId: `collaboration-${sequence}`, routing: { threadId: "parent", turnId: "parent-turn", executionId: PARENT_EXECUTION },
+      sourceProviderId: "codex", sourceIdentities: [], acceptedSequence: sequence, serverTimestamps: { acceptedAt: NOW },
+      payload: { type: "collaboration.observed", changes } })]);
+    if (reduced.outcome !== "applied") throw new Error(`Expected admitted collaboration, got ${reduced.reason}`);
+    collaboration = candidate;
+  };
+  admit(spawn());
+  admit(childStart());
+  admit(textDelta("Child"));
+  const enumeration = countRecordEnumeration(state);
+  for (let index = 0; index < deltas; index++) {
+    admit(textDelta(` ${index}`));
+    enumeration.rewrap();
+  }
+  const enumeratedKeys = enumeration.keys();
+  const reply = Object.values(state.items).map((item) => item.payload.message)
+    .find((message) => MessageSchema().safeParse(message).data?.role === "assistant");
+  return { enumeratedKeys, content: reply };
+}
+
 describe("AcceptedCodexCollaboration", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -188,7 +248,7 @@ describe("AcceptedCodexCollaboration", () => {
     expect(message.item.payload.message).toMatchObject({ content: "Accepted tail" });
   });
 
-  it("forks large accepted history without enumerating record maps and copies each touched map only once", () => {
+  it("forks large accepted history and prepares over it without enumerating or copying its record maps", () => {
     const base = initial();
     const history: Record<string, AgentItem> = {};
     for (let index = 0; index < 5_000; index++) {
@@ -213,12 +273,22 @@ describe("AcceptedCodexCollaboration", () => {
     expect(itemKeys).not.toHaveBeenCalled();
     const prepared = candidate.prepare(spawn());
     expect(prepared.projection.status).toBe("forward");
-    expect(threadKeys).toHaveBeenCalledTimes(1);
-    expect(itemKeys).toHaveBeenCalledTimes(1);
+    expect(threadKeys).not.toHaveBeenCalled();
+    expect(itemKeys).not.toHaveBeenCalled();
     expect(turnKeys).not.toHaveBeenCalled();
     expect(Object.keys(history)).toHaveLength(5_000);
     expect(accepted.loadCodexChildDelegationByReceiverThreadId("native-child")).toBeNull();
     expect(candidate.loadCodexChildDelegationByReceiverThreadId("native-child")).not.toBeNull();
+  });
+
+  it("streams child text over a long accepted history without work that grows with that history", () => {
+    const short = streamChildTextOverHistory(1_000, 20);
+    const long = streamChildTextOverHistory(10_000, 20);
+
+    const streamed = `Child${Array.from({ length: 20 }, (_, index) => ` ${index}`).join("")}`;
+    expect(short.content).toMatchObject({ role: "assistant", content: streamed });
+    expect(long.content).toMatchObject({ role: "assistant", content: streamed });
+    expect(long.enumeratedKeys).toBe(short.enumeratedKeys);
   });
 
   it("refreshes accepted parent records on fork while keeping child indexes and source ownership", () => {
