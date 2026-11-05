@@ -4,14 +4,14 @@ import type { Database } from "bun:sqlite";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AcceptedCanonicalAgentEventEnvelopeSchema } from "@mcode/contracts/compat/agent-model";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
-import { CanonicalAgentWriterClient as SharedCanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
+import { CanonicalAgentWriterClient as SharedCanonicalAgentWriterClient, CanonicalWriterAcknowledgementCapacity } from "../canonical-agent-writer-client.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { workspaceWriteOperations } from "../../../projects/persistence/workspace-write-operations.js";
 import { CanonicalAgentWriterReceipts } from "../canonical-agent-writer-receipts.js";
@@ -319,7 +319,7 @@ describe("canonical SQLite writer", () => {
     expect(secondSaved.events.map((event) => event.acceptedSequence)).toEqual([1, 2]);
     db.run(`CREATE TRIGGER reject_headless_ack BEFORE DELETE ON canonical_writer_thread_operation_receipts
       BEGIN SELECT RAISE(FAIL, 'headless ack unavailable'); END`);
-    await expect(writer.acknowledgeOperation(first.execution.executionId, "same-headless-operation"))
+    await expect(writer.acknowledgeOperations([{ executionId: first.execution.executionId, operationId: "same-headless-operation" }]))
       .rejects.toThrow("Canonical writer write-failed");
     expect(writer.pendingAcknowledgementCount).toBe(1);
     db.run("DROP TRIGGER reject_headless_ack");
@@ -329,10 +329,10 @@ describe("canonical SQLite writer", () => {
     await writer.close();
     let workers = 0;
     writer = new CanonicalAgentWriterClient(dbPath, () => ++workers === 1
-      ? workerDroppingReply("operation-acknowledged")
+      ? workerDroppingReply("operations-acknowledged")
       : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
-    await writer.acknowledgeOperation(second.execution.executionId, "same-headless-operation");
-    await writer.acknowledgeOperation(second.execution.executionId, "same-headless-operation");
+    await writer.acknowledgeOperations([{ executionId: second.execution.executionId, operationId: "same-headless-operation" }]);
+    await writer.acknowledgeOperations([{ executionId: second.execution.executionId, operationId: "same-headless-operation" }]);
     expect(workers).toBe(2);
     expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_thread_operation_receipts").get()).toEqual({ count: 0 });
     expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 4 });
@@ -371,7 +371,7 @@ describe("canonical SQLite writer", () => {
       (execution_id, thread_id, operation_id, kind, input_hash, receipt_json)
       VALUES (?, ?, 'ambiguous-receipt', 'append-accepted', 'seed', '{}')`).run(input.execution.executionId, THREAD_ID);
     try {
-      await expect(writer.acknowledgeOperation(input.execution.executionId, "ambiguous-receipt"))
+      await expect(writer.acknowledgeOperations([{ executionId: input.execution.executionId, operationId: "ambiguous-receipt" }]))
         .rejects.toThrow("Canonical writer write-failed");
       expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 1 });
       expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_thread_operation_receipts").get()).toEqual({ count: 1 });
@@ -420,7 +420,7 @@ describe("canonical SQLite writer", () => {
       .run(otherThreadId, "writer-workspace", "Other capacity", "main", "codex", NOW, NOW);
     expect(await writer.appendAccepted("headless-capacity", headlessAcceptedInput(otherThreadId, "headless-capacity")))
       .toMatchObject({ receipt: { durableRevision: 1 } });
-    await writer.acknowledgeOperation(input.execution.executionId, "headless-capacity");
+    await writer.acknowledgeOperations([{ executionId: input.execution.executionId, operationId: "headless-capacity" }]);
     expect(await writer.appendAccepted("headless-capacity-next", nextInput))
       .toMatchObject({ receipt: { durableRevision: 2 } });
     expect(await writer.commit("turn-capacity", { threadId: THREAD_ID, turnId: TURN_ID,
@@ -1034,8 +1034,8 @@ describe("canonical SQLite writer", () => {
     const before = db.prepare("SELECT COUNT(*) AS count, SUM(LENGTH(receipt_json)) AS bytes FROM canonical_writer_operation_receipts").get();
     expect(before).toEqual({ count: 16_384, bytes: expect.any(Number) });
     await expect(writer.commit("capacity-over", batch)).rejects.toThrow("Canonical writer receipt-capacity");
-    await writer.acknowledgeOperation(EXECUTION_ID, "capacity-start");
-    await writer.acknowledgeOperation(EXECUTION_ID, "capacity-start");
+    await writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: "capacity-start" }]);
+    await writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: "capacity-start" }]);
     expect(await writer.commit("capacity-over", batch)).toMatchObject({ outcome: "duplicate" });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get())
       .toEqual({ count: 16_384 });
@@ -1044,13 +1044,63 @@ describe("canonical SQLite writer", () => {
       .toEqual({ count: 0 });
   }, 30_000);
 
+  it("batches 200 handled saves into at most four cleanup requests", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.whenReady();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const send = vi.spyOn(writer.owner, "sendCanonical");
+      let input = headlessAcceptedInput(THREAD_ID, "batched-0");
+      for (let index = 0; index < 200; index++) {
+        const saved = await writer.appendAccepted(`batched-${index}`, input);
+        writer.enqueueAcknowledgement(input.execution.executionId, `batched-${index}`);
+        input = nextHeadlessInput(input, `batched-${index + 1}`);
+        input = { ...input, baseRevision: saved.receipt.durableRevision,
+          events: input.events.map((event) => ({ ...event, acceptedSequence: input.through.sequence })) };
+      }
+      await writer.close();
+      const requests = send.mock.calls.filter(([request]) => request.kind === "ack-operations");
+      expect(requests.length).toBeGreaterThan(0);
+      expect(requests.length).toBeLessThanOrEqual(4);
+      expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 201 });
+      expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_thread_operation_receipts").get()).toEqual({ count: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("flushes queued receipt deletion before close resolves", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.commit("queued-close", { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() });
+    writer.enqueueAcknowledgement(EXECUTION_ID, "queued-close");
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 1 });
+    await writer.close();
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 0 });
+  });
+
+  it("retains a failed deferred drain and bounds queued plus pending cleanup", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
+    for (let index = 0; index < 65; index++) await writer.commit(`deferred-${index}`, batch);
+    db.run(`CREATE TRIGGER reject_receipt_delete BEFORE DELETE ON canonical_writer_operation_receipts
+      BEGIN SELECT RAISE(FAIL, 'ack unavailable'); END`);
+    writer.enqueueAcknowledgement(EXECUTION_ID, "deferred-0");
+    await expect.poll(() => writer.pendingAcknowledgementCount).toBe(1);
+    for (let index = 1; index < 64; index++) writer.enqueueAcknowledgement(EXECUTION_ID, `deferred-${index}`);
+    expect(() => writer.enqueueAcknowledgement(EXECUTION_ID, "deferred-64")).toThrow(CanonicalWriterAcknowledgementCapacity);
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 65 });
+    db.run("DROP TRIGGER reject_receipt_delete");
+    await writer.close();
+    expect(db.query("SELECT operation_id FROM canonical_writer_operation_receipts").all()).toEqual([{ operation_id: "deferred-64" }]);
+  });
+
   it("retries a failed acknowledgement before the next write", async () => {
     writer = new CanonicalAgentWriterClient(dbPath);
     const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
     await writer.commit("ack-retry-start", batch);
     db.run(`CREATE TRIGGER reject_receipt_delete BEFORE DELETE ON canonical_writer_operation_receipts
       BEGIN SELECT RAISE(FAIL, 'ack unavailable'); END`);
-    await expect(writer.acknowledgeOperation(EXECUTION_ID, "ack-retry-start"))
+    await expect(writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: "ack-retry-start" }]))
       .rejects.toThrow("Canonical writer write-failed");
     expect(writer.pendingAcknowledgementCount).toBe(1);
     db.run("DROP TRIGGER reject_receipt_delete");
@@ -1067,11 +1117,11 @@ describe("canonical SQLite writer", () => {
     await writer.close();
     let created = 0;
     writer = new CanonicalAgentWriterClient(dbPath, () => created++ === 0
-      ? workerDroppingReply("operation-acknowledged")
+      ? workerDroppingReply("operations-acknowledged")
       : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
     const before = db.prepare("SELECT event_id FROM canonical_agent_events").all();
-    await writer.acknowledgeOperation(EXECUTION_ID, "lost-ack");
-    await writer.acknowledgeOperation(EXECUTION_ID, "lost-ack");
+    await writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: "lost-ack" }]);
+    await writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: "lost-ack" }]);
     expect(created).toBe(2);
     expect(writer.pendingAcknowledgementCount).toBe(0);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 0 });
@@ -1085,7 +1135,7 @@ describe("canonical SQLite writer", () => {
     });
     db.run(`CREATE TRIGGER reject_receipt_delete BEFORE DELETE ON canonical_writer_operation_receipts
       BEGIN SELECT RAISE(FAIL, 'ack unavailable'); END`);
-    await expect(writer.acknowledgeOperation(EXECUTION_ID, "ack-close-start"))
+    await expect(writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: "ack-close-start" }]))
       .rejects.toThrow("Canonical writer write-failed");
     db.run("DROP TRIGGER reject_receipt_delete");
     await writer.close();
@@ -1101,10 +1151,10 @@ describe("canonical SQLite writer", () => {
     db.run(`CREATE TRIGGER reject_receipt_delete BEFORE DELETE ON canonical_writer_operation_receipts
       BEGIN SELECT RAISE(FAIL, 'ack unavailable'); END`);
     for (let index = 0; index < 64; index++) {
-      await expect(writer.acknowledgeOperation(EXECUTION_ID, `ack-full-${index}`))
+      await expect(writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: `ack-full-${index}` }]))
         .rejects.toThrow("Canonical writer write-failed");
     }
-    await expect(writer.acknowledgeOperation(EXECUTION_ID, "ack-full-64"))
+    await expect(writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: "ack-full-64" }]))
       .rejects.toThrow("Canonical writer acknowledgement retry queue is full");
     expect(writer.pendingAcknowledgementCount).toBe(64);
     await expect(writer.close()).rejects.toThrow("64 unacknowledged operations");

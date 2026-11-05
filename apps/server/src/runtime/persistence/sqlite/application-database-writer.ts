@@ -18,7 +18,7 @@ const RESERVED_CONTROL = 32;
 const RESERVED_CONTROL_BYTES = 2 * 1024 * 1024;
 const MAX_RECEIPT_ATTEMPTS = 3;
 const CONTROL_REQUEST_KINDS = new Set<ApplicationDatabaseWriterRequest["kind"]>([
-  "close", "ack-operation", "semantic-worker-loss", "query-only-policy",
+  "close", "ack-operations", "semantic-worker-loss", "query-only-policy",
 ]);
 
 interface PendingWrite {

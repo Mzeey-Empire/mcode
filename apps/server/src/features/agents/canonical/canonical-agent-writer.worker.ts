@@ -131,11 +131,11 @@ async function handle(request: CanonicalWriterRequest): Promise<CanonicalWriterR
     db = undefined;
     return { ...correlation, kind: "closed" };
   }
-  if (request.kind === "ack-operation") {
+  if (request.kind === "ack-operations") {
     try {
       if (!receipts) throw new Error("Canonical writer has not opened its database");
-      receipts.acknowledge(request.executionId, request.operationId);
-      return { ...correlation, kind: "operation-acknowledged" };
+      receipts.acknowledgeMany(request.operations);
+      return { ...correlation, kind: "operations-acknowledged" };
     } catch (error) {
       return { ...correlation, kind: "failed", reason: "write-failed", failure: describeFailure(error) };
     }
