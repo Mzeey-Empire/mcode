@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1e1e6590-5a97-461c-bda1-64c6ef7891f0",
+  "id": "619e634e-8861-4f91-937f-c6880c844584",
   "prevId": "02e3ca3c-c7d7-4917-bbc9-b05e59d8cc28",
   "tables": {
     "approval_receipts": {
@@ -481,14 +481,6 @@
         }
       },
       "indexes": {
-        "idx_canonical_agent_items_turn": {
-          "name": "idx_canonical_agent_items_turn",
-          "columns": [
-            "turn_id",
-            "created_at"
-          ],
-          "isUnique": false
-        },
         "idx_canonical_agent_items_turn_kind": {
           "name": "idx_canonical_agent_items_turn_kind",
           "columns": [

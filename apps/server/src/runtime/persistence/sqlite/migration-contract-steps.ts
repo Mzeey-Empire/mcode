@@ -69,6 +69,9 @@ export const CONTRACT_STEPS: Readonly<Record<string, ContractStep>> = {
 
 /** Migrations after the floor migration that are not auto-additive but do not break older builds. */
 export const COMPATIBLE_STEPS: Readonly<Record<string, CompatibleStep>> = {
+  "0107_silly_scourge": {
+    reason: "Drops a non-unique index. Older builds' queries still run with a different plan, using the new turn and kind index for turn_id equality filters.",
+  },
   "0098_workable_cardiac": {
     reason: "Adds nullable threads.fast_mode, backfills it from codex_fast_mode, and adds triggers that copy codex_fast_mode writes into fast_mode. Older builds keep reading and writing codex_fast_mode, which newer builds still write, and the triggers keep fast_mode current after an older build writes. Drop both triggers before dropping codex_fast_mode.",
   },

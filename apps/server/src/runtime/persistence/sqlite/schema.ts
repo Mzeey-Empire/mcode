@@ -785,7 +785,6 @@ export const canonicalAgentItems = sqliteTable(
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [
-    index("idx_canonical_agent_items_turn").on(table.turnId, table.createdAt),
     index("idx_canonical_agent_items_turn_kind").on(table.turnId, table.kind, table.createdAt),
     index("idx_canonical_agent_items_thread").on(table.threadId, table.createdAt),
     index("idx_canonical_agent_items_thread_message").on(
