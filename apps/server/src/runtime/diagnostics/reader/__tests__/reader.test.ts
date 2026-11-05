@@ -106,25 +106,58 @@ describe("diagnostics reader", () => {
     expect(text).toContain("run earlier pid 41: started unknown (previous unknown); ended no exit record; last record at 1970-01-01T00:00:01.950Z");
   });
 
-  it("reads a batch rewritten by a fatal flush once, skipping its torn copy", () => {
-    const marker: DiagRecord = { t: 1500, n: 1, th: "a", k: "run", ch: "diag", run: "crashed", pid: 41, state: "on" };
-    const before: DiagRecord = { t: 2000, n: 2, th: "a", k: "ev", ch: "agent.created", d: "crashed" };
-    // Another process shares the thread file and happens to stamp a different record the same.
-    const otherMarker: DiagRecord = { t: 1600, n: 1, th: "a", k: "run", ch: "diag", run: "other", pid: 42, state: "on" };
-    const other: DiagRecord = { ...before, d: "other" };
-    const fatal: DiagRecord = { t: 2500, n: 3, th: "a", k: "ev", ch: "agent.created", d: "fatal" };
-    const batch = [marker, before].map((row) => JSON.stringify(row) + "\n").join("");
-    const torn = batch.slice(0, batch.length - 20);
-    const otherBatch = [otherMarker, other].map((row) => JSON.stringify(row) + "\n").join("");
-    const rewrite = "\n" + batch + JSON.stringify(fatal) + "\n";
-    NodeFS.writeFileSync(recordingPath("t", "a.jsonl"), batch + otherBatch + torn + rewrite);
+  /** The text one sink append writes: a header naming its run, then its records. */
+  function appended(writer: string, rows: DiagRecord[], replay = false): string {
+    const header = JSON.stringify(replay ? { writer, replay: true } : { writer }) + "\n";
+    // A fatal flush's rewrite starts on a fresh line, after any torn copy.
+    return (replay ? "\n" : "") + header + rows.map((row) => JSON.stringify(row) + "\n").join("");
+  }
+
+  function marker(run: string, t: number): DiagRecord {
+    return { t, n: 1, th: "a", k: "run", ch: "diag", run, pid: 41, state: "on" };
+  }
+
+  it("reads a batch a fatal flush rewrote once, skipping its torn copy", () => {
+    const before: DiagRecord = { t: 2000, n: 2, th: "a", k: "ev", ch: "agent.created", d: "before" };
+    const middle: DiagRecord = { t: 2100, n: 3, th: "a", k: "ev", ch: "agent.created", d: "middle" };
+    const fatal: DiagRecord = { t: 2500, n: 4, th: "a", k: "ev", ch: "agent.created", d: "fatal" };
+    const original = appended("crashed", [before, middle]);
+    NodeFS.writeFileSync(recordingPath("t", "a.jsonl"), [
+      appended("crashed", [marker("crashed", 1500)]),
+      // Another process shares the thread file, so its marker sits above the crashed run's records.
+      appended("other", [marker("other", 1600)]),
+      original.slice(0, original.length - 20),
+      appended("crashed", [before, middle], true),
+      appended("crashed", [fatal]),
+    ].join(""));
     q.thread = "a";
     expect(loadEvidence(q).records).toEqual([
-      marker,
-      otherMarker,
+      marker("crashed", 1500),
+      marker("other", 1600),
       { ...before, run: "crashed" },
-      { ...other, run: "other" },
+      { ...middle, run: "crashed" },
       { ...fatal, run: "crashed" },
+    ]);
+  });
+
+  it("keeps byte-identical records that two processes wrote to one thread file", () => {
+    const event: DiagRecord = { t: 2000, n: 2, th: "a", k: "ev", ch: "agent.created", d: "same" };
+    NodeFS.writeFileSync(recordingPath("t", "a.jsonl"), [
+      appended("first", [marker("first", 1500)]),
+      appended("second", [marker("second", 1600)]),
+      // The first run's append lands below the second run's marker; its header still names it.
+      appended("first", [event]),
+      appended("second", [event]),
+      // A third run crashed before its background append landed, so its rewrite is its only copy.
+      appended("third", [event], true),
+    ].join(""));
+    q.thread = "a";
+    expect(loadEvidence(q).records).toEqual([
+      marker("first", 1500),
+      marker("second", 1600),
+      { ...event, run: "first" },
+      { ...event, run: "second" },
+      { ...event, run: "third" },
     ]);
   });
 

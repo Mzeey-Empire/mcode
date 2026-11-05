@@ -4,7 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "../../logging/index.js";
-import { DiagRecorder, parseDiagLine, type DiagRecord } from "../index.js";
+import { DiagRecorder, parseAppendHeader, parseDiagLine, type DiagRecord } from "../index.js";
 
 const SEGMENT_BYTES = 4 * 1024 * 1024;
 const MAX_OPEN_SPANS = 10_000;
@@ -36,7 +36,7 @@ describe("diagnostics recorder", () => {
   function parseFile(file: string): DiagRecord[] {
     const lines = NodeFS.readFileSync(file, "utf8")
       .split("\n")
-      .filter((line) => line !== "");
+      .filter((line) => line !== "" && parseAppendHeader(line) === undefined);
     return lines.map((line) => {
       const record = parseDiagLine(line);
       if (!record) throw new Error("Unparseable recording line: " + line.slice(0, 80));

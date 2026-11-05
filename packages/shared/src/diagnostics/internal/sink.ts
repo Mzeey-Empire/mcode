@@ -2,7 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { logger } from "../../logging/index.js";
-import type { DiagRecord } from "../record.js";
+import { appendHeaderLine, type DiagRecord } from "../record.js";
 import { describeError } from "./error-message.js";
 import { applyRetention, RETENTION_INTERVAL_MS } from "./retention.js";
 
@@ -73,8 +73,15 @@ export class Sink {
   private failed = false;
   private retentionRunning = false;
   private lastRetentionAt = Date.now();
+  /** Opens every append, so a reader can tell this run's lines from another process's. */
+  private readonly header: string;
+  /** Opens the fatal flush's rewrite, so a reader drops only this run's own second copies. */
+  private readonly replayHeader: string;
 
-  constructor(private readonly options: SinkOptions) {}
+  constructor(private readonly options: SinkOptions) {
+    this.header = appendHeaderLine({ writer: options.runId });
+    this.replayHeader = appendHeaderLine({ writer: options.runId, replay: true });
+  }
 
   /** Queue one record, or count it as dropped when the memory cap is reached. */
   write(record: DiagRecord): void {
@@ -99,7 +106,8 @@ export class Sink {
   /**
    * Writes everything not yet on disk before the process exits, including the batch a background
    * flush has taken but not finished. Exit stops that background append wherever it is, so this
-   * writes the batch again. The file may then hold it twice, and the reader keeps one copy.
+   * writes the batch again under a replay header. The file may then hold it twice, and the reader
+   * drops a replayed line only when this run already wrote it.
    */
   flushSync(): void {
     this.clearTimer();
@@ -156,7 +164,7 @@ export class Sink {
     try {
       // flushSync empties the map once it has rewritten the lines, which ends this loop early.
       for (const [key, lines] of batch.files) {
-        await this.appendLines(key, lines.join(""));
+        await this.appendLines(key, this.header + lines.join(""));
         batch.files.delete(key);
       }
       this.queuedAndWritingBytes -= batch.bytes;
@@ -188,8 +196,8 @@ export class Sink {
     try {
       for (const [key, lines] of unconfirmed) {
         // An append cut short by exit can end mid-line. A leading newline keeps that fragment
-        // from fusing with the first rewritten record, so the reader skips only the fragment.
-        this.appendLinesSync(key, "\n" + lines.join(""));
+        // from fusing with the replay header, so the reader skips only the fragment.
+        this.appendLinesSync(key, "\n" + this.replayHeader + lines.join(""));
         unconfirmed.delete(key);
       }
     } catch (error) {
@@ -202,7 +210,7 @@ export class Sink {
     const batch = this.takeBatch();
     try {
       for (const [key, lines] of batch.files) {
-        this.appendLinesSync(key, lines.join(""));
+        this.appendLinesSync(key, this.header + lines.join(""));
         batch.files.delete(key);
       }
       this.queuedAndWritingBytes -= batch.bytes;
@@ -241,7 +249,7 @@ export class Sink {
   private writeLastMarkersSync(): void {
     for (const [key, lines] of this.takeBatch().files) {
       try {
-        this.appendLinesSync(key, lines.join(""));
+        this.appendLinesSync(key, this.header + lines.join(""));
       } catch {
         // onFailure reports the disk error; a file that refuses its marker has nothing to add.
       }

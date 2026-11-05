@@ -104,13 +104,40 @@ function isDiagRecord(value: unknown): value is DiagRecord {
   );
 }
 
-/** Invalid or torn records cannot prevent reading the retained evidence. */
-export function parseDiagLine(line: string): DiagRecord | undefined {
-  let parsed: unknown;
+function parseJson(line: string): unknown {
   try {
-    parsed = JSON.parse(line);
+    return JSON.parse(line);
   } catch {
     return undefined;
   }
+}
+
+/** Invalid or torn records cannot prevent reading the retained evidence. */
+export function parseDiagLine(line: string): DiagRecord | undefined {
+  const parsed = parseJson(line);
   return isDiagRecord(parsed) ? parsed : undefined;
+}
+
+/**
+ * The line that opens every append to a recording file, naming the run that wrote it. Records
+ * carry no run, and two processes can append to one thread file in turn, so this is how a reader
+ * tells whose line it holds. `replay` opens a fatal flush's second copy of a batch whose background
+ * append may already have landed. It is not a {@link DiagRecord}, so `parseDiagLine` skips it.
+ */
+export interface AppendHeader {
+  writer: string;
+  replay?: true;
+}
+
+/** Serializes an append header as its own JSONL line. */
+export function appendHeaderLine(header: AppendHeader): string {
+  return JSON.stringify(header) + "\n";
+}
+
+/** Reads an append header, or returns undefined for any other line. */
+export function parseAppendHeader(line: string): AppendHeader | undefined {
+  const parsed = parseJson(line);
+  if (!parsed || typeof parsed !== "object" || !hasString(parsed, "writer")) return undefined;
+  const writer: string = Reflect.get(parsed, "writer");
+  return Reflect.get(parsed, "replay") === true ? { writer, replay: true } : { writer };
 }

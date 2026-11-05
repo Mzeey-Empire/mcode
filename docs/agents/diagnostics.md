@@ -6,6 +6,8 @@ When a thread hangs, a turn never finishes, or an approval never appears, read w
 
 Each process writes `diagnostics/t/<threadId>.jsonl` for thread records and `diagnostics/p/<runId>.jsonl` for its own run markers, under its data directory. Files rotate to `.1.jsonl` at 4 MB, and the server deletes recordings older than 7 days or beyond 256 MB in total.
 
+Prefer the reader to raw files. Each append opens with a `{"writer":"<runId>"}` line that is not a record. After a crash, a `{"writer":"<runId>","replay":true}` line opens a second copy of records the run may already have written, and the reader keeps one copy.
+
 | App | Data directory | Database |
 |---|---|---|
 | The user's installed Mcode | `~/.mcode` | `~/.mcode/mcode.db` |
