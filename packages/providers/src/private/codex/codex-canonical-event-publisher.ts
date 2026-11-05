@@ -3,8 +3,13 @@ import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runt
 import { logger } from "@mcode/shared";
 import { volatileIngestClass, type ProviderEventDraft, type ProviderEventSinkPort } from "../../host-ports.js";
 
-const MAX_PENDING_EVENTS_PER_EXECUTION = 1_024;
-const RESERVED_TERMINAL_EVENTS = 4;
+/**
+ * Pending events for one thread at which its Codex stream is paused. The sink saves one event at a
+ * time, so a deeper queue adds no throughput; it only delays responses that arrive behind it.
+ */
+const PAUSE_STREAM_AT_PENDING_EVENTS = 256;
+/** Pending events below which a paused stream reads again; the gap keeps it from toggling per event. */
+const RESUME_STREAM_BELOW_PENDING_EVENTS = 128;
 
 /** Exact Mcode turn and delivery attempt that produced a Codex event. */
 export interface CodexCanonicalEventRouting {
@@ -20,8 +25,10 @@ interface ExecutionQueue {
   tail: Promise<void>;
   failure: Error | undefined;
   discardQueued: boolean;
-  overflowReported: boolean;
 }
+
+/** Asks the provider to stop or restart reading one thread's Codex stream. */
+export type CodexStreamBackpressureHandler = (threadId: string, paused: boolean) => void;
 
 /** Serializes Codex parent events through the server-owned canonical sink. */
 export class CodexCanonicalEventPublisher {
@@ -30,6 +37,10 @@ export class CodexCanonicalEventPublisher {
   private shutdownTask: Promise<void> | undefined;
   private lateEventReported = false;
   private readonly failureTasks = new Set<Promise<void>>();
+  /** Undelivered events per thread, across its executions, because one stream feeds them all. */
+  private readonly pendingByThread = new Map<string, number>();
+  private readonly pausedThreads = new Set<string>();
+  private backpressureHandler: CodexStreamBackpressureHandler | undefined;
   private failureHandler:
     | ((routing: CodexCanonicalEventRouting, error: Error) => void | Promise<void>)
     | undefined;
@@ -41,6 +52,14 @@ export class CodexCanonicalEventPublisher {
     handler: (routing: CodexCanonicalEventRouting, error: Error) => void | Promise<void>,
   ): void {
     this.failureHandler = handler;
+  }
+
+  /**
+   * Pauses a thread's stream while saving falls behind, instead of dropping its events. The queue
+   * has no capacity limit of its own: the paused stream is what bounds it.
+   */
+  setBackpressureHandler(handler: CodexStreamBackpressureHandler): void {
+    this.backpressureHandler = handler;
   }
 
   /** Queues one event; the caller must have verified its exact execution and attempt. */
@@ -55,18 +74,9 @@ export class CodexCanonicalEventPublisher {
     const queue = this.queueFor(routing);
     if (queue.failure || queue.discardQueued) return;
     const terminal = isTerminalEvent(runtimeEvent.event);
-    const limit = MAX_PENDING_EVENTS_PER_EXECUTION + (terminal ? RESERVED_TERMINAL_EVENTS : 0);
-    if (queue.pendingEventCount >= limit) {
-      if (terminal) this.reportFailure(routing, queue, new Error("Codex terminal event reserve exhausted"));
-      else if (!queue.overflowReported) {
-        queue.overflowReported = true;
-        this.logDropped(routing, runtimeEvent.event.type, "queue-capacity");
-      }
-      return;
-    }
-
     const sourceSequence = queue.nextSourceSequence++;
     queue.pendingEventCount++;
+    this.trackAdmitted(routing.threadId);
     const draft = this.createDraft(routing, runtimeEvent, sourceSequence);
     queue.tail = queue.tail
       .then(async () => {
@@ -94,7 +104,7 @@ export class CodexCanonicalEventPublisher {
       })
       .finally(() => {
         queue.pendingEventCount--;
-        if (queue.pendingEventCount < MAX_PENDING_EVENTS_PER_EXECUTION) queue.overflowReported = false;
+        this.trackSettled(routing.threadId);
       });
   }
 
@@ -145,10 +155,25 @@ export class CodexCanonicalEventPublisher {
       tail: Promise.resolve(),
       failure: undefined,
       discardQueued: false,
-      overflowReported: false,
     };
     this.queues.set(key, queue);
     return queue;
+  }
+
+  private trackAdmitted(threadId: string): void {
+    const pending = (this.pendingByThread.get(threadId) ?? 0) + 1;
+    this.pendingByThread.set(threadId, pending);
+    if (pending < PAUSE_STREAM_AT_PENDING_EVENTS || this.pausedThreads.has(threadId)) return;
+    this.pausedThreads.add(threadId);
+    this.backpressureHandler?.(threadId, true);
+  }
+
+  private trackSettled(threadId: string): void {
+    const pending = (this.pendingByThread.get(threadId) ?? 1) - 1;
+    if (pending === 0) this.pendingByThread.delete(threadId);
+    else this.pendingByThread.set(threadId, pending);
+    if (pending >= RESUME_STREAM_BELOW_PENDING_EVENTS || !this.pausedThreads.delete(threadId)) return;
+    this.backpressureHandler?.(threadId, false);
   }
 
   private logDropped(routing: CodexCanonicalEventRouting, eventType: string, reason: string): void {

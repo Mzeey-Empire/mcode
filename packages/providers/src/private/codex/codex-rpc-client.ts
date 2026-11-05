@@ -58,6 +58,10 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   private nextId = 1;
   private disposed = false;
   private lineBuffer = "";
+  /** Complete lines already read from stdout but not yet dispatched, kept in arrival order. */
+  private unprocessedLines: string[] = [];
+  private readPaused = false;
+  private dispatchingLines = false;
 
   private readonly onData: (chunk: string) => void;
   private readonly onClose: () => void;
@@ -81,9 +85,8 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
       const lines = this.lineBuffer.split("\n");
       // Keep the last (potentially incomplete) segment in the buffer
       this.lineBuffer = lines.pop() ?? "";
-      for (const line of lines) {
-        this.processLine(line);
-      }
+      this.unprocessedLines.push(...lines);
+      this.dispatchUnprocessedLines();
     };
 
     this.onClose = () => {
@@ -201,6 +204,25 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   }
 
   /**
+   * Stops dispatching stdout lines and stops reading the pipe, so the app-server blocks on its
+   * own writes. Lines already read stay queued, in order, until {@link resumeReading}. Writes to
+   * stdin continue, but responses to them arrive only after the lines read before them.
+   */
+  pauseReading(): void {
+    if (this.readPaused) return;
+    this.readPaused = true;
+    this.stdout.pause();
+  }
+
+  /** Dispatches the lines held by {@link pauseReading}, then reads the pipe again unless paused anew. */
+  resumeReading(): void {
+    if (!this.readPaused) return;
+    this.readPaused = false;
+    this.dispatchUnprocessedLines();
+    if (!this.readPaused && !this.disposed) this.stdout.resume();
+  }
+
+  /**
    * Disposes the client by rejecting all pending requests and removing stream listeners.
    * After disposal, calling `sendRequest` throws immediately.
    */
@@ -221,6 +243,21 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  private dispatchUnprocessedLines(): void {
+    // A listener may pause or resume while a line dispatches; only the outer loop drains.
+    if (this.dispatchingLines) return;
+    this.dispatchingLines = true;
+    let next = 0;
+    try {
+      while (!this.readPaused && next < this.unprocessedLines.length) {
+        this.processLine(this.unprocessedLines[next++]!);
+      }
+    } finally {
+      this.unprocessedLines = this.unprocessedLines.slice(next);
+      this.dispatchingLines = false;
+    }
+  }
 
   /** Parses and dispatches a single NDJSON line received from stdout. */
   private processLine(line: string): void {

@@ -763,6 +763,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ) {
     super();
     this.canonicalEventPublisher = new CodexCanonicalEventPublisher(host.events);
+    this.canonicalEventPublisher.setBackpressureHandler((threadId, paused) => {
+      const server = this.runtime.states().find((state) => state.threadId === threadId)?.server;
+      if (paused) server?.pauseOutput();
+      else server?.resumeOutput();
+    });
     this.runtime = new SessionRuntime<CodexSessionState>(this, {
       jobObject: {
         isWindowsJob: false,

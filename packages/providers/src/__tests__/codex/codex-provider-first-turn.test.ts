@@ -28,6 +28,7 @@ const { sendTurnMock, startCompactionMock, readConfigMock, appServers, startErro
   readConfigMock: vi.fn(),
   appServers: [] as Array<import("node:events").EventEmitter & {
     isAlive: boolean;
+    outputPaused: boolean;
     resumeFailed: boolean;
     options: CodexAppServerOptions;
     spawnedEnv?: Record<string, string>;
@@ -68,6 +69,9 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
     async startCompaction(): Promise<string> {
       return startCompactionMock();
     }
+    outputPaused = false;
+    pauseOutput(): void { this.outputPaused = true; }
+    resumeOutput(): void { this.outputPaused = false; }
     async interruptTurn(): Promise<void> {}
     async interruptTurnAndDrain(turnId: string): Promise<void> {
       this.emit("notification", {
@@ -334,6 +338,38 @@ describe("CodexProvider first turn on new session", () => {
 
   afterEach(() => {
     for (const server of appServers) server.emit("fatal", "test cleanup");
+  });
+
+  it("pauses the thread's app-server output while saving falls behind and keeps every streamed delta", async () => {
+    const batches: ProviderEventBatch[] = [];
+    let saveSlowly = true;
+    const waiting: Array<() => void> = [];
+    const provider = makeProvider(undefined, undefined, undefined, { submit: async (batch) => {
+      batches.push(batch);
+      if (saveSlowly) await new Promise<void>((resolve) => { waiting.push(resolve); });
+      return acceptedEventReceipt;
+    } });
+    await provider.sendTurn({
+      turnId: "stream-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "write", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "full",
+    });
+    await vi.waitFor(() => expect(sendTurnMock.mock.calls.length).toBe(1));
+    const server = appServers[0]!;
+    const deltas = 1_500;
+    for (let index = 0; index < deltas; index++) {
+      server.emit("notification", { method: "item/agentMessage/delta",
+        params: { threadId: "sdk-thread-1", turnId: "turn-test-id", itemId: "answer", delta: `${index} ` } });
+    }
+    expect(server.outputPaused).toBe(true);
+
+    saveSlowly = false;
+    for (const release of waiting.splice(0)) release();
+    await vi.waitFor(() => expect(server.outputPaused).toBe(false));
+    await provider.waitForCanonicalTurnEvents({ threadId, turnId: "stream-turn", executionId: schemaValidExecutionId, deliveryAttempt: 1 });
+    const streamed = submittedRuntimeEvents(batches).flatMap(({ event }) => event.type === "textDelta" ? [event.delta] : []);
+    expect(streamed).toEqual(Array.from({ length: deltas }, (_, index) => `${index} `));
+    await provider.shutdown();
   });
 
   it.each([true, false])("reports delivery only after the native approval write: %s", async (delivered) => {

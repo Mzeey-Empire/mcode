@@ -133,6 +133,14 @@ admitted execution uses this route, whichever provider runs it and whether the
 user or the provider started it. A batch for an execution with no worker owner
 is rejected.
 
+When saving falls behind a Codex stream, the adapter makes Codex wait instead
+of dropping events: past a pending-event mark it stops reading that app-server's
+stdout until the queue drains. One app-server serves one Mcode thread, so the
+pause holds only that thread. Requests still reach Codex while paused, but their
+responses queue behind the unread output. Stop therefore fences the execution
+with its queued events discarded before it interrupts, which drains the queue
+and lets the interrupt response through.
+
 A provider adapter may forward a generic event, consume private native
 evidence, or reject malformed evidence with a diagnostic. Only a forwarded
 `AgentEvent` reaches the renderer.

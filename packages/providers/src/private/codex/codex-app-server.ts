@@ -1481,6 +1481,19 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   }
 
   /**
+   * Makes the app-server wait while Mcode saves what it already sent. Requests still go out, but
+   * their responses arrive after the output read before them.
+   */
+  pauseOutput(): void {
+    this.rpc?.pauseReading();
+  }
+
+  /** Reads the app-server's output again after {@link pauseOutput}. */
+  resumeOutput(): void {
+    this.rpc?.resumeReading();
+  }
+
+  /**
    * Best-effort interrupt for the in-flight turn without killing the app-server.
    * Used before starting a new turn so stale `turn/completed` waits cannot resolve early.
    */
