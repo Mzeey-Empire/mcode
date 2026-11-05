@@ -229,7 +229,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Retain a turn's release promises while test ingress drains, even after its lifecycle ends. */
-  workerTurnForTest(threadId: string): Readonly<Pick<WorkerOwnedTurn, "terminalRelease" | "lostStreamFinish">> | undefined {
+  workerTurnForTest(threadId: string): Readonly<Pick<WorkerOwnedTurn, "terminalRelease" | "ending">> | undefined {
     return this.lifecycles.worker(threadId);
   }
 
@@ -641,7 +641,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       // The callback still belongs to the route's pending set. Release on the next task.
       active.terminalRelease = new Promise<void>((resolve) => { setTimeout(resolve, 0); })
         .then(() => {
-          if (active.lostStreamFinish) return active.lostStreamFinish;
+          if (active.ending) return active.ending;
           if (isLostProviderStream(event) && result.kind === "accepted" && !active.terminalCommitted) {
             return this.finishLostWorkerStream(active);
           }
@@ -731,12 +731,18 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   private finishLostWorkerStream(active: WorkerOwnedTurn): Promise<void> | undefined {
-    if (active.lostStreamFinish) return active.lostStreamFinish;
+    if (active.ending) return active.ending;
     const { execution } = active;
     if (this.lifecycles.workerFor(execution) !== active || active.releaseStarted
       || active.stopInProgress || active.terminalCommitted) return;
-    active.lostStreamFinish = Promise.resolve().then(() => this.completeLostWorkerStream(active));
-    return active.lostStreamFinish;
+    return this.endWorkerTurn(active, () => this.completeLostWorkerStream(active));
+  }
+
+  /** Start a non-stop terminal write, or join the one already under way so only the first decides the outcome. */
+  private endWorkerTurn(active: WorkerOwnedTurn, finish: () => Promise<void>): Promise<void> {
+    // Deferred so `ending` is set before `finish` runs; a Stop arriving in between must already see it.
+    active.ending ??= Promise.resolve().then(finish);
+    return active.ending;
   }
 
   private async completeLostWorkerStream(active: WorkerOwnedTurn): Promise<void> {
@@ -753,7 +759,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       await this.finishWorkerTurn(active, frozen, { outcome: "interrupted", ending: this.providerInterruptionEnding() });
     } catch (error) {
       if (active.terminalCommitted) throw error;
-      active.lostStreamFinish = undefined;
+      active.ending = undefined;
       active.terminalRelease = undefined;
       active.releaseStarted = false;
       await this.requireWorkerRuntime().recoverRejected(execution);
@@ -914,7 +920,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const workerTurn = this.lifecycles.worker(threadId);
     if (workerTurn) {
       try {
-        await this.failWorkerDispatch(workerTurn, error);
+        await this.endWorkerTurn(workerTurn, () => this.failWorkerDispatch(workerTurn, error));
       } catch (failure) {
         logger.error("Worker dispatch failed before terminal recovery", { threadId,
           executionId: workerTurn.execution.executionId,
@@ -963,14 +969,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   ): Promise<void> {
     const active = this.lifecycles.workerFor(routing);
     if (!active || active.execution.turnId !== routing.turnId
-      || active.deliveryAttempt !== routing.deliveryAttempt || active.deliveryFailureHandling) return;
+      || active.deliveryAttempt !== routing.deliveryAttempt || active.ending) return;
     // Stop intentionally closes this exact route before the provider's final callbacks settle.
     if ((active.stopInProgress || active.stopRequested) && isRetiredWorkerDelivery(error)) return;
     active.deliveryFailed = true;
-    const handling = this.failWorkerDelivery(active, error);
-    active.deliveryFailureHandling = handling;
-    try { await handling; }
-    finally { if (active.deliveryFailureHandling === handling) active.deliveryFailureHandling = undefined; }
+    await this.endWorkerTurn(active, () => this.failWorkerDelivery(active, error));
   }
 
   private async failWorkerDelivery(active: WorkerOwnedTurn, error: Error): Promise<void> {
@@ -1164,16 +1167,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       this.clearTurnDispatch(prepared.threadId);
       return this.cancelledWorkerStop(prepared);
     }
-    if (active.lostStreamFinish) {
-      await active.lostStreamFinish;
+    if (active.ending) {
+      await active.ending;
       return this.alreadyTerminal(prepared);
     }
     if (!isRunningRuntime(prepared.runtime)) {
       await this.releaseWorkerTurn(active);
-      return this.alreadyTerminal(prepared);
-    }
-    if (active.deliveryFailureHandling) {
-      await active.deliveryFailureHandling;
       return this.alreadyTerminal(prepared);
     }
     active.stopInProgress = true;
@@ -1867,7 +1866,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await this.fenceWorkerProvider(active.provider, active.execution, active.deliveryAttempt);
     await this.providerEventIngress.waitForThread(active.execution.threadId);
     await active.terminalRelease;
-    await active.lostStreamFinish;
+    await active.ending;
   }
 
   private async waitForStoppingWorker(active: WorkerOwnedTurn): Promise<void> {

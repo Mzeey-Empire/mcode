@@ -49,7 +49,7 @@ function captureTurnRelease(fixture: WorkerFixture) {
   return async () => {
     try {
       await turn.terminalRelease;
-      await turn.lostStreamFinish;
+      await turn.ending;
     } finally {
       // Rejected-stream recovery clears the release promise before relinquishing ownership.
       await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
@@ -428,6 +428,100 @@ describe("AgentService cleanup through production worker composition", { timeout
       && event.payload.type === "turn.interrupted")).toHaveLength(1);
     expect(fixture.published.filter((event) => event.type === "ended" && event.turnExecutionId === turn.turnExecutionId
       && event.outcome !== undefined)).toEqual([expect.objectContaining({ outcome: "interrupted" })]);
+  });
+
+  describe("a stop arriving while a failed provider start is being recorded", () => {
+    const dispatchError = "Injected provider dispatch failure";
+
+    function holdDeferred() {
+      let resolve!: () => void;
+      const promise = new Promise<void>((done) => { resolve = done; });
+      return { promise, resolve };
+    }
+
+    /** Resolves once Stop has looked up the worker turn, which is where it picks its path synchronously. */
+    function watchStopDecision(fixture: WorkerFixture) {
+      const decided = holdDeferred();
+      const current = fixture.workers.owner.current.bind(fixture.workers.owner);
+      vi.spyOn(fixture.workers.owner, "current").mockImplementation((threadId) => {
+        decided.resolve();
+        return current(threadId);
+      });
+      return decided.promise;
+    }
+
+    async function expectErroredAndReusable(fixture: WorkerFixture, stopping: Promise<unknown>) {
+      await expect(stopping).resolves.toMatchObject({ status: "already-terminal", snapshot: { phase: "errored" } });
+      await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+      const turn = fixture.sent[0];
+      if (!turn) throw new Error("Provider did not receive the turn");
+      expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
+        status: "Errored",
+        ending: { outcome: "errored", failure: expect.objectContaining({ provider: "codex", message: dispatchError }) },
+      });
+      await expect(fixture.service.sendMessage({
+        threadId: fixture.thread.id, content: "replacement", permissionMode: "default", model: "gpt-5", provider: "codex",
+      })).resolves.toBeUndefined();
+      expect(fixture.sent.map((sent) => sent.message)).toEqual(["Do the work", "replacement"]);
+    }
+
+    function failNextProviderStart(fixture: WorkerFixture) {
+      fixture.provider.sendTurn.mockImplementationOnce(async (turn) => {
+        fixture.sent.push(turn);
+        throw new Error(dispatchError);
+      });
+    }
+
+    it("keeps the Errored outcome when Stop arrives while the failure fences provider events", async () => {
+      const fixture = await openFixture();
+      failNextProviderStart(fixture);
+      const fenceEntered = holdDeferred();
+      const releaseFence = holdDeferred();
+      vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementationOnce(async () => {
+        fenceEntered.resolve();
+        await releaseFence.promise;
+      });
+      const sending = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Do the work",
+        provider: "codex", model: "gpt-5", permissionMode: "default" });
+      await fenceEntered.promise;
+      const decided = watchStopDecision(fixture);
+      const stopping = fixture.service.stopSession(fixture.thread.id, { by: "user" });
+      try {
+        await decided;
+      } finally {
+        releaseFence.resolve();
+      }
+      await sending;
+      await expectErroredAndReusable(fixture, stopping);
+    });
+
+    it("keeps the Errored outcome when Stop arrives after the failure commits but before the runtime reads it", async () => {
+      const fixture = await openFixture();
+      failNextProviderStart(fixture);
+      const committed = holdDeferred();
+      const releaseReply = holdDeferred();
+      const submit = fixture.workers.owner.submit.bind(fixture.workers.owner);
+      vi.spyOn(fixture.workers.owner, "submit").mockImplementation(async (execution, command) => {
+        const reply = await submit(execution, command);
+        if (command.kind === "finish-from-state") {
+          committed.resolve();
+          await releaseReply.promise;
+        }
+        return reply;
+      });
+      const sending = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Do the work",
+        provider: "codex", model: "gpt-5", permissionMode: "default" });
+      await committed.promise;
+      const decided = watchStopDecision(fixture);
+      const stopping = fixture.service.stopSession(fixture.thread.id, { by: "user" });
+      try {
+        await decided;
+      } finally {
+        releaseReply.resolve();
+      }
+      await sending;
+      await expectErroredAndReusable(fixture, stopping);
+    });
   });
 
   it("reports the provider's own ending when it commits while a user stop drains the turn", async () => {

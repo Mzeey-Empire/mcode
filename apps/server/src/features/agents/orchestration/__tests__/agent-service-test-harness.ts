@@ -146,7 +146,7 @@ export async function waitForAgentServiceIngressForTest(service: AgentService, t
   await testWorkers.get(service)?.progress?.waitForTerminalSaves(threadId);
   const turn = active ?? controller?.workerTurnForTest(threadId);
   await turn?.terminalRelease;
-  await turn?.lostStreamFinish;
+  await turn?.ending;
 }
 
 /** Stop fixture providers and drain their admitted events and effects before their database closes. */
