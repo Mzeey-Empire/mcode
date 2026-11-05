@@ -90,25 +90,28 @@ function attribute(record: DiagRecord, run: string | undefined): DiagRecord {
 
 /**
  * A file one run wrote alone. A flush that rewrites a batch whose append may not have landed can
- * leave a record in it twice, in either order, with the original copy torn. The run numbers each
- * record once, so the first whole copy of each number is the record.
+ * leave a record in it twice, in either order, with the original copy torn. A rewrite repeats the
+ * record's line exactly, so only an exact repeat is dropped: a sink handed a run id it does not
+ * own could write a different record under a number already used, and that record is kept.
  */
 function readOwnRecording(segments: readonly string[], run: string): DiagRecord[] {
   const records: DiagRecord[] = [];
+  const keptLines: string[] = [];
   let newest = -Infinity;
   // Built only once a number repeats or goes backwards, which only a rewrite causes, so a file
   // without one reads at the cost of a shared file.
-  let seen: Set<number> | undefined;
+  let seen: Set<string> | undefined;
   for (const file of segments) {
     for (const line of linesOf(file)) {
       const record = parseDiagLine(line);
       if (!record) continue;
       if (record.n <= newest) {
-        seen ??= new Set(records.map((kept) => kept.n));
-        if (seen.has(record.n)) continue;
+        seen ??= new Set(keptLines);
+        if (seen.has(line)) continue;
       }
       newest = Math.max(newest, record.n);
-      seen?.add(record.n);
+      seen?.add(line);
+      keptLines.push(line);
       records.push(attribute(record, run));
     }
   }

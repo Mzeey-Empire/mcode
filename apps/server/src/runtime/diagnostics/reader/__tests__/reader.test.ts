@@ -140,6 +140,19 @@ describe("diagnostics reader", () => {
     ]);
   });
 
+  it("keeps two different records that share a run and number, and drops only a rewrite's exact copy", () => {
+    const first: DiagRecord = { t: 2000, n: 2, th: "a", k: "ev", ch: "agent.created", d: "first" };
+    const second: DiagRecord = { t: 2100, n: 2, th: "a", k: "ev", ch: "agent.created", d: "second" };
+    NodeFS.writeFileSync(runFile("a", "shared"),
+      appended([marker("shared", 1500), first]) + appended([second]) + appended([first], true));
+    q.thread = "a";
+    expect(loadEvidence(q).records).toEqual([
+      marker("shared", 1500),
+      { ...first, run: "shared" },
+      { ...second, run: "shared" },
+    ]);
+  });
+
   it("keeps byte-identical records that different runs wrote for one thread", () => {
     const event: DiagRecord = { t: 2000, n: 2, th: "a", k: "ev", ch: "agent.created", d: "same" };
     NodeFS.writeFileSync(runFile("a", "first"), appended([marker("first", 1500), event]));
