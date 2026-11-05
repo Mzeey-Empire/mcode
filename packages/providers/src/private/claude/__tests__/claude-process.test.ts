@@ -80,7 +80,7 @@ describe("ClaudeOwnedProcess diagnostics", () => {
         child.stdin.end();
         await exited;
       },
-    }, "test process", () => undefined, threadId);
+    }, "test process", () => undefined, threadId, async () => {});
     try {
       child = owned.spawn({
         command: process.execPath,

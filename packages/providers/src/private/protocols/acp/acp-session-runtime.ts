@@ -261,6 +261,8 @@ export class AcpSessionRuntime {
   /** Cancels the active prompt for this logical session. */
   async cancel(): Promise<void> {
     this.outputRelease.abort();
+    // Release the current read for Stop, but keep a cancel-ignoring agent bounded.
+    this.outputRelease = new AbortController();
     if (!this.state.sessionId) return;
     await this.state.connection.cancel({ sessionId: this.state.sessionId });
   }

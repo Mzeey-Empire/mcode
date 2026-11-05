@@ -1968,7 +1968,7 @@ export class ClaudeProvider
       resumeId: staged.resumeId,
       cwd,
     });
-    const ownedProcess = this.createOwnedClaudeProcess(sessionId, sessionId.replace(/^mcode-/, ""));
+    const ownedProcess = this.createOwnedClaudeProcess(sessionId, args.threadId);
     // Without it, some startup failures end on stderr alone and reach us with no
     // startup_failure_reason to classify them by.
     options.env = { ...args.env, CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1" };

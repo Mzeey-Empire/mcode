@@ -106,6 +106,69 @@ describe("AcpSessionRuntime", () => {
     }
   });
 
+  it.each(["stop", "close"])("%s releases a paused native ending while saves remain held", async (action) => {
+    const child = new NodeChildProcess.ChildProcess();
+    const input = new NodeStream.PassThrough();
+    const output = new NodeStream.PassThrough();
+    child.stdin = input;
+    child.stdout = output;
+    const spawn = vi.mocked(NodeChildProcess.spawn).mockReturnValue(child);
+    const held = Promise.withResolvers<void>();
+    const paused = Promise.withResolvers<void>();
+    const route = { threadId: "held", turnId: "turn", executionId: "11111111-1111-4111-8111-111111111111", deliveryAttempt: 1 };
+    const publisher = new CanonicalLiveEventPublisher("cursor", { submit: async () => {
+      await held.promise;
+      return { commit: { outcome: "accepted", acceptedThrough: 1, eventCount: 1,
+        progressPosition: { epoch: "epoch", sequence: 1 } }, delivery: { ingress: "not-required" } };
+    } });
+    const write = (value: unknown): void => { output.write(JSON.stringify(value) + "\n"); };
+    let promptId = 0;
+    let admitted = 0;
+    input.on("data", (chunk: Buffer) => {
+      const request = JSON.parse(chunk.toString());
+      if (request.method === "initialize") write({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: 1, agentCapabilities: {} } });
+      if (request.method === "session/new") write({ jsonrpc: "2.0", id: request.id, result: { sessionId: "native" } });
+      if (request.method === "session/prompt") promptId = request.id;
+    });
+    const runtime = await AcpSessionRuntime.start({
+      spawnSpec: { command: "fixture", args: [], cwd: ".", env: {} }, processes: fakeProcesses(),
+      waitForOutputCapacity: (signal) => {
+        if (admitted >= 256) paused.resolve();
+        return publisher.waitForCapacity(route.threadId, signal);
+      },
+      callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }),
+        onSessionUpdate: async () => {
+          admitted++;
+          publisher.publish(route, providerRuntimeEvent({ type: "textDelta", threadId: "held", delta: "x" }), []);
+        } },
+    });
+    try {
+      await runtime.initialize();
+      await runtime.openSession({ cwd: ".", mcpServers: [] });
+      const prompt = runtime.prompt({ prompt: [] });
+      await vi.waitFor(() => expect(promptId).not.toBe(0));
+      for (let i = 0; i < 256; i++) write({ jsonrpc: "2.0", method: "session/update",
+        params: { sessionId: "native", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "x" } } } });
+      await paused.promise;
+      write({ jsonrpc: "2.0", id: promptId, result: { stopReason: "cancelled" } });
+      const stopping = action === "stop" ? runtime.cancel() : runtime.close();
+      await expect(prompt).resolves.toEqual({ stopReason: "cancelled" });
+      if (action === "stop") {
+        for (let i = 0; i < 1000; i++) write({ jsonrpc: "2.0", method: "session/update",
+          params: { sessionId: "native", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "ignored cancel" } } } });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(admitted).toBeLessThanOrEqual(257);
+      }
+      await stopping;
+    } finally {
+      output.end();
+      await runtime.close();
+      held.resolve();
+      await publisher.stopAdmissionAndDrain();
+      spawn.mockRestore();
+    }
+  });
+
   it("negotiates auth, falls back from load, serializes prompts, and cancels the active session", async () => {
     const child = fakeChild();
     const promptResolvers: Array<(value: unknown) => void> = [];

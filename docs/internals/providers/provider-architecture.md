@@ -153,11 +153,16 @@ budget is refused, and the execution ends errored with that reason. SDK 0.2.2's
 stream deltas are not a durable replay contract. `cliUrl` connects to an external
 TCP server, but the SDK owns its private socket and JSON-RPC reader. Pausing it
 requires a proxy plus external CLI startup, authentication and shutdown ownership;
-that is not a small transport substitution. Keep the explicit budget until a
+that is not a small transport substitution. Mcode uses the default stdio transport,
+whose `StreamMessageReader` reads child stdout. Reaching that pipe requires the
+TypeScript-private `cliProcess` and an unsafe cast, which this repository forbids.
+Keep the explicit budget until a
 bounded, complete replay or supported transport pause exists.
 
 A Codex app-server created for an already paused thread starts paused. During
 exit drain, Codex emits `provider_lost` only if no real native ending was read.
+Stop fences Codex before interrupting: requests reach a paused process, but their
+replies queue behind unread stdout.
 Cursor's unused stream-json turn runner has no production caller and is not part
 of this flow; deleting it is separate work.
 

@@ -16,8 +16,8 @@ export class ClaudeOwnedProcess {
     private readonly port: ProviderProcessPort,
     private readonly description: string,
     private readonly stderr: (chunk: string) => void,
-    private readonly threadId?: string,
-    private readonly waitForOutputCapacity: (signal: AbortSignal) => Promise<void> = async () => {},
+    private readonly threadId: string | undefined,
+    private readonly waitForOutputCapacity: (signal: AbortSignal) => Promise<void>,
   ) {}
 
   /** SDK transport callback preserving its forwarded cancellation signal and pipes. */
