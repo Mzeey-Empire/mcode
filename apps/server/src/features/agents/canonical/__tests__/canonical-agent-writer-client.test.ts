@@ -1078,7 +1078,7 @@ describe("canonical SQLite writer", () => {
     expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 0 });
   });
 
-  it("retains a failed deferred drain and bounds queued plus pending cleanup", async () => {
+  it("retains a failed deferred drain and bounds only failed cleanup", async () => {
     writer = new CanonicalAgentWriterClient(dbPath);
     const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
     for (let index = 0; index < 65; index++) await writer.commit(`deferred-${index}`, batch);
@@ -1086,12 +1086,85 @@ describe("canonical SQLite writer", () => {
       BEGIN SELECT RAISE(FAIL, 'ack unavailable'); END`);
     writer.enqueueAcknowledgement(EXECUTION_ID, "deferred-0");
     await expect.poll(() => writer.pendingAcknowledgementCount).toBe(1);
-    for (let index = 1; index < 64; index++) writer.enqueueAcknowledgement(EXECUTION_ID, `deferred-${index}`);
+    for (let index = 1; index < 64; index++) {
+      await expect(writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: `deferred-${index}` }]))
+        .rejects.toThrow("Canonical writer write-failed");
+    }
     expect(() => writer.enqueueAcknowledgement(EXECUTION_ID, "deferred-64")).toThrow(CanonicalWriterAcknowledgementCapacity);
     expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 65 });
     db.run("DROP TRIGGER reject_receipt_delete");
     await writer.close();
     expect(db.query("SELECT operation_id FROM canonical_writer_operation_receipts").all()).toEqual([{ operation_id: "deferred-64" }]);
+  });
+
+  it.each(["queued", "awaited"])("admits healthy %s cleanup while 64 deletions are in flight", async (mode) => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
+    for (let index = 0; index < 66; index++) await writer.commit(`held-${index}`, batch);
+    let releaseDelete: () => void = () => {};
+    const held = new Promise<void>((resolve) => { releaseDelete = resolve; });
+    const original = writer.owner.sendCanonical.bind(writer.owner);
+    vi.spyOn(writer.owner, "sendCanonical").mockImplementation(async (...args) => {
+      if (args[0].kind === "ack-operations") await held;
+      return original(...args);
+    });
+    try {
+      for (let index = 0; index < 64; index++) writer.enqueueAcknowledgement(EXECUTION_ID, `held-${index}`);
+      if (mode === "queued") expect(() => writer.enqueueAcknowledgement(EXECUTION_ID, "held-64")).not.toThrow();
+      const awaited = writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: mode === "queued" ? "held-65" : "held-64" }]);
+      releaseDelete();
+      await expect(awaited).resolves.toBeUndefined();
+      if (mode === "awaited") writer.enqueueAcknowledgement(EXECUTION_ID, "held-65");
+      await writer.close();
+      expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 0 });
+    } finally {
+      releaseDelete();
+    }
+  });
+
+  it("retires 70 receipts from one save without exhausting cleanup capacity", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
+    for (let index = 0; index < 70; index++) await writer.commit(`page-${index}`, batch);
+    expect(() => {
+      for (let index = 0; index < 70; index++) writer.enqueueAcknowledgement(EXECUTION_ID, `page-${index}`);
+    }).not.toThrow();
+    await writer.close();
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 0 });
+  });
+
+  it("isolates a poison receipt and reaches capacity only after 64 distinct failed deletions", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
+    for (let index = 0; index < 64; index++) {
+      await writer.commit(`bad-${index}`, batch);
+      await writer.commit(`good-${index}`, batch);
+    }
+    db.run(`CREATE TRIGGER poison_cleanup BEFORE DELETE ON canonical_writer_operation_receipts
+      WHEN OLD.operation_id LIKE 'bad-%' BEGIN SELECT RAISE(FAIL, 'poison'); END`);
+    try {
+      await expect(writer.acknowledgeOperations([
+        { executionId: EXECUTION_ID, operationId: "bad-0" },
+        { executionId: EXECUTION_ID, operationId: "good-0" },
+      ])).rejects.toThrow("Canonical writer write-failed");
+      expect(db.query("SELECT operation_id FROM canonical_writer_operation_receipts WHERE operation_id = 'good-0'").all()).toEqual([]);
+      await expect(writer.acknowledgeOperations([
+        { executionId: EXECUTION_ID, operationId: "bad-0" },
+        ...Array.from({ length: 63 }, (_, index) => ({ executionId: EXECUTION_ID, operationId: `good-${index + 1}` })),
+      ])).rejects.toThrow("Canonical writer write-failed");
+      expect(writer.pendingAcknowledgementCount).toBe(1);
+      expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id LIKE 'good-%'").get()).toEqual({ count: 0 });
+      expect(() => writer.enqueueAcknowledgement(EXECUTION_ID, "healthy-after-poison")).not.toThrow();
+      await expect(writer.acknowledgeOperations(Array.from({ length: 63 }, (_, index) => ({
+        executionId: EXECUTION_ID, operationId: `bad-${index + 1}`,
+      })))).rejects.toThrow("Canonical writer write-failed");
+      expect(writer.pendingAcknowledgementCount).toBe(64);
+      expect(() => writer.enqueueAcknowledgement(EXECUTION_ID, "overflow")).toThrow(CanonicalWriterAcknowledgementCapacity);
+    } finally {
+      db.run("DROP TRIGGER poison_cleanup");
+    }
+    await writer.close();
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 0 });
   });
 
   it("retries a failed acknowledgement before the next write", async () => {

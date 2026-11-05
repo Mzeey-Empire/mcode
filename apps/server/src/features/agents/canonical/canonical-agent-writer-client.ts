@@ -147,26 +147,22 @@ export class CanonicalAgentWriterClient {
 
   /** Releases handled receipts after publication or journal discard completes. */
   async acknowledgeOperations(operations: PendingAcknowledgement[]): Promise<void> {
-    this.assertAcknowledgementAdmission(operations);
-    for (const operation of operations) {
-      this.pendingAcknowledgements.set(acknowledgementKey(operation.executionId, operation.operationId), operation);
-    }
-    await this.sendAcknowledgements(operations);
-    for (const operation of operations) {
-      const key = acknowledgementKey(operation.executionId, operation.operationId);
-      this.pendingAcknowledgements.delete(key);
-      this.queuedAcknowledgements.delete(key);
-    }
+    this.validateAcknowledgements(operations);
+    const failure = await this.deleteAcknowledgements(operations);
+    if (failure) throw failure;
   }
 
   /** Retain handled progress receipts for bounded cleanup without blocking the next save. */
   enqueueAcknowledgement(executionId: string, operationId: string): void {
     const operation = { executionId, operationId };
-    this.assertAcknowledgementAdmission([operation]);
+    this.validateAcknowledgements([operation]);
     const key = acknowledgementKey(executionId, operationId);
     if (this.pendingAcknowledgements.has(key) || this.queuedAcknowledgements.has(key)) return;
+    if (this.pendingAcknowledgements.size >= MAX_PENDING_ACKNOWLEDGEMENTS) {
+      throw new CanonicalWriterAcknowledgementCapacity("Canonical writer acknowledgement retry queue is full");
+    }
     this.queuedAcknowledgements.set(key, operation);
-    if (this.queuedAcknowledgements.size + this.pendingAcknowledgements.size >= ACKNOWLEDGEMENT_BATCH_SIZE) {
+    if (this.queuedAcknowledgements.size >= ACKNOWLEDGEMENT_BATCH_SIZE) {
       void this.flushQueuedAcknowledgements();
     } else if (!this.acknowledgementTimer) {
       this.acknowledgementTimer = setTimeout(() => {
@@ -176,15 +172,10 @@ export class CanonicalAgentWriterClient {
     }
   }
 
-  private assertAcknowledgementAdmission(operations: PendingAcknowledgement[]): void {
+  private validateAcknowledgements(operations: PendingAcknowledgement[]): void {
     if (this.closing || this.stopping) throw new Error("Canonical writer closed");
-    const keys = new Set([...this.pendingAcknowledgements.keys(), ...this.queuedAcknowledgements.keys()]);
     for (const operation of operations) {
       if (!operation.executionId || !operation.operationId) throw new Error("Canonical writer operation and execution IDs are required");
-      keys.add(acknowledgementKey(operation.executionId, operation.operationId));
-    }
-    if (keys.size > MAX_PENDING_ACKNOWLEDGEMENTS) {
-      throw new CanonicalWriterAcknowledgementCapacity("Canonical writer acknowledgement retry queue is full");
     }
   }
 
@@ -215,32 +206,56 @@ export class CanonicalAgentWriterClient {
   private async flushQueuedAcknowledgements(): Promise<void> {
     if (this.acknowledgementTimer) clearTimeout(this.acknowledgementTimer);
     this.acknowledgementTimer = undefined;
-    if (this.retryingAcknowledgements) await this.retryingAcknowledgements;
-    for (const [key, operation] of this.queuedAcknowledgements) {
-      this.pendingAcknowledgements.set(key, operation);
+    if (!this.retryingAcknowledgements) {
+      this.retryingAcknowledgements = this.drainAcknowledgements()
+        .finally(() => {
+          this.retryingAcknowledgements = undefined;
+          if (this.queuedAcknowledgements.size) return this.flushQueuedAcknowledgements();
+        });
     }
-    this.queuedAcknowledgements.clear();
-    await this.retryPendingAcknowledgements();
+    await this.retryingAcknowledgements;
   }
 
   private retryPendingAcknowledgements(): Promise<void> {
+    if (this.retryingAcknowledgements) return this.retryingAcknowledgements;
     if (this.pendingAcknowledgements.size === 0) return Promise.resolve();
-    if (!this.retryingAcknowledgements) {
-      this.retryingAcknowledgements = this.drainAcknowledgements()
-        .finally(() => { this.retryingAcknowledgements = undefined; });
-    }
-    return this.retryingAcknowledgements;
+    return this.flushQueuedAcknowledgements();
   }
 
   private async drainAcknowledgements(): Promise<void> {
-    const entries = [...this.pendingAcknowledgements];
+    const operations = new Map([...this.pendingAcknowledgements, ...this.queuedAcknowledgements]);
+    this.queuedAcknowledgements.clear();
+    const entries = [...operations.values()];
+    for (let offset = 0; offset < entries.length; offset += ACKNOWLEDGEMENT_BATCH_SIZE) {
+      await this.deleteAcknowledgements(entries.slice(offset, offset + ACKNOWLEDGEMENT_BATCH_SIZE));
+    }
+  }
+
+  private async deleteAcknowledgements(operations: PendingAcknowledgement[]): Promise<unknown> {
     try {
-      await this.sendAcknowledgements(entries.map(([, operation]) => operation));
-      for (const [key, operation] of entries) {
-        if (this.pendingAcknowledgements.get(key) === operation) this.pendingAcknowledgements.delete(key);
+      await this.sendAcknowledgements(operations);
+      for (const operation of operations) {
+        const key = acknowledgementKey(operation.executionId, operation.operationId);
+        this.pendingAcknowledgements.delete(key);
+        this.queuedAcknowledgements.delete(key);
       }
-    } catch {
-      // Keep handled receipts for the next retry or close.
+      return undefined;
+    } catch (error) {
+      if (operations.length > 1) {
+        let failure: unknown;
+        // A transaction rollback does not identify which receipt poisoned the batch.
+        for (const operation of operations) failure = await this.deleteAcknowledgements([operation]) ?? failure;
+        return failure;
+      }
+      const operation = operations[0];
+      if (!operation) return error;
+      const key = acknowledgementKey(operation.executionId, operation.operationId);
+      if (!this.pendingAcknowledgements.has(key) && this.pendingAcknowledgements.size >= MAX_PENDING_ACKNOWLEDGEMENTS) {
+        return new CanonicalWriterAcknowledgementCapacity("Canonical writer acknowledgement retry queue is full", { cause: error });
+      }
+      this.pendingAcknowledgements.delete(key);
+      this.pendingAcknowledgements.set(key, operation);
+      return error;
     }
   }
 
