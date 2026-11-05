@@ -176,7 +176,7 @@ export class CursorProvider
     private readonly stopDrainReuseTimeoutMs: number = STOP_DRAIN_REUSE_TIMEOUT_MS,
   ) {
     super();
-    this.canonicalEventPublisher = new CursorCanonicalEventPublisher("cursor", host.events, undefined, "execution");
+    this.canonicalEventPublisher = new CursorCanonicalEventPublisher("unbounded", "cursor", host.events, undefined, "execution");
     this.settingsService = cursorPorts.settings;
     this.skillService = cursorPorts.skills;
     this.envService = { getEnv: () => ({ ...host.environment.snapshot() }) };

@@ -10,6 +10,6 @@ export type ClaudeCanonicalEventRouting = CanonicalLiveEventRouting;
 /** Serializes Claude live events through the provider-neutral canonical publisher. */
 export class ClaudeCanonicalEventPublisher extends CanonicalLiveEventPublisher {
   constructor(sink: ProviderEventSinkPort, onFailure?: (routing: ClaudeCanonicalEventRouting, error: Error) => void) {
-    super("claude", sink, onFailure);
+    super("unbounded", "claude", sink, onFailure);
   }
 }

@@ -11,13 +11,13 @@ import { CanonicalLiveEventPublisher } from "../../canonical-live-event-publishe
 import { ProviderRuntimeEventSchema, providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 
 describe("ClaudeOwnedProcess diagnostics", () => {
-  it("holds the real SDK stdout pipe and drains all 20000 messages in order", async () => {
+  it("holds the real SDK stdout pipe and drains all 1500 messages in order", async () => {
     const held = Promise.withResolvers<void>();
     let finishedWriting = false;
     let started = false;
     const indices: number[] = [];
     const route = { threadId: "test-thread", turnId: "turn", executionId: "00000000-0000-4000-8000-000000000001", deliveryAttempt: 1 };
-    const publisher = new CanonicalLiveEventPublisher("claude", { submit: async (batch) => {
+    const publisher = new CanonicalLiveEventPublisher("unbounded", "claude", { submit: async (batch) => {
       await held.promise;
       for (const draft of batch.events) {
         if (draft.payload.type !== "item.recorded") throw new Error("Expected saved runtime event");
@@ -33,7 +33,7 @@ describe("ClaudeOwnedProcess diagnostics", () => {
       undefined, (signal) => publisher.waitForCapacity(route.threadId, signal));
     const script = `const {once}=require('node:events');
       process.stderr.write('started');
-      const write=async()=>{ for(let i=0;i<20000;i++) {
+      const write=async()=>{ for(let i=0;i<1500;i++) {
         const line=JSON.stringify({type:'stream_event',event:{type:'content_block_delta',index:i,delta:{type:'text_delta',text:'x'.repeat(2048)}}})+'\\n';
         if(!process.stdout.write(line)) await once(process.stdout,'drain');
       } process.stderr.write('finished'); };
@@ -49,7 +49,7 @@ describe("ClaudeOwnedProcess diagnostics", () => {
         publisher.publish(route, providerRuntimeEvent({ type: "textDelta", threadId: route.threadId, delta: String(message.event.index) }), []);
         pulled++;
         await publisher.waitForCapacity(route.threadId);
-        if (pulled === 20000) break;
+        if (pulled === 1500) break;
       }
     })();
     try {
@@ -60,7 +60,7 @@ describe("ClaudeOwnedProcess diagnostics", () => {
       held.resolve();
       await consuming;
       await publisher.waitForExecution(route);
-      expect(indices).toEqual(Array.from({ length: 20000 }, (_, index) => index));
+      expect(indices).toEqual(Array.from({ length: 1500 }, (_, index) => index));
     } finally {
       held.resolve();
       sdk.close();

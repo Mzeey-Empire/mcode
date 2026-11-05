@@ -156,8 +156,7 @@ requires a proxy plus external CLI startup, authentication and shutdown ownershi
 that is not a small transport substitution. Mcode uses the default stdio transport,
 whose `StreamMessageReader` reads child stdout. Reaching that pipe requires the
 TypeScript-private `cliProcess` and an unsafe cast, which this repository forbids.
-Keep the explicit budget until a
-bounded, complete replay or supported transport pause exists.
+Keep the explicit budget until a bounded, complete replay or supported transport pause exists.
 
 A Codex app-server created for an already paused thread starts paused. During
 exit drain, Codex emits `provider_lost` only if no real native ending was read.
@@ -167,7 +166,8 @@ Cursor's unused stream-json turn runner has no production caller and is not part
 of this flow; deleting it is separate work.
 
 Stop and teardown release held reads before sending an interrupt or waiting
-for native shutdown. A process exit releases the pause and drains stdout
+for native shutdown. ACP Stop releases the current held read, then gates subsequent reads again.
+A process exit releases the pause and drains stdout
 before reporting the exit; ACP and Codex cap this drain at two seconds because
 a descendant can inherit an open pipe. Final native outcomes precede synthetic
 exit failures. Event routes belong to the session that spawned the source and

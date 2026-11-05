@@ -27,7 +27,7 @@ function createSink(submit: (batch: ProviderEventBatch) => Promise<void>): Provi
 describe("CursorCanonicalEventPublisher", () => {
   it("carries one native plan with the assistant message and clears it after consumption", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
-    const publisher = new CursorCanonicalEventPublisher("cursor", createSink(submit), undefined, "execution");
+    const publisher = new CursorCanonicalEventPublisher("unbounded", "cursor", createSink(submit), undefined, "execution");
     const capture = { markdown: "# Cursor plan", source: "native" as const };
     publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnStarted, threadId: routing.threadId }), []);
     publisher.capturePlan(routing, capture);
@@ -42,7 +42,7 @@ describe("CursorCanonicalEventPublisher", () => {
   });
   it("serializes ordered drafts with canonical routing and volatile text", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
-    const publisher = new CursorCanonicalEventPublisher("cursor", createSink(submit), undefined, "execution");
+    const publisher = new CursorCanonicalEventPublisher("unbounded", "cursor", createSink(submit), undefined, "execution");
 
     publisher.publish(routing, providerRuntimeEvent({
       type: AgentEventType.TextDelta,
@@ -99,7 +99,7 @@ describe("CursorCanonicalEventPublisher", () => {
 
   it("binds an SDK session identity to the canonical execution", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
-    const publisher = new CursorCanonicalEventPublisher("cursor", createSink(submit), undefined, "execution");
+    const publisher = new CursorCanonicalEventPublisher("unbounded", "cursor", createSink(submit), undefined, "execution");
 
     publisher.publish(routing, providerRuntimeEvent({
       type: AgentEventType.System,
@@ -130,7 +130,7 @@ describe("CursorCanonicalEventPublisher", () => {
   it("drains accepted drafts and reports the first sink failure", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>()
       .mockRejectedValueOnce(new Error("canonical sink unavailable"));
-    const publisher = new CursorCanonicalEventPublisher("cursor", createSink(submit), undefined, "execution");
+    const publisher = new CursorCanonicalEventPublisher("unbounded", "cursor", createSink(submit), undefined, "execution");
 
     publisher.publish(routing, providerRuntimeEvent({
       type: AgentEventType.System,
@@ -153,7 +153,7 @@ describe("CursorCanonicalEventPublisher", () => {
 
   it("uses a new canonical identity when an execution retries", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
-    const publisher = new CursorCanonicalEventPublisher("cursor", createSink(submit), undefined, "execution");
+    const publisher = new CursorCanonicalEventPublisher("unbounded", "cursor", createSink(submit), undefined, "execution");
     const event = {
       type: AgentEventType.System,
       threadId: routing.threadId,

@@ -224,7 +224,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     private readonly stopDrainReuseTimeoutMs: number = STOP_DRAIN_REUSE_TIMEOUT_MS,
   ) {
     super();
-    this.canonicalEvents = new DevinCanonicalEventPublisher("devin", host.events, undefined, "execution");
+    this.canonicalEvents = new DevinCanonicalEventPublisher("unbounded", "devin", host.events, undefined, "execution");
     this.sessions = new SessionRuntime<DevinAcpSessionEntry>(
       {
         spawn: (args) => this.spawnSession(args),

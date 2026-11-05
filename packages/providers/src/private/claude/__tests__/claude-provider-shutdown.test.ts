@@ -18,10 +18,11 @@ function deferred() {
 }
 
 describe("ClaudeProvider shutdown", () => {
-  it("gates the production stdout hook before the real SDK consumes a CLI flood", async () => {
+  it.each(["resume", "interrupt", "prepareClose"] as const)("%s releases the production stdout hook and reads the real CLI tail", async (action) => {
     const sdk = await vi.importActual<typeof import("@anthropic-ai/claude-agent-sdk")>("@anthropic-ai/claude-agent-sdk");
     const held = deferred();
     let finishedWriting = false;
+    let tailRead = false;
     let saved = 0;
     let savesStarted = false;
     const script = `const {once}=require('node:events');
@@ -40,16 +41,23 @@ describe("ClaudeProvider shutdown", () => {
     mockQuery.mockImplementation((input: Parameters<typeof sdk.query>[0]) => {
       const spawn = input.options?.spawnClaudeCodeProcess;
       if (!spawn) throw new Error("Missing production spawn hook");
-      return sdk.query({ ...input, options: { ...input.options, spawnClaudeCodeProcess: (options) => {
+      const native = sdk.query({ ...input, options: { ...input.options, spawnClaudeCodeProcess: (options) => {
         const child = spawn({ ...options, command: process.execPath, args: ["-e", script] });
         child.stderr.on("data", (chunk: Buffer | string) => { finishedWriting ||= chunk.toString().includes("finished"); });
         return child;
       } } });
+      return Object.assign((async function* () {
+        for await (const message of native) {
+          if (message.type === "result") tailRead = true;
+          yield message;
+        }
+      })(), { close: () => native.close() });
     });
     const host = mockShutdownHost(({ event }) => { if (event.type === "textDelta") saved++; });
     const submit = host.events.submit;
     host.events = { submit: async (batch) => { savesStarted = true; await held.promise; return submit(batch); } };
     const provider = new ClaudeProvider(stubEnvService(), stubJobObject(), undefined, undefined, undefined, host);
+    const spawned = vi.spyOn(provider, "spawn");
     try {
       await provider.sendTurn({
         turnId: "turn-flood", turnExecutionId: "11111111-1111-4111-8111-111111111111",
@@ -59,6 +67,14 @@ describe("ClaudeProvider shutdown", () => {
       await vi.waitFor(() => expect(savesStarted).toBe(true));
       await new Promise((resolve) => setTimeout(resolve, 2000));
       expect(finishedWriting).toBe(false);
+      if (action !== "resume") {
+        const result = spawned.mock.results[0];
+        if (result?.type !== "return") throw new Error("Expected the real spawned session");
+        const { state } = await result.value;
+        provider[action](state);
+        await vi.waitFor(() => expect(tailRead).toBe(true), { timeout: 10000 });
+        expect(finishedWriting).toBe(true);
+      }
       held.resolve();
       await vi.waitFor(() => expect(saved).toBe(20000), { timeout: 15000 });
     } finally {

@@ -55,11 +55,11 @@ export class CanonicalLiveEventPublisher {
   private readonly capacityWaiters = new Map<string, Set<() => void>>();
 
   constructor(
+    private readonly byteBudget: number | "unbounded",
     private readonly providerId: ProviderId,
     private readonly sink: ProviderEventSinkPort,
     private readonly onFailure?: (routing: CanonicalLiveEventRouting, error: Error) => void,
     private readonly failureLifetime: "provider" | "execution" = "provider",
-    private readonly byteBudget = Infinity,
   ) {}
 
   /** Waits before pulling more output while this thread's saves are behind. */
@@ -120,7 +120,7 @@ export class CanonicalLiveEventPublisher {
     }
     const sourceSequence = queue.nextSourceSequence;
     const draft = this.createDraft(routing, runtimeEvent, sourceIdentities, sourceSequence, typeof native === "string" ? undefined : native);
-    const bytes = Number.isFinite(this.byteBudget) ? Buffer.byteLength(JSON.stringify(draft)) : 0;
+    const bytes = this.byteBudget === "unbounded" ? 0 : Buffer.byteLength(JSON.stringify(draft));
     if (!this.admitBytes(queue, routing, bytes, runtimeEvent)) return;
     queue.nextSourceSequence += 1;
     queue.pendingBytes += bytes;
@@ -172,8 +172,8 @@ export class CanonicalLiveEventPublisher {
 
   private admitBytes(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, bytes: number, runtimeEvent: ProviderRuntimeEvent): boolean {
     if (isParentTerminal(runtimeEvent)) return true;
-    if (queue.pendingBytes + bytes <= this.byteBudget) return true;
-    this.fail(queue, routing, Object.assign(new Error(`${this.providerId} canonical save backlog exceeded its ${this.byteBudget} byte budget`),
+    if (this.byteBudget === "unbounded" || queue.pendingBytes + bytes <= this.byteBudget) return true;
+    this.fail(queue, routing, Object.assign(new Error(`CANONICAL_BACKLOG_BYTE_BUDGET: ${this.providerId} canonical save backlog exceeded its ${this.byteBudget} byte budget`),
       { code: "CANONICAL_BACKLOG_BYTE_BUDGET" }));
     logger.error("Provider canonical save backlog exhausted", { executionId: routing.executionId, pendingBytes: queue.pendingBytes, bytes });
     return false;

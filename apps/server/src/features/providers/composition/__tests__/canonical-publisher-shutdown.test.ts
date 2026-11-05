@@ -14,7 +14,7 @@ const receipt: ProviderEventSubmissionReceipt = {
 const factories = (["claude", "copilot", "opencode"] as const).map((name) => ({
   name,
   create: (sink: ProviderEventSinkPort) => {
-    const publisher = new CanonicalLiveEventPublisher(name, sink);
+    const publisher = new CanonicalLiveEventPublisher("unbounded", name, sink);
     return { publish: () => publisher.publish(routing, event, []), publishPeer: () => publisher.publish({ ...routing, executionId: "00000000-0000-4000-8000-000000000002" }, event, []), drain: () => publisher.stopAdmissionAndDrain() };
   },
 }));

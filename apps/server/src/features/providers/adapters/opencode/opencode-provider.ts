@@ -428,7 +428,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     @inject("ProviderHostPorts") private readonly host: ProviderHostPorts,
   ) {
     super();
-    this.canonicalEventPublisher = new CanonicalLiveEventPublisher(this.id, this.host.events);
+    this.canonicalEventPublisher = new CanonicalLiveEventPublisher("unbounded", this.id, this.host.events);
     this.pool = OpenCodeServerPool.withDefaults({
       platform: this.host.runtime.platform,
       terminateTree: (pid) => this.host.processes.terminateTree(pid),

@@ -98,6 +98,25 @@ describe("Copilot public factory", () => {
     provider = createCopilotProvider({ configuration: { cliPath: "copilot", idleSessionTtlMs: 600_000 }, host: ports, copilot: { launch: { resolve: launch } } });
   });
   afterEach(async () => { await provider.shutdown().catch(() => {}); });
+  it("ends errored when held saves exceed the production 64 MiB budget", async () => {
+    const held = Promise.withResolvers<void>();
+    const submit = ports.events.submit.bind(ports.events);
+    ports.events.submit = async (batch) => { await held.promise; return submit(batch); };
+    try {
+      await provider.sendTurn(request());
+      for (let index = 0; index < 65; index++) {
+        session.emit({ type: "assistant.message_delta", data: { messageId: "large-reply", deltaContent: "x".repeat(1024 * 1024) } });
+      }
+      session.emit({ type: "session.idle", ephemeral: true, data: {} });
+      held.resolve();
+      await vi.waitFor(() => expect(projections(sink).filter((event) => event.type === "ended")).toEqual([
+        expect.objectContaining({ outcome: "errored", reason: expect.stringContaining("CANONICAL_BACKLOG_BYTE_BUDGET") }),
+      ]));
+      expect(projections(sink).filter((event) => event.type === "turnComplete")).toEqual([]);
+    } finally {
+      held.resolve();
+    }
+  });
   async function finish() {
     session.emit({ type: "session.idle", ephemeral: true, data: {} });
     await vi.waitFor(() => expect(projections(sink).at(-1)?.type).toBe("ended"));

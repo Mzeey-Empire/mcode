@@ -42,7 +42,7 @@ describe("AcpSessionRuntime", () => {
     let admitted = 0;
     let promptId: number | undefined;
     const route = { threadId: "thread", turnId: "turn", executionId: "11111111-1111-4111-8111-111111111111", deliveryAttempt: 1 };
-    const publisher = new CanonicalLiveEventPublisher(providerId, { submit: async (batch) => {
+    const publisher = new CanonicalLiveEventPublisher("unbounded", providerId, { submit: async (batch) => {
       await held.promise;
       for (const draft of batch.events) {
         if (draft.payload.type !== "item.recorded") throw new Error("Missing event");
@@ -116,7 +116,7 @@ describe("AcpSessionRuntime", () => {
     const held = Promise.withResolvers<void>();
     const paused = Promise.withResolvers<void>();
     const route = { threadId: "held", turnId: "turn", executionId: "11111111-1111-4111-8111-111111111111", deliveryAttempt: 1 };
-    const publisher = new CanonicalLiveEventPublisher("cursor", { submit: async () => {
+    const publisher = new CanonicalLiveEventPublisher("unbounded", "cursor", { submit: async () => {
       await held.promise;
       return { commit: { outcome: "accepted", acceptedThrough: 1, eventCount: 1,
         progressPosition: { epoch: "epoch", sequence: 1 } }, delivery: { ingress: "not-required" } };

@@ -20,11 +20,11 @@ const factories = [
     return { publish: () => publisher.publish(routing, event), publishTerminal: () => publisher.publish(routing, terminal), publishPeer: () => publisher.publish({ ...routing, executionId: "00000000-0000-4000-8000-000000000002" }, event), drain: () => publisher.stopAdmissionAndDrain() };
   } },
   { name: "Cursor", create: (sink: ProviderEventSinkPort) => {
-    const publisher = new CanonicalLiveEventPublisher("cursor", sink, undefined, "execution");
+    const publisher = new CanonicalLiveEventPublisher("unbounded", "cursor", sink, undefined, "execution");
     return { publish: () => publisher.publish(routing, event, []), publishTerminal: () => publisher.publish(routing, terminal, []), publishPeer: () => publisher.publish({ ...routing, executionId: "00000000-0000-4000-8000-000000000002" }, event, []), drain: () => publisher.stopAdmissionAndDrain() };
   } },
   { name: "Devin", create: (sink: ProviderEventSinkPort) => {
-    const publisher = new CanonicalLiveEventPublisher("devin", sink, undefined, "execution");
+    const publisher = new CanonicalLiveEventPublisher("unbounded", "devin", sink, undefined, "execution");
     return { publish: () => publisher.publish(routing, event, []), publishTerminal: () => publisher.publish(routing, terminal, []), publishPeer: () => publisher.publish({ ...routing, executionId: "00000000-0000-4000-8000-000000000002" }, event, []), drain: () => publisher.stopAdmissionAndDrain() };
   } },
 ];
@@ -33,7 +33,7 @@ describe.each(["claude", "cursor", "devin", "copilot", "opencode"] as const)("%s
   it("drains more than 1024 held saves in order through the real outcome", async () => {
     const held = Promise.withResolvers<void>();
     const received: string[] = [];
-    const publisher = new CanonicalLiveEventPublisher(providerId, { submit: async (batch) => {
+    const publisher = new CanonicalLiveEventPublisher("unbounded", providerId, { submit: async (batch) => {
       await held.promise;
       for (const draft of batch.events) {
         if (draft.payload.type !== "item.recorded") throw new Error("Missing runtime event");
@@ -62,7 +62,7 @@ describe.each(["claude", "cursor", "devin", "copilot", "opencode"] as const)("%s
 
   it("releases a paused reader on Stop without waiting for saving", async () => {
     const held = Promise.withResolvers<void>();
-    const publisher = new CanonicalLiveEventPublisher(providerId, { submit: async () => {
+    const publisher = new CanonicalLiveEventPublisher("unbounded", providerId, { submit: async () => {
       await held.promise;
       return receipt;
     } });
@@ -83,7 +83,7 @@ describe.each(["claude", "cursor", "devin", "copilot", "opencode"] as const)("%s
 describe.each(["claude", "cursor"] as const)("%s native plan lifecycle", (providerId) => {
   it("drops a capture with no assistant message instead of inventing one, and rejects captures after retirement", async () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
-    const publisher = new CanonicalLiveEventPublisher(providerId, { submit });
+    const publisher = new CanonicalLiveEventPublisher("unbounded", providerId, { submit });
     const capture = { markdown: "## Review plan", source: "native" as const };
     publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnStarted, threadId: routing.threadId }), []);
     publisher.capturePlan(routing, capture);
@@ -154,7 +154,7 @@ describe.each(factories)("$name publisher shutdown", ({ create }) => {
 describe("execution-lifetime publisher endings", () => {
   it.each(["cursor", "devin"] as const)("%s records a failed ending after saving fails", async (id) => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockRejectedValueOnce(new Error("disk unavailable")).mockResolvedValue(receipt);
-    const publisher = new CanonicalLiveEventPublisher(id, { submit }, undefined, "execution");
+    const publisher = new CanonicalLiveEventPublisher("unbounded", id, { submit }, undefined, "execution");
     publisher.publish(routing, event, []);
     publisher.publish(routing, providerRuntimeEvent({ type: "turnComplete", threadId: routing.threadId,
       reason: "end_turn", tokensIn: 0, tokensOut: 0, costUsd: null }), []);
@@ -170,11 +170,11 @@ describe("execution-lifetime publisher endings", () => {
     const failure = vi.fn();
     const held = Promise.withResolvers<void>();
     const saved: number[] = [];
-    const publisher = new CanonicalLiveEventPublisher("copilot", { submit: async (batch) => {
+    const publisher = new CanonicalLiveEventPublisher(64 * 1024 * 1024, "copilot", { submit: async (batch) => {
       await held.promise;
       saved.push(batch.events[0]!.sourceSequence!);
       return receipt;
-    } }, failure, "execution", 64 * 1024 * 1024);
+    } }, failure, "execution");
     const large = providerRuntimeEvent({ type: "textDelta", threadId: routing.threadId, delta: "x".repeat(1024 * 1024) });
     for (let index = 0; index < 65; index++) publisher.publish(routing, large, []);
     expect(failure).toHaveBeenCalledExactlyOnceWith(routing, expect.objectContaining({ code: "CANONICAL_BACKLOG_BYTE_BUDGET" }));
@@ -189,7 +189,7 @@ describe("execution-lifetime publisher endings", () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>()
       .mockRejectedValueOnce(new Error("sink unavailable"))
       .mockResolvedValue(receipt);
-    const publisher = new CanonicalLiveEventPublisher("copilot", { submit }, undefined, "execution");
+    const publisher = new CanonicalLiveEventPublisher("unbounded", "copilot", { submit }, undefined, "execution");
     publisher.publish(routing, event, []);
     await expect(publisher.flushForExecution(routing)).rejects.toThrow();
     publisher.publish(routing, providerRuntimeEvent(terminal.event, { providerId: "copilot", kind: "child-thread",
@@ -204,7 +204,7 @@ describe("execution-lifetime publisher endings", () => {
 
   it("preserves child and parent endings past the former queue limit", async () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
-    const publisher = new CanonicalLiveEventPublisher("copilot", { submit }, undefined, "execution");
+    const publisher = new CanonicalLiveEventPublisher("unbounded", "copilot", { submit }, undefined, "execution");
     for (let index = 0; index < 1_020; index += 1) publisher.publish(routing, event, []);
     for (let index = 0; index < 6; index += 1) {
       publisher.publish(routing, providerRuntimeEvent(index % 2 === 0 ? terminal.event : {
