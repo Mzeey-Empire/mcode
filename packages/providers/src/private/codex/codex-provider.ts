@@ -2934,8 +2934,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     // Approval cards must clear even if the native interrupt is slow or fails.
     this.drainPending((e) => e.sessionId === sessionId);
     if (state) {
-      // Stop ends the reply now, not when the interrupt settles: output after Stop is discarded.
-      this.closeTurnAssistantText(state, executionForDrain(state));
+      // The reply's text stays open until the turn's output ends. A user Stop fences the execution
+      // before calling here, so nothing published after this point reaches the turn either way.
       state.cancelledTurnExecutionId = pending?.executionId ?? state.nextTurnExecutionId;
       const drain = this.awaitStopSettled(state);
       state.interruptDrain = drain;

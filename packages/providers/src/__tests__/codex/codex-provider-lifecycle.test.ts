@@ -416,6 +416,37 @@ describe("Codex provider lifecycle through native transport", () => {
     }]);
   });
 
+  it("publishes late output and the real completion when app shutdown stops the session before the provider shuts down", async () => {
+    const { provider, child, starts, events } = createProvider();
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    child.stdout.write(answerLine("before "));
+    await vi.waitFor(() => expect(turnTexts(events)).toEqual(["before "]));
+    child.interruptReply = (interrupt) => {
+      if (interrupt.params?.turnId) return;
+      setTimeout(() => child.stdout.write(answerLine("late ") + completionLine("completed")
+        + JSON.stringify({ id: interrupt.id, result: {} }) + "\n"), 100);
+    };
+
+    // Server shutdown stops each live session, unfenced, and then shuts the provider down.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const stop = provider.stopSession(request.sessionId);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await stop;
+      const shutdown = provider.shutdown();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await shutdown;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(turnTexts(events)).toEqual(["before ", "late "]);
+    expect(turnEnds(events)).toEqual([{
+      type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "completed",
+    }]);
+  });
+
   it("ends the turn once as provider_lost after reading the output of a server killed without a real end", async () => {
     const { provider, child, starts, events } = createProvider();
     await provider.sendTurn(request);
@@ -447,35 +478,54 @@ describe("Codex provider lifecycle through native transport", () => {
     expect(turnEnds(events)).toHaveLength(1);
   });
 
-  it("closes the reply as soon as the user stops, before a slow interrupt settles", async () => {
-    const { provider, child, starts, events } = createProvider();
+  it("settles a user Stop without its timeouts while saving is behind, and publishes nothing past the fence", async () => {
+    let releaseFirstSave!: () => void;
+    const firstSaveBlocked = new Promise<void>((resolve) => { releaseFirstSave = resolve; });
+    let releaseLaterSaves!: () => void;
+    const laterSavesBlocked = new Promise<void>((resolve) => { releaseLaterSaves = resolve; });
+    let firstSave = true;
+    const { provider, child, starts, events } = createProvider({ submit: async (batch) => {
+      // Saving stays behind after the first save too, so only discarding the backlog can resume the stream.
+      const gate = firstSave ? firstSaveBlocked : laterSavesBlocked;
+      firstSave = false;
+      await gate;
+      return { commit: { outcome: "committed", conversationRevision: 1, rosterRevision: 0, acceptedThrough: 1,
+        durableThrough: 1, eventCount: batch.events.length }, delivery: { ingress: "queued" } };
+    } });
     await provider.sendTurn(request);
     await vi.waitFor(() => expect(starts()).toHaveLength(1));
-    child.stdout.write(answerLine("before "));
-    await vi.waitFor(() => expect(turnTexts(events)).toEqual(["before "]));
+    const deltas = Array.from({ length: 400 }, (_, index) => `${index} `);
+    child.stdout.write(deltas.map(answerLine).join(""));
+    await vi.waitFor(() => expect(child.stdout.isPaused()).toBe(true));
+    // The interrupt's answer queues behind the held output, so it is read only once the stream resumes.
     child.interruptReply = (interrupt) => {
-      if (interrupt.params?.turnId) {
-        child.stdout.write(answerLine("after stop "));
-        return;
-      }
-      child.stdout.write(completionLine("interrupted") + JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
+      child.stdout.write(answerLine("after stop ") + completionLine("interrupted")
+        + JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
     };
 
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      const stop = provider.stopSession(request.sessionId);
-      // No timer advances: the boundary must not wait on the interrupt's timeout.
-      await provider.flushCanonicalEvents();
-      expect(turnEventsOf(events).at(-1)).toMatchObject({ type: AgentEventType.AssistantMessageBoundary, content: "before " });
-      await vi.advanceTimersByTimeAsync(30_000);
+      const fenced = provider.fenceCanonicalTurnEvents({ threadId: request.threadId, turnId: request.turnId,
+        executionId: request.turnExecutionId, deliveryAttempt: 1 }, { discardQueued: true });
+      let stopped = false;
+      const stop = provider.stopSession(request.sessionId).then(() => { stopped = true; });
+      releaseFirstSave();
+      await fenced;
+      // No timer advances: Stop settles on the interrupt's real answer, not on a timeout.
+      await vi.waitFor(() => expect(stopped).toBe(true));
       await stop;
-      await provider.shutdown();
+      expect(child.kill).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
+    releaseLaterSaves();
+    await provider.shutdown();
 
-    expect(turnTexts(events)).toEqual(["before "]);
-    expect(turnEnds(events)).toHaveLength(1);
+    // Only the save already in flight at the fence lands; the held text, the late text, and the end do not.
+    const texts = turnTexts(events);
+    expect(texts.length).toBeLessThan(deltas.length);
+    expect(texts).toEqual(deltas.slice(0, texts.length));
+    expect(turnEnds(events)).toEqual([]);
   });
 
   it("publishes nothing past the Stop fence while a slow interrupt and teardown settle", async () => {
