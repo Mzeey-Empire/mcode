@@ -70,6 +70,71 @@ describe("bounded tool output", () => {
     expect(NodeFS.readFileSync(result.outputArtifactPath!, "utf8")).toBe(fullOutput);
   });
 
+  it("preserves split surrogate pairs across artifact flushes", () => {
+    const buffer = new BoundedToolOutputBuffer("thread-1", "split-surrogates", {
+      forceArtifact: true,
+    });
+    const prefix = "x".repeat(64 * 1024 - 3);
+    const input = `${prefix}😀`.repeat(3);
+
+    for (let index = 0; index < 3; index++) {
+      buffer.append(`${prefix}\uD83D`);
+      buffer.append("\uDE00");
+    }
+    const result = buffer.finalize();
+
+    expect(result.outputTruncated).toBe(true);
+    expect(NodeFS.readFileSync(result.outputArtifactPath!, "utf8") === input).toBe(true);
+    expect(result.outputTotalBytes).toBe(Buffer.byteLength(input));
+  });
+
+  it("counts split pairs as four wire bytes at the preview limit", () => {
+    const buffer = new BoundedToolOutputBuffer("thread-1", "split-wire-limit");
+    const prefix = "x".repeat(TOOL_OUTPUT_PREVIEW_BYTES - 4);
+    buffer.append(prefix + "\ud83d");
+    buffer.append("");
+    buffer.append("\ude00");
+
+    expect(buffer.finalize()).toEqual({
+      output: prefix + "😀",
+      outputTruncated: false,
+      outputTotalBytes: TOOL_OUTPUT_PREVIEW_BYTES,
+    });
+  });
+
+  it("finalizes a lone high surrogate before considering fallback", () => {
+    const buffer = new BoundedToolOutputBuffer("thread-1", "lone-surrogate");
+    buffer.append("\ud83d");
+
+    expect(buffer.finalize("fallback")).toEqual({
+      output: "\ud83d",
+      outputTruncated: false,
+      outputTotalBytes: 3,
+    });
+  });
+
+  it("saves a lone high surrogate at the end of a fallback", () => {
+    const buffer = new BoundedToolOutputBuffer("thread-1", "fallback-surrogate");
+
+    expect(buffer.finalize("\ud83d")).toEqual({
+      output: "\ud83d",
+      outputTruncated: false,
+      outputTotalBytes: 3,
+    });
+  });
+
+  it("discards a pending high surrogate when replacing output", () => {
+    const buffer = new BoundedToolOutputBuffer("thread-1", "replace-surrogate");
+    buffer.append("old\ud83d");
+    buffer.replaceWith("new😀");
+
+    expect(buffer.finalize()).toEqual({
+      output: "new😀",
+      outputTruncated: false,
+      outputTotalBytes: 7,
+    });
+  });
+
   it("bounds JSON escapes while preserving raw full-output bytes", () => {
     const output = "\u0001".repeat(100_000);
     const result = boundToolOutput({ threadId: "thread-1", toolCallId: "controls", output });

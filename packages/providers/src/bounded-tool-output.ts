@@ -66,6 +66,7 @@ export class BoundedToolOutputBuffer {
   private tailBytes = 0;
   private totalBytes = 0;
   private totalWireBytes = 0;
+  private pendingHighSurrogate = "";
   private headComplete = false;
   private artifactPath: string | undefined;
   private artifactStarted = false;
@@ -90,6 +91,19 @@ export class BoundedToolOutputBuffer {
   /** Append one streamed output chunk without concatenating the full output. */
   append(chunk: string): void {
     if (!chunk) return;
+    chunk = this.pendingHighSurrogate + chunk;
+    this.pendingHighSurrogate = "";
+    const lastCodeUnit = chunk.charCodeAt(chunk.length - 1);
+    // Keep split pairs together for UTF-8 writes and JSON wire-byte accounting.
+    if (lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff) {
+      this.pendingHighSurrogate = chunk.slice(-1);
+      chunk = chunk.slice(0, -1);
+    }
+    this.appendCompleteChunk(chunk);
+  }
+
+  private appendCompleteChunk(chunk: string): void {
+    if (!chunk) return;
     const chunkBytes = byteLength(chunk);
     const nextTotal = this.totalBytes + chunkBytes;
     const chunkWireBytes = toolOutputWireBytes(chunk);
@@ -110,6 +124,7 @@ export class BoundedToolOutputBuffer {
 
   /** Replace retained preview text with a full-text snapshot when it extends the stream. */
   replaceWith(text: string): void {
+    this.pendingHighSurrogate = "";
     this.head = "";
     this.headBytes = 0;
     this.tail = "";
@@ -142,8 +157,10 @@ export class BoundedToolOutputBuffer {
 
   /** Return the bounded result for this output. */
   finalize(fallback = ""): BoundedToolOutputResult {
+    this.appendCompleteChunk(this.pendingHighSurrogate);
+    this.pendingHighSurrogate = "";
     if (this.totalBytes === 0 && fallback) {
-      this.append(fallback);
+      this.appendCompleteChunk(fallback);
     }
 
     const outputTruncated = this.isPreviewTruncated();
