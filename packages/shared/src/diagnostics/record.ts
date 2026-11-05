@@ -119,25 +119,39 @@ export function parseDiagLine(line: string): DiagRecord | undefined {
 }
 
 /**
- * The line that opens every append to a recording file, naming the run that wrote it. Records
- * carry no run, and two processes can append to one thread file in turn, so this is how a reader
- * tells whose line it holds. `replay` opens a fatal flush's second copy of a batch whose background
- * append may already have landed. It is not a {@link DiagRecord}, so `parseDiagLine` skips it.
+ * The line that opens every append to a recording file. Records carry no run, and two processes
+ * can append to one thread file in turn, so `writer` is how a reader tells whose records follow.
+ * `(writer, batch)` names one batch: a flush that rewrites a batch whose append may not have
+ * landed writes the same header again, so a reader keeps one copy whatever order the copies land
+ * in. `records` counts the record lines that follow, so a reader knows where the batch ends even
+ * when another append lands inside a split one. It is not a {@link DiagRecord}, so
+ * `parseDiagLine` skips it.
  */
 export interface AppendHeader {
   writer: string;
-  replay?: true;
+  batch: number;
+  records: number;
 }
 
-/** Serializes an append header as its own JSONL line. */
+/** How every append header line starts; no record line starts this way. */
+export const APPEND_HEADER_PREFIX = '{"writer":';
+
+/** Serializes an append header as its own JSONL line, starting with {@link APPEND_HEADER_PREFIX}. */
 export function appendHeaderLine(header: AppendHeader): string {
-  return JSON.stringify(header) + "\n";
+  const { writer, batch, records } = header;
+  return JSON.stringify({ writer, batch, records }) + "\n";
 }
 
 /** Reads an append header, or returns undefined for any other line. */
 export function parseAppendHeader(line: string): AppendHeader | undefined {
   const parsed = parseJson(line);
-  if (!parsed || typeof parsed !== "object" || !hasString(parsed, "writer")) return undefined;
-  const writer: string = Reflect.get(parsed, "writer");
-  return Reflect.get(parsed, "replay") === true ? { writer, replay: true } : { writer };
+  if (!parsed || typeof parsed !== "object") return undefined;
+  if (!hasString(parsed, "writer") || !hasNumber(parsed, "batch") || !hasNumber(parsed, "records")) {
+    return undefined;
+  }
+  return {
+    writer: Reflect.get(parsed, "writer"),
+    batch: Reflect.get(parsed, "batch"),
+    records: Reflect.get(parsed, "records"),
+  };
 }

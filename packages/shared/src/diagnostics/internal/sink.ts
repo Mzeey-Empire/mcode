@@ -40,7 +40,13 @@ function countLines(files: Map<string, string[]>): number {
   return count;
 }
 
+// Process-wide rather than per sink: a recorder replaces its sink after a failure but keeps its
+// run, so a per-sink count would reuse a (writer, batch) pair the old sink already wrote.
+let lastBatchId = 0;
+
+/** Lines taken from the queue together. Every file's append of them carries the same id. */
 interface QueuedBatch {
+  id: number;
   files: Map<string, string[]>;
   bytes: number;
 }
@@ -63,8 +69,8 @@ export interface SinkOptions {
 export class Sink {
   private queued = new Map<string, string[]>();
   private queuedBytes = 0;
-  /** Lines the background flush has taken, by file, until that file's append resolves. */
-  private unconfirmed = new Map<string, string[]>();
+  /** The batch the background flush has taken; a file leaves it once its append resolves. */
+  private unconfirmed?: QueuedBatch;
   private queuedAndWritingBytes = 0;
   private droppedCount = 0;
   private readonly fileSizes = new Map<string, number>();
@@ -73,15 +79,7 @@ export class Sink {
   private failed = false;
   private retentionRunning = false;
   private lastRetentionAt = Date.now();
-  /** Opens every append, so a reader can tell this run's lines from another process's. */
-  private readonly header: string;
-  /** Opens the fatal flush's rewrite, so a reader drops only this run's own second copies. */
-  private readonly replayHeader: string;
-
-  constructor(private readonly options: SinkOptions) {
-    this.header = appendHeaderLine({ writer: options.runId });
-    this.replayHeader = appendHeaderLine({ writer: options.runId, replay: true });
-  }
+  constructor(private readonly options: SinkOptions) {}
 
   /** Queue one record, or count it as dropped when the memory cap is reached. */
   write(record: DiagRecord): void {
@@ -106,8 +104,8 @@ export class Sink {
   /**
    * Writes everything not yet on disk before the process exits, including the batch a background
    * flush has taken but not finished. Exit stops that background append wherever it is, so this
-   * writes the batch again under a replay header. The file may then hold it twice, and the reader
-   * drops a replayed line only when this run already wrote it.
+   * writes the batch again under the same batch header. When the process lives on, the background
+   * append still lands, before or after this copy. Either way the reader keeps one copy.
    */
   flushSync(): void {
     this.clearTimer();
@@ -160,11 +158,11 @@ export class Sink {
 
   private async flushAsync(): Promise<void> {
     const batch = this.takeBatch();
-    this.unconfirmed = batch.files;
+    this.unconfirmed = batch;
     try {
       // flushSync empties the map once it has rewritten the lines, which ends this loop early.
       for (const [key, lines] of batch.files) {
-        await this.appendLines(key, this.header + lines.join(""));
+        await this.appendLines(key, this.headed(batch.id, lines));
         batch.files.delete(key);
       }
       this.queuedAndWritingBytes -= batch.bytes;
@@ -184,24 +182,31 @@ export class Sink {
   }
 
   private takeBatch(): QueuedBatch {
-    const batch = { files: this.queued, bytes: this.queuedBytes };
+    lastBatchId += 1;
+    const batch = { id: lastBatchId, files: this.queued, bytes: this.queuedBytes };
     this.queued = new Map();
     this.queuedBytes = 0;
     return batch;
   }
 
+  /** Opens an append with the header naming this run, the batch, and its record count. */
+  private headed(batchId: number, lines: string[]): string {
+    const header = { writer: this.options.runId, batch: batchId, records: lines.length };
+    return appendHeaderLine(header) + lines.join("");
+  }
+
   private rewriteUnconfirmedSync(): void {
-    if (this.failed || this.unconfirmed.size === 0) return;
     const unconfirmed = this.unconfirmed;
+    if (this.failed || !unconfirmed || unconfirmed.files.size === 0) return;
     try {
-      for (const [key, lines] of unconfirmed) {
+      for (const [key, lines] of unconfirmed.files) {
         // An append cut short by exit can end mid-line. A leading newline keeps that fragment
-        // from fusing with the replay header, so the reader skips only the fragment.
-        this.appendLinesSync(key, "\n" + this.replayHeader + lines.join(""));
-        unconfirmed.delete(key);
+        // from fusing with the rewrite's header, so the reader skips only the fragment.
+        this.appendLinesSync(key, "\n" + this.headed(unconfirmed.id, lines));
+        unconfirmed.files.delete(key);
       }
     } catch (error) {
-      this.markFailed(error, unconfirmed);
+      this.markFailed(error, unconfirmed.files);
     }
   }
 
@@ -210,7 +215,7 @@ export class Sink {
     const batch = this.takeBatch();
     try {
       for (const [key, lines] of batch.files) {
-        this.appendLinesSync(key, this.header + lines.join(""));
+        this.appendLinesSync(key, this.headed(batch.id, lines));
         batch.files.delete(key);
       }
       this.queuedAndWritingBytes -= batch.bytes;
@@ -247,9 +252,10 @@ export class Sink {
   }
 
   private writeLastMarkersSync(): void {
-    for (const [key, lines] of this.takeBatch().files) {
+    const batch = this.takeBatch();
+    for (const [key, lines] of batch.files) {
       try {
-        this.appendLinesSync(key, this.header + lines.join(""));
+        this.appendLinesSync(key, this.headed(batch.id, lines));
       } catch {
         // onFailure reports the disk error; a file that refuses its marker has nothing to add.
       }
