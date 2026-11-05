@@ -97,6 +97,14 @@ export const CanonicalAgentEventSchema = z.discriminatedUnion("type", [
       droppedEventCount: z.number().int().positive(),
     })
     .strict(),
+  // The writer saved this operation's events without the other contents it rejected.
+  z
+    .object({
+      type: z.literal("ingest.content-replaced"),
+      operationId: z.string().min(1).max(256),
+      reason: z.string().min(1).max(500),
+    })
+    .strict(),
   z.object({ type: z.literal("item.recorded"), item: AgentItemSchema }).strict(),
   z
     .object({

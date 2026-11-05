@@ -8,8 +8,7 @@ import { MessageSchema } from "@mcode/contracts/models/message";
 import { canonicalAgentEvents } from "../../../runtime/persistence/sqlite/schema.js";
 import { CanonicalAgentStore } from "./canonical-agent-store.js";
 import type { CanonicalAcceptedWriteReceipt } from "./canonical-agent-writer-protocol.js";
-import type { ExecutionSemanticOperation } from "../execution/execution-worker-handler.js";
-import type { CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
+import type { AcceptedCompatibilityOperation, CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
 import { PlanQuestionAnswersStore as PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-store.js";
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
 import { AcceptedFeatureWriteMetadataSchema, persistAcceptedFeatureWrite } from "./accepted-feature-write.js";
@@ -32,10 +31,19 @@ export const CanonicalAcceptedWriteInputSchema = z.object({
   /** A user message the provider took mid-turn; its steer row is marked delivered in this transaction. */
   steerMessage: MessageSchema().optional(),
   features: AcceptedFeatureWriteMetadataSchema().optional(),
+  /** Saves the same events in place of a page whose other contents the writer rejected. */
+  replaced: z.object({ reason: z.string().min(1).max(500) }).strict().optional(),
 }).strict();
+
+const REPLACED_OPERATION_SUFFIX = ":replaced";
+
+/** A deterministic storage id, so a lost reply replays the replacement's receipt instead of conflicting. */
+export function replacedOperationId(pageOperationId: string): string {
+  return `${pageOperationId}${REPLACED_OPERATION_SUFFIX}`;
+}
 /** Already-prepared data to append without interpreting a provider event. */
 export type CanonicalAcceptedWriteInput = Omit<z.infer<typeof CanonicalAcceptedWriteInputSchema>, "compatibility">
-  & { readonly compatibility?: ExecutionSemanticOperation };
+  & { readonly compatibility?: AcceptedCompatibilityOperation };
 
 /** Storage correctness for accepted events, independent of execution and publication. */
 export class CanonicalAcceptedEventWrite {
@@ -60,6 +68,7 @@ export class CanonicalAcceptedEventWrite {
     const parsed = CanonicalAcceptedWriteInputSchema.parse(input);
     this.assertRouting(parsed);
     this.assertPredecessor(parsed);
+    this.assertReplacement(input, operationId);
     this.applyCompatibility(input, operationId);
     const result = this.canonical.appendAcceptedInsideTransaction({ ...parsed.execution,
       phase: parsed.phase, nativeCursor: parsed.nativeCursor, events: parsed.events,
@@ -74,7 +83,8 @@ export class CanonicalAcceptedEventWrite {
     if (input.compatibility) this.compatibility?.confirmAcceptedCompatibility(input.compatibility, result.conversationRevision);
     return {
       receipt: { operationId, contentHash: parsed.contentHash, predecessor: parsed.predecessor,
-        through: parsed.through, durableRevision: result.conversationRevision },
+        through: parsed.through, durableRevision: result.conversationRevision,
+        ...(parsed.replaced ? { replaced: parsed.replaced } : {}) },
       revision: { conversationRevision: result.conversationRevision, rosterRevision: result.rosterRevision },
       events: result.events,
     };
@@ -138,10 +148,21 @@ export class CanonicalAcceptedEventWrite {
     if (lastSequence > 0) this.advancePublicationHead.run(input.execution.threadId, lastSequence);
   }
 
+  /** A replacement carries only events and a content-replaced operation, and only under its own storage id. */
+  private assertReplacement(input: CanonicalAcceptedWriteInput, operationId: string): void {
+    const replacing = operationId.endsWith(REPLACED_OPERATION_SUFFIX);
+    const replacedCompatibility = input.compatibility?.mutation.kind === "content-replaced";
+    if (replacing !== (input.replaced !== undefined) || (input.compatibility !== undefined && replacing !== replacedCompatibility)
+      || replacing && (input.planAnswer || input.steerMessage || input.features)) {
+      throw new Error("Accepted content replacement does not match its operation");
+    }
+  }
+
   private applyCompatibility(input: CanonicalAcceptedWriteInput, operationId: string): void {
     if (!input.compatibility) return;
     const operation = input.compatibility;
-    if (!this.compatibility || operationId !== operation.operationId && !operationId.startsWith(`${operation.operationId}:page:`)
+    const pageOperationId = input.replaced ? operationId.slice(0, -REPLACED_OPERATION_SUFFIX.length) : operationId;
+    if (!this.compatibility || pageOperationId !== operation.operationId && !pageOperationId.startsWith(`${operation.operationId}:page:`)
       || operation.execution.executionId !== input.execution.executionId) {
       throw new Error("Accepted compatibility operation identity does not match");
     }

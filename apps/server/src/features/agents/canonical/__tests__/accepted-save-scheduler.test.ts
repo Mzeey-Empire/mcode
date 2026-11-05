@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AcceptedSaveScheduler } from "../accepted-save-scheduler.js";
+import { AcceptedContentRejected, classifySaveFailure } from "../accepted-save-failure.js";
 import { BoundedProgressRetention } from "../../execution/progress-retention-budget.js";
 import { ThreadProgressOwner } from "../../execution/thread-progress-owner.js";
-import type { AcceptedProgressBatch, SavedProgressReceipt } from "../../execution/thread-progress-types.js";
+import type { AcceptedProgressBatch, ProgressSaveFailure, SavedProgressReceipt } from "../../execution/thread-progress-types.js";
 
 const limits = { maxEvents: 20, maxBytes: 100_000, reservedControlEvents: 2, reservedControlBytes: 5_000 };
 
@@ -32,7 +33,7 @@ describe("AcceptedSaveScheduler", () => {
     const held = new Promise<SavedProgressReceipt>((resolve) => { release = resolve; });
     let writes = 0;
     const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async () => { writes += 1; return held; } },
-      maxAttempts: 2, retryDelayMs: 0, retryable: () => true,
+      maxAttempts: 2, retryDelayMs: 0, classify: () => "transient",
       onSaved: async (_batch, saved) => { progress.acknowledge(saved); }, onFailure: async (_batch, failure) => { progress.recordFailure(failure); } });
     const first = accepted(progress, "one", "text");
     scheduler.enqueue(first);
@@ -54,7 +55,7 @@ describe("AcceptedSaveScheduler", () => {
     const two = owner("two");
     const writes: string[] = [];
     const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => { writes.push(batch.operationId); return receipt(batch); } },
-      maxAttempts: 2, retryDelayMs: 0, retryable: () => true,
+      maxAttempts: 2, retryDelayMs: 0, classify: () => "transient",
       onSaved: async (batch, saved) => { (batch.execution.threadId === "one" ? one : two).acknowledge(saved); }, onFailure: async () => {} });
     scheduler.enqueue(accepted(one, "one", "one:1"));
     scheduler.enqueue(accepted(one, "one", "one:2"));
@@ -72,7 +73,7 @@ describe("AcceptedSaveScheduler", () => {
     const failures: Error[] = [];
     const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
       writes.push(batch); if (writes.length === 1) throw original; return receipt(batch);
-    } }, maxAttempts: 2, retryDelayMs: 0, retryable: () => true,
+    } }, maxAttempts: 2, retryDelayMs: 0, classify: () => "transient",
     onSaved: async (_batch, saved) => { progress.acknowledge(saved); },
     onFailure: async (_batch, failure) => { failures.push(failure.error); progress.recordFailure(failure); } });
     const batch = accepted(progress, "one", "text");
@@ -86,24 +87,60 @@ describe("AcceptedSaveScheduler", () => {
     await scheduler.close();
   });
 
-  it("parks permanent failure without losing retention or preventing a peer save", async () => {
-    const one = owner("one");
-    const two = owner("two");
-    const failure = new Error("SQLITE_FULL");
-    const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
-      if (batch.execution.threadId === "one") throw failure; return receipt(batch);
-    } }, maxAttempts: 3, retryDelayMs: 0, retryable: () => false,
-    onSaved: async (batch, saved) => { (batch.execution.threadId === "one" ? one : two).acknowledge(saved); },
-    onFailure: async (_batch, failed) => { one.recordFailure(failed); } });
-    const batch = accepted(one, "one", "one:1");
-    scheduler.enqueue(batch);
-    scheduler.enqueue(accepted(two, "two", "two:1"));
+  it("replaces a batch whose contents the writer rejects, then saves the batch behind it", async () => {
+    const progress = owner("one");
+    const rejected = new Error("Canonical writer write-failed", { cause: new AcceptedContentRejected("live publication is too large") });
+    const writes: [string, Error | undefined][] = [];
+    const failures: ProgressSaveFailure[] = [];
+    const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch, replacing) => {
+      writes.push([batch.operationId, replacing]);
+      if (batch.operationId === "a" && !replacing) throw rejected;
+      return receipt(batch);
+    } }, maxAttempts: 3, retryDelayMs: 0, classify: classifySaveFailure,
+    onSaved: async (_batch, saved) => { progress.acknowledge(saved); },
+    onFailure: async (_batch, failure) => { failures.push(failure); progress.recordFailure(failure); } });
+    scheduler.enqueue(accepted(progress, "one", "a"));
+    scheduler.enqueue(accepted(progress, "one", "b"));
     await scheduler.settle();
-    expect(one.savingState()).toMatchObject({ kind: "failed", error: failure });
-    expect(one.recoveryCut().retained).toEqual([batch]);
-    expect(two.savingState().kind).toBe("saved");
-    expect(scheduler.depth()).toMatchObject({ pending: 1, threads: 1, inFlight: false });
+    expect(writes).toEqual([["a", undefined], ["a", rejected], ["b", undefined]]);
+    expect(failures).toEqual([]);
+    expect(progress.savingState().kind).toBe("saved");
     await scheduler.close();
+  });
+
+  describe("with an environment failure", () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it("keeps retrying the head after reporting it exhausted, without blocking a peer", async () => {
+      vi.useFakeTimers();
+      const one = owner("one");
+      const two = owner("two");
+      let diskFull = true;
+      const full = Object.assign(new Error("database or disk is full"), { code: "SQLITE_FULL" });
+      const failures: ProgressSaveFailure[] = [];
+      const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
+        if (batch.execution.threadId === "one" && diskFull) throw full; return receipt(batch);
+      } }, maxAttempts: 2, retryDelayMs: 1_000, classify: classifySaveFailure,
+      onSaved: async (batch, saved) => { (batch.execution.threadId === "one" ? one : two).acknowledge(saved); },
+      onFailure: async (_batch, failed) => { failures.push(failed); one.recordFailure(failed); } });
+      const a = accepted(one, "one", "a");
+      const b = accepted(one, "one", "b");
+      scheduler.enqueue(a);
+      scheduler.enqueue(b);
+      scheduler.enqueue(accepted(two, "two", "two:1"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(one.savingState()).toMatchObject({ kind: "failed", error: full });
+      expect(two.savingState().kind).toBe("saved");
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(failures.length).toBeGreaterThan(2);
+      expect(failures.every((failure) => failure.exhausted)).toBe(true);
+      expect(one.recoveryCut().retained).toEqual([a, b]);
+      diskFull = false;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(one.savingState().kind).toBe("saved");
+      expect(scheduler.depth()).toMatchObject({ pending: 0, threads: 0 });
+      await scheduler.close();
+    });
   });
 
   it("observes a receipt callback failure without calling it a storage failure or blocking peers", async () => {
@@ -113,7 +150,7 @@ describe("AcceptedSaveScheduler", () => {
     const storageFailures: Error[] = [];
     const observedErrors: Error[] = [];
     const scheduler = new AcceptedSaveScheduler<string>({
-      writer: { append: async (batch) => receipt(batch) }, maxAttempts: 3, retryDelayMs: 0, retryable: () => true,
+      writer: { append: async (batch) => receipt(batch) }, maxAttempts: 3, retryDelayMs: 0, classify: () => "transient",
       onSaved: async (batch, saved) => { if (batch.execution.threadId === "one") throw error; two.acknowledge(saved); },
       onFailure: async (_batch, failure) => { storageFailures.push(failure.error); },
       onObserverError: (_batch, cause) => { observedErrors.push(cause); },
@@ -134,7 +171,7 @@ describe("AcceptedSaveScheduler", () => {
     const observedErrors: Error[] = [];
     const scheduler = new AcceptedSaveScheduler<string>({
       writer: { append: async (batch) => { if (batch.execution.threadId === "one") throw new Error("SQLITE_FULL"); return receipt(batch); } },
-      maxAttempts: 3, retryDelayMs: 0, retryable: () => false,
+      maxAttempts: 3, retryDelayMs: 0, classify: () => "environment",
       onSaved: async (_batch, saved) => { two.acknowledge(saved); },
       onFailure: async () => { throw observerError; }, onObserverError: (_batch, cause) => { observedErrors.push(cause); },
     });

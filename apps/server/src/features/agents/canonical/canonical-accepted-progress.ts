@@ -23,12 +23,13 @@ import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { CanonicalWriterAcknowledgementCapacity, type CanonicalAgentWriterClient } from "./canonical-agent-writer-client.js";
 import type { CanonicalAcceptedWriteReceipt } from "./canonical-agent-writer-protocol.js";
-import type { CanonicalAcceptedWriteInput } from "./canonical-accepted-write.js";
+import { replacedOperationId, type CanonicalAcceptedWriteInput } from "./canonical-accepted-write.js";
 import { AcceptedSaveScheduler } from "./accepted-save-scheduler.js";
+import { classifySaveFailure, contentRejectionReason } from "./accepted-save-failure.js";
 import { SavingStatusPublisher, type SavingStatusTimer } from "./saving-status-publisher.js";
 import { prepareAcceptedParentEvents } from "./accepted-parent-events.js";
 import { acceptedNarrative, advanceAcceptedExecution, seedAcceptedExecution, type AcceptedExecutionState } from "./accepted-execution-state.js";
-import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
+import type { ContentReplacedOperation, LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
 import { sameExecution, sameLease } from "../execution/execution-mailbox-protocol.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import { ProgressAdmissionError, RejectedProviderObservationError } from "../execution/execution-writer-failure.js";
@@ -129,8 +130,8 @@ export class CanonicalAcceptedProgress {
     private readonly planFiles?: PlanFileWriter, private readonly completedTurns?: CompletedTurnWatermark,
     savingStatusTimer?: SavingStatusTimer) {
     this.savingPublisher = new SavingStatusPublisher((status) => broadcast("turn.savingStatus", status), savingStatusTimer);
-    this.saves = new AcceptedSaveScheduler({ writer: { append: (batch) => this.save(batch) },
-      maxAttempts: 6, retryDelayMs: 1_000, retryable: isTransientSaveFailure,
+    this.saves = new AcceptedSaveScheduler({ writer: { append: (batch, replacing) => this.save(batch, replacing) },
+      maxAttempts: 6, retryDelayMs: 1_000, classify: classifySaveFailure,
       onSaved: async (batch, receipt) => this.saved(batch, receipt),
       onFailure: async (batch, failure) => this.failed(batch, failure),
       onObserverError: (batch, error) => { void this.failed(batch, { operationId: batch.operationId, error, exhausted: true }, "receipt")
@@ -440,6 +441,13 @@ export class CanonicalAcceptedProgress {
     nativeCursor: unknown | null = null, features?: AcceptedFeatureWriteMetadata): readonly AcceptedCanonicalAgentEventEnvelope[] {
     this.assertOpen();
     this.assertAdmission(thread);
+    return this.admitControl(thread, operationId, execution, events, phase, nativeCursor, features);
+  }
+
+  /** Admit a control batch on reserved capacity; callers own the open and command-fence checks. */
+  private admitControl(thread: ProgressThread, operationId: string, execution: ExecutionIdentity,
+    events: readonly import("./canonical-agent-boundary.js").CanonicalAgentEventDraft[], phase: string,
+    nativeCursor: unknown | null, features?: AcceptedFeatureWriteMetadata): readonly AcceptedCanonicalAgentEventEnvelope[] {
     let candidate = thread.state;
     const admission = thread.owner.accept({ operationId, execution, admission: "control", events,
       write: { kind: "control", phase, nativeCursor, features } }, (batch) => {
@@ -939,27 +947,36 @@ export class CanonicalAcceptedProgress {
     }
   }
 
-  private async save(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): Promise<SavedProgressReceipt> {
+  /** `replacing` saves the same events with the rejected contents left out; earlier pages replay their receipts. */
+  private async save(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>, replacing?: Error): Promise<SavedProgressReceipt> {
     const events = acceptedEnvelopes(batch);
     const thread = this.saveThread(batch.execution.threadId);
+    const replaced = replacing ? this.replacement(batch, replacing) : undefined;
     let last: CanonicalAcceptedWriteReceipt | undefined;
     const receipts: CanonicalAcceptedWriteReceipt[] = [];
     for (let offset = 0; offset < events.length; offset += 256) {
       const page = events.slice(offset, offset + 256);
       const final = offset + page.length === events.length;
-      last = await this.writer.appendAccepted(events.length <= 256 ? batch.operationId : `${batch.operationId}:page:${offset / 256}`,
+      const pageOperationId = events.length <= 256 ? batch.operationId : `${batch.operationId}:page:${offset / 256}`;
+      last = await this.writer.appendAccepted(final && replaced ? replacedOperationId(pageOperationId) : pageOperationId,
         { execution: batch.execution, phase: final ? batch.write.phase : "running",
           nativeCursor: batch.write.nativeCursor, contentHash: batch.contentHash,
           predecessor: { epoch: batch.through.epoch, sequence: batch.predecessor.sequence + offset },
           through: { epoch: batch.through.epoch, sequence: batch.predecessor.sequence + offset + page.length },
           baseRevision: thread.revision.conversationRevision, events: page,
-          ...compatibilityFields(batch.write, final),
+          ...(final && replaced ? { ...replacementFields(batch.write, replaced.reason), replaced } : compatibilityFields(batch.write, final)),
         });
       receipts.push(last);
     }
     if (!last) throw new Error("Accepted progress has no storage page");
     this.pendingSaved = receipts;
     return { ...last.receipt, operationId: batch.operationId, predecessor: batch.predecessor, through: batch.through };
+  }
+
+  private replacement(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>, rejection: Error): { reason: string } {
+    logger.warn("Accepted progress contents were rejected; saving their replacement", { threadId: batch.execution.threadId,
+      executionId: batch.execution.executionId, operationId: batch.operationId, error: describeSaveFailure(rejection) });
+    return { reason: contentRejectionReason(rejection) };
   }
 
   private async saved(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>, receipt: SavedProgressReceipt): Promise<void> {
@@ -980,6 +997,7 @@ export class CanonicalAcceptedProgress {
     }
     const completed = this.pendingSaved;
     this.pendingSaved = [];
+    if (receipt.replaced) this.recordContentReplaced(thread, batch, receipt.replaced.reason);
     this.publishSaving(batch.execution.threadId);
     this.settleSteerSave(batch.operationId);
     this.publishSavedTerminal(batch);
@@ -990,6 +1008,21 @@ export class CanonicalAcceptedProgress {
     await this.projectSavedPlans(batch);
     await this.recordSavedCoverage(batch);
     await this.retireSavedReceipts(batch, completed, thread);
+  }
+
+  /**
+   * Record which operation lost contents, ahead of any waiting durable command, so the saved history says so.
+   * A closing runtime has stopped its writer; recovery after restart reports that progress as lost instead.
+   */
+  private recordContentReplaced(thread: ProgressThread, batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>, reason: string): void {
+    diag.emit("progress.content-replaced", { th: batch.execution.threadId }, () => ({
+      turn: batch.execution.turnId, execution: batch.execution.executionId, operation: batch.operationId, reason: reason.slice(0, 200) }));
+    if (this.closing) return;
+    const operationId = `${batch.operationId}:content-replaced`;
+    this.admitControl(thread, operationId, batch.execution, [{ eventId: operationId, routing: batch.execution,
+      sourceProviderId: thread.state.threads[batch.execution.threadId]?.providerId ?? "server", sourceIdentities: [],
+      payload: { type: "ingest.content-replaced", operationId: batch.operationId, reason } }],
+    batch.write.phase, batch.write.nativeCursor);
   }
 
   /** Accepted finishes release no committed receipt, so the save acknowledgement is their only persisted signal. */
@@ -1092,7 +1125,7 @@ export class CanonicalAcceptedProgress {
     const failure = thread.owner.savingState();
     if (failure.kind !== "failed" && failure.kind !== "delayed") return { ...common, mode: "saving" };
     return { ...common, mode: failure.kind === "failed" ? "saving-failed" : "save-retrying",
-      failure: { kind: isTransientSaveFailure(failure.error) ? "transient" : "permanent",
+      failure: { kind: classifySaveFailure(failure.error) === "transient" ? "transient" : "permanent",
         name: failure.error.name.slice(0, 128), message: failure.error.message.slice(0, 2_000) } };
   }
 
@@ -1210,6 +1243,18 @@ function compatibilityFields(write: AcceptedExecutionWriteIntent, final: boolean
     : { compatibility: operation, features: write.features };
 }
 
+/** Keep the ordinal and, for a finish, the turn end; drop the publication, narrative, features, and messages. */
+function replacementFields(write: AcceptedExecutionWriteIntent, reason: string):
+  Pick<CanonicalAcceptedWriteInput, "compatibility" | "terminalOutcome"> {
+  if (write.kind !== "execution") return {};
+  const { operationId, execution, lease, ordinal, mutation } = write.operation;
+  const finish = mutation.kind === "finish-live-event" ? { outcome: mutation.outcome, input: mutation.input,
+    projection: { ...mutation.projection, narrative: [] } } : undefined;
+  const compatibility: ContentReplacedOperation = { operationId, execution, lease, ordinal, mutation: { kind: "content-replaced", reason,
+    ...(mutation.kind === "post-terminal-event" ? { postTerminal: true as const } : {}), ...(finish ? { finish } : {}) } };
+  return finish ? { compatibility, terminalOutcome: finish.outcome } : { compatibility };
+}
+
 function acceptedTerminalPersistence(operation: ExecutionSemanticOperation, message?: Message):
   ExecutionTerminalPersistenceReceipt | undefined {
   const mutation = operation.mutation;
@@ -1301,11 +1346,6 @@ function requireExecutionHead(thread: ProgressThread, operation: ExecutionSemant
     throw new Error("Accepted progress has no matching execution lease");
   }
   return head;
-}
-
-function isTransientSaveFailure(error: Error): boolean {
-  if ("code" in error && typeof error.code === "string" && /^SQLITE_(BUSY|LOCKED)/.test(error.code)) return true;
-  return error.cause instanceof Error && isTransientSaveFailure(error.cause);
 }
 
 function describeSaveFailure(error: Error): { name: string; message: string; code?: string; cause?: ReturnType<typeof describeSaveFailure> } {

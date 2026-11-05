@@ -30,6 +30,7 @@ import type {
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventDraft, CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentStore } from "./canonical-agent-store.js";
+import { AcceptedContentRejected } from "./accepted-save-failure.js";
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { APPEND_GROUP_LIMITS, isGroupableAppend } from "./canonical-append-group.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
@@ -206,6 +207,28 @@ export interface LostExecutionInterruption {
 }
 
 /**
+ * Takes the place of an accepted operation whose contents the writer rejected. It claims the same
+ * ordinal, and a replaced finish still ends the turn, so later operations and the turn end can save.
+ * Only the accepted save path builds it; provider admission never sees this mutation.
+ */
+export interface ContentReplacedOperation extends Pick<ExecutionSemanticOperation, "operationId" | "execution" | "lease" | "ordinal"> {
+  readonly mutation: {
+    readonly kind: "content-replaced";
+    readonly reason: string;
+    /** The replaced operation followed its turn's terminal, so it advances a terminal head. */
+    readonly postTerminal?: true;
+    /** The replaced finish, with no narrative and no live publication. */
+    readonly finish?: Omit<Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>, "kind" | "providerEvent">;
+  };
+}
+
+/** An accepted batch's compatibility work: the original operation, or its content replacement. */
+export type AcceptedCompatibilityOperation = ExecutionSemanticOperation | ContentReplacedOperation;
+
+/** The fields that place an operation in its execution's ordered, leased stream. */
+type OperationPosition = Pick<ExecutionSemanticOperation, "execution" | "lease" | "ordinal">;
+
+/**
  * Adapts execution mutations to one writer-local SQLite connection.
  * Outer writes reserve the WAL writer before reading because the main connection may write concurrently.
  */
@@ -356,8 +379,16 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   }
 
   /** Apply cloneable compatibility writes while supplied accepted envelopes own canonical identity. */
-  applyAcceptedCompatibility(operation: ExecutionSemanticOperation): void {
-    if (!validOperation(operation)) throw new Error("Invalid accepted semantic operation");
+  applyAcceptedCompatibility(operation: AcceptedCompatibilityOperation): void {
+    if (isContentReplaced(operation)) {
+      this.applyContentReplaced(operation);
+      return;
+    }
+    if (!validOperationIdentity(operation, isInterruptedFinish(operation))) throw new Error("Invalid accepted semantic operation");
+    // Routing runs before the content checks, so a payload addressed elsewhere is never replaced as bad content.
+    if (!validOperationRouting(operation)) throw new Error("Accepted semantic operation is routed to another execution");
+    if (!validSemanticMutationInput(operation)) throw new AcceptedContentRejected("semantic operation input is invalid");
+    if (!validLivePublication(operation)) throw new AcceptedContentRejected("live publication is invalid or exceeds its size limit");
     const head = operation.mutation.kind === "post-terminal-event"
       ? this.requireTerminalHead(operation) : this.requireNextHead(operation);
     const live = parentLiveOperation(operation);
@@ -369,8 +400,17 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.storeHead({ ...next, ordinal: operation.ordinal });
   }
 
+  /** Claim the rejected operation's ordinal; a replaced finish still records the turn end, without its narrative. */
+  private applyContentReplaced(operation: ContentReplacedOperation): void {
+    if (!validContentReplaced(operation)) throw new Error("Invalid replaced accepted semantic operation");
+    const { mutation } = operation;
+    const head = mutation.postTerminal ? this.requireTerminalHead(operation) : this.requireNextHead(operation);
+    const next = mutation.finish ? this.applyAcceptedFinish(head, { kind: "finish-live-event", ...mutation.finish }) : head;
+    this.storeHead({ ...next, ordinal: operation.ordinal });
+  }
+
   /** Record the real commit revision after compatibility and supplied events commit together. */
-  confirmAcceptedCompatibility(operation: ExecutionSemanticOperation, durableRevision: number): void {
+  confirmAcceptedCompatibility(operation: OperationPosition, durableRevision: number): void {
     const head = this.loadHead(operation.execution.executionId);
     if (!head || head.ordinal !== operation.ordinal || !sameExecutionAndLease(head, operation)) {
       throw new Error("Accepted semantic commit lost its execution lease");
@@ -895,7 +935,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     return this.storeReceipt(operation, hash, receipt, publication);
   }
 
-  private requireTerminalHead(operation: ExecutionSemanticOperation): SemanticHead {
+  private requireTerminalHead(operation: OperationPosition): SemanticHead {
     const head = this.loadHead(operation.execution.executionId);
     if (!head?.terminal || head.ended || head.ordinal + 1 !== operation.ordinal
       || !sameExecutionAndLease(head, operation)) throw new SemanticConflict();
@@ -1000,7 +1040,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       && validPublicationProvider(operation, head.providerId));
   }
 
-  private requireNextHead(operation: ExecutionSemanticOperation): SemanticHead {
+  private requireNextHead(operation: OperationPosition): SemanticHead {
     const head = this.loadHead(operation.execution.executionId);
     if (!head || !nextHead(head, operation)) throw new SemanticConflict();
     return head;
@@ -1320,18 +1360,74 @@ function liveMessage(operation: ExecutionSemanticOperation): DataOnlyParentLiveM
 }
 
 function validOperation(operation: ExecutionSemanticOperation): boolean {
-  return validOperationId(operation)
-    && operation.operationId !== HEAD_ID && operation.operationId.length <= 256
-    && Number.isSafeInteger(operation.ordinal) && operation.ordinal > 0
-    && validIdentity(operation.execution) && validLease(operation.lease)
-    && validSemanticMutationInput(operation)
-    && validLivePublication(operation);
+  return validOperationIdentity(operation, isInterruptedFinish(operation)) && validOperationRouting(operation)
+    && validSemanticMutationInput(operation) && validLivePublication(operation);
 }
 
-function validOperationId(operation: ExecutionSemanticOperation): boolean {
-  if (operation.operationId === `${operation.lease.leaseId}:${operation.ordinal}`) return true;
-  return operation.operationId === `${operation.lease.leaseId}:worker-lost`
-    && operation.mutation.kind === "finish-live-event" && operation.mutation.outcome === "interrupted";
+/**
+ * Every thread and execution the payload names must be the operation's own. A malformed payload
+ * passes here and fails the content checks, which own its shape and size.
+ */
+function validOperationRouting(operation: ExecutionSemanticOperation): boolean {
+  const { execution } = operation;
+  const publication = Array.isArray(operation.livePublication) ? operation.livePublication : [];
+  const publicationRouted = publication.every((intent) => !intent?.event
+    || intent.event.threadId === execution.threadId && intent.event.turnExecutionId === execution.executionId);
+  return publicationRouted && validMutationRouting(operation);
+}
+
+function validMutationRouting(operation: ExecutionSemanticOperation): boolean {
+  const { execution, mutation } = operation;
+  switch (mutation.kind) {
+    case "finish-live-event": return validFinishProjectionRouting(mutation.projection, execution)
+      && validProviderEventRouting(mutation.providerEvent, execution);
+    case "post-terminal-event": return validProviderEventRouting(mutation.providerEvent, execution);
+    case "narrative-delta": return validNarrativeRouting(mutation.input, execution);
+    default: {
+      const live = parentLiveOperation(operation)?.mutation;
+      return !live || validNarrativeRouting(live.narrative, execution) && validLiveTextRouting(live.text, execution);
+    }
+  }
+}
+
+function validFinishProjectionRouting(
+  projection: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>["projection"] | undefined,
+  execution: ExecutionIdentity,
+): boolean {
+  return !projection || projection.threadId === execution.threadId && projection.executionId === execution.executionId;
+}
+
+function validNarrativeRouting(input: { readonly executionId: string } | undefined, execution: ExecutionIdentity): boolean {
+  return !input || input.executionId === execution.executionId;
+}
+
+function validLiveTextRouting(
+  text: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>["text"] | undefined,
+  execution: ExecutionIdentity,
+): boolean {
+  const inputs = text?.kind === "append" ? text.inputs : text?.kind === "promote" ? [text.input] : [];
+  return !Array.isArray(inputs) || inputs.every((input) => !input || sameExecution(input, execution));
+}
+
+function validProviderEventRouting(
+  input: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>["providerEvent"],
+  execution: ExecutionIdentity,
+): boolean {
+  return !Array.isArray(input?.events) || input.events.every((event) => !event?.routing || sameExecution(event.routing, execution));
+}
+
+function isInterruptedFinish(operation: ExecutionSemanticOperation): boolean {
+  return operation.mutation.kind === "finish-live-event" && operation.mutation.outcome === "interrupted";
+}
+
+/** Only an interrupting finish may use a lost worker's operation id instead of its ordinal. */
+function validOperationIdentity(operation: OperationPosition & Pick<ExecutionSemanticOperation, "operationId">,
+  interruptedFinish: boolean): boolean {
+  const validId = operation.operationId === `${operation.lease.leaseId}:${operation.ordinal}`
+    || interruptedFinish && operation.operationId === `${operation.lease.leaseId}:worker-lost`;
+  return validId && operation.operationId !== HEAD_ID && operation.operationId.length <= 256
+    && Number.isSafeInteger(operation.ordinal) && operation.ordinal > 0
+    && validIdentity(operation.execution) && validLease(operation.lease);
 }
 
 function validLivePublication(operation: ExecutionSemanticOperation): boolean {
@@ -1364,8 +1460,6 @@ function validLivePublicationIntent(
   barrier: "writer" | "terminal",
 ): boolean {
   return intent.after === barrier && AgentEventSchema().safeParse(intent.event).success
-    && intent.event.threadId === operation.execution.threadId
-    && intent.event.turnExecutionId === operation.execution.executionId
     && (operation.mutation.kind !== "begin" || intent.event.type === "turnStarted")
     && validTurnStartedPublication(intent.event, operation.mutation)
     && (barrier === "terminal" || !isTerminalLiveEvent(intent.event.type) || isLostProviderStream(intent.event));
@@ -1477,6 +1571,19 @@ function validSemanticMutationInput(operation: ExecutionSemanticOperation): bool
     case "append-events": return validAppendParentInput(operation);
     default: return true;
   }
+}
+
+function isContentReplaced(operation: AcceptedCompatibilityOperation): operation is ContentReplacedOperation {
+  return operation.mutation.kind === "content-replaced";
+}
+
+/** The replacement keeps the original's identity; its only content is a short reason and a finish without narrative. */
+function validContentReplaced(operation: ContentReplacedOperation): boolean {
+  const { mutation } = operation;
+  if (!validOperationIdentity(operation, mutation.finish?.outcome === "interrupted") || "livePublication" in operation
+    || typeof mutation.reason !== "string" || mutation.reason.length === 0 || mutation.reason.length > 500) return false;
+  return !mutation.finish || mutation.postTerminal === undefined && mutation.finish.projection.narrative.length === 0
+    && validLiveFinish(operation.execution, { kind: "finish-live-event", ...mutation.finish });
 }
 
 function validAppendParentInput(operation: ExecutionSemanticOperation): boolean {
@@ -1807,7 +1914,7 @@ function normalizeTerminalOutcome(outcome: TurnOutcome): Exclude<TurnOutcome, "c
   return outcome === "cancelled" ? "interrupted" : outcome;
 }
 
-function nextHead(head: SemanticHead, operation: ExecutionSemanticOperation): boolean {
+function nextHead(head: SemanticHead, operation: OperationPosition): boolean {
   const lease = head.lease;
   const candidate = operation.lease;
   return !head.terminal && head.execution.threadId === operation.execution.threadId

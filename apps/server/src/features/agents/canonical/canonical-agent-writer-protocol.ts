@@ -15,7 +15,8 @@ import type {
 
 /**
  * An error as it crosses the writer worker boundary. `refusal` is set only when the worker
- * refused to start on a database, so the parent can rebuild the typed error instead of parsing text.
+ * refused to start on a database, and `contentRejection` only when it rejected a batch's contents,
+ * so the parent can rebuild the typed error instead of parsing text.
  */
 export type WriterFailure = {
   name: string;
@@ -23,6 +24,7 @@ export type WriterFailure = {
   code?: string;
   retryAfterSeconds?: number;
   refusal?: StartupRefusal;
+  contentRejection?: string;
 };
 
 /** Upper bound for one committed semantic publication message. */
