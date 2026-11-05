@@ -26,6 +26,8 @@ export type AcpTransport = {
 
 /** Options for creating one generic ACP runtime. */
 export type AcpSessionRuntimeOptions = {
+  /** Holds transport reads while canonical saving is behind. */
+  waitForOutputCapacity: (signal: AbortSignal) => Promise<void>;
   spawnSpec: AcpSpawnSpec;
   callbacks: AcpSessionCallbacks;
   clientFactory?: AcpClientFactory;
@@ -88,6 +90,7 @@ export class AcpSessionRuntime {
   private readonly processes: ProviderProcessPort;
   private promptChain: Promise<void> = Promise.resolve();
   private closed = false;
+  private outputRelease: AbortController;
   private openAttemptId = 0;
   private replayGate: ReplayGate | null = null;
   private openingSession: Promise<{ sessionId: string; reloaded: boolean }> | null = null;
@@ -95,7 +98,9 @@ export class AcpSessionRuntime {
   private constructor(
     transport: AcpTransport,
     options: AcpSessionRuntimeOptions,
+    outputRelease = new AbortController(),
   ) {
+    this.outputRelease = outputRelease;
     this.state = createAcpSessionState(transport);
     this.selectAuthMethod = options.selectAuthMethod ?? ((methods) => methods[0]?.id);
     this.clientCapabilities = options.clientCapabilities ?? defaultAcpClientCapabilities();
@@ -144,12 +149,23 @@ export class AcpSessionRuntime {
       });
       if (!child.stdin || !child.stdout) throw new Error("ACP stdio pipes unavailable");
       const client: Client = (options.clientFactory ?? createAcpClientHandlers)(callbacks);
+      const outputRelease = new AbortController();
+      const reader = NodeStream.Readable.toWeb(child.stdout).getReader();
+      const output = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          await options.waitForOutputCapacity(runtimeRef?.outputRelease.signal ?? outputRelease.signal);
+          const next = await reader.read();
+          if (next.done) controller.close();
+          else controller.enqueue(next.value);
+        },
+      });
+      child.once("exit", () => (runtimeRef?.outputRelease ?? outputRelease).abort());
       const stream = ndJsonStream(
         NodeStream.Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
-        NodeStream.Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+        output,
       );
       const connection = new ClientSideConnection(() => client, stream);
-      runtimeRef = new AcpSessionRuntime({ child, connection }, options);
+      runtimeRef = new AcpSessionRuntime({ child, connection }, options, outputRelease);
       return runtimeRef;
     } catch (error) {
       await terminateAcpChild(options.processes, child);
@@ -227,6 +243,7 @@ export class AcpSessionRuntime {
 
   /** Serializes prompts for this logical ACP session. */
   async prompt<T>(prompt: { sessionId?: string; prompt: readonly unknown[] }): Promise<T> {
+    if (this.outputRelease.signal.aborted) this.outputRelease = new AbortController();
     const run = this.promptChain.then(async () => {
       const response = await this.state.connection.prompt({
         sessionId: prompt.sessionId ?? this.state.sessionId,
@@ -243,17 +260,37 @@ export class AcpSessionRuntime {
 
   /** Cancels the active prompt for this logical session. */
   async cancel(): Promise<void> {
+    this.outputRelease.abort();
+    // Release the current read for Stop, but keep a cancel-ignoring agent bounded.
+    this.outputRelease = new AbortController();
     if (!this.state.sessionId) return;
     await this.state.connection.cancel({ sessionId: this.state.sessionId });
   }
 
   /** Disposes the ACP transport and child after setup or runtime failure. */
   async close(): Promise<void> {
+    this.outputRelease.abort();
     if (this.closed) return;
     this.closed = true;
     this.openAttemptId += 1;
     this.clearReplayGate(undefined, "closed");
     await terminateAcpChild(this.processes, this.state.child);
+    await this.drainOutput();
+  }
+
+  /** Reads final protocol messages before callers retire their event routes. */
+  async drainOutput(): Promise<void> {
+    this.outputRelease.abort();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // A descendant can inherit stdout and keep the pipe open after its owner exits.
+      await Promise.race([
+        this.state.connection.closed,
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, 2_000); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private clearReplayGate(attemptId?: number, outcome?: "closed"): void {

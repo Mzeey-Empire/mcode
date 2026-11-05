@@ -1,4 +1,5 @@
 import * as NodeChildProcess from "node:child_process";
+import * as NodeStream from "node:stream";
 import type { SpawnOptions, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import type { ProviderProcessPort } from "../../host-ports.js";
 import { logger } from "@mcode/shared";
@@ -9,12 +10,14 @@ export class ClaudeOwnedProcess {
   private retired = false;
   private readonly processes = new Map<number, SpawnedProcess>();
   private readonly retirements = new Set<Promise<void>>();
+  private readonly outputRelease = new AbortController();
 
   constructor(
     private readonly port: ProviderProcessPort,
     private readonly description: string,
     private readonly stderr: (chunk: string) => void,
-    private readonly threadId?: string,
+    private readonly threadId: string | undefined,
+    private readonly waitForOutputCapacity: (signal: AbortSignal) => Promise<void>,
   ) {}
 
   /** SDK transport callback preserving its forwarded cancellation signal and pipes. */
@@ -47,11 +50,26 @@ export class ClaudeOwnedProcess {
       }
       if (this.retired) this.terminate(child.pid, child);
     }
-    return child;
+    const wait = this.waitForOutputCapacity;
+    const signal = this.outputRelease.signal;
+    const source = child.stdout;
+    // The SDK reads stdout eagerly into its own queue, so its iterator cannot hold the pipe.
+    const stdout = NodeStream.Readable.from((async function* () {
+      for await (const chunk of source) {
+        await wait(signal);
+        yield chunk;
+      }
+    })(), { highWaterMark: 1, objectMode: false });
+    child.once("exit", () => this.releaseOutput());
+    return Object.assign(child, { stdout });
   };
+
+  /** Releases held pipe reads before native shutdown. */
+  releaseOutput(): void { this.outputRelease.abort(); }
 
   /** Retires captured processes and also fences callbacks that arrive afterward. */
   async retire(): Promise<void> {
+    this.releaseOutput();
     this.retired = true;
     for (const [pid, child] of this.processes) this.terminate(pid, child);
     await Promise.all(this.retirements);

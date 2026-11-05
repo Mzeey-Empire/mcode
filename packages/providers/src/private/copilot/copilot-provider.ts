@@ -80,7 +80,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       processes: host.processes, idleTtlMs, logger,
     });
     // The worker owns execution failures; a successful Stop fence must not poison later sessions or shutdown.
-    this.publisher = new CanonicalLiveEventPublisher(this.id, host.events, (routing, error) => {
+    this.publisher = new CanonicalLiveEventPublisher(64 * 1024 * 1024, this.id, host.events, (routing, error) => {
       const state = this.runtime.states().find((entry) => entry.request.turnExecutionId === routing.executionId);
       state?.turn?.settle("failed", error);
       if (state?.turn) state.turn.abortTask ??= state.session.abort();

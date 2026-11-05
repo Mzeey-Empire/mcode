@@ -75,7 +75,8 @@ export interface OpenCodeHttpClient {
    */
   getSessionStatus(endpoint: OpenCodeEndpoint, options?: OpenCodeStatusRequestOptions): Promise<Record<string, { type: string }>>;
   listModels(endpoint: OpenCodeEndpoint): Promise<ProviderModelInfo[]>;
-  subscribeEvents(endpoint: OpenCodeEndpoint, signal: AbortSignal, onEnvelope: (envelope: unknown) => void): Promise<void>;
+  subscribeEvents(endpoint: OpenCodeEndpoint, signal: AbortSignal, onEnvelope: (envelope: unknown) => void,
+    waitForCapacity: () => Promise<void>): Promise<void>;
   /**
    * Read one bounded page of upstream session history. The limit is always
    * sent and clamped; there is no unbounded full-history fetch.
@@ -280,10 +281,12 @@ function emitSseFrame(
 async function drainSseStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   onEnvelope: (envelope: unknown) => void,
+  waitForCapacity: () => Promise<void>,
 ): Promise<void> {
   const decoder = new TextDecoder();
   let incomplete: Uint8Array<ArrayBufferLike> = new Uint8Array();
   for (;;) {
+    await waitForCapacity();
     const { done, value } = await reader.read();
     if (done) return;
     let offset = 0;
@@ -416,7 +419,7 @@ export const defaultOpenCodeHttpClient: OpenCodeHttpClient = {
     return out;
   },
 
-  async subscribeEvents(endpoint, signal, onEnvelope) {
+  async subscribeEvents(endpoint, signal, onEnvelope, waitForCapacity) {
     const res = await fetch(endpointUrl(endpoint, "/event"), {
       headers: { accept: "text/event-stream" },
       signal,
@@ -424,7 +427,7 @@ export const defaultOpenCodeHttpClient: OpenCodeHttpClient = {
     checkStatus(res, "subscribe events");
     const reader = res.body?.getReader();
     if (!reader) return;
-    await drainSseStream(reader, onEnvelope);
+    await drainSseStream(reader, onEnvelope, waitForCapacity);
   },
 
   async listSessionMessages(endpoint, sessionId, options) {

@@ -166,19 +166,14 @@ describe("ClaudeCanonicalEventPublisher", () => {
     expect(submit).toHaveBeenCalledTimes(nativeEvents);
   });
 
-  it.each([1_023, 1_024, 1_025])("fails queue overflow explicitly at %i pending events", async (count) => {
+  it.each([1_023, 1_024, 1_025, 2_048])("saves every event with %i pending events", async (count) => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const failure = vi.fn();
     const publisher = new ClaudeCanonicalEventPublisher(createSink(submit), failure);
     for (let i = 0; i < count; i++) publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "fixture" }), []);
-    if (count > 1_024) {
-      expect(failure).toHaveBeenCalledOnce();
-      await expect(publisher.waitForExecution(routing)).rejects.toThrow("overflowed");
-    } else {
       await publisher.waitForExecution(routing);
       expect(submit).toHaveBeenCalledTimes(count);
       expect(failure).not.toHaveBeenCalled();
-    }
   });
 
   it("retains a delivered execution failure after retirement for provider shutdown", async () => {
