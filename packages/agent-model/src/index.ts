@@ -101,11 +101,14 @@ export type {
 
 export {
   AgentModelStateSchema,
+  applyOwnedAgentEventBatch,
+  clearOwnedEventIds,
+  copyAgentModelState,
   createAgentModelState,
   reduceAgentEvent,
   reduceAgentEventBatch,
 } from "./reducer.js";
-export type { AgentBatchReduction, AgentModelState, AgentReducerResult } from "./reducer.js";
+export type { AgentBatchReduction, AgentModelState, AgentReducerResult, OwnedBatchReduction } from "./reducer.js";
 export { CollaborationObservationChangeSchema, applyCollaborationObservation } from "./collaboration-observation.js";
 export type { CollaborationObservationChange } from "./collaboration-observation.js";
 export { appendItemContent } from "./item-content-append.js";
