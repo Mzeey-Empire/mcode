@@ -290,6 +290,34 @@ describe("Codex provider lifecycle through native transport", () => {
     } finally { vi.useRealTimers(); await f.provider.shutdown(); }
   });
 
+  it("interrupts the next turn on Stop after a Stop during a replacement wait kept the session", async () => {
+    const f = createProvider();
+    const next = { ...request, turnId: "turn-3", turnExecutionId: "83093cff-69b8-4efb-82db-20a75f993612" };
+    try {
+      await f.provider.sendTurn(request);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      f.child.interruptReply = (rpc) => f.child.stdout.write(JSON.stringify({ id: rpc.id, result: {} }) + "\n");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await f.provider.sendTurn({ ...request, turnId: "turn-2", turnExecutionId: STEER_ID });
+      await settleIo();
+      const stopping = f.provider.stopSession(request.sessionId);
+      await settleIo();
+      // The replacement wait expires on the old turn, which then ends before Stop's own wait does.
+      await vi.advanceTimersByTimeAsync(3_000);
+      f.child.complete("native-turn-1", "interrupted");
+      await settleIo();
+      await stopping;
+      vi.useRealTimers();
+      f.child.interruptReply = undefined;
+      await f.provider.sendTurn(next);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      await f.provider.stopSession(request.sessionId);
+      expect(f.child.requests.filter(rpc => rpc.method === "turn/interrupt" && rpc.params?.turnId === "native-turn-2")).toHaveLength(1);
+      await vi.waitFor(() => expect(f.events.map(({ event }) => event).filter(event =>
+        event.type === AgentEventType.Ended && event.turnExecutionId === next.turnExecutionId)).toHaveLength(1));
+    } finally { vi.useRealTimers(); await f.provider.shutdown(); }
+  });
+
   it("reuses the session when the old turn completes before its replacement interrupt fails", async () => {
     const f = createProvider();
     const fresh = new NativeProcess();

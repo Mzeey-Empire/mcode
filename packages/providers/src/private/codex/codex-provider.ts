@@ -282,6 +282,8 @@ interface CodexSessionState {
   /**
    * The turn whose bounded Stop or replacement interrupt wait expired. The session is discarded
    * without sending it another interrupt, and its transport closing then ends it cancelled.
+   * Read only through {@link isAbandonedTurn}: the session can outlive this turn, and a later turn
+   * on it must still be interrupted.
    */
   abandonedTurnExecutionId?: string;
   cancelledTurnExecutionId?: string;
@@ -483,6 +485,11 @@ function executionForDrain(state: CodexSessionState): string | undefined {
   return state.currentTurnExecutionId
     ?? (state.pendingTurnId && state.turnExecutionIdsByNativeTurn.get(state.pendingTurnId))
     ?? state.activeParentTurnExecutionId;
+}
+
+/** Whether a bounded interrupt wait expired on exactly this execution. */
+function isAbandonedTurn(state: CodexSessionState, turnExecutionId: string | undefined): boolean {
+  return turnExecutionId !== undefined && state.abandonedTurnExecutionId === turnExecutionId;
 }
 
 function bufferPendingChildEvent(
@@ -2447,7 +2454,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    */
   async interrupt(state: CodexSessionState): Promise<void> {
     // A bounded interrupt wait already expired on this turn, so asking again only delays the teardown.
-    if (state.abandonedTurnExecutionId !== undefined) return;
+    if (isAbandonedTurn(state, state.currentTurnExecutionId)) return;
     if (!state.currentNativeTurnId && state.turnStartResponsePending) await state.turnStartPromise;
     const nativeTurnId = state.currentNativeTurnId;
     if (nativeTurnId) await state.server.interruptTurnAndDrain(nativeTurnId);
@@ -2508,7 +2515,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private endTurnAfterOutput(state: CodexSessionState, turnInFlight: boolean): void {
     const turnExecutionId = executionForDrain(state);
     this.closeTurnAssistantText(state, turnExecutionId);
-    if (turnInFlight && turnExecutionId && turnExecutionId === state.abandonedTurnExecutionId) {
+    if (turnInFlight && turnExecutionId && isAbandonedTurn(state, turnExecutionId)) {
       // The user replaced or stopped this turn and its interrupt wedged; the provider was not lost.
       this.emitCodexTurnEvent(state, { type: AgentEventType.Ended, threadId: state.threadId, turnExecutionId, outcome: "cancelled" }, turnExecutionId);
     } else if (turnInFlight) this.emitProviderLostEnd(state, turnExecutionId);
@@ -2823,7 +2830,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (error instanceof CodexTurnSupersededError) return true;
     if (completion.serverDied || run.seq !== run.entry.runTurnSeq) return false;
     this.emitCodexPendingAssistantBoundary(run.entry, turnExecutionId);
-    if (run.entry.abandonedTurnExecutionId === turnExecutionId) {
+    if (isAbandonedTurn(run.entry, turnExecutionId)) {
       // The user replaced or stopped this turn; the teardown closing its transport is not a turn failure.
       completion.endedOutcome = "cancelled";
       return false;
