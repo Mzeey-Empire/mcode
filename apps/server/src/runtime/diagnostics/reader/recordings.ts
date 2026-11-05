@@ -93,7 +93,10 @@ function readRecordingFile(file: string, seen: LinesByWriter): DiagRecord[] {
 }
 
 function attribute(record: DiagRecord, run: string | undefined): DiagRecord {
-  return record.k === "run" || run === undefined ? record : { ...record, run };
+  if (record.k === "run" || run === undefined) return record;
+  // Readers carry the writer's run on every record; DiagRecord types only the wire fields.
+  const attributed = { ...record, run };
+  return attributed;
 }
 
 /** Keeps every written line, and a replayed line unless its own writer already wrote it. */
