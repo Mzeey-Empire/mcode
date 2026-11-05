@@ -323,6 +323,42 @@ describe("Codex provider lifecycle through native transport", () => {
     }]);
   });
 
+  it("publishes output still in the pipe and the real completion when shutdown starts while saving is behind", async () => {
+    let releaseSaves!: () => void;
+    const savesBlocked = new Promise<void>((resolve) => { releaseSaves = resolve; });
+    const { provider, child, starts, events } = createProvider({ submit: async (batch) => {
+      await savesBlocked;
+      return { commit: { outcome: "committed", conversationRevision: 1, rosterRevision: 0, acceptedThrough: 1,
+        durableThrough: 1, eventCount: batch.events.length }, delivery: { ingress: "queued" } };
+    } });
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    const deltas = Array.from({ length: 1_300 }, (_, index) => `${index} `);
+    const deltaLines = (slice: string[]) => slice.map((delta) => JSON.stringify({ method: "item/agentMessage/delta",
+      params: { threadId: "native-thread", turnId: "native-turn-1", itemId: "answer", delta } }) + "\n").join("");
+    child.stdout.write(deltaLines(deltas.slice(0, 650)));
+    await vi.waitFor(() => expect(child.stdout.isPaused()).toBe(true));
+    // Written while paused, so these lines and the completion are still in the pipe when shutdown starts.
+    child.stdout.write(deltaLines(deltas.slice(650)) + JSON.stringify({ method: "turn/completed", params: {
+      threadId: "native-thread", turn: { id: "native-turn-1", status: "completed", items: [] } } }) + "\n");
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const shutdown = provider.shutdown();
+      await vi.advanceTimersByTimeAsync(20_000);
+      releaseSaves();
+      await shutdown;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const turnEvents = events.map(({ event }) => event).filter((event) => event.turnExecutionId === request.turnExecutionId);
+    expect(turnEvents.flatMap((event) => event.type === AgentEventType.TextDelta ? [event.delta] : [])).toEqual(deltas);
+    expect(turnEvents.filter((event) => event.type === AgentEventType.Ended)).toEqual([{
+      type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "completed",
+    }]);
+  });
+
   it("steers the running native turn by its id and maps a vanished turn to turn_not_running", async () => {
     const { provider, child, complete } = createProvider();
     const steer = { sessionId: request.sessionId, threadId: request.threadId, turnExecutionId: request.turnExecutionId,

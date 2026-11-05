@@ -143,9 +143,11 @@ and lets the interrupt response through. The pause belongs to the thread, so an
 app-server that starts for a paused thread starts paused. Once the process
 exits, pausing stops: the adapter reads the rest of its output, a final
 `turn/completed` included, before it reports the exit or a failure. Pausing
-also stops when a session is torn down, before it leaves the session pool:
-otherwise its interrupt waits behind the held output and ends the turn
-synthetically, and the held output arrives after its route is gone.
+also stops when a session is torn down, because its interrupt would otherwise
+wait behind the held output and end the turn synthetically. Teardown removes the
+session from the pool before the app-server's pipe is read to its end, so an
+app-server's output routes to the session that spawned it, not to whichever
+session the pool holds.
 
 A provider adapter may forward a generic event, consume private native
 evidence, or reject malformed evidence with a diagnostic. Only a forwarded

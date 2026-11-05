@@ -26,8 +26,8 @@ export interface ProtocolAdapter<TState> {
   spawn(args: SpawnArgs): Promise<SpawnResult<TState>>;
   isBusy(state: TState): boolean;
   /**
-   * Runs first when a pooled session is stopped, before it leaves the pool and before
-   * {@link interrupt} and {@link close}, so output an adapter was holding back still routes.
+   * Runs first when a session is torn down, before {@link interrupt} and {@link close}, so an
+   * adapter can stop holding back output that those waits would otherwise sit behind.
    */
   prepareClose?(state: TState): void;
   interrupt(state: TState): Promise<void> | void;
@@ -192,12 +192,6 @@ export class SessionRuntime<TState> {
     }
     const entry = this.sessions.get(sessionId) ?? this.unretired.get(sessionId);
     if (!entry) return;
-    // Before the pool drops the session, so output the adapter flushes still finds its session.
-    try {
-      this.adapter.prepareClose?.(entry.state);
-    } catch (error) {
-      this.deps.logger?.warn("SessionRuntime close preparation failed", { sessionId, error: errorMessage(error) });
-    }
     this.sessions.delete(sessionId);
     await this.retire(sessionId, entry);
   }
@@ -273,6 +267,11 @@ export class SessionRuntime<TState> {
   }
 
   private async closeEntry(sessionId: string, entry: PoolEntry<TState>): Promise<void> {
+    try {
+      this.adapter.prepareClose?.(entry.state);
+    } catch (error) {
+      this.deps.logger?.warn("SessionRuntime close preparation failed", { sessionId, error: errorMessage(error) });
+    }
     const interrupt = Promise.resolve().then(() => this.adapter.interrupt(entry.state)).catch((error: unknown) => {
       this.deps.logger?.warn("SessionRuntime interrupt failed", { sessionId, error: errorMessage(error) });
     });
