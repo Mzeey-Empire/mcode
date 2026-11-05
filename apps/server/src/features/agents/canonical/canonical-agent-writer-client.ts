@@ -1,5 +1,6 @@
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import * as NodeCrypto from "node:crypto";
+import { logger } from "@mcode/shared";
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type {
   CanonicalParentNarrativeClassificationReceipt,
@@ -18,6 +19,7 @@ import type { ExecutionSemanticOperation, ExecutionWriteReceipt } from "../execu
 import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
 
 const MAX_PENDING_ACKNOWLEDGEMENTS = 64;
+const MAX_ACK_RETRIES_BEFORE_WRITE = 8;
 const MAX_PENDING_WRITES = 64;
 const ACKNOWLEDGEMENT_BATCH_SIZE = 64;
 const ACKNOWLEDGEMENT_DELAY_MS = 250;
@@ -38,6 +40,7 @@ export class CanonicalAgentWriterClient {
   private readonly pendingAcknowledgements = new Map<string, PendingAcknowledgement>();
   private readonly queuedAcknowledgements = new Map<string, PendingAcknowledgement>();
   private acknowledgementTimer: ReturnType<typeof setTimeout> | undefined;
+  private acknowledgementCapacityFailure: CanonicalWriterAcknowledgementCapacity | undefined;
   private closing = false;
   private stopping = false;
   private pendingWrites = 0;
@@ -190,6 +193,7 @@ export class CanonicalAgentWriterClient {
     this.closing = true;
     await this.flushQueuedAcknowledgements();
     this.stopping = true;
+    if (this.acknowledgementCapacityFailure) throw this.acknowledgementCapacityFailure;
     if (this.pendingAcknowledgements.size) throw new Error(`Canonical writer closed with ${this.pendingAcknowledgements.size} unacknowledged operations`);
   }
 
@@ -203,11 +207,11 @@ export class CanonicalAgentWriterClient {
     });
   }
 
-  private async flushQueuedAcknowledgements(): Promise<void> {
+  private async flushQueuedAcknowledgements(retryLimit = MAX_PENDING_ACKNOWLEDGEMENTS): Promise<void> {
     if (this.acknowledgementTimer) clearTimeout(this.acknowledgementTimer);
     this.acknowledgementTimer = undefined;
     if (!this.retryingAcknowledgements) {
-      this.retryingAcknowledgements = this.drainAcknowledgements()
+      this.retryingAcknowledgements = this.drainAcknowledgements(retryLimit)
         .finally(() => {
           this.retryingAcknowledgements = undefined;
           if (this.queuedAcknowledgements.size) return this.flushQueuedAcknowledgements();
@@ -219,11 +223,12 @@ export class CanonicalAgentWriterClient {
   private retryPendingAcknowledgements(): Promise<void> {
     if (this.retryingAcknowledgements) return this.retryingAcknowledgements;
     if (this.pendingAcknowledgements.size === 0) return Promise.resolve();
-    return this.flushQueuedAcknowledgements();
+    return this.flushQueuedAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
   }
 
-  private async drainAcknowledgements(): Promise<void> {
-    const operations = new Map([...this.pendingAcknowledgements, ...this.queuedAcknowledgements]);
+  private async drainAcknowledgements(retryLimit: number): Promise<void> {
+    const retries = [...this.pendingAcknowledgements].slice(0, retryLimit);
+    const operations = new Map([...retries, ...this.queuedAcknowledgements]);
     this.queuedAcknowledgements.clear();
     const entries = [...operations.values()];
     for (let offset = 0; offset < entries.length; offset += ACKNOWLEDGEMENT_BATCH_SIZE) {
@@ -251,7 +256,11 @@ export class CanonicalAgentWriterClient {
       if (!operation) return error;
       const key = acknowledgementKey(operation.executionId, operation.operationId);
       if (!this.pendingAcknowledgements.has(key) && this.pendingAcknowledgements.size >= MAX_PENDING_ACKNOWLEDGEMENTS) {
-        return new CanonicalWriterAcknowledgementCapacity("Canonical writer acknowledgement retry queue is full", { cause: error });
+        const failure = new CanonicalWriterAcknowledgementCapacity("Canonical writer acknowledgement retry queue is full", { cause: error });
+        // Later successful retries cannot account for the receipt that exceeded retention.
+        this.acknowledgementCapacityFailure = failure;
+        logger.error("Canonical writer receipt cleanup exceeded retry capacity", { ...operation, error: failure });
+        return failure;
       }
       this.pendingAcknowledgements.delete(key);
       this.pendingAcknowledgements.set(key, operation);
