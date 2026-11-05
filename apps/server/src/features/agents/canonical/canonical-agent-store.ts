@@ -700,6 +700,7 @@ export class CanonicalAgentStore {
         eventTruncation: { droppedEvents },
         truncationMarkers: events.filter((event) => (
           event.payload.type === "ingest.volatile-truncated"
+          || event.payload.type === "ingest.content-replaced"
           || event.payload.type === "ingest.overflow"
         )),
       },

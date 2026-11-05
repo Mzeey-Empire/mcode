@@ -168,6 +168,7 @@ describe("canonical agent model", () => {
         durableStoppingSequence: 10,
       },
       { type: "ingest.volatile-truncated", droppedEventCount: 4 },
+      { type: "ingest.content-replaced", operationId: "lease:2", reason: "live publication is too large" },
     ];
 
     for (const event of eventTypes) {
