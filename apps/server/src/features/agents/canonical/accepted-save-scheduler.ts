@@ -37,6 +37,7 @@ export class AcceptedSaveScheduler<WriteIntent> {
   private closing = false;
   /** While closing, no attempt starts at or after this time, so close ends inside its save window. */
   private attemptsUntil = Number.POSITIVE_INFINITY;
+  private closed: Promise<void> | undefined;
   private readonly observerFailures = new Map<string, Error>();
 
   constructor(private readonly options: {
@@ -100,9 +101,15 @@ export class AcceptedSaveScheduler<WriteIntent> {
    * already on screen, so dropping the queue here would lose it. An exhausted head gets a fresh retry budget,
    * because storage may have recovered since its last attempt and the text queued behind it is otherwise lost.
    * No attempt starts at or after `attemptsUntil`; a write already running is still awaited. Whatever is left
-   * stays queued, and `depth()` reports it.
+   * stays queued, and `depth()` reports it. Later calls share the first close: once it has stopped,
+   * a new deadline would wait on retries the stopped scheduler never starts.
    */
-  async close(options: { readonly attemptsUntil?: number } = {}): Promise<void> {
+  close(options: { readonly attemptsUntil?: number } = {}): Promise<void> {
+    this.closed ??= this.drainAndStop(options);
+    return this.closed;
+  }
+
+  private async drainAndStop(options: { readonly attemptsUntil?: number }): Promise<void> {
     this.closing = true;
     this.attemptsUntil = options.attemptsUntil ?? Number.POSITIVE_INFINITY;
     this.rearmExhaustedHeads();

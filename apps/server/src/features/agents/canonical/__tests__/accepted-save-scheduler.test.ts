@@ -181,6 +181,11 @@ describe("AcceptedSaveScheduler", () => {
       await closing;
       expect(writes).toEqual(["a", "a", "a"]);
       expect(scheduler.depth().pending).toBe(2);
+      let closedAgain = false;
+      void scheduler.close().then(() => { closedAgain = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(closedAgain).toBe(true);
+      expect(writes).toEqual(["a", "a", "a"]);
     } finally {
       vi.useRealTimers();
     }
