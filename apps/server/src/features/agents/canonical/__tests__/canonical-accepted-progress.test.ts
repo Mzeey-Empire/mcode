@@ -1306,11 +1306,16 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
 
   it("saves multiple pages across the cleanup threshold without stopping its owner", async () => {
     await send(1, start("codex"));
+    await expect.poll(() => progress.depth().pending).toBe(0);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const held = new Promise<void>((resolve) => { release = resolve; });
+    const cleanupStarted = Promise.withResolvers<void>();
     const original = databaseWriter.sendCanonical.bind(databaseWriter);
     vi.spyOn(databaseWriter, "sendCanonical").mockImplementation(async (...args) => {
-      if (args[0].kind === "ack-operations") await held;
+      if (args[0].kind === "ack-operations") {
+        cleanupStarted.resolve();
+        await held;
+      }
       return original(...args);
     });
     for (let index = 0; index < 63; index++) writer.enqueueAcknowledgement(execution.executionId, `previous-${index}`);
@@ -1319,10 +1324,13 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(progress.accept({ operationId: "live-lease:2", execution, lease, ordinal: 2,
       mutation: { kind: "append-events", phase: "running", nativeCursor: null,
         events: Array.from({ length: 300 }, (_, index) => draft("codex", index + 1, "textDelta", { delta: "x", isFinalResponse: true })) } }).kind).toBe("accepted");
-    await expect.poll(() => progress.depth().pending).toBe(0);
+    await cleanupStarted.promise;
     expect(failures).toEqual([]);
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Running" });
     release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(recovery().savedThrough).toBe(recovery().acceptedThrough);
+    expect(failures).toEqual([]);
     await progress.close();
     await writer.close();
     expect(db.prepare("SELECT operation_id FROM canonical_writer_operation_receipts WHERE kind = 'append-accepted'").all()).toEqual([]);
