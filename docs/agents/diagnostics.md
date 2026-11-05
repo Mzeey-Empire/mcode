@@ -4,9 +4,9 @@ When a thread hangs, a turn never finishes, or an approval never appears, read w
 
 ## Find the recording
 
-Each process writes `diagnostics/t/<threadId>.jsonl` for thread records and `diagnostics/p/<runId>.jsonl` for its own run markers, under its data directory. Files rotate to `.1.jsonl` at 4 MB, and the server deletes recordings older than 7 days or beyond 256 MB in total.
+Each process writes its own files under its data directory: `diagnostics/t/<threadId>.<runId>.jsonl` for each thread it records, and `diagnostics/p/<runId>.jsonl` for its run markers and records with no thread. No two processes append to one file, so a file's name says which run wrote every record in it. Builds before this layout share `diagnostics/t/<threadId>.jsonl` between runs, and a record there belongs to the run marker above it. Files rotate to `.1.jsonl` at 4 MB, and the server deletes recordings older than 7 days or beyond 256 MB in total.
 
-Prefer the reader to raw files. Each append opens with a `{"writer":"<runId>","batch":<n>,"records":<count>}` line that is not a record. A flush at exit or when recording stops rewrites a batch whose append may not have landed under the same header, so a raw file can hold a batch twice, and the reader keeps one copy.
+Prefer the reader to raw files. A flush at exit or when recording stops writes again a batch whose append may not have landed, so a raw file can hold a record twice, after a torn copy. A run numbers each record once (`n`), and the reader keeps one record per number in each run's file.
 
 | App | Data directory | Database |
 |---|---|---|
