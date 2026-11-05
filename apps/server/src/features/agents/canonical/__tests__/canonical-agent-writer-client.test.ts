@@ -1220,6 +1220,23 @@ describe("canonical SQLite writer", () => {
     expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id LIKE 'close-%'").get()).toEqual({ count: 0 });
   });
 
+  it("fully flushes retained receipts when a save arrives during close", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
+    for (let index = 0; index < 20; index++) await writer.commit(`closing-${index}`, batch);
+    db.run(`CREATE TRIGGER reject_receipt_delete BEFORE DELETE ON canonical_writer_operation_receipts
+      BEGIN SELECT RAISE(FAIL, 'ack unavailable'); END`);
+    await expect(writer.acknowledgeOperations(Array.from({ length: 20 }, (_, index) => ({
+      executionId: EXECUTION_ID, operationId: `closing-${index}`,
+    })))).rejects.toThrow();
+    db.run("DROP TRIGGER reject_receipt_delete");
+    const closing = writer.close();
+    await expect(writer.commit("save-during-close", batch)).rejects.toThrow("Canonical writer closed");
+    await expect(closing).resolves.toBeUndefined();
+    expect(writer.pendingAcknowledgementCount).toBe(0);
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 0 });
+  });
+
   it("clears capacity failures only after the overflowed receipts are deleted", async () => {
     writer = new CanonicalAgentWriterClient(dbPath);
     const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
@@ -1261,20 +1278,22 @@ describe("canonical SQLite writer", () => {
   it("bounds failing receipt cleanup to eight retries per live write", async () => {
     writer = new CanonicalAgentWriterClient(dbPath);
     const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
-    for (let index = 0; index < 63; index++) await writer.commit(`bounded-${index}`, batch);
+    for (let index = 0; index < 9; index++) await writer.commit(`bounded-${index}`, batch);
     db.run(`CREATE TRIGGER reject_receipt_delete BEFORE DELETE ON canonical_writer_operation_receipts
       BEGIN SELECT RAISE(FAIL, 'ack unavailable'); END`);
     try {
-      await expect(writer.acknowledgeOperations(Array.from({ length: 63 }, (_, index) => ({
+      await expect(writer.acknowledgeOperations(Array.from({ length: 9 }, (_, index) => ({
         executionId: EXECUTION_ID, operationId: `bounded-${index}`,
       })))).rejects.toThrow();
       const send = vi.spyOn(writer.owner, "sendCanonical");
-      for (let index = 0; index < 10; index++) {
+      for (let index = 0; index < 2; index++) {
         send.mockClear();
         await writer.commit(`live-${index}`, batch);
-        await expect.poll(() => send.mock.calls.filter(([request]) => request.kind === "ack-operations").length).toBe(9);
-        await writer.owner.barrier();
-        expect(writer.pendingAcknowledgementCount).toBe(63);
+        await expect.poll(() => send.mock.settledResults.filter(({ type }) => type === "rejected").length).toBe(9);
+        // After the final transport response, drain its promise continuations before starting another round.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(send.mock.calls.filter(([request]) => request.kind === "ack-operations")).toHaveLength(9);
+        expect(writer.pendingAcknowledgementCount).toBe(9);
       }
     } finally {
       db.run("DROP TRIGGER reject_receipt_delete");

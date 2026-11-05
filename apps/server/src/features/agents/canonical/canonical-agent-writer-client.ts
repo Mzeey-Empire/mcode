@@ -224,6 +224,7 @@ export class CanonicalAgentWriterClient {
   }
 
   private retryPendingAcknowledgements(): Promise<void> {
+    if (this.closing) return Promise.resolve();
     // The database owner serializes requests; awaiting cleanup here would hold live saves behind every fallback deletion.
     if (this.retryingAcknowledgements) return this.retryingAcknowledgements;
     if (this.pendingAcknowledgements.size === 0) return Promise.resolve();
