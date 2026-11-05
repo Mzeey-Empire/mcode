@@ -13,7 +13,6 @@ import { PlanQuestionAnswersStore as PlanQuestionAnswersRepo } from "../planning
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
 import { AcceptedFeatureWriteMetadataSchema, persistAcceptedFeatureWrite } from "./accepted-feature-write.js";
 import { TurnSteerStore } from "../steering/persistence/turn-steer-store.js";
-import { stageAcceptedContent } from "./accepted-save-failure.js";
 
 /** Immutable storage intent, validated again on the dedicated SQLite worker. */
 export const CanonicalAcceptedWriteInputSchema = z.object({
@@ -79,8 +78,8 @@ export class CanonicalAcceptedEventWrite {
     });
     if (result.outcome !== "committed") throw new Error("Accepted progress did not append a new durable prefix");
     this.persistPublicationHead(parsed);
-    stageAcceptedContent("feature metadata could not be saved", () => this.persistFeatures(input.execution.threadId, parsed.features));
-    stageAcceptedContent("message staging failed", () => this.stageMessages(parsed, input.execution.threadId));
+    this.persistFeatures(input.execution.threadId, parsed.features);
+    this.stageMessages(parsed, input.execution.threadId);
     if (input.compatibility) this.compatibility?.confirmAcceptedCompatibility(input.compatibility, result.conversationRevision);
     return {
       receipt: { operationId, contentHash: parsed.contentHash, predecessor: parsed.predecessor,

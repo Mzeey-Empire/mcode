@@ -23,6 +23,7 @@ import { CanonicalAgentStore } from "../canonical-agent-store.js";
 import type { CodexSystemWriterIntent } from "../canonical-codex-system-error-projection.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
 import { CanonicalAcceptedEventWrite } from "../canonical-accepted-write.js";
+import { classifySaveFailure } from "../accepted-save-failure.js";
 import { CanonicalConversationProjectionReader } from "../canonical-conversation-projection-reader.js";
 import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 import type { DataOnlyParentTurnStartInput } from "../canonical-parent-turn-write.js";
@@ -208,6 +209,16 @@ function textOperation(ordinal: number, inputs: readonly ParentAssistantTextChec
   return { ...operation(ordinal, mutation), livePublication: [publication] };
 }
 
+function rejection(work: () => void): Error {
+  try {
+    work();
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw error;
+  }
+  throw new Error("Expected the write to be rejected");
+}
+
 describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () => {
   let directory: string;
   let path: string;
@@ -311,6 +322,45 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       .toEqual({ status: "completed", last_turn_outcome: "completed", last_turn_ended_at: NOW });
     expect(db.query("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").all(THREAD_ID))
       .toEqual([{ content: "Final answer" }]);
+  });
+
+  it.each([
+    ["a live publication addressed to another thread", "environment", { threadId: "thread-2" }],
+    ["a live publication addressed to another execution", "environment", { turnExecutionId: "00000000-0000-4000-8000-000000000002" }],
+    ["an oversized live publication", "content", { delta: "x".repeat(300 * 1024) }],
+  ] as const)("classifies %s as %s", async (_name, expected, change) => {
+    expect(await writer.transact(operation(1, { kind: "begin", providerId: "codex", input: startInput() })))
+      .toMatchObject({ kind: "committed" });
+    const live = textOperation(2, [{ ...execution, sequence: 1, text: "Kept text" }]);
+    const publication = live.livePublication?.[0];
+    if (!publication) throw new Error("Expected a live publication");
+    const changed = { ...live, livePublication: [{ ...publication, event: { ...publication.event, ...change } }] };
+
+    expect(classifySaveFailure(rejection(() => db.transaction(() => writer.applyAcceptedCompatibility(changed))())))
+      .toBe(expected);
+  });
+
+  it("keeps a feature write owned by another thread out of content rejection", async () => {
+    expect(await writer.transact(operation(1, { kind: "begin", providerId: "codex", input: startInput() })))
+      .toMatchObject({ kind: "committed" });
+    const canonical = new CanonicalAgentStore(db);
+    const accepted = new CanonicalAcceptedEventWrite(db, canonical, writer);
+    const draft = runtimeEvent(2, { type: "textDelta", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, delta: "Kept" });
+    const foreignPlan = { id: "00000000-0000-4000-8000-000000000003", threadId: "thread-2", messageId: "assistant-1",
+      version: 1, title: "Plan", contentMd: "# Plan", author: "agent" as const, providerId: "codex", captureSource: "fence" as const,
+      baseVersionId: null, revision: 0, acceptedAt: null, acceptedMessageId: null, status: "ready" as const,
+      createdAt: NOW, updatedAt: NOW };
+    const acceptedSequence = (canonical.loadCheckpoint(EXECUTION_ID)?.lastAcceptedSequence ?? 0) + 1;
+
+    const failure = rejection(() => db.transaction(() => accepted.apply({ execution, phase: "running", nativeCursor: null,
+      contentHash: "a".repeat(64), baseRevision: canonical.loadThread(THREAD_ID)?.conversationRevision ?? 0,
+      predecessor: { epoch: EXECUTION_ID, sequence: 0 }, through: { epoch: EXECUTION_ID, sequence: 1 },
+      features: { planRecords: [foreignPlan] },
+      events: [{ ...draft, acceptedSequence, progressPosition: { epoch: EXECUTION_ID, sequence: 1 }, serverTimestamps: { acceptedAt: NOW } }],
+    }, "lease-1:2"))());
+
+    expect(failure.message).toBe("Accepted plan belongs to another thread");
+    expect(classifySaveFailure(failure)).toBe("environment");
   });
 
   it("persists accepted native Copilot system evidence without inventing feature effects", async () => {

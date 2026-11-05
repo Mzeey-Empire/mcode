@@ -5,8 +5,8 @@ export const ACCEPTED_CONTENT_REJECTED_CODE = "MCODE_ACCEPTED_CONTENT_REJECTED";
 export type SaveFailureClass = "transient" | "content" | "environment";
 
 /**
- * The writer throws this only where it rejects a batch's compatibility, feature, or message contents.
- * Identity, lease, ordinal, and routing checks never use it, so a replacement cannot hide an ownership bug.
+ * The writer throws this only at explicit checks of a batch's own payload shape or size.
+ * Identity, lease, ordinal, ownership, and routing checks never use it, so a replacement cannot hide those bugs.
  */
 export class AcceptedContentRejected extends Error {
   override readonly name = "AcceptedContentRejected";
@@ -29,20 +29,6 @@ export function contentRejectionReason(error: Error): string {
   const rejection = findCode(error, (code) => code === ACCEPTED_CONTENT_REJECTED_CODE);
   const reason = rejection instanceof AcceptedContentRejected ? rejection.reason : rejection?.message;
   return (reason || "content rejected").slice(0, 500);
-}
-
-/**
- * Run one step that stores a batch's own contents. Its failures become content rejections, except
- * SQLite failures, which belong to the environment, and any failure `passThrough` keeps.
- */
-export function stageAcceptedContent<T>(reason: string, work: () => T, passThrough?: (error: Error) => boolean): T {
-  try {
-    return work();
-  } catch (error) {
-    if (!(error instanceof Error) || error instanceof AcceptedContentRejected || passThrough?.(error)
-      || findCode(error, (code) => code.startsWith("SQLITE_"))) throw error;
-    throw new AcceptedContentRejected(reason, { cause: error });
-  }
 }
 
 function findCode(error: Error, matches: (code: string) => boolean): Error | undefined {

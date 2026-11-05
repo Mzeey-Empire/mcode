@@ -30,7 +30,7 @@ import type {
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventDraft, CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentStore } from "./canonical-agent-store.js";
-import { AcceptedContentRejected, stageAcceptedContent } from "./accepted-save-failure.js";
+import { AcceptedContentRejected } from "./accepted-save-failure.js";
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { APPEND_GROUP_LIMITS, isGroupableAppend } from "./canonical-append-group.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
@@ -384,18 +384,18 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       return;
     }
     if (!validOperationIdentity(operation, isInterruptedFinish(operation))) throw new Error("Invalid accepted semantic operation");
+    // Routing runs before the content checks, so a payload addressed elsewhere is never replaced as bad content.
+    if (!validOperationRouting(operation)) throw new Error("Accepted semantic operation is routed to another execution");
     if (!validSemanticMutationInput(operation)) throw new AcceptedContentRejected("semantic operation input is invalid");
     if (!validLivePublication(operation)) throw new AcceptedContentRejected("live publication is invalid or exceeds its size limit");
     const head = operation.mutation.kind === "post-terminal-event"
       ? this.requireTerminalHead(operation) : this.requireNextHead(operation);
-    const next = stageAcceptedContent("compatibility effects could not be applied", () => {
-      const live = parentLiveOperation(operation);
-      if (live) {
-        this.applyLiveFeatureEffects(live, head, false);
-        if (live.mutation.systemIntents?.every((intent) => intent.kind !== "system-notice")) this.projectLiveSystem(live, head.providerId);
-      }
-      return this.applyAcceptedMutation(operation, head);
-    }, (error) => error instanceof SemanticConflict);
+    const live = parentLiveOperation(operation);
+    if (live) {
+      this.applyLiveFeatureEffects(live, head, false);
+      if (live.mutation.systemIntents?.every((intent) => intent.kind !== "system-notice")) this.projectLiveSystem(live, head.providerId);
+    }
+    const next = this.applyAcceptedMutation(operation, head);
     this.storeHead({ ...next, ordinal: operation.ordinal });
   }
 
@@ -1359,8 +1359,60 @@ function liveMessage(operation: ExecutionSemanticOperation): DataOnlyParentLiveM
 }
 
 function validOperation(operation: ExecutionSemanticOperation): boolean {
-  return validOperationIdentity(operation, isInterruptedFinish(operation))
+  return validOperationIdentity(operation, isInterruptedFinish(operation)) && validOperationRouting(operation)
     && validSemanticMutationInput(operation) && validLivePublication(operation);
+}
+
+/**
+ * Every thread and execution the payload names must be the operation's own. A malformed payload
+ * passes here and fails the content checks, which own its shape and size.
+ */
+function validOperationRouting(operation: ExecutionSemanticOperation): boolean {
+  const { execution } = operation;
+  const publication = Array.isArray(operation.livePublication) ? operation.livePublication : [];
+  const publicationRouted = publication.every((intent) => !intent?.event
+    || intent.event.threadId === execution.threadId && intent.event.turnExecutionId === execution.executionId);
+  return publicationRouted && validMutationRouting(operation);
+}
+
+function validMutationRouting(operation: ExecutionSemanticOperation): boolean {
+  const { execution, mutation } = operation;
+  switch (mutation.kind) {
+    case "finish-live-event": return validFinishProjectionRouting(mutation.projection, execution)
+      && validProviderEventRouting(mutation.providerEvent, execution);
+    case "post-terminal-event": return validProviderEventRouting(mutation.providerEvent, execution);
+    case "narrative-delta": return validNarrativeRouting(mutation.input, execution);
+    default: {
+      const live = parentLiveOperation(operation)?.mutation;
+      return !live || validNarrativeRouting(live.narrative, execution) && validLiveTextRouting(live.text, execution);
+    }
+  }
+}
+
+function validFinishProjectionRouting(
+  projection: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>["projection"] | undefined,
+  execution: ExecutionIdentity,
+): boolean {
+  return !projection || projection.threadId === execution.threadId && projection.executionId === execution.executionId;
+}
+
+function validNarrativeRouting(input: { readonly executionId: string } | undefined, execution: ExecutionIdentity): boolean {
+  return !input || input.executionId === execution.executionId;
+}
+
+function validLiveTextRouting(
+  text: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>["text"] | undefined,
+  execution: ExecutionIdentity,
+): boolean {
+  const inputs = text?.kind === "append" ? text.inputs : text?.kind === "promote" ? [text.input] : [];
+  return !Array.isArray(inputs) || inputs.every((input) => !input || sameExecution(input, execution));
+}
+
+function validProviderEventRouting(
+  input: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>["providerEvent"],
+  execution: ExecutionIdentity,
+): boolean {
+  return !Array.isArray(input?.events) || input.events.every((event) => !event?.routing || sameExecution(event.routing, execution));
 }
 
 function isInterruptedFinish(operation: ExecutionSemanticOperation): boolean {
@@ -1407,8 +1459,6 @@ function validLivePublicationIntent(
   barrier: "writer" | "terminal",
 ): boolean {
   return intent.after === barrier && AgentEventSchema().safeParse(intent.event).success
-    && intent.event.threadId === operation.execution.threadId
-    && intent.event.turnExecutionId === operation.execution.executionId
     && (operation.mutation.kind !== "begin" || intent.event.type === "turnStarted")
     && validTurnStartedPublication(intent.event, operation.mutation)
     && (barrier === "terminal" || !isTerminalLiveEvent(intent.event.type) || isLostProviderStream(intent.event));

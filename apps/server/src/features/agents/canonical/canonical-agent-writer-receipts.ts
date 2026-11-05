@@ -30,7 +30,8 @@ type ReceiptOwner = { kind: "execution"; executionId: string }
 const storedReceiptSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("accepted-appended"), result: z.object({
     receipt: z.object({ operationId: z.string(), contentHash: z.string(), predecessor: AgentProgressPositionSchema,
-      through: AgentProgressPositionSchema, durableRevision: z.number().int().nonnegative() }).strict(),
+      through: AgentProgressPositionSchema, durableRevision: z.number().int().nonnegative(),
+      replaced: CanonicalAcceptedWriteInputSchema.shape.replaced }).strict(),
     revision: CanonicalAgentRevisionSchema(), eventIds: z.array(z.string()).max(256),
   }).strict() }).strict(),
   z.object({
