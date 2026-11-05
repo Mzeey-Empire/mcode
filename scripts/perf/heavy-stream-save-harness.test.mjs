@@ -1,7 +1,20 @@
 import * as NodeAssertStrict from "node:assert/strict";
 import * as NodeTest from "node:test";
-import { parseHeavyArguments, summarizeRows, summarizeSaves, auditLargeOutput, streamedDeltaCount, isMeasurementRecord } from "./heavy-stream-save-harness.mjs";
+import { parseHeavyArguments, summarizeRows, summarizeSaves, auditLargeOutput, streamedDeltaCount, isMeasurementRecord, restoreFixture } from "./heavy-stream-save-harness.mjs";
 import { isToolIndex } from "../../.agents/skills/verify-mcode/scripts/heavy-stream-provider-fixture.mjs";
+
+NodeTest.test("CLI restoration succeeds when stopping a blocked execution fails", async () => {
+  let configuredCli = "fixture.cmd";
+  const socket = { async rpc(method, params) {
+    if (method === "agent.stop") throw new Error("stop unavailable");
+    if (method === "settings.update") configuredCli = params.provider.cli.codex;
+  } };
+  const receipt = { threadId: "fixture-thread", cleanup: {} };
+  await restoreFixture(socket, receipt, {}, true, "original.cmd");
+  NodeAssertStrict.equal(configuredCli, "original.cmd");
+  NodeAssertStrict.equal(receipt.cleanup.settingsRestored, true);
+  NodeAssertStrict.equal(typeof receipt.cleanup.stopError, "string");
+});
 
 NodeTest.test("tool scheduling includes an unaligned midpoint without duplicating aligned tools", () => {
   NodeAssertStrict.deepEqual(Array.from({ length: 18 }, (_, index) => index).filter((index) => isToolIndex(index, 18, 2)), [0, 9, 10]);

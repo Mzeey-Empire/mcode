@@ -226,9 +226,12 @@ export function auditLargeOutput(rows) {
   return { bytes: 300 * 1024, saved: index >= 0, savedAfter: index >= 0 && index < rows.length - 1 };
 }
 
-async function restoreFixture(socket, receipt, state, changed, original) {
+/** Restores the worktree CLI even when a blocked execution cannot acknowledge Stop. */
+export async function restoreFixture(socket, receipt, state, changed, original) {
   try {
     if (receipt.threadId && !state.persisted) await socket.rpc("agent.stop", { threadId: receipt.threadId });
+  } catch (error) { receipt.cleanup.stopError = error.message; }
+  try {
     if (changed) await socket.rpc("settings.update", { provider: { cli: { codex: original } } });
     receipt.cleanup.settingsRestored = true;
   } catch (error) { receipt.cleanup.error = error.message; }
