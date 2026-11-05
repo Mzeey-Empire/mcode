@@ -16,12 +16,16 @@ async function emitTurn(request, notify, turnId) {
   if (relative.startsWith("..") || NodePath.isAbsolute(relative)) throw new Error("Fixture statistics must stay under .dev/perf");
   const base = { threadId: request.params.threadId, turnId };
   const counts = {};
+  const pieces = [];
+  const tools = [];
   const send = (method, params) => {
+    if (method === "item/agentMessage/delta" || method === "item/reasoning/summaryTextDelta") pieces.push({ index: Number(/piece (\d+)/.exec(params.delta)[1]), at: Date.now() });
+    if (method === "item/completed" && params.item.type === "commandExecution") tools.push(params.item.id);
     counts[method] = (counts[method] ?? 0) + 1;
     notify(method, params);
   };
   const startedAt = Date.now();
-  const save = (complete) => NodeFS.writeFileSync(config.statsPath, JSON.stringify({ counts, startedAt, endedAt: Date.now(), complete }));
+  const save = (complete) => NodeFS.writeFileSync(config.statsPath, JSON.stringify({ counts, pieces, tools, turnId, startedAt, endedAt: Date.now(), complete }));
   send("turn/started", { threadId: base.threadId, turn: { id: base.turnId, items: [], status: "inProgress", error: null } });
   if (config.grow) {
     for (let index = 0; index < config.grow; index += 1) {
