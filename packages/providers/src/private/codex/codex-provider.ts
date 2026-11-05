@@ -595,7 +595,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private emitRuntimeEvent(runtimeEvent: ProviderRuntimeEvent): void {
-    const state = this.canonicalTurnRoutingsByThread.get(runtimeEvent.event.threadId);
+    const state = this.canonicalRoutingForExecution(runtimeEvent.event.threadId, runtimeEvent.event.turnExecutionId);
     const routing = state?.routing;
     if (routing && runtimeEvent.event.turnExecutionId === routing.executionId) {
       if (state.kind === "fenced") return;
@@ -677,6 +677,15 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     kind: "active" | "fenced";
     routing: CodexCanonicalEventRouting;
   }>();
+  private readonly pendingCanonicalTurnRoutingsByThread = new Map<string, {
+    kind: "active" | "fenced";
+    routing: CodexCanonicalEventRouting;
+  }>();
+
+  private canonicalRoutingForExecution(threadId: string, executionId: string | undefined) {
+    const pending = this.pendingCanonicalTurnRoutingsByThread.get(threadId);
+    return pending?.routing.executionId === executionId ? pending : this.canonicalTurnRoutingsByThread.get(threadId);
+  }
 
   /** Report a failed canonical sink promptly for the exact turn attempt. */
   setCanonicalTurnDeliveryFailureHandler(
@@ -692,11 +701,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   /** Stops admission for one exact parent attempt before draining its queued batches. */
   fenceCanonicalTurnEvents(routing: CodexCanonicalEventRouting, options?: { discardQueued?: boolean }): Promise<void> {
-    const state = this.canonicalTurnRoutingsByThread.get(routing.threadId);
+    const state = this.canonicalRoutingForExecution(routing.threadId, routing.executionId);
     if (!state || state.routing.turnId !== routing.turnId
       || state.routing.executionId !== routing.executionId
       || state.routing.deliveryAttempt !== routing.deliveryAttempt) return Promise.resolve();
-    this.canonicalTurnRoutingsByThread.set(routing.threadId, { kind: "fenced", routing: state.routing });
+    state.kind = "fenced";
     return options?.discardQueued
       ? this.canonicalEventPublisher.discardQueuedForExecution(routing)
       : this.canonicalEventPublisher.waitForExecution(routing);
@@ -704,7 +713,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   /** Drop the drained publisher queue while retaining a fence against late SDK events. */
   retireCanonicalTurnEvents(routing: CodexCanonicalEventRouting): Promise<void> {
-    const state = this.canonicalTurnRoutingsByThread.get(routing.threadId);
+    const state = this.canonicalRoutingForExecution(routing.threadId, routing.executionId);
     if (state?.kind !== "fenced" || state.routing.turnId !== routing.turnId
       || state.routing.executionId !== routing.executionId
       || state.routing.deliveryAttempt !== routing.deliveryAttempt) return Promise.resolve();
@@ -1149,7 +1158,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       signal.throwIfAborted();
       const reusable = this.isReusableCodexSession(existing, turn.sandbox);
       if (!this.canStartCodexTurn(turn, reusable)) return;
-      if (!reusable) await this.activateCanonicalCodexRequest(req);
       this.stageCodexTurn(turn);
       const state = await this.acquireCodexTurn(turn);
       if (!state) return;
@@ -1165,12 +1173,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private bindCanonicalCodexRequest(request: TurnRequest<"codex">): void {
     const threadId = this.threadIdForSession(request.sessionId);
-    this.canonicalTurnRoutingsByThread.set(threadId, { kind: "active", routing: {
+    this.pendingCanonicalTurnRoutingsByThread.set(threadId, { kind: "active", routing: {
       threadId, turnId: request.turnId, executionId: request.turnExecutionId, deliveryAttempt: request.deliveryAttempt ?? 1,
     } });
   }
 
   private async prepareCanonicalCodexRequest(request: TurnRequest<"codex">): Promise<void> {
+    this.bindCanonicalCodexRequest(request);
     const state = this.runtime.get(request.sessionId);
     if (state) state.nextTurnExecutionId = request.turnExecutionId;
     if (state && this.isBusy(state)) return;
@@ -1179,8 +1188,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private async activateCanonicalCodexRequest(request: TurnRequest<"codex">): Promise<void> {
     const threadId = this.threadIdForSession(request.sessionId);
-    await this.retirePreviousCanonicalTurn(threadId);
-    this.bindCanonicalCodexRequest(request);
+    await this.activateCodexTurnRouting(threadId, request.turnExecutionId);
   }
 
   private async prepareCodexTurn(request: TurnRequest<"codex">, signal: AbortSignal): Promise<PreparedCodexTurn | undefined> {
@@ -2547,9 +2555,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const entry = this.runtime.get(sessionId);
     if (!entry) return;
     // Keep the old execution bound until its interrupt drains, including its final output.
-    if (this.isBusy(entry)) await this.interruptCodexTurnForReplacement(entry, server, signal);
+    if (this.isBusy(entry)) await this.interruptCodexTurnForReplacement(entry, server);
     if (this.canonicalTurnRoutingsByThread.get(threadId)?.routing.executionId !== turnExecutionId) {
-      await this.activateCodexTurnRouting(entry, threadId, turnExecutionId);
+      await this.activateCodexTurnRouting(threadId, turnExecutionId);
     }
     if (signal.aborted || this.runtime.get(sessionId) !== entry) {
       this.emitCodexTurnEvent(entry, { type: AgentEventType.Ended, threadId, turnExecutionId, outcome: "cancelled" }, turnExecutionId);
@@ -2572,20 +2580,18 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
-  private async activateCodexTurnRouting(entry: CodexSessionState, threadId: string, turnExecutionId: string): Promise<void> {
+  private async activateCodexTurnRouting(threadId: string, turnExecutionId: string): Promise<void> {
+    const pending = this.pendingCanonicalTurnRoutingsByThread.get(threadId);
+    if (!pending || pending.routing.executionId !== turnExecutionId) throw new Error("Codex turn has no pending delivery routing");
     await this.retirePreviousCanonicalTurn(threadId);
-    const routing = entry.turnDiffRouting;
-    if (!routing) throw new Error("Codex turn has no delivery routing");
-    this.canonicalTurnRoutingsByThread.set(threadId, { kind: "active", routing: {
-      threadId, turnId: routing.turnId, executionId: turnExecutionId, deliveryAttempt: routing.deliveryAttempt,
-    } });
+    this.canonicalTurnRoutingsByThread.set(threadId, pending);
+    this.pendingCanonicalTurnRoutingsByThread.delete(threadId);
   }
 
-  private async interruptCodexTurnForReplacement(entry: CodexSessionState, server: CodexAppServer, signal: AbortSignal): Promise<void> {
-    try { await server.interruptTurn(); }
-    catch (error) {
-      if (!signal.aborted && this.runtime.get(entry.sessionId) === entry) throw error;
-    }
+  private async interruptCodexTurnForReplacement(entry: CodexSessionState, server: CodexAppServer): Promise<void> {
+    if (!entry.currentNativeTurnId && entry.turnStartResponsePending) await entry.turnStartPromise;
+    if (entry.currentNativeTurnId) await server.interruptTurnAndDrain(entry.currentNativeTurnId);
+    else await server.interruptTurn();
   }
 
   private prepareCodexTurnRun(sessionId: string, turnExecutionId: string): CodexTurnRun | undefined {
@@ -3060,6 +3066,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   /** Tears down all sessions, drains pending permissions, and stops the eviction timer. */
   async shutdown(): Promise<void> {
+    for (const pending of this.pendingTurnRequests.values()) pending.controller.abort();
     const results: PromiseSettledResult<unknown>[] = await Promise.allSettled([...this.liveSessionIds].map(sessionId => this.planQuestions.drain(sessionId, "expired")));
     // Drain everything up front: `runtime.shutdown` stops each session
     // (close drains per-session), but draining all here also clears any
@@ -3073,6 +3080,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.liveSessionIds.clear();
     this.activeCodexServers.clear();
     this.canonicalTurnRoutingsByThread.clear();
+    this.pendingCanonicalTurnRoutingsByThread.clear();
     this.planModeSessions.clear();
     this.collaborationModeSetSessions.clear();
     const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);

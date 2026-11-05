@@ -201,27 +201,111 @@ afterEach(() => {
 const STEER_ID = "1d7f7a1e-58a1-4d0b-9a55-4f4b3c0f6a10";
 
 describe("Codex provider lifecycle through native transport", () => {
-  it("leaves an unbound interrupt open for the real completion and final output", async () => {
+  it("preserves cancellation routing while replacement settings are held", async () => {
+    const f = createProvider();
+    const replacement = { ...request, turnId: "turn-2", turnExecutionId: "73093cff-69b8-4efb-82db-20a75f993612" };
+    const held = Promise.withResolvers<typeof f.settings>();
+    try {
+      await f.provider.sendTurn(request);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      f.getSettings.mockImplementationOnce(() => held.promise);
+      const sending = f.provider.sendTurn(replacement);
+      await settleIo();
+      await f.provider.stopSession(request.sessionId);
+      held.resolve(f.settings);
+      await sending;
+      await f.provider.flushCanonicalEvents();
+      expect(f.starts()).toHaveLength(1);
+      expect(f.events.map(({ event }) => event).filter((event) => event.type === AgentEventType.Ended
+        && event.turnExecutionId === replacement.turnExecutionId)).toEqual([{
+        type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: replacement.turnExecutionId, outcome: "cancelled",
+      }]);
+      expect(turnEnds(f.events)).toHaveLength(1);
+    } finally { held.resolve(f.settings); await f.provider.shutdown(); }
+  });
+
+  it("keeps old final output when the replacement interrupt reply precedes completion", async () => {
+    const f = createProvider();
+    const replied = Promise.withResolvers<void>();
+    try {
+      await f.provider.sendTurn(request);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      f.child.interruptReply = (interrupt) => {
+        f.child.stdout.write(JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
+        replied.resolve();
+      };
+      await f.provider.sendTurn({ ...request, turnId: "turn-2", turnExecutionId: "73093cff-69b8-4efb-82db-20a75f993612" });
+      await replied.promise;
+      await settleIo();
+      f.child.stdout.write(answerLine("old final answer"));
+      f.child.complete("native-turn-1", "interrupted");
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      await f.provider.flushCanonicalEvents();
+      expect(turnTexts(f.events)).toEqual(["old final answer"]);
+      expect(turnEnds(f.events)).toEqual([{ type: AgentEventType.Ended, threadId: request.threadId,
+        turnExecutionId: request.turnExecutionId, outcome: "cancelled" }]);
+    } finally { f.child.interruptReply = undefined; await f.provider.shutdown(); }
+  });
+
+  it("preserves a fresh request fence through spawn", async () => {
+    const f = createProvider();
+    const held = Promise.withResolvers<typeof f.settings>();
+    f.getSettings.mockImplementationOnce(() => held.promise);
+    try {
+      const sending = f.provider.sendTurn(request);
+      await settleIo();
+      await f.provider.fenceCanonicalTurnEvents({ threadId: request.threadId, turnId: request.turnId,
+        executionId: request.turnExecutionId, deliveryAttempt: 1 });
+      held.resolve(f.settings);
+      await sending;
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      f.child.complete("native-turn-1");
+      await settleIo();
+      await f.provider.flushCanonicalEvents();
+      expect(turnEventsOf(f.events)).toEqual([]);
+    } finally { held.resolve(f.settings); await f.provider.shutdown(); }
+  });
+
+  it("preserves a pending replacement fence through activation", async () => {
+    const f = createProvider();
+    const replacement = { ...request, turnId: "turn-2", turnExecutionId: "73093cff-69b8-4efb-82db-20a75f993612" };
+    const held = Promise.withResolvers<RpcRequest>();
+    try {
+      await f.provider.sendTurn(request);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      f.child.interruptReply = (interrupt) => held.resolve(interrupt);
+      await f.provider.sendTurn(replacement);
+      const interrupt = await held.promise;
+      await f.provider.fenceCanonicalTurnEvents({ threadId: request.threadId, turnId: replacement.turnId,
+        executionId: replacement.turnExecutionId, deliveryAttempt: 1 });
+      f.child.interruptReply = undefined;
+      const stopping = f.provider.stopSession(request.sessionId);
+      f.child.complete("native-turn-1", "interrupted");
+      f.child.stdout.write(JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
+      await stopping;
+      await settleIo();
+      await f.provider.flushCanonicalEvents();
+      expect(f.starts()).toHaveLength(1);
+      expect(f.events.filter(({ event }) => event.turnExecutionId === replacement.turnExecutionId)).toEqual([]);
+    } finally { f.child.interruptReply = undefined; await f.provider.shutdown(); }
+  });
+
+  it("keeps final output when Stop arrives before the turn start response", async () => {
     const { provider, child, starts, events } = createProvider();
-    const busy = vi.spyOn(provider, "isBusy");
+    child.holdTurnStart = true;
     await provider.sendTurn(request);
     await vi.waitFor(() => expect(starts()).toHaveLength(1));
-    const state = busy.mock.calls[0]?.[0];
-    if (!state) throw new Error("Session was not checked for activity");
-    await vi.waitFor(() => expect(state.currentNativeTurnId).toBe("native-turn-1"));
     child.interruptReply = (interrupt) => {
-      child.stdout.write(JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
+      child.stdout.write(answerLine("final answer") + completionLine("interrupted")
+        + JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
     };
-    // Exercise the fallback while the native execution's completion is still outstanding.
-    state.currentNativeTurnId = undefined;
-    await provider.interrupt(state);
-    expect(child.requests.filter(({ method }) => method === "turn/interrupt").map(({ params }) => params?.turnId))
-      .toEqual([undefined]);
+    const stopping = provider.stopSession(request.sessionId);
+    await settleIo();
     expect(turnEnds(events)).toEqual([]);
-    child.stdout.write(answerLine("final answer"));
-    child.complete("native-turn-1", "completed");
+    child.answerHeldTurnStart();
+    await stopping;
     await vi.waitFor(() => expect(turnEnds(events)).toEqual([{
-      type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "completed",
+      type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "cancelled",
     }]));
     expect(turnTexts(events)).toEqual(["final answer"]);
     await provider.shutdown();
@@ -234,7 +318,7 @@ describe("Codex provider lifecycle through native transport", () => {
     await provider.sendTurn(request);
     await vi.waitFor(() => expect(starts()).toHaveLength(1));
     child.interruptReply = (interrupt) => {
-      if (!interrupt.params?.turnId) held.resolve(interrupt);
+      if (child.requests.filter(({ method }) => method === "turn/interrupt").length === 1) held.resolve(interrupt);
       else {
         child.stdout.write(JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
         child.complete(interrupt.params.turnId, "interrupted");
@@ -275,7 +359,7 @@ describe("Codex provider lifecycle through native transport", () => {
     await vi.waitFor(() => expect(starts()).toHaveLength(2));
     await provider.stopSession(request.sessionId);
     expect(child.requests.filter(({ method, params }) => method === "turn/interrupt" && params?.turnId)
-      .map(({ params }) => params?.turnId)).toEqual(["native-turn-2"]);
+      .map(({ params }) => params?.turnId)).toEqual(["native-turn-1", "native-turn-2"]);
     await vi.waitFor(() => expect(events.map(({ event }) => event).filter((event) => event.type === AgentEventType.Ended)).toEqual([
       { type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "cancelled" },
       { type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: "73093cff-69b8-4efb-82db-20a75f993612", outcome: "cancelled" },
