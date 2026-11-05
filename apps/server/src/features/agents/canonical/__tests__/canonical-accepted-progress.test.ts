@@ -42,7 +42,7 @@ import { ProgressAdmissionError } from "../../execution/execution-writer-failure
 import { persistTurnFailure } from "../turn-ending.js";
 import { TurnSteerStore } from "../../steering/persistence/turn-steer-store.js";
 import { TurnSavingStatusSchema, type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
-import { diag, parseDiagLine, recordingFileId } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -293,7 +293,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
           events: [draft("codex", 1, "textDelta", { delta: "pending", isFinalResponse: true })] });
         await expect(settle()).rejects.toThrow();
         diag.flushSync();
-        const file = NodePath.join(dir, "t", `${recordingFileId(execution.threadId)}.jsonl`);
+        const file = NodePath.join(dir, "t", `${threadRecordingFileId(execution.threadId, diag.runId)}.jsonl`);
         const rows = NodeFS.readFileSync(file, "utf8").split("\n").map(parseDiagLine);
         expect(rows.filter((row) => row?.ch === "progress.save-failed").map((row) => row?.d)).toEqual([{
           turn: execution.turnId, execution: execution.executionId, source: "storage",

@@ -5,7 +5,7 @@ import type { ProviderEventBatch } from "@mcode/providers";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
 
 import {
   createProviderHostPorts,
@@ -252,7 +252,7 @@ describe("createProviderHostPorts", () => {
       const refused = { ...batch, events: [...batch.events, ...batch.events] };
       await expect(ports.events.submit(refused)).rejects.toThrow();
       diag.flushSync();
-      const rows = NodeFS.readFileSync(NodePath.join(dir, "t", "thread-1.jsonl"), "utf8")
+      const rows = NodeFS.readFileSync(NodePath.join(dir, "t", threadRecordingFileId("thread-1", diag.runId) + ".jsonl"), "utf8")
         .split("\n").flatMap((line) => parseDiagLine(line) ?? []);
       expect(rows.filter((row) => row.ch === "provider.refused").map((row) => ({ th: row.th, d: row.d })))
         .toEqual([{ th: "thread-1", d: {

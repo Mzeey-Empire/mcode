@@ -2,7 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { logger } from "../../logging/index.js";
-import { appendHeaderLine, type DiagRecord } from "../record.js";
+import type { DiagRecord } from "../record.js";
 import { describeError } from "./error-message.js";
 import { applyRetention, RETENTION_INTERVAL_MS } from "./retention.js";
 
@@ -17,8 +17,17 @@ export function recordingFileId(id: string): string {
   return NodeCrypto.createHash("sha256").update(id).digest("hex").slice(0, 24);
 }
 
+/**
+ * Names one run's recording of one thread, `<thread>.<run>`. Each process writes only its own
+ * files, so a file holds one writer and the name says which. Neither part can contain a dot, so
+ * the name splits back unambiguously. Builds before this layout share `<thread>` across runs.
+ */
+export function threadRecordingFileId(threadId: string, runId: string): string {
+  return recordingFileId(threadId) + "." + recordingFileId(runId);
+}
+
 function fileKeyFor(record: DiagRecord, runId: string): string {
-  if (record.th) return "t/" + recordingFileId(record.th);
+  if (record.th) return "t/" + threadRecordingFileId(record.th, runId);
   return "p/" + recordingFileId(runId);
 }
 
@@ -34,19 +43,22 @@ function needsRotation(size: number, text: string): boolean {
   return size > 0 && size + Buffer.byteLength(text) > SEGMENT_BYTES;
 }
 
+/**
+ * An append cut short by exit or a failed write can end mid-line. Starting on a fresh line keeps
+ * the next record from fusing with that fragment, so the reader loses only the fragment.
+ */
+function afterAnyTornLine(lines: string[]): string {
+  return "\n" + lines.join("");
+}
+
 function countLines(files: Map<string, string[]>): number {
   let count = 0;
   for (const lines of files.values()) count += lines.length;
   return count;
 }
 
-// Process-wide rather than per sink: a recorder replaces its sink after a failure but keeps its
-// run, so a per-sink count would reuse a (writer, batch) pair the old sink already wrote.
-let lastBatchId = 0;
-
-/** Lines taken from the queue together. Every file's append of them carries the same id. */
+/** Lines taken from the queue together. */
 interface QueuedBatch {
-  id: number;
   files: Map<string, string[]>;
   bytes: number;
 }
@@ -104,8 +116,9 @@ export class Sink {
   /**
    * Writes everything not yet on disk before the process exits, including the batch a background
    * flush has taken but not finished. Exit stops that background append wherever it is, so this
-   * writes the batch again under the same batch header. When the process lives on, the background
-   * append still lands, before or after this copy. Either way the reader keeps one copy.
+   * writes the batch again. When the process lives on, the background append still lands, before
+   * or after this copy. The file is this run's alone and every record carries the run's own
+   * sequence number, so the reader keeps one copy of each.
    */
   flushSync(): void {
     this.clearTimer();
@@ -162,7 +175,7 @@ export class Sink {
     try {
       // flushSync empties the map once it has rewritten the lines, which ends this loop early.
       for (const [key, lines] of batch.files) {
-        await this.appendLines(key, this.headed(batch.id, lines));
+        await this.appendLines(key, lines.join(""));
         batch.files.delete(key);
       }
       this.queuedAndWritingBytes -= batch.bytes;
@@ -182,17 +195,10 @@ export class Sink {
   }
 
   private takeBatch(): QueuedBatch {
-    lastBatchId += 1;
-    const batch = { id: lastBatchId, files: this.queued, bytes: this.queuedBytes };
+    const batch = { files: this.queued, bytes: this.queuedBytes };
     this.queued = new Map();
     this.queuedBytes = 0;
     return batch;
-  }
-
-  /** Opens an append with the header naming this run, the batch, and its record count. */
-  private headed(batchId: number, lines: string[]): string {
-    const header = { writer: this.options.runId, batch: batchId, records: lines.length };
-    return appendHeaderLine(header) + lines.join("");
   }
 
   private rewriteUnconfirmedSync(): void {
@@ -200,9 +206,7 @@ export class Sink {
     if (this.failed || !unconfirmed || unconfirmed.files.size === 0) return;
     try {
       for (const [key, lines] of unconfirmed.files) {
-        // An append cut short by exit can end mid-line. A leading newline keeps that fragment
-        // from fusing with the rewrite's header, so the reader skips only the fragment.
-        this.appendLinesSync(key, "\n" + this.headed(unconfirmed.id, lines));
+        this.appendLinesSync(key, afterAnyTornLine(lines));
         unconfirmed.files.delete(key);
       }
     } catch (error) {
@@ -215,7 +219,7 @@ export class Sink {
     const batch = this.takeBatch();
     try {
       for (const [key, lines] of batch.files) {
-        this.appendLinesSync(key, this.headed(batch.id, lines));
+        this.appendLinesSync(key, lines.join(""));
         batch.files.delete(key);
       }
       this.queuedAndWritingBytes -= batch.bytes;
@@ -255,7 +259,8 @@ export class Sink {
     const batch = this.takeBatch();
     for (const [key, lines] of batch.files) {
       try {
-        this.appendLinesSync(key, this.headed(batch.id, lines));
+        // The failed append may have stopped mid-line.
+        this.appendLinesSync(key, afterAnyTornLine(lines));
       } catch {
         // onFailure reports the disk error; a file that refuses its marker has nothing to add.
       }

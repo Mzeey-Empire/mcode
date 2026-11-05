@@ -94,7 +94,11 @@ function diagnosticCollector(paths, threadId, since, state) {
   const records = new Map();
   const offsets = new Map();
   const collect = async () => {
-    const files = [NodePath.join(paths.devDir, "diagnostics", "t", `${threadId}.jsonl`), NodePath.join(paths.devDir, "diagnostics", "t", `${threadId}.1.jsonl`)];
+    // Each run writes its own `<threadId>.<runId>.jsonl`; older builds share `<threadId>.jsonl`.
+    const threads = NodePath.join(paths.devDir, "diagnostics", "t");
+    const files = NodeFS.existsSync(threads)
+      ? NodeFS.readdirSync(threads).filter((name) => name.startsWith(`${threadId}.`) && name.endsWith(".jsonl")).map((name) => NodePath.join(threads, name))
+      : [];
     const processes = NodePath.join(paths.devDir, "diagnostics", "p");
     if (NodeFS.existsSync(processes)) files.push(...NodeFS.readdirSync(processes).filter((name) => name.endsWith(".jsonl")).map((name) => NodePath.join(processes, name)));
     for (const file of files) {

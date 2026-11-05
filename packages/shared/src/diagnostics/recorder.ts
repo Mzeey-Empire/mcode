@@ -43,7 +43,8 @@ export class DiagRecorder {
   private failed = false;
   private dir?: string;
   private sink?: Sink;
-  private readonly runId = NodeCrypto.randomUUID();
+  /** Names this process's recording files, so a reader attributes each record to its process. */
+  readonly runId = NodeCrypto.randomUUID();
   private sequence = 0;
   private readonly openSpans = new Map<string, OpenSpan>();
   private readonly touchedThreads = new Set<string>();

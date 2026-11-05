@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
-import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts/ws/channels";
@@ -154,7 +154,7 @@ describe("TurnRecoveryService", () => {
         ).get(EXECUTION_ID);
         expect(incident?.id).toEqual(expect.any(String));
         diag.flushSync();
-        const rows = NodeFS.readFileSync(NodePath.join(dir, "t", `${THREAD_ID}.jsonl`), "utf8").split("\n").map(parseDiagLine);
+        const rows = NodeFS.readFileSync(NodePath.join(dir, "t", `${threadRecordingFileId(THREAD_ID, diag.runId)}.jsonl`), "utf8").split("\n").map(parseDiagLine);
         expect(rows.filter((row) => row?.ch === "turn.recovered").map((row) => row?.d)).toEqual([{
           turn: TURN_ID, execution: EXECUTION_ID, incident: incident?.id, cause: "app_closed",
           reason: "The provider could not prove that this execution was still active after restart.",

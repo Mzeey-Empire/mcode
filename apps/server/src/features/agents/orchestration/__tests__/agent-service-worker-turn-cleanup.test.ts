@@ -4,7 +4,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { container } from "tsyringe";
-import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { CodexChildEvidence } from "@mcode/contracts/events/provider-runtime-event";
@@ -316,7 +316,7 @@ describe("AgentService cleanup through production worker composition", { timeout
       if (terminal) fixture.provider.stopSession.mockImplementation(() => fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, outcome: "cancelled" }));
       await fixture.service.stopAll();
       diag.flushSync();
-      const recording = await NodeFSPromises.readFile(NodePath.join(dir, "t", `${fixture.thread.id}.jsonl`), "utf8");
+      const recording = await NodeFSPromises.readFile(NodePath.join(dir, "t", `${threadRecordingFileId(fixture.thread.id, diag.runId)}.jsonl`), "utf8");
       const stops = recording.split("\n").filter(Boolean)
         .map((line) => JSON.parse(line) as { ch: string; k: string; d?: Record<string, unknown> })
         .filter((row) => row.ch === "agent.stop");
