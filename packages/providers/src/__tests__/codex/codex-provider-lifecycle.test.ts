@@ -35,6 +35,8 @@ class NativeProcess extends NodeEvents.EventEmitter {
   });
   /** When set, `turn/steer` answers with this JSON-RPC error message. */
   steerError: string | undefined;
+  /** When set, `turn/interrupt` gets this reply in place of a response and an interrupted completion. */
+  interruptReply: ((request: RpcRequest) => void) | undefined;
   private buffer = "";
   private turnCount = 0;
 
@@ -59,6 +61,10 @@ class NativeProcess extends NodeEvents.EventEmitter {
   private respond(request: RpcRequest): void {
     this.requests.push(request);
     if (request.id === undefined) return;
+    if (request.method === "turn/interrupt" && this.interruptReply) {
+      this.interruptReply(request);
+      return;
+    }
     if (request.method === "turn/steer" && this.steerError) {
       this.stdout.write(JSON.stringify({ id: request.id, error: { code: -32600, message: this.steerError } }) + "\n");
       return;
@@ -84,6 +90,28 @@ const request: TurnRequest<"codex"> = {
   threadId: "lifecycle", workspaceId: "fixture", cwd: process.cwd(), message: "hello",
   model: "gpt-5.4", permissionMode: "supervised", approvalReviewMode: "manual", interactionMode: "build", providerOptions: {},
 };
+
+function answerLine(delta: string): string {
+  return JSON.stringify({ method: "item/agentMessage/delta",
+    params: { threadId: "native-thread", turnId: "native-turn-1", itemId: "answer", delta } }) + "\n";
+}
+
+function completionLine(status: string): string {
+  return JSON.stringify({ method: "turn/completed",
+    params: { threadId: "native-thread", turn: { id: "native-turn-1", status, items: [] } } }) + "\n";
+}
+
+function turnEventsOf(events: ProviderRuntimeEvent[]) {
+  return events.map(({ event }) => event).filter((event) => event.turnExecutionId === request.turnExecutionId);
+}
+
+function turnTexts(events: ProviderRuntimeEvent[]): string[] {
+  return turnEventsOf(events).flatMap((event) => event.type === AgentEventType.TextDelta ? [event.delta] : []);
+}
+
+function turnEnds(events: ProviderRuntimeEvent[]) {
+  return turnEventsOf(events).filter((event) => event.type === AgentEventType.Ended);
+}
 
 function createProvider(eventSink?: ProviderEventSinkPort) {
   const settings = { provider: { cli: { codex: "codex" } } };
@@ -357,6 +385,125 @@ describe("Codex provider lifecycle through native transport", () => {
     expect(turnEvents.filter((event) => event.type === AgentEventType.Ended)).toEqual([{
       type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "completed",
     }]);
+  });
+
+  it("publishes late output and the real completion when the turn's interrupt times out during shutdown", async () => {
+    const { provider, child, starts, events } = createProvider();
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    child.stdout.write(answerLine("before "));
+    await vi.waitFor(() => expect(turnTexts(events)).toEqual(["before "]));
+    child.interruptReply = (interrupt) => {
+      // The exact-turn interrupt never answers; the server's final interrupt before the kill does,
+      // a little later, as a real process would, so the answer follows the first interrupt's timeout.
+      if (interrupt.params?.turnId) return;
+      setTimeout(() => child.stdout.write(answerLine("late ") + completionLine("completed")
+        + JSON.stringify({ id: interrupt.id, result: {} }) + "\n"), 100);
+    };
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const shutdown = provider.shutdown();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await shutdown;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(turnTexts(events)).toEqual(["before ", "late "]);
+    expect(turnEnds(events)).toEqual([{
+      type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "completed",
+    }]);
+  });
+
+  it("ends the turn once as provider_lost after reading the output of a server killed without a real end", async () => {
+    const { provider, child, starts, events } = createProvider();
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    child.stdout.write(answerLine("before "));
+    await vi.waitFor(() => expect(turnTexts(events)).toEqual(["before "]));
+    // No interrupt answers. The process writes its last text, with no end, as it is terminated.
+    child.interruptReply = () => {};
+    child.kill.mockImplementation(() => {
+      child.stdout.write(answerLine("late "));
+      setImmediate(() => child.emit("exit", 0, null));
+      return true;
+    });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const shutdown = provider.shutdown();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await shutdown;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(turnTexts(events)).toEqual(["before ", "late "]);
+    expect(turnEventsOf(events).slice(-2)).toMatchObject([
+      { type: AgentEventType.AssistantMessageBoundary, content: "before late " },
+      { type: AgentEventType.Ended, reason: "provider_lost" },
+    ]);
+    expect(turnEnds(events)).toHaveLength(1);
+  });
+
+  it("closes the reply as soon as the user stops, before a slow interrupt settles", async () => {
+    const { provider, child, starts, events } = createProvider();
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    child.stdout.write(answerLine("before "));
+    await vi.waitFor(() => expect(turnTexts(events)).toEqual(["before "]));
+    child.interruptReply = (interrupt) => {
+      if (interrupt.params?.turnId) {
+        child.stdout.write(answerLine("after stop "));
+        return;
+      }
+      child.stdout.write(completionLine("interrupted") + JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
+    };
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const stop = provider.stopSession(request.sessionId);
+      // No timer advances: the boundary must not wait on the interrupt's timeout.
+      await provider.flushCanonicalEvents();
+      expect(turnEventsOf(events).at(-1)).toMatchObject({ type: AgentEventType.AssistantMessageBoundary, content: "before " });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await stop;
+      await provider.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(turnTexts(events)).toEqual(["before "]);
+    expect(turnEnds(events)).toHaveLength(1);
+  });
+
+  it("publishes nothing past the Stop fence while a slow interrupt and teardown settle", async () => {
+    const { provider, child, starts, events } = createProvider();
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    child.stdout.write(answerLine("before "));
+    await vi.waitFor(() => expect(turnTexts(events)).toEqual(["before "]));
+    child.interruptReply = (interrupt) => {
+      if (interrupt.params?.turnId) return;
+      child.stdout.write(answerLine("late ") + completionLine("completed") + JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
+    };
+    const published = events.length;
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const fenced = provider.fenceCanonicalTurnEvents({ threadId: request.threadId, turnId: request.turnId,
+        executionId: request.turnExecutionId, deliveryAttempt: 1 }, { discardQueued: true });
+      const stop = provider.stopSession(request.sessionId);
+      await fenced;
+      await vi.advanceTimersByTimeAsync(30_000);
+      await stop;
+      await provider.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(turnEventsOf(events.slice(published))).toEqual([]);
   });
 
   it("steers the running native turn by its id and maps a vanished turn to turn_not_running", async () => {

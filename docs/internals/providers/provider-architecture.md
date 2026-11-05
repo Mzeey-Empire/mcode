@@ -143,8 +143,13 @@ and lets the interrupt response through. The pause belongs to the thread, so an
 app-server that starts for a paused thread starts paused. Once the process
 exits, pausing stops: the adapter reads the rest of its output, a final
 `turn/completed` included, before it reports the exit or a failure. Pausing
-also stops when a session is torn down, because its interrupt would otherwise
-wait behind the held output and end the turn synthetically. Teardown removes the
+also stops when a session is torn down, so its interrupt does not wait behind
+the held output. Teardown ends a turn when its output ends, not on a timer: an
+interrupt that times out leaves the turn open, and close kills the app-server,
+reads its pipe to the end, and only then closes the reply's text. It ends the
+turn as `provider_lost` only when that drain read no real end.
+User Stop closes the reply's text at once instead, because Stop discards later
+output. Teardown removes the
 session from the pool before the app-server's pipe is read to its end, so an
 app-server's output routes to the session that spawned it, not to whichever
 session the pool holds.

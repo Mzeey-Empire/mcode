@@ -69,6 +69,8 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   /** Set by {@link dispose}, after which stdout has no `data` listener to read into. */
   private detached = false;
   private stopWaitingForOutputEnd: (() => void) | undefined;
+  /** The one wait for stdout to end, shared by every {@link readRemainingOutput} caller. */
+  private outputEnd: Promise<void> | undefined;
   private dispatchingLines = false;
 
   private readonly onData: (chunk: string) => void;
@@ -243,12 +245,14 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   /**
    * Reads everything the app-server wrote, for when its process is gone. Pausing stops applying,
    * held lines dispatch in order, and the pipe is read until it ends. Resolves after `timeoutMs`
-   * anyway, because another process that inherited the pipe can hold it open indefinitely.
+   * anyway, because another process that inherited the pipe can hold it open indefinitely. Callers
+   * share one wait, so the exit handler and a kill awaiting the same pipe end together.
    */
   readRemainingOutput(timeoutMs: number): Promise<void> {
     this.releaseBackpressure();
+    if (this.outputEnd) return this.outputEnd;
     if (this.detached || this.stdout.readableEnded || this.stdout.destroyed) return Promise.resolve();
-    return new Promise<void>((resolve) => {
+    this.outputEnd = new Promise<void>((resolve) => {
       const finish = () => {
         clearTimeout(timer);
         this.stdout.off("end", finish);
@@ -265,6 +269,7 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
       this.stopWaitingForOutputEnd = finish;
       this.stdout.resume();
     });
+    return this.outputEnd;
   }
 
   /**

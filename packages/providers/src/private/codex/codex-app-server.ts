@@ -1173,9 +1173,9 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   /**
    * Gracefully stops the child process.
    *
-   * Sends a best-effort `turn/interrupt`, disposes the RPC client, then
-   * terminates the process. On Windows uses `taskkill /T /F`; on other
-   * platforms sends SIGTERM then SIGKILL after 3 seconds.
+   * Sends a best-effort `turn/interrupt`, terminates the process, reads its
+   * remaining output, then disposes the RPC client. On Windows uses
+   * `taskkill /T /F`; on other platforms sends SIGTERM then SIGKILL after 3 seconds.
    */
   async kill(): Promise<void> {
     if (this.teardownPromise) return this.teardownPromise;
@@ -1188,11 +1188,16 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     }
   }
 
-  /** Runs interrupt, RPC dispose, and process termination once per server instance. */
+  /**
+   * Runs interrupt, process termination, and RPC dispose once per server instance. The pipe is read
+   * to its end before dispose, so the kill resolves only when no more output can arrive: the
+   * interrupt's late output and real `turn/completed` reach listeners before the caller ends the turn.
+   */
   private async performKill(): Promise<void> {
     await this.interruptActiveThread();
-    this.rpc?.dispose();
     await this.terminateChild();
+    await this.rpc?.readRemainingOutput(EXIT_OUTPUT_DRAIN_TIMEOUT_MS);
+    this.rpc?.dispose();
     this._isAlive = false;
   }
 

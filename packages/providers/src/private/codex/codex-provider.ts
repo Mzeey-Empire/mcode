@@ -2397,22 +2397,22 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     state.server.releaseOutput();
   }
 
-  /** Graceful protocol interrupt of the in-flight turn (does not kill the process). */
+  /**
+   * Graceful protocol interrupt of the in-flight turn (does not kill the process). A native turn's
+   * own `turn/completed` closes its text and ends it. When that does not arrive in time the turn is
+   * left open, because its output may still follow: {@link close} ends it once the output has ended.
+   */
   async interrupt(state: CodexSessionState): Promise<void> {
     const turnExecutionId = executionForDrain(state);
     const nativeTurnId = state.currentNativeTurnId;
-    // The boundary waits for the native interrupt: it closes the text item to later deltas, and
-    // text still unread in the pipe, which the interrupt drains, belongs to that item.
-    try {
-      if (nativeTurnId) await state.server.interruptTurnAndDrain(nativeTurnId);
-      else await state.server.interruptTurn();
-    } catch (error) {
-      this.projectInterruptedAssistantText(state, turnExecutionId);
-      if (nativeTurnId) this.emitInterruptProviderLost(state, turnExecutionId);
-      throw error;
+    if (nativeTurnId) {
+      await state.server.interruptTurnAndDrain(nativeTurnId);
+    } else {
+      await state.server.interruptTurn();
+      // With no native turn bound, no output can be matched to this turn, so nothing will end it.
+      this.closeTurnAssistantText(state, turnExecutionId);
+      this.emitProviderLostEnd(state, turnExecutionId);
     }
-    this.projectInterruptedAssistantText(state, turnExecutionId);
-    if (!nativeTurnId) this.emitInterruptProviderLost(state, turnExecutionId);
     state.pendingTurnStartNotification = undefined;
     state.turnStartResponsePending = false;
     state.turnBindingPhase = "idle";
@@ -2423,14 +2423,14 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     state.pendingChildEvents = [];
   }
 
-  private projectInterruptedAssistantText(state: CodexSessionState, turnExecutionId: string | undefined): void {
+  private closeTurnAssistantText(state: CodexSessionState, turnExecutionId: string | undefined): void {
     this.projectCodexAssistantBoundary(state.mapper, state.sessionId, (event) => {
       const runtimeEvent = providerRuntimeEvent(turnExecutionId ? { ...event, turnExecutionId } : event);
       this.emitRuntimeEvent(this.withCodexTurnAttempt(state, runtimeEvent, turnExecutionId));
     });
   }
 
-  private emitInterruptProviderLost(state: CodexSessionState, turnExecutionId: string | undefined): void {
+  private emitProviderLostEnd(state: CodexSessionState, turnExecutionId: string | undefined): void {
     if (!turnExecutionId) return;
     this.emitCodexTurnEvent(state, {
       type: AgentEventType.Ended,
@@ -2448,12 +2448,27 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   async close(state: CodexSessionState): Promise<void> {
     if (this.activeCodexServers.get(state.sessionId) === state.server) this.activeCodexServers.delete(state.sessionId);
     await this.host.mcode.close(state.sessionId);
-    const turnExecutionId = executionForDrain(state);
-    this.projectCodexAssistantBoundary(state.mapper, state.sessionId, (event) => {
-      const runtimeEvent = providerRuntimeEvent(turnExecutionId ? { ...event, turnExecutionId } : event);
-      this.emitRuntimeEvent(this.withCodexTurnAttempt(state, runtimeEvent, turnExecutionId));
-    });
     this.liveSessionIds.delete(state.sessionId);
+    this.drainPending((e) => e.sessionId === state.sessionId);
+    if (state.browserLeaseId) this.host.browser.release(state.browserLeaseId);
+    else if (state.browserCredential) this.host.browser.revokeCredential(state.browserCredential.credentialId);
+    const turnInFlight = this.isBusy(state);
+    try {
+      await state.server.kill();
+    } finally {
+      this.endTurnAfterOutput(state, turnInFlight);
+    }
+  }
+
+  /**
+   * Ends what the killed server's turn left open, once its output has been read to the end. A real
+   * `turn/completed` read during that drain has already ended the turn and closed its routing, so
+   * the synthetic end here is dropped and the real outcome stands.
+   */
+  private endTurnAfterOutput(state: CodexSessionState, turnInFlight: boolean): void {
+    const turnExecutionId = executionForDrain(state);
+    this.closeTurnAssistantText(state, turnExecutionId);
+    if (turnInFlight) this.emitProviderLostEnd(state, turnExecutionId);
     state.pendingTurnStartNotification = undefined;
     state.turnStartResponsePending = false;
     state.turnBindingPhase = "idle";
@@ -2463,10 +2478,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     state.nativeThreadExecutionIds.clear();
     state.pendingChildEvents = [];
     state.nativeExecutionConflictKeys.clear();
-    this.drainPending((e) => e.sessionId === state.sessionId);
-    if (state.browserLeaseId) this.host.browser.release(state.browserLeaseId);
-    else if (state.browserCredential) this.host.browser.revokeCredential(state.browserCredential.credentialId);
-    await state.server.kill();
   }
 
   /** A pooled session must be discarded before reuse if process, cwd, or sandbox changed. */
@@ -2923,6 +2934,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     // Approval cards must clear even if the native interrupt is slow or fails.
     this.drainPending((e) => e.sessionId === sessionId);
     if (state) {
+      // Stop ends the reply now, not when the interrupt settles: output after Stop is discarded.
+      this.closeTurnAssistantText(state, executionForDrain(state));
       state.cancelledTurnExecutionId = pending?.executionId ?? state.nextTurnExecutionId;
       const drain = this.awaitStopSettled(state);
       state.interruptDrain = drain;
