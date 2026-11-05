@@ -9,9 +9,13 @@ period. Active agent turns defer shutdown. Open terminals and idle provider
 sessions do not. Graceful shutdown closes those remaining resources. Supervised
 agent runtimes stay alive until their supervisor stops them.
 
-Shutdown closes terminal process scopes concurrently through the PTY host. The
-host has 25 seconds for graceful cleanup. The server watchdog allows 35 seconds
-for the full shutdown. The desktop waits 40 seconds before forced cleanup of its
+Shutdown stops agents first, within 7 seconds. Providers get 5 seconds to stop
+and report their own turn ends. Every turn still running is then saved
+Interrupted with the text already received, without waiting for its provider.
+Shutdown then closes terminal process scopes concurrently through the PTY host.
+The host has 25 seconds for graceful cleanup. The server watchdog allows 35
+seconds for the full shutdown, which leaves 3 seconds for provider teardown and
+the final saves. The deadlines are in `packages/shared/src/node/shutdown-deadlines.ts`. The desktop waits 40 seconds before forced cleanup of its
 owned server. Startup, heartbeat, and normal operation deadlines do not change.
 
 ## Shared lifecycle: SessionRuntime + ProtocolAdapter

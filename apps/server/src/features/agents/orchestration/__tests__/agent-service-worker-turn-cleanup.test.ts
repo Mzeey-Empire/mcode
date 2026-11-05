@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { container } from "tsyringe";
 import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import { AGENT_SHUTDOWN_DEADLINE_MS, AGENT_SHUTDOWN_GRACE_MS, PTY_HOST_SHUTDOWN_DEADLINE_MS, SERVER_SHUTDOWN_DEADLINE_MS } from "@mcode/shared/node/shutdown-deadlines";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { CodexChildEvidence } from "@mcode/contracts/events/provider-runtime-event";
@@ -16,6 +17,7 @@ import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-st
 import { ThreadControlMutationReservationService } from "../../../thread-control/index.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
+import { SubagentRosterService } from "../../collaboration/subagent-roster-service.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 import { TurnRuntimeController } from "../turn-runtime-controller.js";
 import { appendPreviewAnnotations, sendRecoveryAttempt } from "../../transport/turn-message-dispatch.js";
@@ -55,6 +57,25 @@ function captureTurnRelease(fixture: WorkerFixture) {
       await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
     }
   };
+}
+
+/**
+ * Runs stopAll on fake timers and reports whether it resolved before `boundMs` of fake time. A fake timer marks
+ * the bound, so the answer holds however far `vi.waitFor` moves the clock while the real worker saves.
+ * `hung` asserts that shutdown has reached the wait the test blocks.
+ */
+async function stopAllWithin(fixture: WorkerFixture, boundMs: number, hung: () => void): Promise<boolean> {
+  let boundPassed = false;
+  setTimeout(() => { boundPassed = true; }, boundMs + 1);
+  let resolvedInTime: boolean | undefined;
+  const stopping = fixture.service.stopAll().then(() => { resolvedInTime = !boundPassed; });
+  await vi.waitFor(hung);
+  // Nothing can settle during the grace period while that wait hangs, so skip to its end.
+  await vi.advanceTimersByTimeAsync(AGENT_SHUTDOWN_GRACE_MS);
+  await vi.waitFor(() => expect(resolvedInTime !== undefined || boundPassed).toBe(true), { timeout: 10_000 });
+  if (resolvedInTime === undefined) return false;
+  await stopping;
+  return resolvedInTime;
 }
 
 async function endTurn(fixture: WorkerFixture, event: Extract<AgentEvent, { type: "ended" }>) {
@@ -314,15 +335,12 @@ describe("AgentService cleanup through production worker composition", { timeout
       content: "partial answer before the app closed", tokens: null });
     fixture.provider.stopSession.mockImplementation(() => new Promise<void>(() => undefined));
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const stopping = fixture.service.stopAll();
     try {
-      // The shutdown deadline starts when the provider is asked to stop.
-      await vi.waitFor(() => expect(fixture.provider.stopSession).toHaveBeenCalled());
-      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await stopAllWithin(fixture, AGENT_SHUTDOWN_DEADLINE_MS,
+        () => expect(fixture.provider.stopSession).toHaveBeenCalled())).toBe(true);
     } finally {
       vi.useRealTimers();
     }
-    await stopping;
     // The provider's end arrives after shutdown gave up on it; the turn is already settled.
     await fixture.emit(turnComplete(fixture.thread.id, turn.turnExecutionId));
     await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
@@ -342,20 +360,20 @@ describe("AgentService cleanup through production worker composition", { timeout
           content: "finished answer", tokens: null })
           .then(() => fixture.emit(turnComplete(fixture.thread.id, turn.turnExecutionId)))
           .then(() => fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId }));
-      }, 10_000);
+      }, AGENT_SHUTDOWN_GRACE_MS / 2);
     }));
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const stopping = fixture.service.stopAll();
     try {
       // The shutdown deadline starts when the provider is asked to stop.
       await vi.waitFor(() => expect(fixture.provider.stopSession).toHaveBeenCalled());
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(AGENT_SHUTDOWN_GRACE_MS / 2);
       // Saving schedules its own timers, so the clock moves in small steps while the completion is saved.
       await vi.waitFor(async () => {
         await vi.advanceTimersByTimeAsync(1);
         expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed");
       }, { timeout: 5_000 });
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(AGENT_SHUTDOWN_DEADLINE_MS);
     } finally {
       vi.useRealTimers();
     }
@@ -363,6 +381,53 @@ describe("AgentService cleanup through production worker composition", { timeout
     await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed");
     expect(fixture.assistant()).toMatchObject({ content: "finished answer", outcome: "completed" });
+  });
+
+  it("saves a turn Interrupted with its text when its event route never fences during shutdown", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    await fixture.emit({ type: "message", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
+      content: "partial reply before the route hung", tokens: null });
+    let releaseFence!: () => void;
+    const fenceHeld = new Promise<void>((resolve) => { releaseFence = resolve; });
+    const fence = vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementation(() => fenceHeld);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      expect(await stopAllWithin(fixture, AGENT_SHUTDOWN_DEADLINE_MS, () => expect(fence).toHaveBeenCalled())).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      releaseFence();
+    }
+    await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
+      status: "Interrupted", ending: { outcome: "interrupted", cause: "app_closed" },
+    });
+    expect(fixture.assistant()).toMatchObject({ content: "partial reply before the route hung", outcome: "interrupted" });
+  });
+
+  it("finishes agent stop inside its share of the shutdown watchdog when every wait hangs", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    await fixture.emit({ type: "message", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId,
+      content: "partial reply before everything hung", tokens: null });
+    const hang = () => new Promise<void>(() => undefined);
+    const descendants = vi.spyOn(SubagentRosterService.prototype, "stopDescendants").mockImplementation(hang);
+    fixture.provider.stopSession.mockImplementation(hang);
+    const fence = vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementation(hang);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // The PTY host's whole deadline follows agent stop, so agent stop owns only what the watchdog leaves.
+      expect(await stopAllWithin(fixture, SERVER_SHUTDOWN_DEADLINE_MS - PTY_HOST_SHUTDOWN_DEADLINE_MS,
+        () => expect(descendants).toHaveBeenCalled())).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+    fence.mockRestore();
+    await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
+      status: "Interrupted", ending: { outcome: "interrupted", cause: "app_closed" },
+    });
+    expect(fixture.assistant()).toMatchObject({ content: "partial reply before everything hung", outcome: "interrupted" });
   });
 
   it("settles a turn a previous process left Running when the server starts again", async () => {

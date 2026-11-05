@@ -9,6 +9,7 @@ import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { diag } from "@mcode/shared/diagnostics";
+import { AGENT_SHUTDOWN_GRACE_MS, AGENT_SHUTDOWN_SAVE_MS } from "@mcode/shared/node/shutdown-deadlines";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { ProviderRuntimeEventSchema, isChildRoutedRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { isSessionEvictable, isTurnSteerCapable } from "@mcode/contracts/providers/interfaces";
@@ -81,8 +82,6 @@ import { TurnLifecycles, type WorkerOwnedTurn } from "./turn-lifecycle.js";
  * Bounded wait for `provider.stopSession` before the turn is force-finalized.
  * Sits above provider-internal cancel bounds (Devin waits 10s before killing
  * its ACP child) so a settled provider still reports graceful cancellation.
- * Shutdown cannot wait longer: the server watchdog (`SERVER_SHUTDOWN_DEADLINE_MS`, 35s) also has to cover
- * the terminal host's own 25s deadline and the final saves after this wait.
  */
 const PROVIDER_STOP_SETTLE_TIMEOUT_MS = 15_000;
 
@@ -1220,6 +1219,16 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     frozen: NonNullable<ReturnType<ExecutionFileEvidenceCoordinator["seal"]>>,
     terminal: { outcome: "cancelled" | "interrupted"; ending: TurnEndingCause },
   ): Promise<void> {
+    if (!await this.commitWorkerTerminal(active, frozen, terminal)) throw new Error("Worker terminal did not commit");
+    await this.releaseWorkerTurn(active);
+  }
+
+  /** Returns false when the writer refused the terminal, as it does once the execution already has one. */
+  private async commitWorkerTerminal(
+    active: WorkerOwnedTurn,
+    frozen: NonNullable<ReturnType<ExecutionFileEvidenceCoordinator["seal"]>>,
+    terminal: { outcome: "cancelled" | "interrupted"; ending: TurnEndingCause },
+  ): Promise<boolean> {
     const result = await this.requireWorkerRuntime().owner.submit(active.execution, {
       kind: "finish-from-state", outcome: terminal.outcome, frozenFileEvidence: frozen,
       input: { ...active.execution, providerId: active.prepared.providerId,
@@ -1227,13 +1236,13 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         ...terminal, deliveryAttempt: active.deliveryAttempt,
         projection: { kind: "writer-staged" } },
     });
-    if (result.kind !== "committed" && result.kind !== "accepted") throw new Error("Worker terminal did not commit");
+    if (result.kind !== "committed" && result.kind !== "accepted") return false;
     this.publishWorkerPersistence(active, result);
     active.terminalCommitted = true;
     active.terminalOutcome = terminal.outcome;
     this.turnRuntime.terminalize(active.execution.threadId, active.execution.executionId, terminal.outcome);
     active.stopInProgress = false;
-    await this.releaseWorkerTurn(active);
+    return true;
   }
 
   private cancelledWorkerStop(prepared: PreparedStop): AgentStopResult {
@@ -1874,36 +1883,86 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await this.finishLostWorkerStream(active);
   }
 
-  private async waitForStoppingWorker(active: WorkerOwnedTurn): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
+  /** Lets descendants and the provider stop and report a real end, then drains the turn's route. */
+  private async stopGracefully(threadId: string, active: WorkerOwnedTurn | undefined): Promise<void> {
+    await this.featureEffects.stopDescendants(threadId);
+    const providerId = this.activeProviderId(threadId);
+    if (!providerId) return;
     try {
-      const timedOut = await Promise.race([
-        this.drainStoppingWorker(active).then(() => false),
-        new Promise<true>((resolve) => { timer = setTimeout(() => resolve(true), PROVIDER_STOP_SETTLE_TIMEOUT_MS); }),
-      ]);
-      if (timedOut) logger.warn("Worker-owned shutdown drain did not settle", {
-        threadId: active.execution.threadId, timeoutMs: PROVIDER_STOP_SETTLE_TIMEOUT_MS,
-      });
+      const provider = this.providerRegistry.resolve(providerId);
+      await Promise.resolve(provider.stopSession(`mcode-${threadId}`)).catch(() => {});
+    } catch {
+      // best-effort
+    }
+    if (active) await this.drainStoppingWorker(active);
+  }
+
+  private async saveShutdownInterruptionInTime(active: WorkerOwnedTurn): Promise<void> {
+    const { threadId } = active.execution;
+    logger.warn("Worker-owned shutdown drain did not settle", { threadId, timeoutMs: AGENT_SHUTDOWN_GRACE_MS });
+    const window = shutdownTimer(AGENT_SHUTDOWN_SAVE_MS);
+    try {
+      const saved = await Promise.race([this.saveShutdownInterruption(active).then(() => true), window.elapsed.then(() => false)]);
+      if (!saved) logger.error("Shutdown left a turn Running; the next start settles it", { threadId,
+        timeoutMs: AGENT_SHUTDOWN_SAVE_MS });
     } catch (error) {
-      logger.error("Worker-owned terminal release failed", { threadId: active.execution.threadId,
+      logger.error("Shutdown interruption was not saved", { threadId,
         error: error instanceof Error ? error.message : String(error) });
     } finally {
-      clearTimeout(timer);
+      window.clear();
     }
   }
 
-  /** Stop all active agent sessions (for graceful shutdown). */
+  /**
+   * Saves a turn without a provider end as Interrupted, keeping its accepted output. It does not wait for the
+   * provider fence to drain, which may never happen; the execution writer accepts one terminal, so a real end
+   * saved first wins.
+   */
+  private async saveShutdownInterruption(active: WorkerOwnedTurn): Promise<void> {
+    const { execution, deliveryAttempt, provider } = active;
+    if (active.terminalCommitted || this.lifecycles.workerFor(execution) !== active) return;
+    // The fence closes admission at once, so no later provider event can follow the save; only its drain of
+    // deliveries already in flight can hang.
+    void this.fenceWorkerProvider(provider, execution, deliveryAttempt, true).catch((error: unknown) => {
+      logger.warn("Worker-owned shutdown fence failed", { threadId: execution.threadId,
+        error: error instanceof Error ? error.message : String(error) });
+    });
+    this.requireWorkerFiles().fence(execution.threadId, execution.executionId, deliveryAttempt);
+    const frozen = this.requireWorkerFiles().seal({ ...execution, deliveryAttempt, outcome: "interrupted" });
+    if (!frozen) throw new Error("Shutdown interruption lost its file evidence generation");
+    const committed = await this.commitWorkerTerminal(active, frozen,
+      { outcome: "interrupted", ending: this.providerInterruptionEnding() });
+    if (!committed) {
+      if (active.terminalCommitted) return;
+      throw new Error("Shutdown interruption did not commit");
+    }
+    // Release fences the provider again, so it must not hold shutdown once the turn is saved.
+    void this.releaseWorkerTurn(active).catch((error: unknown) => {
+      logger.warn("Worker-owned release after shutdown interruption failed", { threadId: execution.threadId,
+        error: error instanceof Error ? error.message : String(error) });
+    });
+  }
+
+  /**
+   * Stop all active agent sessions (for graceful shutdown). Every turn shares one grace period, then one
+   * save window, so the whole stop fits `AGENT_SHUTDOWN_DEADLINE_MS` however long a provider hangs.
+   */
   async stopAll(): Promise<void> {
     this.shuttingDown = true;
     const ids = [...this.activeSessionIds];
-    await Promise.all(
-      ids.map((threadId) => diag.run(
-        "agent.stop",
-        { th: threadId },
-        () => this.stopForShutdown(threadId),
-        () => ({ by: "shutdown", provider: this.activeProviderId(threadId) }),
-      )),
-    );
+    const grace = shutdownTimer(AGENT_SHUTDOWN_GRACE_MS);
+    try {
+      await Promise.all(
+        ids.map((threadId) => diag.run(
+          "agent.stop",
+          { th: threadId },
+          () => this.stopForShutdown(threadId, grace.elapsed),
+          () => ({ by: "shutdown", provider: this.activeProviderId(threadId) }),
+        )),
+      );
+    } finally {
+      grace.clear();
+    }
     this.activeSessionIds.clear();
     for (const [threadId, token] of this.activeMutationReservations) {
       this.mutationReservations.release(threadId, token);
@@ -1911,23 +1970,18 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.activeMutationReservations.clear();
   }
 
-  private async stopForShutdown(threadId: string): Promise<void> {
+  private async stopForShutdown(threadId: string, graceElapsed: Promise<void>): Promise<void> {
     const active = this.lifecycles.worker(threadId);
-    await this.featureEffects.stopDescendants(threadId);
-    const sessionId = `mcode-${threadId}`;
-    const providerId = this.activeProviderId(threadId);
-    if (!providerId) return;
-    try {
-      const provider = this.providerRegistry.resolve(providerId);
-      await Promise.race([
-        Promise.resolve(provider.stopSession(sessionId)).catch(() => {}),
-        new Promise<void>((resolve) => setTimeout(resolve, PROVIDER_STOP_SETTLE_TIMEOUT_MS)),
-      ]);
-    } catch {
-      // best-effort
-    }
+    const stopped = await Promise.race([
+      this.stopGracefully(threadId, active).then(() => true, (error: unknown) => {
+        logger.error("Worker-owned shutdown stop failed", { threadId,
+          error: error instanceof Error ? error.message : String(error) });
+        return true;
+      }),
+      graceElapsed.then(() => false),
+    ]);
     if (active) {
-      await this.waitForStoppingWorker(active);
+      if (!stopped) await this.saveShutdownInterruptionInTime(active);
       diag.emit("agent.stopped", { th: threadId }, () => ({
         execution: active.execution.executionId,
         turn: active.execution.turnId,
@@ -2002,4 +2056,11 @@ function isRetiredWorkerDelivery(error: Error): boolean {
 
 function isCopilotBoundary(provider: IAgentProvider): provider is CopilotProviderBoundary {
   return provider.id === "copilot" && "setCanonicalTurnDeliveryFailureHandler" in provider && typeof provider.setCanonicalTurnDeliveryFailureHandler === "function";
+}
+
+/** A timer to race against shutdown work; `clear` it once the race is decided so it cannot hold the process. */
+function shutdownTimer(ms: number): { readonly elapsed: Promise<void>; clear(): void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const elapsed = new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); });
+  return { elapsed, clear: () => clearTimeout(timer) };
 }
