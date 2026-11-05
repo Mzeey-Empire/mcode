@@ -89,6 +89,8 @@ function recordedStream(): Envelope[] {
     envelope(14, turnRouting, { type: "turn.completed", endedAt: LATER }),
     envelope(15, turnRouting, { type: "turn.errored", endedAt: LATER, error: "late failure" }),
     envelope(16, turnRouting, { type: "ingest.volatile-truncated", droppedEventCount: 1 }),
+    // Canonical IDs are free text, so a record keyed `__proto__` must become an own key, not the map's prototype.
+    itemRecorded(17, "__proto__", { projection: "diagnostic" }),
   ];
 }
 
@@ -162,7 +164,10 @@ describe("owned agent event reduction", () => {
         .toEqual([expected.appliedCount, expected.duplicateCount, expected.ignoredTerminalCount]);
       expect(owned).toStrictEqual(pure);
     }
-    expect(counts).toEqual({ applied: 15, duplicate: 1, ignoredTerminal: 1 });
+    expect(counts).toEqual({ applied: 16, duplicate: 1, ignoredTerminal: 1 });
+    expect(Object.hasOwn(owned.items, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(owned.items)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(pure.items)).toBe(Object.prototype);
     expect(owned.items[textItemId]?.payload.content).toBe("Hello");
     expect(owned.items["toolCall:tool-1"]?.payload.projection).toBe("toolCall");
   });

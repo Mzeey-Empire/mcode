@@ -584,7 +584,7 @@ class OwnedWriteJournal {
       const map = this.maps[write.map];
       const had = Object.hasOwn(map, write.key);
       this.entries.push({ map, key: write.key, had, prev: had ? map[write.key] : undefined });
-      map[write.key] = write.value;
+      defineOwnKey(map, write.key, write.value);
     }
   }
 
@@ -594,7 +594,7 @@ class OwnedWriteJournal {
     for (let index = this.entries.length - 1; index >= 0; index -= 1) {
       const entry = this.entries[index];
       if (!entry) continue;
-      if (entry.had) entry.map[entry.key] = entry.prev;
+      if (entry.had) defineOwnKey(entry.map, entry.key, entry.prev);
       else delete entry.map[entry.key];
     }
     this.entries.length = 0;
@@ -617,9 +617,17 @@ function writeImmutably(state: AgentModelState, writes: readonly AgentModelWrite
       maps[write.map] = { ...maps[write.map] };
       copied.add(write.map);
     }
-    maps[write.map][write.key] = write.value;
+    defineOwnKey(maps[write.map], write.key, write.value);
   }
   return next;
+}
+
+/**
+ * Set a record as an own key. IDs are free text, and plain assignment of `__proto__` would replace the map's
+ * prototype instead, unlike the `{ ...map, [id]: record }` literal this reducer used to build.
+ */
+function defineOwnKey(map: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(map, key, { value, writable: true, enumerable: true, configurable: true });
 }
 
 function updateTurnLifecycle(
