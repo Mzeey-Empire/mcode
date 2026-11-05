@@ -9,7 +9,8 @@ import { ProviderRuntimeExtensionSchema, type ProviderRuntimeExtension } from "@
 import { MessageSchema } from "@mcode/contracts/models/message";
 import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { encodeCanonicalSubagentDetailTarget } from "@mcode/contracts/models/tool-call-record";
-import { type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState } from "@mcode/contracts/compat/agent-model";
+import { BoundedProgressRetention } from "../../execution/progress-retention-budget.js";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
@@ -1395,6 +1396,66 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(saved.savedThrough).toBe(failed.acceptedThrough);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE envelope_json LIKE '%progressPosition%'").get())
       .toEqual({ count: failed.retained.length });
+  });
+
+  it("leaves accepted state and recovery unchanged when retention rejects an admission after it validated", async () => {
+    await send(1, start("codex"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: "Kept", isFinalResponse: true })] });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const finish: ExecutionSemanticOperation = { operationId: "live-lease:3", execution, lease, ordinal: 3,
+      livePublication: [{ after: "terminal", event: { type: "turnComplete", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, reason: "completed", costUsd: 0, tokensIn: 0, tokensOut: 0 } }],
+      mutation: { kind: "finish-live-event", outcome: "completed", projection: { ...execution, outcome: "completed", endedAt: NOW,
+        assistant: { content: "Answer", model: "fixture", attachments: [] }, narrative: [completedTool(0)] },
+        input: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } } };
+    const before = recovery();
+    vi.spyOn(BoundedProgressRetention.prototype, "reserve").mockReturnValueOnce(undefined);
+
+    expect(() => progress.accept(finish)).toThrow(expect.objectContaining({ admissionReason: "retention-exhausted" }));
+
+    expect(recovery()).toEqual(before);
+    // A finish that leaked into accepted state would make the turn terminal and this a conflict.
+    expect(progress.interruptWorkerLoss({ execution, lease, reason: "worker unavailable", recoveryIncidentId: "loss" }).kind)
+      .toBe("accepted");
+  });
+
+  it("recovers the durable state its saved events reduce to, isolated from the object recover returns", async () => {
+    const durableState = () => {
+      const durable = recovery().durable;
+      if (durable.mode !== "snapshot") throw new Error("Expected a durable snapshot");
+      return durable.snapshot.state;
+    };
+    const savedEvents = (from: number) => pushes.frames.slice(from).map((frame) => CanonicalAgentProgressFrameSchema().parse(frame))
+      .flatMap((frame) => frame.phase === "saved" && frame.threadId === execution.threadId ? [frame.events] : []);
+    const reduceSaved = (base: AgentModelState, batches: readonly (readonly AcceptedCanonicalAgentEventEnvelope[])[]) =>
+      batches.reduce((state, events) => {
+        const reduction = reduceAgentEventBatch(state, events);
+        if (reduction.outcome !== "applied") throw new Error(`Saved events rejected at ${reduction.eventId}`);
+        return { ...reduction.state, appliedEventIds: {}, acceptedInputEventIds: {} };
+      }, base);
+    const stream = async (ordinal: number, sequence: number) => {
+      await send(ordinal, { kind: "event", phase: "running", nativeCursor: null, events: [
+        draft("codex", sequence, "toolUse", { toolCallId: `tool-${sequence}`, toolName: "Read", toolInput: { file_path: "file.txt" } })] });
+      await send(ordinal + 1, { kind: "event", phase: "running", nativeCursor: null, events: [
+        draft("codex", sequence + 1, "textDelta", { delta: `text ${sequence}`, isFinalResponse: true })] });
+      await expect.poll(() => progress.depth().pending).toBe(0);
+    };
+    await send(1, start("codex"));
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const base = structuredClone(durableState());
+    const savedFrom = pushes.frames.length;
+
+    await stream(2, 1);
+    expect(durableState()).toEqual(reduceSaved(base, savedEvents(savedFrom)));
+
+    const handedOut = durableState();
+    handedOut.items = {};
+    for (const turnId of Object.keys(handedOut.turns)) delete handedOut.turns[turnId];
+    await stream(4, 3);
+
+    expect(durableState()).toEqual(reduceSaved(base, savedEvents(savedFrom)));
+    expect(Object.keys(durableState().items)).not.toHaveLength(0);
   });
 
   it("does not allocate live owners for completed history or report loss after same-runtime saved rehydration", async () => {
