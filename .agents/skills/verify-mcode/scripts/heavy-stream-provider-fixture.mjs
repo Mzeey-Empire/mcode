@@ -81,7 +81,8 @@ function completeSegment(base, send, active) {
   send("item/completed", { ...base, item });
 }
 
-function isToolIndex(index, total, rate) {
+/** Selects periodic tools and the single midpoint output without double emission. */
+export function isToolIndex(index, total, rate) {
   return index % (rate * 5) === 0 || index === Math.floor(total / 2);
 }
 
@@ -93,21 +94,26 @@ function emitTool(base, send, index, large) {
   send("item/completed", { ...base, item: { ...item, status: "completed", aggregatedOutput: output, exitCode: 0, durationMs: 1 } });
 }
 
-if (parseFixtureArguments(process.argv.slice(2)).command === "version") {
-  process.stdout.write("codex 99.0.0\n");
-} else {
-  const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
-  const reply = (id, result) => send({ jsonrpc: "2.0", id, result });
-  const notify = (method, params) => send({ jsonrpc: "2.0", method, params });
-  NodeReadline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
-    const request = JSON.parse(line);
-    if (request.id === undefined) return;
-    if (request.method === "thread/start" || request.method === "thread/resume") {
-      reply(request.id, { thread: { id: request.params?.threadId ?? NodeCrypto.randomUUID() } });
-    } else if (request.method === "turn/start") {
-      const turnId = NodeCrypto.randomUUID();
-      reply(request.id, { turn: { id: turnId } });
-      void emitTurn(request, notify, turnId).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
-    } else reply(request.id, {});
-  });
+function main() {
+  if (parseFixtureArguments(process.argv.slice(2)).command === "version") {
+    process.stdout.write("codex 99.0.0\n");
+  } else {
+    const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
+    const reply = (id, result) => send({ jsonrpc: "2.0", id, result });
+    const notify = (method, params) => send({ jsonrpc: "2.0", method, params });
+    NodeReadline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
+      const request = JSON.parse(line);
+      if (request.id === undefined) return;
+      if (request.method === "thread/start" || request.method === "thread/resume") {
+        reply(request.id, { thread: { id: request.params?.threadId ?? NodeCrypto.randomUUID() } });
+      } else if (request.method === "turn/start") {
+        const turnId = NodeCrypto.randomUUID();
+        reply(request.id, { turn: { id: turnId } });
+        void emitTurn(request, notify, turnId).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
+      } else reply(request.id, {});
+    });
+  }
 }
+
+if (process.argv[1] && NodePath.resolve(process.argv[1]) === NodePath.resolve(NodeURL.fileURLToPath(import.meta.url))) main();
+

@@ -214,7 +214,8 @@ function recordOutcome(receipt, state) {
   receipt.error ??= state.error?.message ?? state.error?.error ?? null;
 }
 
-function streamedDeltaCount(emitted) {
+/** Counts text and reasoning pieces independently of lifecycle and tool notifications. */
+export function streamedDeltaCount(emitted) {
   if (!emitted) return 0;
   return (emitted.counts["item/agentMessage/delta"] ?? 0) + (emitted.counts["item/reasoning/summaryTextDelta"] ?? 0);
 }
@@ -258,7 +259,8 @@ async function finishMeasurements(sampler, diagnostics, directory, receipt) {
   if (receipt.saveFailures.length) receipt.error = receipt.saveFailures.at(-1).d.error;
 }
 
-function isMeasurementRecord(record, threadId) {
+/** Keeps thread-local save evidence and worktree process stalls within the receipt. */
+export function isMeasurementRecord(record, threadId) {
   return record.ch === "app.stall" || (record.th === threadId && ["push.canonical", "progress.save-failed"].includes(record.ch));
 }
 

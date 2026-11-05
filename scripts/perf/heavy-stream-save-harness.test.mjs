@@ -1,6 +1,26 @@
 import * as NodeAssertStrict from "node:assert/strict";
 import * as NodeTest from "node:test";
-import { parseHeavyArguments, summarizeRows, summarizeSaves, auditLargeOutput } from "./heavy-stream-save-harness.mjs";
+import { parseHeavyArguments, summarizeRows, summarizeSaves, auditLargeOutput, streamedDeltaCount, isMeasurementRecord } from "./heavy-stream-save-harness.mjs";
+import { isToolIndex } from "../../.agents/skills/verify-mcode/scripts/heavy-stream-provider-fixture.mjs";
+
+NodeTest.test("tool scheduling includes an unaligned midpoint without duplicating aligned tools", () => {
+  NodeAssertStrict.deepEqual(Array.from({ length: 18 }, (_, index) => index).filter((index) => isToolIndex(index, 18, 2)), [0, 9, 10]);
+  NodeAssertStrict.deepEqual(Array.from({ length: 20 }, (_, index) => index).filter((index) => isToolIndex(index, 20, 2)), [0, 10]);
+});
+
+NodeTest.test("delta totals exclude tool output and lifecycle notifications", () => {
+  NodeAssertStrict.equal(streamedDeltaCount({ counts: { "item/agentMessage/delta": 7, "item/reasoning/summaryTextDelta": 3, "item/commandExecution/outputDelta": 100, "item/started": 2 } }), 10);
+  NodeAssertStrict.equal(streamedDeltaCount({ counts: { "item/agentMessage/delta": 4 } }), 4);
+  NodeAssertStrict.equal(streamedDeltaCount(null), 0);
+});
+
+NodeTest.test("record selection excludes other threads and unrelated channels", () => {
+  NodeAssertStrict.equal(isMeasurementRecord({ th: "mine", ch: "push.canonical" }, "mine"), true);
+  NodeAssertStrict.equal(isMeasurementRecord({ th: "mine", ch: "progress.save-failed" }, "mine"), true);
+  NodeAssertStrict.equal(isMeasurementRecord({ ch: "app.stall" }, "mine"), true);
+  NodeAssertStrict.equal(isMeasurementRecord({ th: "other", ch: "push.canonical" }, "mine"), false);
+  NodeAssertStrict.equal(isMeasurementRecord({ th: "mine", ch: "rpc.request" }, "mine"), false);
+});
 
 NodeTest.test("workload options retain defaults and reject invalid or repeated inputs", () => {
   NodeAssertStrict.deepEqual(parseHeavyArguments([]), { duration: 120, rate: 36, grow: 0 });
