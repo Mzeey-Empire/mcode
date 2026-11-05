@@ -37,6 +37,9 @@ class NativeProcess extends NodeEvents.EventEmitter {
   steerError: string | undefined;
   /** When set, `turn/interrupt` gets this reply in place of a response and an interrupted completion. */
   interruptReply: ((request: RpcRequest) => void) | undefined;
+  /** When true, `turn/start` waits for {@link answerHeldTurnStart} or {@link failHeldTurnStart}. */
+  holdTurnStart = false;
+  private heldTurnStart: RpcRequest | undefined;
   private buffer = "";
   private turnCount = 0;
 
@@ -58,19 +61,45 @@ class NativeProcess extends NodeEvents.EventEmitter {
     } }) + "\n");
   }
 
+  answerHeldTurnStart(): void {
+    const held = this.takeHeldTurnStart();
+    this.stdout.write(JSON.stringify({ id: held.id, result: this.resultFor(held) }) + "\n");
+  }
+
+  failHeldTurnStart(message: string): void {
+    const held = this.takeHeldTurnStart();
+    this.stdout.write(JSON.stringify({ id: held.id, error: { code: -32600, message } }) + "\n");
+  }
+
+  private takeHeldTurnStart(): RpcRequest {
+    const held = this.heldTurnStart;
+    if (!held) throw new Error("No turn/start is held");
+    this.heldTurnStart = undefined;
+    return held;
+  }
+
   private respond(request: RpcRequest): void {
     this.requests.push(request);
-    if (request.id === undefined) return;
+    if (request.id === undefined || this.answerAsScripted(request)) return;
+    this.stdout.write(JSON.stringify({ id: request.id, result: this.resultFor(request) }) + "\n");
+    if (request.method === "turn/interrupt" && request.params?.turnId) this.complete(request.params.turnId, "interrupted");
+  }
+
+  /** Answers a request the test scripted, returning false when the default answer applies. */
+  private answerAsScripted(request: RpcRequest): boolean {
+    if (request.method === "turn/start" && this.holdTurnStart) {
+      this.heldTurnStart = request;
+      return true;
+    }
     if (request.method === "turn/interrupt" && this.interruptReply) {
       this.interruptReply(request);
-      return;
+      return true;
     }
     if (request.method === "turn/steer" && this.steerError) {
       this.stdout.write(JSON.stringify({ id: request.id, error: { code: -32600, message: this.steerError } }) + "\n");
-      return;
+      return true;
     }
-    this.stdout.write(JSON.stringify({ id: request.id, result: this.resultFor(request) }) + "\n");
-    if (request.method === "turn/interrupt" && request.params?.turnId) this.complete(request.params.turnId, "interrupted");
+    return false;
   }
 
   private resultFor(request: RpcRequest): object {
@@ -111,6 +140,11 @@ function turnTexts(events: ProviderRuntimeEvent[]): string[] {
 
 function turnEnds(events: ProviderRuntimeEvent[]) {
   return turnEventsOf(events).filter((event) => event.type === AgentEventType.Ended);
+}
+
+/** Lets pending stream and RPC callbacks run, so teardown reaches its interrupt. */
+function settleIo(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function createProvider(eventSink?: ProviderEventSinkPort) {
@@ -476,6 +510,95 @@ describe("Codex provider lifecycle through native transport", () => {
       { type: AgentEventType.Ended, reason: "provider_lost" },
     ]);
     expect(turnEnds(events)).toHaveLength(1);
+  });
+
+  it("interrupts a turn stopped before turn/start answers once the answer binds it, and saves its output and real end", async () => {
+    const { provider, child, starts, events } = createProvider();
+    child.holdTurnStart = true;
+    child.kill.mockImplementation(() => true);
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    child.interruptReply = (interrupt) => {
+      const output = interrupt.params?.turnId === "native-turn-1" ? answerLine("late ") + completionLine("interrupted") : "";
+      child.stdout.write(output + JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
+    };
+
+    const shutdown = provider.shutdown();
+    await settleIo();
+    child.answerHeldTurnStart();
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalled());
+    child.emit("exit", 0, null);
+    await shutdown;
+
+    expect(child.requests.some(({ method, params }) => method === "turn/interrupt" && params?.turnId === "native-turn-1")).toBe(true);
+    expect(turnTexts(events)).toEqual(["late "]);
+    expect(turnEnds(events)).toEqual([{
+      type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "cancelled",
+    }]);
+  });
+
+  it("interrupts the bound turn when a user Stop arrives before turn/start answers", async () => {
+    const { provider, child, starts, events } = createProvider();
+    child.holdTurnStart = true;
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+
+    const stop = provider.stopSession(request.sessionId);
+    await settleIo();
+    child.answerHeldTurnStart();
+    await stop;
+
+    expect(child.requests.some(({ method, params }) => method === "turn/interrupt" && params?.turnId === "native-turn-1")).toBe(true);
+    expect(turnEnds(events)).toEqual([{
+      type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "cancelled",
+    }]);
+    expect(child.kill).not.toHaveBeenCalled();
+    await provider.shutdown();
+  });
+
+  it("ends a turn stopped before turn/start answers once when turn/start then fails", async () => {
+    const { provider, child, starts, events } = createProvider();
+    child.holdTurnStart = true;
+    child.kill.mockImplementation(() => true);
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+
+    const shutdown = provider.shutdown();
+    await settleIo();
+    child.failHeldTurnStart("turn rejected");
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalled());
+    child.emit("exit", 0, null);
+    await shutdown;
+
+    expect(turnEnds(events)).toMatchObject([{ type: AgentEventType.Ended, outcome: "errored" }]);
+  });
+
+  it("ends a turn stopped before turn/start answers once as provider_lost when the server closes first, keeping its output", async () => {
+    const { provider, child, starts, events } = createProvider();
+    child.holdTurnStart = true;
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    // Codex can stream a turn before it answers turn/start.
+    child.stdout.write(answerLine("early "));
+    await vi.waitFor(() => expect(turnTexts(events)).toEqual(["early "]));
+    child.kill.mockImplementationOnce(() => {
+      child.stdout.write(answerLine("late "));
+      setImmediate(() => child.emit("exit", 0, null));
+      return true;
+    });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const shutdown = provider.shutdown();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await shutdown;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(child.requests.some(({ method, params }) => method === "turn/interrupt" && params?.turnId)).toBe(false);
+    expect(turnTexts(events)).toEqual(["early ", "late "]);
+    expect(turnEnds(events)).toMatchObject([{ type: AgentEventType.Ended, reason: "provider_lost" }]);
   });
 
   it("settles a user Stop without its timeouts while saving is behind, and publishes nothing past the fence", async () => {
