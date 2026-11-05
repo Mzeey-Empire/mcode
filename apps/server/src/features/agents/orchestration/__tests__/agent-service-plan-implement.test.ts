@@ -89,6 +89,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
   let threadId: string;
   let ready: PlanVersion;
   let sent: TurnRequest[];
+  let dispatched: ReturnType<typeof deferred>;
   let atDispatch: Array<{ text: string; status: string | undefined }>;
   const oldDbPath = process.env.MCODE_DB_PATH;
   const oldDataDir = process.env.MCODE_DATA_DIR;
@@ -118,6 +119,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
       sendTurn: async (request: TurnRequest) => {
         sent.push(request);
         atDispatch.push({ text: NodeFS.readFileSync(files.path(threadId), "utf8"), status: plans.getById(ready.id)?.status });
+        dispatched.resolve();
       },
       stopSession: async () => undefined, shutdown: () => undefined, listModels: testModelCatalog.listModels,
       setCanonicalTurnDeliveryFailureHandler: () => undefined,
@@ -151,6 +153,7 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
 
   beforeEach(async () => {
     sent = [];
+    dispatched = deferred();
     atDispatch = [];
     provider.prepareImplement = undefined;
     Object.assign(provider, { fenceCanonicalTurnEvents: async () => undefined });
@@ -742,11 +745,13 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
       baseRevision: 0, contentMd: "# Edited\nDraft text." });
   }
 
-  // Implement answers on admission. Stopping the session before the worker
-  // hands the turn to the provider races its release, so tests that end
-  // right after admission wait for dispatch first.
+  // Implement answers on admission, and the worker hands the turn to the provider
+  // later, after a Git baseline capture that can take seconds on a loaded runner.
+  // Wait for the provider to receive it rather than for a clock, then require
+  // that it arrived exactly once.
   async function untilDispatched() {
-    await expect.poll(() => sent).toHaveLength(1);
+    await dispatched.promise;
+    expect(sent).toHaveLength(1);
   }
 
   function pauseFiles() {
@@ -768,7 +773,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(await new PlanService(writer, workers.progress, files, runtime).implement(input)).toEqual(first);
     expect(turns()).toEqual([{ status: "Running" }]);
     expect(userMessages()).toEqual([{ id: first.messageId, content: "Implement plan v1" }]);
-    await expect.poll(() => sent.map(turn => turn.message)).toEqual([
+    await untilDispatched();
+    expect(sent.map(turn => turn.message)).toEqual([
       `Implement plan v1: "Original".\n\nThis is the plan the user approved. It supersedes any earlier plan or plan file, including your own. Mcode keeps this text at ${files.path(threadId)}.\n\n# Original\nExact plan text.`,
     ]);
     expect(atDispatch).toEqual([{ text: "# Original\nExact plan text.", status: "accepted" }]);
@@ -792,7 +798,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     expect(new PlanImplementStore(database).read(stale.requestId)).toBeNull();
     assertUnaccepted();
     await service.implement(request(newer));
-    await expect.poll(() => sent.map(turn => turn.message.endsWith("\n\n# Window B\nRevision five."))).toEqual([true]);
+    await untilDispatched();
+    expect(sent.map(turn => turn.message.endsWith("\n\n# Window B\nRevision five."))).toEqual([true]);
     expect(NodeFS.readFileSync(files.path(threadId), "utf8")).toBe("# Window B\nRevision five.");
   });
 
@@ -812,7 +819,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
       pending: { versionId, baseVersionId: ready.id, baseRevision: 0, contentMd: "# Unsaved\nLast keystroke." } });
     expect((await service.snapshot({ threadId })).versions.map(v => [v.status, v.revision, v.acceptedMessageId]))
       .toEqual([["superseded", 0, null], ["accepted", 1, receipt.messageId]]);
-    await expect.poll(() => sent.map(turn => turn.message.endsWith("\n\n# Unsaved\nLast keystroke."))).toEqual([true]);
+    await untilDispatched();
+    expect(sent.map(turn => turn.message.endsWith("\n\n# Unsaved\nLast keystroke."))).toEqual([true]);
   });
 
   it("passes the newest agent file proof with draft text and durably returns the adapter outcome", async () => {
@@ -871,7 +879,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     const receipt = await service.implement(request());
     expect((await service.snapshot({ threadId })).versions.map(v => [v.status, v.acceptedMessageId]))
       .toEqual([["accepted", receipt.messageId], ["superseded", null]]);
-    await expect.poll(() => atDispatch).toEqual([{ text: "# Original\nExact plan text.", status: "accepted" }]);
+    await untilDispatched();
+    expect(atDispatch).toEqual([{ text: "# Original\nExact plan text.", status: "accepted" }]);
     expect(NodeFS.readFileSync(files.path(threadId), "utf8")).toBe("# Original\nExact plan text.");
   });
 
@@ -901,7 +910,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
   it("implements at the thread's reasoning level", async () => {
     await runtime.threads.updateSettings(threadId, { reasoning_level: "xhigh" });
     await service.implement(request());
-    await expect.poll(() => sent.map(turn => turn.reasoningLevel)).toEqual(["xhigh"]);
+    await untilDispatched();
+    expect(sent.map(turn => turn.reasoningLevel)).toEqual(["xhigh"]);
   });
 
   it("rolls back pending edits when a fault occurs before the request row", async () => {
@@ -957,23 +967,36 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
 
   it("keeps Accepted after provider dispatch fails and never lets late compensation overwrite admission", async () => {
     const send = vi.spyOn(provider, "sendTurn").mockRejectedValueOnce(new Error("Injected provider dispatch failure"));
+    // The runtime retires the provider's event route only after the errored terminal commits.
+    // Waiting for that, not for the row, also keeps afterEach's Stop from landing while the
+    // failure is still finishing, which Stop rejects with invalid-transition.
+    const retired = deferred();
+    const retire = vi.spyOn(provider, "retireCanonicalTurnEvents").mockImplementationOnce(async () => retired.resolve());
     const input = request();
     const receipt = await service.implement(input);
     expect(receipt.state).toBe("admitted");
-    await expect.poll(() => turns()).toEqual([{ status: "Errored" }]);
+    await retired.promise;
+    await workers.progress?.waitForTerminalSaves(threadId);
+    expect(turns()).toEqual([{ status: "Errored" }]);
     expect(plans.getById(ready.id)?.status).toBe("accepted");
     expect(userMessages()).toEqual([{ id: receipt.messageId, content: "Implement plan v1" }]);
     await writer.execute(planImplementWriteOperations.fail, { requestId: input.requestId, code: "interrupted" });
     expect(await service.implement(input)).toEqual(receipt);
     send.mockRestore();
+    retire.mockRestore();
   });
 
   it("answers on admission while the provider is still starting the turn", async () => {
     const providerStarting = deferred();
-    const send = vi.spyOn(provider, "sendTurn").mockImplementationOnce(() => providerStarting.promise);
+    const received = deferred();
+    const send = vi.spyOn(provider, "sendTurn").mockImplementationOnce(() => {
+      received.resolve();
+      return providerStarting.promise;
+    });
     const receipt = await service.implement(request());
     expect(receipt.state).toBe("admitted");
-    await expect.poll(() => send.mock.calls.length).toBe(1);
+    await received.promise;
+    expect(send).toHaveBeenCalledTimes(1);
     providerStarting.resolve();
     send.mockRestore();
   });
