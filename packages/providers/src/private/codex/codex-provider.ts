@@ -1416,7 +1416,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async dispatchReusedCodexTurn(turn: PreparedCodexTurn, state: CodexSessionState): Promise<void> {
     const sessionId = turn.request.sessionId;
     if (this.consumePendingCodexStop(turn)) { this.releasePendingCodexRequest(sessionId, turn.signal); return; }
-    const drain = state.interruptDrain;
+    const drain = this.codexReuseDrain(state);
     if (drain) {
       const settled = await Promise.race([
         drain.then((value) => value, () => false),
@@ -2554,8 +2554,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): Promise<void> {
     const entry = this.runtime.get(sessionId);
     if (!entry) return;
-    // Keep the old execution bound until its interrupt drains, including its final output.
-    if (this.isBusy(entry)) await this.interruptCodexTurnForReplacement(entry, server);
     if (this.canonicalTurnRoutingsByThread.get(threadId)?.routing.executionId !== turnExecutionId) {
       await this.activateCodexTurnRouting(threadId, turnExecutionId);
     }
@@ -2585,13 +2583,21 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (!pending || pending.routing.executionId !== turnExecutionId) throw new Error("Codex turn has no pending delivery routing");
     await this.retirePreviousCanonicalTurn(threadId);
     this.canonicalTurnRoutingsByThread.set(threadId, pending);
-    this.pendingCanonicalTurnRoutingsByThread.delete(threadId);
+    if (this.pendingCanonicalTurnRoutingsByThread.get(threadId) === pending) {
+      this.pendingCanonicalTurnRoutingsByThread.delete(threadId);
+    }
   }
 
   private async interruptCodexTurnForReplacement(entry: CodexSessionState, server: CodexAppServer): Promise<void> {
     if (!entry.currentNativeTurnId && entry.turnStartResponsePending) await entry.turnStartPromise;
     if (entry.currentNativeTurnId) await server.interruptTurnAndDrain(entry.currentNativeTurnId);
-    else await server.interruptTurn();
+  }
+
+  private codexReuseDrain(state: CodexSessionState): Promise<boolean> | undefined {
+    if (state.interruptDrain) return state.interruptDrain;
+    if (!this.isBusy(state)) return undefined;
+    // Replacement and Stop share the same bounded wait and discard policy.
+    return this.interruptCodexTurnForReplacement(state, state.server).then(() => true);
   }
 
   private prepareCodexTurnRun(sessionId: string, turnExecutionId: string): CodexTurnRun | undefined {
