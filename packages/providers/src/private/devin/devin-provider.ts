@@ -34,7 +34,7 @@ import type {
   AcpSessionUpdate,
 } from "../protocols/acp/acp-session-types.js";
 import { describeDevinAuth, resolveDevinAcpCredentials } from "./devin-credentials.js";
-import { DevinCanonicalEventPublisher, type DevinCanonicalEventRouting } from "./devin-canonical-event-publisher.js";
+import { CanonicalLiveEventPublisher as DevinCanonicalEventPublisher, type CanonicalLiveEventRouting as DevinCanonicalEventRouting } from "../canonical-live-event-publisher.js";
 import {
   createDevinAcpTurnState,
   devinPermissionPreview,
@@ -224,13 +224,12 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     private readonly stopDrainReuseTimeoutMs: number = STOP_DRAIN_REUSE_TIMEOUT_MS,
   ) {
     super();
-    this.canonicalEvents = new DevinCanonicalEventPublisher(host.events);
+    this.canonicalEvents = new DevinCanonicalEventPublisher("devin", host.events, undefined, "execution");
     this.sessions = new SessionRuntime<DevinAcpSessionEntry>(
       {
         spawn: (args) => this.spawnSession(args),
         isBusy: (state) => state.activeTurnState !== null,
         interrupt: async (state) => {
-          state.pendingUserStopAbort = true;
           this.cancelPendingPermissionsForSession(state.mcodeSessionId);
           await state.acpRuntime.cancel().catch(() => undefined);
         },
@@ -887,6 +886,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (!cliPath) throw new DevinCliMissingError(this.cliPath());
     let entry: DevinAcpSessionEntry | undefined;
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: (signal) => this.canonicalEvents.waitForCapacity(args.threadId, signal),
       spawnSpec: {
         command: cliPath,
         args: ["acp"],

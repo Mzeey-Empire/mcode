@@ -1,8 +1,16 @@
 import * as NodeEvents from "node:events";
-import type * as NodeChildProcess from "node:child_process";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeStream from "node:stream";
+import { CanonicalLiveEventPublisher } from "../../../canonical-live-event-publisher.js";
+import { ProviderRuntimeEventSchema, providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Client, ClientSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
 import { AcpSessionRuntime, SessionRecoveryFailedError } from "../acp-session-runtime.js";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeChildProcess>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 
 function fakeChild() {
   return Object.assign(new NodeEvents.EventEmitter(), {
@@ -19,6 +27,85 @@ function fakeProcesses() {
 }
 
 describe("AcpSessionRuntime", () => {
+  it.each([
+    ["cursor", "stop"], ["cursor", "close"], ["devin", "stop"], ["devin", "close"],
+  ] as const)("drains %s ACP output and its real end on %s while paused", async (providerId, action) => {
+    const child = new NodeChildProcess.ChildProcess();
+    const input = new NodeStream.PassThrough();
+    const output = new NodeStream.PassThrough();
+    child.stdin = input;
+    child.stdout = output;
+    const spawn = vi.mocked(NodeChildProcess.spawn).mockReturnValue(child);
+    const held = Promise.withResolvers<void>();
+    const paused = Promise.withResolvers<void>();
+    const received: string[] = [];
+    let admitted = 0;
+    let promptId: number | undefined;
+    const route = { threadId: "thread", turnId: "turn", executionId: "11111111-1111-4111-8111-111111111111", deliveryAttempt: 1 };
+    const publisher = new CanonicalLiveEventPublisher(providerId, { submit: async (batch) => {
+      await held.promise;
+      for (const draft of batch.events) {
+        if (draft.payload.type !== "item.recorded") throw new Error("Missing event");
+        const runtime = ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent);
+        if (runtime.event.type !== "textDelta") throw new Error("Missing text");
+        received.push(runtime.event.delta);
+      }
+      return { commit: { outcome: "accepted", acceptedThrough: 1, eventCount: 1,
+        progressPosition: { epoch: "epoch", sequence: 1 } }, delivery: { ingress: "not-required" } };
+    } });
+    const write = (value: unknown): void => { output.write(JSON.stringify(value) + "\n"); };
+    input.on("data", (chunk: Buffer) => {
+      const request = JSON.parse(chunk.toString());
+      if (request.method === "initialize") write({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: 1, agentCapabilities: {} } });
+      if (request.method === "session/new") write({ jsonrpc: "2.0", id: request.id, result: { sessionId: "native" } });
+      if (request.method === "session/prompt") promptId = request.id;
+      if (request.method === "session/cancel") writeTail();
+    });
+    const writeTail = (): void => {
+      for (let index = 256; index < 1_500; index++) writeUpdate(index);
+      write({ jsonrpc: "2.0", id: promptId, result: { stopReason: "end_turn" } });
+      output.end();
+      child.emit("exit", 0, null);
+    };
+    const writeUpdate = (index: number): void => write({ jsonrpc: "2.0", method: "session/update",
+      params: { sessionId: "native", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: String(index) } } } });
+    let runtime: AcpSessionRuntime | undefined;
+    try {
+      runtime = await AcpSessionRuntime.start({
+        spawnSpec: { command: "fixture", args: [], cwd: ".", env: {} }, processes: fakeProcesses(),
+        waitForOutputCapacity: async (signal) => {
+          const capacity = publisher.waitForCapacity(route.threadId, signal);
+          if (admitted >= 256) paused.resolve();
+          await capacity;
+        },
+        callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }),
+          onSessionUpdate: async ({ update }) => {
+            if (update.sessionUpdate !== "agent_message_chunk" || update.content.type !== "text") throw new Error("Unexpected update");
+            admitted++;
+            publisher.publish(route, providerRuntimeEvent({ type: "textDelta", threadId: "thread", delta: update.content.text }), []);
+          } },
+      });
+      await runtime.initialize();
+      await runtime.openSession({ cwd: ".", mcpServers: [] });
+      const prompt = runtime.prompt({ prompt: [] });
+      for (let index = 0; index < 256; index++) writeUpdate(index);
+      await paused.promise;
+      const stopping = action === "stop" ? runtime.cancel() : runtime.close();
+      if (action === "close") writeTail();
+      await stopping;
+      await runtime.drainOutput();
+      expect(await prompt).toEqual({ stopReason: "end_turn" });
+      held.resolve();
+      await publisher.stopAdmissionAndDrain();
+      expect(received).toEqual(Array.from({ length: 1_500 }, (_, index) => String(index)));
+    } finally {
+      held.resolve();
+      output.end();
+      await runtime?.close();
+      spawn.mockRestore();
+    }
+  });
+
   it("negotiates auth, falls back from load, serializes prompts, and cancels the active session", async () => {
     const child = fakeChild();
     const promptResolvers: Array<(value: unknown) => void> = [];

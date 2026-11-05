@@ -876,7 +876,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     const upstreamId = state.upstreamSessionId;
     const subscribe = this.http.subscribeEvents(endpoint, state.abortController.signal, (envelope) => {
       this.handleTurnEnvelope(envelope, req, state, endpoint, upstreamId, settler);
-    }).catch((error: unknown) => {
+    }, () => this.canonicalEventPublisher.waitForCapacity(req.threadId, state.abortController.signal)).catch((error: unknown) => {
       logger.debug("OpenCode event subscription ended", {
         sessionId: req.sessionId,
         error: error instanceof Error ? error.message : String(error),

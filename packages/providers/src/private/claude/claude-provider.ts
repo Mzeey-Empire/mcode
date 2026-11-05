@@ -660,6 +660,7 @@ export class ClaudeProvider
     Map<string, ClaudeCanonicalEventRouting> | undefined;
   /** Serializes every live event through the mandatory canonical sink. */
   private readonly canonicalEventPublisher: ClaudeCanonicalEventPublisher;
+  private readonly outputReleases = new WeakMap<Query, AbortController>();
   private readonly streamTasks = new Set<Promise<void>>();
   /** The loop state of each live SDK query, so a steer can check the turn the stream is on. */
   private readonly streamStates = new WeakMap<Query, ClaudeStreamLoopState>();
@@ -2025,7 +2026,13 @@ export class ClaudeProvider
 
   /** Graceful protocol interrupt: close the prompt queue so the SDK iterator ends. */
   interrupt(state: ClaudeSessionState): void {
+    this.outputReleases.get(state.query)?.abort();
     state.closeQueue();
+  }
+
+  /** Releases held output before teardown waits for the SDK to finish. */
+  prepareClose(state: ClaudeSessionState): void {
+    this.outputReleases.get(state.query)?.abort();
   }
 
   /** Provider teardown: close the SDK query handle. */
@@ -2166,11 +2173,14 @@ export class ClaudeProvider
     q: Query,
     state: ClaudeStreamLoopState,
   ): Promise<void> {
+    const release = new AbortController();
+    this.outputReleases.set(q, release);
     try {
       for await (const raw of q) {
         const current = this.runtime.get(sessionId);
         if (this.suppressEndedQueries.has(q) || this.isSupersededClaudeStream(current, q)) break;
         if (!(await this.handleClaudeStreamMessage(sessionId, state, raw as Record<string, unknown>))) break;
+        await this.canonicalEventPublisher.waitForCapacity(state.threadId, release.signal);
       }
     } catch (error: unknown) {
       this.publishClaudeStreamError(sessionId, q, state, error);

@@ -6,7 +6,9 @@ import { type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
 import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { volatileIngestClass, type ProviderEventBatch, type ProviderEventSinkPort } from "../host-ports.js";
 
-const MAX_PENDING_EVENTS_PER_EXECUTION = 1_024;
+const PAUSE_AT = 256;
+const RESUME_BELOW = 128;
+const CALLBACK_BYTE_BUDGET = 64 * 1024 * 1024;
 /**
  * Native replays arrive close to their original, so dedupe needs only recent identities.
  * A long Claude turn streams one identity per thinking or text delta, far past this window.
@@ -23,7 +25,7 @@ export interface CanonicalLiveEventRouting {
 
 interface ProviderExecutionQueue {
   nextSourceSequence: number;
-  pendingEventCount: number;
+  pendingBytes: number;
   tail: Promise<void>;
   failure: Error | undefined;
   nativeEvents: Map<string, string>;
@@ -42,7 +44,7 @@ export interface NativeLiveEventEvidence {
 /**
  * Serializes one provider's live events into canonical drafts for an execution.
  * Provider lifetime retains retired failures. Execution lifetime drains admitted drafts
- * and reserves two terminal slots while its worker owns the final failure outcome.
+ * while its worker owns the final failure outcome.
  */
 export class CanonicalLiveEventPublisher {
   private readonly queues = new Map<string, ProviderExecutionQueue>();
@@ -50,6 +52,8 @@ export class CanonicalLiveEventPublisher {
   private shutdownTask: Promise<void> | undefined;
   private lateEventReported = false;
   private firstFailure: Error | undefined;
+  private readonly pendingByThread = new Map<string, number>();
+  private readonly capacityWaiters = new Map<string, Set<() => void>>();
 
   constructor(
     private readonly providerId: ProviderId,
@@ -57,6 +61,31 @@ export class CanonicalLiveEventPublisher {
     private readonly onFailure?: (routing: CanonicalLiveEventRouting, error: Error) => void,
     private readonly failureLifetime: "provider" | "execution" = "provider",
   ) {}
+
+  /** Waits before pulling more output while this thread's saves are behind. */
+  waitForCapacity(threadId: string, signal?: AbortSignal): Promise<void> {
+    if ((this.pendingByThread.get(threadId) ?? 0) < PAUSE_AT || signal?.aborted) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const waiters = this.capacityWaiters.get(threadId) ?? new Set<() => void>();
+      const done = (): void => {
+        waiters.delete(done);
+        signal?.removeEventListener("abort", done);
+        resolve();
+      };
+      waiters.add(done);
+      this.capacityWaiters.set(threadId, waiters);
+      signal?.addEventListener("abort", done, { once: true });
+    });
+  }
+
+  private settleCapacity(threadId: string): void {
+    const pending = (this.pendingByThread.get(threadId) ?? 1) - 1;
+    if (pending === 0) this.pendingByThread.delete(threadId);
+    else this.pendingByThread.set(threadId, pending);
+    if (pending >= RESUME_BELOW) return;
+    for (const done of this.capacityWaiters.get(threadId) ?? []) done();
+    this.capacityWaiters.delete(threadId);
+  }
 
   /** Retain native plan evidence within its exact execution until an assistant message arrives. */
   capturePlan(routing: CanonicalLiveEventRouting, capture: NonNullable<ProviderRuntimeEvent["planCapture"]>): void {
@@ -83,11 +112,7 @@ export class CanonicalLiveEventPublisher {
       return;
     }
     const queue = this.queueFor(routing);
-    if (queue.planCapture && runtimeEvent.event.type === AgentEventType.TurnComplete) {
-      // The plan record needs an assistant message to anchor to; a textless turn has none.
-      logger.warn("Native plan capture had no assistant message to attach to", { executionId: routing.executionId });
-      queue.planCapture = undefined;
-    }
+    this.discardUnanchoredPlan(queue, routing, runtimeEvent);
     if (!this.admit(queue, routing, runtimeEvent, sourceIdentities, native)) return;
     if (runtimeEvent.event.type === AgentEventType.Message && queue.planCapture) {
       runtimeEvent = { ...runtimeEvent, planCapture: queue.planCapture };
@@ -95,11 +120,14 @@ export class CanonicalLiveEventPublisher {
     }
     const sourceSequence = queue.nextSourceSequence;
     queue.nextSourceSequence += 1;
-    queue.pendingEventCount += 1;
     const draft = this.createDraft(routing, runtimeEvent, sourceIdentities, sourceSequence, typeof native === "string" ? undefined : native);
+    const bytes = this.providerId === "copilot" ? Buffer.byteLength(JSON.stringify(draft)) : 0;
+    if (!this.admitBytes(queue, routing, bytes)) return;
+    queue.pendingBytes += bytes;
+    this.pendingByThread.set(routing.threadId, (this.pendingByThread.get(routing.threadId) ?? 0) + 1);
     queue.tail = queue.tail
       .then(async () => {
-        if (queue.failure && this.failureLifetime === "provider") return;
+        if (queue.failure && !this.deliverAfterFailure(runtimeEvent)) return;
         const receipt = await this.sink.submit({
           threadId: routing.threadId,
           turnId: routing.turnId,
@@ -117,8 +145,28 @@ export class CanonicalLiveEventPublisher {
         this.fail(queue, routing, toError(error));
       })
       .finally(() => {
-        queue.pendingEventCount -= 1;
+        queue.pendingBytes -= bytes;
+        this.settleCapacity(routing.threadId);
       });
+  }
+
+  private discardUnanchoredPlan(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent): void {
+    if (!queue.planCapture || runtimeEvent.event.type !== AgentEventType.TurnComplete) return;
+    // The plan record needs an assistant message to anchor to; a textless turn has none.
+    logger.warn("Native plan capture had no assistant message to attach to", { executionId: routing.executionId });
+    queue.planCapture = undefined;
+  }
+
+  private admitBytes(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, bytes: number): boolean {
+    if (this.providerId !== "copilot" || queue.pendingBytes + bytes <= CALLBACK_BYTE_BUDGET) return true;
+    this.fail(queue, routing, Object.assign(new Error("Copilot canonical save backlog exceeded its 64 MiB byte budget"),
+      { code: "CANONICAL_BACKLOG_BYTE_BUDGET" }));
+    logger.error("Copilot canonical save backlog exhausted", { executionId: routing.executionId, pendingBytes: queue.pendingBytes, bytes });
+    return false;
+  }
+
+  private deliverAfterFailure(runtimeEvent: ProviderRuntimeEvent): boolean {
+    return this.failureLifetime === "execution" && isParentTerminal(runtimeEvent);
   }
 
   private admit(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent,
@@ -126,11 +174,6 @@ export class CanonicalLiveEventPublisher {
     const terminal = isParentTerminal(runtimeEvent);
     if (queue.failure && (this.failureLifetime === "provider" || !terminal)) return false;
     if (typeof native === "string" && this.replayed(queue, routing, runtimeEvent, sourceIdentities, native)) return false;
-    const terminalReserve = this.failureLifetime === "execution" && !terminal ? 2 : 0;
-    if (queue.pendingEventCount >= MAX_PENDING_EVENTS_PER_EXECUTION - terminalReserve) {
-      this.fail(queue, routing, new Error(`${this.providerId} canonical event queue overflowed for execution ${routing.executionId}`));
-      return false;
-    }
     return true;
   }
 
@@ -172,7 +215,7 @@ export class CanonicalLiveEventPublisher {
     if (existing) return existing;
     const queue: ProviderExecutionQueue = {
       nextSourceSequence: 1,
-      pendingEventCount: 0,
+      pendingBytes: 0,
       tail: Promise.resolve(),
       failure: undefined,
       nativeEvents: new Map(),
@@ -243,7 +286,9 @@ export class CanonicalLiveEventPublisher {
           turnId: routing.turnId,
           kind: "system",
           providerIdentities: [...sourceIdentities],
-          payload: { projection: "providerRuntimeEvent", runtimeEvent, ...(native ? { native } : { provenance: "generated" }) },
+          payload: { projection: "providerRuntimeEvent", runtimeEvent: {
+            ...runtimeEvent, event: { ...runtimeEvent.event, turnExecutionId: routing.executionId },
+          }, ...(native ? { native } : { provenance: "generated" }) },
           createdAt: timestamp,
           updatedAt: timestamp,
         },

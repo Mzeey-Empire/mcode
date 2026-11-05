@@ -133,28 +133,27 @@ admitted execution uses this route, whichever provider runs it and whether the
 user or the provider started it. A batch for an execution with no worker owner
 is rejected.
 
-When saving falls behind a Codex stream, the adapter makes Codex wait instead
-of dropping events: past a pending-event mark it stops reading that app-server's
-stdout until the queue drains. One app-server serves one Mcode thread, so the
-pause holds only that thread. Requests still reach Codex while paused, but their
-responses queue behind the unread output. Stop therefore fences the execution
-with its queued events discarded before it interrupts, which drains the queue
-and lets the interrupt response through. The pause belongs to the thread, so an
-app-server that starts for a paused thread starts paused. Once the process
-exits, pausing stops: the adapter reads the rest of its output, a final
-`turn/completed` included, before it reports the exit or a failure. Pausing
-also stops when a session is torn down, so its interrupt does not wait behind
-the held output. The adapter closes a reply's text in one way only: when the
-turn's output ends, whoever asked it to stop. A real `turn/completed` ends it;
-otherwise an interrupt that times out leaves the turn open, and close kills the
-app-server, reads its pipe to the end, and only then closes the text. It ends
-the turn as `provider_lost` only when that drain read no real end. Stop needs no
-earlier close: a user Stop fences the execution before it reaches the adapter,
-and the server finishes the turn from the text it already accepted, while app
-shutdown stops sessions unfenced so their late output and real end still save.
-Teardown removes the session from the pool before the app-server's pipe is read
-to its end, so an app-server's output routes to the session that spawned it,
-not to whichever session the pool holds.
+Every provider preserves ordered stream events when canonical saving falls
+behind. Pullable sources stop reading at 256 pending saves per thread and
+resume below 128. Claude stops pulling its SDK iterator; Codex and Cursor
+stream-json stop reading stdout; OpenCode holds its HTTP SSE reader; Cursor and Devin ACP hold reads before their
+stdout-backed Web stream reaches the protocol decoder. Provider quirks remain
+in adapters; Claude, Cursor, Devin, Copilot and OpenCode share the canonical save queue.
+
+Copilot's SDK callback dispatcher does not await handlers and exposes no
+pause API. Its queue therefore has no event-count limit and permits up to
+64 MiB of serialized drafts per execution. Exceeding that byte budget logs
+an explicit error and fails the execution through its normal delivery-failure
+path. No adapter silently discards output to make room for newer output.
+
+Stop and teardown release held reads before sending an interrupt or waiting
+for native shutdown. A process exit releases the pause and drains stdout
+before reporting the exit; ACP and Codex cap this drain at two seconds because
+a descendant can inherit an open pipe. Final native outcomes precede synthetic
+exit failures. Event routes belong to the session that spawned the source and
+must remain usable during its drain, after removal from the pool. A user Stop
+fences the execution on the server before interrupting it; app shutdown is
+unfenced so the remaining text and real end still save.
 
 A provider adapter may forward a generic event, consume private native
 evidence, or reject malformed evidence with a diagnostic. Only a forwarded

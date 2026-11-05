@@ -879,22 +879,22 @@ describe("Copilot public factory", () => {
     expect(session.disconnect).toHaveBeenCalledOnce();
   });
 
-  it("reserves terminal capacity when ordered canonical delivery overflows", async () => {
+  it("saves a callback burst past 1024 events with its real successful ending", async () => {
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => { release = resolve; });
     const submit = sink.submit.bind(sink);
     ports.events.submit = async (batch) => { await blocked; return submit(batch); };
     const failure = vi.fn(async () => {}); provider.setCanonicalTurnDeliveryFailureHandler(failure);
     await provider.sendTurn(request());
-    for (let index = 0; index < 1_021; index += 1) session.emit({ type: "assistant.turn_start", data: { turnId: `native-turn-${index}` } });
+    for (let index = 0; index < 1_500; index += 1) session.emit({ type: "assistant.turn_start", data: { turnId: `native-turn-${index}` } });
     expect(session.abort).not.toHaveBeenCalled();
-    session.emit({ type: "assistant.turn_start", data: { turnId: "overflow" } });
-    expect(session.abort).toHaveBeenCalledOnce();
+    session.emit({ type: "session.idle", ephemeral: true, data: {} });
     release();
-    await vi.waitFor(() => expect(failure).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ message: expect.stringContaining("overflowed") })));
+    await vi.waitFor(() => expect(projections(sink).at(-1)).toMatchObject({ type: "ended" }));
+    expect(failure).not.toHaveBeenCalled();
     const events = projections(sink);
-    expect(events).toHaveLength(1_023);
-    expect(events.at(-1)).toEqual(expect.objectContaining({ type: "ended", outcome: "errored" }));
+    expect(events.filter((event) => event.type === "system" && event.subtype === "copilot_native:assistant.turn_start")).toHaveLength(1_500);
+    expect(events.filter((event) => event.type === "turnComplete")).toMatchObject([{ reason: "end_turn" }]);
   });
 
   it("preserves native history while replacing permission-sensitive browser MCP configuration", async () => {

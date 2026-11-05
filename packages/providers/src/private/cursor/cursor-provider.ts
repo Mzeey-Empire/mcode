@@ -51,9 +51,9 @@ import type {
   CursorSessionState,
 } from "./cursor-session-state.js";
 import {
-  CursorCanonicalEventPublisher,
-  type CursorCanonicalEventRouting,
-} from "./cursor-canonical-event-publisher.js";
+  CanonicalLiveEventPublisher as CursorCanonicalEventPublisher,
+  type CanonicalLiveEventRouting as CursorCanonicalEventRouting,
+} from "../canonical-live-event-publisher.js";
 
 export { cursorSupportsHttpMcp } from "./acp/cursor-acp-capabilities.js";
 export { appendCursorMcodeInstructions } from "./runtime/cursor-turn-executor.js";
@@ -176,7 +176,7 @@ export class CursorProvider
     private readonly stopDrainReuseTimeoutMs: number = STOP_DRAIN_REUSE_TIMEOUT_MS,
   ) {
     super();
-    this.canonicalEventPublisher = new CursorCanonicalEventPublisher(host.events);
+    this.canonicalEventPublisher = new CursorCanonicalEventPublisher("cursor", host.events, undefined, "execution");
     this.settingsService = cursorPorts.settings;
     this.skillService = cursorPorts.skills;
     this.envService = { getEnv: () => ({ ...host.environment.snapshot() }) };
@@ -229,6 +229,7 @@ export class CursorProvider
   private getProcessSpawner(): CursorAcpProcessSpawner {
     if (!this.processSpawner) {
       this.processSpawner = new CursorAcpProcessSpawner({
+        waitForOutputCapacity: (threadId, signal) => this.canonicalEventPublisher.waitForCapacity(threadId, signal),
         host: this.host,
         getEnvironment: () => this.envService.getEnv(),
         getSettings: () => this.settingsService.get(),

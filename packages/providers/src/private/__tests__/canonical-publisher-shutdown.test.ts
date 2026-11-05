@@ -4,8 +4,6 @@ import { ProviderRuntimeEventSchema, providerRuntimeEvent } from "@mcode/contrac
 import { CanonicalLiveEventPublisher } from "../canonical-live-event-publisher.js";
 import type { ProviderEventSinkPort, ProviderEventSubmissionReceipt } from "../../host-ports.js";
 import { CodexCanonicalEventPublisher } from "../codex/codex-canonical-event-publisher.js";
-import { CursorCanonicalEventPublisher } from "../cursor/cursor-canonical-event-publisher.js";
-import { DevinCanonicalEventPublisher } from "../devin/devin-canonical-event-publisher.js";
 
 const routing = { threadId: "thread-1", turnId: "turn-1", executionId: "00000000-0000-4000-8000-000000000001", deliveryAttempt: 1 };
 const event = providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "notice" });
@@ -22,20 +20,70 @@ const factories = [
     return { publish: () => publisher.publish(routing, event), publishTerminal: () => publisher.publish(routing, terminal), publishPeer: () => publisher.publish({ ...routing, executionId: "00000000-0000-4000-8000-000000000002" }, event), drain: () => publisher.stopAdmissionAndDrain() };
   } },
   { name: "Cursor", create: (sink: ProviderEventSinkPort) => {
-    const publisher = new CursorCanonicalEventPublisher(sink);
+    const publisher = new CanonicalLiveEventPublisher("cursor", sink, undefined, "execution");
     return { publish: () => publisher.publish(routing, event, []), publishTerminal: () => publisher.publish(routing, terminal, []), publishPeer: () => publisher.publish({ ...routing, executionId: "00000000-0000-4000-8000-000000000002" }, event, []), drain: () => publisher.stopAdmissionAndDrain() };
   } },
   { name: "Devin", create: (sink: ProviderEventSinkPort) => {
-    const publisher = new DevinCanonicalEventPublisher(sink);
+    const publisher = new CanonicalLiveEventPublisher("devin", sink, undefined, "execution");
     return { publish: () => publisher.publish(routing, event, []), publishTerminal: () => publisher.publish(routing, terminal, []), publishPeer: () => publisher.publish({ ...routing, executionId: "00000000-0000-4000-8000-000000000002" }, event, []), drain: () => publisher.stopAdmissionAndDrain() };
   } },
 ];
 
+describe.each(["claude", "cursor", "devin", "copilot", "opencode"] as const)("%s save backpressure", (providerId) => {
+  it("drains more than 1024 held saves in order through the real outcome", async () => {
+    const held = Promise.withResolvers<void>();
+    const received: string[] = [];
+    const publisher = new CanonicalLiveEventPublisher(providerId, { submit: async (batch) => {
+      await held.promise;
+      for (const draft of batch.events) {
+        if (draft.payload.type !== "item.recorded") throw new Error("Missing runtime event");
+        const runtime = ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent);
+        received.push(runtime.event.type === "textDelta" ? runtime.event.delta : runtime.event.type);
+      }
+      return receipt;
+    } });
+    for (let index = 0; index < 2_048; index++) {
+      publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TextDelta,
+        threadId: routing.threadId, delta: String(index) }), []);
+    }
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.Ended,
+      threadId: routing.threadId, outcome: "completed" }), []);
+    let readable = false;
+    const capacity = publisher.waitForCapacity(routing.threadId).then(() => { readable = true; });
+    const drain = publisher.stopAdmissionAndDrain();
+    await Promise.resolve();
+    expect(readable).toBe(false);
+    expect(received).toEqual([]);
+    held.resolve();
+    await Promise.all([capacity, drain]);
+    expect(received).toEqual([...Array.from({ length: 2_048 }, (_, index) => String(index)), "ended"]);
+    expect(readable).toBe(true);
+  });
+
+  it("releases a paused reader on Stop without waiting for saving", async () => {
+    const held = Promise.withResolvers<void>();
+    const publisher = new CanonicalLiveEventPublisher(providerId, { submit: async () => {
+      await held.promise;
+      return receipt;
+    } });
+    for (let index = 0; index < 256; index++) publisher.publish(routing, event, []);
+    const stop = new AbortController();
+    let settled = false;
+    const read = publisher.waitForCapacity(routing.threadId, stop.signal).then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    stop.abort();
+    await read;
+    expect(settled).toBe(true);
+    held.resolve();
+    await publisher.stopAdmissionAndDrain();
+  });
+});
+
 describe.each(["claude", "cursor"] as const)("%s native plan lifecycle", (providerId) => {
   it("drops a capture with no assistant message instead of inventing one, and rejects captures after retirement", async () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
-    const publisher = providerId === "cursor"
-      ? new CursorCanonicalEventPublisher({ submit }) : new CanonicalLiveEventPublisher(providerId, { submit });
+    const publisher = new CanonicalLiveEventPublisher(providerId, { submit });
     const capture = { markdown: "## Review plan", source: "native" as const };
     publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnStarted, threadId: routing.threadId }), []);
     publisher.capturePlan(routing, capture);
@@ -103,7 +151,22 @@ describe.each(factories)("$name publisher shutdown", ({ create }) => {
   });
 });
 
-describe("execution-lifetime publisher terminal reserve", () => {
+describe("execution-lifetime publisher endings", () => {
+  it("fails Copilot explicitly past the byte budget without a count limit", async () => {
+    const failure = vi.fn();
+    const held = Promise.withResolvers<void>();
+    const publisher = new CanonicalLiveEventPublisher("copilot", { submit: async () => {
+      await held.promise;
+      return receipt;
+    } }, failure, "execution");
+    const large = providerRuntimeEvent({ type: "textDelta", threadId: routing.threadId, delta: "x".repeat(1024 * 1024) });
+    for (let index = 0; index < 65; index++) publisher.publish(routing, large, []);
+    expect(failure).toHaveBeenCalledExactlyOnceWith(routing, expect.objectContaining({ code: "CANONICAL_BACKLOG_BYTE_BUDGET" }));
+    held.resolve();
+    await expect(publisher.waitForExecution(routing)).rejects.toMatchObject({ code: "CANONICAL_BACKLOG_BYTE_BUDGET" });
+    await publisher.stopAdmissionAndDrain();
+  });
+
   it("rejects child endings after a sink failure while admitting the parent ending", async () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>()
       .mockRejectedValueOnce(new Error("sink unavailable"))
@@ -121,7 +184,7 @@ describe("execution-lifetime publisher terminal reserve", () => {
     ]);
   });
 
-  it("keeps parent terminal slots through a child-ending burst and rejects children after overflow", async () => {
+  it("preserves child and parent endings past the former queue limit", async () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const publisher = new CanonicalLiveEventPublisher("copilot", { submit }, undefined, "execution");
     for (let index = 0; index < 1_020; index += 1) publisher.publish(routing, event, []);
@@ -133,14 +196,16 @@ describe("execution-lifetime publisher terminal reserve", () => {
     publisher.publish(routing, providerRuntimeEvent({ type: "turnComplete", threadId: routing.threadId,
       reason: "end_turn", tokensIn: 0, tokensOut: 0, costUsd: null }), []);
     publisher.publish(routing, terminal, []);
-    await expect(publisher.waitForExecution(routing)).rejects.toThrow();
+    await publisher.waitForExecution(routing);
     const emitted = submit.mock.calls.flatMap(([batch]) => batch.events.flatMap((draft) =>
       draft.payload.type === "item.recorded"
         ? [ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent)] : []));
-    expect(emitted).toHaveLength(1_024);
+    expect(emitted).toHaveLength(1_028);
     expect(emitted.slice(1_020).map((runtime) => [runtime.event.type, runtime.extension?.kind === "child-thread"
       ? runtime.extension.childThread.path : null])).toEqual([
-      ["ended", ["task-0"]], ["turnComplete", ["task-1"]], ["turnComplete", null], ["ended", null],
+      ["ended", ["task-0"]], ["turnComplete", ["task-1"]], ["ended", ["task-2"]],
+      ["turnComplete", ["task-3"]], ["ended", ["task-4"]], ["turnComplete", ["task-5"]],
+      ["turnComplete", null], ["ended", null],
     ]);
   });
 });

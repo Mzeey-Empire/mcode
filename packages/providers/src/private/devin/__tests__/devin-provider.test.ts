@@ -300,6 +300,41 @@ describe("DevinProvider", () => {
     });
   });
 
+  it("preserves the native successful ending and tail during shutdown with saving held", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-drain", 101);
+    starts.push(mockAcpStart([fake]));
+    const saved = host.events.submit;
+    const held = Promise.withResolvers<void>();
+    host.events.submit = vi.fn(async (batch) => { await held.promise; return saved(batch); });
+    const result = Promise.withResolvers<{ stopReason: string }>();
+    vi.mocked(fake.runtime.prompt).mockImplementation(() => result.promise);
+    vi.mocked(fake.runtime.cancel).mockImplementation(async () => {
+      await textChunk(fake, "devin-drain", "tail");
+      result.resolve({ stopReason: "end_turn" });
+    });
+    const p = createProvider(host);
+    const running = p.sendTurn(turn());
+    try {
+      await vi.waitFor(() => expect(fake.runtime.prompt).toHaveBeenCalledOnce());
+      for (let index = 0; index < 1_500; index++) await textChunk(fake, "devin-drain", String(index));
+      const closing = p.shutdown();
+      await vi.waitFor(() => expect(fake.runtime.cancel).toHaveBeenCalledOnce());
+      held.resolve();
+      await Promise.all([closing, running]);
+      const events = submittedRuntimeEvents(host);
+      expect(events.filter((event) => event.type === "textDelta").map((event) =>
+        event.type === "textDelta" ? event.delta : "")).toEqual([...Array.from({ length: 1_500 }, (_, index) => String(index)), "tail"]);
+      expect(events.filter((event) => event.type === "turnComplete")).toMatchObject([{ reason: "end_turn" }]);
+      expect(events.at(-1)).toMatchObject({ type: "ended" });
+      expect(events.at(-1)).not.toHaveProperty("outcome", "cancelled");
+    } finally {
+      held.resolve();
+      result.resolve({ stopReason: "end_turn" });
+      await running;
+    }
+  });
+
   it("resumes through session/load when resumeFrom carries an ACP session id", async () => {
     const host = createHost();
     const fake = createFakeRuntime("devin-acp-1", 101);

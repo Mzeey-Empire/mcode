@@ -218,6 +218,31 @@ describe("session status polling", () => {
 });
 
 describe("SSE boundary", () => {
+  it("holds network reads behind saving and preserves more than 1024 envelopes in order", async () => {
+    const held = Promise.withResolvers<void>();
+    const encoder = new TextEncoder();
+    const values = Array.from({ length: 1_500 }, (_, index) => ({ index }));
+    const encode = (events: unknown[]): Uint8Array => encoder.encode(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
+    const stream = new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(encode(values.slice(0, 256)));
+      controller.enqueue(encode(values.slice(256)));
+      controller.close();
+    } });
+    stubFetch(() => new Response(stream, { status: 200 }));
+    const received: unknown[] = [];
+    const capacity = vi.fn(async () => { if (received.length >= 256) await held.promise; });
+    const subscription = defaultOpenCodeHttpClient.subscribeEvents(ENDPOINT, new AbortController().signal,
+      (event) => received.push(event), capacity);
+    try {
+      await vi.waitFor(() => expect(capacity).toHaveBeenCalledTimes(2));
+      expect(received).toEqual(values.slice(0, 256));
+    } finally {
+      held.resolve();
+      await subscription;
+    }
+    expect(received).toEqual(values);
+  });
+
   it("accepts a coalesced oversized network chunk when each complete frame is bounded", async () => {
     const encoder = new TextEncoder();
     const chunk = Array.from(

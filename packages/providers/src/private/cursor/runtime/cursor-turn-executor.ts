@@ -34,7 +34,7 @@ import {
 import { cursorSessionRecoveryErrorMessage } from "../acp/cursor-session-recovery-error.js";
 import { resolveCursorAssistantMessageContent } from "../stream-json/cursor-stream-event-mapper.js";
 import type { CursorSessionState } from "../cursor-session-state.js";
-import type { CursorCanonicalEventRouting } from "../cursor-canonical-event-publisher.js";
+import type { CanonicalLiveEventRouting as CursorCanonicalEventRouting } from "../../canonical-live-event-publisher.js";
 
 /** Supplies provider-owned session operations to the turn executor. */
 export interface CursorTurnExecutorDeps {
