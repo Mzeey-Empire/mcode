@@ -523,7 +523,7 @@ describe("AgentService cleanup through production worker composition", { timeout
       await expectErroredAndReusable(fixture, stopping);
     });
 
-    it("waits for recovery when recording the failure itself fails, then reports the saved interruption", async () => {
+    it("waits for recovery when recording the failure itself fails, and the send still reports the provider's reason", async () => {
       const fixture = await openFixture();
       failNextProviderStart(fixture);
       const fenceEntered = holdDeferred();
@@ -547,8 +547,8 @@ describe("AgentService cleanup through production worker composition", { timeout
       }
       expect(await stopResult).toEqual({ value: expect.objectContaining({ status: "already-terminal",
         snapshot: expect.objectContaining({ phase: "interrupted" }) }) });
-      // The saved interruption reports the failed start, so the send itself has nothing left to report.
-      expect(await sendResult).toBe("sent");
+      // The saved interruption cannot say why the start failed, so the send reports the provider's reason.
+      expect(await sendResult).toContain(dispatchError);
       await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
       const turn = fixture.sent[0];
       if (!turn) throw new Error("Provider did not receive the turn");
