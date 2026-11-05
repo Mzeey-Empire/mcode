@@ -154,12 +154,13 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 ## Verifying
 
 - Before you write or keep a test, read [docs/internals/testing/writing-tests.md](docs/internals/testing/writing-tests.md). A test must fail for a real bug; source-text, class-name, mock-echo, and set-then-read tests do not.
-- Smallest proof that the change works. `bun run --cwd <workspace> test -- --reporter=dot --silent=passed-only <test-file> [<test-file> ...]`. For files in different workspaces, run one command per workspace.
+- Check the changed scope with `bun run check:changed`, or `bun run check:changed --since origin/main` for the whole branch. It runs the tests, lint, and typecheck that your changes can affect, including in workspaces that depend on them, and prints failures in full.
+- To rerun test files: `bun run --cwd <workspace> test -- --reporter=dot --silent=passed-only <test-file> [<test-file> ...]`. For files in different workspaces, run one command per workspace.
 - The flags keep output short so failures are not truncated: passing tests print a dot, while failing tests keep their diff, stack trace, and console output. If a failure needs more context, rerun that file without the flags.
 - Do not use `bun test`: it invokes Bun's native test runner and bypasses the workspace Vitest configuration.
-- Lint and complexity check, on the files you changed: `bun run lint <file> [<file> ...]`. It runs oxlint with the Mcode rules.
-- Type check each workspace you changed: `bun run --cwd <workspace> typecheck`. It runs `tsc-rs`, a Rust port of the TypeScript 7 checker pinned at the root, so a root `bunx tsc` checks with different rules. TypeScript 7 loads no `@types` package a tsconfig does not list in `types`, so a workspace that uses Node globals lists `"node"` there.
-- Do not run repo wide checks, CI owns the full test suite
+- To lint files by hand: `bun run lint <file> [<file> ...]`. It runs oxlint with the Mcode rules.
+- To type check a workspace by hand: `bun run --cwd <workspace> typecheck`. It runs `tsc-rs`, a Rust port of the TypeScript 7 checker pinned at the root, so a root `bunx tsc` checks with different rules. TypeScript 7 loads no `@types` package a tsconfig does not list in `types`, so a workspace that uses Node globals lists `"node"` there.
+- CI owns the full suites. Run `bun run lint` or `bun run typecheck` repo-wide only when `check:changed` reports a shared config change.
 - When a CI job fails, find its failing tests with [docs/agents/ci-failures.md](docs/agents/ci-failures.md) instead of downloading the whole log.
 - When a thread is stuck or a flow is slow, diagnose it from its recording with [the diagnose-thread skill](.agents/skills/diagnose-thread/SKILL.md) instead of reproducing it.
 
