@@ -166,6 +166,8 @@ export class ClaudeEventMapper {
     this.systemHandlers = new Map([
       ["init", this.systemInit.bind(this)],
       ["status", this.systemStatus.bind(this)],
+      // Raw diagnostics retain these progress pings; publishing them adds save backlog.
+      ["thinking_tokens", () => {}],
       ["compact_boundary", this.compactBoundary.bind(this)],
       ["api_retry", this.apiRetry.bind(this)],
       ["hook_started", this.hookStarted.bind(this)],

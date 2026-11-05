@@ -36,6 +36,24 @@ function createMapper(captureSdkSessionId = vi.fn(() => true)) {
 }
 
 describe("ClaudeEventMapper native dispatch", () => {
+  it("does not emit events for thinking token progress pings", async () => {
+    const { mapper, events } = createMapper();
+
+    await mapper.map({ type: "system", subtype: "thinking_tokens", thinking_tokens: 128 });
+
+    expect(events).toEqual([]);
+  });
+
+  it("still emits system events for unrelated unknown subtypes", async () => {
+    const { mapper, events } = createMapper();
+
+    await mapper.map({ type: "system", subtype: "future_system_subtype" });
+
+    expect(events).toEqual([
+      { type: AgentEventType.System, threadId: "test", subtype: "future_system_subtype" },
+    ]);
+  });
+
   it("keeps a subagent report out of the parent turn's final response", async () => {
     const { mapper, events } = createMapper();
     await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: "Waiting for both reports." }] } });
