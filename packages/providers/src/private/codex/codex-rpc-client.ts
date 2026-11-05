@@ -234,6 +234,12 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
     if (!this.readPaused) this.stdout.resume();
   }
 
+  /** Dispatches held lines and reads the pipe freely from now on; later pauses do nothing. */
+  releaseReading(): void {
+    this.releaseBackpressure();
+    if (!this.detached) this.stdout.resume();
+  }
+
   /**
    * Reads everything the app-server wrote, for when its process is gone. Pausing stops applying,
    * held lines dispatch in order, and the pipe is read until it ends. Resolves after `timeoutMs`

@@ -25,6 +25,11 @@ export interface SpawnResult<TState> {
 export interface ProtocolAdapter<TState> {
   spawn(args: SpawnArgs): Promise<SpawnResult<TState>>;
   isBusy(state: TState): boolean;
+  /**
+   * Runs first when a pooled session is stopped, before it leaves the pool and before
+   * {@link interrupt} and {@link close}, so output an adapter was holding back still routes.
+   */
+  prepareClose?(state: TState): void;
   interrupt(state: TState): Promise<void> | void;
   close(state: TState): Promise<void> | void;
   isStale(state: TState, args: { cwd: string; permissionMode: string }): boolean;
@@ -187,6 +192,12 @@ export class SessionRuntime<TState> {
     }
     const entry = this.sessions.get(sessionId) ?? this.unretired.get(sessionId);
     if (!entry) return;
+    // Before the pool drops the session, so output the adapter flushes still finds its session.
+    try {
+      this.adapter.prepareClose?.(entry.state);
+    } catch (error) {
+      this.deps.logger?.warn("SessionRuntime close preparation failed", { sessionId, error: errorMessage(error) });
+    }
     this.sessions.delete(sessionId);
     await this.retire(sessionId, entry);
   }

@@ -72,6 +72,7 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
     outputPaused = false;
     pauseOutput(): void { this.outputPaused = true; }
     resumeOutput(): void { this.outputPaused = false; }
+    releaseOutput(): void { this.outputPaused = false; }
     async interruptTurn(): Promise<void> {}
     async interruptTurnAndDrain(turnId: string): Promise<void> {
       this.emit("notification", {

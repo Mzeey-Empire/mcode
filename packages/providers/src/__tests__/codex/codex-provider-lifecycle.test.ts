@@ -7,6 +7,7 @@ import { type NativePlanQuestionBatch } from "@mcode/contracts/models/plan-quest
 import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
+import type { ProviderEventSinkPort } from "../../host-ports.js";
 import { checkCodexVersion, clearVersionCache } from "../../private/codex/codex-version.js";
 
 const { spawn, cli } = vi.hoisted(() => ({ spawn: vi.fn(), cli: { version: "0.150.0" } }));
@@ -84,7 +85,7 @@ const request: TurnRequest<"codex"> = {
   model: "gpt-5.4", permissionMode: "supervised", approvalReviewMode: "manual", interactionMode: "build", providerOptions: {},
 };
 
-function createProvider() {
+function createProvider(eventSink?: ProviderEventSinkPort) {
   const settings = { provider: { cli: { codex: "codex" } } };
   const getSettings = vi.fn(async () => settings);
   const child = new NativeProcess();
@@ -100,6 +101,7 @@ function createProvider() {
       listModels: async () => [], currentSkills: () => [], currentPrompts: () => [],
       refreshCustomPrompts: async () => ({ prompts: [] }), shutdown: catalogShutdown,
     },
+    undefined, undefined, eventSink,
   );
   const events: ProviderRuntimeEvent[] = [];
   provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
@@ -283,6 +285,42 @@ describe("Codex provider lifecycle through native transport", () => {
       child.emit("exit", 0, null);
       await shutdown;
     }
+  });
+
+  it("publishes held output and the real completion when shutdown starts while saving is behind", async () => {
+    let releaseSaves!: () => void;
+    const savesBlocked = new Promise<void>((resolve) => { releaseSaves = resolve; });
+    const { provider, child, starts, events } = createProvider({ submit: async (batch) => {
+      await savesBlocked;
+      return { commit: { outcome: "committed", conversationRevision: 1, rosterRevision: 0, acceptedThrough: 1,
+        durableThrough: 1, eventCount: batch.events.length }, delivery: { ingress: "queued" } };
+    } });
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    // One chunk, so the lines past the pause threshold are read but held, with the completion last.
+    const deltas = Array.from({ length: 400 }, (_, index) => `${index} `);
+    child.stdout.write(deltas.map((delta) => JSON.stringify({ method: "item/agentMessage/delta",
+      params: { threadId: "native-thread", turnId: "native-turn-1", itemId: "answer", delta } }) + "\n").join("")
+      + JSON.stringify({ method: "turn/completed", params: { threadId: "native-thread",
+        turn: { id: "native-turn-1", status: "completed", items: [] } } }) + "\n");
+    await vi.waitFor(() => expect(child.stdout.isPaused()).toBe(true));
+
+    // Saving stays behind past every teardown grace, as with a stalled database.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const shutdown = provider.shutdown();
+      await vi.advanceTimersByTimeAsync(20_000);
+      releaseSaves();
+      await shutdown;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const turnEvents = events.map(({ event }) => event).filter((event) => event.turnExecutionId === request.turnExecutionId);
+    expect(turnEvents.flatMap((event) => event.type === AgentEventType.TextDelta ? [event.delta] : [])).toEqual(deltas);
+    expect(turnEvents.filter((event) => event.type === AgentEventType.Ended)).toEqual([{
+      type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "completed",
+    }]);
   });
 
   it("steers the running native turn by its id and maps a vanished turn to turn_not_running", async () => {

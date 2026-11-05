@@ -142,7 +142,10 @@ with its queued events discarded before it interrupts, which drains the queue
 and lets the interrupt response through. The pause belongs to the thread, so an
 app-server that starts for a paused thread starts paused. Once the process
 exits, pausing stops: the adapter reads the rest of its output, a final
-`turn/completed` included, before it reports the exit or a failure.
+`turn/completed` included, before it reports the exit or a failure. Pausing
+also stops when a session is torn down, before it leaves the session pool:
+otherwise its interrupt waits behind the held output and ends the turn
+synthetically, and the held output arrives after its route is gone.
 
 A provider adapter may forward a generic event, consume private native
 evidence, or reject malformed evidence with a diagnostic. Only a forwarded

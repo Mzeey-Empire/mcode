@@ -2378,6 +2378,15 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return state.server.steerTurn(nativeTurnId, input.steerId, parts);
   }
 
+  /**
+   * Admits output held back by a paused stream while the session is pooled and its server routes
+   * events. Otherwise an interrupt waiting behind that output times out into a synthetic end, and
+   * the held lines, a real `turn/completed` included, surface only after routing is gone.
+   */
+  prepareClose(state: CodexSessionState): void {
+    state.server.releaseOutput();
+  }
+
   /** Graceful protocol interrupt of the in-flight turn (does not kill the process). */
   async interrupt(state: CodexSessionState): Promise<void> {
     const turnExecutionId = executionForDrain(state);

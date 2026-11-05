@@ -42,6 +42,7 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
     }> {
       return getChildThreadMetadataMock(childThreadId);
     }
+    releaseOutput(): void {}
     async interruptTurn(): Promise<void> {}
     async interruptChildTurn(nativeThreadId: string, nativeTurnId: string): Promise<void> {
       await interruptChildTurnMock(nativeThreadId, nativeTurnId);

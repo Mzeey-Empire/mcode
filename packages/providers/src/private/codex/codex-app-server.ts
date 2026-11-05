@@ -971,6 +971,8 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   private killRequested = false;
   /** Kept apart from the RPC client so a pause requested before {@link start} still applies. */
   private outputPaused = false;
+  /** Set by {@link releaseOutput}; later pauses are ignored. */
+  private outputReleased = false;
   /** Shared in-flight teardown so concurrent `kill()` callers await the same work. */
   private teardownPromise: Promise<void> | null = null;
 
@@ -1494,8 +1496,19 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
    * their responses arrive after the output read before them.
    */
   pauseOutput(): void {
+    if (this.outputReleased) return;
     this.outputPaused = true;
     this.rpc?.pauseReading();
+  }
+
+  /**
+   * Reads the app-server's output freely from now on, dispatching what a pause held first. For
+   * teardown, whose own waits would otherwise sit behind the paused output.
+   */
+  releaseOutput(): void {
+    this.outputReleased = true;
+    this.outputPaused = false;
+    this.rpc?.releaseReading();
   }
 
   /** Reads the app-server's output again after {@link pauseOutput}. */
