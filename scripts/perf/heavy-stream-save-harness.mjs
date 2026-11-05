@@ -145,8 +145,7 @@ export async function runHeavyStream(options) {
   let changed = false;
   let sampler;
   let diagnostics;
-  let interrupted = false;
-  const onSignal = () => { interrupted = true; state.interrupted = true; };
+  const onSignal = createInterruptHandler(state);
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
   try {
@@ -185,8 +184,8 @@ export async function runHeavyStream(options) {
   finally {
     try {
       await finishMeasurements(sampler, diagnostics, directory, receipt, state.progress);
-      receipt.serverDropLines = await countDropLines(NodePath.join(paths.logsDir, "server.log"), receipt.logOffset ?? 0);
-      finalizeOutcome(receipt, interrupted);
+      receipt.serverDropLogLines = await countDropLines(NodePath.join(paths.logsDir, "server.log"), receipt.logOffset ?? 0, receipt.threadId);
+      finalizeOutcome(receipt, state.interrupted);
     } catch (error) { receipt.error = error.message; receipt.outcome = "failed"; }
     await restoreFixture(socket, receipt, state, changed, original);
     db.close();
@@ -209,11 +208,22 @@ export function finalizeOutcome(receipt, interrupted) {
   }).filter((lag) => lag !== null);
   receipt.endToEndLag = summarizeLatency(lags);
   receipt.endToEndLag.unmatchedSavedPieces = pieces.length - lags.length;
+  receipt.persistedAtLag = summarizeLatency(pieces.filter((piece) => Number.isFinite(piece.persistedAt)).map((piece) => piece.persistedAt - piece.at));
+  receipt.persistedAtLag.unmatchedSavedPieces = pieces.length - receipt.persistedAtLag.count;
+  receipt.lagExcludesLostPieces = true;
   delete receipt.saves.savedTimes;
   if (receipt.delivery) delete receipt.delivery.savedPieces;
   const failures = [interrupted, receipt.error, !receipt.emitted?.complete, receipt.delivery?.pieces.lost,
-    receipt.delivery?.tools.lost, receipt.serverDropLines, !receipt.terminalEvent, !receipt.largeOutput?.saved, receipt.saves.unmatchedAcceptedEvents, receipt.endToEndLag.unmatchedSavedPieces];
+    receipt.delivery?.tools.lost, Object.values({ ...receipt.serverDropLogLines }).some((count) => count > 0), !receipt.terminalEvent, !receipt.largeOutput?.saved, receipt.saves.unmatchedAcceptedEvents, receipt.endToEndLag.unmatchedSavedPieces];
   if (failures.some(Boolean)) receipt.outcome = "failed";
+}
+
+/** Lets the first signal reach restoration and forces exit on a second signal. */
+export function createInterruptHandler(state) {
+  return () => {
+    if (state.interrupted) process.exit(130);
+    state.interrupted = true;
+  };
 }
 
 if (import.meta.main) {
@@ -286,7 +296,7 @@ export async function restoreFixture(socket, receipt, state, changed, original) 
 
 function printSummary(receipt, receiptPath) {
   const { options } = receipt;
-  const summary = { duration: options.duration, outcome: receipt.outcome, error: receipt.error, pieces: receipt.delivery?.pieces, tools: receipt.delivery?.tools, serverDropLines: receipt.serverDropLines, rows: receipt.rows?.total, rowsPerSavedDelta: receipt.rows?.rowsPerSavedDelta, commits: receipt.saves.commits, acceptToSaveLag: receipt.saves.lag, endToEndLag: receipt.endToEndLag, largeOutput: receipt.largeOutput, terminalEvent: receipt.terminalEvent, cleanup: receipt.cleanup, receiptPath };
+  const summary = { duration: options.duration, outcome: receipt.outcome, error: receipt.error, pieces: receipt.delivery?.pieces, tools: receipt.delivery?.tools, serverDropLogLines: receipt.serverDropLogLines, rows: receipt.rows?.total, rowsPerSavedDelta: receipt.rows?.rowsPerSavedDelta, commits: receipt.saves.commits, acceptToSaveLag: receipt.saves.lag, endToEndLag: receipt.endToEndLag, persistedAtLag: receipt.persistedAtLag, lagExcludesLostPieces: receipt.lagExcludesLostPieces, largeOutput: receipt.largeOutput, terminalEvent: receipt.terminalEvent, cleanup: receipt.cleanup, receiptPath };
   process.stdout.write(JSON.stringify(summary) + "\n");
 }
 
@@ -377,7 +387,7 @@ export function auditDelivery(rows, emitted) {
   const tools = new Set();
   for (const raw of rows) {
     const row = raw.pieces ? raw : compactRow(raw);
-    for (const index of row.pieces) if (!pieces.has(index)) pieces.set(index, { position: row.position });
+    for (const index of row.pieces) if (!pieces.has(index)) pieces.set(index, { position: row.position, persistedAt: Date.parse(row.persisted_at) });
     for (const id of row.tools) tools.add(id);
   }
   const sentPieces = emitted?.pieces ?? [];
@@ -391,6 +401,7 @@ export function auditDelivery(rows, emitted) {
 
 /** Finds a durable terminal even when final publication rows follow it. */
 export function savedTerminal(rows, turnId) {
+  if (!turnId) return null;
   for (const row of rows) {
     const event = JSON.parse(row.envelope_json);
     if ((event.turnId ?? event.routing?.turnId) === turnId && /^turn\.(completed|cancelled|interrupted|errored)$/.test(event.payload.type)) return event.payload.type;
@@ -398,12 +409,17 @@ export function savedTerminal(rows, turnId) {
   return null;
 }
 
-async function countDropLines(file, start) {
-  let count = 0;
+/** Counts thread-local drop log lines by reason, never treating them as event counts. */
+export async function countDropLines(file, start, threadId) {
+  const counts = { queueCapacity: 0, acceptanceRejected: 0, deliveryFailed: 0, other: 0 };
+  const reasons = new Map([["queue-capacity", "queueCapacity"], ["acceptance-rejected", "acceptanceRejected"], ["delivery-failed", "deliveryFailed"]]);
   for await (const line of NodeReadline.createInterface({ input: NodeFS.createReadStream(file, { start }), crlfDelay: Infinity })) {
-    if (/Codex observation dropped.*queue-capacity/.test(line)) count += 1;
+    const marker = line.indexOf("Codex observation dropped");
+    if (marker < 0) continue;
+    const data = JSON.parse(line.slice(line.indexOf("{", marker)));
+    if (threadId && data.threadId === threadId) counts[reasons.get(data.reason) ?? "other"] += 1;
   }
-  return count;
+  return counts;
 }
 
 

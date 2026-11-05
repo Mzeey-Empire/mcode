@@ -3,7 +3,47 @@ import * as NodeTest from "node:test";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeChildProcess from "node:child_process";
 import { auditDelivery, savedTerminal, finalizeOutcome } from "./heavy-stream-save-harness.mjs";
+import * as Harness from "./heavy-stream-save-harness.mjs";
+
+NodeTest.test("outcome gate rejects each independent failure", async (test) => {
+  const cases = [
+    ["clean", () => {}, "completed"],
+    ["no terminal", (r) => { r.terminalEvent = null; }],
+    ["lost pieces", (r) => { r.delivery.pieces.lost = 1; }],
+    ["lost tools", (r) => { r.delivery.tools.lost = 1; }],
+    ["missing output", (r) => { r.largeOutput.saved = false; }],
+    ...["queueCapacity", "acceptanceRejected", "deliveryFailed", "other"].map((reason) => [reason, (r) => { r.serverDropLogLines[reason] = 1; }]),
+    ["unmatched lag join", (r) => { r.delivery.savedPieces[0].position.epoch = "other"; }],
+    ["unmatched acceptance", (r) => { r.saves.unmatchedAcceptedEvents = 1; }],
+    ["incomplete fixture", (r) => { r.emitted.complete = false; }],
+    ["error", (r) => { r.error = "save failed"; }],
+    ["interrupted", () => {}],
+  ];
+  for (const [name, change, expected = "failed"] of cases) await test.test(name, () => {
+    const receipt = { outcome: "completed", emitted: { complete: true }, terminalEvent: "turn.completed", largeOutput: { saved: true },
+      serverDropLogLines: { queueCapacity: 0, acceptanceRejected: 0, deliveryFailed: 0, other: 0 },
+      delivery: { pieces: { lost: 0 }, tools: { lost: 0 }, savedPieces: [{ at: 100, position: { epoch: "a", sequence: 1 } }] },
+      saves: { unmatchedAcceptedEvents: 0, savedTimes: [{ at: 120, through: { epoch: "a", sequence: 1 } }] } };
+    change(receipt);
+    finalizeOutcome(receipt, name === "interrupted");
+    NodeAssertStrict.equal(receipt.outcome, expected);
+  });
+});
+
+NodeTest.test("drop log lines count every reason only for the measured thread after the offset", async () => {
+  NodeFS.mkdirSync(NodePath.join(process.cwd(), ".codex/tmp"), { recursive: true });
+  const directory = NodeFS.mkdtempSync(NodePath.join(process.cwd(), ".codex/tmp/drop-lines-"));
+  const file = NodePath.join(directory, "server.log");
+  const line = (threadId, reason) => `warn: Codex observation dropped; execution continues ${JSON.stringify({ threadId, reason })}\n`;
+  const before = line("mine", "queue-capacity");
+  try {
+    NodeFS.writeFileSync(file, before + line("mine", "queue-capacity").repeat(2) + line("mine", "acceptance-rejected") + line("mine", "delivery-failed") + line("mine", "future-reason") + line("other", "queue-capacity") + line("mine-extra", "acceptance-rejected") + 'info: unrelated {"threadId":"mine","reason":"delivery-failed"}\n');
+    NodeAssertStrict.deepEqual(await Harness.countDropLines(file, Buffer.byteLength(before), "mine"), { queueCapacity: 2, acceptanceRejected: 1, deliveryFailed: 1, other: 1 });
+    NodeAssertStrict.deepEqual(await Harness.countDropLines(file, 0, "absent"), { queueCapacity: 0, acceptanceRejected: 0, deliveryFailed: 0, other: 0 });
+  } finally { NodeFS.rmSync(directory, { recursive: true }); }
+});
 
 NodeTest.test("send-to-save lag uses the matching epoch and a missing match fails the run", () => {
   const receipt = { outcome: "completed", emitted: { complete: true }, terminalEvent: "turn.completed", largeOutput: { saved: true }, delivery: { pieces: { lost: 0 }, tools: { lost: 0 }, savedPieces: [{ at: 100, position: { epoch: "a", sequence: 1 } }] }, saves: { unmatchedAcceptedEvents: 0, savedTimes: [{ at: 120, through: { epoch: "b", sequence: 2 } }, { at: 150, through: { epoch: "a", sequence: 1 } }] } };
@@ -27,6 +67,35 @@ NodeTest.test("terminal is found before final publication and scoped to the turn
   const rows = ["turn.completed", "publication.recorded"].map((type) => ({ envelope_json: JSON.stringify({ turnId: "mine", payload: { type } }) }));
   NodeAssertStrict.equal(savedTerminal(rows, "mine"), "turn.completed");
   NodeAssertStrict.equal(savedTerminal(rows, "other"), null);
+  NodeAssertStrict.equal(savedTerminal([{ envelope_json: '{"payload":{"type":"turn.completed"}}' }], undefined), null);
+});
+
+NodeTest.test("DB save lag uses first durable piece timestamps and excludes lost pieces", () => {
+  const row = (text, persisted_at) => ({ persisted_at, envelope_json: JSON.stringify({ payload: { text } }) });
+  const delivery = auditDelivery([row("piece 0\npiece 1\n", "1970-01-01T00:00:00.150Z"), row("piece 0\n", "1970-01-01T00:00:00.900Z")],
+    { pieces: [{ index: 0, at: 100 }, { index: 1, at: 120 }, { index: 2, at: 125 }], tools: [] });
+  const receipt = { delivery, saves: {}, emitted: { complete: true } };
+  finalizeOutcome(receipt, false);
+  NodeAssertStrict.deepEqual(receipt.persistedAtLag, { count: 2, p50Ms: 30, p95Ms: 50, maxMs: 50, unmatchedSavedPieces: 0 });
+  NodeAssertStrict.equal(receipt.lagExcludesLostPieces, true);
+  NodeAssertStrict.equal(receipt.delivery.pieces.lost, 1);
+});
+
+NodeTest.test("first signal permits restoration and second SIGINT or SIGTERM forces exit", () => {
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    const script = `import { createInterruptHandler } from ${JSON.stringify(new URL("./heavy-stream-save-harness.mjs", import.meta.url).href)};
+      const state = {};
+      const handler = createInterruptHandler(state);
+      process.on("SIGINT", handler);
+      process.on("SIGTERM", handler);
+      process.emit("SIGINT");
+      if (state.interrupted) process.stdout.write("restoration reachable\\n");
+      process.emit(${JSON.stringify(signal)});
+      process.stdout.write("still running\\n");`;
+    const child = NodeChildProcess.spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8", windowsHide: true });
+    NodeAssertStrict.equal(child.status, 130, child.stderr);
+    NodeAssertStrict.equal(child.stdout, "restoration reachable\n");
+  }
 });
 
 NodeTest.test("epochs cannot save one another's accepted sequences", () => {
