@@ -135,8 +135,9 @@ is rejected.
 
 Every provider preserves ordered stream events when canonical saving falls
 behind. Pullable sources stop reading at 256 pending saves per thread and
-resume below 128. Claude stops pulling its SDK iterator; Codex and Cursor
-stream-json stop reading stdout; OpenCode holds its HTTP SSE reader; Cursor and Devin ACP hold reads before their
+resume below 128. Claude gates CLI stdout before the SDK's eager reader as well
+as its iterator; Codex stops reading stdout; OpenCode holds its HTTP SSE reader;
+Cursor and Devin ACP hold reads before their
 stdout-backed Web stream reaches the protocol decoder. Provider quirks remain
 in adapters; Claude, Cursor, Devin, Copilot and OpenCode share the canonical save queue.
 
@@ -145,6 +146,20 @@ pause API. Its queue therefore has no event-count limit and permits up to
 64 MiB of serialized drafts per execution. Exceeding that byte budget logs
 an explicit error and fails the execution through its normal delivery-failure
 path. No adapter silently discards output to make room for newer output.
+
+Accepted drafts always drain after admission fails. Only output beyond Copilot's
+budget is refused, and the execution ends errored with that reason. SDK 0.2.2's
+`session.getMessages()` returns a whole event array without pagination; ephemeral
+stream deltas are not a durable replay contract. `cliUrl` connects to an external
+TCP server, but the SDK owns its private socket and JSON-RPC reader. Pausing it
+requires a proxy plus external CLI startup, authentication and shutdown ownership;
+that is not a small transport substitution. Keep the explicit budget until a
+bounded, complete replay or supported transport pause exists.
+
+A Codex app-server created for an already paused thread starts paused. During
+exit drain, Codex emits `provider_lost` only if no real native ending was read.
+Cursor's unused stream-json turn runner has no production caller and is not part
+of this flow; deleting it is separate work.
 
 Stop and teardown release held reads before sending an interrupt or waiting
 for native shutdown. A process exit releases the pause and drains stdout

@@ -13,12 +13,12 @@ import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import { defaultOpenCodeHttpClient, type OpenCodeHttpClient } from "../opencode-http-client.js";
 import type { TurnRequest } from "@mcode/contracts/providers/interfaces";
 
-function testProvider(http: OpenCodeHttpClient | undefined, pool: OpenCodeServerPool) {
+function testProvider(http: OpenCodeHttpClient | undefined, pool: OpenCodeServerPool, saving: Promise<void> = Promise.resolve()) {
   const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };
   const envService = { getEnv: () => ({}) };
   const submitted: unknown[] = [];
   const host = {
-    events: { submit: async (batch: unknown) => { submitted.push(batch); return { commit: {}, delivery: { ingress: "queued" } }; } },
+    events: { submit: async (batch: unknown) => { await saving; submitted.push(batch); return { commit: {}, delivery: { ingress: "queued" } }; } },
     processes: { attach: () => {}, terminateTree: async () => {} },
     runtime: { platform: "win32" },
     environment: { snapshot: () => ({}) },
@@ -481,7 +481,9 @@ describe("OpenCodeProvider minimal turn", () => {
     expect(completed).toBe(true);
   });
 
-  it("streams a reply to completion and returns the pool server warm", async () => {
+  it("holds the provider SSE hook while saving is behind and drains the reply", async () => {
+    const held = Promise.withResolvers<void>();
+    const paused = Promise.withResolvers<void>();
     const pool = new OpenCodeServerPool({
       spawn: () => ({ pid: 1, on: () => {}, off: () => {}, kill: () => true }) as never,
       waitForHealth: async () => {},
@@ -497,15 +499,24 @@ describe("OpenCodeProvider minimal turn", () => {
       listModels: vi.fn(async () => []),
       listSessionMessages: vi.fn(async () => []),
       getSessionStatus: vi.fn(async () => new Proxy({}, { get: () => ({ type: "idle" }) })),
-      subscribeEvents: vi.fn(async (_url: string, _signal: AbortSignal, onEnvelope: (e: unknown) => void) => {
-        onEnvelope({ type: "message.part.updated", properties: { sessionID: "ses_1", part: { type: "text", id: "p1" }, delta: "hi" } });
+      subscribeEvents: vi.fn(async (_url: string, _signal: AbortSignal, onEnvelope: (e: unknown) => void, capacity: () => Promise<void>) => {
+        for (let index = 0; index < 300; index++) onEnvelope({ type: "message.part.updated", properties: { sessionID: "ses_1", part: { type: "text", id: "p1" }, delta: "hi" } });
+        let readable = false;
+        const waiting = capacity().then(() => { readable = true; });
+        await Promise.resolve();
+        expect(readable).toBe(false);
+        paused.resolve();
+        await waiting;
         onEnvelope({ type: "session.idle", properties: { sessionID: "ses_1" } });
       }),
     };
-    const { provider, submitted } = testProvider(http as never, pool);
+    const { provider, submitted } = testProvider(http as never, pool, held.promise);
     const events: unknown[] = [];
     provider.on("event", (e) => events.push(e));
-    await provider.sendTurn(turnRequest());
+    const running = provider.sendTurn(turnRequest());
+    try { await paused.promise; expect(submitted).toEqual([]); }
+    finally { held.resolve(); }
+    await running;
     expect(http.createSession).toHaveBeenCalledTimes(1);
     expect(http.promptAsync).toHaveBeenCalledTimes(1);
     expect(http.promptAsync).toHaveBeenCalledWith({ baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", {

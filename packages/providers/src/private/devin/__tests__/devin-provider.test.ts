@@ -303,7 +303,8 @@ describe("DevinProvider", () => {
   it("preserves the native successful ending and tail during shutdown with saving held", async () => {
     const host = createHost();
     const fake = createFakeRuntime("devin-drain", 101);
-    starts.push(mockAcpStart([fake]));
+    const start = mockAcpStart([fake]);
+    starts.push(start);
     const saved = host.events.submit;
     const held = Promise.withResolvers<void>();
     host.events.submit = vi.fn(async (batch) => { await held.promise; return saved(batch); });
@@ -318,6 +319,13 @@ describe("DevinProvider", () => {
     try {
       await vi.waitFor(() => expect(fake.runtime.prompt).toHaveBeenCalledOnce());
       for (let index = 0; index < 1_500; index++) await textChunk(fake, "devin-drain", String(index));
+      const signal = new AbortController();
+      let readable = false;
+      const capacity = start.mock.calls[0]![0].waitForOutputCapacity(signal.signal).then(() => { readable = true; });
+      await Promise.resolve();
+      expect(readable).toBe(false);
+      signal.abort();
+      await capacity;
       const closing = p.shutdown();
       await vi.waitFor(() => expect(fake.runtime.cancel).toHaveBeenCalledOnce());
       held.resolve();

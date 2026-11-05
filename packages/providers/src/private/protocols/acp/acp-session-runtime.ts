@@ -27,7 +27,7 @@ export type AcpTransport = {
 /** Options for creating one generic ACP runtime. */
 export type AcpSessionRuntimeOptions = {
   /** Holds transport reads while canonical saving is behind. */
-  waitForOutputCapacity?: (signal: AbortSignal) => Promise<void>;
+  waitForOutputCapacity: (signal: AbortSignal) => Promise<void>;
   spawnSpec: AcpSpawnSpec;
   callbacks: AcpSessionCallbacks;
   clientFactory?: AcpClientFactory;
@@ -153,7 +153,7 @@ export class AcpSessionRuntime {
       const reader = NodeStream.Readable.toWeb(child.stdout).getReader();
       const output = new ReadableStream<Uint8Array>({
         async pull(controller) {
-          await options.waitForOutputCapacity?.(runtimeRef?.outputRelease.signal ?? outputRelease.signal);
+          await options.waitForOutputCapacity(runtimeRef?.outputRelease.signal ?? outputRelease.signal);
           const next = await reader.read();
           if (next.done) controller.close();
           else controller.enqueue(next.value);

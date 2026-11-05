@@ -124,6 +124,34 @@ function submittedRuntimeEvents(host: ProviderHostPorts): unknown[] {
 }
 
 describe("CursorProvider session continuity", () => {
+  it("holds the production ACP capacity hook until accepted saves drain", async () => {
+    const host = createHost();
+    const held = Promise.withResolvers<void>();
+    const save = host.events.submit;
+    host.events.submit = vi.fn(async (batch) => { await held.promise; return save(batch); });
+    const fake = createFakeRuntime("cursor-session-1", 101);
+    const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(fake.runtime);
+    const ending = Promise.withResolvers<{ stopReason: "end_turn" }>();
+    vi.mocked(fake.runtime.prompt).mockImplementation(() => ending.promise);
+    const provider = new CursorProvider(host, { settings: { get: () => getDefaultSettings() }, skills: { list: () => [] } }, 60_000);
+    const running = provider.sendTurn(turn("prompt", "execution-1"));
+    try {
+      await vi.waitFor(() => expect(fake.runtime.prompt).toHaveBeenCalledOnce());
+      const options = start.mock.calls[0]![0];
+      for (let index = 0; index < 300; index++) await options.callbacks.onSessionUpdate?.({ sessionId: "cursor-session-1",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: String(index) } } });
+      let readable = false;
+      const capacity = options.waitForOutputCapacity(new AbortController().signal).then(() => { readable = true; });
+      await Promise.resolve();
+      expect(readable).toBe(false);
+      held.resolve();
+      await capacity;
+      expect(readable).toBe(true);
+      ending.resolve({ stopReason: "end_turn" });
+      await running;
+      expect(submittedRuntimeEvents(host).filter((event) => typeof event === "object" && event !== null && "type" in event && event.type === "textDelta")).toHaveLength(300);
+    } finally { held.resolve(); ending.resolve({ stopReason: "end_turn" }); await running; start.mockRestore(); await provider.shutdown(); }
+  });
   it("delivers the turn through the canonical host without EventEmitter duplicates", async () => {
     const host = createHost();
     const fake = createFakeRuntime("cursor-session-1", 101);

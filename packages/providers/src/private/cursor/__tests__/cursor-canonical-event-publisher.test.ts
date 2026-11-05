@@ -127,7 +127,7 @@ describe("CursorCanonicalEventPublisher", () => {
     });
   });
 
-  it("fails closed after a sink submission fails", async () => {
+  it("drains accepted drafts and reports the first sink failure", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>()
       .mockRejectedValueOnce(new Error("canonical sink unavailable"));
     const publisher = new CursorCanonicalEventPublisher("cursor", createSink(submit), undefined, "execution");
@@ -145,7 +145,10 @@ describe("CursorCanonicalEventPublisher", () => {
 
     await expect(publisher.waitForExecution(routing))
       .rejects.toThrow("canonical sink unavailable");
-    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls.map(([batch]) => batch.events[0]?.payload)).toMatchObject([
+      { item: { payload: { runtimeEvent: { event: { subtype: "first" } } } } },
+      { item: { payload: { runtimeEvent: { event: { subtype: "second" } } } } },
+    ]);
   });
 
   it("uses a new canonical identity when an execution retries", async () => {

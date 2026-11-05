@@ -16,7 +16,7 @@ const STDERR_TAIL_MAX = 48;
 
 /** Supplies provider-owned state changes around the ACP subprocess lifecycle. */
 export interface CursorAcpProcessSpawnerDeps {
-  waitForOutputCapacity?: (threadId: string, signal: AbortSignal) => Promise<void>;
+  waitForOutputCapacity: (threadId: string, signal: AbortSignal) => Promise<void>;
   host: ProviderHostPorts;
   getEnvironment: () => Record<string, string>;
   getSettings: () => Settings;
@@ -71,7 +71,7 @@ export class CursorAcpProcessSpawner {
   ): Promise<CursorSessionState> {
     let entry: CursorSessionState | undefined;
     const runtime = await AcpSessionRuntime.start({
-      waitForOutputCapacity: (signal) => this.deps.waitForOutputCapacity?.(threadId, signal) ?? Promise.resolve(),
+      waitForOutputCapacity: (signal) => this.deps.waitForOutputCapacity(threadId, signal),
       spawnSpec: {
         command: cliPath,
         args: buildCursorAcpArgs({

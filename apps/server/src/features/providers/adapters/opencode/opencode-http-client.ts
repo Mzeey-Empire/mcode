@@ -76,7 +76,7 @@ export interface OpenCodeHttpClient {
   getSessionStatus(endpoint: OpenCodeEndpoint, options?: OpenCodeStatusRequestOptions): Promise<Record<string, { type: string }>>;
   listModels(endpoint: OpenCodeEndpoint): Promise<ProviderModelInfo[]>;
   subscribeEvents(endpoint: OpenCodeEndpoint, signal: AbortSignal, onEnvelope: (envelope: unknown) => void,
-    waitForCapacity?: () => Promise<void>): Promise<void>;
+    waitForCapacity: () => Promise<void>): Promise<void>;
   /**
    * Read one bounded page of upstream session history. The limit is always
    * sent and clamped; there is no unbounded full-history fetch.
@@ -427,7 +427,7 @@ export const defaultOpenCodeHttpClient: OpenCodeHttpClient = {
     checkStatus(res, "subscribe events");
     const reader = res.body?.getReader();
     if (!reader) return;
-    await drainSseStream(reader, onEnvelope, waitForCapacity ?? (() => Promise.resolve()));
+    await drainSseStream(reader, onEnvelope, waitForCapacity);
   },
 
   async listSessionMessages(endpoint, sessionId, options) {

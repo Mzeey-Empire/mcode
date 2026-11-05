@@ -26,8 +26,6 @@ export interface CursorTurnRunnerDeps {
 
 /** Describes one Cursor CLI turn. */
 export interface CursorTurnRunnerOptions {
-  /** Holds stdout reads while saving is behind. */
-  waitForOutputCapacity?: (signal: AbortSignal) => Promise<void>;
   cliPath: string;
   prompt: string;
   cwd: string;
@@ -110,7 +108,6 @@ export async function runCursorTurn(
     let stderrBuffer = "";
     let aborted = false;
     let settled = false;
-    const outputRelease = new AbortController();
 
     const settle = (fn: () => void): void => {
       if (settled) return;
@@ -137,15 +134,14 @@ export async function runCursorTurn(
       );
     });
 
-    const outputTask = (async (): Promise<void> => {
-      if (!child.stdout) return;
-      for await (const chunk of child.stdout) {
-        const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-        processEvents(parser.feed(text));
-        await options.waitForOutputCapacity?.(outputRelease.signal);
-      }
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      processEvents(parser.feed(text));
+    });
+
+    child.stdout?.on("end", () => {
       processEvents(parser.flush());
-    })();
+    });
 
     child.stderr?.on("data", (chunk: Buffer | string) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
@@ -155,10 +151,6 @@ export async function runCursorTurn(
     });
 
     child.once("exit", (code, signal) => {
-      outputRelease.abort();
-      void outputTask.then(() => finishExit(code, signal), (error: unknown) => settle(() => reject(error)));
-    });
-    const finishExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       if (aborted) {
         settle(() => reject(new Error("Cursor turn aborted")));
         return;
@@ -180,12 +172,11 @@ export async function runCursorTurn(
         ? `cursor-agent ${codeStr}: ${stderrTrim}`
         : `cursor-agent ${codeStr}`;
       settle(() => reject(new Error(message)));
-    };
+    });
 
     if (abortSignal) {
       const onAbort = (): void => {
         aborted = true;
-        outputRelease.abort();
         try {
           child.kill("SIGTERM");
         } catch (e) {

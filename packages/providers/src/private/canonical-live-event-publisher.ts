@@ -8,7 +8,6 @@ import { volatileIngestClass, type ProviderEventBatch, type ProviderEventSinkPor
 
 const PAUSE_AT = 256;
 const RESUME_BELOW = 128;
-const CALLBACK_BYTE_BUDGET = 64 * 1024 * 1024;
 /**
  * Native replays arrive close to their original, so dedupe needs only recent identities.
  * A long Claude turn streams one identity per thinking or text delta, far past this window.
@@ -60,6 +59,7 @@ export class CanonicalLiveEventPublisher {
     private readonly sink: ProviderEventSinkPort,
     private readonly onFailure?: (routing: CanonicalLiveEventRouting, error: Error) => void,
     private readonly failureLifetime: "provider" | "execution" = "provider",
+    private readonly byteBudget = Infinity,
   ) {}
 
   /** Waits before pulling more output while this thread's saves are behind. */
@@ -119,15 +119,18 @@ export class CanonicalLiveEventPublisher {
       queue.planCapture = undefined;
     }
     const sourceSequence = queue.nextSourceSequence;
-    queue.nextSourceSequence += 1;
     const draft = this.createDraft(routing, runtimeEvent, sourceIdentities, sourceSequence, typeof native === "string" ? undefined : native);
-    const bytes = this.providerId === "copilot" ? Buffer.byteLength(JSON.stringify(draft)) : 0;
-    if (!this.admitBytes(queue, routing, bytes)) return;
+    const bytes = Number.isFinite(this.byteBudget) ? Buffer.byteLength(JSON.stringify(draft)) : 0;
+    if (!this.admitBytes(queue, routing, bytes, runtimeEvent)) return;
+    queue.nextSourceSequence += 1;
     queue.pendingBytes += bytes;
     this.pendingByThread.set(routing.threadId, (this.pendingByThread.get(routing.threadId) ?? 0) + 1);
     queue.tail = queue.tail
       .then(async () => {
-        if (queue.failure && !this.deliverAfterFailure(runtimeEvent)) return;
+        const delivered = queue.failure && isParentTerminal(runtimeEvent)
+          ? this.createDraft(routing, this.failedTerminal(routing, runtimeEvent, queue.failure),
+            sourceIdentities, sourceSequence, typeof native === "string" ? undefined : native)
+          : draft;
         const receipt = await this.sink.submit({
           threadId: routing.threadId,
           turnId: routing.turnId,
@@ -135,7 +138,7 @@ export class CanonicalLiveEventPublisher {
           batchId: draft.eventId,
           deliveryAttempt: routing.deliveryAttempt,
           phase: "running",
-          events: [draft],
+          events: [delivered],
         });
         if (receipt.commit.outcome === "conflict" || receipt.commit.outcome === "ingest-overflow") {
           throw new Error(`${this.providerId} canonical event was ${receipt.commit.outcome}`);
@@ -157,16 +160,23 @@ export class CanonicalLiveEventPublisher {
     queue.planCapture = undefined;
   }
 
-  private admitBytes(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, bytes: number): boolean {
-    if (this.providerId !== "copilot" || queue.pendingBytes + bytes <= CALLBACK_BYTE_BUDGET) return true;
-    this.fail(queue, routing, Object.assign(new Error("Copilot canonical save backlog exceeded its 64 MiB byte budget"),
-      { code: "CANONICAL_BACKLOG_BYTE_BUDGET" }));
-    logger.error("Copilot canonical save backlog exhausted", { executionId: routing.executionId, pendingBytes: queue.pendingBytes, bytes });
-    return false;
+  private failedTerminal(routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent, failure: Error): ProviderRuntimeEvent {
+    if (runtimeEvent.event.type === AgentEventType.TurnComplete) {
+      // Keep the admitted sequence contiguous without recording a successful completion.
+      return { ...runtimeEvent, event: { type: AgentEventType.System, threadId: routing.threadId,
+        subtype: "canonical_save_failed", message: failure.message.slice(0, 1000) } };
+    }
+    return { ...runtimeEvent, event: { type: AgentEventType.Ended, threadId: routing.threadId,
+      turnExecutionId: routing.executionId, outcome: "errored", reason: failure.message } };
   }
 
-  private deliverAfterFailure(runtimeEvent: ProviderRuntimeEvent): boolean {
-    return this.failureLifetime === "execution" && isParentTerminal(runtimeEvent);
+  private admitBytes(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, bytes: number, runtimeEvent: ProviderRuntimeEvent): boolean {
+    if (isParentTerminal(runtimeEvent)) return true;
+    if (queue.pendingBytes + bytes <= this.byteBudget) return true;
+    this.fail(queue, routing, Object.assign(new Error(`${this.providerId} canonical save backlog exceeded its ${this.byteBudget} byte budget`),
+      { code: "CANONICAL_BACKLOG_BYTE_BUDGET" }));
+    logger.error("Provider canonical save backlog exhausted", { executionId: routing.executionId, pendingBytes: queue.pendingBytes, bytes });
+    return false;
   }
 
   private admit(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent,

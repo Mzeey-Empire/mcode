@@ -309,6 +309,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     const cliPath = await this.resolveCliPath();
     if (!cliPath) return [];
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: {
         command: cliPath,
         args: ["acp"],

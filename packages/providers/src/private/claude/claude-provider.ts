@@ -1835,7 +1835,7 @@ export class ClaudeProvider
     return new ClaudeOwnedProcess(this.host.processes, `Claude ${description}`, (chunk) => {
       tail = (tail + chunk).slice(-STDERR_CAPTURE_LIMIT);
       this.recentStderr.set(description, tail);
-    }, threadId);
+    }, threadId, (signal) => threadId === undefined ? Promise.resolve() : this.canonicalEventPublisher.waitForCapacity(threadId, signal));
   }
 
   private resolveClaudeExecutable(): string | undefined {
@@ -2026,12 +2026,14 @@ export class ClaudeProvider
 
   /** Graceful protocol interrupt: close the prompt queue so the SDK iterator ends. */
   interrupt(state: ClaudeSessionState): void {
+    state.ownedProcess?.releaseOutput();
     this.outputReleases.get(state.query)?.abort();
     state.closeQueue();
   }
 
   /** Releases held output before teardown waits for the SDK to finish. */
   prepareClose(state: ClaudeSessionState): void {
+    state.ownedProcess?.releaseOutput();
     this.outputReleases.get(state.query)?.abort();
   }
 

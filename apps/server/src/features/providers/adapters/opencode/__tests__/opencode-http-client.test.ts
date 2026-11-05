@@ -37,7 +37,7 @@ describe("directory routing", () => {
     await defaultOpenCodeHttpClient.abortSession(endpoint, "ses_1");
     await defaultOpenCodeHttpClient.getSessionStatus(endpoint);
     await defaultOpenCodeHttpClient.listModels(endpoint);
-    await defaultOpenCodeHttpClient.subscribeEvents(endpoint, new AbortController().signal, () => {});
+    await defaultOpenCodeHttpClient.subscribeEvents(endpoint, new AbortController().signal, () => {}, async () => {});
     await defaultOpenCodeHttpClient.listSessionMessages(endpoint, "ses_1", { limit: 5 });
 
     const encoded = "directory=%2Fhome%2FZo%C3%AB%20%C3%91%2Fmy%20repo";
@@ -264,7 +264,7 @@ describe("SSE boundary", () => {
       const properties = event.properties;
       if (!properties || typeof properties !== "object" || Array.isArray(properties) || !("index" in properties)) return;
       if (typeof properties.index === "number") received.push(properties.index);
-    });
+    }, async () => {});
 
     expect(received).toEqual([0, 1, 2, 3]);
   });
@@ -280,7 +280,7 @@ describe("SSE boundary", () => {
     });
     stubFetch(() => ({ ok: true, status: 200, body: stream }) as Response);
     const received: unknown[] = [];
-    await defaultOpenCodeHttpClient.subscribeEvents(ENDPOINT, new AbortController().signal, (event) => received.push(event));
+    await defaultOpenCodeHttpClient.subscribeEvents(ENDPOINT, new AbortController().signal, (event) => received.push(event), async () => {});
     expect(received).toEqual([{ type: "mcode.adapter.oversized-sse-frame", properties: {} }]);
   });
 });

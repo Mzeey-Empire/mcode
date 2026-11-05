@@ -795,6 +795,7 @@ describe("Cursor ACP client-factory session-update seam", () => {
     } as unknown as ClientSideConnection;
 
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: { attach: vi.fn(), terminateTree: vi.fn(async () => undefined) },
       callbacks: {
@@ -911,6 +912,7 @@ describe("Cursor ACP client-factory session-update seam", () => {
         newSession: vi.fn(async () => ({ sessionId: `session-${threadId}` })),
       } as unknown as ClientSideConnection;
       const runtime = await AcpSessionRuntime.start({
+        waitForOutputCapacity: async () => {},
         spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
         processes: { attach: vi.fn(), terminateTree: vi.fn(async () => undefined) },
         callbacks: {

@@ -760,7 +760,9 @@ describe("Copilot public factory", () => {
     }
     async function resumeOnFreshClient(endedBefore: number) {
       sdk.getState.mockReturnValue("connected");
-      const replacement = new FakeSession(); sdk.resume.mockResolvedValueOnce(replacement);
+      const replacement = new FakeSession();
+      replacement.sequence = session.sequence;
+      sdk.resume.mockResolvedValueOnce(replacement);
       await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002", resumeFrom: session.sessionId }));
       replacement.emit({ type: "session.idle", ephemeral: true, data: {} });
       await vi.waitFor(() => expect(projections(sink).filter((event) => event.type === "ended")).toHaveLength(endedBefore + 1));

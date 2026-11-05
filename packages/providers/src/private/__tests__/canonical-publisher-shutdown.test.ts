@@ -152,18 +152,36 @@ describe.each(factories)("$name publisher shutdown", ({ create }) => {
 });
 
 describe("execution-lifetime publisher endings", () => {
+  it.each(["cursor", "devin"] as const)("%s records a failed ending after saving fails", async (id) => {
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockRejectedValueOnce(new Error("disk unavailable")).mockResolvedValue(receipt);
+    const publisher = new CanonicalLiveEventPublisher(id, { submit }, undefined, "execution");
+    publisher.publish(routing, event, []);
+    publisher.publish(routing, providerRuntimeEvent({ type: "turnComplete", threadId: routing.threadId,
+      reason: "end_turn", tokensIn: 0, tokensOut: 0, costUsd: null }), []);
+    publisher.publish(routing, providerRuntimeEvent({ type: "ended", threadId: routing.threadId, outcome: "completed" }), []);
+    await expect(publisher.waitForExecution(routing)).rejects.toThrow("disk unavailable");
+    expect(submit.mock.calls.slice(1).map(([batch]) => batch.events[0]?.payload)).toMatchObject([
+      { item: { payload: { runtimeEvent: { event: { type: "system", subtype: "canonical_save_failed", message: "disk unavailable" } } } } },
+      { item: { payload: { runtimeEvent: { event: { type: "ended", outcome: "errored", reason: "disk unavailable" } } } } },
+    ]);
+    expect(submit.mock.calls.map(([batch]) => batch.events[0]?.sourceSequence)).toEqual([1, 2, 3]);
+  });
   it("fails Copilot explicitly past the byte budget without a count limit", async () => {
     const failure = vi.fn();
     const held = Promise.withResolvers<void>();
-    const publisher = new CanonicalLiveEventPublisher("copilot", { submit: async () => {
+    const saved: number[] = [];
+    const publisher = new CanonicalLiveEventPublisher("copilot", { submit: async (batch) => {
       await held.promise;
+      saved.push(batch.events[0]!.sourceSequence!);
       return receipt;
-    } }, failure, "execution");
+    } }, failure, "execution", 64 * 1024 * 1024);
     const large = providerRuntimeEvent({ type: "textDelta", threadId: routing.threadId, delta: "x".repeat(1024 * 1024) });
     for (let index = 0; index < 65; index++) publisher.publish(routing, large, []);
     expect(failure).toHaveBeenCalledExactlyOnceWith(routing, expect.objectContaining({ code: "CANONICAL_BACKLOG_BYTE_BUDGET" }));
+    publisher.publish(routing, terminal, []);
     held.resolve();
     await expect(publisher.waitForExecution(routing)).rejects.toMatchObject({ code: "CANONICAL_BACKLOG_BYTE_BUDGET" });
+    expect(saved).toEqual(Array.from({ length: 64 }, (_, index) => index + 1));
     await publisher.stopAdmissionAndDrain();
   });
 

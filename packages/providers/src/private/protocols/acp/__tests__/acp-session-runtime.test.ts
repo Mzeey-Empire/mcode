@@ -128,6 +128,7 @@ describe("AcpSessionRuntime", () => {
     } as unknown as ClientSideConnection;
 
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: fakeProcesses(),
       callbacks: {
@@ -180,6 +181,7 @@ describe("AcpSessionRuntime", () => {
       newSession: vi.fn(async () => ({ sessionId: "fresh" })),
     } as unknown as ClientSideConnection;
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: fakeProcesses(),
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
@@ -207,6 +209,7 @@ describe("AcpSessionRuntime", () => {
     } as unknown as ClientSideConnection;
 
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: fakeProcesses(),
       callbacks: {
@@ -252,6 +255,7 @@ describe("AcpSessionRuntime", () => {
       newSession: vi.fn(async () => ({ sessionId: "fresh-after-failure" })),
     } as unknown as ClientSideConnection;
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: fakeProcesses(),
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
@@ -275,6 +279,7 @@ describe("AcpSessionRuntime", () => {
         newSession: vi.fn(async () => ({ sessionId: "fresh-after-timeout" })),
       } as unknown as ClientSideConnection;
       const runtime = await AcpSessionRuntime.start({
+        waitForOutputCapacity: async () => {},
         spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
         processes: fakeProcesses(),
         callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
@@ -300,6 +305,7 @@ describe("AcpSessionRuntime", () => {
       newSession: vi.fn(async () => ({ sessionId: "replacement" })),
     } as unknown as ClientSideConnection;
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: { attach: vi.fn(), terminateTree },
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
@@ -327,6 +333,7 @@ describe("AcpSessionRuntime", () => {
       newSession: vi.fn(async () => ({ sessionId: "unexpected" })),
     } as unknown as ClientSideConnection;
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: fakeProcesses(),
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
@@ -351,6 +358,7 @@ describe("AcpSessionRuntime", () => {
       newSession: vi.fn(async () => ({ sessionId: "unexpected" })),
     } as unknown as ClientSideConnection;
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: fakeProcesses(),
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
@@ -376,6 +384,7 @@ describe("AcpSessionRuntime", () => {
       newSession: vi.fn(async () => ({ sessionId: "replacement" })),
     } as unknown as ClientSideConnection;
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: { attach: vi.fn(), terminateTree },
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
@@ -403,6 +412,7 @@ describe("AcpSessionRuntime", () => {
         newSession: vi.fn(async () => ({ sessionId: "replacement" })),
       } as unknown as ClientSideConnection;
       const runtime = await AcpSessionRuntime.start({
+        waitForOutputCapacity: async () => {},
         spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
         processes: { attach: vi.fn(), terminateTree },
         callbacks: {
@@ -450,6 +460,7 @@ describe("AcpSessionRuntime", () => {
       initialize: vi.fn(async () => { throw new Error("handshake failed"); }),
     } as unknown as ClientSideConnection;
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: { attach: vi.fn(), terminateTree },
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
@@ -465,6 +476,7 @@ describe("AcpSessionRuntime", () => {
     let client!: Client;
     const updates: SessionNotification[] = [];
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: fakeProcesses(),
       callbacks: {
@@ -502,6 +514,7 @@ describe("AcpSessionRuntime", () => {
 
   it("rejects malformed nested capabilities during initialization", async () => {
     const runtime = await AcpSessionRuntime.start({
+      waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
       processes: fakeProcesses(),
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },

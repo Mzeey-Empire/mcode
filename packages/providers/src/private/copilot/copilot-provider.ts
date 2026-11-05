@@ -84,7 +84,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       const state = this.runtime.states().find((entry) => entry.request.turnExecutionId === routing.executionId);
       state?.turn?.settle("failed", error);
       if (state?.turn) state.turn.abortTask ??= state.session.abort();
-    }, "execution");
+    }, "execution", 64 * 1024 * 1024);
   }
 
   /** Starts a native turn with the current standard controls and exact Mcode routing. */

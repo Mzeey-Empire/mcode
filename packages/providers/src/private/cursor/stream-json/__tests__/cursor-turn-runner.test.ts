@@ -224,26 +224,6 @@ function ndjson(...events: unknown[]): string {
 }
 
 describe("runCursorTurn", () => {
-  it("releases paused stdout on exit and reads the real result after the tail", async () => {
-    const harness = fakeSpawn();
-    const paused = Promise.withResolvers<void>();
-    const promise = runCursorTurn({
-      cliPath: "agent", prompt: "x", cwd: "/work", threadId: "t1", permissionMode: "default", chatId: null,
-      waitForOutputCapacity: (signal) => {
-        paused.resolve();
-        if (signal.aborted) return Promise.resolve();
-        return new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
-      },
-    }, () => {}, createCursorTodoSnapshot(), undefined, { spawn: harness.spawn });
-    harness.child.stdout.write(ndjson({ type: "assistant", timestamp_ms: 1,
-      message: { role: "assistant", content: [{ type: "text", text: "head" }] } }));
-    await paused.promise;
-    harness.child.stdout.end(ndjson({ type: "assistant", timestamp_ms: 2,
-      message: { role: "assistant", content: [{ type: "text", text: "tail" }] } }, { type: "result", subtype: "success" }));
-    harness.child.emit("exit", 0, null);
-    expect(await promise).toMatchObject({ assistantText: "headtail", resultSubtype: "success" });
-  });
-
   it("invokes spawn with the configured cliPath and the built args", async () => {
     const harness = fakeSpawn();
     const onEvent = vi.fn();
