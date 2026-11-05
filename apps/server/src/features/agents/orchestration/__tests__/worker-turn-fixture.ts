@@ -65,7 +65,10 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
   await workers.whenReady();
   const sent: TurnRequest[] = [];
   const fenced = new Set<string>();
+  const discarded = new Set<string>();
   const pending = new Set<Promise<void>>();
+  let deliveryHold: Promise<void> | undefined;
+  let delivered = 0;
   const canonicalEvents: CanonicalAgentEventEnvelope[] = [];
   function drain(): Promise<void> {
     return Promise.all(pending).then(() => undefined);
@@ -82,8 +85,10 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
     shutdown: () => undefined,
     listModels: async () => [],
     setCanonicalTurnDeliveryFailureHandler: () => undefined,
-    fenceCanonicalTurnEvents: async (routing: { executionId: string }) => {
+    // Like the Codex publisher, a discarding fence drops deliveries that have not started yet.
+    fenceCanonicalTurnEvents: async (routing: { executionId: string }, options?: { discardQueued?: boolean }) => {
       fenced.add(routing.executionId);
+      if (options?.discardQueued) discarded.add(routing.executionId);
       await drain();
     },
     retireCanonicalTurnEvents: async (routing: { executionId: string }) => {
@@ -134,6 +139,10 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
   async function submit(event: AgentEvent, extension?: ProviderRuntimeEvent["extension"], planCapture?: ProviderRuntimeEvent["planCapture"]): Promise<void> {
     const executionId = event.turnExecutionId;
     if (!executionId) throw new Error("Worker fixture event needs an execution identity");
+    if (deliveryHold) {
+      await deliveryHold;
+      if (discarded.has(executionId)) return;
+    }
     const owned = workers.owner.current(event.threadId);
     if (!owned || owned.execution.executionId !== executionId) {
       throw new Error("Worker fixture event has no execution owner");
@@ -143,7 +152,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
     const itemId = "fixture:" + executionId + ":item:" + sequence;
     const eventId = "fixture:" + executionId + ":event:" + sequence;
     const now = new Date().toISOString();
-    await host.events.submit({
+    const delivery = host.events.submit({
       ...routing, executionId: routing.executionId, batchId: eventId, phase: "running",
       events: [{
         eventId, sourceProviderId: provider.id, sourceIdentities: [], sourceSequence: sequence,
@@ -157,6 +166,8 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
         } },
       }],
     });
+    await delivery;
+    delivered += 1;
     await progress.waitForSaved(event.threadId);
   }
   function emit(event: AgentEvent, extension?: ProviderRuntimeEvent["extension"], planCapture?: ProviderRuntimeEvent["planCapture"]): Promise<void> {
@@ -165,6 +176,12 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
     pending.add(task);
     void task.then(() => pending.delete(task), () => pending.delete(task));
     return task;
+  }
+  /** Holds deliveries that have not started, as a busy event sink does, until the returned release runs. */
+  function holdDeliveries(): () => void {
+    let release!: () => void;
+    deliveryHold = new Promise<void>((resolve) => { release = resolve; });
+    return () => { deliveryHold = undefined; release(); };
   }
   function assistant() {
     return messages.listByThread(thread.id, 100).messages.filter((message) => message.role === "assistant").at(-1);
@@ -201,6 +218,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
     diffs: container.resolve(TurnDiffService), directory, writer, db, workers, service, thread,
     workspace, provider, providerRegistry, sent, host, threads, messages, tools, thoughts, hooks,
     canonical: container.resolve(CanonicalAgentBoundary), canonicalEvents, published, emit, drain, stop, assistant, close,
+    holdDeliveries, deliveredCount: () => delivered,
   };
 }
 

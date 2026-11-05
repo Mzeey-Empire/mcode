@@ -828,7 +828,7 @@ export class CanonicalAcceptedProgress {
   /** Release the temporary admission fence after the caller's durable deletion attempt finishes. */
   finishThreadDeletion(threadId: string): void { this.deletingThreads.delete(threadId); }
 
-  /** Stop admission before waiting for the single active storage write. */
+  /** Stop admission, then write every accepted save still queued. */
   async close(): Promise<void> {
     this.closing = true;
     const error = new Error("Accepted progress is closing before the durable command completed");

@@ -33,6 +33,8 @@ export class AcceptedSaveScheduler<WriteIntent> {
   private readonly pausedThreads = new Set<string>();
   private wake: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
+  /** Admission is closed while `close` writes the remaining queue. */
+  private closing = false;
   private readonly observerFailures = new Map<string, Error>();
 
   constructor(private readonly options: {
@@ -52,7 +54,7 @@ export class AcceptedSaveScheduler<WriteIntent> {
 
   /** The owner has already reserved retention; enqueue never duplicates its bytes. */
   enqueue(batch: AcceptedProgressBatch<WriteIntent>): void {
-    if (this.stopped) throw new Error("Accepted save scheduler is closed");
+    if (this.closing) throw new Error("Accepted save scheduler is closed");
     const threadId = batch.execution.threadId;
     const queue = this.queues.get(threadId);
     if (queue?.some((entry) => entry.batch.operationId === batch.operationId)) {
@@ -67,7 +69,7 @@ export class AcceptedSaveScheduler<WriteIntent> {
   /** Try a failed or exhausted head now, with the same operation identity and immutable contents. */
   retry(threadId: string): boolean {
     const head = this.queues.get(threadId)?.[0];
-    if (!head || !(head.failed || head.exhausted) || this.stopped) return false;
+    if (!head || !(head.failed || head.exhausted) || this.closing) return false;
     head.failed = false;
     head.exhausted = false;
     head.attempts = 0;
@@ -95,11 +97,19 @@ export class AcceptedSaveScheduler<WriteIntent> {
     if (failure) throw failure;
   }
 
-  /** Stops dispatch after the current acknowledged write, preserving owner retention. */
+  /**
+   * Stops admission, then writes every queued save, waiting out transient retries. Accepted output is already
+   * on screen, so dropping the queue here would lose it. A failed or exhausted head stays retained by its owner,
+   * which has reported it.
+   */
   async close(): Promise<void> {
+    this.closing = true;
+    while (this.inFlight || this.retryableHeads().length > 0) {
+      this.schedule();
+      await (this.inFlight ?? this.untilNextRetry());
+    }
     this.stopped = true;
     if (this.wake) clearTimeout(this.wake);
-    await this.inFlight;
     const failure = this.observerFailures.values().next().value;
     if (failure) throw failure;
   }
@@ -142,6 +152,18 @@ export class AcceptedSaveScheduler<WriteIntent> {
       this.ready.push(threadId);
     }
     return undefined;
+  }
+
+  private retryableHeads(): PendingSave<WriteIntent>[] {
+    return [...this.queues].flatMap(([id, queue]) => {
+      const head = queue[0];
+      return head && !this.pausedThreads.has(id) && !head.failed && !head.exhausted ? [head] : [];
+    });
+  }
+
+  private untilNextRetry(): Promise<void> {
+    const retryAt = Math.min(...this.retryableHeads().map((head) => head.retryAt));
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, retryAt - Date.now())));
   }
 
   private runnable(): boolean {

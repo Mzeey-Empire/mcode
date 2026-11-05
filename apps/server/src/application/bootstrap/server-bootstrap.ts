@@ -175,6 +175,8 @@ import {
   EXPLICIT_SHUTDOWN_DEADLINE_MS,
   type ShutdownCoordinator,
 } from "../../runtime/lifecycle/shutdown-coordinator.js";
+import { runShutdownPhases } from "../../runtime/lifecycle/shutdown-phases.js";
+import { SHUTDOWN_PERSISTENCE_START_MS } from "@mcode/shared/node/shutdown-deadlines";
 import type { Database } from "bun:sqlite";
 import type { JobObject } from "../../runtime/process/containment/job-object.js";
 import { resolveWebAutomationFlag } from "../../runtime/startup/startup-policy.js";
@@ -1190,40 +1192,6 @@ await bootstrapServer();
  * Awaits server close handshakes so in-flight connections drain cleanly.
  */
 async function shutdown(): Promise<void> {
-  shutdownCoordinator.setPhase("begin shutdown");
-  logger.info("Shutdown initiated");
-  coordinatorWakeReady = false;
-  stopObservingWakeTasks();
-  stopObservingWakeTurns();
-  stopObservingWakeReleases();
-  await coordinatorWake.dispose();
-
-  // Disarm the grace-period controller so its timer does not fire after
-  // an externally-triggered shutdown (e.g. SIGTERM).
-  graceController?.dispose();
-  graceController = null;
-
-  shutdownCoordinator.setPhase("drain admitted transport work");
-  await stopAdmissionAndDrain();
-  await turnResumeScheduler.shutdown();
-
-  // 0. Close the MessagePort stream transport
-  shutdownCoordinator.setPhase("detach message transport");
-  portPush.detach();
-
-  // Close IPC push server
-  shutdownCoordinator.setPhase("close IPC push server");
-  await ipcServer.close();
-
-  shutdownCoordinator.setPhase("close external thread-control runtime");
-  await externalThreadControlMcpRuntime.close();
-  shutdownCoordinator.setPhase("close mcode MCP server");
-  await mcodeMcpServer.close();
-
-  removeIpcSocket(ipcPath, hostRuntime.platform);
-
-  // 1. Stop all agent sessions. The provider owns the terminal outcome.
-  shutdownCoordinator.setPhase("stop agent sessions");
   let shutdownFailure: unknown = null;
   const captureCleanupFailure = async (cleanup: () => Promise<void> | void): Promise<void> => {
     try {
@@ -1232,65 +1200,108 @@ async function shutdown(): Promise<void> {
       shutdownFailure ??= error;
     }
   };
-  threadAutoCompleteService.dispose();
-  await captureCleanupFailure(() => agentService.stopAll());
 
-  settingsService.dispose();
-  shutdownCoordinator.setPhase("drain provider catalogs");
-  await captureCleanupFailure(() => modelCacheService.close());
-  await captureCleanupFailure(() => providerCatalogService.close());
+  await runShutdownPhases({
+    stopServices: async () => {
+      shutdownCoordinator.setPhase("begin shutdown");
+      logger.info("Shutdown initiated");
+      coordinatorWakeReady = false;
+      stopObservingWakeTasks();
+      stopObservingWakeTurns();
+      stopObservingWakeReleases();
+      await coordinatorWake.dispose();
 
-  // 2. Shutdown provider registry
-  shutdownCoordinator.setPhase("shutdown providers");
-  await captureCleanupFailure(() => providerRegistry.shutdown());
-  shutdownCoordinator.setPhase("shutdown provider event workers");
-  await captureCleanupFailure(() => providerEventIngress.stopAdmissionAndDrain());
-  browserAutomationBroker.shutdown();
-  browserAutomationSessionLease.shutdown();
+      // Disarm the grace-period controller so its timer does not fire after
+      // an externally-triggered shutdown (e.g. SIGTERM).
+      graceController?.dispose();
+      graceController = null;
 
-  // 6. Contain Project command sessions before their Terminal dependency shuts down.
-  shutdownCoordinator.setPhase("shutdown Project commands");
-  await captureCleanupFailure(() => settleActionObserver.stop());
-  await captureCleanupFailure(() => projectActionService.dispose());
-  await captureCleanupFailure(() => workspaceEnvironmentService.dispose());
+      shutdownCoordinator.setPhase("drain admitted transport work");
+      await stopAdmissionAndDrain();
+      await turnResumeScheduler.shutdown();
 
-  // 7. Shutdown terminal service — enable graceful signal ladder for this path only
-  shutdownCoordinator.setPhase("shutdown terminal service");
-  terminalService.setGracefulKill(true);
-  await captureCleanupFailure(() => terminalService.shutdown());
+      // 0. Close the MessagePort stream transport
+      shutdownCoordinator.setPhase("detach message transport");
+      portPush.detach();
 
-  // 8. Dispose all git HEAD file watchers
-  await captureCleanupFailure(() => gitWatcherService.dispose());
+      // Close IPC push server
+      shutdownCoordinator.setPhase("close IPC push server");
+      await ipcServer.close();
 
-  // 8a. Stop all skill / plugin directory watchers
-  await captureCleanupFailure(() => skillWatcherService.stopAll());
+      shutdownCoordinator.setPhase("close external thread-control runtime");
+      await externalThreadControlMcpRuntime.close();
+      shutdownCoordinator.setPhase("close mcode MCP server");
+      await mcodeMcpServer.close();
 
-  // 9. Dispose memory pressure timers
-  await captureCleanupFailure(() => memoryPressureService.dispose());
+      removeIpcSocket(ipcPath, hostRuntime.platform);
 
-  // 9a. Dispose cleanup worker
-  shutdownCoordinator.setPhase("shutdown cleanup worker");
-  await captureCleanupFailure(() => cleanupWorker.shutdown());
-  await captureCleanupFailure(() => threadCompletionService.shutdown());
+      // 1. Stop all agent sessions. The provider owns the terminal outcome.
+      shutdownCoordinator.setPhase("stop agent sessions");
+      threadAutoCompleteService.dispose();
+      await captureCleanupFailure(() => agentService.stopAll());
 
-  // 9b. Dispose CI check watcher timers and in-flight GitHub CLI children
-  shutdownCoordinator.setPhase("shutdown CI watcher");
-  await captureCleanupFailure(() => ciWatcherService.dispose());
+      settingsService.dispose();
+      shutdownCoordinator.setPhase("drain provider catalogs");
+      await captureCleanupFailure(() => modelCacheService.close());
+      await captureCleanupFailure(() => providerCatalogService.close());
 
-  shutdownCoordinator.setPhase("drain terminal persistence and execution workers");
-  await captureCleanupFailure(() => snapshotRefPins.drain());
-  await captureCleanupFailure(() => container.resolve(AgentEventPublicationRegistry).drain());
-  await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
-  // Turns are drained, so no further turn facts arrive; finish startup writes before the writer closes.
-  await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
-  await captureCleanupFailure(() => planImplementStartupObserver.stop());
-  stopObservingSubagentRosters();
-  stopObservingDelegatedRosters();
-  stopObservingDelegatedStartups();
-  stopObservingDelegatedTurns();
-  stopObservingDelegatedAttention();
-  shutdownCoordinator.setPhase("close application database writer");
-  await captureCleanupFailure(() => databaseWriter.close());
+      // 2. Shutdown provider registry
+      shutdownCoordinator.setPhase("shutdown providers");
+      await captureCleanupFailure(() => providerRegistry.shutdown());
+      shutdownCoordinator.setPhase("shutdown provider event workers");
+      await captureCleanupFailure(() => providerEventIngress.stopAdmissionAndDrain());
+      browserAutomationBroker.shutdown();
+      browserAutomationSessionLease.shutdown();
+
+      // 6. Contain Project command sessions before their Terminal dependency shuts down.
+      shutdownCoordinator.setPhase("shutdown Project commands");
+      await captureCleanupFailure(() => settleActionObserver.stop());
+      await captureCleanupFailure(() => projectActionService.dispose());
+      await captureCleanupFailure(() => workspaceEnvironmentService.dispose());
+
+      // 7. Shutdown terminal service — enable graceful signal ladder for this path only
+      shutdownCoordinator.setPhase("shutdown terminal service");
+      terminalService.setGracefulKill(true);
+      await captureCleanupFailure(() => terminalService.shutdown());
+
+      // 8. Dispose all git HEAD file watchers
+      await captureCleanupFailure(() => gitWatcherService.dispose());
+
+      // 8a. Stop all skill / plugin directory watchers
+      await captureCleanupFailure(() => skillWatcherService.stopAll());
+
+      // 9. Dispose memory pressure timers
+      await captureCleanupFailure(() => memoryPressureService.dispose());
+
+      // 9a. Dispose cleanup worker
+      shutdownCoordinator.setPhase("shutdown cleanup worker");
+      await captureCleanupFailure(() => cleanupWorker.shutdown());
+      await captureCleanupFailure(() => threadCompletionService.shutdown());
+
+      // 9b. Dispose CI check watcher timers and in-flight GitHub CLI children
+      shutdownCoordinator.setPhase("shutdown CI watcher");
+      await captureCleanupFailure(() => ciWatcherService.dispose());
+    },
+    persist: async () => {
+      shutdownCoordinator.setPhase("drain terminal persistence and execution workers");
+      await captureCleanupFailure(() => snapshotRefPins.drain());
+      await captureCleanupFailure(() => container.resolve(AgentEventPublicationRegistry).drain());
+      await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
+      // Turns are drained, so no further turn facts arrive; finish startup writes before the writer closes.
+      await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
+      await captureCleanupFailure(() => planImplementStartupObserver.stop());
+      stopObservingSubagentRosters();
+      stopObservingDelegatedRosters();
+      stopObservingDelegatedStartups();
+      stopObservingDelegatedTurns();
+      stopObservingDelegatedAttention();
+      shutdownCoordinator.setPhase("close application database writer");
+      await captureCleanupFailure(() => databaseWriter.close());
+    },
+    onServicesOverrun: () => logger.error("Shutdown phase overran; saving turn output before the watchdog", {
+      phase: shutdownCoordinator.getPhase(), persistenceStartMs: SHUTDOWN_PERSISTENCE_START_MS,
+    }),
+  });
 
   // 9. Close all WebSocket clients and shut down the WS server
   closeWebSocketClients(wss.clients);
