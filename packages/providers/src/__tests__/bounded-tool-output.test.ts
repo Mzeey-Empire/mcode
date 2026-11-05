@@ -8,6 +8,7 @@ import {
   boundToolOutput,
   pruneStaleToolOutputArtifacts,
   resolveToolOutputArtifactPath,
+  toolOutputWireBytes,
 } from "@mcode/providers";
 
 describe("bounded tool output", () => {
@@ -63,10 +64,146 @@ describe("bounded tool output", () => {
 
     expect(result.outputTruncated).toBe(true);
     expect(result.outputTotalBytes).toBe(Buffer.byteLength(fullOutput, "utf8"));
-    expect(Buffer.byteLength(result.output, "utf8")).toBe(TOOL_OUTPUT_PREVIEW_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(result.output), "utf8") - 2).toBe(TOOL_OUTPUT_PREVIEW_BYTES);
     expect(result.output.startsWith("A".repeat(1024))).toBe(true);
     expect(result.output.endsWith("Z".repeat(1024))).toBe(true);
     expect(NodeFS.readFileSync(result.outputArtifactPath!, "utf8")).toBe(fullOutput);
+  });
+
+  it("preserves split surrogate pairs across artifact flushes", () => {
+    const buffer = new BoundedToolOutputBuffer("thread-1", "split-surrogates", {
+      forceArtifact: true,
+    });
+    const prefix = "x".repeat(64 * 1024 - 3);
+    const input = `${prefix}😀`.repeat(3);
+
+    for (let index = 0; index < 3; index++) {
+      buffer.append(`${prefix}\uD83D`);
+      buffer.append("\uDE00");
+    }
+    const result = buffer.finalize();
+
+    expect(result.outputTruncated).toBe(true);
+    expect(NodeFS.readFileSync(result.outputArtifactPath!, "utf8") === input).toBe(true);
+    expect(result.outputTotalBytes).toBe(Buffer.byteLength(input));
+  });
+
+  it("counts split pairs as four wire bytes at the preview limit", () => {
+    const buffer = new BoundedToolOutputBuffer("thread-1", "split-wire-limit");
+    const prefix = "x".repeat(TOOL_OUTPUT_PREVIEW_BYTES - 4);
+    buffer.append(prefix + "\ud83d");
+    buffer.append("");
+    buffer.append("\ude00");
+
+    expect(buffer.finalize()).toEqual({
+      output: prefix + "😀",
+      outputTruncated: false,
+      outputTotalBytes: TOOL_OUTPUT_PREVIEW_BYTES,
+    });
+  });
+
+  it("finalizes a lone high surrogate before considering fallback", () => {
+    const buffer = new BoundedToolOutputBuffer("thread-1", "lone-surrogate");
+    buffer.append("\ud83d");
+
+    expect(buffer.finalize("fallback")).toEqual({
+      output: "\ud83d",
+      outputTruncated: false,
+      outputTotalBytes: 3,
+    });
+  });
+
+  it("saves a lone high surrogate at the end of a fallback", () => {
+    const buffer = new BoundedToolOutputBuffer("thread-1", "fallback-surrogate");
+
+    expect(buffer.finalize("\ud83d")).toEqual({
+      output: "\ud83d",
+      outputTruncated: false,
+      outputTotalBytes: 3,
+    });
+  });
+
+  it("discards a pending high surrogate when replacing output", () => {
+    const buffer = new BoundedToolOutputBuffer("thread-1", "replace-surrogate");
+    buffer.append("old\ud83d");
+    buffer.replaceWith("new😀");
+
+    expect(buffer.finalize()).toEqual({
+      output: "new😀",
+      outputTruncated: false,
+      outputTotalBytes: 7,
+    });
+  });
+
+  it("bounds JSON escapes while preserving raw full-output bytes", () => {
+    const output = "\u0001".repeat(100_000);
+    const result = boundToolOutput({ threadId: "thread-1", toolCallId: "controls", output });
+
+    expect(result.outputTruncated).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(result.output)) - 2).toBeLessThanOrEqual(TOOL_OUTPUT_PREVIEW_BYTES);
+    expect(result.outputTotalBytes).toBe(100_000);
+    expect(NodeFS.readFileSync(result.outputArtifactPath!, "utf8")).toBe(output);
+  });
+
+  it("keeps an escaped character that exceeds the remaining head capacity", () => {
+    const output = "a".repeat(96 * 1024 - 1) + "\n" + "b".repeat(32 * 1024 - 1);
+    const result = boundToolOutput({ threadId: "thread-1", toolCallId: "head-boundary", output });
+
+    expect(result.output === output).toBe(true);
+    expect(result.outputTruncated).toBe(false);
+  });
+
+  it("seeds the artifact losslessly after an escaped head boundary", () => {
+    const head = "a".repeat(96 * 1024 - 1);
+    const tail = "\n" + "b".repeat(32 * 1024 - 1);
+    const buffer = new BoundedToolOutputBuffer("thread-1", "stream-boundary");
+    buffer.append(head);
+    buffer.append(tail);
+    buffer.append("c");
+    const result = buffer.finalize();
+
+    expect(result.outputTruncated).toBe(true);
+    expect(NodeFS.readFileSync(result.outputArtifactPath!, "utf8") === head + tail + "c").toBe(true);
+  });
+
+  it("retains a lone surrogate at the tail boundary without splitting an emoji", () => {
+    const head = "a".repeat(96 * 1024 - 1);
+    const tail = "\ud800😀" + "b".repeat(32 * 1024 - 9);
+    const result = boundToolOutput({
+      threadId: "thread-1",
+      toolCallId: "surrogate-boundary",
+      output: head + "\n" + tail,
+    });
+
+    expect(toolOutputWireBytes(result.output)).toBeLessThanOrEqual(TOOL_OUTPUT_PREVIEW_BYTES);
+    expect(result.output === head + tail).toBe(true);
+    expect(result.output.replace("\ud800", "").isWellFormed()).toBe(true);
+  });
+
+  it("preserves deterministic mixed outputs around the wire budget", () => {
+    let seed = 2468;
+    const characters = ["a", "é", "中", "\n", '"', "\\", "\u0001", "\b", "\f", "\r", "\t", "😀"];
+    const fragment = Array.from({ length: 128 }, () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return characters[seed % characters.length];
+    }).join("");
+    const fragmentBytes = Buffer.byteLength(JSON.stringify(fragment), "utf8") - 2;
+
+    for (const size of [64, 96 * 1024, TOOL_OUTPUT_PREVIEW_BYTES - 1, TOOL_OUTPUT_PREVIEW_BYTES, TOOL_OUTPUT_PREVIEW_BYTES + 1, TOOL_OUTPUT_PREVIEW_BYTES + 7]) {
+      const head = size > 96 * 1024 ? "a".repeat(96 * 1024 - 1) + "\n" : "";
+      const remaining = size - (Buffer.byteLength(JSON.stringify(head), "utf8") - 2);
+      const repeats = Math.floor(remaining / fragmentBytes);
+      const output = head + fragment.repeat(repeats) + "b".repeat(remaining - repeats * fragmentBytes);
+      const result = boundToolOutput({ threadId: "thread-1", toolCallId: `generated-${size}`, output });
+
+      expect(result.outputTruncated).toBe(size > TOOL_OUTPUT_PREVIEW_BYTES);
+      if (!result.outputTruncated) {
+        expect(result.output === output).toBe(true);
+      } else {
+        expect(NodeFS.readFileSync(result.outputArtifactPath!, "utf8") === output).toBe(true);
+        expect(toolOutputWireBytes(result.output)).toBeLessThanOrEqual(TOOL_OUTPUT_PREVIEW_BYTES);
+      }
+    }
   });
 
   it("sanitizes artifact path segments", () => {
@@ -106,7 +243,7 @@ describe("bounded tool output", () => {
     const result = buffer.finalize();
 
     expect(result.outputTruncated).toBe(true);
-    expect(result.output.endsWith("Z".repeat(64 * 1024))).toBe(true);
+    expect(result.output.endsWith("Z".repeat(32 * 1024))).toBe(true);
     expect(result.output.includes("M".repeat(1024))).toBe(false);
   });
 

@@ -1,15 +1,27 @@
 import type { AcceptedProgressBatch, ProgressSaveFailure, SavedProgressReceipt } from "../execution/thread-progress-types.js";
+import type { SaveFailureClass } from "./accepted-save-failure.js";
+
+/** Background retries of an exhausted save never wait longer than this between attempts. */
+const MAX_EXHAUSTED_RETRY_DELAY_MS = 30_000;
+/** Background retries start no faster than this, so a zero retry delay cannot spin the writer. */
+const MIN_EXHAUSTED_RETRY_DELAY_MS = 1_000;
 
 /** Storage replies certify commits and cannot release a renderer effect. */
 export interface AcceptedProgressWriter<WriteIntent> {
-  append(batch: AcceptedProgressBatch<WriteIntent>): Promise<SavedProgressReceipt>;
+  /** `replacing` is the content rejection of this batch; when set, save its replacement form instead. */
+  append(batch: AcceptedProgressBatch<WriteIntent>, replacing?: Error): Promise<SavedProgressReceipt>;
 }
 
 interface PendingSave<WriteIntent> {
   readonly batch: AcceptedProgressBatch<WriteIntent>;
   attempts: number;
   retryAt: number;
+  /** A receipt observer failed; only an explicit retry may run this head again. */
   failed: boolean;
+  /** Reported as exhausted; the head keeps retrying in the background with capped backoff. */
+  exhausted: boolean;
+  backoffs: number;
+  replacing?: Error;
 }
 
 /** A shared writer runs one batch per ready thread before returning to a busy thread. */
@@ -27,7 +39,7 @@ export class AcceptedSaveScheduler<WriteIntent> {
     readonly writer: AcceptedProgressWriter<WriteIntent>;
     readonly maxAttempts: number;
     readonly retryDelayMs: number;
-    readonly retryable: (error: Error) => boolean;
+    readonly classify: (error: Error) => SaveFailureClass;
     readonly onSaved: (batch: AcceptedProgressBatch<WriteIntent>, receipt: SavedProgressReceipt) => Promise<void>;
     readonly onFailure: (batch: AcceptedProgressBatch<WriteIntent>, failure: ProgressSaveFailure) => Promise<void>;
     readonly onObserverError?: (batch: AcceptedProgressBatch<WriteIntent>, error: Error) => void;
@@ -46,18 +58,20 @@ export class AcceptedSaveScheduler<WriteIntent> {
     if (queue?.some((entry) => entry.batch.operationId === batch.operationId)) {
       throw new Error("Accepted save operation was enqueued twice");
     }
-    const pending = { batch, attempts: 0, retryAt: 0, failed: false };
+    const pending: PendingSave<WriteIntent> = { batch, attempts: 0, retryAt: 0, failed: false, exhausted: false, backoffs: 0 };
     if (queue) queue.push(pending);
     else { this.queues.set(threadId, [pending]); this.ready.push(threadId); }
     this.schedule();
   }
 
-  /** An explicit retry retains the same operation identity and immutable contents. */
+  /** Try a failed or exhausted head now, with the same operation identity and immutable contents. */
   retry(threadId: string): boolean {
     const head = this.queues.get(threadId)?.[0];
-    if (!head?.failed || this.stopped) return false;
+    if (!head || !(head.failed || head.exhausted) || this.stopped) return false;
     head.failed = false;
+    head.exhausted = false;
     head.attempts = 0;
+    head.backoffs = 0;
     head.retryAt = 0;
     this.observerFailures.delete(threadId);
     this.schedule();
@@ -71,7 +85,7 @@ export class AcceptedSaveScheduler<WriteIntent> {
       threads: this.queues.size, inFlight: this.inFlight !== undefined };
   }
 
-  /** Wait for currently runnable work; a failed tail remains retained by its owner. */
+  /** Wait for currently runnable work; a failed or exhausted tail remains retained by its owner. */
   async settle(): Promise<void> {
     while (this.inFlight || this.runnable()) {
       this.schedule();
@@ -131,19 +145,17 @@ export class AcceptedSaveScheduler<WriteIntent> {
   }
 
   private runnable(): boolean {
-    return [...this.queues].some(([id, queue]) => !this.pausedThreads.has(id) && queue[0] && !queue[0].failed && queue[0].retryAt <= Date.now());
+    return [...this.queues].some(([id, queue]) => !this.pausedThreads.has(id) && queue[0] && !queue[0].failed
+      && !queue[0].exhausted && queue[0].retryAt <= Date.now());
   }
 
   private async save(pending: PendingSave<WriteIntent>): Promise<void> {
     pending.attempts += 1;
     let receipt: SavedProgressReceipt;
     try {
-      receipt = await this.options.writer.append(pending.batch);
+      receipt = await this.options.writer.append(pending.batch, pending.replacing);
     } catch (cause) {
-      const error = cause instanceof Error ? cause : new Error("Accepted progress write failed", { cause });
-      pending.failed = pending.attempts >= this.options.maxAttempts || !this.options.retryable(error);
-      pending.retryAt = Date.now() + this.options.retryDelayMs;
-      await this.options.onFailure(pending.batch, { operationId: pending.batch.operationId, error, exhausted: pending.failed });
+      await this.recordWriteFailure(pending, cause instanceof Error ? cause : new Error("Accepted progress write failed", { cause }));
       return;
     }
     // Receipt handling failure is observable, but it is not a failed disk commit.
@@ -157,6 +169,28 @@ export class AcceptedSaveScheduler<WriteIntent> {
       const readyIndex = this.ready.indexOf(threadId);
       if (readyIndex >= 0) this.ready.splice(readyIndex, 1);
     }
+  }
+
+  private async recordWriteFailure(pending: PendingSave<WriteIntent>, error: Error): Promise<void> {
+    const failure = this.options.classify(error);
+    if (failure === "content" && !pending.replacing) {
+      // The rejected contents never become valid, so the replacement goes next instead of retrying them.
+      pending.replacing = error;
+      pending.attempts = 0;
+      pending.retryAt = 0;
+      return;
+    }
+    // A rejected replacement means the events themselves cannot be saved, so it is treated like the environment.
+    pending.exhausted ||= failure !== "transient" || pending.attempts >= this.options.maxAttempts;
+    pending.retryAt = Date.now() + (pending.exhausted ? this.exhaustedRetryDelay(pending) : this.options.retryDelayMs);
+    await this.options.onFailure(pending.batch, { operationId: pending.batch.operationId, error, exhausted: pending.exhausted });
+  }
+
+  private exhaustedRetryDelay(pending: PendingSave<WriteIntent>): number {
+    const base = Math.max(this.options.retryDelayMs, MIN_EXHAUSTED_RETRY_DELAY_MS);
+    const delay = Math.min(MAX_EXHAUSTED_RETRY_DELAY_MS, base * 2 ** pending.backoffs);
+    if (delay < MAX_EXHAUSTED_RETRY_DELAY_MS) pending.backoffs += 1;
+    return delay;
   }
 
   private recordObserverFailure(pending: PendingSave<WriteIntent>, cause: unknown): void {

@@ -35,6 +35,8 @@ export interface SavedProgressReceipt {
   readonly predecessor: ThreadProgressPosition;
   readonly through: ThreadProgressPosition;
   readonly durableRevision: number;
+  /** Set when the writer saved the events without the contents it rejected. */
+  readonly replaced?: { readonly reason: string };
 }
 
 /** Saving health never changes the execution's provider outcome. */

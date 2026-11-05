@@ -109,6 +109,8 @@ const AGENT_EVENT_REDUCERS: Record<AgentEventType, AgentEventReducer> = {
     reduceIngestOverflow(state, event as AgentEventFor<"ingest.overflow">, acceptedInputState),
   "ingest.volatile-truncated": (state, _event, acceptedInputState) =>
     reduceVolatileTruncation(state, acceptedInputState),
+  "ingest.content-replaced": (state, _event, acceptedInputState) =>
+    reduceVolatileTruncation(state, acceptedInputState),
   "item.recorded": (state, event, acceptedInputState) =>
     reduceItemRecorded(state, event as AgentEventFor<"item.recorded">, acceptedInputState),
   "item.content-appended": (state, event, acceptedInputState) =>

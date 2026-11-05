@@ -6,6 +6,7 @@ import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-
 import type { CanonicalWriterRequest, CanonicalWriterResponse } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { DatabaseStartupRefusal } from "./startup-refusal.js";
+import { AcceptedContentRejected } from "../../../features/agents/canonical/accepted-save-failure.js";
 import { serverModuleUrl } from "../../environment/server-module-url.js";
 import type { DatabaseWriteOperation } from "./database-write-operation.js";
 import type { ApplicationDatabaseWriterRequest, ApplicationDatabaseWriterResponse } from "./application-database-writer-protocol.js";
@@ -305,14 +306,18 @@ function responseError(response: ApplicationDatabaseWriterResponse): Error {
   if (response.kind !== "failed" && response.kind !== "ordinary-failed") return new Error("Unexpected database writer response");
   const failure = response.failure;
   if (failure?.refusal) return new DatabaseStartupRefusal(failure.refusal);
+  if (failure && "contentRejection" in failure && failure.contentRejection) return new AcceptedContentRejected(failure.contentRejection);
   const error = new Error(failureMessage(response));
-  if (!failure) return error;
+  if (failure) copyFailureFields(error, failure);
+  return error;
+}
+
+function copyFailureFields(error: Error, failure: NonNullable<Extract<ApplicationDatabaseWriterResponse, { kind: "failed" | "ordinary-failed" }>["failure"]>): void {
   error.name = failure.name;
   if (failure.code) Object.assign(error, { code: failure.code });
   if ("retryAfterSeconds" in failure && typeof failure.retryAfterSeconds === "number") {
     Object.assign(error, { retryAfterSeconds: failure.retryAfterSeconds });
   }
-  return error;
 }
 
 function failureMessage(response: Extract<ApplicationDatabaseWriterResponse, { kind: "failed" | "ordinary-failed" }>): string {

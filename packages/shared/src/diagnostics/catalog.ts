@@ -204,7 +204,11 @@ export const DIAG_CATALOG = {
   ),
   "progress.save-failed": event<{ turn: string; execution: string; source: "storage" | "receipt"; error: string; exhausted: boolean; events: number; types: string[] }>()(
     ["th"],
-    "Accepted events a save could not write. `exhausted` means no retry follows, so these events are missing from the database.",
+    "Accepted events a save could not write. `exhausted` means the failure is reported to waiters; retries continue in the background until a save succeeds.",
+  ),
+  "progress.content-replaced": event<{ turn: string; execution: string; operation: string; reason: string }>()(
+    ["th"],
+    "An accepted operation whose contents the writer rejected. Its events were saved without the publication, narrative, features, or messages it carried.",
   ),
   "cursor.wire": event<CursorWirePayload>()(
     ["th"],

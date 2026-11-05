@@ -10,6 +10,7 @@ import { DatabaseStartupRefusal, rootCauseMessage } from "../../../runtime/persi
 import { CanonicalAgentStore } from "./canonical-agent-store.js";
 import { CanonicalProviderCommitProjector } from "./canonical-provider-projection.js";
 import { CanonicalAcceptedEventWrite } from "./canonical-accepted-write.js";
+import { AcceptedContentRejected } from "./accepted-save-failure.js";
 import { CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
 import { isGroupableAppend, selectAppendGroup, type QueuedCanonicalWrite } from "./canonical-append-group.js";
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
@@ -279,6 +280,7 @@ function describeFailure(error: unknown): WriterFailure {
   if (!(error instanceof Error)) return { name: "Error", message: String(error).slice(0, 8_000) };
   return { name: error.name.slice(0, 128), message: failureMessageWithCause(error).slice(0, 8_000),
     ...(error instanceof DatabaseStartupRefusal ? { refusal: error.refusal } : {}),
+    ...(error instanceof AcceptedContentRejected ? { contentRejection: error.reason.slice(0, 500) } : {}),
     ...("code" in error && typeof error.code === "string" ? { code: error.code.slice(0, 128) } : {}),
     ...("retryAfterSeconds" in error && typeof error.retryAfterSeconds === "number" && Number.isFinite(error.retryAfterSeconds)
       ? { retryAfterSeconds: error.retryAfterSeconds } : {}) };

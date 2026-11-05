@@ -454,6 +454,30 @@ describe("canonical SQLite writer", () => {
     } finally { peer.close(true); }
   });
 
+  it("replays a committed content replacement's receipt with its reason after a lost reply", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const saved = headlessAcceptedInput(THREAD_ID, "before-replaced");
+    await writer.appendAccepted("before-replaced", saved);
+    const receipts = new CanonicalAgentWriterReceipts(db);
+    const replaced = { reason: "live publication is invalid or exceeds its size limit" };
+    const input = { ...nextHeadlessInput(saved, "replaced"), replaced };
+    const request = { kind: "append-accepted" as const, requestId: "replaced:request", operationId: "lease:2:replaced",
+      executionId: input.execution.executionId, input };
+    let applied = 0;
+    const apply = (): Extract<CanonicalWriterResponse, { kind: "accepted-appended" }> => {
+      applied += 1;
+      return { kind: "accepted-appended", requestId: request.requestId, operationId: request.operationId,
+        executionId: request.executionId, result: { receipt: { operationId: request.operationId, contentHash: input.contentHash,
+          predecessor: input.predecessor, through: input.through, durableRevision: 2, replaced },
+        revision: { conversationRevision: 2, rosterRevision: 0 }, events: [] } };
+    };
+    const first = receipts.execute(request, apply);
+    const replay = receipts.execute({ ...request, requestId: "replaced:retry" }, apply);
+    expect(applied).toBe(1);
+    expect(replay).toEqual({ ...first, requestId: "replaced:retry" });
+    expect(replay).toMatchObject({ kind: "accepted-appended", result: { receipt: { replaced } } });
+  });
+
   it("retains a failed publication head until the worker's final response before releasing an ordinary tail", async () => {
     const execution = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID };
     const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "failed-publication-lease" };
