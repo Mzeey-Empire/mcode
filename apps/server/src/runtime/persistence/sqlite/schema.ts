@@ -786,6 +786,7 @@ export const canonicalAgentItems = sqliteTable(
   },
   (table) => [
     index("idx_canonical_agent_items_turn").on(table.turnId, table.createdAt),
+    index("idx_canonical_agent_items_turn_kind").on(table.turnId, table.kind, table.createdAt),
     index("idx_canonical_agent_items_thread").on(table.threadId, table.createdAt),
     index("idx_canonical_agent_items_thread_message").on(
       table.threadId,
@@ -952,6 +953,7 @@ export const canonicalAgentIngestCheckpoints = sqliteTable(
   },
   (table) => [
     index("idx_canonical_agent_checkpoints_thread").on(table.threadId, table.updatedAt),
+    index("idx_canonical_agent_checkpoints_turn_terminal").on(table.turnId, table.terminalOutcome),
     index("idx_canonical_agent_checkpoints_recovery_incident").on(table.recoveryIncidentId, table.updatedAt),
   ],
 );
