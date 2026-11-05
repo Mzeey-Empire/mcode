@@ -152,7 +152,7 @@ describe("Thread Lifecycle Behavior", () => {
       comments,
     );
 
-    expect(persisted).toBe(true);
+    expect(persisted).toEqual({ sent: true });
     expect(mockTransport.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       content: "Please explain it.",
       selectedTextComments: comments,
@@ -188,7 +188,7 @@ describe("Thread Lifecycle Behavior", () => {
       [comment],
     );
 
-    expect(persisted).toBe(false);
+    expect(persisted).toEqual({ sent: false, failureDetail: "connection lost" });
     expect(mockTransport.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       content: "",
       selectedTextComments: [comment],

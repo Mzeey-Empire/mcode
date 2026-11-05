@@ -18,9 +18,12 @@ export interface WorkerOwnedTurn {
   /** The release scheduled by the committed Ended; a provider can start its next turn before it finishes. */
   terminalRelease?: Promise<void>;
   deliveryFailed?: boolean;
-  deliveryFailureHandling?: Promise<void>;
-  /** A stop arriving after stream loss joins this finaliser instead of writing another terminal. */
-  lostStreamFinish?: Promise<void>;
+  /**
+   * The terminal write already under way for a reason other than Stop: a failed provider start,
+   * a failed event delivery, or a lost stream. Absent while the turn runs. The first ending to
+   * start owns the outcome; a later ending or Stop joins this promise instead of writing another terminal.
+   */
+  ending?: Promise<void>;
   stopInProgress?: boolean;
   stopRequested?: boolean;
   lastRetries?: ObservedProviderRetries;

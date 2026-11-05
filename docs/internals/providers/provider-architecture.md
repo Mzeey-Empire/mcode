@@ -14,6 +14,17 @@ host has 25 seconds for graceful cleanup. The server watchdog allows 35 seconds
 for the full shutdown. The desktop waits 40 seconds before forced cleanup of its
 owned server. Startup, heartbeat, and normal operation deadlines do not change.
 
+The last 5 seconds before the watchdog belong to persistence. It writes every
+accepted save still queued, in order, because clients have already shown that
+output. A save that already used up its retries gets a fresh attempt, since the
+text queued behind it is lost otherwise. No save attempt starts in the final
+second, which is kept for closing the databases; anything still unwritten is
+logged with a count. Persistence starts when the other phases finish or 30
+seconds after shutdown began, whichever comes first, so a hung provider,
+terminal, snapshot pin, or status save cannot use up its time. Shutdown does not write turn outcomes: a turn left `Running` is
+settled `Interrupted` with its saved text by `TurnRecoveryService` on the next
+start, before the server listens. See `apps/server/src/runtime/lifecycle/shutdown-phases.ts`.
+
 ## Shared lifecycle: SessionRuntime + ProtocolAdapter
 
 The shared lifecycle for per-session process adapters lives privately in

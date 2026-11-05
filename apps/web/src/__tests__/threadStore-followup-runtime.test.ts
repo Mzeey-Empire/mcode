@@ -88,7 +88,7 @@ describe("follow-up runtime ownership", () => {
 
   it.each([false, true])("completes a sent follow-up without file-effect metadata, background=%s", async (background) => {
     completeFirstTurn();
-    expect(await useThreadStore.getState().sendMessage(THREAD_ID, "Second prompt")).toBe(true);
+    expect(await useThreadStore.getState().sendMessage(THREAD_ID, "Second prompt")).toEqual({ sent: true });
     expect(record()?.turnExecutionId).toBeNull();
     if (background) {
       useThreadStore.setState({ currentThreadId: OTHER_THREAD_ID });

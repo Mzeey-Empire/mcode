@@ -108,6 +108,89 @@ describe("AcceptedSaveScheduler", () => {
     await scheduler.close();
   });
 
+  it("writes the whole queue on close, waiting out a busy retry, and refuses new saves", async () => {
+    vi.useFakeTimers();
+    try {
+      const progress = owner("one");
+      const busy = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+      const writes: string[] = [];
+      const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
+        writes.push(batch.operationId);
+        if (writes.length === 2) throw busy;
+        return receipt(batch);
+      } }, maxAttempts: 3, retryDelayMs: 1_000, classify: classifySaveFailure,
+      onSaved: async (_batch, saved) => { progress.acknowledge(saved); },
+      onFailure: async (_batch, failure) => { progress.recordFailure(failure); } });
+      scheduler.enqueue(accepted(progress, "one", "a"));
+      scheduler.enqueue(accepted(progress, "one", "b"));
+      scheduler.enqueue(accepted(progress, "one", "c"));
+      let closed = false;
+      const closing = scheduler.close().then(() => { closed = true; });
+      expect(() => scheduler.enqueue(accepted(owner("two"), "two", "late"))).toThrow("closed");
+      await vi.advanceTimersByTimeAsync(999);
+      expect(closed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await closing;
+      expect(writes).toEqual(["a", "b", "b", "c"]);
+      expect(scheduler.depth().pending).toBe(0);
+      expect(progress.savingState().kind).toBe("saved");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives an exhausted head a fresh attempt on close, then writes the text queued behind it", async () => {
+    const progress = owner("one");
+    const writes: string[] = [];
+    let blocked = true;
+    const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
+      writes.push(batch.operationId);
+      if (blocked) throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+      return receipt(batch);
+    } }, maxAttempts: 1, retryDelayMs: 1_000, classify: classifySaveFailure,
+    onSaved: async (_batch, saved) => { progress.acknowledge(saved); },
+    onFailure: async (_batch, failure) => { progress.recordFailure(failure); } });
+    scheduler.enqueue(accepted(progress, "one", "visible-a"));
+    scheduler.enqueue(accepted(progress, "one", "visible-b"));
+    await scheduler.settle();
+    expect(progress.savingState().kind).toBe("failed");
+    blocked = false;
+    await scheduler.close();
+    expect(writes).toEqual(["visible-a", "visible-a", "visible-b"]);
+    expect(scheduler.depth().pending).toBe(0);
+    expect(progress.savingState().kind).toBe("saved");
+  });
+
+  it("starts no save attempt after its close deadline and leaves the unwritten saves queued", async () => {
+    vi.useFakeTimers();
+    try {
+      const progress = owner("one");
+      const writes: string[] = [];
+      const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
+        writes.push(batch.operationId);
+        throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+      } }, maxAttempts: 6, retryDelayMs: 1_000, classify: classifySaveFailure,
+      onSaved: async (_batch, saved) => { progress.acknowledge(saved); },
+      onFailure: async (_batch, failure) => { progress.recordFailure(failure); } });
+      scheduler.enqueue(accepted(progress, "one", "a"));
+      scheduler.enqueue(accepted(progress, "one", "b"));
+      let closed = false;
+      const closing = scheduler.close({ attemptsUntil: Date.now() + 2_500 }).then(() => { closed = true; });
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(closed).toBe(true);
+      await closing;
+      expect(writes).toEqual(["a", "a", "a"]);
+      expect(scheduler.depth().pending).toBe(2);
+      let closedAgain = false;
+      void scheduler.close().then(() => { closedAgain = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(closedAgain).toBe(true);
+      expect(writes).toEqual(["a", "a", "a"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   describe("with an environment failure", () => {
     afterEach(() => { vi.useRealTimers(); });
 

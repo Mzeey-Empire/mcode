@@ -1813,7 +1813,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await restarted.close();
   });
 
-  it("rejects existing durable command waiters on close while retaining the undispatched suffix", async () => {
+  it("rejects existing durable command waiters on close and still writes the queued suffix", async () => {
     await send(1, start("codex"));
     holdWrites();
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
@@ -1826,8 +1826,9 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await rejected;
     release?.();
     await closing;
-    expect(progress.depth().pending).toBe(1);
-    expect(recovery().retained.some((event) => event.eventId === `${execution.executionId}:raw:2`)).toBe(true);
-    expect(writer.appendAccepted).toHaveBeenCalledTimes(1);
+    // The queued suffix is already on screen, so close writes it instead of dropping it.
+    expect(progress.depth().pending).toBe(0);
+    expect(recovery().retained.some((event) => event.eventId === `${execution.executionId}:raw:2`)).toBe(false);
+    expect(writer.appendAccepted).toHaveBeenCalledTimes(2);
   });
 });

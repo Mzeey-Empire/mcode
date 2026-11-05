@@ -33,9 +33,27 @@ import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-rep
 import { ThoughtSegmentRepo } from "../../conversation/narrative/persistence/thought-segment-repo.js";
 import { HookExecutionRepo } from "../../events/persistence/hook-execution-repo.js";
 
-export async function openWorkerServiceFixture(providerId: ProviderId = "codex") {
+/** Reopens the same database and thread, as the next server process would after the previous one ended. */
+interface WorkerFixtureRestart {
+  readonly directory: string;
+  readonly threadId: string;
+}
+
+async function openFixtureThread(threads: ThreadRepo, directory: string, providerId: ProviderId, restart?: WorkerFixtureRestart) {
+  const workspaces = container.resolve(WorkspaceRepo);
+  if (!restart) {
+    const workspace = await workspaces.create("Worker fixture", directory);
+    return { workspace, thread: await threads.create(workspace.id, "Worker turn", "direct", "main", true, providerId) };
+  }
+  const thread = threads.findById(restart.threadId);
+  const workspace = thread ? workspaces.findById(thread.workspace_id) : null;
+  if (!thread || !workspace) throw new Error("Restarted worker fixture lost its thread");
+  return { workspace, thread };
+}
+
+export async function openWorkerServiceFixture(providerId: ProviderId = "codex", restart?: WorkerFixtureRestart) {
   container.reset();
-  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-worker-turn-"));
+  const directory = restart?.directory ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-worker-turn-"));
   const previousDatabasePath = process.env.MCODE_DB_PATH;
   const previousDataDirectory = process.env.MCODE_DATA_DIR;
   process.env.MCODE_DATA_DIR = NodePath.join(directory, "data");
@@ -47,7 +65,10 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
   await workers.whenReady();
   const sent: TurnRequest[] = [];
   const fenced = new Set<string>();
+  const discarded = new Set<string>();
   const pending = new Set<Promise<void>>();
+  let deliveryHold: Promise<void> | undefined;
+  let delivered = 0;
   const canonicalEvents: CanonicalAgentEventEnvelope[] = [];
   function drain(): Promise<void> {
     return Promise.all(pending).then(() => undefined);
@@ -64,8 +85,10 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
     shutdown: () => undefined,
     listModels: async () => [],
     setCanonicalTurnDeliveryFailureHandler: () => undefined,
-    fenceCanonicalTurnEvents: async (routing: { executionId: string }) => {
+    // Like the Codex publisher, a discarding fence drops deliveries that have not started yet.
+    fenceCanonicalTurnEvents: async (routing: { executionId: string }, options?: { discardQueued?: boolean }) => {
       fenced.add(routing.executionId);
+      if (options?.discardQueued) discarded.add(routing.executionId);
       await drain();
     },
     retireCanonicalTurnEvents: async (routing: { executionId: string }) => {
@@ -79,7 +102,6 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
   container.registerInstance("IProviderRegistry", providerRegistry);
   vi.spyOn(container.resolve(ProviderAvailabilityService), "assertUsable").mockReturnValue(undefined);
   const publication = container.resolve(AgentEventPublicationRegistry);
-  const workspace = await container.resolve(WorkspaceRepo).create("Worker fixture", directory);
   const threads = container.resolve(ThreadRepo);
   const progress = workers.progress;
   const planFiles = workers.planFiles;
@@ -89,7 +111,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
   container.resolve(PlanTurnService).bindPlanProjection(progress, planFiles);
   container.resolve(CanonicalAgentBoundary).bindAcceptedSynthesizedPublications((threadId, events) =>
     progress.acceptSynthesizedPublications(threadId, events));
-  const thread = await threads.create(workspace.id, "Worker turn", "direct", "main", true, providerId);
+  const { workspace, thread } = await openFixtureThread(threads, directory, providerId, restart);
   const service = container.resolve(AgentService);
   const host = container.resolve<ProviderHostPorts>("ProviderHostPorts");
   let sequence = 0;
@@ -117,6 +139,10 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
   async function submit(event: AgentEvent, extension?: ProviderRuntimeEvent["extension"], planCapture?: ProviderRuntimeEvent["planCapture"]): Promise<void> {
     const executionId = event.turnExecutionId;
     if (!executionId) throw new Error("Worker fixture event needs an execution identity");
+    if (deliveryHold) {
+      await deliveryHold;
+      if (discarded.has(executionId)) return;
+    }
     const owned = workers.owner.current(event.threadId);
     if (!owned || owned.execution.executionId !== executionId) {
       throw new Error("Worker fixture event has no execution owner");
@@ -126,7 +152,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
     const itemId = "fixture:" + executionId + ":item:" + sequence;
     const eventId = "fixture:" + executionId + ":event:" + sequence;
     const now = new Date().toISOString();
-    await host.events.submit({
+    const delivery = host.events.submit({
       ...routing, executionId: routing.executionId, batchId: eventId, phase: "running",
       events: [{
         eventId, sourceProviderId: provider.id, sourceIdentities: [], sourceSequence: sequence,
@@ -140,6 +166,8 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
         } },
       }],
     });
+    await delivery;
+    delivered += 1;
     await progress.waitForSaved(event.threadId);
   }
   function emit(event: AgentEvent, extension?: ProviderRuntimeEvent["extension"], planCapture?: ProviderRuntimeEvent["planCapture"]): Promise<void> {
@@ -149,6 +177,12 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
     void task.then(() => pending.delete(task), () => pending.delete(task));
     return task;
   }
+  /** Holds deliveries that have not started, as a busy event sink does, until the returned release runs. */
+  function holdDeliveries(): () => void {
+    let release!: () => void;
+    deliveryHold = new Promise<void>((resolve) => { release = resolve; });
+    return () => { deliveryHold = undefined; release(); };
+  }
   function assistant() {
     return messages.listByThread(thread.id, 100).messages.filter((message) => message.role === "assistant").at(-1);
   }
@@ -157,11 +191,17 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
     await progress.waitForTerminalSaves(thread.id);
     return result;
   }
-  async function close(): Promise<void> {
+  /**
+   * `graceful: false` skips the agent stop, as a crash or kill does; `keepDirectory` keeps the database so a
+   * restart can reopen it.
+   */
+  async function close(options: { graceful?: boolean; keepDirectory?: boolean } = {}): Promise<void> {
     await drain();
-    await service.stopAll();
-    await drain();
-    await workers.progress?.waitForTerminalSaves(thread.id);
+    if (options.graceful !== false) {
+      await service.stopAll();
+      await drain();
+      await workers.progress?.waitForTerminalSaves(thread.id);
+    }
     await workers.close();
     await container.resolve(SnapshotRefPins).drain();
     stopObserving();
@@ -172,12 +212,13 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
     else process.env.MCODE_DB_PATH = previousDatabasePath;
     if (previousDataDirectory === undefined) delete process.env.MCODE_DATA_DIR;
     else process.env.MCODE_DATA_DIR = previousDataDirectory;
-    NodeFS.rmSync(directory, { recursive: true, force: true });
+    if (!options.keepDirectory) NodeFS.rmSync(directory, { recursive: true, force: true });
   }
   return {
     diffs: container.resolve(TurnDiffService), directory, writer, db, workers, service, thread,
     workspace, provider, providerRegistry, sent, host, threads, messages, tools, thoughts, hooks,
     canonical: container.resolve(CanonicalAgentBoundary), canonicalEvents, published, emit, drain, stop, assistant, close,
+    holdDeliveries, deliveredCount: () => delivered,
   };
 }
 
