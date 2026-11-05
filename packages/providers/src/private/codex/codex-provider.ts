@@ -369,7 +369,6 @@ interface CodexSpawnContext {
 interface CodexTurnRun {
   entry: CodexSessionState;
   seq: number;
-  hadInflightTurn: boolean;
 }
 
 interface CodexTurnCompletionState {
@@ -1141,12 +1140,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const signal = pending.controller.signal;
     let dispatched = false;
     try {
-      const preparingSession = this.runtime.get(req.sessionId);
-      if (preparingSession) preparingSession.nextTurnExecutionId = req.turnExecutionId;
-      const threadId = this.threadIdForSession(req.sessionId);
-      await this.retirePreviousCanonicalTurn(threadId);
+      await this.prepareCanonicalCodexRequest(req);
       signal.throwIfAborted();
-      this.bindCanonicalCodexRequest(req);
       const turn = await this.prepareCodexTurn(req, signal);
       if (!turn) return;
       if (this.consumePendingCodexStop(turn)) return;
@@ -1154,6 +1149,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       signal.throwIfAborted();
       const reusable = this.isReusableCodexSession(existing, turn.sandbox);
       if (!this.canStartCodexTurn(turn, reusable)) return;
+      if (!reusable) await this.activateCanonicalCodexRequest(req);
       this.stageCodexTurn(turn);
       const state = await this.acquireCodexTurn(turn);
       if (!state) return;
@@ -1172,6 +1168,19 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.canonicalTurnRoutingsByThread.set(threadId, { kind: "active", routing: {
       threadId, turnId: request.turnId, executionId: request.turnExecutionId, deliveryAttempt: request.deliveryAttempt ?? 1,
     } });
+  }
+
+  private async prepareCanonicalCodexRequest(request: TurnRequest<"codex">): Promise<void> {
+    const state = this.runtime.get(request.sessionId);
+    if (state) state.nextTurnExecutionId = request.turnExecutionId;
+    if (state && this.isBusy(state)) return;
+    await this.activateCanonicalCodexRequest(request);
+  }
+
+  private async activateCanonicalCodexRequest(request: TurnRequest<"codex">): Promise<void> {
+    const threadId = this.threadIdForSession(request.sessionId);
+    await this.retirePreviousCanonicalTurn(threadId);
+    this.bindCanonicalCodexRequest(request);
   }
 
   private async prepareCodexTurn(request: TurnRequest<"codex">, signal: AbortSignal): Promise<PreparedCodexTurn | undefined> {
@@ -2517,7 +2526,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       }
       if (signal.aborted) return;
       if (this.runtime.get(sessionId)?.cancelledTurnExecutionId === turnExecutionId) return;
-      await this.runTurn(sessionId, threadId, server, input, turnOptions, turnExecutionId);
+      await this.runTurn(sessionId, threadId, server, input, turnOptions, turnExecutionId, signal);
     } finally { this.releasePendingCodexRequest(sessionId, signal); }
   }
 
@@ -2533,10 +2542,21 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     input: CodexTurnInput,
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
+    signal: AbortSignal,
   ): Promise<void> {
+    const entry = this.runtime.get(sessionId);
+    if (!entry) return;
+    // Keep the old execution bound until its interrupt drains, including its final output.
+    if (this.isBusy(entry)) await this.interruptCodexTurnForReplacement(entry, server, signal);
+    if (this.canonicalTurnRoutingsByThread.get(threadId)?.routing.executionId !== turnExecutionId) {
+      await this.activateCodexTurnRouting(entry, threadId, turnExecutionId);
+    }
+    if (signal.aborted || this.runtime.get(sessionId) !== entry) {
+      this.emitCodexTurnEvent(entry, { type: AgentEventType.Ended, threadId, turnExecutionId, outcome: "cancelled" }, turnExecutionId);
+      return;
+    }
     const run = this.prepareCodexTurnRun(sessionId, turnExecutionId);
     if (!run) return;
-    if (run.hadInflightTurn) await server.interruptTurn();
     const completion: CodexTurnCompletionState = {
       serverDied: false,
       endedOutcome: undefined,
@@ -2552,12 +2572,27 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
+  private async activateCodexTurnRouting(entry: CodexSessionState, threadId: string, turnExecutionId: string): Promise<void> {
+    await this.retirePreviousCanonicalTurn(threadId);
+    const routing = entry.turnDiffRouting;
+    if (!routing) throw new Error("Codex turn has no delivery routing");
+    this.canonicalTurnRoutingsByThread.set(threadId, { kind: "active", routing: {
+      threadId, turnId: routing.turnId, executionId: turnExecutionId, deliveryAttempt: routing.deliveryAttempt,
+    } });
+  }
+
+  private async interruptCodexTurnForReplacement(entry: CodexSessionState, server: CodexAppServer, signal: AbortSignal): Promise<void> {
+    try { await server.interruptTurn(); }
+    catch (error) {
+      if (!signal.aborted && this.runtime.get(entry.sessionId) === entry) throw error;
+    }
+  }
+
   private prepareCodexTurnRun(sessionId: string, turnExecutionId: string): CodexTurnRun | undefined {
     const entry = this.runtime.get(sessionId);
     if (!entry) return undefined;
     this.emitCodexPendingAssistantBoundary(entry, turnExecutionId);
     entry.mapper.prepareForTurn({ executionId: turnExecutionId, deliveryAttempt: entry.turnDiffRouting?.deliveryAttempt ?? 0 });
-    const hadInflightTurn = entry.pendingTurnId !== null || entry.abortPendingTurnWait !== undefined;
     entry.currentTurnExecutionId = turnExecutionId;
     entry.currentNativeTurnId = undefined;
     entry.turnBindingPhase = "awaiting";
@@ -2571,7 +2606,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     entry.abortPendingTurnWait = undefined;
     entry.runTurnSeq += 1;
     entry.pendingTurnId = null;
-    return { entry, seq: entry.runTurnSeq, hadInflightTurn };
+    return { entry, seq: entry.runTurnSeq };
   }
 
   private emitCodexPendingAssistantBoundary(entry: CodexSessionState, turnExecutionId: string): void {
@@ -2631,6 +2666,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (rawNotification.method !== "turn/completed") return false;
     const nativeTurnId = nativeTurnIdFromParams(rawNotification.params);
     if (!this.isCodexCurrentTurnCompletion(server, run.entry, rawNotification.params, nativeTurnId, turnExecutionId)) return false;
+    if (!run.entry.currentNativeTurnId && !isMainThreadNotification(server, rawNotification.params)) return false;
     const turn = rawNotification.params?.turn as { status?: string } | undefined;
     if (this.codexCompletionBeforeBinding(run.entry, nativeTurnId, turnExecutionId)) {
       completion.endedOutcome = this.codexTurnCompletionOutcome(turn?.status);
@@ -2674,7 +2710,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private isProvenCodexTurnCompletion(entry: CodexSessionState, nativeTurnId: string | undefined, turnExecutionId: string): boolean {
-    return entry.currentTurnExecutionId === turnExecutionId && Boolean(entry.currentNativeTurnId) && nativeTurnId === entry.currentNativeTurnId;
+    return entry.currentTurnExecutionId === turnExecutionId && nativeTurnId !== undefined
+      && (nativeTurnId === entry.currentNativeTurnId || (!entry.currentNativeTurnId
+        && entry.turnExecutionIdsByNativeTurn.get(nativeTurnId) === turnExecutionId));
   }
 
   private logIgnoredCodexTurnCompletion(run: CodexTurnRun, nativeTurnId: string | undefined): void {
