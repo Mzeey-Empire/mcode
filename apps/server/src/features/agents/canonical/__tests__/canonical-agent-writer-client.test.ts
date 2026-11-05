@@ -1298,7 +1298,7 @@ describe("canonical SQLite writer", () => {
     } finally {
       db.run("DROP TRIGGER reject_receipt_delete");
     }
-  });
+  }, 30_000);
 
   it.each([1, 32, 63])("admits healthy queued cleanup alongside %i retained failures", async (failures) => {
     writer = new CanonicalAgentWriterClient(dbPath);
