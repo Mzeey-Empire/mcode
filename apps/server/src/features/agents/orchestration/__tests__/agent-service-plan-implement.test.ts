@@ -18,6 +18,7 @@ import { PlanTurnService } from "../../planning/plan-turn-service.js";
 import { PlanQuestionService } from "../../planning/plan-question-service.js";
 import { setupContainer } from "../../../../application/composition/container.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { SQLITE_BUSY_TIMEOUT_MS } from "../../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
 import { WorkerOwnedTurnRuntime } from "../../execution/worker-owned-turn-runtime.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
@@ -99,6 +100,9 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     process.env.MCODE_DATA_DIR = NodePath.join(directory, "data");
     await openServiceSet();
     database = new Database(process.env.MCODE_DB_PATH);
+    // This connection writes beside the app's writer worker, whose background saves and receipt cleanup
+    // can hold the write lock at any moment. bun:sqlite waits 0 ms by default, so wait like every app connection.
+    database.run(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
     workspaceId = (await container.resolve(WorkspaceRepo).create("Implement fixture", directory, false)).id;
   });
 
