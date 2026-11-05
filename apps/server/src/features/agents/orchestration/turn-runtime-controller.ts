@@ -81,6 +81,8 @@ import { TurnLifecycles, type WorkerOwnedTurn } from "./turn-lifecycle.js";
  * Bounded wait for `provider.stopSession` before the turn is force-finalized.
  * Sits above provider-internal cancel bounds (Devin waits 10s before killing
  * its ACP child) so a settled provider still reports graceful cancellation.
+ * Shutdown cannot wait longer: the server watchdog (`SERVER_SHUTDOWN_DEADLINE_MS`, 35s) also has to cover
+ * the terminal host's own 25s deadline and the final saves after this wait.
  */
 const PROVIDER_STOP_SETTLE_TIMEOUT_MS = 15_000;
 
@@ -1867,7 +1869,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await this.fenceWorkerProvider(active.provider, active.execution, active.deliveryAttempt);
     await this.providerEventIngress.waitForThread(active.execution.threadId);
     await active.terminalRelease;
-    await active.lostStreamFinish;
+    // Once the route is fenced the provider's own end can no longer arrive, so a turn without one would stay
+    // Running until the next start. Settle it Interrupted now, keeping the output already accepted.
+    await this.finishLostWorkerStream(active);
   }
 
   private async waitForStoppingWorker(active: WorkerOwnedTurn): Promise<void> {

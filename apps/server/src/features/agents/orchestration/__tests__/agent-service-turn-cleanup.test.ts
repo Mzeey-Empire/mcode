@@ -1190,7 +1190,7 @@ describe("AgentService Ended finalization through the production execution worke
     })?.latestTurn?.status).toBe("Interrupted"));
   });
 
-  it("leaves a stopAll turn unresolved when the provider sends no terminal outcome", async () => {
+  it("settles a stopAll turn Interrupted after the provider stops without a terminal outcome", async () => {
     const workspace = await workspaceRepo.create("Test", process.cwd());
     const thread = await threadRepo.create(workspace.id, "Shutdown without outcome", "direct", "main", true, "codex");
 
@@ -1218,13 +1218,15 @@ describe("AgentService Ended finalization through the production execution worke
       phase: "running",
       terminalOutcome: null,
     });
-    expect(canonicalSink.loadCheckpoint(executionId)).toMatchObject({
-      phase: "running",
-      terminalOutcome: null,
-    });
-    expect(threadRepo.findById(thread.id)?.status).toBe("active");
+    // The interruption is accepted before stopAll returns; its save finishes in the background.
+    await vi.waitFor(() => expect(canonicalSink.loadCheckpoint(executionId)).toMatchObject({
+      phase: "finalized",
+      terminalOutcome: "interrupted",
+    }));
+    expect(canonicalSink.loadTurnByExecution(executionId)?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
+    expect(threadRepo.findById(thread.id)?.status).toBe("interrupted");
     expect(service.runtimeAccess().runtimeSnapshots().find((snapshot) => snapshot.threadId === thread.id))
-      .toMatchObject({ phase: "running", turnExecutionId: executionId });
+      .toMatchObject({ phase: "interrupted", turnExecutionId: executionId });
   });
 
   it("does not persist an interruption when a running turn ends without an outcome", async () => {

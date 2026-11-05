@@ -33,9 +33,27 @@ import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-rep
 import { ThoughtSegmentRepo } from "../../conversation/narrative/persistence/thought-segment-repo.js";
 import { HookExecutionRepo } from "../../events/persistence/hook-execution-repo.js";
 
-export async function openWorkerServiceFixture(providerId: ProviderId = "codex") {
+/** Reopens the same database and thread, as the next server process would after the previous one ended. */
+interface WorkerFixtureRestart {
+  readonly directory: string;
+  readonly threadId: string;
+}
+
+async function openFixtureThread(threads: ThreadRepo, directory: string, providerId: ProviderId, restart?: WorkerFixtureRestart) {
+  const workspaces = container.resolve(WorkspaceRepo);
+  if (!restart) {
+    const workspace = await workspaces.create("Worker fixture", directory);
+    return { workspace, thread: await threads.create(workspace.id, "Worker turn", "direct", "main", true, providerId) };
+  }
+  const thread = threads.findById(restart.threadId);
+  const workspace = thread ? workspaces.findById(thread.workspace_id) : null;
+  if (!thread || !workspace) throw new Error("Restarted worker fixture lost its thread");
+  return { workspace, thread };
+}
+
+export async function openWorkerServiceFixture(providerId: ProviderId = "codex", restart?: WorkerFixtureRestart) {
   container.reset();
-  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-worker-turn-"));
+  const directory = restart?.directory ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-worker-turn-"));
   const previousDatabasePath = process.env.MCODE_DB_PATH;
   const previousDataDirectory = process.env.MCODE_DATA_DIR;
   process.env.MCODE_DATA_DIR = NodePath.join(directory, "data");
@@ -79,7 +97,6 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
   container.registerInstance("IProviderRegistry", providerRegistry);
   vi.spyOn(container.resolve(ProviderAvailabilityService), "assertUsable").mockReturnValue(undefined);
   const publication = container.resolve(AgentEventPublicationRegistry);
-  const workspace = await container.resolve(WorkspaceRepo).create("Worker fixture", directory);
   const threads = container.resolve(ThreadRepo);
   const progress = workers.progress;
   const planFiles = workers.planFiles;
@@ -89,7 +106,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
   container.resolve(PlanTurnService).bindPlanProjection(progress, planFiles);
   container.resolve(CanonicalAgentBoundary).bindAcceptedSynthesizedPublications((threadId, events) =>
     progress.acceptSynthesizedPublications(threadId, events));
-  const thread = await threads.create(workspace.id, "Worker turn", "direct", "main", true, providerId);
+  const { workspace, thread } = await openFixtureThread(threads, directory, providerId, restart);
   const service = container.resolve(AgentService);
   const host = container.resolve<ProviderHostPorts>("ProviderHostPorts");
   let sequence = 0;
@@ -157,11 +174,17 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
     await progress.waitForTerminalSaves(thread.id);
     return result;
   }
-  async function close(): Promise<void> {
+  /**
+   * `graceful: false` skips the agent stop, as a crash or kill does; `keepDirectory` keeps the database so a
+   * restart can reopen it.
+   */
+  async function close(options: { graceful?: boolean; keepDirectory?: boolean } = {}): Promise<void> {
     await drain();
-    await service.stopAll();
-    await drain();
-    await workers.progress?.waitForTerminalSaves(thread.id);
+    if (options.graceful !== false) {
+      await service.stopAll();
+      await drain();
+      await workers.progress?.waitForTerminalSaves(thread.id);
+    }
     await workers.close();
     await container.resolve(SnapshotRefPins).drain();
     stopObserving();
@@ -172,7 +195,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex")
     else process.env.MCODE_DB_PATH = previousDatabasePath;
     if (previousDataDirectory === undefined) delete process.env.MCODE_DATA_DIR;
     else process.env.MCODE_DATA_DIR = previousDataDirectory;
-    NodeFS.rmSync(directory, { recursive: true, force: true });
+    if (!options.keepDirectory) NodeFS.rmSync(directory, { recursive: true, force: true });
   }
   return {
     diffs: container.resolve(TurnDiffService), directory, writer, db, workers, service, thread,
