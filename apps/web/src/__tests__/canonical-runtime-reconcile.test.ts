@@ -4,7 +4,11 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type AgentItem, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { type Message } from "@mcode/contracts/models/message";
 import { type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
-import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting, sendQueuedMessage, useThreadStore } from "@/stores/threadStore";
+import { useQueueStore } from "@/stores/queueStore";
+import { useToastStore } from "@/stores/toastStore";
+import { sendComposerThreadMessage } from "@/features/conversation/composer/submission/composer-thread-message";
+import { createDefaultComposerAgentSelection } from "@/features/conversation/composer/draft/composer-selection-state";
 import { getThreadRuntimePhase, isThreadStopPending } from "@/stores/thread-lifecycle";
 import {
   resetThreadStoreForTests,
@@ -114,7 +118,7 @@ function promptAdmission(prompt: Message): CanonicalAgentEventEnvelope[] {
 
 async function sendOptimisticPrompt(content: string): Promise<Message> {
   vi.mocked(mockTransport.sendMessage).mockResolvedValueOnce(undefined);
-  expect(await useThreadStore.getState().sendMessage(THREAD_ID, content)).toBe(true);
+  expect(await useThreadStore.getState().sendMessage(THREAD_ID, content)).toEqual({ sent: true });
   const prompt = readThreadField(THREAD_ID, (record) => record.messages.at(-1));
   if (!prompt || prompt.role !== "user") throw new Error("missing optimistic prompt");
   return prompt;
@@ -588,7 +592,7 @@ describe("canonical runtime reconciliation", () => {
     useThreadStore.getState().handleAgentEvent({ type: "textDelta", threadId: THREAD_ID, delta: "Newer healthy progress", isFinalResponse: true });
     if (!rejectOlder) throw new Error("missing pending request");
     rejectOlder(new Error("Older request failed"));
-    expect(await olderSend).toBe(false);
+    expect(await olderSend).toEqual({ sent: false, failureDetail: "Older request failed" });
     expect(readThreadField(THREAD_ID, (record) => record.optimisticUserMessageId)).toBe(newerPrompt.id);
     expect(readThreadField(THREAD_ID, (record) => record.runtimePhase)).toBe("running");
     expect(readThreadField(THREAD_ID, (record) => record.error)).toBeNull();
@@ -603,10 +607,53 @@ describe("canonical runtime reconciliation", () => {
     seedRuntime("idle", null, false);
     useThreadStore.setState({ currentThreadId: THREAD_ID });
     vi.mocked(mockTransport.sendMessage).mockRejectedValueOnce(new Error("Send rejected"));
-    expect(await useThreadStore.getState().sendMessage(THREAD_ID, "Rejected request")).toBe(false);
+    expect(await useThreadStore.getState().sendMessage(THREAD_ID, "Rejected request")).toEqual({ sent: false, failureDetail: "Send rejected" });
     expect(readThreadField(THREAD_ID, (record) => record.optimisticUserMessageId)).toBeNull();
     expect(readThreadField(THREAD_ID, (record) => record.runtimePhase)).toBe("errored");
     expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
+  });
+
+  describe.each([
+    { case: "before admission", admitFirst: false },
+    { case: "after canonical admission claimed the prompt", admitFirst: true },
+  ])("a provider that fails to start, rejecting the send $case", ({ admitFirst }) => {
+    const PROVIDER_FAILURE = "Codex could not start: run `codex login` first";
+
+    function rejectSendWithProviderFailure(): void {
+      vi.mocked(mockTransport.sendMessage).mockImplementationOnce(async () => {
+        if (admitFirst) {
+          const prompt = readThreadField(THREAD_ID, (record) => record.messages.at(-1));
+          if (!prompt) throw new Error("missing optimistic prompt");
+          useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, promptAdmission(prompt));
+          expect(readThreadField(THREAD_ID, (record) => record.optimisticUserMessageId)).toBeNull();
+        }
+        throw new Error(PROVIDER_FAILURE);
+      });
+    }
+
+    beforeEach(() => {
+      seedRuntime("idle", null, false);
+      useThreadStore.setState({ currentThreadId: THREAD_ID });
+      useQueueStore.setState({ queues: {} });
+      useToastStore.setState({ toasts: [] });
+    });
+
+    it("tells the Composer the provider's reason", async () => {
+      rejectSendWithProviderFailure();
+      await expect(sendComposerThreadMessage(THREAD_ID, {
+        content: "Do the work", displayContent: "Do the work", attachments: [], mentions: [],
+        selection: createDefaultComposerAgentSelection(),
+      })).rejects.toThrow(PROVIDER_FAILURE);
+    });
+
+    it("shows the provider's reason for a queued send", async () => {
+      rejectSendWithProviderFailure();
+      useQueueStore.getState().enqueue(THREAD_ID, {
+        content: "Do the work", displayContent: "Do the work", attachments: [], model: "gpt-5.5", permissionMode: "full",
+      });
+      await sendQueuedMessage(THREAD_ID, useQueueStore.getState().claimNextQueuedMessage(THREAD_ID)!);
+      expect(useToastStore.getState().toasts[0]).toMatchObject({ title: "Could not send message", meta: PROVIDER_FAILURE });
+    });
   });
 
   it("lets a newer turn the client did not start claim a settled record", () => {

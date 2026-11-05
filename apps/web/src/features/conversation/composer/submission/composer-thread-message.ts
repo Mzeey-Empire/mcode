@@ -3,7 +3,7 @@ import type { DevinMode, OrchestrationMode } from "@mcode/contracts/models/enums
 import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
-import { threadSendFailureDetail, useThreadStore } from "@/stores/threadStore";
+import { useThreadStore } from "@/stores/threadStore";
 import { requestTranscriptFollow } from "@/features/conversation/messages/transcript-follow-request";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
@@ -44,7 +44,7 @@ export async function sendComposerThreadMessage(
   const { selection } = payload;
   const scoped = providerScopedSelection(selection);
   requestTranscriptFollow(threadId);
-  const sent = await useThreadStore.getState().sendMessage(
+  const outcome = await useThreadStore.getState().sendMessage(
     threadId,
     payload.content,
     selection.modelId,
@@ -69,7 +69,7 @@ export async function sendComposerThreadMessage(
     undefined,
     payload.planCommentIds,
   );
-  if (!sent) throw new Error(threadSendFailureDetail(threadId) ?? "Message dispatch failed");
+  if (!outcome.sent) throw new Error(outcome.failureDetail ?? "Message dispatch failed");
 }
 
 /** Adapts a prepared submit for existing-thread transport. */

@@ -396,6 +396,16 @@ export interface ThreadRecapCacheEntry {
 /** Result of one directional history request. */
 export type HistoryPageLoadResult = "loaded" | "skipped" | "failed";
 
+/**
+ * How a store send settled. A rejected send carries the server's reason itself, because the
+ * thread record may already belong to the canonical turn that admitted the prompt, or to a
+ * newer prompt, and then keeps no send error. `failureDetail` is null only for a resend another
+ * window already sent, which is not a failure the user needs to see.
+ */
+export type SendMessageOutcome =
+  | { sent: true }
+  | { sent: false; failureDetail: string | null };
+
 interface ThreadState {
   records: Map<string, ThreadRecord>;
   currentThreadId: string | null;
@@ -427,7 +437,7 @@ interface ThreadState {
   // Message actions
   loadOlderMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
   loadNewerMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, fastMode?: boolean, replyToMessageId?: string, quotedText?: string, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts/models/enums").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string, planCommentIds?: string[]) => Promise<boolean>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, fastMode?: boolean, replyToMessageId?: string, quotedText?: string, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts/models/enums").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string, planCommentIds?: string[]) => Promise<SendMessageOutcome>;
   /** Remove one durably cancelled message from the resident thread transcript. */
   removePersistedMessage: (threadId: string, messageId: string) => void;
   stopAgent: (threadId: string) => Promise<void>;
@@ -776,12 +786,6 @@ function sendFailureDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Returns the error a rejected send left on its thread, if the latest error came from a send. */
-export function threadSendFailureDetail(threadId: string): string | null {
-  const record = getThreadRecord(useThreadStore.getState().records, threadId);
-  return record.errorSource === "send" ? record.error : null;
-}
-
 /** Raises the one notice a failed send shows; the transcript keeps no inline send error. */
 export function showSendFailureToast(detail: string | null): void {
   useToastStore.getState().show({
@@ -801,7 +805,7 @@ export async function sendQueuedMessage(threadId: string, message: QueuedMessage
   const resendOfSteerId = message.steer?.state === "resend" ? message.steer.resendOfSteerId : undefined;
   const sendsWithEntryId = Boolean(resendOfSteerId) || message.holdsDraftElements === true;
   try {
-    const sent = await useThreadStore.getState().sendMessage(
+    const outcome = await useThreadStore.getState().sendMessage(
       threadId,
       message.content,
       message.model || undefined,
@@ -825,13 +829,10 @@ export async function sendQueuedMessage(threadId: string, message: QueuedMessage
       sendsWithEntryId ? message.id : undefined,
       resendOfSteerId,
     );
-    if (sent) admitQueuedDraftHold(message.id);
-    else {
-      // A resend another window already sent leaves no send error; that outcome is not a failure.
-      const detail = threadSendFailureDetail(threadId);
-      if (detail) showSendFailureToast(detail);
-    }
-    useQueueStore.getState().settleQueuedDispatch(threadId, message.id, sent);
+    if (outcome.sent) admitQueuedDraftHold(message.id);
+    // A resend another window already sent has no failure detail; that outcome is not a failure.
+    else if (outcome.failureDetail) showSendFailureToast(outcome.failureDetail);
+    useQueueStore.getState().settleQueuedDispatch(threadId, message.id, outcome.sent);
   } catch (error) {
     pauseRejectedQueuedSend(threadId, error);
     showSendFailureToast(sendFailureDetail(error));
@@ -3321,7 +3322,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     isControlCommand: boolean, runningBeforeControl: Set<string> | undefined,
     responseKey: string, executionId: string | null, userMessageId: string,
     alreadySent = false,
-  ): boolean => {
+  ): SendMessageOutcome => {
     const message = sendFailureDetail(error);
     const activeSessionConflict = !isControlCommand && turnAdmissionFailureReason(error) === "busy";
     // A resend another window already sent is a normal outcome. Its turn owns the thread now, so
@@ -3348,7 +3349,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }
     if (invalidateFailedPrompt) invalidateDeferredNarrativeEvents(threadId);
     pauseRejectedQueuedSend(threadId, error);
-    return false;
+    return { sent: false, failureDetail: alreadySent ? null : message };
   };
 
   // Canonical lifecycle owns runtime state once its turn correlates to the
@@ -3851,7 +3852,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         resendOfSteerId,
         planCommentIds,
       });
-      return true;
+      return { sent: true };
     } catch (error) {
       // Another window already settled this resend, so the queue item is spent, not retryable.
       const alreadySent = Boolean(resendOfSteerId) && error instanceof RpcError && error.code === "steer_resend_closed";
