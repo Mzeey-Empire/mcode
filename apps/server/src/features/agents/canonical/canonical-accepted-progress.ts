@@ -1042,7 +1042,7 @@ export class CanonicalAcceptedProgress {
     receipts: readonly CanonicalAcceptedWriteReceipt[], thread: ProgressThread): Promise<void> {
     for (const saved of receipts) {
       try {
-        await this.writer.acknowledgeOperation(batch.execution.executionId, saved.receipt.operationId);
+        this.writer.enqueueAcknowledgement(batch.execution.executionId, saved.receipt.operationId);
       } catch (cause) {
         const error = cause instanceof Error ? cause : new Error("Saved receipt cleanup failed", { cause });
         logger.error("Accepted progress saved receipt cleanup failed", { threadId: batch.execution.threadId,

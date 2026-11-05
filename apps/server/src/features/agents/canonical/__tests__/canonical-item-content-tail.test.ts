@@ -252,7 +252,7 @@ describe("assistant text producer through the SQLite writer", () => {
         contentHash: NodeCrypto.createHash("sha256").update(JSON.stringify(events)).digest("hex"),
         predecessor: position, through, baseRevision: thread.conversationRevision, events });
       position = through;
-      await writer.acknowledgeOperation(EXECUTION_ID, operation.operationId);
+      await writer.acknowledgeOperations([{ executionId: EXECUTION_ID, operationId: operation.operationId }]);
     }
 
     try {
