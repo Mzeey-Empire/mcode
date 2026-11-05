@@ -33,6 +33,8 @@ class NativeProcess extends NodeEvents.EventEmitter {
 
   constructor() {
     super();
+    // A real process's stdout ends once its last bytes are read after it exits.
+    this.once("exit", () => this.stdout.end());
     this.stdin.on("data", (chunk: Buffer) => {
       this.buffer += chunk.toString();
       const lines = this.buffer.split("\n");

@@ -61,6 +61,14 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   /** Complete lines already read from stdout but not yet dispatched, kept in arrival order. */
   private unprocessedLines: string[] = [];
   private readPaused = false;
+  /**
+   * Set once the app-server's output must be read to its end: its process is gone, its stdout
+   * closed, or the client was disposed. Pausing no longer applies after that.
+   */
+  private backpressureReleased = false;
+  /** Set by {@link dispose}, after which stdout has no `data` listener to read into. */
+  private detached = false;
+  private stopWaitingForOutputEnd: (() => void) | undefined;
   private dispatchingLines = false;
 
   private readonly onData: (chunk: string) => void;
@@ -90,12 +98,15 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
     };
 
     this.onClose = () => {
+      // Held lines may include responses, so they settle their requests before the rest are rejected.
+      this.releaseBackpressure();
       this.disposed = true;
       this.rejectAll(new CodexTransportError("Stream closed while waiting for response"));
     };
 
     this.onError = (err: Error) => {
       logger.error("CodexRpcClient: stdout stream error", { err });
+      this.releaseBackpressure();
       this.disposed = true;
       this.rejectAll(new CodexTransportError(`Stream error: ${err.message}`));
     };
@@ -209,7 +220,7 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
    * stdin continue, but responses to them arrive only after the lines read before them.
    */
   pauseReading(): void {
-    if (this.readPaused) return;
+    if (this.readPaused || this.backpressureReleased) return;
     this.readPaused = true;
     this.stdout.pause();
   }
@@ -219,15 +230,47 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
     if (!this.readPaused) return;
     this.readPaused = false;
     this.dispatchUnprocessedLines();
-    if (!this.readPaused && !this.disposed) this.stdout.resume();
+    // A closed stdin or a request failure does not end stdout: what the pipe still holds is output.
+    if (!this.readPaused) this.stdout.resume();
   }
 
   /**
-   * Disposes the client by rejecting all pending requests and removing stream listeners.
-   * After disposal, calling `sendRequest` throws immediately.
+   * Reads everything the app-server wrote, for when its process is gone. Pausing stops applying,
+   * held lines dispatch in order, and the pipe is read until it ends. Resolves after `timeoutMs`
+   * anyway, because another process that inherited the pipe can hold it open indefinitely.
+   */
+  readRemainingOutput(timeoutMs: number): Promise<void> {
+    this.releaseBackpressure();
+    if (this.detached || this.stdout.readableEnded || this.stdout.destroyed) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        this.stdout.off("end", finish);
+        this.stdout.off("close", finish);
+        this.stopWaitingForOutputEnd = undefined;
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        logger.warn("CodexRpcClient: app-server output did not end after exit", { timeoutMs });
+        finish();
+      }, timeoutMs);
+      this.stdout.once("end", finish);
+      this.stdout.once("close", finish);
+      this.stopWaitingForOutputEnd = finish;
+      this.stdout.resume();
+    });
+  }
+
+  /**
+   * Disposes the client: dispatches the lines it already read, rejects the requests still pending,
+   * and removes stream listeners. Output still in the pipe is not read, because the caller is
+   * tearing the app-server down. After disposal, calling `sendRequest` throws immediately.
    */
   dispose(): void {
+    this.releaseBackpressure();
     this.disposed = true;
+    this.detached = true;
+    this.stopWaitingForOutputEnd?.();
 
     this.stdout.off("data", this.onData);
     this.stdout.off("close", this.onClose);
@@ -243,6 +286,12 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  private releaseBackpressure(): void {
+    this.backpressureReleased = true;
+    this.readPaused = false;
+    this.dispatchUnprocessedLines();
+  }
 
   private dispatchUnprocessedLines(): void {
     // A listener may pause or resume while a line dispatches; only the outer loop drains.

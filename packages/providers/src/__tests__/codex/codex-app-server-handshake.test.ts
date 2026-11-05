@@ -216,6 +216,8 @@ function makeFakeChild(): { child: FakeChild; stdin: NodeStream.PassThrough; std
   child.stderr = stderr;
   child.pid = 4321;
   child.kill = vi.fn();
+  // A real process's stdout ends once its last bytes are read after it exits.
+  child.once("exit", () => stdout.end());
   return { child, stdin, stdout, stderr };
 }
 
@@ -799,6 +801,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     stderr.write("\u001b[31mfirst useful line\u001b[0m\n");
     stderr.write("latest crash cause\n");
     child.emit("exit", 4294967295, null);
+    await NodeEvents.once(server, "exit");
 
     expect(fatal).toHaveBeenCalledWith(expect.stringContaining("Codex app-server exited unexpectedly"));
     expect(fatal).toHaveBeenCalledWith(expect.stringContaining("raw code=4294967295"));
@@ -855,6 +858,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     await server.start();
     await server.sendTurn("secret prompt and response payload");
     child.emit("exit", 9, "SIGKILL");
+    await NodeEvents.once(server, "exit");
 
     expect(vi.mocked(fatal).mock.calls[0]).toHaveLength(1);
     expect(server.lastFatalKind).toBe("retryable");
@@ -880,6 +884,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     }) + "\n");
     child.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: oversizedMethod, params: {} }) + "\n");
     child.emit("exit", 2, null);
+    await NodeEvents.once(server, "exit");
 
     const breadcrumb = server.lastTransportBreadcrumb;
     expect(breadcrumb?.activeTurnId).toBe("turn-" + "x".repeat(251));
@@ -899,6 +904,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     await server.start();
     stderr.write("Reading prompt from stdin\n");
     child.emit("exit", 1, "SIGTERM");
+    await NodeEvents.once(server, "exit");
 
     expect(fatal).toHaveBeenCalledWith(expect.stringContaining("no stderr was captured"));
     expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
@@ -918,6 +924,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
       stderr.write(`line-${i}\n`);
     }
     child.emit("exit", 2, null);
+    await NodeEvents.once(server, "exit");
 
     expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
       expect.stringContaining("Codex app-server exited unexpectedly"),
@@ -941,6 +948,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     stderr.write(`${"A".repeat(12 * 1024)}\n`);
     stderr.write(`${"B".repeat(12 * 1024)}\n`);
     child.emit("exit", 2, null);
+    await NodeEvents.once(server, "exit");
 
     const logFields = findUnexpectedExitLogFields();
     expect(logFields?.stderrTail).toHaveLength(1);
@@ -958,12 +966,42 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     await server.start();
     stderr.write(`${"oversized crash cause ".repeat(1024)}\n`);
     child.emit("exit", 2, null);
+    await NodeEvents.once(server, "exit");
 
     expect(fatal).toHaveBeenCalledWith(expect.stringContaining("latest stderr:"));
     const logFields = findUnexpectedExitLogFields();
     expect(logFields?.stderrTail).toHaveLength(1);
     expect(Buffer.byteLength(logFields?.stderrTail?.[0] ?? "", "utf8")).toBeLessThanOrEqual(16 * 1024);
     expect(logFields?.stderrTail?.[0]).toContain("oversized crash cause");
+  }, 10_000);
+
+  it("dispatches a turn/completed held while paused, and output left in the pipe, before it reports an exit", async () => {
+    const { child } = harnessFakeServer((req): Record<string, unknown> =>
+      req.method === "thread/start" ? { result: { thread: { id: "thread-held" } } } : { result: {} },
+    );
+    const server = new CodexAppServer({ cliPath: "codex", workingDirectory: "/tmp", getSpawnEnv: () => ({}) });
+    const order: string[] = [];
+    server.on("notification", (notification: { method: string; params: { delta?: string } }) => {
+      order.push(notification.params.delta ?? notification.method);
+      if (notification.params.delta === "held-before") server.pauseOutput();
+    });
+    server.on("exit", () => order.push("exit"));
+    server.on("fatal", () => order.push("fatal"));
+    await server.start();
+
+    const delta = (text: string) => JSON.stringify({ jsonrpc: "2.0", method: "item/agentMessage/delta",
+      params: { threadId: "thread-held", turnId: "turn-held", itemId: "answer", delta: text } }) + "\n";
+    const completed = JSON.stringify({ jsonrpc: "2.0", method: "turn/completed",
+      params: { threadId: "thread-held", turn: { id: "turn-held", status: "completed", items: [] } } }) + "\n";
+    child.stdout.write(delta("held-before") + completed);
+    child.stdout.write(delta("in-pipe"));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(order).toEqual(["held-before"]);
+
+    child.emit("exit", 1, null);
+    await vi.waitFor(() => expect(order).toContain("fatal"));
+
+    expect(order).toEqual(["held-before", "turn/completed", "in-pipe", "exit", "fatal"]);
   }, 10_000);
 
   it("truncates and strips backticks in the fatal message excerpt while keeping the full line in stderrTail", async () => {
@@ -978,6 +1016,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     const longBadLine = "run `rm -rf ~` now ".repeat(30);
     stderr.write(longBadLine + "\n");
     child.emit("exit", 2, null);
+    await NodeEvents.once(server, "exit");
 
     expect(fatal).toHaveBeenCalledWith(expect.stringContaining("latest stderr:"));
 
@@ -1006,6 +1045,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     await server.start();
     stderr.write(`${"A".repeat(16 * 1024 - 3)}😀${"B".repeat(100)}\n`);
     child.emit("exit", 2, null);
+    await NodeEvents.once(server, "exit");
 
     const retainedLine = findUnexpectedExitLogFields()?.stderrTail?.[0] ?? "";
     const lastCodeUnit = retainedLine.charCodeAt(retainedLine.length - 1);
@@ -1040,6 +1080,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     await server.start();
     await server.kill();
     child.emit("exit", 1, null);
+    await NodeEvents.once(server, "exit");
 
     expect(fatal).not.toHaveBeenCalledWith(expect.stringContaining("Codex app-server exited unexpectedly"));
   }, 10_000);

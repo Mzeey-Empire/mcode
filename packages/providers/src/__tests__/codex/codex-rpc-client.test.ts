@@ -284,4 +284,60 @@ describe("CodexRpcClient", () => {
     expect(order).toEqual(["item/agentMessage/delta", "turn/completed"]);
     client.dispose();
   });
+
+  it("leaves output written while paused in the pipe instead of reading it", async () => {
+    const { stdout, client } = makeClient();
+    const received: string[] = [];
+    client.on("notification", (message: { method: string }) => {
+      received.push(message.method);
+      client.pauseReading();
+    });
+
+    stdout.write(notificationLine("item/delta") + notificationLine("turn/completed"));
+    stdout.write(notificationLine("item/later"));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stdout.isPaused()).toBe(true);
+    expect(stdout.readableLength).toBeGreaterThan(0);
+    client.dispose();
+  });
+
+  it("dispatches held lines and the rest of the pipe in order once the app-server's output must be read to its end", async () => {
+    const { stdout, client } = makeClient();
+    const received: string[] = [];
+    client.on("notification", (message: { method: string }) => {
+      received.push(message.method);
+      if (message.method === "item/delta") client.pauseReading();
+    });
+
+    stdout.write(notificationLine("item/delta") + notificationLine("turn/completed"));
+    stdout.write(notificationLine("item/still-in-pipe"));
+    stdout.end();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(received).toEqual(["item/delta"]);
+
+    await client.readRemainingOutput(1_000);
+    expect(received).toEqual(["item/delta", "turn/completed", "item/still-in-pipe"]);
+    client.pauseReading();
+    expect(stdout.isPaused()).toBe(false);
+  });
+
+  it("dispatches lines it already read before a deliberate dispose", async () => {
+    const { stdout, client } = makeClient();
+    const received: string[] = [];
+    client.on("notification", (message: { method: string }) => {
+      received.push(message.method);
+      if (message.method === "item/delta") client.pauseReading();
+    });
+
+    stdout.write(notificationLine("item/delta") + notificationLine("turn/completed"));
+    await new Promise((resolve) => setImmediate(resolve));
+    client.dispose();
+
+    expect(received).toEqual(["item/delta", "turn/completed"]);
+  });
 });
+
+function notificationLine(method: string): string {
+  return `${JSON.stringify({ jsonrpc: "2.0", method, params: {} })}\n`;
+}

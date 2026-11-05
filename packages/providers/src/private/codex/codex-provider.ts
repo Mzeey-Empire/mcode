@@ -764,9 +764,12 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     super();
     this.canonicalEventPublisher = new CodexCanonicalEventPublisher(host.events);
     this.canonicalEventPublisher.setBackpressureHandler((threadId, paused) => {
-      const server = this.runtime.states().find((state) => state.threadId === threadId)?.server;
-      if (paused) server?.pauseOutput();
-      else server?.resumeOutput();
+      // Active servers include one still in its handshake, which the session pool does not list yet.
+      for (const [sessionId, server] of this.activeCodexServers) {
+        if (this.threadIdForSession(sessionId) !== threadId) continue;
+        if (paused) server.pauseOutput();
+        else server.resumeOutput();
+      }
     });
     this.runtime = new SessionRuntime<CodexSessionState>(this, {
       jobObject: {
@@ -1443,6 +1446,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const server = this.createCodexAppServer(context, mcodeInstructions);
     const mapper = this.createCodexEventMapper(threadId, context.sessionId);
     this.activeCodexServers.set(context.sessionId, server);
+    // The pause belongs to the thread, so a server replacing one paused mid-backlog starts paused.
+    if (this.canonicalEventPublisher.isStreamPaused(threadId)) server.pauseOutput();
     try {
       this.attachCodexServerEvents(context, server, mapper);
       const mcodeStartup = mcode ? observeCodexMcodeStartup(server) : undefined;

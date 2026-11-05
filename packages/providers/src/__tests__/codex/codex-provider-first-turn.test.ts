@@ -91,7 +91,7 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
 
 import { BrowserAutomationSessionLease, CodexProvider, mcodeAttachment, stubEnvService } from "./codex-provider-test-fixture.js";
 import { AgentEventSchema, AgentEventType } from "@mcode/contracts/events/agent-event";
-import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { ProviderRuntimeEventSchema, providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
 import type { ProviderFileMutationStart, ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts/providers/interfaces";
 import type { ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
@@ -369,6 +369,42 @@ describe("CodexProvider first turn on new session", () => {
     await provider.waitForCanonicalTurnEvents({ threadId, turnId: "stream-turn", executionId: schemaValidExecutionId, deliveryAttempt: 1 });
     const streamed = submittedRuntimeEvents(batches).flatMap(({ event }) => event.type === "textDelta" ? [event.delta] : []);
     expect(streamed).toEqual(Array.from({ length: deltas }, (_, index) => `${index} `));
+    await provider.shutdown();
+  });
+
+  it("starts a new app-server paused while the thread's saving is behind, and resumes it before it registers", async () => {
+    let saveSlowly = true;
+    const waiting: Array<() => void> = [];
+    const provider = makeProvider(undefined, undefined, undefined, { submit: async () => {
+      if (saveSlowly) await new Promise<void>((resolve) => { waiting.push(resolve); });
+      return acceptedEventReceipt;
+    } });
+    // A backlog left by an earlier app-server for this thread, still saving when the next one starts.
+    const publisher = (provider as unknown as { canonicalEventPublisher: {
+      publish: (routing: { threadId: string; turnId: string; executionId: string; deliveryAttempt: number }, event: ProviderRuntimeEvent) => void;
+    } }).canonicalEventPublisher;
+    const earlier = { threadId, turnId: "earlier-turn", executionId: "612520b0-7178-49f4-88b2-a9594d359f89", deliveryAttempt: 1 };
+    for (let index = 0; index < 300; index++) {
+      publisher.publish(earlier, providerRuntimeEvent({ type: AgentEventType.TextDelta, threadId,
+        turnExecutionId: earlier.executionId, delta: `${index} ` }));
+    }
+    let finishStart!: () => void;
+    startGate.current = new Promise<void>((resolve) => { finishStart = resolve; });
+
+    const sent = provider.sendTurn({
+      turnId: "next-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "write", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "full",
+    });
+    await vi.waitFor(() => expect(appServers).toHaveLength(1));
+    const replacement = appServers[0]!;
+    expect(replacement.outputPaused).toBe(true);
+
+    saveSlowly = false;
+    for (const release of waiting.splice(0)) release();
+    await vi.waitFor(() => expect(replacement.outputPaused).toBe(false));
+    finishStart();
+    await sent;
     await provider.shutdown();
   });
 

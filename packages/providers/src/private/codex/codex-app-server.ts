@@ -468,6 +468,12 @@ const INITIALIZE_HANDSHAKE = {
  */
 const THREAD_HANDSHAKE_TIMEOUT_MS = 30_000;
 
+/**
+ * How long an exit waits for the app-server's stdout to end. The pipe ends as soon as the exited
+ * process's last bytes are read, unless a process it spawned inherited the pipe and keeps it open.
+ */
+const EXIT_OUTPUT_DRAIN_TIMEOUT_MS = 2_000;
+
 /** Maximum non-benign stderr lines retained for app-server diagnostics. */
 const STDERR_TAIL_MAX_LINES = 50;
 /** Maximum UTF-8 bytes retained across non-benign stderr diagnostics. */
@@ -963,6 +969,8 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   private rpc!: CodexRpcClient;
   private child!: NodeChildProcess.ChildProcess;
   private killRequested = false;
+  /** Kept apart from the RPC client so a pause requested before {@link start} still applies. */
+  private outputPaused = false;
   /** Shared in-flight teardown so concurrent `kill()` callers await the same work. */
   private teardownPromise: Promise<void> | null = null;
 
@@ -1032,6 +1040,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     this.child = child;
     this._isAlive = true;
     this.rpc = new CodexRpcClient(child.stdin!, child.stdout!);
+    if (this.outputPaused) this.rpc.pauseReading();
     this.wireRpc();
     this.wireStderr();
     this.wireExit();
@@ -1485,11 +1494,13 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
    * their responses arrive after the output read before them.
    */
   pauseOutput(): void {
+    this.outputPaused = true;
     this.rpc?.pauseReading();
   }
 
   /** Reads the app-server's output again after {@link pauseOutput}. */
   resumeOutput(): void {
+    this.outputPaused = false;
     this.rpc?.resumeReading();
   }
 
@@ -1626,34 +1637,40 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     this.emit("fatal", message);
   }
 
-  /** Wires the child process exit event to update state and emit events. */
+  /**
+   * Wires the child process exit event to update state and emit events. Output the process wrote
+   * before it exited, a final `turn/completed` included, dispatches first: exit listeners tear the
+   * session down and report a failure, which must not overtake the events that preceded it.
+   */
   private wireExit(): void {
-    const { cliPath } = this.options;
-
     this.child.on("exit", (code, signal) => {
       this._isAlive = false;
-      this.emit("exit", code, signal);
-
-      if (!this.killRequested) {
-        const exit = decodeExitDiagnostics(code, signal);
-        const stderrTail = this.stderrTail.snapshot();
-        const latestStderr = this.stderrTail.latest();
-        const msg = formatUnexpectedExitMessage(exit, latestStderr);
-        const breadcrumb = Object.freeze({
-          cause: "unexpected_exit" as const,
-          pid: this.child.pid ?? null,
-          activeRequestId: this.activeRequestId,
-          activeTurnId: this.activeTurnId,
-          lastActivity: this.lastActivity ? Object.freeze({ ...this.lastActivity }) : null,
-          exit: Object.freeze({ code, signal }),
-          stderrTail: Object.freeze(stderrTail),
-        }) satisfies CodexTransportBreadcrumb;
-        this._lastTransportBreadcrumb = breadcrumb;
-        logger.error(msg, { cliPath, exit, stderrTail, breadcrumb });
-        // A crash says nothing about the request; a fresh app-server may well finish it.
-        this.emitFatal(msg, "retryable");
-      }
+      const unexpected = !this.killRequested;
+      void this.rpc.readRemainingOutput(EXIT_OUTPUT_DRAIN_TIMEOUT_MS).then(() => {
+        this.emit("exit", code, signal);
+        if (unexpected) this.reportUnexpectedExit(code, signal);
+      });
     });
+  }
+
+  private reportUnexpectedExit(code: number | null, signal: NodeJS.Signals | null): void {
+    const exit = decodeExitDiagnostics(code, signal);
+    const stderrTail = this.stderrTail.snapshot();
+    const latestStderr = this.stderrTail.latest();
+    const msg = formatUnexpectedExitMessage(exit, latestStderr);
+    const breadcrumb = Object.freeze({
+      cause: "unexpected_exit" as const,
+      pid: this.child.pid ?? null,
+      activeRequestId: this.activeRequestId,
+      activeTurnId: this.activeTurnId,
+      lastActivity: this.lastActivity ? Object.freeze({ ...this.lastActivity }) : null,
+      exit: Object.freeze({ code, signal }),
+      stderrTail: Object.freeze(stderrTail),
+    }) satisfies CodexTransportBreadcrumb;
+    this._lastTransportBreadcrumb = breadcrumb;
+    logger.error(msg, { cliPath: this.options.cliPath, exit, stderrTail, breadcrumb });
+    // A crash says nothing about the request; a fresh app-server may well finish it.
+    this.emitFatal(msg, "retryable");
   }
 
   /** Runs the JSON-RPC handshake sequence in order. */

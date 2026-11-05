@@ -139,7 +139,10 @@ stdout until the queue drains. One app-server serves one Mcode thread, so the
 pause holds only that thread. Requests still reach Codex while paused, but their
 responses queue behind the unread output. Stop therefore fences the execution
 with its queued events discarded before it interrupts, which drains the queue
-and lets the interrupt response through.
+and lets the interrupt response through. The pause belongs to the thread, so an
+app-server that starts for a paused thread starts paused. Once the process
+exits, pausing stops: the adapter reads the rest of its output, a final
+`turn/completed` included, before it reports the exit or a failure.
 
 A provider adapter may forward a generic event, consume private native
 evidence, or reject malformed evidence with a diagnostic. Only a forwarded

@@ -62,6 +62,11 @@ export class CodexCanonicalEventPublisher {
     this.backpressureHandler = handler;
   }
 
+  /** Whether a thread's stream is paused now, so an app-server that starts for it can start paused. */
+  isStreamPaused(threadId: string): boolean {
+    return this.pausedThreads.has(threadId);
+  }
+
   /** Queues one event; the caller must have verified its exact execution and attempt. */
   publish(routing: CodexCanonicalEventRouting, runtimeEvent: ProviderRuntimeEvent): void {
     if (this.admissionStopped) {
