@@ -95,11 +95,18 @@ async function spawnChild(fixture: WorkerFixture, executionId: string, name: str
   return { ...delegation, evidence };
 }
 
+/**
+ * A graceful close runs `stopAll`, which may wait out the 15 s provider-stop bound and then the 15 s
+ * worker-drain bound in `turn-runtime-controller.ts`. Vitest's default 10 s hook timeout would fail
+ * a close that is still inside those bounds.
+ */
+const FIXTURE_CLOSE_TIMEOUT_MS = 45_000;
+
 afterEach(async () => {
   await activeFixture?.close();
   activeFixture = undefined;
   vi.restoreAllMocks();
-});
+}, FIXTURE_CLOSE_TIMEOUT_MS);
 
 describe("AgentService cleanup through production worker composition", { timeout: 30_000 }, () => {
   it("aborts an auto-resumed turn when a pending mutation reservation owns the thread", async () => {
