@@ -7,7 +7,7 @@ import { type PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import { type PlanVersion } from "@mcode/contracts/models/plan";
 import { type TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
 import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
-import type { ProviderEventDraft } from "@mcode/providers";
+import { boundToolOutput, toolOutputWireBytes, TOOL_OUTPUT_PREVIEW_BYTES, type ProviderEventDraft } from "@mcode/providers";
 
 import type {
   DataOnlyParentLiveMessageInput,
@@ -411,7 +411,7 @@ export class ExecutionWorkerHandler {
     if (event.type === "toolUse" && resolveBrowserNarrativeTool(event.toolName)) {
       state.browserToolNames.set(event.toolCallId, event.toolName);
     }
-    const sanitized = this.browserNarrativeEvents.sanitize(event);
+    const sanitized = boundProviderToolResult(this.browserNarrativeEvents.sanitize(event));
     if (sanitized === event) return draft;
     return { ...draft, payload: { ...payload, item: { ...payload.item,
       payload: { ...payload.item.payload, runtimeEvent: { ...runtime.data, event: sanitized } },
@@ -921,6 +921,14 @@ function livePublicationFor(command: WorkerCommand): readonly ExecutionLivePubli
     case "post-terminal-event": return [command.publication];
     default: return undefined;
   }
+}
+
+function boundProviderToolResult(event: AgentEvent): AgentEvent {
+  if (event.type !== "toolResult" || event.outputArtifactPath
+    || toolOutputWireBytes(event.output) <= TOOL_OUTPUT_PREVIEW_BYTES) return event;
+  return { ...event, ...boundToolOutput({
+    threadId: event.threadId, toolCallId: event.toolCallId, output: event.output,
+  }) };
 }
 
 function operationId(request: ExecutionWorkerRequest<WorkerCommand>): string {

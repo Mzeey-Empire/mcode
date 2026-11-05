@@ -63,10 +63,20 @@ describe("bounded tool output", () => {
 
     expect(result.outputTruncated).toBe(true);
     expect(result.outputTotalBytes).toBe(Buffer.byteLength(fullOutput, "utf8"));
-    expect(Buffer.byteLength(result.output, "utf8")).toBe(TOOL_OUTPUT_PREVIEW_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(result.output), "utf8") - 2).toBe(TOOL_OUTPUT_PREVIEW_BYTES);
     expect(result.output.startsWith("A".repeat(1024))).toBe(true);
     expect(result.output.endsWith("Z".repeat(1024))).toBe(true);
     expect(NodeFS.readFileSync(result.outputArtifactPath!, "utf8")).toBe(fullOutput);
+  });
+
+  it("bounds JSON escapes while preserving raw full-output bytes", () => {
+    const output = "\u0001".repeat(100_000);
+    const result = boundToolOutput({ threadId: "thread-1", toolCallId: "controls", output });
+
+    expect(result.outputTruncated).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(result.output)) - 2).toBeLessThanOrEqual(TOOL_OUTPUT_PREVIEW_BYTES);
+    expect(result.outputTotalBytes).toBe(100_000);
+    expect(NodeFS.readFileSync(result.outputArtifactPath!, "utf8")).toBe(output);
   });
 
   it("sanitizes artifact path segments", () => {
@@ -106,7 +116,7 @@ describe("bounded tool output", () => {
     const result = buffer.finalize();
 
     expect(result.outputTruncated).toBe(true);
-    expect(result.output.endsWith("Z".repeat(64 * 1024))).toBe(true);
+    expect(result.output.endsWith("Z".repeat(32 * 1024))).toBe(true);
     expect(result.output.includes("M".repeat(1024))).toBe(false);
   });
 

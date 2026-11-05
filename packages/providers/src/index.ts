@@ -57,6 +57,7 @@ export {
   TOOL_OUTPUT_PREVIEW_BYTES,
   TOOL_OUTPUT_TAIL_BYTES,
   boundToolOutput,
+  toolOutputWireBytes,
   pruneStaleToolOutputArtifacts,
   resolveToolOutputArtifactPath,
   type BoundedToolOutputResult,
