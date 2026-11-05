@@ -106,6 +106,28 @@ describe("diagnostics reader", () => {
     expect(text).toContain("run earlier pid 41: started unknown (previous unknown); ended no exit record; last record at 1970-01-01T00:00:01.950Z");
   });
 
+  it("reads a batch rewritten by a fatal flush once, skipping its torn copy", () => {
+    const marker: DiagRecord = { t: 1500, n: 1, th: "a", k: "run", ch: "diag", run: "crashed", pid: 41, state: "on" };
+    const before: DiagRecord = { t: 2000, n: 2, th: "a", k: "ev", ch: "agent.created", d: "crashed" };
+    // Another process shares the thread file and happens to stamp a different record the same.
+    const otherMarker: DiagRecord = { t: 1600, n: 1, th: "a", k: "run", ch: "diag", run: "other", pid: 42, state: "on" };
+    const other: DiagRecord = { ...before, d: "other" };
+    const fatal: DiagRecord = { t: 2500, n: 3, th: "a", k: "ev", ch: "agent.created", d: "fatal" };
+    const batch = [marker, before].map((row) => JSON.stringify(row) + "\n").join("");
+    const torn = batch.slice(0, batch.length - 20);
+    const otherBatch = [otherMarker, other].map((row) => JSON.stringify(row) + "\n").join("");
+    const rewrite = "\n" + batch + JSON.stringify(fatal) + "\n";
+    NodeFS.writeFileSync(recordingPath("t", "a.jsonl"), batch + otherBatch + torn + rewrite);
+    q.thread = "a";
+    expect(loadEvidence(q).records).toEqual([
+      marker,
+      otherMarker,
+      { ...before, run: "crashed" },
+      { ...other, run: "other" },
+      { ...fatal, run: "crashed" },
+    ]);
+  });
+
   it("includes process records on lane - in a scoped timeline, including channel and JSON selection", () => {
     write("a", [begin("a")]);
     const row: DiagRecord = { t: 3000, n: 2, k: "ev", ch: "rpc.request", d: { approval: "request", outcome: "ok" } };

@@ -5,12 +5,6 @@ import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "../../logging/index.js";
 import { DiagRecorder, parseDiagLine, type DiagRecord } from "../index.js";
-import { Sink } from "../internal/sink.js";
-
-vi.mock("node:fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof NodeFS>();
-  return { ...actual, write: vi.fn(actual.write) };
-});
 
 const SEGMENT_BYTES = 4 * 1024 * 1024;
 const MAX_OPEN_SPANS = 10_000;
@@ -116,60 +110,6 @@ describe("diagnostics recorder", () => {
       ...Array.from({ length: 1000 }, (_, i) => ({ operation: "burst-" + i })),
       { operation: "fatal" },
     ]);
-  });
-
-  it.each([false, true])("does not repeat a synchronous takeover when async preparation settles (failure=%s)", async (fails) => {
-    NodeFS.mkdirSync(NodePath.join(dir, "t"));
-    let settle = (_error?: Error): void => { throw new Error("Preparation not started"); };
-    const preparation = new Promise<string | undefined>((resolve, reject) => {
-      settle = (error) => error ? reject(error) : resolve(undefined);
-    });
-    const mkdir = vi.spyOn(NodeFS.promises, "mkdir").mockReturnValueOnce(preparation);
-    const onFailure = vi.fn();
-    const sink = new Sink({ dir, runId: "test", onFailure, onDropped: vi.fn() });
-    for (let n = 0; n < 1000; n += 1) {
-      sink.write({ t: n, n, ch: "test", k: "ev", th: "a", d: "x".repeat(100) });
-    }
-    sink.flushSync();
-    expect(threadEvents("a").map((record) => record.n)).toEqual(Array.from({ length: 1000 }, (_, n) => n));
-    settle(fails ? new Error("late mkdir failure") : undefined);
-    await preparation.catch(() => undefined);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    mkdir.mockRestore();
-    sink.write({ t: 1000, n: 1000, ch: "test", k: "ev", th: "a" });
-    sink.flushSync();
-    expect(threadEvents("a").map((record) => record.n)).toEqual(Array.from({ length: 1001 }, (_, n) => n));
-    expect(onFailure).not.toHaveBeenCalled();
-  });
-
-  it.each([false, true])("keeps one copy when an active write settles after flushSync (failure=%s)", async (fails) => {
-    const { write: originalWrite } = await vi.importActual<typeof NodeFS>("node:fs");
-    const write = vi.mocked(NodeFS.write).mockClear().mockImplementationOnce(() => {});
-    const onFailure = vi.fn();
-    const sink = new Sink({ dir, runId: "test", onFailure, onDropped: vi.fn() });
-    for (let n = 0; n < 1000; n += 1) {
-      sink.write({ t: n, n, ch: "test", k: "ev", th: "a", d: "x".repeat(100) });
-    }
-    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1));
-    sink.flushSync();
-    expect(threadEvents("a").map((record) => record.n)).toEqual(Array.from({ length: 1000 }, (_, n) => n));
-    const args = write.mock.calls[0];
-    if (!args) throw new Error("No active filesystem write");
-    write.mockImplementation(originalWrite);
-    await new Promise<void>((resolve) => {
-      const callback = args.at(-1);
-      if (typeof callback !== "function") throw new Error("No filesystem callback");
-      const finish = (...result: unknown[]): void => {
-        Reflect.apply(callback, undefined, result);
-        resolve();
-      };
-      if (fails) finish(new Error("late write failure"));
-      else Reflect.apply(originalWrite, NodeFS, [...args.slice(0, -1), finish]);
-    });
-    sink.write({ t: 1000, n: 1000, ch: "test", k: "ev", th: "a" });
-    sink.flushSync();
-    expect(threadEvents("a").map((record) => record.n)).toEqual(Array.from({ length: 1001 }, (_, n) => n));
-    expect(onFailure).not.toHaveBeenCalled();
   });
 
   it("rotates a noisy thread to a previous segment without touching another thread", async () => {

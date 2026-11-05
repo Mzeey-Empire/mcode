@@ -34,10 +34,15 @@ function needsRotation(size: number, text: string): boolean {
   return size > 0 && size + Buffer.byteLength(text) > SEGMENT_BYTES;
 }
 
+function countLines(files: Map<string, string[]>): number {
+  let count = 0;
+  for (const lines of files.values()) count += lines.length;
+  return count;
+}
+
 interface QueuedBatch {
   files: Map<string, string[]>;
   bytes: number;
-  writing?: { key: string; fd: number; buffer: Buffer; position: number };
 }
 
 /** Callbacks and location for one recording directory. */
@@ -46,7 +51,7 @@ export interface SinkOptions {
   runId: string;
   /** Called once when a write fails; the sink accepts no more records afterwards. */
   onFailure(error: unknown): void;
-  /** Called after a successful flush with the number of records dropped at the memory cap. */
+  /** Called with the number of records dropped at the memory cap or lost to a failed write. */
   onDropped(count: number): void;
 }
 
@@ -58,12 +63,13 @@ export interface SinkOptions {
 export class Sink {
   private queued = new Map<string, string[]>();
   private queuedBytes = 0;
+  /** Lines the background flush has taken, by file, until that file's append resolves. */
+  private unconfirmed = new Map<string, string[]>();
   private queuedAndWritingBytes = 0;
   private droppedCount = 0;
   private readonly fileSizes = new Map<string, number>();
   private timer?: ReturnType<typeof setTimeout>;
   private flushInFlight = false;
-  private inFlight?: QueuedBatch;
   private failed = false;
   private retentionRunning = false;
   private lastRetentionAt = Date.now();
@@ -91,12 +97,13 @@ export class Sink {
   }
 
   /**
-   * Finishes queued and in-flight records before exit. Active writes share fixed offsets,
-   * so their later async completion cannot append a second copy.
+   * Writes everything not yet on disk before the process exits, including the batch a background
+   * flush has taken but not finished. Exit stops that background append wherever it is, so this
+   * writes the batch again. The file may then hold it twice, and the reader keeps one copy.
    */
   flushSync(): void {
     this.clearTimer();
-    if (this.inFlight) this.writeBatchSync(this.inFlight);
+    this.rewriteUnconfirmedSync();
     this.writeQueuedSync();
     if (this.reportDrops()) this.writeQueuedSync();
   }
@@ -145,20 +152,19 @@ export class Sink {
 
   private async flushAsync(): Promise<void> {
     const batch = this.takeBatch();
-    this.inFlight = batch;
+    this.unconfirmed = batch.files;
     try {
+      // flushSync empties the map once it has rewritten the lines, which ends this loop early.
       for (const [key, lines] of batch.files) {
-        await this.appendLines(batch, key, lines.join(""));
+        await this.appendLines(key, lines.join(""));
         batch.files.delete(key);
       }
       this.queuedAndWritingBytes -= batch.bytes;
-      batch.bytes = 0;
       this.reportDrops();
     } catch (error) {
-      if (batch.files.size > 0) this.markFailed(error, batch);
+      this.markFailed(error, batch.files);
     } finally {
       this.flushInFlight = false;
-      this.inFlight = undefined;
     }
     this.afterFlush();
   }
@@ -176,27 +182,32 @@ export class Sink {
     return batch;
   }
 
-  private writeQueuedSync(): void {
-    if (this.failed || this.queued.size === 0) return;
-    this.writeBatchSync(this.takeBatch());
+  private rewriteUnconfirmedSync(): void {
+    if (this.failed || this.unconfirmed.size === 0) return;
+    const unconfirmed = this.unconfirmed;
+    try {
+      for (const [key, lines] of unconfirmed) {
+        // An append cut short by exit can end mid-line. A leading newline keeps that fragment
+        // from fusing with the first rewritten record, so the reader skips only the fragment.
+        this.appendLinesSync(key, "\n" + lines.join(""));
+        unconfirmed.delete(key);
+      }
+    } catch (error) {
+      this.markFailed(error, unconfirmed);
+    }
   }
 
-  private writeBatchSync(batch: QueuedBatch): void {
-    if (this.failed) return;
+  private writeQueuedSync(): void {
+    if (this.failed || this.queued.size === 0) return;
+    const batch = this.takeBatch();
     try {
       for (const [key, lines] of batch.files) {
-        const writing = batch.writing;
-        if (writing?.key === key) {
-          writeAllSync(writing.fd, writing.buffer, writing.position);
-        } else {
-          this.appendLinesSync(key, lines.join(""));
-        }
+        this.appendLinesSync(key, lines.join(""));
         batch.files.delete(key);
       }
       this.queuedAndWritingBytes -= batch.bytes;
-      batch.bytes = 0;
     } catch (error) {
-      this.markFailed(error, batch);
+      this.markFailed(error, batch.files);
     }
   }
 
@@ -208,72 +219,75 @@ export class Sink {
     return true;
   }
 
-  private markFailed(error: unknown, batch: QueuedBatch): void {
+  /**
+   * A failed write ends recording. Every record not yet on disk, in the failed batch or still
+   * queued, counts as dropped, and the sink makes one last attempt to write that count as a
+   * marker in each file. A file that still accepts writes then shows the loss.
+   */
+  private markFailed(error: unknown, unwritten: Map<string, string[]>): void {
     if (this.failed) return;
-    this.clearTimer();
-    const batches = new Set([batch, this.inFlight].filter((value) => value !== undefined));
-    for (const pending of batches) {
-      for (const lines of pending.files.values()) this.droppedCount += lines.length;
-      pending.files.clear();
-      pending.bytes = 0;
-    }
-    for (const lines of this.queued.values()) this.droppedCount += lines.length;
-    this.queued.clear();
-    this.queuedBytes = 0;
+    this.droppedCount += countLines(unwritten) + countLines(this.queued);
+    unwritten.clear();
+    this.takeBatch();
     this.queuedAndWritingBytes = 0;
-    this.flushInFlight = true;
+    // The recorder answers with markers sent through write(), so this runs before writes close.
     this.reportDrops();
     this.failed = true;
     this.clearTimer();
+    this.writeLastMarkersSync();
+    this.options.onFailure(error);
+  }
+
+  private writeLastMarkersSync(): void {
     for (const [key, lines] of this.takeBatch().files) {
       try {
         this.appendLinesSync(key, lines.join(""));
       } catch {
-        // The failure callback below reports disk errors even if their marker cannot be saved.
+        // onFailure reports the disk error; a file that refuses its marker has nothing to add.
       }
     }
-    this.options.onFailure(error);
   }
 
   private pathFor(key: string): string {
     return NodePath.join(this.options.dir, key + ".jsonl");
   }
 
-  private async appendLines(batch: QueuedBatch, key: string, text: string): Promise<void> {
+  private async appendLines(key: string, text: string): Promise<void> {
     const file = this.pathFor(key);
-    // Yield before metadata work too, so crossing the threshold never blocks emit().
-    await NodeFS.promises.mkdir(NodePath.dirname(file), { recursive: true });
-    if (!batch.files.has(key)) return;
-    const position = this.prepareAppend(key, file, text);
-    const fd = NodeFS.openSync(file, NodeFS.constants.O_CREAT | NodeFS.constants.O_RDWR);
-    const buffer = Buffer.from(text);
-    batch.writing = { key, fd, buffer, position };
-    this.fileSizes.set(key, position + buffer.length);
-    try {
-      let offset = 0;
-      while (offset < buffer.length && batch.files.has(key)) {
-        offset += await writeAt(fd, buffer, offset, position);
-      }
-    } catch (error) {
-      if (batch.files.has(key)) throw error;
-    } finally {
-      batch.writing = undefined;
-      NodeFS.closeSync(fd);
+    let size = await this.sizeOf(key, file);
+    if (needsRotation(size, text)) {
+      await rotateIfPresent(file);
+      size = 0;
     }
+    await NodeFS.promises.appendFile(file, text);
+    this.fileSizes.set(key, size + Buffer.byteLength(text));
   }
 
   private appendLinesSync(key: string, text: string): void {
     const file = this.pathFor(key);
-    const size = this.prepareAppend(key, file, text);
+    let size = this.sizeOfSync(key, file);
+    if (needsRotation(size, text)) {
+      rotateIfPresentSync(file);
+      size = 0;
+    }
     NodeFS.appendFileSync(file, text);
     this.fileSizes.set(key, size + Buffer.byteLength(text));
   }
 
-  private prepareAppend(key: string, file: string, text: string): number {
-    const size = this.sizeOfSync(key, file);
-    if (!needsRotation(size, text)) return size;
-    rotateIfPresentSync(file);
-    return 0;
+  private async sizeOf(key: string, file: string): Promise<number> {
+    const known = this.fileSizes.get(key);
+    if (known !== undefined) return known;
+
+    await NodeFS.promises.mkdir(NodePath.dirname(file), { recursive: true });
+    try {
+      const stats = await NodeFS.promises.stat(file);
+      this.fileSizes.set(key, stats.size);
+      return stats.size;
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+      this.fileSizes.set(key, 0);
+      return 0;
+    }
   }
 
   private sizeOfSync(key: string, file: string): number {
@@ -293,22 +307,11 @@ export class Sink {
   }
 }
 
-function writeAt(fd: number, buffer: Buffer, offset: number, position: number): Promise<number> {
-  return new Promise((resolve, reject) => {
-    NodeFS.write(fd, buffer, offset, buffer.length - offset, position + offset, (error, written) => {
-      if (error) reject(error);
-      else if (written === 0) reject(new Error("Diagnostics write made no progress"));
-      else resolve(written);
-    });
-  });
-}
-
-function writeAllSync(fd: number, buffer: Buffer, position: number): void {
-  let offset = 0;
-  while (offset < buffer.length) {
-    const written = NodeFS.writeSync(fd, buffer, offset, buffer.length - offset, position + offset);
-    if (written === 0) throw new Error("Diagnostics write made no progress");
-    offset += written;
+async function rotateIfPresent(file: string): Promise<void> {
+  try {
+    await NodeFS.promises.rename(file, previousSegmentPath(file));
+  } catch (error) {
+    if (!isMissing(error)) throw error;
   }
 }
 
