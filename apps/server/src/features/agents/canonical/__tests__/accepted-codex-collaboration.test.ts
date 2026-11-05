@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentEventSchema, AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { MessageSchema } from "@mcode/contracts/models/message";
 import { ProviderRuntimeExtensionSchema, type CodexChildEvidence, type ProviderRuntimeExtension } from "@mcode/contracts/events/provider-runtime-event";
-import { createAgentModelState, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn } from "@mcode/contracts/compat/agent-model";
+import { applyOwnedAgentEventBatch, CanonicalAgentSemanticEnvelopeSchema, createAgentModelState, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn } from "@mcode/contracts/compat/agent-model";
 import { logger } from "@mcode/shared";
 import type { ProviderEventIngressEvent } from "../../../providers/composition/provider-event-ingress.js";
 import { AcceptedCodexCollaboration } from "../accepted-codex-collaboration.js";
@@ -242,6 +242,22 @@ describe("AcceptedCodexCollaboration", () => {
       parentExecution: { threadId: "parent", turnId: "parent-turn", executionId: PARENT_EXECUTION },
       sourceExecution: { threadId: value.childThread.id, turnId: value.turn.id, executionId: value.turn.executionId },
     }));
+  });
+
+  it("refuses reads from a fork whose accepted state its owner has since changed in place", () => {
+    const state = initial();
+    const accepted = new AcceptedCodexCollaboration(state);
+    const kept = accepted.fork(state);
+    const parent = state.threads.parent;
+    if (!parent) throw new Error("Expected parent thread");
+    const admitted = applyOwnedAgentEventBatch(state, [CanonicalAgentSemanticEnvelopeSchema.parse({
+      eventId: "revision-99", routing: { threadId: "parent", executionId: PARENT_EXECUTION }, sourceProviderId: "codex",
+      sourceIdentities: [], acceptedSequence: 1, serverTimestamps: { acceptedAt: NOW },
+      payload: { type: "thread.recorded", thread: { ...parent, conversationRevision: 99 } } })]);
+    expect(admitted.outcome).toBe("applied");
+
+    expect(() => kept.loadThread("parent")).toThrow("changed since");
+    expect(accepted.fork(state).loadThread("parent")?.conversationRevision).toBe(99);
   });
 
   it("rehydrates native routing and preserves the original child owner after a newer parent turn", () => {

@@ -2,7 +2,7 @@ import { type CanonicalChildRosterRequest } from "./canonical-child-roster.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
 import { diag } from "@mcode/shared/diagnostics";
-import { AcceptedCanonicalAgentEventEnvelopeSchema, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState, type AgentProgressPosition, type CanonicalAgentEventEnvelope, type CollaborationObservationChange } from "@mcode/contracts/compat/agent-model";
+import { AcceptedCanonicalAgentEventEnvelopeSchema, applyOwnedAgentEventBatch, clearOwnedEventIds, copyAgentModelState, type OwnedBatchReduction, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState, type AgentProgressPosition, type CanonicalAgentEventEnvelope, type CollaborationObservationChange } from "@mcode/contracts/compat/agent-model";
 import { type CanonicalAgentProgressRecovery, type CanonicalAgentProgressFrame } from "@mcode/contracts/models/canonical-agent-progress";
 import { type CanonicalAgentRevision } from "@mcode/contracts/models/canonical-agent-reconnect";
 import { type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
@@ -80,10 +80,18 @@ export class TurnVisualRejectedError extends Error {
   }
 }
 
+type AppliedOwnedBatch = Extract<OwnedBatchReduction, { outcome: "applied" }>;
+type AcceptedOwner = ThreadProgressOwner<AcceptedExecutionWriteIntent, ExecutionAcceptedReceipt>;
+
 interface ProgressThread {
-  owner: ThreadProgressOwner<AcceptedExecutionWriteIntent, ExecutionAcceptedReceipt>;
+  owner: AcceptedOwner;
   head?: AcceptedExecutionState;
+  /**
+   * Owned by this thread and mutated in place by each admission, because copying the whole family's maps per
+   * batch made every save cost grow with thread history. Never hand it out: readers that outlive a call get a copy.
+   */
   state: AgentModelState;
+  /** Owned like `state` but a separate object, advanced in place only by saved receipts. */
   durableState: AgentModelState;
   revision: CanonicalAgentRevision;
   publicationSequence: number;
@@ -175,7 +183,7 @@ export class CanonicalAcceptedProgress {
       conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER });
     if (recovery.mode !== "snapshot") throw new Error("Durable command seed requires a snapshot");
     thread.state = recovery.snapshot.state;
-    thread.durableState = thread.state;
+    thread.durableState = copyAgentModelState(thread.state);
     thread.revision = recovery.snapshot.revision;
     thread.epoch = `${this.epoch}:${NodeCrypto.randomUUID()}`;
     thread.owner = this.makeOwner(threadId, thread.epoch, thread.state, thread.revision);
@@ -247,22 +255,15 @@ export class CanonicalAcceptedProgress {
       publicationIds, messageSequence: thread.messageSequence, acceptedAt });
     prependObservationEvents(prepared.events, [...collaboration.events, ...features.events]);
     const nextHead = advanceAcceptedExecution(head, operation, prepared.terminalMessage);
-    let candidate = thread.state;
     const terminal = acceptedTerminalPersistence(operation, prepared.terminalMessage);
-    const admission = thread.owner.accept({ operationId: operation.operationId, execution: operation.execution,
+    const admission = acceptIntoOwnedState(thread, { operationId: operation.operationId, execution: operation.execution,
       events: prepared.events, write: { kind: "execution", operation: prepared.storageOperation ?? operation,
         phase: nextHead.phase, nativeCursor: nextHead.nativeCursor, features: featureWriteMetadata(features),
         ...(terminal ? { terminal } : {}) },
-      admission: isControl(operation) ? "control" : "progress" }, (batch) => {
-      if (operation.ordinal !== head.ordinal + 1) return false;
-      const reduction = reduceAgentEventBatch(thread.state, acceptedEnvelopes(batch));
-      if (reduction.outcome !== "applied") return false;
-      candidate = compactReduction(reduction.state);
-      return true;
-    }, { inputHash, receipt: (batch) => this.acceptedReceipt(operation, batch) });
+      admission: isControl(operation) ? "control" : "progress" }, { inputHash, receipt: (batch) => this.acceptedReceipt(operation, batch) },
+    () => operation.ordinal === head.ordinal + 1);
     if (admission.kind === "rejected") throw new ProgressAdmissionError(admission.reason);
     if (admission.kind === "duplicate") throw new Error("Accepted operation has no original producer receipt");
-    thread.state = candidate;
     this.advanceMessageSequence(thread, prepared.events);
     this.installCollaboration(thread, collaboration.candidate);
     this.installFeatureState(thread, features);
@@ -448,17 +449,10 @@ export class CanonicalAcceptedProgress {
   private admitControl(thread: ProgressThread, operationId: string, execution: ExecutionIdentity,
     events: readonly import("./canonical-agent-boundary.js").CanonicalAgentEventDraft[], phase: string,
     nativeCursor: unknown | null, features?: AcceptedFeatureWriteMetadata): readonly AcceptedCanonicalAgentEventEnvelope[] {
-    let candidate = thread.state;
-    const admission = thread.owner.accept({ operationId, execution, admission: "control", events,
-      write: { kind: "control", phase, nativeCursor, features } }, (batch) => {
-      const reduction = reduceAgentEventBatch(thread.state, acceptedEnvelopes(batch));
-      if (reduction.outcome !== "applied") return false;
-      candidate = compactReduction(reduction.state);
-      return true;
-    });
+    const admission = acceptIntoOwnedState(thread, { operationId, execution, admission: "control", events,
+      write: { kind: "control", phase, nativeCursor, features } });
     if (admission.kind === "rejected") throw new ProgressAdmissionError(admission.reason);
     if (admission.kind === "duplicate") return [];
-    thread.state = candidate;
     this.publishAccepted(admission.batch);
     this.saves.enqueue(admission.batch);
     this.advanceMessageSequence(thread, events);
@@ -566,8 +560,7 @@ export class CanonicalAcceptedProgress {
     const operationId = `plan-answer:${NodeCrypto.randomUUID()}`;
     const acceptedAt = new Date().toISOString();
     const itemId = `message:${messageId}`;
-    let candidate = thread.state;
-    const admission = thread.owner.accept({ operationId, execution: head.execution, admission: "control",
+    const admission = acceptIntoOwnedState(thread, { operationId, execution: head.execution, admission: "control",
       write: { kind: "plan-answer", assistant: head.assistant, phase: head.phase, nativeCursor: head.nativeCursor },
       events: [{ eventId: `${operationId}:message`, routing: { ...head.execution, itemId }, sourceProviderId: head.providerId,
         sourceIdentities: [], payload: { type: "item.recorded", item: { id: itemId, threadId, turnId: head.execution.turnId,
@@ -576,14 +569,8 @@ export class CanonicalAcceptedProgress {
           createdAt: head.assistant.timestamp, updatedAt: acceptedAt } } },
       { eventId: `${operationId}:marker`, routing: head.execution, sourceProviderId: head.providerId,
         sourceIdentities: [], payload: { type: "execution.checkpoint", operationKind: "plan-answer" } }],
-    }, (batch) => {
-      const reduction = reduceAgentEventBatch(thread.state, acceptedEnvelopes(batch));
-      if (reduction.outcome !== "applied") return false;
-      candidate = compactReduction(reduction.state);
-      return true;
     });
     if (admission.kind !== "accepted") throw new Error("Accepted plan marker could not reserve its control capacity");
-    thread.state = candidate;
     thread.answeredPlanMessages.add(messageId);
     this.publishAccepted(admission.batch);
     this.saves.enqueue(admission.batch);
@@ -617,20 +604,13 @@ export class CanonicalAcceptedProgress {
       payload: { type: "item.recorded", item: { id: itemId, threadId: input.threadId, turnId: head.execution.turnId,
         kind: "message", providerIdentities: [], payload: { projection: "message", message },
         createdAt: acceptedAt, updatedAt: acceptedAt } } }];
-    let candidate = thread.state;
-    const admission = thread.owner.accept({ operationId, execution: head.execution, admission: "control", events,
-      write: { kind: "steer", message, phase: head.phase, nativeCursor: head.nativeCursor } }, (batch) => {
-      const reduction = reduceAgentEventBatch(thread.state, acceptedEnvelopes(batch));
-      if (reduction.outcome !== "applied") return false;
-      candidate = compactReduction(reduction.state);
-      return true;
-    });
+    const admission = acceptIntoOwnedState(thread, { operationId, execution: head.execution, admission: "control", events,
+      write: { kind: "steer", message, phase: head.phase, nativeCursor: head.nativeCursor } });
     if (admission.kind === "rejected") throw new ProgressAdmissionError(admission.reason);
     if (admission.kind === "duplicate") throw new Error("Steered message was already accepted");
     const saved = new Promise<void>((resolve, reject) => {
       this.steerSaves.set(operationId, { threadId: input.threadId, resolve, reject });
     });
-    thread.state = candidate;
     this.advanceMessageSequence(thread, events);
     this.publishAccepted(admission.batch);
     this.saves.enqueue(admission.batch);
@@ -712,7 +692,7 @@ export class CanonicalAcceptedProgress {
     const cut = thread.owner.recoveryCut();
     return { phase: "recovery", threadId, ...(ownerId !== threadId ? { ownerThreadId: ownerId } : {}), epoch: thread.epoch, acceptedThrough: cut.accepted.sequence,
       savedThrough: cut.saved.sequence, durable: { mode: "snapshot", threadId: ownerId,
-        snapshot: { revision: thread.revision, state: thread.durableState } },
+        snapshot: { revision: thread.revision, state: copyAgentModelState(thread.durableState) } },
       retained: cut.retained.flatMap(acceptedEnvelopes),
       loss: this.lostProgress(ownerId, cursor) ? "runtime-restarted" : "none" };
   }
@@ -893,7 +873,7 @@ export class CanonicalAcceptedProgress {
     const epoch = head?.epoch.startsWith(`${this.epoch}:`) ? head.epoch : `${this.epoch}:${NodeCrypto.randomUUID()}`;
     const features = { ...this.canonical.loadAcceptedFeatureSeed(threadId), compacting: false };
     const thread: ProgressThread = { owner: this.makeOwner(threadId, epoch, state, revision, head?.epoch === epoch ? head : undefined),
-      state, durableState: state, revision, publicationSequence: features.publicationSequence, statuses: new Map(), epoch, features,
+      state, durableState: copyAgentModelState(state), revision, publicationSequence: features.publicationSequence, statuses: new Map(), epoch, features,
       commandPending: false, messageSequence: nextMessageSequence(state), waiters: new Set(), answeredPlanMessages: new Set() };
     this.threads.set(threadId, thread);
     return thread;
@@ -981,14 +961,21 @@ export class CanonicalAcceptedProgress {
 
   private async saved(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>, receipt: SavedProgressReceipt): Promise<void> {
     const thread = this.saveThread(batch.execution.threadId);
-    let candidate = thread.durableState;
+    const applied: AppliedOwnedBatch[] = [];
+    const undoApplied = () => { for (const page of applied.reverse()) page.rollback(); };
     for (const saved of this.pendingSaved) {
-      const reduced = reduceAgentEventBatch(candidate, saved.events);
-      if (reduced.outcome !== "applied") throw new Error("Saved progress cannot reduce its acknowledged prefix");
-      candidate = compactReduction(reduced.state);
+      const reduced = applyOwnedAgentEventBatch(thread.durableState, saved.events);
+      if (reduced.outcome !== "applied") {
+        undoApplied();
+        throw new Error("Saved progress cannot reduce its acknowledged prefix");
+      }
+      clearOwnedEventIds(thread.durableState);
+      applied.push(reduced);
     }
-    if (!thread.owner.acknowledge(receipt)) throw new Error("Saved receipt does not match the accepted owner prefix");
-    thread.durableState = candidate;
+    if (!thread.owner.acknowledge(receipt)) {
+      undoApplied();
+      throw new Error("Saved receipt does not match the accepted owner prefix");
+    }
     for (const saved of this.pendingSaved) {
       thread.revision = saved.revision;
       this.publishFamily({ phase: "saved", threadId: batch.execution.threadId, epoch: thread.epoch,
@@ -1210,8 +1197,29 @@ function acceptedEnvelopes<WriteIntent>(batch: AcceptedProgressBatch<WriteIntent
   });
 }
 
-function compactReduction(state: AgentModelState): AgentModelState {
-  return { ...state, appliedEventIds: {}, acceptedInputEventIds: {} };
+/**
+ * Admit through the owner while applying the batch to the thread's owned accepted state during validation.
+ * The owner can still refuse after validation (retention), so any outcome but "accepted" undoes the batch.
+ */
+function acceptIntoOwnedState(thread: ProgressThread, input: Parameters<AcceptedOwner["accept"]>[0],
+  replay?: Parameters<AcceptedOwner["accept"]>[2], admissible: () => boolean = () => true): ReturnType<AcceptedOwner["accept"]> {
+  const applied: { batch?: AppliedOwnedBatch } = {};
+  let admission: ReturnType<AcceptedOwner["accept"]>;
+  try {
+    admission = thread.owner.accept(input, (batch) => {
+      if (!admissible()) return false;
+      const reduction = applyOwnedAgentEventBatch(thread.state, acceptedEnvelopes(batch));
+      if (reduction.outcome !== "applied") return false;
+      applied.batch = reduction;
+      return true;
+    }, replay);
+  } catch (error) {
+    applied.batch?.rollback();
+    throw error;
+  }
+  if (admission.kind === "accepted") clearOwnedEventIds(thread.state);
+  else applied.batch?.rollback();
+  return admission;
 }
 
 function nextMessageSequence(state: AgentModelState): number {
