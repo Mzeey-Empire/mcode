@@ -207,23 +207,57 @@ describe("CodexCanonicalEventPublisher", () => {
     expect(submit).toHaveBeenCalledTimes(2);
   });
 
-  it("reserves terminal delivery when ordinary observations fill the queue", async () => {
-    let release!: (receipt: ProviderEventSubmissionReceipt) => void;
-    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(acceptedReceipt)
-      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+  it("pauses the stream instead of dropping events while saving falls behind, then saves every event in order", async () => {
+    // Every save takes a macrotask, so the whole burst is admitted before the first save finishes.
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>()
+      .mockImplementation(() => new Promise((resolve) => { setImmediate(() => resolve(acceptedReceipt)); }));
     const publisher = new CodexCanonicalEventPublisher(sink(submit));
     const onFailure = vi.fn();
     publisher.setFailureHandler(onFailure);
-    const notice = providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "notice" });
-    publisher.publish(routing, notice);
-    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
-    for (let index = 0; index < 1100; index++) publisher.publish(routing, notice);
-    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.Ended, threadId: routing.threadId, outcome: "completed" }));
-    release(acceptedReceipt);
+    const pressure: boolean[] = [];
+    publisher.setBackpressureHandler((threadId, paused) => {
+      expect(threadId).toBe(routing.threadId);
+      pressure.push(paused);
+    });
+
+    const deltas = 3_000;
+    for (let index = 0; index < deltas; index++) {
+      publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TextDelta, threadId: routing.threadId,
+        turnExecutionId: routing.executionId, delta: `${index}` }));
+    }
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.Ended, threadId: routing.threadId,
+      turnExecutionId: routing.executionId, outcome: "completed" }));
+    expect(pressure).toEqual([true]);
+
     await publisher.waitForExecution(routing);
-    expect(submit).toHaveBeenCalledTimes(1025);
-    expect(submit.mock.lastCall?.[0].events[0]?.payload).toMatchObject({ type: "item.recorded",
+
+    expect(pressure).toEqual([true, false]);
+    const delivered = submit.mock.calls.map(([batch]) => batch.events[0]!);
+    expect(delivered.map((event) => event.sourceSequence)).toEqual(Array.from({ length: deltas + 1 }, (_, index) => index + 1));
+    expect(delivered.at(-1)?.payload).toMatchObject({ type: "item.recorded",
       item: { payload: { runtimeEvent: { event: { type: "ended", outcome: "completed" } } } } });
     expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it("resumes a paused stream promptly when Stop discards the queued events", async () => {
+    let completeFirst!: (receipt: ProviderEventSubmissionReceipt) => void;
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>()
+      .mockImplementationOnce(() => new Promise((resolve) => { completeFirst = resolve; }))
+      .mockResolvedValue(acceptedReceipt);
+    const publisher = new CodexCanonicalEventPublisher(sink(submit));
+    const pressure: boolean[] = [];
+    publisher.setBackpressureHandler((_threadId, paused) => { pressure.push(paused); });
+    const notice = providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "notice" });
+
+    for (let index = 0; index < 1_000; index++) publisher.publish(routing, notice);
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(pressure).toEqual([true]);
+    const discarded = publisher.discardQueuedForExecution(routing);
+    completeFirst(acceptedReceipt);
+    await discarded;
+
+    // Stop must not wait for the backlog to save: the interrupt response is read from the paused stream.
+    expect(pressure).toEqual([true, false]);
+    expect(submit).toHaveBeenCalledOnce();
   });
 });

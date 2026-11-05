@@ -25,6 +25,11 @@ export interface SpawnResult<TState> {
 export interface ProtocolAdapter<TState> {
   spawn(args: SpawnArgs): Promise<SpawnResult<TState>>;
   isBusy(state: TState): boolean;
+  /**
+   * Runs first when a session is torn down, before {@link interrupt} and {@link close}, so an
+   * adapter can stop holding back output that those waits would otherwise sit behind.
+   */
+  prepareClose?(state: TState): void;
   interrupt(state: TState): Promise<void> | void;
   close(state: TState): Promise<void> | void;
   isStale(state: TState, args: { cwd: string; permissionMode: string }): boolean;
@@ -262,6 +267,11 @@ export class SessionRuntime<TState> {
   }
 
   private async closeEntry(sessionId: string, entry: PoolEntry<TState>): Promise<void> {
+    try {
+      this.adapter.prepareClose?.(entry.state);
+    } catch (error) {
+      this.deps.logger?.warn("SessionRuntime close preparation failed", { sessionId, error: errorMessage(error) });
+    }
     const interrupt = Promise.resolve().then(() => this.adapter.interrupt(entry.state)).catch((error: unknown) => {
       this.deps.logger?.warn("SessionRuntime interrupt failed", { sessionId, error: errorMessage(error) });
     });

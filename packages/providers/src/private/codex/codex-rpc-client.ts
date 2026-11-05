@@ -58,6 +58,20 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   private nextId = 1;
   private disposed = false;
   private lineBuffer = "";
+  /** Complete lines already read from stdout but not yet dispatched, kept in arrival order. */
+  private unprocessedLines: string[] = [];
+  private readPaused = false;
+  /**
+   * Set once the app-server's output must be read to its end: its process is gone, its stdout
+   * closed, or the client was disposed. Pausing no longer applies after that.
+   */
+  private backpressureReleased = false;
+  /** Set by {@link dispose}, after which stdout has no `data` listener to read into. */
+  private detached = false;
+  private stopWaitingForOutputEnd: (() => void) | undefined;
+  /** The one wait for stdout to end, shared by every {@link readRemainingOutput} caller. */
+  private outputEnd: Promise<void> | undefined;
+  private dispatchingLines = false;
 
   private readonly onData: (chunk: string) => void;
   private readonly onClose: () => void;
@@ -81,18 +95,20 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
       const lines = this.lineBuffer.split("\n");
       // Keep the last (potentially incomplete) segment in the buffer
       this.lineBuffer = lines.pop() ?? "";
-      for (const line of lines) {
-        this.processLine(line);
-      }
+      this.unprocessedLines.push(...lines);
+      this.dispatchUnprocessedLines();
     };
 
     this.onClose = () => {
+      // Held lines may include responses, so they settle their requests before the rest are rejected.
+      this.releaseBackpressure();
       this.disposed = true;
       this.rejectAll(new CodexTransportError("Stream closed while waiting for response"));
     };
 
     this.onError = (err: Error) => {
       logger.error("CodexRpcClient: stdout stream error", { err });
+      this.releaseBackpressure();
       this.disposed = true;
       this.rejectAll(new CodexTransportError(`Stream error: ${err.message}`));
     };
@@ -201,11 +217,71 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   }
 
   /**
-   * Disposes the client by rejecting all pending requests and removing stream listeners.
-   * After disposal, calling `sendRequest` throws immediately.
+   * Stops dispatching stdout lines and stops reading the pipe, so the app-server blocks on its
+   * own writes. Lines already read stay queued, in order, until {@link resumeReading}. Writes to
+   * stdin continue, but responses to them arrive only after the lines read before them.
+   */
+  pauseReading(): void {
+    if (this.readPaused || this.backpressureReleased) return;
+    this.readPaused = true;
+    this.stdout.pause();
+  }
+
+  /** Dispatches the lines held by {@link pauseReading}, then reads the pipe again unless paused anew. */
+  resumeReading(): void {
+    if (!this.readPaused) return;
+    this.readPaused = false;
+    this.dispatchUnprocessedLines();
+    // A closed stdin or a request failure does not end stdout: what the pipe still holds is output.
+    if (!this.readPaused) this.stdout.resume();
+  }
+
+  /** Dispatches held lines and reads the pipe freely from now on; later pauses do nothing. */
+  releaseReading(): void {
+    this.releaseBackpressure();
+    if (!this.detached) this.stdout.resume();
+  }
+
+  /**
+   * Reads everything the app-server wrote, for when its process is gone. Pausing stops applying,
+   * held lines dispatch in order, and the pipe is read until it ends. Resolves after `timeoutMs`
+   * anyway, because another process that inherited the pipe can hold it open indefinitely. Callers
+   * share one wait, so the exit handler and a kill awaiting the same pipe end together.
+   */
+  readRemainingOutput(timeoutMs: number): Promise<void> {
+    this.releaseBackpressure();
+    if (this.outputEnd) return this.outputEnd;
+    if (this.detached || this.stdout.readableEnded || this.stdout.destroyed) return Promise.resolve();
+    this.outputEnd = new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        this.stdout.off("end", finish);
+        this.stdout.off("close", finish);
+        this.stopWaitingForOutputEnd = undefined;
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        logger.warn("CodexRpcClient: app-server output did not end after exit", { timeoutMs });
+        finish();
+      }, timeoutMs);
+      this.stdout.once("end", finish);
+      this.stdout.once("close", finish);
+      this.stopWaitingForOutputEnd = finish;
+      this.stdout.resume();
+    });
+    return this.outputEnd;
+  }
+
+  /**
+   * Disposes the client: dispatches the lines it already read, rejects the requests still pending,
+   * and removes stream listeners. Output still in the pipe is not read, because the caller is
+   * tearing the app-server down. After disposal, calling `sendRequest` throws immediately.
    */
   dispose(): void {
+    this.releaseBackpressure();
     this.disposed = true;
+    this.detached = true;
+    this.stopWaitingForOutputEnd?.();
 
     this.stdout.off("data", this.onData);
     this.stdout.off("close", this.onClose);
@@ -221,6 +297,27 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  private releaseBackpressure(): void {
+    this.backpressureReleased = true;
+    this.readPaused = false;
+    this.dispatchUnprocessedLines();
+  }
+
+  private dispatchUnprocessedLines(): void {
+    // A listener may pause or resume while a line dispatches; only the outer loop drains.
+    if (this.dispatchingLines) return;
+    this.dispatchingLines = true;
+    let next = 0;
+    try {
+      while (!this.readPaused && next < this.unprocessedLines.length) {
+        this.processLine(this.unprocessedLines[next++]!);
+      }
+    } finally {
+      this.unprocessedLines = this.unprocessedLines.slice(next);
+      this.dispatchingLines = false;
+    }
+  }
 
   /** Parses and dispatches a single NDJSON line received from stdout. */
   private processLine(line: string): void {
