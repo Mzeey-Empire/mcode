@@ -44,6 +44,11 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
     }
     releaseOutput(): void {}
     async interruptTurn(): Promise<void> {}
+    async interruptTurnAndDrain(nativeTurnId: string): Promise<void> {
+      this.emit("notification", { method: "turn/completed", params: {
+        threadId: this.threadId, turn: { id: nativeTurnId, status: "interrupted" },
+      } });
+    }
     async interruptChildTurn(nativeThreadId: string, nativeTurnId: string): Promise<void> {
       await interruptChildTurnMock(nativeThreadId, nativeTurnId);
     }
