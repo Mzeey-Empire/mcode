@@ -967,9 +967,10 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
 
   it("keeps Accepted after provider dispatch fails and never lets late compensation overwrite admission", async () => {
     const send = vi.spyOn(provider, "sendTurn").mockRejectedValueOnce(new Error("Injected provider dispatch failure"));
-    // The runtime retires the provider's event route only after the errored terminal commits.
-    // Waiting for that, not for the row, also keeps afterEach's Stop from landing while the
-    // failure is still finishing, which Stop rejects with invalid-transition.
+    // The runtime retires the provider's event route only after it accepts the errored terminal;
+    // waitForTerminalSaves below proves the save. Waiting for retirement, not for the row, also
+    // keeps afterEach's Stop from landing while the failure is still finishing, which Stop
+    // rejects with invalid-transition.
     const retired = deferred();
     const retire = vi.spyOn(provider, "retireCanonicalTurnEvents").mockImplementationOnce(async () => retired.resolve());
     const input = request();
