@@ -102,4 +102,6 @@ The desktop waits up to 10 minutes for server readiness after it spawns the serv
 
 ## Focused verification
 
+Run `bun run perf:heavy-stream` against a ready worktree runtime for a 120 second, 36 delta/s save baseline, or add `--duration 600` for ten minutes. `--rate <n>` changes the delta rate; `--grow-thread <n>` first fills the same fixture thread with items, bounded to ten minutes. The fake Codex executable calls no upstream provider; receipts, emitted counts, and captured diagnostics stay under `.dev/perf/`, and the previous worktree Codex CLI setting is restored afterwards. The receipt retains the scenario thread for inspection and reports saved notifications as commit batches, including unmatched accepted events when saving falls behind.
+
 Run the smallest test that covers the changed behavior. Follow the repository [verification rules](../../AGENTS.md#verifying) and the [agent workflow](../internals/runtime/agent-workflow.md#focused-checks). For desktop-only behavior, use the [live Electron workflow](../../.agents/skills/electorn-live-testing/SKILL.md).

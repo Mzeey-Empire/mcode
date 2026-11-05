@@ -802,14 +802,14 @@ function createReceipt(run, label, stopOne) {
   };
 }
 
-function requireLocalRuntime(repoRoot) {
+export function requireLocalRuntime(repoRoot) {
   const ports = readPortsFile(repoRoot);
   if (!ports) throw new Error("The worktree runtime contract is missing; start this worktree runtime before running the harness");
   if (!samePath(ports.worktreeIdentity, repoRoot)) throw new Error("The runtime contract belongs to a different worktree");
   return ports;
 }
 
-async function requireFixtureWorkspace(socket, fixtureRepoDir, deadline) {
+export async function requireFixtureWorkspace(socket, fixtureRepoDir, deadline) {
   assertRuntimeDirectorySafe(fixtureRepoDir, "fixture repository");
   const fixtureRealPath = NodeFS.realpathSync.native(fixtureRepoDir);
   const workspaces = await socket.rpc("workspace.list", {}, deadline);
@@ -835,7 +835,7 @@ function createFixtureWrapper(wrapperPath, repoRoot, devDir) {
   }
 }
 
-function currentFixtureBranch(fixtureRepoDir) {
+export function currentFixtureBranch(fixtureRepoDir) {
   const branch = NodeChildProcess.execFileSync("git", ["branch", "--show-current"], {
     cwd: fixtureRepoDir,
     encoding: "utf8",
@@ -1447,7 +1447,7 @@ function validWorkerQueueDepth(value) {
       && count(worker.index) && count(worker.queued) && typeof worker.inFlight === "boolean");
 }
 
-class HealthSampler {
+export class HealthSampler {
   constructor(healthUrl, target, queueTarget) {
     this.healthUrl = healthUrl;
     this.target = target;
@@ -1568,7 +1568,7 @@ function serverLogPaths(logsDirectory) {
     });
 }
 
-async function readMemorySnapshot(paths) {
+export async function readMemorySnapshot(paths) {
   const snapshot = {
     at: new Date().toISOString(),
     harnessRssBytes: process.memoryUsage().rss,
@@ -1634,7 +1634,7 @@ function throwFirstRejected(results, context) {
   if (rejected) throw new Error(`${context}: ${safeError(rejected.reason)}`);
 }
 
-function ensureRealDirectory(directory, devDir) {
+export function ensureRealDirectory(directory, devDir) {
   assertInsideDevDir(directory, devDir);
   NodeFS.mkdirSync(directory, { recursive: true });
   let current = NodePath.resolve(devDir);
