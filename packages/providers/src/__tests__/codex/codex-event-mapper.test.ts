@@ -768,7 +768,7 @@ describe("CodexEventMapper", () => {
       outputTruncated: true,
       outputTotalBytes: Buffer.byteLength(fullOutput, "utf8"),
     });
-    expect(Buffer.byteLength(result.event.output, "utf8")).toBe(256 * 1024);
+    expect(Buffer.byteLength(JSON.stringify(result.event.output), "utf8") - 2).toBe(128 * 1024);
     expect(result.event.output.startsWith("A".repeat(1024))).toBe(true);
     expect(result.event.output.endsWith("Z".repeat(1024))).toBe(true);
     expect(existsSync(requireOutputArtifactPath(result))).toBe(true);
@@ -4311,7 +4311,7 @@ describe("CodexEventMapper", () => {
       outputTruncated: true,
       outputTotalBytes: Buffer.byteLength(fullOutput, "utf8"),
     });
-    expect(result?.event.type === "toolResult" ? Buffer.byteLength(result.event.output, "utf8") : 0).toBe(256 * 1024);
+    expect(result?.event.type === "toolResult" ? Buffer.byteLength(JSON.stringify(result.event.output), "utf8") - 2 : 0).toBe(128 * 1024);
     expect(result?.event.type === "toolResult" ? existsSync(result.event.outputArtifactPath ?? "") : false).toBe(true);
     expect(result?.event.type === "toolResult" ? readFileSync(result.event.outputArtifactPath!, "utf8") : "").toBe(fullOutput);
   });

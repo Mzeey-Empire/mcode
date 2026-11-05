@@ -9,6 +9,7 @@ import { ExecutionWorkerHandler, type ExecutionSemanticOperation, type Execution
   type ExecutionWorkCommand, type ExecutionWriteReceipt } from "../execution-worker-handler.js";
 import { TurnFileTracker } from "../../turns/turn-file-tracker.js";
 import { RejectedProviderObservationError } from "../execution-writer-failure.js";
+import { MAX_LIVE_PUBLICATION_BYTES } from "../../canonical/canonical-execution-semantic-writer.js";
 
 const execution = { threadId: "thread", turnId: "turn", executionId: "11111111-1111-4111-8111-111111111111" };
 const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "lease-1" };
@@ -74,6 +75,42 @@ function fixture() {
 }
 
 describe("execution worker parent event ownership", () => {
+  it("bounds oversized Claude output before accepting its row and live publication", async () => {
+    const originalDataDir = process.env.MCODE_DATA_DIR;
+    const dataDir = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-handler-output-"));
+    directories.push(dataDir);
+    process.env.MCODE_DATA_DIR = dataDir;
+    try {
+      const { writer, send, event } = fixture();
+      const command = start();
+      await send(1, { ...command, providerId: "claude", input: {
+        ...command.input, thread: { ...command.input.thread, providerId: "claude" },
+      } });
+      await event(2, { ...eventDraft(1, "turnStarted"), sourceProviderId: "claude" });
+      const output = '"\\\n'.repeat(100_000);
+      const reply = await event(3, { ...eventDraft(2, "toolResult", {
+        toolCallId: "large", output, isError: false,
+      }), sourceProviderId: "claude" });
+      expect(reply.result.kind).toBe("committed");
+      const operation = writer.operations[2];
+      if (!operation || operation.mutation.kind !== "append-events") throw new Error("Expected appended tool result");
+      const draft = operation.mutation.events[0];
+      if (!draft || draft.payload.type !== "item.recorded") throw new Error("Expected runtime item");
+      const runtime = ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent);
+      expect(runtime.event).toMatchObject({ type: "toolResult", outputTruncated: true, outputTotalBytes: 300_000 });
+      if (runtime.event.type !== "toolResult" || !runtime.event.outputArtifactPath) throw new Error("Expected output artifact");
+      expect(await NodeFSPromises.readFile(runtime.event.outputArtifactPath, "utf8")).toBe(output);
+      expect(operation.livePublication).toHaveLength(1);
+      for (const intent of operation.livePublication ?? []) {
+        expect(Buffer.byteLength(JSON.stringify(intent))).toBeLessThanOrEqual(MAX_LIVE_PUBLICATION_BYTES);
+        expect(intent.event).toMatchObject({ type: "toolResult", output: runtime.event.output, outputTruncated: true });
+      }
+    } finally {
+      if (originalDataDir === undefined) delete process.env.MCODE_DATA_DIR;
+      else process.env.MCODE_DATA_DIR = originalDataDir;
+    }
+  });
+
   it.each(["codex", "claude", "cursor"] as const)("preserves %s partial text and narrative when Stop finishes from worker state", async (providerId) => {
     const { writer, send, event, stop } = fixture();
     const command = start();

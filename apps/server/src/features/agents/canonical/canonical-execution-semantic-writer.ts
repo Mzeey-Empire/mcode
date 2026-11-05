@@ -61,7 +61,8 @@ const PUBLICATION_CHUNK_SIZE = 64;
 const PUBLICATION_CHUNK_PAGE_SIZE = 16;
 const MAX_BUFFERED_PUBLICATION_EVENTS = 2_048;
 const MAX_LIVE_PUBLICATION_EVENTS = 64;
-const MAX_LIVE_PUBLICATION_BYTES = 256 * 1024;
+/** Maximum JSON-encoded bytes admitted in a live publication. */
+export const MAX_LIVE_PUBLICATION_BYTES = 256 * 1024;
 const MAX_LIVE_RECEIPT_BYTES = 512 * 1024;
 const LIVE_PUBLICATION_KINDS: ReadonlySet<ExecutionSemanticOperation["mutation"]["kind"]> = new Set([
   "begin", "append-events", "finish-live-event", "live-event", "post-terminal-event",

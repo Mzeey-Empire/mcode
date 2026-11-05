@@ -3,14 +3,11 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir, logger } from "@mcode/shared";
 
-/** Maximum tool or sub-agent output bytes sent through the live event stream. */
-export const TOOL_OUTPUT_PREVIEW_BYTES = 256 * 1024;
+/** Maximum JSON wire bytes, excluding string quotes, sent through the live event stream. */
+export const TOOL_OUTPUT_PREVIEW_BYTES = 128 * 1024;
 
-/** Bytes retained from the start of a truncated output preview. */
-export const TOOL_OUTPUT_HEAD_BYTES = 192 * 1024;
-
-/** Bytes retained from the end of a truncated output preview. */
-export const TOOL_OUTPUT_TAIL_BYTES = 64 * 1024;
+/** JSON wire bytes retained from the start of a truncated output preview. */
+export const TOOL_OUTPUT_HEAD_BYTES = 96 * 1024;
 
 /** Milliseconds before stale tool-output artifacts are eligible for cleanup. */
 export const TOOL_OUTPUT_ARTIFACT_TTL_MS = 14 * 24 * 60 * 60 * 1000;
@@ -68,6 +65,8 @@ export class BoundedToolOutputBuffer {
   private tail = "";
   private tailBytes = 0;
   private totalBytes = 0;
+  private totalWireBytes = 0;
+  private headComplete = false;
   private artifactPath: string | undefined;
   private artifactStarted = false;
   private artifactChunks: string[] = [];
@@ -93,7 +92,8 @@ export class BoundedToolOutputBuffer {
     if (!chunk) return;
     const chunkBytes = byteLength(chunk);
     const nextTotal = this.totalBytes + chunkBytes;
-    const shouldStartArtifact = this.forceArtifact || nextTotal > TOOL_OUTPUT_PREVIEW_BYTES;
+    const chunkWireBytes = toolOutputWireBytes(chunk);
+    const shouldStartArtifact = this.forceArtifact || this.totalWireBytes + chunkWireBytes > TOOL_OUTPUT_PREVIEW_BYTES;
 
     if (shouldStartArtifact && !this.artifactStarted) {
       this.startArtifact();
@@ -104,7 +104,8 @@ export class BoundedToolOutputBuffer {
     }
 
     this.totalBytes = nextTotal;
-    this.retainPreview(chunk, chunkBytes);
+    this.totalWireBytes += chunkWireBytes;
+    this.retainPreview(chunk, chunkWireBytes);
   }
 
   /** Replace retained preview text with a full-text snapshot when it extends the stream. */
@@ -114,6 +115,8 @@ export class BoundedToolOutputBuffer {
     this.tail = "";
     this.tailBytes = 0;
     this.totalBytes = 0;
+    this.totalWireBytes = 0;
+    this.headComplete = false;
     this.artifactChunks = [];
     this.artifactChunkBytes = 0;
     if (this.artifactStarted && this.artifactPath) {
@@ -134,7 +137,7 @@ export class BoundedToolOutputBuffer {
 
   /** True once the retained preview has dropped middle bytes. */
   isPreviewTruncated(): boolean {
-    return this.totalBytes > TOOL_OUTPUT_PREVIEW_BYTES;
+    return this.totalWireBytes > TOOL_OUTPUT_PREVIEW_BYTES;
   }
 
   /** Return the bounded result for this output. */
@@ -143,7 +146,7 @@ export class BoundedToolOutputBuffer {
       this.append(fallback);
     }
 
-    const outputTruncated = this.totalBytes > TOOL_OUTPUT_PREVIEW_BYTES;
+    const outputTruncated = this.isPreviewTruncated();
     if (outputTruncated) {
       this.flushArtifactChunks();
     } else if (this.artifactStarted && this.artifactPath) {
@@ -162,12 +165,13 @@ export class BoundedToolOutputBuffer {
   }
 
   private retainPreview(chunk: string, chunkBytes: number): void {
-    if (this.headBytes < TOOL_OUTPUT_HEAD_BYTES) {
-      const headPart = takeUtf8Prefix(chunk, TOOL_OUTPUT_HEAD_BYTES - this.headBytes);
+    if (!this.headComplete) {
+      const headPart = takeWirePrefix(chunk, TOOL_OUTPUT_HEAD_BYTES - this.headBytes);
       this.head += headPart.text;
       this.headBytes += headPart.bytes;
+      this.headComplete = headPart.units < chunk.length || this.headBytes === TOOL_OUTPUT_HEAD_BYTES;
       const restBytes = chunkBytes - headPart.bytes;
-      if (restBytes >= TOOL_OUTPUT_TAIL_BYTES) {
+      if (restBytes >= TOOL_OUTPUT_PREVIEW_BYTES - this.headBytes) {
         this.replaceTailWithSuffix(chunk);
       } else if (restBytes > 0) {
         this.appendTail(chunk.slice(headPart.units), restBytes);
@@ -178,20 +182,20 @@ export class BoundedToolOutputBuffer {
   }
 
   private appendTail(chunk: string, chunkBytes: number): void {
-    if (chunkBytes >= TOOL_OUTPUT_TAIL_BYTES) {
+    const capacity = TOOL_OUTPUT_PREVIEW_BYTES - this.headBytes;
+    if (chunkBytes >= capacity) {
       this.replaceTailWithSuffix(chunk);
       return;
     }
     this.tail += chunk;
     this.tailBytes += chunkBytes;
-    if (this.tailBytes <= TOOL_OUTPUT_TAIL_BYTES) return;
-    const trimmed = takeUtf8Suffix(this.tail, TOOL_OUTPUT_TAIL_BYTES);
-    this.tail = trimmed.text;
-    this.tailBytes = trimmed.bytes;
+    if (this.tailBytes > 2 * capacity) {
+      this.replaceTailWithSuffix(this.tail);
+    }
   }
 
   private replaceTailWithSuffix(chunk: string): void {
-    const trimmed = takeUtf8Suffix(chunk, TOOL_OUTPUT_TAIL_BYTES);
+    const trimmed = takeWireSuffix(chunk, TOOL_OUTPUT_PREVIEW_BYTES - this.headBytes);
     this.tail = trimmed.text;
     this.tailBytes = trimmed.bytes;
   }
@@ -224,6 +228,9 @@ export class BoundedToolOutputBuffer {
   }
 
   private previewSoFar(): string {
+    if (this.tailBytes > TOOL_OUTPUT_PREVIEW_BYTES - this.headBytes) {
+      this.replaceTailWithSuffix(this.tail);
+    }
     return this.head + this.tail;
   }
 }
@@ -288,35 +295,61 @@ function byteLength(text: string): number {
   return Buffer.byteLength(text, "utf8");
 }
 
-function takeUtf8Prefix(text: string, maxBytes: number): { text: string; bytes: number; units: number } {
+/** UTF-8 size of JSON string content, excluding the surrounding quotes. */
+export function toolOutputWireBytes(text: string): number {
+  return Buffer.byteLength(JSON.stringify(text), "utf8") - 2;
+}
+
+function controlCharacterWireBytes(codePoint: number): number {
+  switch (codePoint) {
+    case 0x08:
+    case 0x0c:
+    case 0x0a:
+    case 0x0d:
+    case 0x09:
+      return 2;
+    default:
+      return 6;
+  }
+}
+
+function characterWireBytes(codePoint: number): number {
+  if (codePoint < 0x20) return controlCharacterWireBytes(codePoint);
+  if (codePoint === 0x22 || codePoint === 0x5c) return 2;
+  if (codePoint >= 0xd800 && codePoint <= 0xdfff) return 6;
+  if (codePoint < 0x80) return 1;
+  if (codePoint < 0x800) return 2;
+  if (codePoint < 0x10000) return 3;
+  return 4;
+}
+
+function takeWirePrefix(text: string, maxBytes: number): { text: string; bytes: number; units: number } {
   if (maxBytes <= 0) return { text: "", bytes: 0, units: 0 };
   let bytes = 0;
   let units = 0;
-  let out = "";
-  for (const char of text) {
-    const next = byteLength(char);
+  while (units < text.length) {
+    const codePoint = text.codePointAt(units)!;
+    const next = characterWireBytes(codePoint);
     if (bytes + next > maxBytes) break;
-    out += char;
     bytes += next;
-    units += char.length;
+    units += codePoint > 0xffff ? 2 : 1;
   }
-  return { text: out, bytes, units };
+  return { text: text.slice(0, units), bytes, units };
 }
 
-function takeUtf8Suffix(text: string, maxBytes: number): { text: string; bytes: number } {
+function takeWireSuffix(text: string, maxBytes: number): { text: string; bytes: number } {
   if (maxBytes <= 0) return { text: "", bytes: 0 };
   let bytes = 0;
-  let out = "";
-  for (let i = text.length; i > 0;) {
+  let i = text.length;
+  while (i > 0) {
     const code = text.charCodeAt(i - 1);
-    const width = code >= 0xdc00 && code <= 0xdfff && i > 1 ? 2 : 1;
+    const previous = text.charCodeAt(i - 2);
+    const width = code >= 0xdc00 && code <= 0xdfff && previous >= 0xd800 && previous <= 0xdbff ? 2 : 1;
     const start = i - width;
-    const char = text.slice(start, i);
-    const next = byteLength(char);
+    const next = characterWireBytes(text.codePointAt(start)!);
     if (bytes + next > maxBytes) break;
-    out = char + out;
     bytes += next;
     i = start;
   }
-  return { text: out, bytes };
+  return { text: text.slice(i), bytes };
 }
