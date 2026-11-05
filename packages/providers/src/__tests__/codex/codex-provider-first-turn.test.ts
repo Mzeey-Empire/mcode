@@ -2075,50 +2075,6 @@ describe("CodexProvider first turn on new session", () => {
     }
   });
 
-  it("reports provider_lost when stop begins before Codex assigns a native turn id", async () => {
-    const provider = makeProvider();
-    const events: ProviderRuntimeEvent[] = [];
-    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
-
-    await provider.sendTurn({
-      turnId: "test-turn",
-      turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
-      sessionId,
-      workspaceId: "workspace-test",
-      threadId,
-      message: "stop before native identity",
-      cwd: process.cwd(),
-      model: "gpt-5.4",
-      interactionMode: "build",
-      providerOptions: {},
-      permissionMode: "auto",
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    const runtime = (provider as unknown as {
-      runtime: {
-        get: (id: string) => { currentNativeTurnId?: string; abortPendingTurnWait?: () => void } | undefined;
-      };
-    }).runtime;
-    const state = runtime.get(sessionId);
-    expect(state).toBeDefined();
-    if (state) state.currentNativeTurnId = undefined;
-
-    try {
-      await provider.stopSession(sessionId);
-      expect(events).toContainEqual({ deliveryAttempt: 1,
-        event: {
-          type: AgentEventType.Ended,
-          threadId,
-          turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
-          reason: "provider_lost",
-        },
-      });
-    } finally {
-      state?.abortPendingTurnWait?.();
-    }
-  });
-
   it("emits Error before Ended when CLI preflight fails before runtime acquire", async () => {
     checkCodexVersionMock.mockReturnValueOnce({ ok: false, error: "Codex CLI unavailable" });
     const provider = makeProvider();

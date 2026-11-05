@@ -2401,18 +2401,14 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * Graceful protocol interrupt of the in-flight turn (does not kill the process). A native turn's
    * own `turn/completed` closes its text and ends it. When that does not arrive in time the turn is
    * left open, because its output may still follow: {@link close} ends it once the output has ended.
+   * A Stop before `turn/start` answers waits for that answer, so the turn it binds is the one
+   * interrupted; a `turn/start` that fails ends its own turn.
    */
   async interrupt(state: CodexSessionState): Promise<void> {
-    const turnExecutionId = executionForDrain(state);
+    if (!state.currentNativeTurnId && state.turnStartResponsePending) await state.turnStartPromise;
     const nativeTurnId = state.currentNativeTurnId;
-    if (nativeTurnId) {
-      await state.server.interruptTurnAndDrain(nativeTurnId);
-    } else {
-      await state.server.interruptTurn();
-      // With no native turn bound, no output can be matched to this turn, so nothing will end it.
-      this.closeTurnAssistantText(state, turnExecutionId);
-      this.emitProviderLostEnd(state, turnExecutionId);
-    }
+    if (nativeTurnId) await state.server.interruptTurnAndDrain(nativeTurnId);
+    else await state.server.interruptTurn();
     state.pendingTurnStartNotification = undefined;
     state.turnStartResponsePending = false;
     state.turnBindingPhase = "idle";
@@ -2974,7 +2970,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    */
   private async awaitStopSettled(state: CodexSessionState): Promise<boolean> {
     const attempt = (async () => {
-      await state.turnStartPromise;
       if (this.isBusy(state)) await this.interrupt(state);
     })();
     let timer: ReturnType<typeof setTimeout> | undefined;
