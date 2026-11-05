@@ -224,4 +224,55 @@ describe("CursorTurnExecutor", () => {
       expect.objectContaining({ type: AgentEventType.Ended, turnExecutionId: ROUTING.executionId }),
     ]);
   });
+
+  it("publishes the partial reply before the error when a prompt fails", async () => {
+    const published: AgentEvent[] = [];
+    const prompt = vi.fn(async () => {
+      mapCursorAcpSessionNotification(sessionUpdate({
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Partial answer." },
+      }), entry.threadId, entry.activeTurnState!).forEach((event) => published.push(event));
+      throw new Error("ACP connection closed");
+    });
+    const entry = {
+      threadId: ROUTING.threadId,
+      cwd: process.cwd(),
+      acpSessionId: "cursor-session-1",
+      activeTurnState: createCursorAcpTurnState(),
+      replayTurnState: null,
+      cursorPromptOrdinal: 0,
+      stickyHeavyInstructionsSent: false,
+      mcodeRuntimeInstructions: "",
+      mcodeRuntimeInstructionsSent: false,
+      pendingUserStopAbort: false,
+      stderrTailLines: [],
+      child: { pid: 101, exitCode: null, signalCode: null },
+      acpRuntime: { prompt },
+    } as unknown as CursorSessionState;
+    const executor = new CursorTurnExecutor({
+      settings: { get: () => getDefaultSettings() },
+      skills: { list: () => [] },
+      publishEvent: (_entry, event) => published.push(event),
+      bindTurnRouting: () => undefined,
+      openLogicalSession: vi.fn(async () => true),
+      applyModel: vi.fn(async () => undefined),
+      replaceAfterTransientFailure: vi.fn(async () => undefined),
+    });
+
+    await executor.run(entry, {
+      message: "continue",
+      model: "cursor-model",
+      resume: false,
+      turnId: ROUTING.turnId,
+      turnExecutionId: ROUTING.executionId,
+      deliveryAttempt: ROUTING.deliveryAttempt,
+    });
+
+    const settled = published.filter((event) => event.type !== AgentEventType.TextDelta);
+    expect(settled).toEqual([
+      expect.objectContaining({ type: AgentEventType.Message, content: "Partial answer." }),
+      expect.objectContaining({ type: AgentEventType.Error, error: "ACP connection closed" }),
+      expect.objectContaining({ type: AgentEventType.Ended, turnExecutionId: ROUTING.executionId }),
+    ]);
+  });
 });
