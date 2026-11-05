@@ -51,7 +51,7 @@ function captureTurnRelease(fixture: WorkerFixture) {
       await turn.terminalRelease;
       await turn.ending;
     } finally {
-      // Rejected-stream recovery clears the release promise before relinquishing ownership.
+      // Whether the ending saved its own outcome or recovery did, the turn must no longer own the worker.
       await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
       await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
     }
@@ -522,6 +522,44 @@ describe("AgentService cleanup through production worker composition", { timeout
       await sending;
       await expectErroredAndReusable(fixture, stopping);
     });
+
+    it("waits for recovery when recording the failure itself fails, then reports the saved interruption", async () => {
+      const fixture = await openFixture();
+      failNextProviderStart(fixture);
+      const fenceEntered = holdDeferred();
+      const releaseFence = holdDeferred();
+      vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementationOnce(async () => {
+        fenceEntered.resolve();
+        await releaseFence.promise;
+        throw new Error("Injected provider fence failure");
+      });
+      // Settle both results up front so a rejection is asserted below rather than reported as unhandled.
+      const sendResult = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Do the work",
+        provider: "codex", model: "gpt-5", permissionMode: "default" }).then(() => "sent", (error: unknown) => String(error));
+      await fenceEntered.promise;
+      const decided = watchStopDecision(fixture);
+      const stopResult = fixture.service.stopSession(fixture.thread.id, { by: "user" })
+        .then((value) => ({ value }), (error: unknown) => ({ error: String(error) }));
+      try {
+        await decided;
+      } finally {
+        releaseFence.resolve();
+      }
+      expect(await stopResult).toEqual({ value: expect.objectContaining({ status: "already-terminal",
+        snapshot: expect.objectContaining({ phase: "interrupted" }) }) });
+      // The saved interruption reports the failed start, so the send itself has nothing left to report.
+      expect(await sendResult).toBe("sent");
+      await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+      const turn = fixture.sent[0];
+      if (!turn) throw new Error("Provider did not receive the turn");
+      expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
+        status: "Interrupted", ending: { outcome: "interrupted", cause: "saving_stopped" },
+      });
+      await expect(fixture.service.sendMessage({
+        threadId: fixture.thread.id, content: "replacement", permissionMode: "default", model: "gpt-5", provider: "codex",
+      })).resolves.toBeUndefined();
+      expect(fixture.sent.map((sent) => sent.message)).toEqual(["Do the work", "replacement"]);
+    });
   });
 
   it("reports the provider's own ending when it commits while a user stop drains the turn", async () => {
@@ -550,9 +588,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     const fenceError = new Error("Provider fence failed");
     vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockRejectedValueOnce(fenceError);
     await endTurn(fixture, { type: "ended", threadId: fixture.thread.id,
-      turnExecutionId: turn.turnExecutionId, reason: "provider_lost" }).catch((error: unknown) => {
-      expect(error).toBe(fenceError);
-    });
+      turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
     expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined();
     expect(recover).toHaveBeenCalledWith(expect.objectContaining({ executionId: turn.turnExecutionId }));
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
@@ -564,7 +600,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     expect(fixture.sent.map((sent) => sent.message)).toEqual(["Do the work", "replacement"]);
   });
 
-  it("recovers a failed lost-stream release once and preserves the committed ending", async () => {
+  it("recovers a failed lost-stream release, keeps the committed ending, and lets Stop report it", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);
     const waitForRelease = captureTurnRelease(fixture);
@@ -579,14 +615,15 @@ describe("AgentService cleanup through production worker composition", { timeout
     await fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
     try {
       await vi.waitFor(() => expect(retire).toHaveBeenCalledTimes(1));
-      const stopping = expect(fixture.service.stopSession(fixture.thread.id, { by: "user" })).rejects.toBe(releaseError);
+      const stopping = expect(fixture.service.stopSession(fixture.thread.id, { by: "user" }))
+        .resolves.toMatchObject({ status: "already-terminal", snapshot: { phase: "interrupted" } });
       releaseRetirement();
       await stopping;
     } finally {
       releaseRetirement();
     }
-    await expect(waitForRelease()).rejects.toBe(releaseError);
-    expect(recover).toHaveBeenCalledTimes(1);
+    await waitForRelease();
+    expect(recover).toHaveBeenCalledWith(expect.objectContaining({ executionId: turn.turnExecutionId }));
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({
       status: "Interrupted", ending: { outcome: "interrupted", cause: "provider_exited" },
     });

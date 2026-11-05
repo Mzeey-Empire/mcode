@@ -738,33 +738,42 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return this.endWorkerTurn(active, () => this.completeLostWorkerStream(active));
   }
 
-  /** Start a non-stop terminal write, or join the one already under way so only the first decides the outcome. */
+  /**
+   * Start a non-stop ending, or join the one already under way so only the first decides the outcome.
+   * The promise settles only once an outcome is saved, by `finish` or by recovery when `finish` fails.
+   */
   private endWorkerTurn(active: WorkerOwnedTurn, finish: () => Promise<void>): Promise<void> {
     // Deferred so `ending` is set before `finish` runs; a Stop arriving in between must already see it.
-    active.ending ??= Promise.resolve().then(finish);
+    active.ending ??= Promise.resolve().then(finish)
+      .catch((failure: unknown) => this.recoverFailedEnding(active, failure));
     return active.ending;
+  }
+
+  /**
+   * Recovery saves Interrupted (or keeps a terminal already saved) and releases the turn, so the ending
+   * is complete and Stop must not report the ending's own failure. Only a failed recovery rejects; it
+   * clears `ending` so the next Stop makes its own attempt instead of joining a dead promise.
+   */
+  private async recoverFailedEnding(active: WorkerOwnedTurn, failure: unknown): Promise<void> {
+    const { execution } = active;
+    logger.error("Worker turn ending failed; recovering the turn", { threadId: execution.threadId,
+      executionId: execution.executionId, error: failure instanceof Error ? failure.message : String(failure) });
+    try {
+      await this.requireWorkerRuntime().recoverRejected(execution);
+    } catch (recoveryFailure) {
+      active.ending = undefined;
+      throw recoveryFailure;
+    }
   }
 
   private async completeLostWorkerStream(active: WorkerOwnedTurn): Promise<void> {
     const { execution, provider, deliveryAttempt } = active;
-    try {
-      this.requireWorkerFiles().fence(execution.threadId, execution.executionId, deliveryAttempt);
-      await this.fenceWorkerProvider(provider, execution, deliveryAttempt);
-      if (active.terminalCommitted) {
-        await this.releaseWorkerTurn(active);
-        return;
-      }
-      const frozen = this.requireWorkerFiles().seal({ ...execution, deliveryAttempt, outcome: "interrupted" });
-      if (!frozen) throw new Error("Lost stream finish lost its file evidence generation");
-      await this.finishWorkerTurn(active, frozen, { outcome: "interrupted", ending: this.providerInterruptionEnding() });
-    } catch (error) {
-      if (active.terminalCommitted) throw error;
-      active.ending = undefined;
-      active.terminalRelease = undefined;
-      active.releaseStarted = false;
-      await this.requireWorkerRuntime().recoverRejected(execution);
-      throw error;
-    }
+    this.requireWorkerFiles().fence(execution.threadId, execution.executionId, deliveryAttempt);
+    await this.fenceWorkerProvider(provider, execution, deliveryAttempt);
+    if (active.terminalCommitted) return this.releaseWorkerTurn(active);
+    const frozen = this.requireWorkerFiles().seal({ ...execution, deliveryAttempt, outcome: "interrupted" });
+    if (!frozen) throw new Error("Lost stream finish lost its file evidence generation");
+    await this.finishWorkerTurn(active, frozen, { outcome: "interrupted", ending: this.providerInterruptionEnding() });
   }
 
   /** Git work must not hold the thread after release; pin failures are logged, never thrown. */
@@ -918,19 +927,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   ): Promise<void> {
     if (!this.mutationReservations.owns(threadId, dispatch.mutationReservationToken, "activeTurn")) return;
     const workerTurn = this.lifecycles.worker(threadId);
-    if (workerTurn) {
-      try {
-        await this.endWorkerTurn(workerTurn, () => this.failWorkerDispatch(workerTurn, error));
-      } catch (failure) {
-        logger.error("Worker dispatch failed before terminal recovery", { threadId,
-          executionId: workerTurn.execution.executionId,
-          error: error instanceof Error ? error.message : String(error),
-          recoveryError: failure instanceof Error ? failure.message : String(failure) });
-        await this.requireWorkerRuntime().recoverRejected(workerTurn.execution);
-        throw error;
-      }
-      return;
-    }
+    if (!workerTurn) return;
+    // The saved outcome carries this reason only if its own write succeeds, so log it for recovery.
+    logger.warn("Worker provider start failed", { threadId, executionId: workerTurn.execution.executionId,
+      error: error instanceof Error ? error.message : String(error) });
+    await this.endWorkerTurn(workerTurn, () => this.failWorkerDispatch(workerTurn, error));
   }
 
   private async failWorkerDispatch(active: WorkerOwnedTurn, error: unknown): Promise<void> {
@@ -980,13 +981,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const { execution, deliveryAttempt } = active;
     logger.error("Worker-owned canonical delivery failed", { threadId: execution.threadId,
       executionId: execution.executionId, deliveryAttempt, error: error.message });
-    try {
-      await this.failWorkerDispatch(active, error);
-    } catch (failure) {
-      logger.error("Worker-owned canonical delivery recovery failed", { threadId: execution.threadId,
-        executionId: execution.executionId, error: failure instanceof Error ? failure.message : String(failure) });
-      await this.requireWorkerRuntime().recoverRejected(active.execution);
-    }
+    await this.failWorkerDispatch(active, error);
   }
 
   /** Terminalize setup failures while preserving an explicit user-stop winner. */
