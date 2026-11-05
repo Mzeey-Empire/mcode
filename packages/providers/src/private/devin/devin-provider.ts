@@ -685,9 +685,8 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): void {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const cancelled = entry.pendingUserStopAbort || /cancel/i.test(errorMessage);
-    if (cancelled) {
-      this.emitAssistantText(entry, routing);
-    } else {
+    this.emitAssistantText(entry, routing);
+    if (!cancelled) {
       const description = describeAcpError(error);
       logger.error("Devin ACP prompt failed", {
         threadId: entry.threadId,

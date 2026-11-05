@@ -896,6 +896,26 @@ describe("DevinProvider", () => {
     expect(fake.runtime.close).not.toHaveBeenCalled();
   });
 
+  it("publishes the partial reply before the error when a prompt fails", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    const p = createProvider(host);
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      await textChunk(fake, "devin-acp-1", "Partial answer.");
+      throw new Error("ACP connection closed");
+    });
+
+    await p.sendTurn(turn());
+
+    const settled = submittedRuntimeEvents(host).filter((event) => event.type !== "textDelta");
+    expect(settled.slice(-3)).toEqual([
+      expect.objectContaining({ type: "message", content: "Partial answer." }),
+      expect.objectContaining({ type: "error" }),
+      expect.objectContaining({ type: "ended", outcome: "errored" }),
+    ]);
+  });
+
   it("kills a wedged child and warms a replacement when cancel is ignored", async () => {
     const host = createHost();
     const stuck = createFakeRuntime("devin-acp-1", 101);

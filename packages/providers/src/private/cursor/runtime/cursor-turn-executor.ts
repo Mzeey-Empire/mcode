@@ -468,8 +468,12 @@ export class CursorTurnExecutor {
       pendingUserStopAbort: entry.pendingUserStopAbort,
     });
     const stderrTail = this.resolveStderrTail(entry, cursorCfg);
+    const partialReply = entry.activeTurnState
+      ? resolveCursorAssistantMessageContent(entry.activeTurnState.accumulator).trim()
+      : "";
+    this.emitMessageIfPresent(entry, partialReply, emitTurnEvent);
     if (userStopped) {
-      this.emitStoppedTurn(entry, errorMessage, emitTurnEvent);
+      this.logStoppedTurn(entry, errorMessage);
     } else {
       this.emitPromptFailure(entry, cursorCfg, error, stderrTail, emitTurnEvent);
     }
@@ -516,19 +520,11 @@ export class CursorTurnExecutor {
     } satisfies AgentEvent);
   }
 
-  private emitStoppedTurn(
-    entry: CursorSessionState,
-    errorMessage: string,
-    emitTurnEvent: CursorTurnEventEmitter,
-  ): void {
+  private logStoppedTurn(entry: CursorSessionState, errorMessage: string): void {
     logger.info("Cursor prompt ended after Stop (expected disconnect)", {
       threadId: entry.threadId,
       errorSample: errorMessage.slice(0, 200),
     });
-    const interrupted = entry.activeTurnState
-      ? resolveCursorAssistantMessageContent(entry.activeTurnState.accumulator).trim()
-      : "";
-    this.emitMessageIfPresent(entry, interrupted, emitTurnEvent);
   }
 
   private emitMessageIfPresent(
