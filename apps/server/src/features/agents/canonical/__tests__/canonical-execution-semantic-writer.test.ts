@@ -297,6 +297,22 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     },
   );
 
+  it("advances a replaced operation's ordinal once and still records a replaced turn end", async () => {
+    expect(await writer.transact(operation(1, { kind: "begin", providerId: "codex", input: startInput() })))
+      .toMatchObject({ kind: "committed" });
+    const replaced = operation(2, { kind: "content-replaced", reason: "live publication is too large" });
+    db.transaction(() => writer.applyAcceptedCompatibility(replaced))();
+    expect(() => db.transaction(() => writer.applyAcceptedCompatibility(replaced))()).toThrow();
+    const { kind: _kind, livePublication: _publication, providerEvent: _evidence, ...finish } = finishLiveCommand("completed");
+    db.transaction(() => writer.applyAcceptedCompatibility(operation(3, { kind: "content-replaced",
+      reason: "live publication is too large", finish })))();
+
+    expect(db.query("SELECT status, last_turn_outcome, last_turn_ended_at FROM threads WHERE id = ?").get(THREAD_ID))
+      .toEqual({ status: "completed", last_turn_outcome: "completed", last_turn_ended_at: NOW });
+    expect(db.query("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").all(THREAD_ID))
+      .toEqual([{ content: "Final answer" }]);
+  });
+
   it("persists accepted native Copilot system evidence without inventing feature effects", async () => {
     db.prepare("UPDATE threads SET provider = 'copilot' WHERE id = ?").run(THREAD_ID);
     const input = startInput(); input.thread.providerId = "copilot";

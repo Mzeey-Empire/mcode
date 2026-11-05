@@ -1501,6 +1501,24 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
   }, 30_000);
 
+  it("replaces a batch whose live publication the writer rejects, so the turn end still saves", async () => {
+    await send(1, start("codex"));
+    const oversized = "x".repeat(300 * 1024);
+    expect((await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: oversized, isFinalResponse: true })] })).result.kind).toBe("accepted");
+    expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 2, "turnComplete")], terminalInput: { ...execution, providerId: "codex",
+        providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } })).result.kind).toBe("accepted");
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
+    expect(progress.savingStatuses(execution.threadId)).toEqual([]);
+    await expect(progress.waitForSaved(execution.threadId)).resolves.toBeUndefined();
+    const markers = db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE envelope_json LIKE '%ingest.content-replaced%'").all() as { envelope_json: string }[];
+    expect(markers.map((row) => JSON.parse(row.envelope_json).payload)).toEqual([
+      { type: "ingest.content-replaced", operationId: "live-lease:2", reason: expect.any(String) },
+    ]);
+  });
+
   it("reports a permanent save failure while the provider continues and retries its retained completion", async () => {
     await send(1, start("codex"));
     const previousPublicationHead = db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?")
