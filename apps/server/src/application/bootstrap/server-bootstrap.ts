@@ -1281,12 +1281,18 @@ async function shutdown(): Promise<void> {
       // 9b. Dispose CI check watcher timers and in-flight GitHub CLI children
       shutdownCoordinator.setPhase("shutdown CI watcher");
       await captureCleanupFailure(() => ciWatcherService.dispose());
-    },
-    persist: async () => {
-      shutdownCoordinator.setPhase("drain terminal persistence and execution workers");
+
+      // Snapshot pins and turn status labels wait on git and the database without a bound. They stay in this
+      // phase so the phase timer, not their duration, decides when accepted saves start; a label left unwritten
+      // is set by startup recovery, while unsaved text is gone.
+      shutdownCoordinator.setPhase("drain snapshot pins and turn status saves");
       await captureCleanupFailure(() => snapshotRefPins.drain());
       await captureCleanupFailure(() => container.resolve(AgentEventPublicationRegistry).drain());
-      await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
+    },
+    persist: async (saveAttemptsUntil) => {
+      shutdownCoordinator.setPhase("write accepted turn output");
+      await captureCleanupFailure(() => workerOwnedTurnRuntime.close({ attemptsUntil: saveAttemptsUntil }));
+      logUnsavedTurnOutput("Shutdown stopped retrying before every accepted save was written");
       // Turns are drained, so no further turn facts arrive; finish startup writes before the writer closes.
       await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
       await captureCleanupFailure(() => planImplementStartupObserver.stop());
@@ -1372,6 +1378,16 @@ function closeWebSocketClients(clients: Iterable<WebSocket>): void {
   }
 }
 
+/**
+ * Logs how much accepted turn output is still unwritten, without its content. The user has already seen it,
+ * so an exit now loses it; the count is the only record left.
+ */
+function logUnsavedTurnOutput(message: string): void {
+  const unsaved = workerOwnedTurnRuntime.progress?.depth();
+  if (!unsaved || unsaved.pending === 0) return;
+  logger.error(message, { pendingSaves: unsaved.pending, pendingBytes: unsaved.pendingBytes, threads: unsaved.threads });
+}
+
 let shutdownCoordinator: ShutdownCoordinator;
 
 shutdownCoordinator = createShutdownCoordinator({
@@ -1381,6 +1397,7 @@ shutdownCoordinator = createShutdownCoordinator({
       deadlineMs: EXPLICIT_SHUTDOWN_DEADLINE_MS,
       phase,
     });
+    logUnsavedTurnOutput("Shutdown watchdog expired before every accepted save was written");
   },
 });
 

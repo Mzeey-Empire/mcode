@@ -828,8 +828,8 @@ export class CanonicalAcceptedProgress {
   /** Release the temporary admission fence after the caller's durable deletion attempt finishes. */
   finishThreadDeletion(threadId: string): void { this.deletingThreads.delete(threadId); }
 
-  /** Stop admission, then write every accepted save still queued. */
-  async close(): Promise<void> {
+  /** Stop admission, then write every accepted save still queued, starting no attempt at or after `attemptsUntil`. */
+  async close(options: { readonly attemptsUntil?: number } = {}): Promise<void> {
     this.closing = true;
     const error = new Error("Accepted progress is closing before the durable command completed");
     for (const thread of this.threads.values()) {
@@ -839,7 +839,7 @@ export class CanonicalAcceptedProgress {
     }
     this.rejectSteerSaves(error);
     try {
-      await this.saves.close();
+      await this.saves.close(options);
     } finally {
       this.savingPublisher.close();
     }

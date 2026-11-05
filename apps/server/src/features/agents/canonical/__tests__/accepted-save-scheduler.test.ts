@@ -139,6 +139,53 @@ describe("AcceptedSaveScheduler", () => {
     }
   });
 
+  it("gives an exhausted head a fresh attempt on close, then writes the text queued behind it", async () => {
+    const progress = owner("one");
+    const writes: string[] = [];
+    let blocked = true;
+    const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
+      writes.push(batch.operationId);
+      if (blocked) throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+      return receipt(batch);
+    } }, maxAttempts: 1, retryDelayMs: 1_000, classify: classifySaveFailure,
+    onSaved: async (_batch, saved) => { progress.acknowledge(saved); },
+    onFailure: async (_batch, failure) => { progress.recordFailure(failure); } });
+    scheduler.enqueue(accepted(progress, "one", "visible-a"));
+    scheduler.enqueue(accepted(progress, "one", "visible-b"));
+    await scheduler.settle();
+    expect(progress.savingState().kind).toBe("failed");
+    blocked = false;
+    await scheduler.close();
+    expect(writes).toEqual(["visible-a", "visible-a", "visible-b"]);
+    expect(scheduler.depth().pending).toBe(0);
+    expect(progress.savingState().kind).toBe("saved");
+  });
+
+  it("starts no save attempt after its close deadline and leaves the unwritten saves queued", async () => {
+    vi.useFakeTimers();
+    try {
+      const progress = owner("one");
+      const writes: string[] = [];
+      const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
+        writes.push(batch.operationId);
+        throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+      } }, maxAttempts: 6, retryDelayMs: 1_000, classify: classifySaveFailure,
+      onSaved: async (_batch, saved) => { progress.acknowledge(saved); },
+      onFailure: async (_batch, failure) => { progress.recordFailure(failure); } });
+      scheduler.enqueue(accepted(progress, "one", "a"));
+      scheduler.enqueue(accepted(progress, "one", "b"));
+      let closed = false;
+      const closing = scheduler.close({ attemptsUntil: Date.now() + 2_500 }).then(() => { closed = true; });
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(closed).toBe(true);
+      await closing;
+      expect(writes).toEqual(["a", "a", "a"]);
+      expect(scheduler.depth().pending).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   describe("with an environment failure", () => {
     afterEach(() => { vi.useRealTimers(); });
 

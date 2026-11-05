@@ -35,6 +35,8 @@ export class AcceptedSaveScheduler<WriteIntent> {
   private stopped = false;
   /** Admission is closed while `close` writes the remaining queue. */
   private closing = false;
+  /** While closing, no attempt starts at or after this time, so close ends inside its save window. */
+  private attemptsUntil = Number.POSITIVE_INFINITY;
   private readonly observerFailures = new Map<string, Error>();
 
   constructor(private readonly options: {
@@ -70,11 +72,7 @@ export class AcceptedSaveScheduler<WriteIntent> {
   retry(threadId: string): boolean {
     const head = this.queues.get(threadId)?.[0];
     if (!head || !(head.failed || head.exhausted) || this.closing) return false;
-    head.failed = false;
-    head.exhausted = false;
-    head.attempts = 0;
-    head.backoffs = 0;
-    head.retryAt = 0;
+    this.rearm(head);
     this.observerFailures.delete(threadId);
     this.schedule();
     return true;
@@ -98,13 +96,17 @@ export class AcceptedSaveScheduler<WriteIntent> {
   }
 
   /**
-   * Stops admission, then writes every queued save, waiting out transient retries. Accepted output is already
-   * on screen, so dropping the queue here would lose it. A failed or exhausted head stays retained by its owner,
-   * which has reported it.
+   * Stops admission, then writes every queued save in order, waiting out transient retries. Accepted output is
+   * already on screen, so dropping the queue here would lose it. An exhausted head gets a fresh retry budget,
+   * because storage may have recovered since its last attempt and the text queued behind it is otherwise lost.
+   * No attempt starts at or after `attemptsUntil`; a write already running is still awaited. Whatever is left
+   * stays queued, and `depth()` reports it.
    */
-  async close(): Promise<void> {
+  async close(options: { readonly attemptsUntil?: number } = {}): Promise<void> {
     this.closing = true;
-    while (this.inFlight || this.retryableHeads().length > 0) {
+    this.attemptsUntil = options.attemptsUntil ?? Number.POSITIVE_INFINITY;
+    this.rearmExhaustedHeads();
+    while (this.inFlight || this.closeCanAttempt()) {
       this.schedule();
       await (this.inFlight ?? this.untilNextRetry());
     }
@@ -128,7 +130,7 @@ export class AcceptedSaveScheduler<WriteIntent> {
   }
 
   private schedule(): void {
-    if (this.stopped || this.inFlight) return;
+    if (this.stopped || this.inFlight || Date.now() >= this.attemptsUntil) return;
     const pending = this.nextReady();
     if (!pending) { this.scheduleRetry(); return; }
     // Start on the next microtask so enqueue cannot run storage before live admission returns.
@@ -154,6 +156,25 @@ export class AcceptedSaveScheduler<WriteIntent> {
     return undefined;
   }
 
+  private rearmExhaustedHeads(): void {
+    for (const [threadId, queue] of this.queues) {
+      const head = queue[0];
+      if (head?.exhausted && !head.failed && !this.pausedThreads.has(threadId)) this.rearm(head);
+    }
+  }
+
+  private closeCanAttempt(): boolean {
+    return this.retryableHeads().length > 0 && Date.now() < this.attemptsUntil;
+  }
+
+  private rearm(head: PendingSave<WriteIntent>): void {
+    head.failed = false;
+    head.exhausted = false;
+    head.attempts = 0;
+    head.backoffs = 0;
+    head.retryAt = 0;
+  }
+
   private retryableHeads(): PendingSave<WriteIntent>[] {
     return [...this.queues].flatMap(([id, queue]) => {
       const head = queue[0];
@@ -162,7 +183,7 @@ export class AcceptedSaveScheduler<WriteIntent> {
   }
 
   private untilNextRetry(): Promise<void> {
-    const retryAt = Math.min(...this.retryableHeads().map((head) => head.retryAt));
+    const retryAt = Math.min(this.attemptsUntil, ...this.retryableHeads().map((head) => head.retryAt));
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, retryAt - Date.now())));
   }
 

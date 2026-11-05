@@ -434,7 +434,7 @@ describe("AgentService cleanup through production worker composition", { timeout
         await fixture.service.stopAll();
         await sessions.shutdown();
       },
-      persist: () => fixture.workers.close(),
+      persist: (saveAttemptsUntil) => fixture.workers.close({ attemptsUntil: saveAttemptsUntil }),
       onServicesOverrun: () => undefined,
     }).then(() => { persistedInTime = !watchdogExpired; });
     try {
