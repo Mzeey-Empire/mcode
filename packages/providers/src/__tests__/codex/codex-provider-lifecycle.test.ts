@@ -290,6 +290,46 @@ describe("Codex provider lifecycle through native transport", () => {
     } finally { vi.useRealTimers(); await f.provider.shutdown(); }
   });
 
+  // Fresh spawn resumes the same native thread, so it waits for the old process to exit; only the
+  // 3 s replacement wait and that exit stand between the new turn and its start.
+  it.each([
+    { exit: "on SIGTERM", startsBetweenFakeMs: [3_000, 3_500] },
+    { exit: "only on SIGKILL", startsBetweenFakeMs: [6_000, 6_500] },
+  ])("starts a replacement behind an unresponsive turn whose process exits $exit without asking it to interrupt again", async ({ exit, startsBetweenFakeMs }) => {
+    const f = createProvider();
+    const fresh = new NativeProcess();
+    const freshStarts = () => fresh.requests.filter(rpc => rpc.method === "turn/start");
+    try {
+      await f.provider.sendTurn(request);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      f.child.stdout.write(answerLine("old text"));
+      await vi.waitFor(() => expect(turnTexts(f.events)).toEqual(["old text"]));
+      f.child.interruptReply = () => {};
+      f.child.kill.mockImplementation(() => {
+        if (exit === "on SIGTERM" || f.child.kill.mock.calls.length > 1) setImmediate(() => f.child.emit("exit", null, "SIGKILL"));
+        return true;
+      });
+      spawn.mockImplementation(() => { setImmediate(() => fresh.emit("spawn")); return fresh; });
+      const advanceFakeMs = async (ms: number) => {
+        for (let advanced = 0; advanced < ms; advanced += 50) {
+          await vi.advanceTimersByTimeAsync(50);
+          await settleIo();
+        }
+      };
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await f.provider.sendTurn({ ...request, turnId: "turn-2", turnExecutionId: STEER_ID });
+      await advanceFakeMs(startsBetweenFakeMs[0]! - 50);
+      expect(freshStarts()).toHaveLength(0);
+      await advanceFakeMs(startsBetweenFakeMs[1]! - startsBetweenFakeMs[0]! + 50);
+      expect(freshStarts()).toHaveLength(1);
+      vi.useRealTimers();
+      expect(f.child.requests.filter(rpc => rpc.method === "turn/interrupt")).toHaveLength(1);
+      expect(turnTexts(f.events)).toEqual(["old text"]);
+      expect(turnEnds(f.events)).toEqual([{ type: AgentEventType.Ended, threadId: request.threadId,
+        turnExecutionId: request.turnExecutionId, outcome: "cancelled" }]);
+    } finally { vi.useRealTimers(); await f.provider.shutdown(); }
+  });
+
   it("interrupts the next turn on Stop after a Stop during a replacement wait kept the session", async () => {
     const f = createProvider();
     const next = { ...request, turnId: "turn-3", turnExecutionId: "83093cff-69b8-4efb-82db-20a75f993612" };

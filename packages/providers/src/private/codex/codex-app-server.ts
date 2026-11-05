@@ -1176,11 +1176,14 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
    * Sends a best-effort `turn/interrupt`, terminates the process, reads its
    * remaining output, then disposes the RPC client. On Windows uses
    * `taskkill /T /F`; on other platforms sends SIGTERM then SIGKILL after 3 seconds.
+   *
+   * @param options.interruptActiveTurn - Pass `false` when the turn's interrupt already went
+   *   unanswered, so termination starts without another wait of up to 3 seconds.
    */
-  async kill(): Promise<void> {
+  async kill(options: { interruptActiveTurn?: boolean } = {}): Promise<void> {
     if (this.teardownPromise) return this.teardownPromise;
     this.killRequested = true;
-    this.teardownPromise = this.performKill();
+    this.teardownPromise = this.performKill(options.interruptActiveTurn ?? true);
     try {
       await this.teardownPromise;
     } finally {
@@ -1193,8 +1196,8 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
    * to its end before dispose, so the kill resolves only when no more output can arrive: the
    * interrupt's late output and real `turn/completed` reach listeners before the caller ends the turn.
    */
-  private async performKill(): Promise<void> {
-    await this.interruptActiveThread();
+  private async performKill(interruptActiveTurn: boolean): Promise<void> {
+    if (interruptActiveTurn) await this.interruptActiveThread();
     await this.terminateChild();
     await this.rpc?.readRemainingOutput(EXIT_OUTPUT_DRAIN_TIMEOUT_MS);
     this.rpc?.dispose();

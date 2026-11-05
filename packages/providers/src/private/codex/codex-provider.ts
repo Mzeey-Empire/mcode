@@ -1441,6 +1441,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * {@link STOP_DRAIN_REUSE_TIMEOUT_MS}. When it expires, the old turn is abandoned and the session
    * discarded without a second interrupt, and this turn respawns through the staged-turn path
    * rather than queueing `turn/start` behind an interrupt that may never produce `turn/completed`.
+   * The respawn resumes the same native thread, so it starts only after the old process has exited:
+   * at once if it exits on its first signal, otherwise within the kill's termination and
+   * output-drain bounds (up to 5 s more on POSIX, 7 s on Windows).
    * A failed interrupt discards the session only if the old turn is still running.
    */
   private async dispatchReusedCodexTurn(turn: PreparedCodexTurn, state: CodexSessionState): Promise<void> {
@@ -2500,7 +2503,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     else if (state.browserCredential) this.host.browser.revokeCredential(state.browserCredential.credentialId);
     const turnInFlight = this.isBusy(state);
     try {
-      await state.server.kill();
+      // An abandoned turn already left an interrupt unanswered, and a replacement resuming this
+      // native thread waits for this kill, so it skips the kill's own best-effort interrupt.
+      await state.server.kill({ interruptActiveTurn: !isAbandonedTurn(state, executionForDrain(state)) });
     } finally {
       this.endTurnAfterOutput(state, turnInFlight);
     }
