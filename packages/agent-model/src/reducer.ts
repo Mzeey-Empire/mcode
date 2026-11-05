@@ -531,6 +531,7 @@ export function applyOwnedAgentEventBatch(
   state: AgentModelState,
   events: readonly z.infer<typeof CanonicalAgentSemanticEnvelopeSchema>[],
 ): OwnedBatchReduction {
+  markOwnedChange(state);
   const journal = new OwnedWriteJournal(state);
   let appliedCount = 0;
   let duplicateCount = 0;
@@ -556,8 +557,24 @@ export function applyOwnedAgentEventBatch(
  * An earlier batch's `rollback()` still restores them exactly.
  */
 export function clearOwnedEventIds(state: AgentModelState): void {
+  markOwnedChange(state);
   state.appliedEventIds = {};
   state.acceptedInputEventIds = {};
+}
+
+const ownedChangeCounts = new WeakMap<AgentModelState, number>();
+
+/**
+ * How many times an owned batch or compaction has changed `state` in place. A reader that keeps `state` between
+ * calls records this when it starts reading; a later different value means what it would read may have changed.
+ * Counts a batch even if it is later rejected or rolled back, so a reader can only err towards refusing.
+ */
+export function ownedStateChangeCount(state: AgentModelState): number {
+  return ownedChangeCounts.get(state) ?? 0;
+}
+
+function markOwnedChange(state: AgentModelState): void {
+  ownedChangeCounts.set(state, ownedStateChangeCount(state) + 1);
 }
 
 type OwnedKeyWrite = { readonly map: Record<string, unknown>; readonly key: string; readonly had: boolean; readonly prev: unknown };
@@ -582,7 +599,8 @@ class OwnedWriteJournal {
         continue;
       }
       const map = this.maps[write.map];
-      const had = Object.hasOwn(map, write.key);
+      // `Object.hasOwn` is ES2022, beyond the web app's lib, which also compiles this file.
+      const had = Object.prototype.hasOwnProperty.call(map, write.key);
       this.entries.push({ map, key: write.key, had, prev: had ? map[write.key] : undefined });
       defineOwnKey(map, write.key, write.value);
     }

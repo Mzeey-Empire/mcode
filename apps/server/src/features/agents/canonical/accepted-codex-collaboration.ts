@@ -3,7 +3,7 @@ import * as NodeUtil from "node:util";
 import { AgentEventSchema, AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { CANONICAL_SUBAGENT_TASK_MAX_LENGTH } from "@mcode/contracts/models/canonical-subagent-roster";
 import { MessageSchema, type Message } from "@mcode/contracts/models/message";
-import { createAgentModelState, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn, type CollaborationAction, type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import { createAgentModelState, ownedStateChangeCount, type AgentItem, type AgentModelState, type AgentThread, type AgentTurn, type CollaborationAction, type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
 import { resolveSubagentDisplayName, resolveSubagentMetadata } from "@mcode/contracts/models/tool-call-record";
 import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { type ProviderRuntimeExtensionKind } from "@mcode/contracts/events/provider-runtime-event";
@@ -47,6 +47,11 @@ type StateMapName = "threads" | "turns" | "items" | "collaborationActions";
 type IndexName = "nativeThreads" | "nativeTurns" | "executions" | "delegations" | "receivers" | "nativeActions";
 type CollaborationIndexes = Record<IndexName, Map<string, ReadonlySet<string>>>;
 type PreparationCheckpoint = { readonly state: AgentModelState; readonly indexes: CollaborationIndexes };
+type LentAcceptedState = { readonly state: AgentModelState; readonly changes: number };
+
+function lend(state: AgentModelState): LentAcceptedState {
+  return { state, changes: ownedStateChangeCount(state) };
+}
 
 /**
  * Interprets Codex collaboration against accepted domain state. Prepare on a fork and install
@@ -54,7 +59,9 @@ type PreparationCheckpoint = { readonly state: AgentModelState; readonly indexes
  * parent records can be supplied to the next fork without reindexing ordinary history.
  */
 export class AcceptedCodexCollaboration implements CodexCollaborationDurability, ChildThreadRecorder {
-  private state: AgentModelState;
+  private current: AgentModelState;
+  /** The accepted state this collaboration was handed, and its owner's change count at that moment. */
+  private lent: LentAcceptedState;
   private readonly adapters: { readonly [K in ProviderRuntimeExtensionKind]: ExtensionAdapter };
   private changes: AcceptedCollaborationChange[] = [];
   private indexes: CollaborationIndexes = { nativeThreads: new Map(), nativeTurns: new Map(), executions: new Map(),
@@ -63,7 +70,8 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   private readonly ownedIndexes = new Set<IndexName>();
 
   constructor(hydrated: AgentModelState) {
-    this.state = hydrated;
+    this.current = hydrated;
+    this.lent = lend(hydrated);
     for (const thread of Object.values(hydrated.threads)) this.indexThread(thread);
     for (const turn of Object.values(hydrated.turns)) this.indexTurn(turn);
     for (const action of Object.values(hydrated.collaborationActions)) this.indexAction(action);
@@ -71,13 +79,31 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     this.adapters = { "codex-collaboration": new CodexCollaborationEventAdapter(this), "child-thread": new ChildThreadEventAdapter(this) };
   }
 
-  /** Shares immutable records/indexes; supplied accepted records refresh reads without a history scan. */
+  /**
+   * Shares indexes and reads the supplied accepted state in place, without a history scan. The fork stays readable
+   * only until that state's owner next changes it in place; reads after that throw, so fork again with the current
+   * state. Without a state, the fork reads this collaboration's state under the same rule.
+   */
   fork(currentAcceptedState?: AgentModelState): AcceptedCodexCollaboration {
     const candidate = new AcceptedCodexCollaboration(createAgentModelState());
     this.releaseOwnership();
     candidate.state = currentAcceptedState ?? this.state;
+    candidate.lent = currentAcceptedState ? lend(currentAcceptedState) : this.lent;
     candidate.indexes = this.indexes;
     return candidate;
+  }
+
+  // Every record read passes here. The accepted progress owner reduces into its state in place instead of copying
+  // it per event, so a kept reference would otherwise silently show records admitted after this fork.
+  private get state(): AgentModelState {
+    if (ownedStateChangeCount(this.lent.state) !== this.lent.changes) {
+      throw new Error("Accepted collaboration state has changed since this fork; fork it with the current state");
+    }
+    return this.current;
+  }
+
+  private set state(next: AgentModelState) {
+    this.current = next;
   }
 
   /** Returns the adapter's sanitized projection and at most 256 changes within 2 MiB. */

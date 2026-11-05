@@ -105,6 +105,7 @@ export {
   clearOwnedEventIds,
   copyAgentModelState,
   createAgentModelState,
+  ownedStateChangeCount,
   reduceAgentEvent,
   reduceAgentEventBatch,
 } from "./reducer.js";
