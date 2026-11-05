@@ -8,7 +8,7 @@ import {
   mapCursorAcpSessionNotification,
   type CursorAcpTurnState,
 } from "../../acp/cursor-acp-event-mapper.js";
-import type { CursorCanonicalEventRouting } from "../../cursor-canonical-event-publisher.js";
+import type { CanonicalLiveEventRouting as CursorCanonicalEventRouting } from "../../../canonical-live-event-publisher.js";
 import type { CursorSessionState } from "../../cursor-session-state.js";
 import { CursorTurnExecutor } from "../cursor-turn-executor.js";
 

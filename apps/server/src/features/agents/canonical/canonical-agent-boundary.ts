@@ -42,7 +42,7 @@ export class CanonicalAgentBoundary {
     const operationId = "main-canonical:projected:" + NodeCrypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
     const result = await this.canonicalWriter.commitProjected(operationId, input);
     this.publishCommittedGroups(result.providerProjection.publications);
-    await this.canonicalWriter.acknowledgeOperation(input.executionId, operationId);
+    await this.canonicalWriter.acknowledgeOperations([{ executionId: input.executionId, operationId }]);
     return result;
   }
 
@@ -50,14 +50,14 @@ export class CanonicalAgentBoundary {
   async recordParentNarrativeRecovery(input: Parameters<CanonicalAgentStore["recordParentNarrativeRecovery"]>[0]): Promise<boolean> {
     const operationId = "main-recovery:" + NodeCrypto.createHash("sha256").update(JSON.stringify(input)).digest("hex");
     const result = await this.canonicalWriter.recordParentNarrativeRecovery(operationId, input);
-    await this.canonicalWriter.acknowledgeOperation(input.executionId, operationId);
+    await this.canonicalWriter.acknowledgeOperations([{ executionId: input.executionId, operationId }]);
     return result.recorded;
   }
 
   /** Classify recovered narrative and reset its provisional text with one replayable writer receipt. */
   async classifyParentNarrativeRecovery(input: Parameters<CanonicalAgentStore["recordParentNarrativeRecovery"]>[0], operationId: string) {
     const receipt = await this.canonicalWriter.classifyParentNarrativeRecovery(operationId, input);
-    await this.canonicalWriter.acknowledgeOperation(input.executionId, operationId);
+    await this.canonicalWriter.acknowledgeOperations([{ executionId: input.executionId, operationId }]);
     return receipt;
   }
 

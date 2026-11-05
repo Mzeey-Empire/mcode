@@ -1251,7 +1251,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(frames().filter((frame) => frame.phase === "accepted")).toEqual(acceptedFrames);
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'append-accepted'")
+    await expect.poll(() => db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'append-accepted'")
       .get(execution.executionId)).toEqual({ count: 0 });
     expect(await port.transact(structuredClone(operation))).toEqual(first);
     expect(frames().filter((frame) => frame.phase === "accepted")).toEqual(acceptedFrames);
@@ -1269,7 +1269,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 1, "textDelta", { delta: "First", isFinalResponse: true })] });
     await expect.poll(() => progress.depth().pending).toBe(0);
-    expect(writer.pendingAcknowledgementCount).toBe(1);
+    await expect.poll(() => writer.pendingAcknowledgementCount).toBe(1);
     expect(recovery().savedThrough).toBe(recovery().acceptedThrough);
     expect(progress.savingStatuses(execution.threadId)).toEqual([]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'append-accepted'")
@@ -1278,8 +1278,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await send(3, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 2, "textDelta", { delta: "Second", isFinalResponse: true })] });
     await expect.poll(() => progress.depth().pending).toBe(0);
-    expect(writer.pendingAcknowledgementCount).toBe(0);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'append-accepted'")
+    await expect.poll(() => writer.pendingAcknowledgementCount).toBe(0);
+    await expect.poll(() => db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'append-accepted'")
       .get(execution.executionId)).toEqual({ count: 0 });
     expect(db.prepare("SELECT event_id FROM canonical_agent_events WHERE event_id IN (?, ?)")
       .all(`${execution.executionId}:raw:1`, `${execution.executionId}:raw:2`)).toHaveLength(2);
@@ -1288,7 +1288,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
   it("stops the exact active owner when receipt cleanup cannot fit its bounded retry queue without replaying saved events", async () => {
     await send(1, start("codex"));
     const error = new CanonicalWriterAcknowledgementCapacity("Receipt cleanup retention exhausted");
-    vi.spyOn(writer, "acknowledgeOperation").mockRejectedValueOnce(error);
+    vi.spyOn(writer, "enqueueAcknowledgement").mockImplementationOnce(() => { throw error; });
     const failures: string[] = [];
     progress.bindPermanentFailure(async (active, cause) => {
       expect(cause).toBe(error);
@@ -1302,6 +1302,38 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Interrupted" });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE event_id = ?")
       .get(`${execution.executionId}:raw:1`)).toEqual({ count: 1 });
+  });
+
+  it("saves multiple pages across the cleanup threshold without stopping its owner", async () => {
+    await send(1, start("codex"));
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const cleanupStarted = Promise.withResolvers<void>();
+    const original = databaseWriter.sendCanonical.bind(databaseWriter);
+    vi.spyOn(databaseWriter, "sendCanonical").mockImplementation(async (...args) => {
+      if (args[0].kind === "ack-operations") {
+        cleanupStarted.resolve();
+        await held;
+      }
+      return original(...args);
+    });
+    for (let index = 0; index < 63; index++) writer.enqueueAcknowledgement(execution.executionId, `previous-${index}`);
+    const failures: string[] = [];
+    progress.bindPermanentFailure(async (active) => { failures.push(active.executionId); });
+    expect(progress.accept({ operationId: "live-lease:2", execution, lease, ordinal: 2,
+      mutation: { kind: "append-events", phase: "running", nativeCursor: null,
+        events: Array.from({ length: 300 }, (_, index) => draft("codex", index + 1, "textDelta", { delta: "x", isFinalResponse: true })) } }).kind).toBe("accepted");
+    await cleanupStarted.promise;
+    expect(failures).toEqual([]);
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Running" });
+    release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(recovery().savedThrough).toBe(recovery().acceptedThrough);
+    expect(failures).toEqual([]);
+    await progress.close();
+    await writer.close();
+    expect(db.prepare("SELECT operation_id FROM canonical_writer_operation_receipts WHERE kind = 'append-accepted'").all()).toEqual([]);
   });
 
   it("rejects all admission while a durable command is fenced or the service is closing", async () => {

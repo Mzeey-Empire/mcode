@@ -84,7 +84,7 @@ export type CanonicalWriterRequest =
   | (Correlation & { kind: "semantic-worker-loss"; input: LostExecutionInterruption })
   | (Correlation & { kind: "record-parent-narrative-recovery"; input: ParentNarrativeRecoveryCommitInput })
   | (Correlation & { kind: "classify-parent-narrative-recovery"; input: ParentNarrativeRecoveryCommitInput })
-  | (Correlation & { kind: "ack-operation" })
+  | (Correlation & { kind: "ack-operations"; operations: { executionId: string; operationId: string }[] })
   | (Correlation & { kind: "close" });
 
 export type CanonicalWriterResponse =
@@ -95,7 +95,7 @@ export type CanonicalWriterResponse =
   | (Correlation & { kind: "semantic-transacted"; receipt: ExecutionWriteReceipt })
   | (Correlation & { kind: "parent-narrative-recovery-recorded"; receipt: CanonicalParentNarrativeRecoveryReceipt })
   | (Correlation & { kind: "parent-narrative-recovery-classified"; receipt: CanonicalParentNarrativeClassificationReceipt })
-  | (Correlation & { kind: "operation-acknowledged" })
+  | (Correlation & { kind: "operations-acknowledged" })
   | (Correlation & { kind: "closed" })
   | (Correlation & { kind: "failed"; reason: "open-failed" | "write-failed" | "operation-conflict" | "receipt-capacity";
       failure?: WriterFailure });

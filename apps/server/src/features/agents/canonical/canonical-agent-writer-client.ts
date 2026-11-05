@@ -1,5 +1,6 @@
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import * as NodeCrypto from "node:crypto";
+import { logger } from "@mcode/shared";
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type {
   CanonicalParentNarrativeClassificationReceipt,
@@ -18,9 +19,10 @@ import type { ExecutionSemanticOperation, ExecutionWriteReceipt } from "../execu
 import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
 
 const MAX_PENDING_ACKNOWLEDGEMENTS = 64;
-const MAX_PENDING_WRITES = 64;
 const MAX_ACK_RETRIES_BEFORE_WRITE = 8;
-const MAX_ACK_RETRIES_ON_CLOSE = 16;
+const MAX_PENDING_WRITES = 64;
+const ACKNOWLEDGEMENT_BATCH_SIZE = 64;
+const ACKNOWLEDGEMENT_DELAY_MS = 250;
 
 interface PendingAcknowledgement {
   executionId: string;
@@ -36,6 +38,10 @@ export class CanonicalWriterAcknowledgementCapacity extends Error {}
 export class CanonicalAgentWriterClient {
   private retryingAcknowledgements: Promise<void> | undefined;
   private readonly pendingAcknowledgements = new Map<string, PendingAcknowledgement>();
+  private readonly queuedAcknowledgements = new Map<string, PendingAcknowledgement>();
+  private acknowledgementTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly acknowledgementCapacityFailures = new Map<string, CanonicalWriterAcknowledgementCapacity>();
+  private acknowledgementTrackingFailure: CanonicalWriterAcknowledgementCapacity | undefined;
   private closing = false;
   private stopping = false;
   private pendingWrites = 0;
@@ -59,7 +65,7 @@ export class CanonicalAgentWriterClient {
 
   private async commitInput(operationId: string, input: CanonicalProviderWriteInput, projectProviderEvents?: true): Promise<CanonicalProviderWriteReceipt> {
     if (!operationId || !input.executionId) throw new Error("Canonical writer operation and execution IDs are required");
-    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    void this.retryPendingAcknowledgements();
     const response = await this.sendWithRetry({
       kind: "commit", requestId: NodeCrypto.randomUUID(), operationId, executionId: input.executionId, input,
       ...(projectProviderEvents ? { projectProviderEvents } : {}),
@@ -71,7 +77,7 @@ export class CanonicalAgentWriterClient {
   /** Store the same immutable accepted batch; its receipt contains no publication side effect. */
   async appendAccepted(operationId: string, input: CanonicalAcceptedWriteInput): Promise<CanonicalAcceptedWriteReceipt> {
     if (!operationId || !input.execution.executionId) throw new Error("Accepted writer operation and execution IDs are required");
-    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    void this.retryPendingAcknowledgements();
     const response = await this.sendWithRetry({ kind: "append-accepted", requestId: NodeCrypto.randomUUID(), operationId,
       executionId: input.execution.executionId, input });
     if (response.kind !== "accepted-appended") throw new Error("Canonical writer returned an unexpected accepted append response");
@@ -100,7 +106,7 @@ export class CanonicalAgentWriterClient {
     onPublication: (events: readonly CanonicalAgentEventEnvelope[]) => void,
   ): Promise<ExecutionWriteReceipt> {
     const operationId = `${input.lease.leaseId}:worker-lost`;
-    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    void this.retryPendingAcknowledgements();
     const response = await this.sendWithRetry({
       kind: "semantic-worker-loss", requestId: NodeCrypto.randomUUID(), operationId,
       executionId: input.execution.executionId, input,
@@ -115,7 +121,7 @@ export class CanonicalAgentWriterClient {
     input: ParentNarrativeRecoveryCommitInput,
   ): Promise<CanonicalParentNarrativeRecoveryReceipt> {
     if (!operationId || !input.executionId) throw new Error("Canonical writer operation and execution IDs are required");
-    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    void this.retryPendingAcknowledgements();
     const response = await this.sendWithRetry({
       kind: "record-parent-narrative-recovery", requestId: NodeCrypto.randomUUID(), operationId,
       executionId: input.executionId, input,
@@ -132,7 +138,7 @@ export class CanonicalAgentWriterClient {
     input: ParentNarrativeRecoveryCommitInput,
   ): Promise<CanonicalParentNarrativeClassificationReceipt> {
     if (!operationId || !input.executionId) throw new Error("Canonical writer operation and execution IDs are required");
-    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    void this.retryPendingAcknowledgements();
     const response = await this.sendWithRetry({
       kind: "classify-parent-narrative-recovery", requestId: NodeCrypto.randomUUID(), operationId,
       executionId: input.executionId, input,
@@ -143,22 +149,37 @@ export class CanonicalAgentWriterClient {
     return response.receipt;
   }
 
-  /** Releases a receipt after its caller has finished publication or journal discard. Never acknowledge before that work. */
-  async acknowledgeOperation(executionId: string, operationId: string): Promise<void> {
-    if (!executionId || !operationId) throw new Error("Canonical writer operation and execution IDs are required");
-    if (this.closing || this.stopping) throw new Error("Canonical writer closed");
+  /** Releases handled receipts after publication or journal discard completes. */
+  async acknowledgeOperations(operations: PendingAcknowledgement[]): Promise<void> {
+    this.validateAcknowledgements(operations);
+    const failure = await this.deleteAcknowledgements(operations);
+    if (failure) throw failure;
+  }
+
+  /** Retain handled progress receipts for bounded cleanup without blocking the next save. */
+  enqueueAcknowledgement(executionId: string, operationId: string): void {
+    const operation = { executionId, operationId };
+    this.validateAcknowledgements([operation]);
     const key = acknowledgementKey(executionId, operationId);
-    try {
-      await this.sendAcknowledgement({ executionId, operationId });
-      this.pendingAcknowledgements.delete(key);
-    } catch (error) {
-      if (!this.pendingAcknowledgements.has(key)) {
-        if (this.pendingAcknowledgements.size >= MAX_PENDING_ACKNOWLEDGEMENTS) {
-          throw new CanonicalWriterAcknowledgementCapacity("Canonical writer acknowledgement retry queue is full", { cause: error });
-        }
-        this.pendingAcknowledgements.set(key, { executionId, operationId });
-      }
-      throw error;
+    if (this.pendingAcknowledgements.has(key) || this.queuedAcknowledgements.has(key)) return;
+    if (this.pendingAcknowledgements.size >= MAX_PENDING_ACKNOWLEDGEMENTS) {
+      throw new CanonicalWriterAcknowledgementCapacity("Canonical writer acknowledgement retry queue is full");
+    }
+    this.queuedAcknowledgements.set(key, operation);
+    if (this.queuedAcknowledgements.size >= ACKNOWLEDGEMENT_BATCH_SIZE) {
+      void this.flushQueuedAcknowledgements();
+    } else if (!this.acknowledgementTimer) {
+      this.acknowledgementTimer = setTimeout(() => {
+        this.acknowledgementTimer = undefined;
+        void this.flushQueuedAcknowledgements();
+      }, ACKNOWLEDGEMENT_DELAY_MS);
+    }
+  }
+
+  private validateAcknowledgements(operations: PendingAcknowledgement[]): void {
+    if (this.closing || this.stopping) throw new Error("Canonical writer closed");
+    for (const operation of operations) {
+      if (!operation.executionId || !operation.operationId) throw new Error("Canonical writer operation and execution IDs are required");
     }
   }
 
@@ -171,40 +192,95 @@ export class CanonicalAgentWriterClient {
   async close(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
-    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_ON_CLOSE);
+    await this.retryingAcknowledgements;
+    await this.flushQueuedAcknowledgements();
     this.stopping = true;
+    const capacityFailure = this.acknowledgementTrackingFailure ?? this.acknowledgementCapacityFailures.values().next().value;
+    if (capacityFailure) throw capacityFailure;
     if (this.pendingAcknowledgements.size) throw new Error(`Canonical writer closed with ${this.pendingAcknowledgements.size} unacknowledged operations`);
   }
 
-  private sendAcknowledgement(acknowledgement: PendingAcknowledgement, allowDuringClose = false): Promise<void> {
+  private sendAcknowledgements(operations: PendingAcknowledgement[]): Promise<void> {
     return this.sendWithRetry({
-      kind: "ack-operation", requestId: NodeCrypto.randomUUID(), ...acknowledgement,
-    }, allowDuringClose).then((response) => {
-      if (response.kind !== "operation-acknowledged") {
+      kind: "ack-operations", requestId: NodeCrypto.randomUUID(), operationId: "", executionId: "", operations,
+    }, this.closing).then((response) => {
+      if (response.kind !== "operations-acknowledged") {
         throw new Error("Canonical writer returned an unexpected response");
       }
     });
   }
 
-  private retryPendingAcknowledgements(limit: number): Promise<void> {
-    if (this.pendingAcknowledgements.size === 0) return Promise.resolve();
+  private async flushQueuedAcknowledgements(retryLimit = MAX_PENDING_ACKNOWLEDGEMENTS): Promise<void> {
+    if (this.acknowledgementTimer) clearTimeout(this.acknowledgementTimer);
+    this.acknowledgementTimer = undefined;
     if (!this.retryingAcknowledgements) {
-      this.retryingAcknowledgements = this.drainAcknowledgements(limit)
-        .finally(() => { this.retryingAcknowledgements = undefined; });
+      this.retryingAcknowledgements = this.drainAcknowledgements(retryLimit)
+        .finally(() => {
+          this.retryingAcknowledgements = undefined;
+          if (this.queuedAcknowledgements.size) return this.flushQueuedAcknowledgements();
+        });
     }
-    return this.retryingAcknowledgements;
+    await this.retryingAcknowledgements;
   }
 
-  private async drainAcknowledgements(limit: number): Promise<void> {
-    for (const [key, acknowledgement] of [...this.pendingAcknowledgements].slice(0, limit)) {
-      try {
-        await this.sendAcknowledgement(acknowledgement, this.closing);
+  private retryPendingAcknowledgements(): Promise<void> {
+    if (this.closing) return Promise.resolve();
+    // The database owner serializes requests; awaiting cleanup here would hold live saves behind every fallback deletion.
+    if (this.retryingAcknowledgements) return this.retryingAcknowledgements;
+    if (this.pendingAcknowledgements.size === 0) return Promise.resolve();
+    return this.flushQueuedAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+  }
+
+  private async drainAcknowledgements(retryLimit: number): Promise<void> {
+    const retries = [...this.pendingAcknowledgements].slice(0, retryLimit);
+    const operations = new Map([...retries, ...this.queuedAcknowledgements]);
+    this.queuedAcknowledgements.clear();
+    const entries = [...operations.values()];
+    for (let offset = 0; offset < entries.length; offset += ACKNOWLEDGEMENT_BATCH_SIZE) {
+      await this.deleteAcknowledgements(entries.slice(offset, offset + ACKNOWLEDGEMENT_BATCH_SIZE));
+    }
+  }
+
+  private async deleteAcknowledgements(operations: PendingAcknowledgement[]): Promise<unknown> {
+    try {
+      await this.sendAcknowledgements(operations);
+      for (const operation of operations) {
+        const key = acknowledgementKey(operation.executionId, operation.operationId);
         this.pendingAcknowledgements.delete(key);
-      } catch {
-        if (this.pendingAcknowledgements.get(key) !== acknowledgement) continue;
-        this.pendingAcknowledgements.delete(key);
-        this.pendingAcknowledgements.set(key, acknowledgement);
+        this.queuedAcknowledgements.delete(key);
+        this.acknowledgementCapacityFailures.delete(key);
       }
+      return undefined;
+    } catch (error) {
+      if (operations.length > 1) {
+        let failure: unknown;
+        // A transaction rollback does not identify which receipt poisoned the batch.
+        for (const operation of operations) failure = await this.deleteAcknowledgements([operation]) ?? failure;
+        return failure;
+      }
+      const operation = operations[0];
+      if (!operation) return error;
+      const key = acknowledgementKey(operation.executionId, operation.operationId);
+      if (!this.pendingAcknowledgements.has(key) && this.pendingAcknowledgements.size >= MAX_PENDING_ACKNOWLEDGEMENTS) {
+        const failure = new CanonicalWriterAcknowledgementCapacity("Canonical writer acknowledgement retry queue is full", { cause: error });
+        this.retainCapacityFailure(key, failure);
+        logger.error("Canonical writer receipt cleanup exceeded retry capacity", {
+          ...operation, error: failure.message, cause: error instanceof Error ? error.message : String(error),
+        });
+        return failure;
+      }
+      this.pendingAcknowledgements.delete(key);
+      this.pendingAcknowledgements.set(key, operation);
+      return error;
+    }
+  }
+
+  private retainCapacityFailure(key: string, failure: CanonicalWriterAcknowledgementCapacity): void {
+    if (this.acknowledgementCapacityFailures.size < MAX_PENDING_ACKNOWLEDGEMENTS || this.acknowledgementCapacityFailures.has(key)) {
+      this.acknowledgementCapacityFailures.set(key, failure);
+    } else {
+      // Once identities exceed bounded tracking, successful retries cannot prove complete cleanup.
+      this.acknowledgementTrackingFailure = failure;
     }
   }
 
@@ -214,7 +290,7 @@ export class CanonicalAgentWriterClient {
     onPublication?: (events: readonly CanonicalAgentEventEnvelope[]) => void,
   ): Promise<CanonicalWriterResponse> {
     if (this.stopping || (this.closing && !allowDuringClose)) return Promise.reject(new Error("Canonical writer closed"));
-    if (request.kind === "ack-operation") return this.databaseWriter.sendCanonical(request, onPublication);
+    if (request.kind === "ack-operations") return this.databaseWriter.sendCanonical(request, onPublication);
     if (this.pendingWrites >= MAX_PENDING_WRITES) return Promise.reject(new Error("Canonical writer admission is full"));
     this.pendingWrites++;
     return this.databaseWriter.sendCanonical(request, onPublication).finally(() => { this.pendingWrites--; });

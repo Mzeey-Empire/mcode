@@ -5,6 +5,7 @@ import { CanonicalAgentRevisionSchema } from "@mcode/contracts/models/canonical-
 import { and, count, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
+import { lazySchema } from "@mcode/contracts/utils/lazySchema";
 import {
   canonicalAgentEvents,
   canonicalAgentTurns,
@@ -26,6 +27,10 @@ type WriteResponse = Extract<CanonicalWriterResponse, {
 
 type ReceiptOwner = { kind: "execution"; executionId: string }
   | { kind: "thread"; executionId: string; threadId: string };
+
+const acknowledgementOperationsSchema = lazySchema(() => z.array(z.object({
+  executionId: z.string().min(1), operationId: z.string().min(1).max(256),
+})).max(256));
 
 const storedReceiptSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("accepted-appended"), result: z.object({
@@ -114,22 +119,25 @@ export class CanonicalAgentWriterReceipts {
   }
 
   /** Removes a receipt only after the caller has completed its dependent publication or journal discard. */
-  acknowledge(executionId: string, operationId: string): void {
+  acknowledgeMany(operations: { executionId: string; operationId: string }[]): void {
+    const validated = acknowledgementOperationsSchema().parse(operations);
     this.db.transaction(() => {
-      const turnReceipt = this.loadReceipt({ kind: "execution", executionId }, operationId);
-      const threadReceipt = this.orm.select().from(canonicalWriterThreadOperationReceipts).where(and(
-        eq(canonicalWriterThreadOperationReceipts.executionId, executionId),
-        eq(canonicalWriterThreadOperationReceipts.operationId, operationId),
-      )).get();
-      if (turnReceipt && threadReceipt) throw new CanonicalWriterOperationConflict("Canonical writer receipt has ambiguous ownership");
-      if (threadReceipt) {
-        const owner: ReceiptOwner = { kind: "thread", executionId, threadId: threadReceipt.threadId };
-        if (syntheticThreadExecutionId(owner.threadId) !== executionId) throw new Error("Canonical thread receipt execution does not match its thread");
-        this.assertOwnership(owner);
-        this.deleteReceipt(canonicalWriterThreadOperationReceipts, executionId, operationId);
-      } else if (turnReceipt) {
-        this.assertOwnership({ kind: "execution", executionId });
-        this.deleteReceipt(canonicalWriterOperationReceipts, executionId, operationId);
+      for (const { executionId, operationId } of validated) {
+        const turnReceipt = this.loadReceipt({ kind: "execution", executionId }, operationId);
+        const threadReceipt = this.orm.select().from(canonicalWriterThreadOperationReceipts).where(and(
+          eq(canonicalWriterThreadOperationReceipts.executionId, executionId),
+          eq(canonicalWriterThreadOperationReceipts.operationId, operationId),
+        )).get();
+        if (turnReceipt && threadReceipt) throw new CanonicalWriterOperationConflict("Canonical writer receipt has ambiguous ownership");
+        if (threadReceipt) {
+          const owner: ReceiptOwner = { kind: "thread", executionId, threadId: threadReceipt.threadId };
+          if (syntheticThreadExecutionId(owner.threadId) !== executionId) throw new Error("Canonical thread receipt execution does not match its thread");
+          this.assertOwnership(owner);
+          this.deleteReceipt(canonicalWriterThreadOperationReceipts, executionId, operationId);
+        } else if (turnReceipt) {
+          this.assertOwnership({ kind: "execution", executionId });
+          this.deleteReceipt(canonicalWriterOperationReceipts, executionId, operationId);
+        }
       }
     }).immediate();
   }

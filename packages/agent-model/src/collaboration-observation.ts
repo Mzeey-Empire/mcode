@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AgentThreadIdSchema, AgentTurnIdSchema, AgentTurnExecutionIdSchema, ProviderIdentitySchema } from "./identity.js";
-import { AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CollaborationActionSchema } from "./records.js";
+import { AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CollaborationActionSchema, type AgentItem, type AgentThread,
+  type AgentTurn, type CollaborationAction } from "./records.js";
 import type { AgentModelState } from "./reducer.js";
 
 const execution = z.object({ threadId: AgentThreadIdSchema, turnId: AgentTurnIdSchema, executionId: AgentTurnExecutionIdSchema }).strict();
@@ -21,110 +22,149 @@ export const CollaborationObservationChangeSchema = z.discriminatedUnion("kind",
 /** A bounded set of child changes without a child event allocator or provider command. */
 export type CollaborationObservationChange = z.infer<typeof CollaborationObservationChangeSchema>;
 
+/** One record an observation writes, as a single key so an owned reducer can journal and undo it. */
+export type CollaborationObservationWrite =
+  | { readonly map: "threads"; readonly key: string; readonly value: AgentThread }
+  | { readonly map: "turns"; readonly key: string; readonly value: AgentTurn }
+  | { readonly map: "items"; readonly key: string; readonly value: AgentItem }
+  | { readonly map: "collaborationActions"; readonly key: string; readonly value: CollaborationAction };
+
 const terminal = new Set(["Completed", "Cancelled", "Interrupted", "Errored"]);
 
-/** Reduce one parent-owned family observation atomically, fencing every child to that exact parent turn. */
+/**
+ * Validate one parent-owned family observation atomically, fencing every child to that exact parent turn.
+ * Returns the records it writes, or `undefined` when any change is refused. `state` is never changed.
+ */
 export function applyCollaborationObservation(state: AgentModelState, owner: z.infer<typeof execution>,
-  changes: readonly CollaborationObservationChange[]): AgentModelState | undefined {
-  const candidate = { ...state, threads: { ...state.threads }, turns: { ...state.turns },
-    items: { ...state.items }, collaborationActions: { ...state.collaborationActions } };
+  changes: readonly CollaborationObservationChange[]): readonly CollaborationObservationWrite[] | undefined {
+  const records = new ObservedRecords(state);
   for (const change of changes) {
-    if (!applyChange(candidate, change)) return undefined;
+    if (!applyChange(records, change)) return undefined;
   }
   for (const change of changes) {
-    if (!validContext(candidate, owner, change) || !validRecord(candidate, owner.threadId, change)) return undefined;
+    if (!validContext(records, owner, change) || !validRecord(records, owner.threadId, change)) return undefined;
   }
-  return candidate;
+  return records.writes();
 }
 
-function applyChange(state: AgentModelState, change: CollaborationObservationChange): boolean {
+/**
+ * The state's records with this observation's writes laid over them. Validation reads through it, so an
+ * observation costs its own changes instead of a copy of every record map in a long thread.
+ */
+class ObservedRecords {
+  private readonly threads = new Map<string, AgentThread>();
+  private readonly turns = new Map<string, AgentTurn>();
+  private readonly items = new Map<string, AgentItem>();
+  private readonly actions = new Map<string, CollaborationAction>();
+
+  constructor(private readonly state: AgentModelState) {}
+
+  thread(id: string): AgentThread | undefined { return this.threads.get(id) ?? this.state.threads[id]; }
+  turn(id: string): AgentTurn | undefined { return this.turns.get(id) ?? this.state.turns[id]; }
+  item(id: string): AgentItem | undefined { return this.items.get(id) ?? this.state.items[id]; }
+
+  putThread(thread: AgentThread): void { this.threads.set(thread.id, thread); }
+  putTurn(turn: AgentTurn): void { this.turns.set(turn.id, turn); }
+  putItem(item: AgentItem): void { this.items.set(item.id, item); }
+  putAction(action: CollaborationAction): void { this.actions.set(action.id, action); }
+
+  writes(): CollaborationObservationWrite[] {
+    return [
+      ...[...this.threads].map(([key, value]) => ({ map: "threads" as const, key, value })),
+      ...[...this.turns].map(([key, value]) => ({ map: "turns" as const, key, value })),
+      ...[...this.items].map(([key, value]) => ({ map: "items" as const, key, value })),
+      ...[...this.actions].map(([key, value]) => ({ map: "collaborationActions" as const, key, value })),
+    ];
+  }
+}
+
+function applyChange(records: ObservedRecords, change: CollaborationObservationChange): boolean {
   switch (change.kind) {
-    case "thread-recorded": state.threads[change.thread.id] = change.thread; return true;
-    case "thread-bound": state.threads[change.childThread.id] = change.childThread; return true;
+    case "thread-recorded": records.putThread(change.thread); return true;
+    case "thread-bound": records.putThread(change.childThread); return true;
     case "turn-started":
-    case "turn-terminal": return applyTurn(state, change.turn);
+    case "turn-terminal": return applyTurn(records, change.turn);
     case "item-recorded":
-    case "diagnostic": return applyItem(state, change.item);
-    case "action-recorded": state.collaborationActions[change.action.id] = change.action; return true;
+    case "diagnostic": return applyItem(records, change.item);
+    case "action-recorded": records.putAction(change.action); return true;
   }
 }
 
-function applyTurn(state: AgentModelState, turn: AgentModelState["turns"][string]): boolean {
-  const existing = state.turns[turn.id];
+function applyTurn(records: ObservedRecords, turn: AgentTurn): boolean {
+  const existing = records.turn(turn.id);
   if (existing && (existing.threadId !== turn.threadId || existing.executionId !== turn.executionId
     || terminal.has(existing.status) && existing.status !== turn.status)) return false;
-  state.turns[turn.id] = turn;
+  records.putTurn(turn);
   return true;
 }
 
-function applyItem(state: AgentModelState, item: AgentModelState["items"][string]): boolean {
-  const existing = state.items[item.id];
+function applyItem(records: ObservedRecords, item: AgentItem): boolean {
+  const existing = records.item(item.id);
   if (existing && (existing.threadId !== item.threadId || existing.turnId !== item.turnId)) return false;
-  state.items[item.id] = existing?.payload.projection === "narrativeRecovery" && item.payload.projection === "codexSubagent"
-    ? { ...item, payload: { ...item.payload, ...existing.payload } } : item;
+  records.putItem(existing?.payload.projection === "narrativeRecovery" && item.payload.projection === "codexSubagent"
+    ? { ...item, payload: { ...item.payload, ...existing.payload } } : item);
   return true;
 }
 
-function validContext(state: AgentModelState, owner: z.infer<typeof execution>, change: CollaborationObservationChange): boolean {
-  const source = state.turns[change.sourceExecution.turnId];
-  const parent = state.turns[change.parentExecution.turnId];
+function validContext(records: ObservedRecords, owner: z.infer<typeof execution>, change: CollaborationObservationChange): boolean {
+  const source = records.turn(change.sourceExecution.turnId);
+  const parent = records.turn(change.parentExecution.turnId);
   if (!matchesTurn(source, change.sourceExecution) || !matchesTurn(parent, change.parentExecution)) return false;
   let current = source;
   const seen = new Set<string>();
   while (current.threadId !== owner.threadId) {
     if (seen.has(current.id) || current.trigger.kind !== "child") return false;
     seen.add(current.id);
-    const next = state.turns[current.trigger.sourceTurnId];
+    const next = records.turn(current.trigger.sourceTurnId);
     if (!next || next.threadId !== current.trigger.sourceThreadId) return false;
     current = next;
   }
   return matchesTurn(current, owner);
 }
 
-function matchesTurn(turn: AgentModelState["turns"][string] | undefined, identity: z.infer<typeof execution>):
-  turn is AgentModelState["turns"][string] {
+function matchesTurn(turn: AgentTurn | undefined, identity: z.infer<typeof execution>): turn is AgentTurn {
   return turn?.threadId === identity.threadId && turn.id === identity.turnId && turn.executionId === identity.executionId;
 }
 
-function validRecord(state: AgentModelState, ownerThreadId: string, change: CollaborationObservationChange): boolean {
+function validRecord(records: ObservedRecords, ownerThreadId: string, change: CollaborationObservationChange): boolean {
   switch (change.kind) {
-    case "thread-recorded": return inFamily(state, change.thread.id, ownerThreadId);
-    case "thread-bound": return validBinding(state, ownerThreadId, change);
-    case "turn-started": return change.turn.status === "Running" && validTurn(state, change.turn, ownerThreadId);
-    case "turn-terminal": return terminal.has(change.turn.status) && validTurn(state, change.turn, ownerThreadId);
+    case "thread-recorded": return inFamily(records, change.thread.id, ownerThreadId);
+    case "thread-bound": return validBinding(records, ownerThreadId, change);
+    case "turn-started": return change.turn.status === "Running" && validTurn(records, change.turn, ownerThreadId);
+    case "turn-terminal": return terminal.has(change.turn.status) && validTurn(records, change.turn, ownerThreadId);
     case "item-recorded":
-    case "diagnostic": return validItem(state, ownerThreadId, change.item);
-    case "action-recorded": return validAction(state, ownerThreadId, change.action);
+    case "diagnostic": return validItem(records, ownerThreadId, change.item);
+    case "action-recorded": return validAction(records, ownerThreadId, change.action);
   }
 }
 
-function validBinding(state: AgentModelState, ownerThreadId: string,
+function validBinding(records: ObservedRecords, ownerThreadId: string,
   change: Extract<CollaborationObservationChange, { kind: "thread-bound" }>): boolean {
-  return change.childThread.parentThreadId === change.parentThreadId && inFamily(state, change.childThread.id, ownerThreadId)
+  return change.childThread.parentThreadId === change.parentThreadId && inFamily(records, change.childThread.id, ownerThreadId)
     && change.childThread.providerIdentities.some((id) => JSON.stringify(id) === JSON.stringify(change.identity));
 }
 
-function validItem(state: AgentModelState, ownerThreadId: string, item: AgentModelState["items"][string]): boolean {
-  return state.turns[item.turnId]?.threadId === item.threadId && inFamily(state, item.threadId, ownerThreadId);
+function validItem(records: ObservedRecords, ownerThreadId: string, item: AgentItem): boolean {
+  return records.turn(item.turnId)?.threadId === item.threadId && inFamily(records, item.threadId, ownerThreadId);
 }
 
-function validAction(state: AgentModelState, ownerThreadId: string, action: AgentModelState["collaborationActions"][string]): boolean {
-  return state.turns[action.source.turnId]?.threadId === action.source.threadId
-    && state.items[action.source.itemId]?.threadId === action.source.threadId
-    && inFamily(state, action.source.threadId, ownerThreadId) && inFamily(state, action.target.threadId, ownerThreadId);
+function validAction(records: ObservedRecords, ownerThreadId: string, action: CollaborationAction): boolean {
+  return records.turn(action.source.turnId)?.threadId === action.source.threadId
+    && records.item(action.source.itemId)?.threadId === action.source.threadId
+    && inFamily(records, action.source.threadId, ownerThreadId) && inFamily(records, action.target.threadId, ownerThreadId);
 }
 
-function validTurn(state: AgentModelState, turn: AgentModelState["turns"][string], ownerThreadId: string): boolean {
-  return turn.threadId !== ownerThreadId && turn.executionId !== undefined && inFamily(state, turn.threadId, ownerThreadId);
+function validTurn(records: ObservedRecords, turn: AgentTurn, ownerThreadId: string): boolean {
+  return turn.threadId !== ownerThreadId && turn.executionId !== undefined && inFamily(records, turn.threadId, ownerThreadId);
 }
 
-function inFamily(state: AgentModelState, threadId: string, ownerThreadId: string): boolean {
+function inFamily(records: ObservedRecords, threadId: string, ownerThreadId: string): boolean {
   const seen = new Set<string>();
   let id: string | undefined = threadId;
   while (id && !seen.has(id)) {
-    if (id === ownerThreadId) return state.threads[id] !== undefined;
+    if (id === ownerThreadId) return records.thread(id) !== undefined;
     seen.add(id);
-    id = state.threads[id]?.parentThreadId;
+    id = records.thread(id)?.parentThreadId;
   }
   return false;
 }

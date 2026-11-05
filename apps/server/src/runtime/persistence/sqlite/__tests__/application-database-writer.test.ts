@@ -40,12 +40,12 @@ describe("application SQLite owner", () => {
   it("shares ordered ordinary and canonical commands and continues after a rolled-back constraint failure", async () => {
     owner = new ApplicationDatabaseWriter(dbPath);
     const first = owner.execute(workspaceWriteOperations.create, ["First", "first", true]);
-    const canonical = owner.sendCanonical({ kind: "ack-operation", requestId: "canonical-ack", operationId: "missing", executionId: "missing" });
+    const canonical = owner.sendCanonical({ kind: "ack-operations", requestId: "canonical-ack", operationId: "", executionId: "", operations: [{ operationId: "missing", executionId: "missing" }] });
     const failed = owner.execute(workspaceWriteOperations.create, ["Duplicate", "first", true]);
     const failedObserved = expect(failed).rejects.toThrow("UNIQUE");
     const last = owner.execute(workspaceWriteOperations.create, ["Last", "last", false]);
     expect(await first).toMatchObject({ name: "First", sort_order: 0 });
-    expect(await canonical).toMatchObject({ kind: "operation-acknowledged" });
+    expect(await canonical).toMatchObject({ kind: "operations-acknowledged" });
     await failedObserved;
     expect(await last).toMatchObject({ name: "Last", is_git_repo: false });
     expect(reader.query("SELECT name, sort_order FROM workspaces ORDER BY sort_order").all())

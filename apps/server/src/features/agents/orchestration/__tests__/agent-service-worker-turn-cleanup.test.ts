@@ -56,7 +56,8 @@ function captureTurnRelease(fixture: WorkerFixture) {
       await turn.terminalRelease;
       await turn.lostStreamFinish;
     } finally {
-      // Recovery can release the worker after accepting an interruption but before saving it.
+      // Rejected-stream recovery clears the release promise before relinquishing ownership.
+      await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
       await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
     }
   };
@@ -272,8 +273,15 @@ describe("AgentService cleanup through production worker composition", { timeout
     const storage = new AttachmentService();
     const recovery = new TurnRecoveryService(fixture.canonical, fixture.threads, storage,
       container.resolve(ParentAssistantTextCheckpointService), container.resolve(ThreadStartupRepo), fixture.messages, fixture.providerRegistry);
+    const providerSent = new Promise<void>((resolve) => {
+      fixture.provider.sendTurn.mockImplementationOnce(async (turn) => {
+        fixture.sent.push(turn);
+        resolve();
+      });
+    });
     const retry = await recovery.retryErroredTurn({ threadId: fixture.thread.id, turnId: original.turnId }, (command) => sendRecoveryAttempt(fixture.service, command));
-    await vi.waitFor(() => expect(fixture.sent).toHaveLength(2));
+    await providerSent;
+    expect(fixture.sent).toHaveLength(2);
     const message = fixture.canonical.loadUserMessage(retry.turnId);
     if (!message?.attachments || message.previewAnnotations?.schemaVersion !== 2) throw new Error("Missing v2 retry message");
     expect(message.attachments.map(({ name, sizeBytes }) => ({ name, sizeBytes }))).toEqual([{ name: "Notes on Google.png", sizeBytes: 4 }]);
@@ -469,16 +477,18 @@ describe("AgentService cleanup through production worker composition", { timeout
       if (terminal) fixture.provider.stopSession.mockImplementation(() => fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, outcome: "cancelled" }));
       await fixture.service.stopAll();
       diag.flushSync();
-      const recording = await NodeFSPromises.readFile(NodePath.join(dir, "t", `${fixture.thread.id}.jsonl`), "utf8");
-      const stops = recording.split("\n").filter(Boolean)
-        .map((line) => JSON.parse(line) as { ch: string; k: string; d?: Record<string, unknown> })
-        .filter((row) => row.ch === "agent.stop");
-      expect(stops.map((row) => row.k)).toEqual(["beg", "end"]);
-      expect(stops[0].d).toMatchObject({ by: "shutdown", provider: "codex" });
-      expect(recording.split("\n").map(parseDiagLine).filter((row) => row?.ch === "agent.stopped").map((row) => row?.d)).toEqual([{
-        execution: turn.turnExecutionId, turn: fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.id,
-        phase: terminal ? "interrupted" : "running", terminal,
-      }]);
+      // flushSync leaves in-flight appends running; sequence stamps define recording order.
+      await vi.waitFor(async () => {
+        const recording = await NodeFSPromises.readFile(NodePath.join(dir, "t", `${fixture.thread.id}.jsonl`), "utf8");
+        const records = recording.split("\n").map(parseDiagLine).filter((row) => row !== undefined).sort((a, b) => a.n - b.n);
+        const stops = records.filter((row) => row.ch === "agent.stop");
+        expect(stops.map((row) => row.k)).toEqual(["beg", "end"]);
+        expect(stops[0].d).toMatchObject({ by: "shutdown", provider: "codex" });
+        expect(records.filter((row) => row.ch === "agent.stopped").map((row) => row.d)).toEqual([{
+          execution: turn.turnExecutionId, turn: fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.id,
+          phase: terminal ? "interrupted" : "running", terminal,
+        }]);
+      });
     } finally {
       diag.configure({ enabled: false });
       await NodeFSPromises.rm(dir, { recursive: true, force: true });

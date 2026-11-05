@@ -111,6 +111,6 @@ export {
 } from "./reducer.js";
 export type { AgentBatchReduction, AgentModelState, AgentReducerResult, OwnedBatchReduction } from "./reducer.js";
 export { CollaborationObservationChangeSchema, applyCollaborationObservation } from "./collaboration-observation.js";
-export type { CollaborationObservationChange } from "./collaboration-observation.js";
+export type { CollaborationObservationChange, CollaborationObservationWrite } from "./collaboration-observation.js";
 export { appendItemContent } from "./item-content-append.js";
 export type { ItemContentAppend, ItemContentAppendResult } from "./item-content-append.js";
