@@ -4,7 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { ProviderEventDraft } from "@mcode/providers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -15,7 +15,10 @@ import { CanonicalExecutionWriterPort } from "../../canonical/canonical-executio
 import { ExecutionLivePublicationRelease } from "../../canonical/execution-live-publication-release.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
-import type { ExecutionIdentity, ExecutionWorkerPort, ExecutionWorkerReply, ExecutionWorkerRequest } from "../execution-mailbox-protocol.js";
+import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
+import { CanonicalAcceptedProgress } from "../../canonical/canonical-accepted-progress.js";
+import { CanonicalAgentStore } from "../../canonical/canonical-agent-boundary.js";
+import type { ExecutionIdentity, ExecutionLease, ExecutionWorkerPort, ExecutionWorkerReply, ExecutionWorkerRequest } from "../execution-mailbox-protocol.js";
 import type { ExecutionLostAssignment, ExecutionMailboxCommand } from "../execution-mailbox-scheduler.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution-worker-handler.js";
 import { ExecutionThreadWorkerPort } from "../execution-worker-port.js";
@@ -104,6 +107,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
         recoveryIncidentIds.push(input.recoveryIncidentId);
         return port.interruptWorkerLoss(input);
       },
+      released: (identity, lease) => port.released(identity, lease),
     }, {
       workerCount: 1,
       limits,
@@ -425,5 +429,116 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     workers[0]?.crash();
     expect(await coordinator.waitForRecovery(0)).toEqual({ kind: "recovered", workerIndex: 0 });
     expect(workers).toHaveLength(2);
+  });
+});
+
+describe("ExecutionWorkerLossCoordinator with accepted progress", { timeout: 30_000 }, () => {
+  let directory: string;
+  let db: Database;
+  let reader: Database;
+  let databaseWriter: ApplicationDatabaseWriter;
+  let writer: CanonicalAgentWriterClient;
+  let progress: CanonicalAcceptedProgress;
+  let coordinator: ExecutionWorkerLossCoordinator;
+  let workers: CrashingPort[];
+
+  beforeEach(() => {
+    directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-lost-worker-progress-"));
+    const dbPath = NodePath.join(directory, "app.sqlite");
+    db = openDatabase({ dbPath });
+    db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run("lost-worker-workspace", "Workspace", directory, NOW, NOW);
+    db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(execution.threadId, "lost-worker-workspace", "Thread", "main", "codex", NOW, NOW);
+    databaseWriter = new ApplicationDatabaseWriter(dbPath);
+    writer = new CanonicalAgentWriterClient(databaseWriter);
+    reader = openReadOnlyDatabase(dbPath);
+    progress = new CanonicalAcceptedProgress(new CanonicalAgentStore(reader, databaseWriter, writer, () => {}), writer);
+    const port = new CanonicalExecutionWriterPort(writer, () => {}, undefined, undefined, progress);
+    workers = [];
+    coordinator = new ExecutionWorkerLossCoordinator(port, {
+      workerCount: 1,
+      limits,
+      createWorker: () => {
+        const worker = new CrashingPort(port);
+        workers.push(worker);
+        return worker;
+      },
+    });
+  });
+
+  afterEach(async () => {
+    coordinator.scheduler.shutdown();
+    await progress.close();
+    await writer.close();
+    await databaseWriter.close();
+    reader.close(true);
+    db.close(true);
+    NodeFS.rmSync(directory, { recursive: true, force: true });
+  });
+
+  async function send(identity: ExecutionIdentity, lease: ExecutionLease, command: ExecutionWorkCommand) {
+    const admitted = coordinator.scheduler.submit({ execution: identity, lease, command,
+      byteLength: Buffer.byteLength(JSON.stringify(command), "utf8") });
+    if (admitted.kind !== "admitted") throw new Error(`Command not admitted: ${admitted.kind}`);
+    const completion = await admitted.completion;
+    if (completion.kind !== "reply") throw new Error(`Command had no reply: ${JSON.stringify(completion)}`);
+    return completion.result;
+  }
+
+  async function startTurn(identity: ExecutionIdentity, ownerEpoch: number) {
+    const claim = coordinator.scheduler.claim(identity, ownerEpoch);
+    if (claim.kind !== "claimed") throw new Error(`Claim failed: ${claim.kind}`);
+    expect(await send(identity, claim.lease, { kind: "start", providerId: "codex", publishParentStart: true,
+      parentLive: { planFeature: "none", precedingMessageId: `${identity.turnId}:user` },
+      input: { thread: { id: identity.threadId, workspaceId: "lost-worker-workspace", providerId: "codex", createdAt: NOW },
+        turnId: identity.turnId, executionId: identity.executionId, permissionMode: "full", providerIdentities: [],
+        userMessage: { kind: "create", messageId: `${identity.turnId}:user`, content: "Question", sequence: ownerEpoch } } }))
+      .toMatchObject({ kind: "committed" });
+    return claim.lease;
+  }
+
+  function text(identity: ExecutionIdentity, sequence: number, type: "textDelta" | "turnComplete", fields: Record<string, unknown>) {
+    const event = AgentEventSchema().parse({ type, threadId: identity.threadId, turnExecutionId: identity.executionId, ...fields });
+    const itemId = `${identity.executionId}:raw:${sequence}`;
+    return { eventId: itemId, routing: { ...identity, itemId }, sourceProviderId: "codex", sourceIdentities: [],
+      sourceSequence: sequence, payload: { type: "item.recorded" as const, item: { id: itemId, threadId: identity.threadId,
+        turnId: identity.turnId, kind: "system" as const, providerIdentities: [],
+        payload: { projection: "providerRuntimeEvent", runtimeEvent: { event } }, createdAt: NOW, updatedAt: NOW } } };
+  }
+
+  it("drops the lost execution's owner once its interruption is saved, and the thread takes a new turn", async () => {
+    const lease = await startTurn(execution, 1);
+    expect(await send(execution, lease, { kind: "event", phase: "running", nativeCursor: null,
+      events: [text(execution, 1, "textDelta", { delta: "Partial answer", isFinalResponse: true })] }))
+      .toMatchObject({ kind: "accepted" });
+    await progress.waitForSaved(execution.threadId);
+    expect(progress.depth().owners).toBe(1);
+
+    workers[0]?.crash();
+    expect(await coordinator.waitForRecovery(0)).toEqual({ kind: "recovered", workerIndex: 0 });
+    await expect.poll(() => progress.depth()).toMatchObject({ pending: 0, owners: 0, ownedTurns: 0 });
+
+    const saved = new CanonicalAgentStore(reader, databaseWriter, writer, () => {}).recoverThread(execution.threadId,
+      { conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER });
+    if (saved.mode !== "snapshot") throw new Error("Expected saved history");
+    expect(saved.snapshot.state.turns[execution.turnId]?.status).toBe("Interrupted");
+    expect(new MessageRepo(db, databaseWriter).listIncludingInternal(execution.threadId)).toContainEqual(expect.objectContaining({
+      role: "assistant", content: "Partial answer", outcome: "interrupted", is_internal: false,
+    }));
+
+    const next = { ...execution, turnId: "after-loss-turn", executionId: "00000000-0000-4000-8000-000000000190" };
+    const nextLease = await startTurn(next, 2);
+    expect(await send(next, nextLease, { kind: "event", phase: "running", nativeCursor: null,
+      events: [text(next, 1, "textDelta", { delta: "Fresh answer", isFinalResponse: true })] })).toMatchObject({ kind: "accepted" });
+    expect(await send(next, nextLease, { kind: "event", phase: "running", nativeCursor: null,
+      events: [text(next, 2, "turnComplete", { reason: "completed", costUsd: 0, tokensIn: 0, tokensOut: 0 })],
+      terminalInput: { ...next, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } }))
+      .toMatchObject({ kind: "accepted" });
+    expect(await send(next, nextLease, { kind: "release" })).toEqual({ kind: "released" });
+    expect(coordinator.scheduler.release(next, nextLease)).toBe(true);
+    await expect.poll(() => progress.depth()).toMatchObject({ pending: 0, owners: 0 });
+    expect(db.prepare("SELECT id, status FROM canonical_agent_turns WHERE thread_id = ? ORDER BY id").all(execution.threadId))
+      .toEqual([{ id: next.turnId, status: "Completed" }, { id: execution.turnId, status: "Interrupted" }]);
   });
 });
