@@ -51,6 +51,44 @@ describe("useReviewState", () => {
     await act(async () => { finish?.({ ...clean, uncommitted: { staged: 1, unstaged: 0, untracked: 0 } }); });
     expect(result.current.isDirty).toBe(false);
   });
+  // Each probe costs the server about six git spawns, which on Windows block
+  // the event loop ahead of the transcript the user just selected.
+  it("sends one probe per selection for the hooks a selection mounts together", async () => {
+    const { result, rerender } = renderHook(({ thread }) => [
+      useReviewState("workspace", thread),
+      useReviewState("workspace", thread),
+      useReviewState("workspace", thread),
+    ], { initialProps: { thread: "a" } });
+    await waitFor(() => expect(result.current.map((hook) => hook.state)).toEqual([clean, clean, clean]));
+    rerender({ thread: "b" });
+    await waitFor(() => expect(result.current.map((hook) => hook.state)).toEqual([clean, clean, clean]));
+    rerender({ thread: "a" });
+    await waitFor(() => expect(result.current.map((hook) => hook.state)).toEqual([clean, clean, clean]));
+    expect(getReviewState.mock.calls).toEqual([["workspace", "a"], ["workspace", "b"], ["workspace", "a"]]);
+  });
+  it("re-reads when the revision moves while a shared probe is in flight", async () => {
+    const stale: Array<(state: ReviewState) => void> = [];
+    const dirty = { ...clean, uncommitted: { staged: 0, unstaged: 1, untracked: 0 } };
+    let changed = false;
+    getReviewState.mockImplementation(() => changed
+      ? Promise.resolve(dirty)
+      : new Promise((resolve) => { stale.push(resolve); }));
+    const { result } = renderHook(() => [useReviewState("workspace", "thread"), useReviewState("workspace", "thread")]);
+    changed = true;
+    act(() => useDiffStore.getState().bumpDiffRevision("thread"));
+    await waitFor(() => expect(result.current.map((hook) => hook.isDirty)).toEqual([true, true]));
+    await act(async () => { for (const finish of stale) finish(clean); });
+    expect(result.current.map((hook) => hook.isDirty)).toEqual([true, true]);
+  });
+  it("re-reads for a hook that mounts after the shared probe settled", async () => {
+    const first = renderHook(() => useReviewState("workspace", "thread"));
+    await waitFor(() => expect(first.result.current.state).toEqual(clean));
+    const dirty = { ...clean, uncommitted: { staged: 1, unstaged: 0, untracked: 0 } };
+    getReviewState.mockResolvedValue(dirty);
+    const second = renderHook(() => useReviewState("workspace", "thread"));
+    await waitFor(() => expect(second.result.current.isDirty).toBe(true));
+    expect(getReviewState).toHaveBeenCalledTimes(2);
+  });
   it("keeps a probe error distinct from a clean state", async () => {
     const error = new Error("offline");
     getReviewState.mockRejectedValue(error);
