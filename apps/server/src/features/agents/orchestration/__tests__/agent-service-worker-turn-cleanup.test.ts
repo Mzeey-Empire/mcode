@@ -6,7 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { container } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
 import { SERVER_SHUTDOWN_DEADLINE_MS, SHUTDOWN_PERSISTENCE_START_MS } from "@mcode/shared/node/shutdown-deadlines";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
@@ -485,10 +485,14 @@ describe("AgentService cleanup through production worker composition", { timeout
       if (terminal) fixture.provider.stopSession.mockImplementation(() => fixture.emit({ type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, outcome: "cancelled" }));
       await fixture.service.stopAll();
       diag.flushSync();
-      // flushSync leaves in-flight appends running; sequence stamps define recording order.
+      // flushSync leaves in-flight appends running and may rewrite their batch, so a record can land
+      // twice; its sequence stamp identifies it and defines recording order.
       await vi.waitFor(async () => {
-        const recording = await NodeFSPromises.readFile(NodePath.join(dir, "t", `${fixture.thread.id}.jsonl`), "utf8");
-        const records = recording.split("\n").map(parseDiagLine).filter((row) => row !== undefined).sort((a, b) => a.n - b.n);
+        const file = NodePath.join(dir, "t", `${threadRecordingFileId(fixture.thread.id, diag.runId)}.jsonl`);
+        const recording = await NodeFSPromises.readFile(file, "utf8");
+        const bySequence = new Map(recording.split("\n").map(parseDiagLine)
+          .filter((row) => row !== undefined).map((row) => [row.n, row] as const));
+        const records = [...bySequence.values()].sort((a, b) => a.n - b.n);
         const stops = records.filter((row) => row.ch === "agent.stop");
         expect(stops.map((row) => row.k)).toEqual(["beg", "end"]);
         expect(stops[0].d).toMatchObject({ by: "shutdown", provider: "codex" });

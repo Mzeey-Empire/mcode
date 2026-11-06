@@ -4,7 +4,7 @@ import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runt
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: mockQuery }));
@@ -145,6 +145,13 @@ function reasoningAndText(events: readonly ProviderRuntimeEvent[]) {
     const { turnExecutionId: _executionId, ...mapped } = event;
     return [mapped];
   });
+}
+
+/** A flush may rewrite a batch whose append also lands, so records are read once per sequence number. */
+function readThreadRecording(dir: string, threadId: string) {
+  const file = NodePath.join(dir, "t", `${threadRecordingFileId(threadId, diag.runId)}.jsonl`);
+  const records = NodeFS.readFileSync(file, "utf8").split("\n").flatMap((line) => parseDiagLine(line) ?? []);
+  return [...new Map(records.map((row) => [row.n, row] as const)).values()].sort((a, b) => a.n - b.n);
 }
 
 describe("ClaudeProvider stream mapping", () => {
@@ -295,9 +302,7 @@ describe("ClaudeProvider stream mapping", () => {
 
     expect(outcome).toEqual({ outcome: "accepted" });
     diag.flushSync();
-    const rows = NodeFS.readFileSync(NodePath.join(recordingDir, "t", "steer.jsonl"), "utf8")
-      .split("\n").flatMap((line) => parseDiagLine(line) ?? [])
-      .filter((row) => row.ch === "claude.turn");
+    const rows = readThreadRecording(recordingDir, "steer").filter((row) => row.ch === "claude.turn");
     expect(rows.filter((row) => row.d && typeof row.d === "object" && "steer" in row.d)
       .map((row) => ({ th: row.th, d: row.d }))).toEqual([
       { th: "steer", d: { step: "steer-queued", steer: STEER_ID, openTools: ["open-bash"] } },
@@ -330,8 +335,7 @@ describe("ClaudeProvider stream mapping", () => {
     await provider.stopSession("mcode-stop");
     await ended;
     diag.flushSync();
-    const rows = NodeFS.readFileSync(NodePath.join(recordingDir, "t", "stop.jsonl"), "utf8")
-      .split("\n").flatMap((line) => parseDiagLine(line) ?? []);
+    const rows = readThreadRecording(recordingDir, "stop");
     expect(rows.filter((row) => row.ch === "claude.turn" && row.d && typeof row.d === "object"
       && "step" in row.d && row.d.step === "stop-requested").map((row) => ({ th: row.th, d: row.d })))
       .toEqual([{ th: "stop", d: { step: "stop-requested", hadSession: true, openTools: ["open-bash"] } }]);

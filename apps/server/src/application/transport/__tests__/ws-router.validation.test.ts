@@ -6,7 +6,7 @@ import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { diag, parseDiagLine, recordingFileId } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
 import type { WebSocket } from "ws";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { logger } from "@mcode/shared";
@@ -1498,7 +1498,7 @@ describe("routeMessage thread.delete teardown", () => {
       const request = JSON.stringify({ id: "request-1", method: "agent.send", params: { threadId: "thread-1", content: "private prompt" } });
       const rows = () => {
         diag.flushSync();
-        const file = NodePath.join(dir, "t", recordingFileId("thread-1") + ".jsonl");
+        const file = NodePath.join(dir, "t", threadRecordingFileId("thread-1", diag.runId) + ".jsonl");
         return NodeFS.existsSync(file)
           ? NodeFS.readFileSync(file, "utf8").split("\n").flatMap((line) => parseDiagLine(line) ?? []).filter((row) => row.ch === "rpc.request")
           : [];

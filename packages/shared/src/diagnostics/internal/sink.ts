@@ -17,8 +17,17 @@ export function recordingFileId(id: string): string {
   return NodeCrypto.createHash("sha256").update(id).digest("hex").slice(0, 24);
 }
 
+/**
+ * Names one run's recording of one thread, `<thread>.<run>`. Each process writes only its own
+ * files, so a file holds one writer and the name says which. Neither part can contain a dot, so
+ * the name splits back unambiguously. Builds before this layout share `<thread>` across runs.
+ */
+export function threadRecordingFileId(threadId: string, runId: string): string {
+  return recordingFileId(threadId) + "." + recordingFileId(runId);
+}
+
 function fileKeyFor(record: DiagRecord, runId: string): string {
-  if (record.th) return "t/" + recordingFileId(record.th);
+  if (record.th) return "t/" + threadRecordingFileId(record.th, runId);
   return "p/" + recordingFileId(runId);
 }
 
@@ -34,6 +43,21 @@ function needsRotation(size: number, text: string): boolean {
   return size > 0 && size + Buffer.byteLength(text) > SEGMENT_BYTES;
 }
 
+/**
+ * An append cut short by exit or a failed write can end mid-line. Starting on a fresh line keeps
+ * the next record from fusing with that fragment, so the reader loses only the fragment.
+ */
+function afterAnyTornLine(lines: string[]): string {
+  return "\n" + lines.join("");
+}
+
+function countLines(files: Map<string, string[]>): number {
+  let count = 0;
+  for (const lines of files.values()) count += lines.length;
+  return count;
+}
+
+/** Lines taken from the queue together. */
 interface QueuedBatch {
   files: Map<string, string[]>;
   bytes: number;
@@ -45,7 +69,7 @@ export interface SinkOptions {
   runId: string;
   /** Called once when a write fails; the sink accepts no more records afterwards. */
   onFailure(error: unknown): void;
-  /** Called after a successful flush with the number of records dropped at the memory cap. */
+  /** Called with the number of records dropped at the memory cap or lost to a failed write. */
   onDropped(count: number): void;
 }
 
@@ -57,6 +81,8 @@ export interface SinkOptions {
 export class Sink {
   private queued = new Map<string, string[]>();
   private queuedBytes = 0;
+  /** The batch the background flush has taken; a file leaves it once its append resolves. */
+  private unconfirmed?: QueuedBatch;
   private queuedAndWritingBytes = 0;
   private droppedCount = 0;
   private readonly fileSizes = new Map<string, number>();
@@ -65,7 +91,6 @@ export class Sink {
   private failed = false;
   private retentionRunning = false;
   private lastRetentionAt = Date.now();
-
   constructor(private readonly options: SinkOptions) {}
 
   /** Queue one record, or count it as dropped when the memory cap is reached. */
@@ -89,11 +114,15 @@ export class Sink {
   }
 
   /**
-   * Writes everything queued before the process exits. A flush already running keeps going on
-   * its own; the reader orders records by their stamps, so file order does not matter.
+   * Writes everything not yet on disk before the process exits, including the batch a background
+   * flush has taken but not finished. Exit stops that background append wherever it is, so this
+   * writes the batch again. When the process lives on, the background append still lands, before
+   * or after this copy. The file is this run's alone and every record carries the run's own
+   * sequence number, so the reader keeps one copy of each.
    */
   flushSync(): void {
     this.clearTimer();
+    this.rewriteUnconfirmedSync();
     this.writeQueuedSync();
     if (this.reportDrops()) this.writeQueuedSync();
   }
@@ -142,14 +171,17 @@ export class Sink {
 
   private async flushAsync(): Promise<void> {
     const batch = this.takeBatch();
+    this.unconfirmed = batch;
     try {
+      // flushSync empties the map once it has rewritten the lines, which ends this loop early.
       for (const [key, lines] of batch.files) {
         await this.appendLines(key, lines.join(""));
+        batch.files.delete(key);
       }
       this.queuedAndWritingBytes -= batch.bytes;
       this.reportDrops();
     } catch (error) {
-      this.markFailed(error);
+      this.markFailed(error, batch.files);
     } finally {
       this.flushInFlight = false;
     }
@@ -169,16 +201,30 @@ export class Sink {
     return batch;
   }
 
+  private rewriteUnconfirmedSync(): void {
+    const unconfirmed = this.unconfirmed;
+    if (this.failed || !unconfirmed || unconfirmed.files.size === 0) return;
+    try {
+      for (const [key, lines] of unconfirmed.files) {
+        this.appendLinesSync(key, afterAnyTornLine(lines));
+        unconfirmed.files.delete(key);
+      }
+    } catch (error) {
+      this.markFailed(error, unconfirmed.files);
+    }
+  }
+
   private writeQueuedSync(): void {
     if (this.failed || this.queued.size === 0) return;
     const batch = this.takeBatch();
     try {
       for (const [key, lines] of batch.files) {
         this.appendLinesSync(key, lines.join(""));
+        batch.files.delete(key);
       }
       this.queuedAndWritingBytes -= batch.bytes;
     } catch (error) {
-      this.markFailed(error);
+      this.markFailed(error, batch.files);
     }
   }
 
@@ -190,14 +236,35 @@ export class Sink {
     return true;
   }
 
-  private markFailed(error: unknown): void {
+  /**
+   * A failed write ends recording. Every record not yet on disk, in the failed batch or still
+   * queued, counts as dropped, and the sink makes one last attempt to write that count as a
+   * marker in each file. A file that still accepts writes then shows the loss.
+   */
+  private markFailed(error: unknown, unwritten: Map<string, string[]>): void {
     if (this.failed) return;
+    this.droppedCount += countLines(unwritten) + countLines(this.queued);
+    unwritten.clear();
+    this.takeBatch();
+    this.queuedAndWritingBytes = 0;
+    // The recorder answers with markers sent through write(), so this runs before writes close.
+    this.reportDrops();
     this.failed = true;
     this.clearTimer();
-    this.queued.clear();
-    this.queuedBytes = 0;
-    this.queuedAndWritingBytes = 0;
+    this.writeLastMarkersSync();
     this.options.onFailure(error);
+  }
+
+  private writeLastMarkersSync(): void {
+    const batch = this.takeBatch();
+    for (const [key, lines] of batch.files) {
+      try {
+        // The failed append may have stopped mid-line.
+        this.appendLinesSync(key, afterAnyTornLine(lines));
+      } catch {
+        // onFailure reports the disk error; a file that refuses its marker has nothing to add.
+      }
+    }
   }
 
   private pathFor(key: string): string {

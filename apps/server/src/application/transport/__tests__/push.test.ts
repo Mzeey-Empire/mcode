@@ -3,7 +3,7 @@ import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
 import { createMockApproval } from "@mcode/contracts/testing";
 import { WebSocket } from "ws";
 import {
@@ -86,7 +86,7 @@ describe("broadcastTerminalData", () => {
       removeClient(ws);
       broadcast("approval.requested", createMockApproval());
       diag.flushSync();
-      const rows = NodeFS.readFileSync(NodePath.join(dir, "t", "thread-1.jsonl"), "utf8").split("\n").map(parseDiagLine);
+      const rows = NodeFS.readFileSync(NodePath.join(dir, "t", threadRecordingFileId("thread-1", diag.runId) + ".jsonl"), "utf8").split("\n").map(parseDiagLine);
       expect(rows.filter((row) => row?.ch === "approval.push").map((row) => row?.d)).toEqual([
         { request: "req-1", kind: "requested", conns: ["conn-approval"] },
         { request: "req-1", kind: "resolved", conns: ["conn-approval"] },

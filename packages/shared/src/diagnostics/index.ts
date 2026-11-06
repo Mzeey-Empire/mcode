@@ -13,4 +13,4 @@ export type {
 export { parseDiagLine } from "./record.js";
 export type { DiagIds, DiagOutcome, DiagRecord } from "./record.js";
 export { redactDiagnostic } from "./internal/bound.js";
-export { recordingFileId } from "./internal/sink.js";
+export { recordingFileId, threadRecordingFileId } from "./internal/sink.js";

@@ -2,10 +2,11 @@ import type { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
-import { recordingFileId, type DiagRecord } from "@mcode/shared/diagnostics";
+import { DiagRecorder, recordingFileId, threadRecordingFileId, type DiagRecord } from "@mcode/shared/diagnostics";
 import { openMigratedTestDatabase } from "../../../persistence/sqlite/testing/migrated-test-database.js";
+import { readRecordings } from "../recordings.js";
 import { loadEvidence } from "../sources.js";
 import { findAnomalies } from "../anomalies.js";
 import { renderJson, renderText } from "../render.js";
@@ -26,6 +27,7 @@ describe("diagnostics reader", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     NodeFS.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
@@ -104,6 +106,338 @@ describe("diagnostics reader", () => {
     const text = render();
     expect(text).toContain("run contained pid 42: started 1970-01-01T00:00:01.500Z (previous clean; provider processes end with it); ended no exit record; last record at 1970-01-01T00:00:02.600Z");
     expect(text).toContain("run earlier pid 41: started unknown (previous unknown); ended no exit record; last record at 1970-01-01T00:00:01.950Z");
+  });
+
+  /** The text one sink append writes. */
+  function appended(rows: DiagRecord[], rewrite = false): string {
+    // A flush's rewrite starts on a fresh line, after any torn copy.
+    return (rewrite ? "\n" : "") + rows.map((row) => JSON.stringify(row) + "\n").join("");
+  }
+
+  function marker(run: string, t: number): DiagRecord {
+    return { t, n: 1, th: "a", k: "run", ch: "diag", run, pid: 41, state: "on" };
+  }
+
+  function runFile(threadId: string, run: string, rotated = false): string {
+    return recordingPath("t", threadRecordingFileId(threadId, run) + (rotated ? ".1.jsonl" : ".jsonl"));
+  }
+
+  it("reads a batch a fatal flush rewrote once, skipping its torn copy in the rotated segment", () => {
+    const before: DiagRecord = { t: 2000, n: 2, th: "a", k: "ev", ch: "agent.created", d: "before" };
+    const middle: DiagRecord = { t: 2100, n: 3, th: "a", k: "ev", ch: "agent.created", d: "middle" };
+    const fatal: DiagRecord = { t: 2500, n: 4, th: "a", k: "ev", ch: "agent.created", d: "fatal" };
+    const original = appended([before, middle]);
+    NodeFS.writeFileSync(runFile("a", "crashed", true), appended([marker("crashed", 1500)]) + original.slice(0, -20));
+    NodeFS.writeFileSync(runFile("a", "crashed"), appended([before, middle], true) + appended([fatal]));
+    NodeFS.writeFileSync(runFile("a", "other"), appended([marker("other", 1600)]));
+    q.thread = "a";
+    expect(loadEvidence(q).records).toEqual([
+      marker("crashed", 1500),
+      marker("other", 1600),
+      { ...before, run: "crashed" },
+      { ...middle, run: "crashed" },
+      { ...fatal, run: "crashed" },
+    ]);
+  });
+
+  it("keeps two different records that share a run and number, and drops only a rewrite's exact copy", () => {
+    const first: DiagRecord = { t: 2000, n: 2, th: "a", k: "ev", ch: "agent.created", d: "first" };
+    const second: DiagRecord = { t: 2100, n: 2, th: "a", k: "ev", ch: "agent.created", d: "second" };
+    NodeFS.writeFileSync(runFile("a", "shared"),
+      appended([marker("shared", 1500), first]) + appended([second]) + appended([first], true));
+    q.thread = "a";
+    expect(loadEvidence(q).records).toEqual([
+      marker("shared", 1500),
+      { ...first, run: "shared" },
+      { ...second, run: "shared" },
+    ]);
+  });
+
+  it("keeps byte-identical records that different runs wrote for one thread", () => {
+    const event: DiagRecord = { t: 2000, n: 2, th: "a", k: "ev", ch: "agent.created", d: "same" };
+    NodeFS.writeFileSync(runFile("a", "first"), appended([marker("first", 1500), event]));
+    NodeFS.writeFileSync(runFile("a", "second"), appended([marker("second", 1600), event]));
+    // A third run crashed before its background append landed, so its rewrite is its only copy.
+    NodeFS.writeFileSync(runFile("a", "third"), appended([event], true));
+    q.thread = "a";
+    expect(loadEvidence(q).records).toEqual([
+      marker("first", 1500),
+      marker("second", 1600),
+      { ...event, run: "first" },
+      { ...event, run: "second" },
+      { ...event, run: "third" },
+    ]);
+  });
+
+  it("finds every run's file for a thread, by thread id and by modification time, beside an older build's file", () => {
+    const event = (d: string): DiagRecord => ({ t: 2000, n: 2, th: "a", k: "ev", ch: "agent.created", d });
+    write("a", [marker("old-build", 1500), event("old")]);
+    NodeFS.writeFileSync(runFile("a", "first"), appended([event("first")]));
+    NodeFS.writeFileSync(runFile("a", "second"), appended([event("second")]));
+    NodeFS.writeFileSync(runFile("b", "first"), appended([{ ...event("other thread"), th: "b" }]));
+    const threadA = (records: DiagRecord[]) => records
+      .filter((record) => record.th === "a" && record.k === "ev")
+      .map((record) => [Reflect.get(record, "run"), record.d])
+      .sort();
+    const expected = [["first", "first"], ["old-build", "old"], ["second", "second"]];
+
+    expect(threadA(readRecordings(dir, { kind: "threads", threadIds: ["a"] }))).toEqual(expected);
+    expect(threadA(readRecordings(dir, { kind: "modified-since", since: 0 }))).toEqual(expected);
+    expect(readRecordings(dir, { kind: "threads", threadIds: ["a"] }).some((record) => record.th === "b")).toBe(false);
+  });
+
+  describe("records the real recorder appended", () => {
+    interface HeldAppend {
+      /** Settles once the first part has landed and the rest is held. */
+      readonly entered: Promise<void>;
+      /** Settles once the rest has landed. */
+      readonly landed: Promise<void>;
+      release(): void;
+      /** Lets an append held with `reply: "when-answered"` report back. */
+      answer(): void;
+    }
+
+    interface HoldOptions {
+      /** Holds only an append whose text contains this, so two recorders' appends are held apart. */
+      from?: string;
+      firstPart?: (text: string) => string;
+      /** "never" is a process that exits after the bytes land but before the callback runs. */
+      reply?: "at-once" | "when-answered" | "never";
+    }
+
+    /** Each held append, in the order it was asked for; one spy serves them all. */
+    let holds: Array<{ matches(file: string, text: string): boolean; run(file: string, text: string): Promise<void> }> = [];
+
+    beforeEach(() => {
+      holds = [];
+    });
+
+    function diagDir(): string {
+      return NodePath.join(dir, "diagnostics");
+    }
+
+    /** Any recording file of the thread, whatever the layout names it. */
+    function isThreadFile(file: string, threadId: string): boolean {
+      if (NodePath.basename(NodePath.dirname(file)) !== "t") return false;
+      return NodePath.basename(file).startsWith(recordingFileId(threadId) + ".");
+    }
+
+    // Bound before any spy replaces it, so a held append writes its parts for real.
+    const realAppend = NodeFS.promises.appendFile.bind(NodeFS.promises);
+
+    /**
+     * Holds the first background append to one thread file, as a slow disk does: `firstPart` lands
+     * at once and the rest after release().
+     */
+    function holdThreadAppend(threadId: string, options: HoldOptions = {}): HeldAppend {
+      const [release, gate] = signal();
+      const [answer, answered] = signal();
+      const [enter, entered] = signal();
+      const [land, landed] = signal();
+      let used = false;
+      holds.push({
+        matches: (file, text) => !used && isThreadFile(file, threadId) && text.includes(options.from ?? ""),
+        async run(file, text) {
+          used = true;
+          const first = options.firstPart?.(text) ?? "";
+          if (first) await realAppend(file, first);
+          enter();
+          await gate;
+          await realAppend(file, text.slice(first.length));
+          land();
+          if (options.reply === "never") await new Promise<never>(() => {});
+          if (options.reply === "when-answered") await answered;
+        },
+      });
+      if (!vi.isMockFunction(NodeFS.promises.appendFile)) {
+        vi.spyOn(NodeFS.promises, "appendFile").mockImplementation(async (file, data, appendOptions) => {
+          const hold = holds.find((candidate) => candidate.matches(String(file), String(data)));
+          return hold ? hold.run(String(file), String(data)) : realAppend(file, data, appendOptions);
+        });
+      }
+      return { entered, landed, release, answer };
+    }
+
+    function signal(): [() => void, Promise<void>] {
+      let settle = (): void => {};
+      const settled = new Promise<void>((resolve) => { settle = resolve; });
+      return [() => settle(), settled];
+    }
+
+    function startRecorder(): DiagRecorder {
+      const recorder = new DiagRecorder();
+      recorder.configure({ dir: diagDir(), enabled: true });
+      return recorder;
+    }
+
+    function runIds(): string[] {
+      return NodeFS.readdirSync(NodePath.join(diagDir(), "p")).map((name) => name.replace(/\.jsonl$/u, ""));
+    }
+
+    function threadEvents(threadId: string): DiagRecord[] {
+      const records = readRecordings(dir, { kind: "threads", threadIds: [threadId] });
+      return records.filter((record) => record.th === threadId && record.k === "ev");
+    }
+
+    function runOf(record: DiagRecord): unknown {
+      return Reflect.get(record, "run");
+    }
+
+    function operationOf(record: DiagRecord): unknown {
+      return Reflect.get(Object(record.d), "operation");
+    }
+
+    it("reads each record once when recording stops while a background append is still pending", async () => {
+      const held = holdThreadAppend("a");
+      const recorder = startRecorder();
+      for (let i = 0; i < 500; i++) {
+        recorder.emit("cursor.session", { th: "a" }, () => ({ operation: "event-" + i }));
+      }
+      await held.entered;
+      // Stopping flushes synchronously, so the pending batch is rewritten before its append lands.
+      recorder.configure({ enabled: false });
+      held.release();
+      await held.landed;
+
+      expect(threadEvents("a").map(operationOf)).toEqual(
+        Array.from({ length: 500 }, (_, i) => "event-" + i),
+      );
+    });
+
+    it("attributes an older build's records after its marker to that build, below a newer build's append", () => {
+      const nightly = startRecorder();
+      nightly.emit("cursor.session", { th: "a" }, () => ({ operation: "nightly" }));
+      nightly.flushSync();
+      const [nightlyRun] = runIds();
+      // An older build writes no append headers: its marker, then its record.
+      const olderBuild: DiagRecord[] = [
+        { t: Date.now(), n: 1, th: "a", k: "run", ch: "diag", run: "old-build", pid: 41, state: "on" },
+        { t: Date.now(), n: 2, th: "a", k: "ev", ch: "cursor.session", d: { operation: "old" } },
+      ];
+      NodeFS.appendFileSync(
+        recordingPath("t", "a.jsonl"),
+        olderBuild.map((row) => JSON.stringify(row) + "\n").join(""),
+      );
+
+      expect(threadEvents("a").map((record) => [runOf(record), operationOf(record)])).toEqual([
+        [nightlyRun, "nightly"],
+        ["old-build", "old"],
+      ]);
+    });
+
+    it("keeps each run's records when another run's append lands inside a split append that crashed", async () => {
+      // One clock makes the two runs' second records byte-identical, as two builds can write them.
+      vi.spyOn(Date, "now").mockReturnValue(2000);
+      const held = holdThreadAppend("a", {
+        // The first part ends 20 bytes into the record both runs write alike.
+        firstPart: (text) => text.slice(0, text.lastIndexOf("\n", text.indexOf('"same"')) + 1 + 20),
+        reply: "never",
+      });
+      const first = startRecorder();
+      first.emit("cursor.session", { th: "a" }, () => ({ operation: "same" }));
+      first.emit("cursor.session", { th: "a" }, () => ({ operation: "later" }));
+      await held.entered;
+      const [firstRun] = runIds();
+
+      const second = startRecorder();
+      second.emit("cursor.session", { th: "a" }, () => ({ operation: "same" }));
+      second.flushSync();
+      const secondRun = runIds().find((run) => run !== firstRun);
+
+      held.release();
+      await held.landed;
+      first.flushSync();
+
+      const read = threadEvents("a").map((record) => [runOf(record), record.n, operationOf(record)]);
+      expect(read.sort()).toEqual([
+        [firstRun, 2, "same"],
+        [firstRun, 4, "later"],
+        [secondRun, 2, "same"],
+      ].sort());
+    });
+
+    it("reads each run's records once when two runs' torn appends and rewrites interleave on one thread", async () => {
+      const first = startRecorder();
+      // The first run's append lands up to the end of its first event and holds the rest.
+      const firstHeld = holdThreadAppend("a", {
+        from: '"first-1"',
+        firstPart: (text) => text.slice(0, text.indexOf("\n", text.indexOf('"first-1"')) + 1),
+      });
+      for (const i of [1, 2, 3]) first.emit("cursor.session", { th: "a" }, () => ({ operation: "first-" + i }));
+      await firstHeld.entered;
+      const [firstRun] = runIds();
+
+      const second = startRecorder();
+      // The second run's append tears its second event and does not report back until told.
+      const secondHeld = holdThreadAppend("a", {
+        from: '"second-1"',
+        firstPart: (text) => text.slice(0, text.indexOf('"second-2"')),
+        reply: "when-answered",
+      });
+      for (const i of [1, 2, 3]) second.emit("cursor.session", { th: "a" }, () => ({ operation: "second-" + i }));
+      await secondHeld.entered;
+      const secondRun = runIds().find((run) => run !== firstRun);
+
+      first.flushSync();
+      secondHeld.release();
+      await secondHeld.landed;
+      firstHeld.release();
+      await firstHeld.landed;
+      second.flushSync();
+      secondHeld.answer();
+
+      expect(threadEvents("a").map((record) => [runOf(record), operationOf(record)]).sort()).toEqual([
+        [firstRun, "first-1"], [firstRun, "first-2"], [firstRun, "first-3"],
+        [secondRun, "second-1"], [secondRun, "second-2"], [secondRun, "second-3"],
+      ].sort());
+    });
+
+    it("attributes an older build's records to it when it resumes without a new marker after a newer build", () => {
+      const olderBuild = (rows: DiagRecord[]): void => {
+        NodeFS.appendFileSync(recordingPath("t", "a.jsonl"), rows.map((row) => JSON.stringify(row) + "\n").join(""));
+      };
+      // An older build marks a thread once, on its first record there.
+      olderBuild([
+        { t: Date.now(), n: 1, th: "a", k: "run", ch: "diag", run: "stable", pid: 41, state: "on" },
+        { t: Date.now(), n: 2, th: "a", k: "ev", ch: "cursor.session", d: { operation: "stable-1" } },
+      ]);
+      const nightly = startRecorder();
+      nightly.emit("cursor.session", { th: "a" }, () => ({ operation: "nightly" }));
+      nightly.flushSync();
+      olderBuild([{ t: Date.now(), n: 3, th: "a", k: "ev", ch: "cursor.session", d: { operation: "stable-2" } }]);
+
+      expect(threadEvents("a").map((record) => [runOf(record), operationOf(record)]).sort()).toEqual([
+        [runIds()[0], "nightly"],
+        ["stable", "stable-1"],
+        ["stable", "stable-2"],
+      ].sort());
+    });
+
+    it("never takes a header-shaped payload at the end of a torn line for a writer", async () => {
+      const forged = '{"writer":"forged","batch":7,"records":1}';
+      NodeFS.appendFileSync(recordingPath("t", "a.jsonl"), [
+        { t: Date.now(), n: 1, th: "a", k: "run", ch: "diag", run: "stable", pid: 41, state: "on" },
+        { t: Date.now(), n: 2, th: "a", k: "ev", ch: "cursor.session", d: { operation: "stable-1" } },
+      ].map((row) => JSON.stringify(row) + "\n").join(""));
+      // The append tears right after the payload object, and the process exits after flushing.
+      const held = holdThreadAppend("a", {
+        firstPart: (text) => text.slice(0, text.indexOf(forged) + forged.length),
+        reply: "never",
+      });
+      const nightly = startRecorder();
+      nightly.emit("cursor.wire", { th: "a" }, () => ({ raw: { writer: "forged", batch: 7, records: 1 } }));
+      await held.entered;
+      nightly.flushSync();
+      NodeFS.appendFileSync(recordingPath("t", "a.jsonl"), JSON.stringify(
+        { t: Date.now(), n: 3, th: "a", k: "ev", ch: "cursor.session", d: { operation: "stable-2" } },
+      ) + "\n");
+
+      expect(threadEvents("a").map((record) => [runOf(record), record.ch]).sort()).toEqual([
+        [runIds()[0], "cursor.wire"],
+        ["stable", "cursor.session"],
+        ["stable", "cursor.session"],
+      ].sort());
+    });
   });
 
   it("includes process records on lane - in a scoped timeline, including channel and JSON selection", () => {

@@ -1,9 +1,10 @@
 import * as NodeFS from "node:fs";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "../../logging/index.js";
-import { DiagRecorder, parseDiagLine, type DiagRecord } from "../index.js";
+import { DiagRecorder, parseDiagLine, threadRecordingFileId, type DiagRecord } from "../index.js";
 
 const SEGMENT_BYTES = 4 * 1024 * 1024;
 const MAX_OPEN_SPANS = 10_000;
@@ -28,8 +29,8 @@ describe("diagnostics recorder", () => {
     NodeFS.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  function threadFile(threadId: string): string {
-    return NodePath.join(dir, "t", threadId + ".jsonl");
+  function threadFile(threadId: string, segment = ".jsonl"): string {
+    return NodePath.join(dir, "t", threadRecordingFileId(threadId, recorder.runId) + segment);
   }
 
   function parseFile(file: string): DiagRecord[] {
@@ -49,10 +50,20 @@ describe("diagnostics recorder", () => {
     return NodeFS.readdirSync(folder).flatMap((name) => parseFile(NodePath.join(folder, name)));
   }
 
+  /** Events of the one run that recorded the thread, each once, as the reader keeps them. */
   function threadEvents(threadId: string): DiagRecord[] {
-    const segments = [NodePath.join(dir, "t", threadId + ".1.jsonl"), threadFile(threadId)];
-    const existing = segments.filter((file) => NodeFS.existsSync(file));
-    return existing.flatMap(parseFile).filter((record) => record.k === "ev");
+    const folder = NodePath.join(dir, "t");
+    const names = NodeFS.existsSync(folder)
+      ? NodeFS.readdirSync(folder).filter((name) => name.startsWith(threadId + "."))
+      : [];
+    const oldestFirst = names.sort((a, b) => Number(b.endsWith(".1.jsonl")) - Number(a.endsWith(".1.jsonl")));
+    // A flush that rewrites an unconfirmed append can leave a record twice; its run's number is unique.
+    const seen = new Set<number>();
+    return oldestFirst.flatMap((name) => parseFile(NodePath.join(folder, name))).filter((record) => {
+      if (record.k !== "ev" || seen.has(record.n)) return false;
+      seen.add(record.n);
+      return true;
+    });
   }
 
   function runStates(records: readonly DiagRecord[]): string[] {
@@ -90,6 +101,46 @@ describe("diagnostics recorder", () => {
     }
   });
 
+  it("gives each process its own file for a thread they both record", () => {
+    const other = new DiagRecorder();
+    try {
+      recorder.configure({ dir, enabled: true });
+      other.configure({ dir, enabled: true });
+      recorder.emit("cursor.session", { th: "a" }, () => ({ operation: "mine" }));
+      other.emit("cursor.session", { th: "a" }, () => ({ operation: "theirs" }));
+      recorder.flushSync();
+      other.flushSync();
+
+      const otherFile = NodePath.join(dir, "t", threadRecordingFileId("a", other.runId) + ".jsonl");
+      const operations = (file: string) => parseFile(file).flatMap((record) => (record.k === "ev" ? [record.d] : []));
+      expect(operations(threadFile("a"))).toEqual([{ operation: "mine" }]);
+      expect(operations(otherFile)).toEqual([{ operation: "theirs" }]);
+    } finally {
+      other.configure({ enabled: false });
+    }
+  });
+
+  it("preserves every pre-fatal record when flushSync is followed immediately by exit", () => {
+    const moduleUrl = new URL("../recorder.ts", import.meta.url).href;
+    const child = NodeChildProcess.spawnSync("bun", ["--eval", `
+      import { DiagRecorder } from ${JSON.stringify(moduleUrl)};
+      const recorder = new DiagRecorder();
+      recorder.configure({ dir: process.argv[1], enabled: true });
+      for (let i = 0; i < 1000; i++) {
+        recorder.emit("cursor.session", { th: "crash" }, () => ({ operation: "burst-" + i }));
+      }
+      recorder.emit("cursor.session", { th: "crash" }, () => ({ operation: "fatal" }));
+      recorder.flushSync();
+      process.exit(17);
+    `, dir], { encoding: "utf8" });
+    expect(child.error).toBeUndefined();
+    expect(child.status, child.stderr).toBe(17);
+    expect(threadEvents("crash").map((record) => record.d)).toEqual([
+      ...Array.from({ length: 1000 }, (_, i) => ({ operation: "burst-" + i })),
+      { operation: "fatal" },
+    ]);
+  });
+
   it("rotates a noisy thread to a previous segment without touching another thread", async () => {
     recorder.configure({ dir, enabled: true });
     recorder.emit("cursor.session", { th: "quiet" }, () => ({ operation: "start" }));
@@ -104,7 +155,7 @@ describe("diagnostics recorder", () => {
     }
 
     await vi.waitFor(() => expect(threadEvents("noisy")).toHaveLength(10_000), { interval: 5 });
-    const previous = NodePath.join(dir, "t", "noisy.1.jsonl");
+    const previous = threadFile("noisy", ".1.jsonl");
     expect(NodeFS.statSync(previous).size).toBeLessThanOrEqual(SEGMENT_BYTES);
     expect(NodeFS.statSync(threadFile("noisy")).size).toBeLessThanOrEqual(SEGMENT_BYTES);
     expect(NodeFS.readFileSync(threadFile("quiet"), "utf8")).toBe(quietBefore);
@@ -239,6 +290,8 @@ describe("diagnostics recorder", () => {
 
       expect(payload).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledTimes(1);
+      expect(processRecords().filter((record) => record.k === "run" && record.state === "dropped"))
+        .toMatchObject([{ dropped: 2 }]);
     });
 
     it("writes again when recording is turned back on", () => {

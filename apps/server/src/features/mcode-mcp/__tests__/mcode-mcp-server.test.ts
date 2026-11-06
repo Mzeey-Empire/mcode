@@ -3,7 +3,7 @@ import * as NodeHTTP from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { diag, parseDiagLine, recordingFileId, type DiagRecord } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine, threadRecordingFileId, type DiagRecord } from "@mcode/shared/diagnostics";
 import { ThreadSendResultSchema, ThreadWaitResultSchema } from "@mcode/contracts/thread-control";
 import { type BrowserAutomationPublicOperation } from "@mcode/contracts/models/browser-automation";
 import { BrowserAutomationSessionLease } from "../../browser-automation/access/browser-automation-session-lease.js";
@@ -505,7 +505,7 @@ describe("McodeMcpServer diagnostics", () => {
 
   function toolSpans(threadId: string): DiagRecord[] {
     diag.flushSync();
-    const file = NodePath.join(dir, "t", recordingFileId(threadId) + ".jsonl");
+    const file = NodePath.join(dir, "t", threadRecordingFileId(threadId, diag.runId) + ".jsonl");
     const lines = NodeFS.readFileSync(file, "utf8").split("\n").filter((line) => line !== "");
     return lines.flatMap((line) => parseDiagLine(line) ?? []).filter((record) => record.ch.startsWith("mcp."));
   }

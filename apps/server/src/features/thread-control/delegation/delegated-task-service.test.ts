@@ -6,7 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { container } from "tsyringe";
-import { diag, parseDiagLine, recordingFileId, type DiagRecord } from "@mcode/shared/diagnostics";
+import { diag, parseDiagLine, threadRecordingFileId, type DiagRecord } from "@mcode/shared/diagnostics";
 import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
 import { SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
 import { delegatedTaskRosterEntryId } from "@mcode/contracts/models/subagent-roster";
@@ -511,7 +511,7 @@ describe("Coordinator task notices", { timeout: 30_000 }, () => {
     const w = await wakeHarness(f);
     const wakeRows = (): Array<Pick<DiagRecord, "ch" | "k" | "d">> => {
       diag.flushSync();
-      const file = NodePath.join(dir, "t", recordingFileId(f.coordinator.id) + ".jsonl");
+      const file = NodePath.join(dir, "t", threadRecordingFileId(f.coordinator.id, diag.runId) + ".jsonl");
       const lines = NodeFS.existsSync(file) ? NodeFS.readFileSync(file, "utf8").split("\n") : [];
       return lines.flatMap((line) => parseDiagLine(line) ?? [])
         .filter((row) => row.ch === "delegate.wake" || row.ch === "delegate.steer")
