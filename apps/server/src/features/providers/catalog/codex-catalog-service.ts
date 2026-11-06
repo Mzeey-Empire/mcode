@@ -46,7 +46,6 @@ export interface CodexCatalogRefreshResult {
   readonly diagnostics: ProviderCatalogSourceDiagnostic[];
   readonly freshness: ProviderCatalogFreshness;
   readonly skillsAvailable: boolean;
-  readonly pluginsAvailable: boolean;
   readonly promptsAvailable: boolean;
 }
 
@@ -583,7 +582,7 @@ export class CodexCatalogService {
     ]);
     const [skillsResult, reconciledPlugins, configResult] = await Promise.all([
       client.listSkills(cwd ? [cwd] : undefined, forceReload),
-      this.refreshPlugins(client, cwd, forceReload),
+      client.listPlugins(cwd ? [cwd] : undefined).then((result) => reconcilePlugins(client, result)),
       client.readConfig(cwd).then((value) => ({ value }), () => ({ value: undefined })),
     ]);
     const data = this.requestedSkillContext(skillsResult, cwd);
@@ -600,28 +599,10 @@ export class CodexCatalogService {
       diagnostics: [...diagnostics, ...customPrompts.diagnostics].slice(0, PROVIDER_CATALOG_MAX_DIAGNOSTICS),
       freshness: customPrompts.available ? { status: "fresh", fetchedAt } : { status: "stale", fetchedAt, reason: "Codex custom prompt discovery failed." },
       skillsAvailable: true,
-      pluginsAvailable: true,
       promptsAvailable: customPrompts.available,
     };
     this.snapshots.set(catalogKey(cwd), snapshot);
     return snapshot;
-  }
-
-  private async refreshPlugins(
-    client: CodexCatalogClient,
-    cwd: string | undefined,
-    forceReload: boolean,
-  ): Promise<Awaited<ReturnType<typeof reconcilePlugins>>> {
-    const previous = this.snapshots.get(catalogKey(cwd));
-    // Routine refreshes still discover Skills; skills/changed forces plugin discovery.
-    // Reuse the bounded snapshot rather than retaining the large marketplace response.
-    if (previous?.pluginsAvailable && !forceReload) {
-      return {
-        plugins: previous.plugins,
-        diagnostics: previous.diagnostics.filter((diagnostic) => diagnostic.sourceKind === "appServerPlugins"),
-      };
-    }
-    return reconcilePlugins(client, await client.listPlugins(cwd ? [cwd] : undefined));
   }
 
   private requestedSkillContext(skillsResult: unknown, cwd: string | undefined): Record<string, unknown> | undefined {
@@ -670,7 +651,6 @@ export class CodexCatalogService {
       diagnostics: [...standalone.diagnostics, sourceDiagnostic("providerCatalog", "codex app-server", "source-unavailable", "Codex capabilities and agent registrations are temporarily unavailable for this catalog context."), ...customPrompts.diagnostics].slice(0, PROVIDER_CATALOG_MAX_DIAGNOSTICS),
       freshness: standaloneIsFresh ? { status: "fresh", fetchedAt } : { status: "stale", fetchedAt, reason: "Codex capability discovery failed." },
       skillsAvailable: false,
-      pluginsAvailable: false,
       promptsAvailable: customPrompts.available,
     };
     this.snapshots.set(catalogKey(cwd), snapshot);
@@ -728,10 +708,6 @@ export class CodexCatalogService {
   }
 
   private createCatalogClient(cwd: string | undefined, environment: Record<string, string>): CodexCatalogClient {
-    // Changes made while disconnected cannot send skills/changed to this client.
-    for (const [key, snapshot] of this.snapshots) {
-      this.snapshots.set(key, { ...snapshot, pluginsAvailable: false });
-    }
     const settings = this.settingsService.get();
     return this.clientFactory.create({
       cliPath: settings.provider.cli.codex || "codex",

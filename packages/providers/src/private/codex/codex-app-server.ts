@@ -56,8 +56,8 @@ import type {
   AccountRateLimitsReadResult,
   SkillsListParams,
   SkillsListResult,
-  PluginListParams,
-  PluginListResult,
+  PluginInstalledParams,
+  PluginInstalledResult,
   PluginReadParams,
   PluginReadResult,
   ConfigReadParams,
@@ -1452,12 +1452,13 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   }
 
   /** Reads installed plugin summaries for the effective working-directory context. */
-  async listPlugins(cwds?: string[]): Promise<PluginListResult> {
+  async listPlugins(cwds?: string[]): Promise<PluginInstalledResult> {
     if (!this._isAlive || !this.rpc) {
       throw new Error("listPlugins called before codex app-server was ready");
     }
-    const params: PluginListParams = cwds && cwds.length > 0 ? { cwds } : {};
-    return this.rpc.sendRequest<PluginListParams, PluginListResult>("plugin/list", params, 10000);
+    const params: PluginInstalledParams = cwds && cwds.length > 0 ? { cwds } : {};
+    // Available since the minimum supported Codex 0.135.0; avoids the remote discovery catalog.
+    return this.rpc.sendRequest<PluginInstalledParams, PluginInstalledResult>("plugin/installed", params, 10000);
   }
 
   /** Reads plugin detail only when its list summary omits composer metadata. */
