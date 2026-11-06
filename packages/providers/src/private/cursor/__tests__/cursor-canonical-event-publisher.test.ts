@@ -40,6 +40,19 @@ describe("CursorCanonicalEventPublisher", () => {
         && draft.payload.item.payload.runtimeEvent.planCapture ? [draft.payload.item.payload.runtimeEvent.planCapture] : []));
     expect(captures).toEqual([capture]);
   });
+  it("leaves text, reasoning and tool input fragments unlabelled so each one is still saved", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const publisher = new CursorCanonicalEventPublisher("unbounded", "cursor", createSink(submit), undefined, "execution");
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TextDelta, threadId: routing.threadId, delta: "text" }), []);
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.ReasoningDelta, threadId: routing.threadId,
+      delta: "thought", reasoningItemId: "reason" }), []);
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.ToolInputDelta, threadId: routing.threadId,
+      partialJson: "{}" }), []);
+    await publisher.waitForExecution(routing);
+    const drafts = submit.mock.calls.flatMap(([batch]) => batch.events);
+    expect(drafts).toHaveLength(3);
+    expect(drafts.map((draft) => draft.delivery)).toEqual([undefined, undefined, undefined]);
+  });
   it("serializes ordered drafts with canonical routing and volatile text", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
     const publisher = new CursorCanonicalEventPublisher("unbounded", "cursor", createSink(submit), undefined, "execution");

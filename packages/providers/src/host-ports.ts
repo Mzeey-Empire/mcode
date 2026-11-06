@@ -11,6 +11,8 @@ import type { McodeAttachedToolkits } from "@mcode/thread-orchestration";
 
 /** Provider event input submitted to the server-owned canonical event sink. */
 export interface ProviderEventDraft {
+  /** Set by the publisher on fragments the server may show without saving; absent means save as published. */
+  delivery?: "live";
   eventId: string;
   routing: AgentEventRouting;
   sourceProviderId: string;
