@@ -35,6 +35,31 @@ const parentTurn = {
 };
 
 describe("ExecutionMailboxOwner", () => {
+  it("reports the lease of a start it gives up, and only that start, before rejecting it", async () => {
+    const worker = new WorkerPort();
+    const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
+      workerCount: 1,
+      limits: { maxPending: 8, maxPendingBytes: 128_000, reservedControl: 2, reservedControlBytes: 16_000,
+        maxPerExecutionPending: 8, maxPerExecutionBytes: 128_000,
+        reservedPerExecutionControl: 2, reservedPerExecutionControlBytes: 16_000 },
+      createWorker: () => worker, onWorkerLost: () => {},
+    });
+    const abandoned: unknown[] = [];
+    const owner = new ExecutionMailboxOwner(scheduler, async (failed, failedLease) => { abandoned.push({ failed, failedLease }); });
+    const failing = owner.start({ execution, ownerEpoch: 1, providerId: "codex", parentTurn });
+    const failedLease = worker.requests[0]?.lease;
+    worker.reply(0, { kind: "rejected", reason: "writer-failure", failure: { name: "Error", message: "reply lost" } });
+    await expect(failing).rejects.toThrow("reply lost");
+    expect(abandoned).toEqual([{ failed: execution, failedLease }]);
+    expect(owner.current(execution.threadId)).toBeUndefined();
+
+    const starting = owner.start({ execution, ownerEpoch: 2, providerId: "codex", parentTurn });
+    worker.reply(1, { kind: "committed", operationId: `${worker.requests[1]?.lease.leaseId}:1`, durableRevision: 1 });
+    await starting;
+    expect(abandoned).toHaveLength(1);
+    scheduler.shutdown();
+  });
+
   it("preserves the original bounded writer rejection through the owner", async () => {
     const worker = new WorkerPort();
     const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({

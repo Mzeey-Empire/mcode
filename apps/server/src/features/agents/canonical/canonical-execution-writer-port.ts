@@ -29,23 +29,20 @@ export class CanonicalExecutionWriterPort implements ExecutionSemanticWriter {
     if (this.progress && operation.mutation.kind !== "begin") {
       return await this.progress.acceptWhenReady(operation);
     }
-    let committed = false;
-    try {
-      const receipt = await this.transactDurable(operation, () => { committed = true; });
-      this.releaseDurable(operation, receipt);
-      return receipt;
-    } catch (error) {
-      if (committed && operation.mutation.kind === "begin") await this.abandonCommittedBegin(operation);
-      throw error;
-    }
+    const receipt = await this.transactDurable(operation);
+    this.releaseDurable(operation, receipt);
+    return receipt;
   }
 
   /**
-   * A begin that committed but failed before its worker saw the receipt leaves a Running turn that no worker holds,
-   * so no ending or release would ever arrive for it. End it the way a lost worker's turn ends.
+   * End the turn a start's lease may have saved, after its owner gave that lease up without a committed start.
+   *
+   * A begin can commit and still fail its reply, which leaves a Running turn that no worker holds, so no ending or
+   * release would ever arrive for it. The reply failure alone cannot decide this: a retry of the same begin replays
+   * its receipt and keeps the turn, and a duplicate begin's failure says nothing about the worker already running it.
+   * Only the released lease proves no retry can follow, and the interruption acts only on a head carrying that lease.
    */
-  private async abandonCommittedBegin(operation: ExecutionSemanticOperation): Promise<void> {
-    const { execution, lease } = operation;
+  async abandonStart(execution: ExecutionIdentity, lease: ExecutionLease): Promise<void> {
     try {
       await this.interruptWorkerLoss({ execution, lease,
         reason: "The turn start failed after it was saved.", recoveryIncidentId: workerLossIncidentId({ execution, lease }) });
@@ -61,15 +58,12 @@ export class CanonicalExecutionWriterPort implements ExecutionSemanticWriter {
     this.progress?.releaseExecution(execution, lease);
   }
 
-  private async transactDurable(operation: ExecutionSemanticOperation, onCommitted: () => void): Promise<ExecutionWriteReceipt> {
+  private async transactDurable(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
     await this.progress?.beforeDurableCommand(operation.execution.threadId);
     let receipt: ExecutionWriteReceipt;
     try {
-      receipt = await this.writer.transactSemantic(operation, (events) => {
-        onCommitted();
-        if (this.progress) this.progress.observeCommitted(events, operation);
-        else this.publish(events);
-      });
+      receipt = await this.writer.transactSemantic(operation,
+        this.progress ? (events) => this.progress?.observeCommitted(events, operation) : this.publish);
     } finally {
       this.progress?.cancelDurableCommand(operation.execution.threadId);
     }

@@ -1864,19 +1864,64 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(stillRunning.result.kind).toBe("accepted");
   });
 
-  it("interrupts and releases a start whose reply fails after its durable begin committed", async () => {
-    const transact = writer.transactSemantic.bind(writer);
-    vi.spyOn(writer, "transactSemantic").mockImplementationOnce(async (...args) => {
-      await transact(...args);
-      throw new Error("reply lost after durable begin");
-    });
-    await expect(send(1, start("codex"))).rejects.toThrow("reply lost after durable begin");
+  describe("when a start's reply is lost after its begin is saved", () => {
+    function loseNextBeginReply() {
+      const transact = writer.transactSemantic.bind(writer);
+      vi.spyOn(writer, "transactSemantic").mockImplementationOnce(async (...args) => {
+        await transact(...args);
+        throw new Error("reply lost after durable begin");
+      });
+    }
+    const turnStatus = () => db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId);
 
-    await expect.poll(() => progress.depth().owners).toBe(0);
-    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Interrupted" });
-    const next = { ...execution, turnId: "after-failed-begin", executionId: "00000000-0000-4000-8000-000000000301" };
-    const nextLease = { ...lease, ownerEpoch: 2, leaseId: "after-failed-begin-lease" };
-    expect((await send(1, start("codex", next), next, nextLease)).result.kind).toBe("committed");
+    it("interrupts and releases twelve such starts once their leases are abandoned", async () => {
+      const failed = Array.from({ length: 12 }, (_, index) => ({
+        identity: { threadId: `failed-start-thread-${index}`, turnId: `failed-start-turn-${index}`,
+          executionId: `00000000-0000-4000-8000-${String(index + 4000).padStart(12, "0")}` },
+        lease: { ...lease, leaseId: `failed-start-lease-${index}` } }));
+      for (const turn of failed) {
+        insertThread(turn.identity.threadId);
+        loseNextBeginReply();
+        await expect(send(1, start("codex", turn.identity), turn.identity, turn.lease)).rejects.toThrow("reply lost after durable begin");
+        await port.abandonStart(turn.identity, turn.lease);
+      }
+
+      await expect.poll(() => progress.depth().owners).toBe(0);
+      for (const turn of failed) {
+        expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(turn.identity.turnId)).toEqual({ status: "Interrupted" });
+      }
+      const next = { ...execution, turnId: "after-failed-begin", executionId: "00000000-0000-4000-8000-000000000301" };
+      const nextLease = { ...lease, ownerEpoch: 2, leaseId: "after-failed-begin-lease" };
+      expect((await send(1, start("codex", next), next, nextLease)).result.kind).toBe("committed");
+    });
+
+    it("keeps the turn saving when that exact start is retried", async () => {
+      loseNextBeginReply();
+      await expect(send(1, start("codex"))).rejects.toThrow("reply lost after durable begin");
+
+      expect((await send(1, start("codex"))).result.kind).toBe("committed");
+      const text = await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 1, "textDelta", { delta: "after retry", isFinalResponse: true })] });
+      expect(text.result.kind).toBe("accepted");
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(turnStatus()).toEqual({ status: "Running" });
+    });
+
+    it("keeps a running turn when a duplicate start for it loses its reply", async () => {
+      expect((await send(1, start("codex"))).result.kind).toBe("committed");
+      loseNextBeginReply();
+      const duplicate = new ExecutionWorkerHandler(port);
+      await expect(duplicate.handle({ requestId: 1, execution, lease, ordinal: 1, command: start("codex") }))
+        .rejects.toThrow("reply lost after durable begin");
+
+      await progress.waitForSaved(execution.threadId);
+      expect(turnStatus()).toEqual({ status: "Running" });
+      const text = await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 1, "textDelta", { delta: "still live", isFinalResponse: true })] });
+      expect(text.result.kind).toBe("accepted");
+      await progress.waitForSaved(execution.threadId);
+      expect(turnStatus()).toEqual({ status: "Running" });
+    });
   });
 
   describe("after a released turn", () => {
