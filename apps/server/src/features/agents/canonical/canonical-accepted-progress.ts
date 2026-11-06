@@ -56,7 +56,7 @@ type AcceptedExecutionWriteIntent = ({ readonly kind: "execution"; readonly oper
     readonly terminal?: ExecutionTerminalPersistenceReceipt }
   | { readonly kind: "plan-answer"; readonly assistant: Message }
   | { readonly kind: "steer"; readonly message: Message }
-  | { readonly kind: "control" }) & {
+  | { readonly kind: "control"; readonly assistantTextCheckpoint?: CanonicalAcceptedWriteInput["assistantTextCheckpoint"] }) & {
   readonly phase: string;
   readonly nativeCursor: unknown | null;
   readonly features?: AcceptedFeatureWriteMetadata;
@@ -420,7 +420,9 @@ export class CanonicalAcceptedProgress {
     const prepared = prepareAcceptedParentEvents({ operation, thread: modelThread, turn, items: thread.state.items,
       publicationIds: [], messageSequence: thread.messageSequence, acceptedAt: new Date().toISOString() });
     this.admitControl(thread, operation.operationId, execution, prepared.events,
-      thread.head?.phase ?? "running", thread.head?.nativeCursor ?? null);
+      thread.head?.phase ?? "running", thread.head?.nativeCursor ?? null, undefined,
+      operation.mutation.kind === "live-event" && operation.mutation.text.kind === "append"
+        ? [...operation.mutation.text.inputs] : undefined);
   }
 
   private operationAdmission(thread: ProgressThread, operation: ExecutionSemanticOperation):
@@ -536,10 +538,11 @@ export class CanonicalAcceptedProgress {
   /** Admit a control batch on reserved capacity; callers own the open and command-fence checks. */
   private admitControl(thread: ProgressThread, operationId: string, execution: ExecutionIdentity,
     events: readonly import("./canonical-agent-boundary.js").CanonicalAgentEventDraft[], phase: string,
-    nativeCursor: unknown | null, features?: AcceptedFeatureWriteMetadata): readonly AcceptedCanonicalAgentEventEnvelope[] {
+    nativeCursor: unknown | null, features?: AcceptedFeatureWriteMetadata,
+    assistantTextCheckpoint?: CanonicalAcceptedWriteInput["assistantTextCheckpoint"]): readonly AcceptedCanonicalAgentEventEnvelope[] {
     this.flushLive(thread);
     const admission = acceptIntoOwnedState(thread, { operationId, execution, admission: "control", events,
-      write: { kind: "control", phase, nativeCursor, features } });
+      write: { kind: "control", phase, nativeCursor, features, assistantTextCheckpoint } });
     if (admission.kind === "rejected") throw new ProgressAdmissionError(admission.reason);
     if (admission.kind === "duplicate") return [];
     this.publishAccepted(admission.batch);
@@ -1370,9 +1373,9 @@ function isControl(operation: ExecutionSemanticOperation): boolean {
 }
 
 function compatibilityFields(write: AcceptedExecutionWriteIntent, final: boolean):
-  Pick<CanonicalAcceptedWriteInput, "compatibility" | "terminalOutcome" | "planAnswer" | "steerMessage" | "features"> {
+  Pick<CanonicalAcceptedWriteInput, "compatibility" | "terminalOutcome" | "planAnswer" | "steerMessage" | "features" | "assistantTextCheckpoint"> {
   if (!final) return {};
-  if (write.kind === "control") return { features: write.features };
+  if (write.kind === "control") return { features: write.features, assistantTextCheckpoint: write.assistantTextCheckpoint };
   if (write.kind === "steer") return { steerMessage: write.message };
   if (write.kind === "plan-answer") return { planAnswer: write.assistant };
   const operation = write.operation;

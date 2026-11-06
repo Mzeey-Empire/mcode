@@ -185,8 +185,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
   afterEach(async () => {
     release?.();
     release = undefined;
-    await progress.close();
     vi.useRealTimers();
+    await progress.close({ attemptsUntil: Date.now() + 1_000 });
     await writer.close();
     await databaseWriter.close();
     reader.close(true);
@@ -325,6 +325,59 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       await vi.advanceTimersByTimeAsync(1);
       await drainSaves();
       expect(savedText()).toBe("prefixidle");
+    });
+
+    it.each(["claude", "devin", "codex"])("completes a %s turn containing only live text", async (provider) => {
+      await begin(provider);
+      await piece(" answer", provider);
+      await progress.waitForSaved(execution.threadId);
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft(provider, ordinal, "turnComplete")], terminalInput: { ...execution,
+          providerId: provider, providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      expect(new CanonicalAgentStore(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual(["prefix answer"]);
+    });
+
+    it("reclassifies live text between two model loops through the shared publisher", async () => {
+      await begin("copilot");
+      const routing = { ...execution, deliveryAttempt: 1 };
+      const publisher = new CanonicalLiveEventPublisher("unbounded", "copilot", { submit: async (batch) => {
+        const events = batch.events.map((event) => {
+          const runtime = event.payload.type === "item.recorded"
+            ? ProviderRuntimeEventSchema().parse(event.payload.item.payload.runtimeEvent) : undefined;
+          return runtime?.event.type === "textDelta" ? { ...event, delivery: "live" as const } : event;
+        });
+        const terminal = batch.events.some((event) => event.payload.type === "item.recorded"
+          && ProviderRuntimeEventSchema().parse(event.payload.item.payload.runtimeEvent).event.type === "turnComplete");
+        const reply = await send(++ordinal, { kind: "event", phase: batch.phase, nativeCursor: null, events,
+          ...(terminal ? { terminalInput: { ...execution, providerId: "copilot", providerIdentities: [],
+            outcome: "completed" as const, projection: { kind: "writer-staged" as const } } } : {}) });
+        if (reply.result.kind !== "accepted") throw new Error(`Piece rejected: ${JSON.stringify(reply.result)}`);
+        return { commit: { outcome: "accepted", acceptedThrough: reply.result.acceptedThrough,
+          eventCount: events.length, progressPosition: reply.result.progressPosition }, delivery: { ingress: "not-required" } };
+      } });
+      publisher.publish(routing, providerRuntimeEvent({ type: "textDelta", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, delta: " searching", isFinalResponse: true }), []);
+      await publisher.waitForExecution(routing);
+      expect(liveFrames()).toHaveLength(1);
+      await progress.waitForSaved(execution.threadId);
+      publisher.publish(routing, providerRuntimeEvent({ type: "assistantMessageBoundary", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, isFinalResponse: false }), []);
+      await publisher.waitForExecution(routing);
+      await progress.waitForSaved(execution.threadId);
+      publisher.publish(routing, providerRuntimeEvent({ type: "textDelta", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, delta: "Final answer", isFinalResponse: true }), []);
+      publisher.publish(routing, providerRuntimeEvent({ type: "turnComplete", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, reason: "completed", costUsd: 0, tokensIn: 0, tokensOut: 0 }), []);
+      await publisher.waitForExecution(routing);
+      await progress.waitForSaved(execution.threadId);
+      expect(new CanonicalAgentStore(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual(["Final answer"]);
+      expect(new ThoughtSegmentStore(reader).listByMessage(deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`)))
+        .toEqual(expect.arrayContaining([expect.objectContaining({ text: "prefix searching" })]));
     });
 
     it("saves at 16 KiB of pending text without waiting for the timer", async () => {

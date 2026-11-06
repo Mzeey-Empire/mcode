@@ -13,6 +13,8 @@ import { PlanQuestionAnswersStore as PlanQuestionAnswersRepo } from "../planning
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
 import { AcceptedFeatureWriteMetadataSchema, persistAcceptedFeatureWrite } from "./accepted-feature-write.js";
 import { TurnSteerStore } from "../steering/persistence/turn-steer-store.js";
+import { ParentAssistantTextCheckpointStore } from "../turns/parent-assistant-text-checkpoint-store.js";
+import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 
 /** Immutable storage intent, validated again on the dedicated SQLite worker. */
 export const CanonicalAcceptedWriteInputSchema = z.object({
@@ -31,6 +33,10 @@ export const CanonicalAcceptedWriteInputSchema = z.object({
   /** A user message the provider took mid-turn; its steer row is marked delivered in this transaction. */
   steerMessage: MessageSchema().optional(),
   features: AcceptedFeatureWriteMetadataSchema().optional(),
+  assistantTextCheckpoint: z.array(z.object({
+    executionId: z.string().uuid(), threadId: z.string().min(1).max(256), turnId: z.string().min(1).max(256),
+    sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), text: z.string(),
+  }).strict()).min(1).max(8_192).optional(),
   /** Saves the same events in place of a page whose other contents the writer rejected. */
   replaced: z.object({ reason: z.string().min(1).max(500) }).strict().optional(),
 }).strict();
@@ -70,6 +76,7 @@ export class CanonicalAcceptedEventWrite {
     this.assertPredecessor(parsed);
     this.assertReplacement(input, operationId);
     this.applyCompatibility(input, operationId);
+    this.persistAssistantText(parsed);
     const result = this.canonical.appendAcceptedInsideTransaction({ ...parsed.execution,
       phase: parsed.phase, nativeCursor: parsed.nativeCursor, events: parsed.events,
       ...(parsed.terminalOutcome ? { terminalOutcome: parsed.terminalOutcome } : {}),
@@ -88,6 +95,22 @@ export class CanonicalAcceptedEventWrite {
       revision: { conversationRevision: result.conversationRevision, rosterRevision: result.rosterRevision },
       events: result.events,
     };
+  }
+
+  private persistAssistantText(input: z.infer<typeof CanonicalAcceptedWriteInputSchema>): void {
+    const chunks = input.assistantTextCheckpoint;
+    if (!chunks) return;
+    if (input.compatibility || chunks.some((chunk) => chunk.executionId !== input.execution.executionId
+      || chunk.threadId !== input.execution.threadId || chunk.turnId !== input.execution.turnId)) {
+      throw new Error("Live assistant text checkpoint has inconsistent routing");
+    }
+    // The enclosing receipt transaction commits the recovery prefix and canonical events together.
+    const store = new ParentAssistantTextCheckpointStore(this.db);
+    const chunkSize = ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 1;
+    for (let offset = 0; offset < chunks.length; offset += chunkSize) {
+      const result = store.appendChunk(chunks.slice(offset, offset + chunkSize));
+      if (result.outcome !== "committed") throw new Error("Live assistant text checkpoint exceeded retention");
+    }
   }
 
   private stageMessages(parsed: z.infer<typeof CanonicalAcceptedWriteInputSchema>, threadId: string): void {
