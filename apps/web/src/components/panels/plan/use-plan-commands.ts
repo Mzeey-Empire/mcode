@@ -24,8 +24,10 @@ export function usePlanCommands(threadId: string | null): void {
   const running = useThreadStore((s) => threadId !== null && isThreadExecuting(threadId, s));
   const waiting = useWaitingForSetup(threadId ?? "") !== null;
   const executing = running || waiting;
-  const { isGitRepo } = useSourceCheckout(threadId);
   const version = threadId && !executing ? (selectImplementTarget(versions, activeVersion, onScreen)?.version ?? null) : null;
+  // Only the worktree command needs the checkout, and this hook runs for every
+  // selected thread, so skip the git-backed read until there is a plan to implement.
+  const { isGitRepo } = useSourceCheckout(version === null ? null : threadId);
 
   useEffect(() => {
     if (threadId === null || version === null) return;

@@ -436,6 +436,19 @@ describe("PlanPanel", () => {
         hook.unmount();
       });
 
+      // The hook runs for every selected thread, so a read here spawns git on
+      // every switch even though only an implementable plan needs the answer.
+      it("reads the checkout only once a version becomes implementable", async () => {
+        seedThreads();
+        const hook = renderHook(() => usePlanCommands(SOURCE));
+        expect(getReviewState).not.toHaveBeenCalled();
+
+        act(() => startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]));
+        await waitFor(() => expect(getCommand("plan.implementInNewWorktree")?.title).toBe("Implement v2 in a new worktree"));
+        expect(getReviewState).toHaveBeenCalledTimes(1);
+        hook.unmount();
+      });
+
       it("holds the source in Plan, read-only, until the server reports the first turn admitted", async () => {
         startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
         seedThreads();
