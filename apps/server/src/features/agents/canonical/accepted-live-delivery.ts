@@ -38,12 +38,15 @@ export function canDeliverLive(events: readonly ProviderEventDraft[], effects: P
 /**
  * The accepted owner's final check: the provider has started (the first frame saves that start), and preparing
  * the operation added no events or publications of its own, so the checkpoint rebuilds everything it changed.
+ * Every event the live frame would show must be a stream fragment, whatever label the worker set: a saved event
+ * shown live is never saved, and the writer's predecessor check cannot see it was skipped.
  */
 export function acceptsLive(operation: ExecutionSemanticOperation, providerStartedAt: string | null | undefined,
   preparedEvents: number, publications: ExecutionSemanticOperation["livePublication"]): boolean {
   return operation.delivery === "live" && operation.mutation.kind === "append-events" && Boolean(providerStartedAt)
     && preparedEvents === 0 && canDeliverLive(operation.mutation.events, operation.mutation.parentLive)
-    && NodeUtil.isDeepStrictEqual(publications, operation.livePublication);
+    && NodeUtil.isDeepStrictEqual(publications, operation.livePublication)
+    && (publications ?? []).every(({ event }) => agentEventDelivery(event) === "live");
 }
 
 /** Merge complete narrative records by identity and preserve assistant append order. */

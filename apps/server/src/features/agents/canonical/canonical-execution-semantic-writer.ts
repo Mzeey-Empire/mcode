@@ -1924,6 +1924,8 @@ function nextHead(head: SemanticHead, operation: OperationPosition, afterOrdinal
   const candidate = operation.lease;
   return !head.terminal && head.execution.threadId === operation.execution.threadId
     && head.execution.turnId === operation.execution.turnId
+    // Trusts the accepted owner to name the last saved ordinal it admitted: the stored head proves that one was
+    // written, but not that the ordinals skipped since were live. Only stream fragments can be live (acceptsLive).
     && Number.isSafeInteger(afterOrdinal) && head.ordinal === afterOrdinal && afterOrdinal < operation.ordinal
     && sameLease(lease, candidate);
 }

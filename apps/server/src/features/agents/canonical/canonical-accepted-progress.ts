@@ -91,8 +91,6 @@ interface ProgressThread {
   /** Live pieces shown since the last checkpoint; saved as one control batch by `flushLive`. */
   live?: PendingLiveDelivery;
   lastLiveReceipt?: LiveDeliveryReceipt;
-  /** Identifies live frames within the epoch; live frames take no progress position. */
-  liveSequence?: number;
   owner: AcceptedOwner;
   head?: AcceptedExecutionState;
   /**
@@ -130,6 +128,12 @@ export class CanonicalAcceptedProgress {
   }
 
   readonly epoch = NodeCrypto.randomUUID();
+  /**
+   * Orders live frames, which take no progress position. Clients drop a live frame that is not newer than the last
+   * one they showed in its epoch. Every epoch is prefixed by this process's `epoch`, so one counter per process
+   * keeps that order. A per-thread counter would restart when an evicted thread reloads under its saved epoch.
+   */
+  private liveSequence = 0;
   private readonly threads = new Map<string, ProgressThread>();
   private readonly budget = new BoundedProgressRetention({ maxEvents: 98_304, maxBytes: 96 * 1024 * 1024,
     reservedControlEvents: MAX_OWNERS * LOCAL_LIMITS.reservedControlEvents,
@@ -370,9 +374,9 @@ export class CanonicalAcceptedProgress {
     mergeLiveDelivery(thread.live, operation);
     thread.head = advanceLiveExecution(head, operation);
     thread.lastLiveReceipt = { operationId: operation.operationId, inputHash, receipt };
-    thread.liveSequence = (thread.liveSequence ?? 0) + 1;
+    this.liveSequence += 1;
     this.publishFamily({ phase: "live", threadId: operation.execution.threadId, epoch: thread.epoch,
-      after: cut.accepted.sequence, liveSequence: thread.liveSequence,
+      after: cut.accepted.sequence, liveSequence: this.liveSequence,
       events: (operation.livePublication ?? []).map((publication) => publication.event) });
     if (thread.live.bytes >= LIVE_CHECKPOINT_BYTES) this.flushLive(thread);
     return receipt;

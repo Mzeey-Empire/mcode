@@ -376,17 +376,58 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     it("answers a resent live piece with its first receipt and refuses different content under its identity", async () => {
       await begin();
       const accept = vi.spyOn(progress, "acceptWhenReady");
+      pushes.frames.length = 0;
       await piece("once");
       const operation = accept.mock.calls[0]?.[0];
       if (!operation || operation.mutation.kind !== "append-events") throw new Error("Expected the live operation");
       const first = await accept.mock.results[0]?.value;
       await progress.waitForSaved(execution.threadId);
       expect(progress.accept(operation)).toEqual(first);
+      // A retried publish is the only way the server could send a live frame twice; it must not send one.
+      expect(liveFrames()).toHaveLength(1);
       const changed = { ...operation, mutation: { ...operation.mutation,
         events: [{ ...draft("claude", ordinal - 1, "textDelta", { delta: "twice", isFinalResponse: true }), delivery: "live" as const }] } };
       expect(() => progress.accept(changed)).toThrow(expect.objectContaining({ admissionReason: "identity-conflict" }));
       await progress.waitForSaved(execution.threadId);
       expect(savedText()).toBe("prefixonce");
+    });
+
+    it("saves a non-fragment event whose draft is labelled live", async () => {
+      await begin();
+      pushes.frames.length = 0;
+      const reply = await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [{ ...draft("claude", ordinal - 1, "toolUse", { toolCallId: "tool", toolName: "Read", toolInput: {} }),
+          delivery: "live" as const }] });
+      expect(reply.result.kind).toBe("accepted");
+      expect(pushes.frames.filter((frame) => (frame as { phase?: unknown }).phase === "live")).toEqual([]);
+      await progress.waitForSaved(execution.threadId);
+      expect(rowCount("canonical_agent_events", "WHERE json_extract(envelope_json, '$.payload.event.type') = 'toolUse'")).toBe(1);
+    });
+
+    it("saves a failed operation before any later one and retries it under the same identity", async () => {
+      await begin();
+      const toolRows = (id: string) =>
+        rowCount("canonical_agent_events", `WHERE json_extract(envelope_json, '$.payload.event.toolCallId') = '${id}'`);
+      const append = writer.appendAccepted.bind(writer);
+      const attempts: { operationId: string; tool?: string; earlierSaved: number }[] = [];
+      vi.spyOn(writer, "appendAccepted").mockImplementation(async (operationId, input) => {
+        const tool = ["tool-a", "tool-b"].find((id) => JSON.stringify(input.events).includes(`"${id}"`));
+        attempts.push({ operationId, tool, earlierSaved: toolRows("tool-a") });
+        if (attempts.length === 1) throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+        return append(operationId, input);
+      });
+      const tool = (id: string) => send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal - 1, "toolUse", { toolCallId: id, toolName: "Read", toolInput: {} })] });
+      await tool("tool-a");
+      await vi.waitFor(() => expect(attempts).toHaveLength(1));
+      await piece(" between");
+      expect((await tool("tool-b")).result.kind).toBe("accepted");
+      expect([toolRows("tool-a"), toolRows("tool-b")]).toEqual([0, 0]);
+      await progress.waitForSaved(execution.threadId);
+      expect([toolRows("tool-a"), toolRows("tool-b")]).toEqual([1, 1]);
+      expect(attempts[1]?.operationId).toBe(attempts[0]?.operationId);
+      expect(attempts.find((attempt) => attempt.tool === "tool-b")?.earlierSaved).toBe(1);
+      expect(savedText()).toBe("prefix between");
     });
 
     it("retries a busy checkpoint save under one identity and saves its text once", async () => {
