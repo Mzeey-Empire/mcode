@@ -154,13 +154,18 @@ NodeTest.test("large output proof requires the payload and later saved records",
 
 NodeTest.test("row breakdown separates raw projections and divides by saved pieces", () => {
   const rows = [
-    { envelope_json: '{"payload":{"type":"item.recorded","item":{"payload":{"projection":"providerRuntimeEvent"}}}}' },
-    { envelope_json: '{"payload":{"type":"item.recorded","item":{"payload":{"projection":"assistant"}}}}' },
-    { envelope_json: '{"payload":{"type":"publication.recorded"}}' },
-    { envelope_json: '{"payload":{"type":"turn.completed"}}' },
+    { durable_revision: 1, envelope_json: '{"payload":{"type":"item.recorded","item":{"payload":{"projection":"providerRuntimeEvent"}}}}' },
+    { durable_revision: 1, envelope_json: '{"payload":{"type":"item.recorded","item":{"payload":{"projection":"assistant"}}}}' },
+    { durable_revision: 2, envelope_json: '{"payload":{"type":"item.content-appended"}}' },
+    { durable_revision: 3, envelope_json: '{"payload":{"type":"publication.recorded"}}' },
+    { durable_revision: 3, envelope_json: '{"payload":{"type":"turn.completed"}}' },
   ];
-  NodeAssertStrict.deepEqual(summarizeRows(rows, 2), { total: 4, types: { "item.recorded": 2, "publication.recorded": 1, "turn.completed": 1 }, itemProjections: { providerRuntimeEvent: 1, assistant: 1 }, rowsPerSavedDelta: 2 });
-  NodeAssertStrict.deepEqual(summarizeRows([], 0), { total: 0, types: {}, itemProjections: {}, rowsPerSavedDelta: null });
+  NodeAssertStrict.deepEqual(summarizeRows(rows, 2, 4), { total: 5,
+    types: { "item.recorded": 2, "item.content-appended": 1, "publication.recorded": 1, "turn.completed": 1 },
+    itemProjections: { providerRuntimeEvent: 1, assistant: 1 }, itemRows: 4, contentAppends: 1, writerReceipts: 3,
+    rowsPerSavedDelta: 2.5, perSavedDelta: { itemRows: 2, contentAppends: 0.5, writerReceipts: 1.5 } });
+  NodeAssertStrict.deepEqual(summarizeRows([], 0), { total: 0, types: {}, itemProjections: {}, itemRows: 0, contentAppends: 0,
+    writerReceipts: 0, rowsPerSavedDelta: null, perSavedDelta: { itemRows: null, contentAppends: null, writerReceipts: null } });
   NodeAssertStrict.throws(() => summarizeRows([{ envelope_json: "broken" }], 1));
 });
 

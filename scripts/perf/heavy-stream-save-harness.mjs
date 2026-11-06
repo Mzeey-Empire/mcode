@@ -25,10 +25,25 @@ export function parseHeavyArguments(argv) {
   return result;
 }
 
-/** Counts durable rows without assuming a provider-specific projection exists. */
-export function summarizeRows(rows, deltas) {
+/**
+ * Counts durable rows without assuming a provider-specific projection exists. Two tables are counted indirectly,
+ * because the server deletes their rows after the fact: a writer receipt is deleted once its save is acknowledged,
+ * and an item's content appends are cleared when the whole item is rewritten. Each accepted write page commits one
+ * durable revision and inserts one receipt, so receipts are the distinct revisions; each append is one event.
+ */
+export function summarizeRows(rows, deltas, itemRows = 0) {
+  const { types, projections, revisions } = countRowKinds(rows);
+  const perSavedDelta = (count) => deltas ? count / deltas : null;
+  const contentAppends = types["item.content-appended"] ?? 0;
+  return { total: rows.length, types, itemProjections: projections, itemRows, contentAppends, writerReceipts: revisions.size,
+    rowsPerSavedDelta: perSavedDelta(rows.length),
+    perSavedDelta: { itemRows: perSavedDelta(itemRows), contentAppends: perSavedDelta(contentAppends), writerReceipts: perSavedDelta(revisions.size) } };
+}
+
+function countRowKinds(rows) {
   const types = {};
   const projections = {};
+  const revisions = new Set();
   for (const row of rows) {
     const payload = JSON.parse(row.envelope_json).payload;
     types[payload.type] = (types[payload.type] ?? 0) + 1;
@@ -36,8 +51,9 @@ export function summarizeRows(rows, deltas) {
       const projection = payload.item?.payload?.projection ?? "none";
       projections[projection] = (projections[projection] ?? 0) + 1;
     }
+    if (row.durable_revision !== undefined) revisions.add(row.durable_revision);
   }
-  return { total: rows.length, types, itemProjections: projections, rowsPerSavedDelta: deltas ? rows.length / deltas : null };
+  return { types, projections, revisions };
 }
 
 /** Joins accepted sequence ranges to saved watermarks; missing evidence stays visible. */
@@ -144,7 +160,7 @@ export async function runHeavyStream(options) {
   const dbPath = NodePath.join(paths.devDir, "db", "app.sqlite");
   assertRuntimeFileSafe(dbPath, "fixture database");
   const db = new Database(dbPath, { readonly: true });
-  const readRows = () => Array.from(db.query("SELECT envelope_json, accepted_sequence, persisted_at FROM canonical_agent_events WHERE thread_id = ? ORDER BY durable_revision, accepted_sequence").iterate(receipt.threadId), compactRow);
+  const readRows = () => Array.from(db.query("SELECT envelope_json, accepted_sequence, durable_revision, persisted_at FROM canonical_agent_events WHERE thread_id = ? ORDER BY durable_revision, accepted_sequence").iterate(receipt.threadId), compactRow);
   let original;
   let changed = false;
   let sampler;
@@ -179,7 +195,8 @@ export async function runHeavyStream(options) {
     try {
       await sendTurn(socket, thread.id, { ...options, grow: 0, statsPath }, state, (options.duration + 240) * 1000);
     } catch (error) { receipt.error = error.message; }
-    recordTurnResult(receipt, state, statsPath, readRows().slice(previousRows));
+    recordTurnResult(receipt, state, statsPath, readRows().slice(previousRows),
+      (turnId) => db.query("SELECT count(*) AS count FROM canonical_agent_items WHERE turn_id = ?").get(turnId).count);
     receipt.checkpoint = db.query("SELECT phase, terminal_outcome, error, last_accepted_sequence, last_durable_sequence FROM canonical_agent_ingest_checkpoints WHERE thread_id = ? ORDER BY updated_at DESC LIMIT 1").get(thread.id);
     receipt.databaseAfter = databaseBytes(dbPath);
     receipt.databaseGrowthBytes = receipt.databaseAfter.total - receipt.databaseBefore.total;
@@ -260,13 +277,14 @@ function fixtureFinished(statsPath) {
   return JSON.parse(NodeFS.readFileSync(statsPath, "utf8")).complete === true;
 }
 
-function recordTurnResult(receipt, state, statsPath, rows) {
+function recordTurnResult(receipt, state, statsPath, rows, countItemRows) {
   recordOutcome(receipt, state);
   receipt.emitted = NodeFS.existsSync(statsPath) ? JSON.parse(NodeFS.readFileSync(statsPath, "utf8")) : null;
   receipt.delivery = auditDelivery(rows, receipt.emitted);
-  receipt.rows = summarizeRows(rows, receipt.delivery.pieces.saved);
+  const turnId = rows.map((row) => JSON.parse(row.envelope_json)).find((event) => event.payload.type === "turn.started")?.routing?.turnId;
+  receipt.rows = summarizeRows(rows, receipt.delivery.pieces.saved, turnId ? countItemRows(turnId) : 0);
   receipt.lastSavedEvent = rows.length ? JSON.parse(rows.at(-1).envelope_json).payload.type : null;
-  receipt.terminalEvent = savedTerminal(rows, rows.map((row) => JSON.parse(row.envelope_json)).find((event) => event.payload.type === "turn.started")?.routing?.turnId);
+  receipt.terminalEvent = savedTerminal(rows, turnId);
   receipt.largeOutput = auditLargeOutput(rows);
 }
 
@@ -300,7 +318,9 @@ export async function restoreFixture(socket, receipt, state, changed, original) 
 
 function printSummary(receipt, receiptPath) {
   const { options } = receipt;
-  const summary = { duration: options.duration, outcome: receipt.outcome, error: receipt.error, pieces: receipt.delivery?.pieces, tools: receipt.delivery?.tools, serverDropLogLines: receipt.serverDropLogLines, rows: receipt.rows?.total, rowsPerSavedDelta: receipt.rows?.rowsPerSavedDelta, commits: receipt.saves.commits, acceptToSaveLag: receipt.saves.lag, endToEndLag: receipt.endToEndLag, persistedAtLag: receipt.persistedAtLag, lagExcludesLostPieces: receipt.lagExcludesLostPieces, largeOutput: receipt.largeOutput, terminalEvent: receipt.terminalEvent, cleanup: receipt.cleanup, receiptPath };
+  const summary = { duration: options.duration, outcome: receipt.outcome, error: receipt.error, pieces: receipt.delivery?.pieces, tools: receipt.delivery?.tools, serverDropLogLines: receipt.serverDropLogLines, rows: receipt.rows?.total, rowsPerSavedDelta: receipt.rows?.rowsPerSavedDelta,
+    itemRows: receipt.rows?.itemRows, contentAppends: receipt.rows?.contentAppends, writerReceipts: receipt.rows?.writerReceipts,
+    perSavedDelta: receipt.rows?.perSavedDelta, commits: receipt.saves.commits, acceptToSaveLag: receipt.saves.lag, endToEndLag: receipt.endToEndLag, persistedAtLag: receipt.persistedAtLag, lagExcludesLostPieces: receipt.lagExcludesLostPieces, largeOutput: receipt.largeOutput, terminalEvent: receipt.terminalEvent, cleanup: receipt.cleanup, receiptPath };
   process.stdout.write(JSON.stringify(summary) + "\n");
 }
 
