@@ -24,7 +24,7 @@ describe("ClaudeProvider shutdown", () => {
     let finishedWriting = false;
     let tailRead = false;
     let saved = 0;
-    let savesStarted = false;
+    const savesStarted = deferred();
     const script = `const {once}=require('node:events');
       const send=x=>process.stdout.write(JSON.stringify(x)+'\\n');
       require('node:readline').createInterface({input:process.stdin}).on('line',async line=>{
@@ -55,7 +55,7 @@ describe("ClaudeProvider shutdown", () => {
     });
     const host = mockShutdownHost(({ event }) => { if (event.type === "textDelta") saved++; });
     const submit = host.events.submit;
-    host.events = { submit: async (batch) => { savesStarted = true; await held.promise; return submit(batch); } };
+    host.events = { submit: async (batch) => { savesStarted.resolve(); await held.promise; return submit(batch); } };
     const provider = new ClaudeProvider(stubEnvService(), stubJobObject(), undefined, undefined, undefined, host);
     const spawned = vi.spyOn(provider, "spawn");
     try {
@@ -64,7 +64,9 @@ describe("ClaudeProvider shutdown", () => {
         sessionId: "mcode-thread-flood", threadId: "thread-flood", workspaceId: "workspace", message: "hi", cwd: process.cwd(),
         model: "claude-sonnet-4-6", permissionMode: "supervised", approvalReviewMode: "manual", interactionMode: "build", providerOptions: {},
       });
-      await vi.waitFor(() => expect(savesStarted).toBe(true));
+      // The first save is the CLI's init event, which needs a real child process to start and answer the SDK
+      // handshake. Await it rather than poll it, because under full-suite load that start can exceed a poll budget.
+      await savesStarted.promise;
       await new Promise((resolve) => setTimeout(resolve, 2000));
       expect(finishedWriting).toBe(false);
       if (action !== "resume") {
