@@ -1,4 +1,14 @@
 import { z } from "zod";
+
+/** Live events are replaced by saved records; saved events retain their published form. */
+export const AgentEventDelivery = { Live: "live", Saved: "saved" } as const;
+export type AgentEventDelivery = (typeof AgentEventDelivery)[keyof typeof AgentEventDelivery];
+
+/** Classifies transient stream fragments independently of the provider rollout. */
+export function agentEventDelivery(event: Pick<AgentEvent, "type">): AgentEventDelivery {
+  return event.type === "textDelta" || event.type === "reasoningDelta" || event.type === "toolInputDelta"
+    ? AgentEventDelivery.Live : AgentEventDelivery.Saved;
+}
 import { SystemNoticeMetadataSchema } from "../models/message.js";
 import { HtmlVisualSchema } from "../models/html-visual.js";
 import { lazySchema } from "../utils/lazySchema.js";

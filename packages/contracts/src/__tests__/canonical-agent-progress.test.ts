@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { agentEventDelivery, AgentEventType } from "../events/agent-event.js";
 import { AcceptedCanonicalAgentEventEnvelopeSchema } from "../compat/agent-model.js";
 import { CanonicalAgentProgressFrameSchema, CanonicalAgentProgressRecoverySchema } from "../models/canonical-agent-progress.js";
 
@@ -12,6 +13,14 @@ function event(sequence = 1) {
 }
 
 describe("canonical accepted/saved progress contract", () => {
+  it("classifies only stream fragments as live and rejects publication identity on live events", () => {
+    expect(Object.values(AgentEventType).filter((type) => agentEventDelivery({ type }) === "live"))
+      .toEqual(["textDelta", "reasoningDelta", "toolInputDelta"]);
+    const text = { type: "textDelta", threadId: "thread", delta: "Live" };
+    const frame = { phase: "live", threadId: "thread", epoch: "epoch", after: 2, liveSequence: 1, events: [text] };
+    expect(CanonicalAgentProgressFrameSchema().parse(frame)).toEqual(frame);
+    expect(CanonicalAgentProgressFrameSchema().safeParse({ ...frame, events: [{ ...text, publicationId: "1" }] }).success).toBe(false);
+  });
   it("accepts progress with no fabricated durable revision and rejects a durable field", () => {
     expect(AcceptedCanonicalAgentEventEnvelopeSchema.safeParse(event()).success).toBe(true);
     expect(AcceptedCanonicalAgentEventEnvelopeSchema.safeParse({ ...event(), durableRevision: 0 }).success).toBe(false);
