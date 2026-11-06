@@ -18,7 +18,14 @@ interface OwnedExecution {
 export class ExecutionMailboxOwner {
   private readonly active = new Map<string, OwnedExecution>();
 
-  constructor(private readonly scheduler: Scheduler) {}
+  /**
+   * @param onStartAbandoned Ends whatever a start may have saved under a lease this owner gave up without a
+   *   committed start. A begin can commit even when its reply fails, and once the lease is gone no retry can claim it.
+   */
+  constructor(
+    private readonly scheduler: Scheduler,
+    private readonly onStartAbandoned?: (execution: ExecutionIdentity, lease: ExecutionLease) => Promise<void>,
+  ) {}
 
   /** Start the exact execution on its assigned worker and wait for its durable receipt. */
   async start(input: {
@@ -44,7 +51,10 @@ export class ExecutionMailboxOwner {
       owner.started = true;
     } catch (error) {
       // A lost worker is reconciled by its coordinator. A rejected start did not create worker state.
-      if (this.scheduler.release(owner.execution, owner.lease)) this.active.delete(input.execution.threadId);
+      if (this.scheduler.release(owner.execution, owner.lease)) {
+        this.active.delete(input.execution.threadId);
+        await this.onStartAbandoned?.(owner.execution, owner.lease);
+      }
       throw error;
     }
   }

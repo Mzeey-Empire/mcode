@@ -1021,6 +1021,28 @@ describe("Copilot public factory", () => {
     await vi.waitFor(() => expect(replaySink.snapshot().events.at(-1)?.payload).toEqual(expect.objectContaining({ type: "item.recorded", item: expect.objectContaining({ payload: expect.objectContaining({ runtimeEvent: expect.objectContaining({ event: expect.objectContaining({ type: "ended" }) }) }) }) })));
   });
 
+  it("maps and submits a live text delta once when it replays after the session ID window evicted it", async () => {
+    sink = new DeterministicCanonicalSink({ maxEvents: 9_000, maxDiagnostics: 32 });
+    ports.events = sink;
+    const submitted: string[] = [];
+    const submit = sink.submit.bind(sink);
+    sink.submit = async (batch) => { submitted.push(...batch.events.map((event) => event.eventId)); return submit(batch); };
+    provider = createCopilotProvider({ configuration: { cliPath: "copilot", idleSessionTtlMs: 600_000 }, host: ports, copilot: { launch: { resolve: launch } } });
+    await provider.sendTurn(request());
+    const original: SessionEvent = { id: "original-delta", timestamp: "2026-10-02T10:00:00.000Z", parentId: null, ephemeral: true,
+      type: "assistant.message_delta", data: { messageId: "reply", deltaContent: "Hello" } };
+    session.handlers.forEach((handler) => handler(original));
+    for (let index = 0; index < 8_192; index += 1) {
+      session.emit({ type: "session.usage_info", data: { tokenLimit: 100_000, currentTokens: index, messagesLength: 1 } });
+      if (index % 100 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    session.handlers.forEach((handler) => handler(original));
+    session.emit({ type: "assistant.message", data: { messageId: "reply", content: "Hello" } });
+    await finish();
+    expect(submitted.filter((eventId) => eventId === "copilot:native:original-delta:textDelta")).toHaveLength(1);
+    expect(projections(sink).flatMap((event) => event.type === "textDelta" ? [event.delta] : []).join("")).toBe("Hello");
+  });
+
   it("preserves nested native agent identity without copying notification prompts", async () => {
     await provider.sendTurn(request());
     session.emit({ type: "system.notification", data: { content: "private notification", kind: { type: "agent_completed", agentId: "native-background-agent", agentType: "task", status: "completed", description: "private task", prompt: "private prompt" } } }, "agent-notification");
