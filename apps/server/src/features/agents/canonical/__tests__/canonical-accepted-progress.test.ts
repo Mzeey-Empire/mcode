@@ -501,6 +501,45 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(savedText()).toBe("prefix one two");
     });
 
+    it("checkpoints a Devin burst and stores every piece when the turn completes", async () => {
+      await begin("devin");
+      const routing = { ...execution, deliveryAttempt: 1 };
+      const publisher = new CanonicalLiveEventPublisher("unbounded", "devin", { submit: async (batch) => {
+        const reply = await send(++ordinal, { kind: "event", phase: batch.phase, nativeCursor: null, events: batch.events });
+        if (reply.result.kind !== "accepted") throw new Error(`Devin piece was not accepted: ${JSON.stringify(reply.result)}`);
+        return { commit: { outcome: "accepted", acceptedThrough: reply.result.acceptedThrough,
+          eventCount: batch.events.length, progressPosition: reply.result.progressPosition }, delivery: { ingress: "not-required" } };
+      } });
+      const inserts = countInserts();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const text = Array.from({ length: 200 }, (_, index) => `text-${index} `);
+      const reasoning = Array.from({ length: 200 }, (_, index) => `thought-${index} `);
+      for (const delta of text) {
+        publisher.publish(routing, providerRuntimeEvent({ type: "textDelta", threadId: execution.threadId,
+          turnExecutionId: execution.executionId, delta, isFinalResponse: true }), []);
+      }
+      for (const delta of reasoning) {
+        publisher.publish(routing, providerRuntimeEvent({ type: "reasoningDelta", threadId: execution.threadId,
+          turnExecutionId: execution.executionId, delta, reasoningItemId: "reasoning-block" }), []);
+      }
+      await publisher.waitForExecution(routing);
+      await progress.waitForSaved(execution.threadId);
+      const burstRows = inserts().canonical_agent_events;
+      console.log(`Devin burst: 400 pieces, ${burstRows} event rows`);
+      expect(burstRows).toBe(2);
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("devin", 1000, "turnComplete")], terminalInput: { ...execution,
+          providerId: "devin", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      const canonical = new CanonicalAgentStore(db, () => {});
+      expect(canonical.loadTurn(execution.turnId)?.status).toBe("Completed");
+      expect(savedText()).toBe(`prefix${text.join("")}`);
+      const thought = db.prepare(`SELECT json_extract(envelope_json, '$.payload.item.payload.narrative.record.text') AS text
+        FROM canonical_agent_events WHERE thread_id = ?
+        AND json_extract(envelope_json, '$.payload.item.payload.projection') = 'narrativeRecovery'`).all(execution.threadId);
+      expect(thought).toEqual([{ text: reasoning.join("") }]);
+    });
+
     it("saves a Codex stream per checkpoint, then its completion suffix and the next tool in order", async () => {
       await begin("codex");
       const routing = { ...execution, deliveryAttempt: 1 };

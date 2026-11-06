@@ -11,9 +11,9 @@ const RESUME_BELOW = 128;
 /**
  * Providers whose text, reasoning and tool-input fragments are shown live and checkpointed instead of saved
  * one by one. Live delivery rolls out one provider at a time so each provider's save cost and crash bound are
- * measured alone; Cursor, Devin, Copilot and OpenCode keep saving every fragment until theirs are proven.
+ * measured alone; Cursor, Copilot and OpenCode keep saving every fragment until theirs are proven.
  */
-const LIVE_DELIVERY_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude"]);
+const LIVE_DELIVERY_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "devin"]);
 /**
  * Native replays arrive close to their original, so dedupe needs only recent identities.
  * A long Claude turn streams one identity per thinking or text delta, far past this window.
@@ -294,7 +294,8 @@ export class CanonicalLiveEventPublisher {
       ...(native ? {} : { sourceSequence }),
       providerTimestamp: timestamp,
       ...volatileIngestClass(runtimeEvent.event),
-      ...(LIVE_DELIVERY_PROVIDERS.has(this.providerId) && agentEventDelivery(runtimeEvent.event) === "live" ? { delivery: "live" as const } : {}),
+      ...(LIVE_DELIVERY_PROVIDERS.has(this.providerId) && !isChildRoutedRuntimeEvent(runtimeEvent.extension)
+        && agentEventDelivery(runtimeEvent.event) === "live" ? { delivery: "live" as const } : {}),
       payload: {
         type: "item.recorded",
         item: {
