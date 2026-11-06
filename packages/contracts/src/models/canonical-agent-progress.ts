@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentEventSchema } from "../events/agent-event.js";
+import { AgentEventDelivery, agentEventDelivery, AgentEventSchema } from "../events/agent-event.js";
 import { AcceptedCanonicalAgentEventEnvelopeSchema, CanonicalAgentEventEnvelopeSchema } from "../compat/agent-model.js";
 import { CanonicalAgentReconnectRecoverySchema, CanonicalAgentRevisionSchema } from "./canonical-agent-reconnect.js";
 import { lazySchema } from "../utils/lazySchema.js";
@@ -16,12 +16,16 @@ const identity = {
 };
 const sequence = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 
-/** Live events are bare provider events; a publication id would claim a saved identity they do not have. */
+/**
+ * Live events are bare provider events; a publication id would claim a saved identity they do not have.
+ * Only stream fragments may be live: any other event is shown once and never saved, so it would be lost.
+ */
 const liveEvent = lazySchema(() => z.unknown().superRefine((event, context) => {
   if (typeof event === "object" && event !== null && "publicationId" in event) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "Live events cannot have publication ids" });
   }
-}).pipe(AgentEventSchema()));
+}).pipe(AgentEventSchema()).refine((event) => agentEventDelivery(event) === AgentEventDelivery.Live,
+  { message: "Only text, reasoning and tool-input fragments can be live" }));
 
 const recoveryObject = lazySchema(() => z.object({
   phase: z.literal("recovery"),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentEventDelivery, AgentEventType } from "../events/agent-event.js";
+import { agentEventDelivery, AgentEventSchema, AgentEventType } from "../events/agent-event.js";
 import { AcceptedCanonicalAgentEventEnvelopeSchema } from "../compat/agent-model.js";
 import { CanonicalAgentProgressFrameSchema, CanonicalAgentProgressRecoverySchema } from "../models/canonical-agent-progress.js";
 
@@ -20,6 +20,18 @@ describe("canonical accepted/saved progress contract", () => {
     const frame = { phase: "live", threadId: "thread", epoch: "epoch", after: 2, liveSequence: 1, events: [text] };
     expect(CanonicalAgentProgressFrameSchema().parse(frame)).toEqual(frame);
     expect(CanonicalAgentProgressFrameSchema().safeParse({ ...frame, events: [{ ...text, publicationId: "1" }] }).success).toBe(false);
+  });
+  it("refuses a valid saved event in a live frame, so it cannot be shown and then lost", () => {
+    const fragments = [{ type: "textDelta", threadId: "thread", delta: "Live" },
+      { type: "reasoningDelta", threadId: "thread", delta: "Thought" }, { type: "toolInputDelta", threadId: "thread", partialJson: "{" }];
+    const saved = [{ type: "turnStarted", threadId: "thread" },
+      { type: "toolUse", threadId: "thread", toolCallId: "tool", toolName: "Read", toolInput: {} }];
+    const live = (events: unknown[]) => ({ phase: "live", threadId: "thread", epoch: "epoch", after: 2, liveSequence: 1, events });
+    expect(saved.every((value) => AgentEventSchema().safeParse(value).success)).toBe(true);
+    expect(CanonicalAgentProgressFrameSchema().safeParse(live(fragments)).success).toBe(true);
+    for (const value of saved) {
+      expect(CanonicalAgentProgressFrameSchema().safeParse(live([fragments[0], value])).success).toBe(false);
+    }
   });
   it("accepts progress with no fabricated durable revision and rejects a durable field", () => {
     expect(AcceptedCanonicalAgentEventEnvelopeSchema.safeParse(event()).success).toBe(true);
