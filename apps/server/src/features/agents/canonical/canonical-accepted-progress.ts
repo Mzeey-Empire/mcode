@@ -980,8 +980,7 @@ export class CanonicalAcceptedProgress {
   private evictSavedThread(): void {
     if (this.threads.size < MAX_OWNERS) return;
     for (const [id, thread] of this.threads) {
-      if (!thread.commandPending && !thread.completingSave && thread.owner.recoveryCut().retained.length === 0
-        && !Object.values(thread.state.turns).some((turn) => turn.status === "Running" || turn.status === "Pending")) {
+      if (ownerIdle(thread)) {
         this.savingPublisher.flushThread(id);
         this.threads.delete(id); return;
       }
@@ -1108,12 +1107,7 @@ export class CanonicalAcceptedProgress {
   }
 
   private releaseSavedThread(threadId: string, thread: ProgressThread): void {
-    // A saved terminal does not end the execution: its worker can still send post-terminal events, and they
-    // need this owner's head. Only the worker's release proves that nothing more can arrive for the head.
-    const headLive = thread.head !== undefined && thread.releasedExecutionId !== thread.head.execution.executionId;
-    if (headLive || this.threads.get(threadId) !== thread || thread.commandPending || thread.completingSave
-      || thread.owner.recoveryCut().retained.length > 0
-      || Object.values(thread.state.turns).some((turn) => turn.status === "Running" || turn.status === "Pending")) return;
+    if (this.threads.get(threadId) !== thread || !ownerIdle(thread)) return;
     this.savingPublisher.flushThread(threadId);
     this.threads.delete(threadId);
   }
@@ -1477,6 +1471,15 @@ function operationInputHash(operation: ExecutionSemanticOperation): string {
   hash.update(`:narrative:${narrative.length}:[`);
   for (const item of narrative) hash.update(JSON.stringify(item)).update(",");
   return hash.update("]").digest("hex");
+}
+
+/** Nothing accepted, saving, or still to arrive needs this owner, so release and eviction may drop it. */
+function ownerIdle(thread: ProgressThread): boolean {
+  // A saved terminal does not end the execution: its worker can still send post-terminal events, and they
+  // need this owner's head. Only the worker's release proves that nothing more can arrive for the head.
+  const headLive = thread.head !== undefined && thread.releasedExecutionId !== thread.head.execution.executionId;
+  return !headLive && !thread.commandPending && !thread.completingSave && thread.owner.recoveryCut().retained.length === 0
+    && !Object.values(thread.state.turns).some((turn) => turn.status === "Running" || turn.status === "Pending");
 }
 
 function requireExecutionHead(thread: ProgressThread, operation: ExecutionSemanticOperation): AcceptedExecutionState {

@@ -567,7 +567,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       }
     });
 
-    it.each(["close", "discardThread", "evictSavedThread"])("flushes a final durable on %s", async (action) => {
+    it.each(["close", "discardThread", "release"])("flushes a final durable on %s", async (action) => {
       await send(1, start("codex"));
       await send(2, { kind: "event", phase: "running", nativeCursor: null,
         events: [draft("codex", 1, "turnComplete")], terminalInput: { ...execution, providerId: "codex", providerIdentities: [],
@@ -576,14 +576,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(pushes.saving).toEqual([]);
       if (action === "close") await progress.close();
       else if (action === "discardThread") await progress.discardThread(execution.threadId);
-      else {
-        for (let index = 0; index < 8; index += 1) {
-          const threadId = `extra-thread-${index}`;
-          insertThread(threadId);
-          await progress.beforeDurableCommand(threadId);
-          progress.cancelDurableCommand(threadId);
-        }
-      }
+      else expect((await send(3, { kind: "release" })).result.kind).toBe("released");
       expect(pushes.saving).toEqual([{ threadId: execution.threadId, executionId: execution.executionId, mode: "durable" }]);
       vi.advanceTimersByTime(1_000);
       expect(pushes.saving).toHaveLength(1);
@@ -1805,6 +1798,28 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(progress.depth().owners).toBe(1);
     expect((await send(5, { kind: "release" })).result.kind).toBe("released");
     expect(progress.depth().owners).toBe(0);
+  });
+
+  it("keeps a finished turn's owner through owner eviction until its worker releases the execution", async () => {
+    await send(1, start("codex"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "turnComplete")],
+      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const busy = Array.from({ length: 8 }, (_, index) => ({ threadId: `busy-thread-${index}`, turnId: `busy-turn-${index}`,
+      executionId: `00000000-0000-4000-8000-${String(index + 2000).padStart(12, "0")}` }));
+    for (const [index, other] of busy.entries()) {
+      insertThread(other.threadId);
+      const started = send(1, start("codex", other), other, { ...lease, leaseId: `busy-lease-${index}` });
+      if (index < 7) expect((await started).result.kind).toBe("committed");
+      else await expect(started).rejects.toThrow("Live progress owner capacity is full");
+    }
+
+    const late = await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 2, "ended", { outcome: "completed" })] });
+    expect(late.result.kind).toBe("accepted");
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect((await send(4, { kind: "release" })).result.kind).toBe("released");
+    expect(progress.depth().owners).toBe(7);
   });
 
   describe("after a released turn", () => {
