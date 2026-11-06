@@ -1,4 +1,9 @@
 import "reflect-metadata";
+import * as NodeFS from "node:fs";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts/models/canonical-agent-progress";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { container } from "tsyringe";
@@ -42,6 +47,7 @@ function publishedEvents() {
 
 
 const createdServices: AgentService[] = [];
+const roots: string[] = [];
 
 /**
  * Build an AgentService with a Claude-shaped provider stub that records
@@ -60,7 +66,11 @@ async function buildService(database: OwnedTestDatabase) {
   const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 
   const gitService = {
-    resolveWorkingDir: vi.fn(() => process.cwd()),
+    resolveWorkingDir: vi.fn(() => {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
+      roots.push(root);
+      return root;
+    }),
     listWorktrees: vi.fn(() => []),
   } as unknown as GitService;
 
@@ -224,6 +234,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   afterEach(async () => {
     try { await Promise.all(createdServices.splice(0).map((service) => drainAgentServicePersistenceForTest(service))); }
     finally { await database.close(); }
+    await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
   });
 
   it("/goal <condition> installs the goal AND invokes the provider with a directive payload", async () => {

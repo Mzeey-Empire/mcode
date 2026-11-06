@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { startupEnvironmentFixture } from "../../../projects/environment/testing/startup-environment-fixture.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as NodeEvents from "node:events";
+import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -52,6 +53,7 @@ import { WorkspaceEnvironmentService } from "../../../projects/environment/works
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn(), subscribedThreadIds: () => new Set<string>() }));
 
 const THREAD_ID = "thread-cleanup-test";
+const roots: string[] = [];
 
 function activeExecutionId(service: AgentService, threadId = THREAD_ID): string {
   const executionId = service.runtimeAccess().runtimeSnapshots()
@@ -157,7 +159,11 @@ async function buildService(
   (providerEmitter as any).stopSession = vi.fn(() => Promise.resolve());
 
   const gitService = {
-    resolveWorkingDir: vi.fn(() => cwd),
+    resolveWorkingDir: vi.fn(() => {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
+      roots.push(root);
+      return root;
+    }),
     listWorktrees: vi.fn(() => []),
   } as unknown as GitService;
 
@@ -285,7 +291,10 @@ async function buildService(
   };
 }
 
-afterEach(closeAgentStorageTestDatabases);
+afterEach(async () => {
+  await closeAgentStorageTestDatabases();
+  await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+});
 
 describe("AgentService turn cleanup through the production execution worker", { timeout: 30_000 }, () => {
   beforeEach(() => {
@@ -1012,7 +1021,11 @@ describe("AgentService Ended finalization through the production execution worke
       shutdown: vi.fn(),
     } as unknown as IProviderRegistry;
     const gitService = {
-      resolveWorkingDir: vi.fn(() => process.cwd()),
+      resolveWorkingDir: vi.fn(() => {
+        const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
+        roots.push(root);
+        return root;
+      }),
       listWorktrees: vi.fn(() => []),
     } as unknown as GitService;
     const attachmentService = {
