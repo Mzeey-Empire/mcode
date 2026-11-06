@@ -4,6 +4,7 @@ import type { PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import { LruCache } from "@/lib/lru-cache";
 import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "./threadStore";
 import { stableAgentEventPublications } from "./thread-store/stable-agent-event-publications";
+import { shownLiveFrames } from "./thread-store/shown-live-frames";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import {
   createEmptyThreadRecord,
@@ -45,6 +46,7 @@ export function resetThreadStoreForTests(opts?: {
   recentlyAnsweredPlanMessageIds?: Set<string>;
 }) {
   stableAgentEventPublications.reset();
+  shownLiveFrames.reset();
   useApprovalStore.setState({ approvals: [] });
   const baseline = createEmptyThreadStoreState();
   useThreadStore.setState({

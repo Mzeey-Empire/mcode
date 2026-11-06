@@ -97,6 +97,7 @@ import {
 import {
   applyCanonicalPushEvents,
   applyCanonicalReconnectRecovery,
+  type CanonicalAgentReplica,
 } from "./canonical-agent-replica";
 import { applyCanonicalProgressFrame, type CanonicalProgressUpdate } from "./canonical-agent-progress";
 import { CanonicalProgressBuffer } from "./canonical-progress-buffer";
@@ -110,6 +111,7 @@ import {
 } from "./thread-store/agent-event-preflight";
 import { stableAgentEventPublications } from "./thread-store/stable-agent-event-publications";
 import type { CanonicalPublicationIdentity } from "./thread-store/stable-agent-event-publications";
+import { shownLiveFrames } from "./thread-store/shown-live-frames";
 import {
   hydrateRunningThreads as hydrateRunningThreadRecords,
   transferThreadRuntime as transferOptimisticThreadRuntime,
@@ -1281,6 +1283,21 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const lostExecutionAwaitingEndingByThread = new Map<string, string>();
   const persistedExecutionByThread = new Map<string, string>();
   const MAX_DEFERRED_NARRATIVE_BYTES = 256 * 1024;
+
+  /**
+   * Live pieces stream like provider events; they move no saved position, so nothing is projected or reloaded.
+   * A resent or older frame is dropped first, because showing it again would append its text twice.
+   */
+  const showLiveCanonicalProgress = (frame: Extract<CanonicalAgentProgressFrame, { phase: "live" }>, previous: CanonicalAgentReplica): void => {
+    if (!shownLiveFrames.isNew(frame)) return;
+    const update = applyCanonicalProgressFrame(previous, frame);
+    if (update.replica !== previous) {
+      set((state) => ({ records: patchThreadRecord(state.records, frame.threadId, { canonicalAgent: update.replica }) }));
+    }
+    if (!update.liveEvents) return;
+    shownLiveFrames.remember(frame);
+    for (const event of update.liveEvents) get().handleAgentEvent(event);
+  };
 
   const getRec = (threadId: string) => getThreadRecord(get().records, threadId);
 
@@ -3518,6 +3535,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const current = get();
     if (!canReceiveCanonicalProgress(current, frame.threadId, (threadId) => conversationResidency.isDisplayConversationLeased(threadId))) return;
     const previous = getThreadRecord(current.records, frame.threadId);
+    if (frame.phase === "live") {
+      showLiveCanonicalProgress(frame, previous.canonicalAgent);
+      return;
+    }
     const update = applyCanonicalProgressFrame(previous.canonicalAgent, frame);
     if (update.replica === previous.canonicalAgent) return;
     set((state) => ({ records: patchThreadRecord(state.records, frame.threadId, { canonicalAgent: update.replica }) }));
@@ -4183,6 +4204,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const retainedOwners = new Set([...get().records].filter(([id]) => id !== threadId)
       .flatMap(([, record]) => record.canonicalAgent.ownerThreadId ? [record.canonicalAgent.ownerThreadId] : []));
     stableAgentEventPublications.forgetThread(threadId, retainedOwners);
+    shownLiveFrames.forget(threadId);
     conversationResidency.invalidateConversation(threadId);
     clearNarrativeLoadState(threadId);
     clearDequeueTimer(threadId);

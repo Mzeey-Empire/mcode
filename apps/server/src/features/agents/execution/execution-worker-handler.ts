@@ -1,4 +1,5 @@
 import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { canDeliverLive } from "../canonical/accepted-live-delivery.js";
 import { type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { resolveBrowserNarrativeTool } from "@mcode/contracts/models/browser-narrative";
 import { type AgentProgressPosition } from "@mcode/contracts/compat/agent-model";
@@ -90,6 +91,7 @@ export interface TerminalProviderEventInput {
 
 /** One complete semantic mutation. The single writer decides its SQL transaction. */
 export interface ExecutionSemanticOperation {
+  readonly delivery?: "live";
   readonly operationId: string;
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
@@ -908,6 +910,9 @@ function operationFor(
     lease: request.lease,
     ordinal: request.ordinal,
     mutation,
+    ...(request.command.kind === "event" && !request.command.terminalInput
+      && !request.command.capturedFileObservation && !request.command.frozenFileEvidence
+      && canDeliverLive(request.command.events, request.command.parentLive) ? { delivery: "live" as const } : {}),
     ...(livePublication ? { livePublication } : {}),
   };
 }

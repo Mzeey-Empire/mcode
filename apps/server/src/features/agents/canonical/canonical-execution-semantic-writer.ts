@@ -222,8 +222,13 @@ export interface ContentReplacedOperation extends Pick<ExecutionSemanticOperatio
   };
 }
 
-/** An accepted batch's compatibility work: the original operation, or its content replacement. */
-export type AcceptedCompatibilityOperation = ExecutionSemanticOperation | ContentReplacedOperation;
+/**
+ * An accepted batch's compatibility work: the original operation, or its content replacement.
+ * `afterOrdinal` is the saved ordinal it follows. Live fragments take worker ordinals but are never saved
+ * one by one, so the head jumps over them here; without it, the operation must follow its ordinal directly.
+ */
+export type AcceptedCompatibilityOperation = (ExecutionSemanticOperation | ContentReplacedOperation)
+  & { readonly afterOrdinal?: number };
 
 /** The fields that place an operation in its execution's ordered, leased stream. */
 type OperationPosition = Pick<ExecutionSemanticOperation, "execution" | "lease" | "ordinal">;
@@ -390,7 +395,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (!validSemanticMutationInput(operation)) throw new AcceptedContentRejected("semantic operation input is invalid");
     if (!validLivePublication(operation)) throw new AcceptedContentRejected("live publication is invalid or exceeds its size limit");
     const head = operation.mutation.kind === "post-terminal-event"
-      ? this.requireTerminalHead(operation) : this.requireNextHead(operation);
+      ? this.requireTerminalHead(operation) : this.requireNextHead(operation, operation.afterOrdinal);
     const live = parentLiveOperation(operation);
     if (live) {
       this.applyLiveFeatureEffects(live, head, false);
@@ -401,10 +406,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   }
 
   /** Claim the rejected operation's ordinal; a replaced finish still records the turn end, without its narrative. */
-  private applyContentReplaced(operation: ContentReplacedOperation): void {
+  private applyContentReplaced(operation: ContentReplacedOperation & { readonly afterOrdinal?: number }): void {
     if (!validContentReplaced(operation)) throw new Error("Invalid replaced accepted semantic operation");
     const { mutation } = operation;
-    const head = mutation.postTerminal ? this.requireTerminalHead(operation) : this.requireNextHead(operation);
+    const head = mutation.postTerminal ? this.requireTerminalHead(operation) : this.requireNextHead(operation, operation.afterOrdinal);
     const next = mutation.finish ? this.applyAcceptedFinish(head, { kind: "finish-live-event", ...mutation.finish }) : head;
     this.storeHead({ ...next, ordinal: operation.ordinal });
   }
@@ -1040,9 +1045,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       && validPublicationProvider(operation, head.providerId));
   }
 
-  private requireNextHead(operation: OperationPosition): SemanticHead {
+  private requireNextHead(operation: OperationPosition, afterOrdinal?: number): SemanticHead {
     const head = this.loadHead(operation.execution.executionId);
-    if (!head || !nextHead(head, operation)) throw new SemanticConflict();
+    if (!head || !nextHead(head, operation, afterOrdinal)) throw new SemanticConflict();
     return head;
   }
 
@@ -1914,12 +1919,14 @@ function normalizeTerminalOutcome(outcome: TurnOutcome): Exclude<TurnOutcome, "c
   return outcome === "cancelled" ? "interrupted" : outcome;
 }
 
-function nextHead(head: SemanticHead, operation: OperationPosition): boolean {
+function nextHead(head: SemanticHead, operation: OperationPosition, afterOrdinal = operation.ordinal - 1): boolean {
   const lease = head.lease;
   const candidate = operation.lease;
   return !head.terminal && head.execution.threadId === operation.execution.threadId
     && head.execution.turnId === operation.execution.turnId
-    && head.ordinal + 1 === operation.ordinal
+    // Trusts the accepted owner to name the last saved ordinal it admitted: the stored head proves that one was
+    // written, but not that the ordinals skipped since were live. Only stream fragments can be live (acceptsLive).
+    && Number.isSafeInteger(afterOrdinal) && head.ordinal === afterOrdinal && afterOrdinal < operation.ordinal
     && sameLease(lease, candidate);
 }
 

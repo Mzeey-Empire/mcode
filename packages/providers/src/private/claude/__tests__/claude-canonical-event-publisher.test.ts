@@ -21,6 +21,22 @@ function createSink(submit: ProviderEventSinkPort["submit"]): ProviderEventSinkP
 const receipt: ProviderEventSubmissionReceipt = { commit: { outcome: "committed", acceptedThrough: 1, durableThrough: 1, conversationRevision: 1, rosterRevision: 0, eventCount: 1 }, delivery: { ingress: "queued" } };
 
 describe("ClaudeCanonicalEventPublisher", () => {
+  it("labels text, reasoning and tool input fragments, leaving boundaries saved", async () => {
+    const deliveries: (string | undefined)[] = [];
+    const publisher = new ClaudeCanonicalEventPublisher(createSink(async (batch) => {
+      deliveries.push(...batch.events.map((draft) => draft.delivery));
+      return receipt;
+    }));
+    const events: AgentEvent[] = [
+      { type: "textDelta", threadId: routing.threadId, delta: "text" },
+      { type: "reasoningDelta", threadId: routing.threadId, delta: "thought", reasoningItemId: "reason" },
+      { type: "toolInputDelta", threadId: routing.threadId, partialJson: "{}" },
+      { type: "turnStarted", threadId: routing.threadId },
+    ];
+    for (const event of events) publisher.publish(routing, providerRuntimeEvent(event), []);
+    await publisher.waitForExecution(routing);
+    expect(deliveries).toEqual(["live", "live", "live", undefined]);
+  });
   it("binds a native plan to exactly one assistant message in its own attempt", async () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const publisher = new ClaudeCanonicalEventPublisher(createSink(submit));
