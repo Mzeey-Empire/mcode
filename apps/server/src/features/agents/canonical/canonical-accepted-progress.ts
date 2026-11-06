@@ -72,7 +72,15 @@ export interface AcceptedSteerMessage {
   readonly systemNotice?: Message["systemNotice"];
 }
 
-const MAX_OWNERS = 8;
+/** Live owners kept before admission drops idle ones. A send above it is still admitted, never refused. */
+const SOFT_OWNER_LIMIT = 8;
+/**
+ * Above this, admission also drops owners whose terminal is saved but whose worker release never arrived, such as
+ * a turn whose provider drain hangs; late events for such a turn are then rejected. 32 is four times the soft limit:
+ * a release normally lands moments after its terminal, so an owner still waiting behind 31 newer ones is stuck, and
+ * each owner holds its whole thread's state in memory twice.
+ */
+const HARD_OWNER_CEILING = 32;
 const LOCAL_LIMITS = { maxEvents: 8_192, maxBytes: 16 * 1024 * 1024,
   reservedControlEvents: 4_096, reservedControlBytes: 8 * 1024 * 1024 };
 
@@ -140,8 +148,8 @@ export class CanonicalAcceptedProgress {
   private liveSequence = 0;
   private readonly threads = new Map<string, ProgressThread>();
   private readonly budget = new BoundedProgressRetention({ maxEvents: 98_304, maxBytes: 96 * 1024 * 1024,
-    reservedControlEvents: MAX_OWNERS * LOCAL_LIMITS.reservedControlEvents,
-    reservedControlBytes: MAX_OWNERS * LOCAL_LIMITS.reservedControlBytes });
+    reservedControlEvents: SOFT_OWNER_LIMIT * LOCAL_LIMITS.reservedControlEvents,
+    reservedControlBytes: SOFT_OWNER_LIMIT * LOCAL_LIMITS.reservedControlBytes });
   private readonly saves: AcceptedSaveScheduler<AcceptedExecutionWriteIntent>;
   private readonly savingPublisher: SavingStatusPublisher;
   private onPermanentFailure: ((execution: ExecutionIdentity, error: Error) => Promise<void>) | undefined;
@@ -961,7 +969,8 @@ export class CanonicalAcceptedProgress {
     if (this.deletingThreads.has(threadId)) throw new Error("Accepted conversation deletion is in progress");
     const existing = this.threads.get(threadId);
     if (existing) return existing;
-    this.evictIdleOwners();
+    this.evictOwners(SOFT_OWNER_LIMIT, ownerIdle);
+    this.evictOwners(HARD_OWNER_CEILING, ownerSettled);
     const recovery = this.canonical.recoverThread(threadId, {
       conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER });
     if (recovery.mode !== "snapshot") throw new Error("Canonical progress seed requires a snapshot");
@@ -977,15 +986,15 @@ export class CanonicalAcceptedProgress {
   }
 
   /**
-   * Make room for a new owner by dropping idle ones. The limit is soft: a send must never fail on it, so when every
-   * owner still has live work the new owner is admitted over the limit. Owners with an execution leave on release;
-   * this sweep bounds the ones nothing releases, such as owners seeded by a durable command that started no turn.
-   * Memory for unsaved progress is bounded separately by the shared retention budget.
+   * Make room for a new owner by dropping the oldest owners `evictable` allows until fewer than `limit` remain. A send
+   * must never fail on a limit, so when too few owners are evictable the new owner is admitted over it. Owners with
+   * an execution leave on release; this sweep bounds the ones nothing releases, such as owners seeded by a durable
+   * command that started no turn. Memory for unsaved progress is bounded separately by the shared retention budget.
    */
-  private evictIdleOwners(): void {
+  private evictOwners(limit: number, evictable: (thread: ProgressThread) => boolean): void {
     for (const [id, thread] of this.threads) {
-      if (this.threads.size < MAX_OWNERS) return;
-      if (!ownerIdle(thread)) continue;
+      if (this.threads.size < limit) return;
+      if (!evictable(thread)) continue;
       this.savingPublisher.flushThread(id);
       this.threads.delete(id);
     }
@@ -1482,7 +1491,12 @@ function ownerIdle(thread: ProgressThread): boolean {
   // A saved terminal does not end the execution: its worker can still send post-terminal events, and they
   // need this owner's head. Only the worker's release proves that nothing more can arrive for the head.
   const headLive = thread.head !== undefined && thread.releasedExecutionId !== thread.head.execution.executionId;
-  return !headLive && !thread.commandPending && !thread.completingSave && thread.owner.recoveryCut().retained.length === 0
+  return !headLive && ownerSettled(thread);
+}
+
+/** Everything this owner accepted is saved and no turn is running; only a worker release may still be missing. */
+function ownerSettled(thread: ProgressThread): boolean {
+  return !thread.commandPending && !thread.completingSave && thread.owner.recoveryCut().retained.length === 0
     && !Object.values(thread.state.turns).some((turn) => turn.status === "Running" || turn.status === "Pending");
 }
 

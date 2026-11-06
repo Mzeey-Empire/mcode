@@ -1838,6 +1838,32 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(progress.depth().owners).toBe(8);
   });
 
+  it("keeps owners at the hard ceiling when 40 saved terminals never get their release, without evicting a running turn", async () => {
+    const turnOf = (index: number) => ({
+      identity: { threadId: `unreleased-thread-${index}`, turnId: `unreleased-turn-${index}`,
+        executionId: `00000000-0000-4000-8000-${String(index + 3000).padStart(12, "0")}` },
+      lease: { ...lease, leaseId: `unreleased-lease-${index}` } });
+    const running = turnOf(0);
+    insertThread(running.identity.threadId);
+    await send(1, start("codex", running.identity), running.identity, running.lease);
+    for (let index = 1; index <= 40; index += 1) {
+      const turn = turnOf(index);
+      insertThread(turn.identity.threadId);
+      await send(1, start("codex", turn.identity), turn.identity, turn.lease);
+      await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "turnComplete", {}, turn.identity)],
+        terminalInput: { ...turn.identity, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } },
+      turn.identity, turn.lease);
+      await expect.poll(() => progress.depth().pending).toBe(0);
+    }
+
+    expect((await send(1, start("codex"))).result.kind).toBe("committed");
+    expect(progress.depth().owners).toBeLessThanOrEqual(32);
+    const stillRunning = await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: "still here", isFinalResponse: true }, running.identity)] },
+    running.identity, running.lease);
+    expect(stillRunning.result.kind).toBe("accepted");
+  });
+
   it("interrupts and releases a start whose reply fails after its durable begin committed", async () => {
     const transact = writer.transactSemantic.bind(writer);
     vi.spyOn(writer, "transactSemantic").mockImplementationOnce(async (...args) => {
