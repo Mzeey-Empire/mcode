@@ -98,9 +98,9 @@ function readOwnRecording(segments: readonly string[], run: string): DiagRecord[
   const records: DiagRecord[] = [];
   const keptLines: string[] = [];
   let newest = -Infinity;
-  // Built the first time a number repeats or goes backwards. A rewrite causes that, and so can a
-  // run marker. `keptLines` holds every kept line either way, so this read costs more memory
-  // than a shared file's even when nothing was rewritten.
+  // Built the first time a number repeats or goes backwards. A rewrite causes that, and so does a
+  // thread's first event: it is numbered before the run marker written ahead of it. `keptLines`
+  // holds every kept line either way, so this read costs more memory than a shared file's.
   let seen: Set<string> | undefined;
   for (const file of segments) {
     for (const line of linesOf(file)) {
