@@ -23,7 +23,7 @@ export interface ConversationResidencyDeps {
   /** Read the selected transcript without making residency own selection. */
   getSelectedConversationId?: () => string | null;
   deactivateConversation: () => void;
-  retainInactiveConversation: (threadId: string) => void;
+  retainInactiveConversation: (threadId: string, settledExecutionId?: string) => void;
   invalidateConversation: (threadId: string) => void;
   synchronizeConversation: (threadId: string) => void;
   mergeCachedFileChanges: (threadId: string, filesChanged: Record<string, string[]>) => void;
@@ -199,8 +199,8 @@ export class ConversationResidency {
   }
 
   /** Retain a completed background conversation through the bounded cache. */
-  retainInactiveConversation(threadId: string): void {
-    this.deps.retainInactiveConversation(threadId);
+  retainInactiveConversation(threadId: string, settledExecutionId?: string): void {
+    this.deps.retainInactiveConversation(threadId, settledExecutionId);
   }
 
   /** Invalidate stale conversation cache state before an authoritative mutation. */

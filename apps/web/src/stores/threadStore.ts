@@ -69,6 +69,9 @@ import {
   selectConversationWindow,
 } from "@/features/conversation/hydration/conversation-memory-policy";
 import {
+  cacheRecord,
+  getCachedRecord,
+  projectConversationCacheState,
   evictCachedRecord,
   setActiveConversation,
   setConversationTransientTextBytes,
@@ -87,6 +90,7 @@ import {
   type ThreadSettings,
   providerNoticeSessionId,
   getThreadRecord,
+  createEmptyThreadRecord,
   patchThreadRecord,
   deleteThreadRecord,
 } from "./thread-record";
@@ -951,6 +955,24 @@ function drainedSavingEpoch(frame: CanonicalAgentProgressFrame, previous: Thread
   return frame.phase === "recovery" && frame.loss === "none" && previousEpoch !== frame.epoch ? previousEpoch : undefined;
 }
 
+function hasDurablySettledExecution(threadId: string, record: ThreadRecord, executionId: string): boolean {
+  const turn = getCanonicalRuntimeTurn(threadId, record);
+  if (!turn || turn.executionId !== executionId || turn.status === "Pending" || turn.status === "Running") return false;
+  const replica = record.canonicalAgent;
+  const progress = replica.progress;
+  return !replica.recoveryRequired && progress !== null && progress.savedThrough === progress.acceptedThrough;
+}
+
+function hasPendingConversationResults(record: ThreadRecord): boolean {
+  return record.optimisticUserMessageId !== null
+    || record.planQuestionsStatus === "pending"
+    || record.pendingTurnPersistMessageIds.length > 0
+    || record.savingStatus !== null
+    || record.savingStatuses.length > 0
+    || record.pendingSavingStatuses.length > 0
+    || record.toolCalls.some((tool) => !tool.isComplete);
+}
+
 /**
  * Resolve the client-side message id that should receive a `turn.persisted`
  * payload. Never uses {@link ThreadRecord.currentTurnMessageId} alone because
@@ -1257,6 +1279,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   >();
   const deferredNarrativeGenerations = new Map<string, number>();
   const lostExecutionAwaitingEndingByThread = new Map<string, string>();
+  const persistedExecutionByThread = new Map<string, string>();
   const MAX_DEFERRED_NARRATIVE_BYTES = 256 * 1024;
 
   const getRec = (threadId: string) => getThreadRecord(get().records, threadId);
@@ -1541,7 +1564,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       if (current) invalidateDeferredNarrativeEvents(current);
       threadHydrator.deactivate();
     },
-    retainInactiveConversation: (threadId) => threadHydrator.retainInactiveConversation(threadId),
+    retainInactiveConversation: (threadId, executionId) => {
+      threadHydrator.retainInactiveConversation(threadId, executionId);
+      persistedExecutionByThread.delete(threadId);
+    },
     invalidateConversation: (threadId) => threadHydrator.invalidateConversation(threadId),
     synchronizeConversation: (threadId) => threadHydrator.synchronizeConversation(threadId),
     mergeCachedFileChanges: (threadId, filesChanged) =>
@@ -1840,6 +1866,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const record = getRec(event.threadId);
     const sameExecution = runtime.incomingExecutionId === undefined
       || record.turnExecutionId === runtime.incomingExecutionId;
+    if (!sameExecution) persistedExecutionByThread.delete(event.threadId);
     if (get().runningThreadIds.has(event.threadId) && sameExecution && record.fileEffectTurnId === fileEffectTurnId) return;
     clearStreamingTextUsage(event.threadId);
     useTaskStore.getState().prepareTaskBubbleForNewTurn(event.threadId);
@@ -3411,6 +3438,20 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     };
   };
 
+  const retireSettledConversation = (threadId: string, executionId: string | null | undefined): void => {
+    const record = get().records.get(threadId);
+    if (!record || !executionId || record.turnExecutionId !== executionId) return;
+    if (conversationResidency.isConversationVisible(threadId)) return;
+    if (!hasDurablySettledExecution(threadId, record, executionId)) return;
+    if (persistedExecutionByThread.get(threadId) !== executionId) return;
+    // Background tools and a lost provider can still deliver a result after terminal progress.
+    if (hasPendingConversationResults(record) || lostExecutionAwaitingEndingByThread.has(threadId)) return;
+    // Queued input starts the next turn here, and sending it clears the cached copy retirement relies on.
+    if (hasQueuedInput(threadId)) return;
+    invalidateDeferredNarrativeEvents(threadId);
+    conversationResidency.retainInactiveConversation(threadId, executionId);
+  };
+
   return {
     records: new Map<string, ThreadRecord>(),
     currentThreadId: null,
@@ -3499,6 +3540,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       });
       return visibleChanged ? reconcileCanonicalRuntime(records, state.runningThreadIds, frame.threadId) : { records };
     });
+    retireSettledConversation(frame.threadId, previous.turnExecutionId);
   },
 
   handleCanonicalAgentEvents: (threadId, events) => {
@@ -4137,6 +4179,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   },
 
   clearThreadState: (threadId) => {
+    persistedExecutionByThread.delete(threadId);
     const retainedOwners = new Set([...get().records].filter(([id]) => id !== threadId)
       .flatMap(([, record]) => record.canonicalAgent.ownerThreadId ? [record.canonicalAgent.ownerThreadId] : []));
     stableAgentEventPublications.forgetThread(threadId, retainedOwners);
@@ -4566,11 +4609,26 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   handleTurnPersisted: (payload) => {
     flushPendingTextDeltas();
+    const resident = get().records.get(payload.threadId);
+    const cached = getCachedRecord(payload.threadId);
     conversationResidency.invalidateConversation(payload.threadId);
     const terminalPhase = persistedTerminalPhase(getRec(payload.threadId), payload);
     if (terminalPhase) lostExecutionAwaitingEndingByThread.delete(payload.threadId);
 
     set((state) => {
+      if (!resident && cached) {
+        const empty = createEmptyThreadRecord();
+        const record = {
+          ...empty,
+          ...cached,
+          fileEffectSummary: cached.settledFileEffectSummary ?? empty.fileEffectSummary,
+        };
+        cacheRecord(payload.threadId, projectConversationCacheState({
+          ...record,
+          ...projectPersistedTurn(record, payload, state.currentThreadId, undefined),
+        }));
+        return {};
+      }
       return {
         records: patchThreadRecord(
           state.records,
@@ -4586,6 +4644,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     });
 
     if (terminalPhase) cleanupTerminalRuntime(payload.threadId, terminalPhase);
+    if (resident && payload.executionId && payload.executionId === resident.turnExecutionId) {
+      persistedExecutionByThread.set(payload.threadId, payload.executionId);
+    }
+    retireSettledConversation(payload.threadId, payload.executionId);
 
     if (payload.filesChanged.length > 0) {
       useWorkspaceStore.setState((ws) => ({

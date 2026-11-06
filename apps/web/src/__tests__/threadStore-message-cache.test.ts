@@ -1,4 +1,4 @@
-import { createMockMessage } from "@mcode/contracts/testing";
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
 import type { ToolCallRecord } from "@/transport/types";
@@ -12,8 +12,12 @@ import {
   patchThreadRecord,
   type ThreadRecord,
 } from "@/stores/thread-record";
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useThreadStore, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { createAgentModelState, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
+import { useThreadStore, MESSAGE_FETCH_SIZE, scheduleDrainAfterEdit } from "@/stores/threadStore";
+import { useQueueStore } from "@/stores/queueStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getThreadRecord } from "@/stores/thread-record";
 import { clearRecordCache, getCachedRecord } from "@/features/conversation/hydration/record-cache";
 import {
@@ -35,6 +39,327 @@ const fakeMessages = [
     content: "hello",
   }),
 ];
+
+const CACHE_EXECUTION = "00000000-0000-4000-8000-000000000001";
+const CACHE_NOW = "2026-11-06T12:00:00.000Z";
+
+function startHiddenConversation(threadId: string) {
+  const state = createAgentModelState();
+  state.threads[threadId] = { id: threadId, workspaceId: "workspace", rootThreadId: threadId,
+    providerId: "codex", providerIdentities: [], activityState: "Active", conversationRevision: 0,
+    rosterRevision: 0, createdAt: CACHE_NOW, updatedAt: CACHE_NOW };
+  state.turns[threadId] = { id: threadId, threadId, executionId: CACHE_EXECUTION,
+    status: "Running", trigger: { kind: "user" }, permissionMode: "full", approvalReviewMode: "manual",
+    approvalReviewReason: "manual-requested", attemptOf: null, providerIdentities: [],
+    startedAt: CACHE_NOW, providerStartedAt: null, ending: null, endedAt: null,
+    createdAt: CACHE_NOW, updatedAt: CACHE_NOW };
+  const message = createMockMessage({ id: `${threadId}-answer`, thread_id: threadId,
+    role: "assistant", content: `Answer for ${threadId}`, sequence: 10 });
+  state.items[`message:${message.id}`] = { id: `message:${message.id}`, threadId, turnId: threadId, kind: "message",
+    providerIdentities: [], createdAt: CACHE_NOW, updatedAt: CACHE_NOW,
+    payload: { projection: "message", message } };
+  useThreadStore.setState((current) => ({
+    records: patchThreadRecord(current.records, threadId, {
+      ...createEmptyThreadRecord(), turnExecutionId: CACHE_EXECUTION, runtimePhase: "running",
+      messages: [message], oldestLoadedSequence: 10, newestLoadedSequence: 10, hasMoreMessages: true,
+    }),
+    runningThreadIds: new Set([...current.runningThreadIds, threadId]),
+  }));
+  useThreadStore.getState().handleCanonicalProgress({ phase: "recovery", threadId,
+    epoch: threadId, acceptedThrough: 0, savedThrough: 0, retained: [], loss: "none",
+    durable: { mode: "snapshot", threadId, snapshot: {
+      revision: { conversationRevision: 0, rosterRevision: 0 }, state,
+    } },
+  });
+  const terminal: AcceptedCanonicalAgentEventEnvelope = {
+    eventId: `${threadId}-complete`, routing: { threadId, turnId: threadId, executionId: CACHE_EXECUTION },
+    sourceProviderId: "codex", sourceIdentities: [], acceptedSequence: 1,
+    progressPosition: { epoch: threadId, sequence: 1 },
+    serverTimestamps: { acceptedAt: CACHE_NOW, persistedAt: CACHE_NOW },
+    payload: { type: "turn.completed", endedAt: CACHE_NOW },
+  };
+  return {
+    complete: () => useThreadStore.getState().handleCanonicalProgress({ phase: "accepted", threadId,
+      epoch: threadId, from: 0, through: 1, events: [terminal] }),
+    save: () => useThreadStore.getState().handleCanonicalProgress({ phase: "saved", threadId,
+      epoch: threadId, through: 1, revision: { conversationRevision: 1, rosterRevision: 0 },
+      events: [{ ...terminal, durableRevision: 1 }] }),
+  };
+}
+
+describe("hidden completion residency", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetThreadStoreTestState();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("holds a queued follow-up while hidden plan questions are pending", async () => {
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "plan" })] });
+    useQueueStore.setState({ queues: {}, autoDrainSuppressedThreadIds: new Set<string>(), inFlightQueuedMessages: {} });
+    const execution = startHiddenConversation("plan");
+    useThreadStore.getState().setPlanQuestions("plan", [{
+      id: "q1", category: "CHOICE", question: "Which?", options: [
+        { id: "a", title: "A", description: "First choice" },
+        { id: "b", title: "B", description: "Second choice" },
+      ],
+    }]);
+    useQueueStore.getState().enqueue("plan", {
+      content: "follow-up", displayContent: "follow-up", attachments: [],
+      model: "claude-sonnet-4-6", permissionMode: "full",
+    });
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "plan", messageId: "plan-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "plan-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 0, filesChanged: [],
+    });
+    scheduleDrainAfterEdit("plan");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+    expect(useQueueStore.getState().queues.plan?.map((message) => message.content)).toEqual(["follow-up"]);
+    expect(useThreadStore.getState().records.get("plan")?.planQuestionsStatus).toBe("pending");
+  });
+
+  it("keeps the earlier transcript when a queued follow-up sends after a hidden finish", async () => {
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "queued" })] });
+    useQueueStore.setState({ queues: {}, autoDrainSuppressedThreadIds: new Set<string>(), inFlightQueuedMessages: {} });
+    const execution = startHiddenConversation("queued");
+    useQueueStore.getState().enqueue("queued", {
+      content: "follow-up", displayContent: "follow-up", attachments: [],
+      model: "claude-sonnet-4-6", permissionMode: "full",
+    });
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "queued", messageId: "queued-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "queued-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 0, filesChanged: [],
+    });
+    scheduleDrainAfterEdit("queued");
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mockTransport.sendMessage).toHaveBeenCalled();
+    await activateTestConversation("queued");
+    expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
+    expect(useThreadStore.getState().records.get("queued")?.messages.map((message) => message.content))
+      .toContain("Answer for queued");
+  });
+
+  it("shows the settled file-effect summary immediately after restoring a retired turn", async () => {
+    const execution = startHiddenConversation("effects");
+    useThreadStore.setState((state) => ({ records: patchThreadRecord(state.records, "effects", {
+      fileEffectTurnId: "effects",
+      fileEffectSummary: { revision: 2, fileCount: 1, additions: 3, deletions: 1, effects: [] },
+    }) }));
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "effects", messageId: "effects-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "effects-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 1, filesChanged: ["src/a.ts"],
+    });
+    expect(useThreadStore.getState().records.has("effects")).toBe(false);
+    const restoration = activateTestConversation("effects");
+    expect(useThreadStore.getState().records.get("effects")?.fileEffectSummary).toEqual({
+      revision: 2, fileCount: 1, additions: 3, deletions: 1, effects: [],
+    });
+    await restoration;
+  });
+
+  it("does not cache a replacement execution when an old persistence receipt arrives", async () => {
+    const execution = startHiddenConversation("replaced");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "replaced", messageId: "replaced-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "replaced-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 0, filesChanged: [],
+    });
+    useThreadStore.getState().handleAgentEvent({
+      type: "turnStarted", threadId: "replaced",
+      turnExecutionId: "00000000-0000-4000-8000-000000000002",
+    });
+    useThreadStore.getState().handleAgentEvent({
+      type: "toolUse", threadId: "replaced",
+      turnExecutionId: "00000000-0000-4000-8000-000000000002",
+      toolCallId: "replacement-tool", toolName: "Bash", toolInput: { command: "work" },
+    });
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "replaced", messageId: "replaced-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "replaced-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 0, filesChanged: [],
+    });
+    expect(getCachedRecord("replaced")).toBeUndefined();
+    expect(useThreadStore.getState().records.get("replaced")).toMatchObject({
+      turnExecutionId: "00000000-0000-4000-8000-000000000002", runtimePhase: "running",
+      toolCalls: [{ id: "replacement-tool", isComplete: false }],
+    });
+  });
+
+  it("keeps persisted file changes when the hidden turn's saved frame lands first", async () => {
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "late", has_file_changes: false })] });
+    const execution = startHiddenConversation("late");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.has("late")).toBe(true);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "late", messageId: "late-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "late-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 2, filesChanged: ["src/a.ts"],
+    });
+    expect(useWorkspaceStore.getState().threads.find((thread) => thread.id === "late")?.has_file_changes).toBe(true);
+    expect(useThreadStore.getState().records.has("late")).toBe(false);
+    expect(getCachedRecord("late")?.persistedFilesChanged).toEqual({ "late-answer": ["src/a.ts"] });
+    expect(getCachedRecord("late")?.persistedToolCallCounts).toEqual({ "late-answer": 2 });
+    expect(getCachedRecord("late")?.messages[0]?.serverSequence).toBe(10);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "late", messageId: "late-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "late-answer", sequence: 11 },
+      outcome: "completed", toolCallCount: 3, filesChanged: ["src/a.ts", "src/b.ts"],
+    });
+    expect(useThreadStore.getState().records.has("late")).toBe(false);
+    expect(getCachedRecord("late")?.persistedToolCallCounts).toEqual({ "late-answer": 3 });
+    expect(getCachedRecord("late")?.messages[0]?.serverSequence).toBe(11);
+    await activateTestConversation("late");
+    expect(getThreadRecord(useThreadStore.getState().records, "late").persistedFilesChanged).toEqual({ "late-answer": ["src/a.ts", "src/b.ts"] });
+  });
+
+  it("applies turn.persisted for a thread this window never loaded", () => {
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "unloaded", has_file_changes: false })] });
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "unloaded", messageId: "answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "answer", sequence: 3 },
+      outcome: "completed", toolCallCount: 0, filesChanged: ["src/b.ts"],
+    });
+    expect(useWorkspaceStore.getState().threads.find((thread) => thread.id === "unloaded")?.has_file_changes).toBe(true);
+  });
+
+  it("keeps an accepted terminal with turn.persisted resident until its saved frame", async () => {
+    const execution = startHiddenConversation("unsaved");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "unsaved", messageId: "unsaved-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "unsaved-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 0, filesChanged: [],
+    });
+    expect(useThreadStore.getState().records.get("unsaved")?.canonicalAgent.progress?.savedThrough).toBe(0);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.has("unsaved")).toBe(false);
+  });
+
+  it("retires five durably completed hidden records and restores their warm transcript", async () => {
+    for (let index = 0; index < 5; index += 1) {
+      const execution = startHiddenConversation(`hidden-${index}`);
+      execution.complete();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(useThreadStore.getState().records.has(`hidden-${index}`)).toBe(true);
+      execution.save();
+      await vi.advanceTimersByTimeAsync(100);
+      useThreadStore.getState().handleTurnPersisted({ threadId: `hidden-${index}`,
+        messageId: `hidden-${index}-answer`, executionId: CACHE_EXECUTION,
+        settledMessage: { id: `hidden-${index}-answer`, sequence: 10 },
+        outcome: "completed", toolCallCount: 0, filesChanged: [] });
+    }
+    const records = [...useThreadStore.getState().records.values()];
+    const canonicalItems = records.reduce((count, record) => count + Object.keys(record.canonicalAgent.state.items).length, 0);
+    expect({ liveRecords: records.length, canonicalItems }).toEqual({ liveRecords: 0, canonicalItems: 0 });
+    useThreadStore.getState().handleTurnPersisted({ threadId: "hidden-0", messageId: "hidden-0-answer",
+      settledMessage: { id: "hidden-0-answer", sequence: 10 },
+      executionId: CACHE_EXECUTION, outcome: "completed", toolCallCount: 0, filesChanged: [] });
+    expect(useThreadStore.getState().records.has("hidden-0")).toBe(false);
+    const cached = getCachedRecord("hidden-0");
+    expect(cached?.messages.map((message) => message.content)).toEqual(["Answer for hidden-0"]);
+    expect(cached?.oldestLoadedSequence).toBe(10);
+    expect(cached?.hasMoreMessages).toBe(true);
+    const restoration = activateTestConversation("hidden-0");
+    expect(getTestActiveMessages().map((message) => message.content)).toEqual(["Answer for hidden-0"]);
+    expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
+    await restoration;
+  });
+
+  it.each(["selected", "leased"])("keeps a %s completed conversation resident", async (display) => {
+    const execution = startHiddenConversation("displayed");
+    if (display === "selected") useThreadStore.setState({ currentThreadId: "displayed" });
+    else await getConversationResidency().mountDisplayConversation("displayed");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({ threadId: "displayed", messageId: "displayed-answer",
+      settledMessage: { id: "displayed-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
+      outcome: "completed", toolCallCount: 0, filesChanged: [] });
+    expect(useThreadStore.getState().records.get("displayed")?.runtimePhase).toBe("completed");
+    expect(Object.keys(useThreadStore.getState().records.get("displayed")?.canonicalAgent.state.items ?? {})).toEqual(["message:displayed-answer"]);
+    if (display === "leased") getConversationResidency().unmountDisplayConversation("displayed");
+  });
+
+  it("keeps a replacement execution when the old saved receipt arrives", async () => {
+    const execution = startHiddenConversation("replacement");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleAgentEvent({ type: "turnStarted", threadId: "replacement",
+      turnExecutionId: "00000000-0000-4000-8000-000000000002" });
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.get("replacement")?.turnExecutionId).toBe("00000000-0000-4000-8000-000000000002");
+    expect(useThreadStore.getState().runningThreadIds.has("replacement")).toBe(true);
+  });
+
+  it("keeps running hidden conversations", async () => {
+    startHiddenConversation("running");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.get("running")?.runtimePhase).toBe("running");
+    expect(Object.keys(useThreadStore.getState().records.get("running")?.canonicalAgent.state.items ?? {})).toEqual(["message:running-answer"]);
+  });
+
+  it("waits for response persistence before retiring a saved hidden execution", async () => {
+    const execution = startHiddenConversation("pending");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.setState((state) => ({ records: patchThreadRecord(state.records, "pending", {
+      pendingTurnPersistMessageIds: ["pending-answer"],
+    }) }));
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.has("pending")).toBe(true);
+    useThreadStore.getState().handleTurnPersisted({ threadId: "pending", messageId: "pending-answer",
+      settledMessage: { id: "pending-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
+      outcome: "completed", toolCallCount: 0, filesChanged: [] });
+    expect(useThreadStore.getState().records.has("pending")).toBe(false);
+    expect(getCachedRecord("pending")?.messages.map((message) => message.content)).toEqual(["Answer for pending"]);
+  });
+
+  it("keeps a saved hidden execution while a background tool owes a late result", async () => {
+    const execution = startHiddenConversation("background");
+    useThreadStore.getState().handleAgentEvent({ type: "toolUse", threadId: "background",
+      turnExecutionId: CACHE_EXECUTION, toolCallId: "background-tool", toolName: "Bash", toolInput: { command: "work" } });
+    useThreadStore.getState().handleAgentEvent({ type: "toolBackgrounded", threadId: "background",
+      turnExecutionId: CACHE_EXECUTION, toolCallId: "background-tool" });
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({ threadId: "background", messageId: "background-answer",
+      settledMessage: { id: "background-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
+      outcome: "completed", toolCallCount: 1, filesChanged: [] });
+    expect(useThreadStore.getState().records.get("background")?.toolCalls.map((tool) => ({
+      id: tool.id, complete: tool.isComplete,
+    }))).toEqual([{ id: "background-tool", complete: false }]);
+  });
+});
 
 /**
  * Reset thread store and message cache to a clean state for tests.
