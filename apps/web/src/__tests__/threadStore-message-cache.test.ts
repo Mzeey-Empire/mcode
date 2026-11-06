@@ -1,4 +1,4 @@
-import { createMockMessage } from "@mcode/contracts/testing";
+import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
 import type { ToolCallRecord } from "@/transport/types";
@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createAgentModelState, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import { useThreadStore, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getThreadRecord } from "@/stores/thread-record";
 import { clearRecordCache, getCachedRecord } from "@/features/conversation/hydration/record-cache";
 import {
@@ -53,7 +54,7 @@ function startHiddenConversation(threadId: string) {
     createdAt: CACHE_NOW, updatedAt: CACHE_NOW };
   const message = createMockMessage({ id: `${threadId}-answer`, thread_id: threadId,
     role: "assistant", content: `Answer for ${threadId}`, sequence: 10 });
-  state.items[message.id] = { id: message.id, threadId, turnId: threadId, kind: "message",
+  state.items[`message:${message.id}`] = { id: `message:${message.id}`, threadId, turnId: threadId, kind: "message",
     providerIdentities: [], createdAt: CACHE_NOW, updatedAt: CACHE_NOW,
     payload: { projection: "message", message } };
   useThreadStore.setState((current) => ({
@@ -92,22 +93,76 @@ describe("hidden completion residency", () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it("keeps persisted file changes when the hidden turn's saved frame lands first", async () => {
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "late", has_file_changes: false })] });
+    const execution = startHiddenConversation("late");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.has("late")).toBe(true);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "late", messageId: "late-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "late-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 2, filesChanged: ["src/a.ts"],
+    });
+    expect(useWorkspaceStore.getState().threads.find((thread) => thread.id === "late")?.has_file_changes).toBe(true);
+    expect(useThreadStore.getState().records.has("late")).toBe(false);
+    expect(getCachedRecord("late")?.persistedFilesChanged).toEqual({ "late-answer": ["src/a.ts"] });
+    expect(getCachedRecord("late")?.persistedToolCallCounts).toEqual({ "late-answer": 2 });
+    expect(getCachedRecord("late")?.messages[0]?.serverSequence).toBe(10);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "late", messageId: "late-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "late-answer", sequence: 11 },
+      outcome: "completed", toolCallCount: 3, filesChanged: ["src/a.ts", "src/b.ts"],
+    });
+    expect(useThreadStore.getState().records.has("late")).toBe(false);
+    expect(getCachedRecord("late")?.persistedToolCallCounts).toEqual({ "late-answer": 3 });
+    expect(getCachedRecord("late")?.messages[0]?.serverSequence).toBe(11);
+    await activateTestConversation("late");
+    expect(getThreadRecord(useThreadStore.getState().records, "late").persistedFilesChanged).toEqual({ "late-answer": ["src/a.ts", "src/b.ts"] });
+  });
+
+  it("applies turn.persisted for a thread this window never loaded", () => {
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "unloaded", has_file_changes: false })] });
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "unloaded", messageId: "answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "answer", sequence: 3 },
+      outcome: "completed", toolCallCount: 0, filesChanged: ["src/b.ts"],
+    });
+    expect(useWorkspaceStore.getState().threads.find((thread) => thread.id === "unloaded")?.has_file_changes).toBe(true);
+  });
+
+  it("keeps an accepted terminal with turn.persisted resident until its saved frame", async () => {
+    const execution = startHiddenConversation("unsaved");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "unsaved", messageId: "unsaved-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "unsaved-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 0, filesChanged: [],
+    });
+    expect(useThreadStore.getState().records.get("unsaved")?.canonicalAgent.progress?.savedThrough).toBe(0);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.has("unsaved")).toBe(false);
+  });
+
   it("retires five durably completed hidden records and restores their warm transcript", async () => {
     for (let index = 0; index < 5; index += 1) {
       const execution = startHiddenConversation(`hidden-${index}`);
       execution.complete();
       await vi.advanceTimersByTimeAsync(100);
       expect(useThreadStore.getState().records.has(`hidden-${index}`)).toBe(true);
+      execution.save();
+      await vi.advanceTimersByTimeAsync(100);
       useThreadStore.getState().handleTurnPersisted({ threadId: `hidden-${index}`,
         messageId: `hidden-${index}-answer`, executionId: CACHE_EXECUTION,
         settledMessage: { id: `hidden-${index}-answer`, sequence: 10 },
         outcome: "completed", toolCallCount: 0, filesChanged: [] });
-      execution.save();
-      await vi.advanceTimersByTimeAsync(100);
     }
     const records = [...useThreadStore.getState().records.values()];
     const canonicalItems = records.reduce((count, record) => count + Object.keys(record.canonicalAgent.state.items).length, 0);
-    console.log(`Hidden completions: live records=${records.length}, canonical items=${canonicalItems}`);
     expect({ liveRecords: records.length, canonicalItems }).toEqual({ liveRecords: 0, canonicalItems: 0 });
     useThreadStore.getState().handleTurnPersisted({ threadId: "hidden-0", messageId: "hidden-0-answer",
       settledMessage: { id: "hidden-0-answer", sequence: 10 },
@@ -129,13 +184,13 @@ describe("hidden completion residency", () => {
     else await getConversationResidency().mountDisplayConversation("displayed");
     execution.complete();
     await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
     useThreadStore.getState().handleTurnPersisted({ threadId: "displayed", messageId: "displayed-answer",
       settledMessage: { id: "displayed-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
       outcome: "completed", toolCallCount: 0, filesChanged: [] });
-    execution.save();
-    await vi.advanceTimersByTimeAsync(100);
     expect(useThreadStore.getState().records.get("displayed")?.runtimePhase).toBe("completed");
-    expect(Object.keys(useThreadStore.getState().records.get("displayed")?.canonicalAgent.state.items ?? {})).toEqual(["displayed-answer"]);
+    expect(Object.keys(useThreadStore.getState().records.get("displayed")?.canonicalAgent.state.items ?? {})).toEqual(["message:displayed-answer"]);
     if (display === "leased") getConversationResidency().unmountDisplayConversation("displayed");
   });
 
@@ -155,7 +210,7 @@ describe("hidden completion residency", () => {
     startHiddenConversation("running");
     await vi.advanceTimersByTimeAsync(100);
     expect(useThreadStore.getState().records.get("running")?.runtimePhase).toBe("running");
-    expect(Object.keys(useThreadStore.getState().records.get("running")?.canonicalAgent.state.items ?? {})).toEqual(["running-answer"]);
+    expect(Object.keys(useThreadStore.getState().records.get("running")?.canonicalAgent.state.items ?? {})).toEqual(["message:running-answer"]);
   });
 
   it("waits for response persistence before retiring a saved hidden execution", async () => {
@@ -183,11 +238,11 @@ describe("hidden completion residency", () => {
       turnExecutionId: CACHE_EXECUTION, toolCallId: "background-tool" });
     execution.complete();
     await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
     useThreadStore.getState().handleTurnPersisted({ threadId: "background", messageId: "background-answer",
       settledMessage: { id: "background-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
       outcome: "completed", toolCallCount: 1, filesChanged: [] });
-    execution.save();
-    await vi.advanceTimersByTimeAsync(100);
     expect(useThreadStore.getState().records.get("background")?.toolCalls.map((tool) => ({
       id: tool.id, complete: tool.isComplete,
     }))).toEqual([{ id: "background-tool", complete: false }]);

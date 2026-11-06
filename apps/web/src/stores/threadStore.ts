@@ -69,6 +69,9 @@ import {
   selectConversationWindow,
 } from "@/features/conversation/hydration/conversation-memory-policy";
 import {
+  cacheRecord,
+  getCachedRecord,
+  projectConversationCacheState,
   evictCachedRecord,
   setActiveConversation,
   setConversationTransientTextBytes,
@@ -87,6 +90,7 @@ import {
   type ThreadSettings,
   providerNoticeSessionId,
   getThreadRecord,
+  createEmptyThreadRecord,
   patchThreadRecord,
   deleteThreadRecord,
 } from "./thread-record";
@@ -1274,6 +1278,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   >();
   const deferredNarrativeGenerations = new Map<string, number>();
   const lostExecutionAwaitingEndingByThread = new Map<string, string>();
+  const persistedExecutionByThread = new Map<string, string>();
   const MAX_DEFERRED_NARRATIVE_BYTES = 256 * 1024;
 
   const getRec = (threadId: string) => getThreadRecord(get().records, threadId);
@@ -1558,7 +1563,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       if (current) invalidateDeferredNarrativeEvents(current);
       threadHydrator.deactivate();
     },
-    retainInactiveConversation: (threadId, executionId) => threadHydrator.retainInactiveConversation(threadId, executionId),
+    retainInactiveConversation: (threadId, executionId) => {
+      threadHydrator.retainInactiveConversation(threadId, executionId);
+      persistedExecutionByThread.delete(threadId);
+    },
     invalidateConversation: (threadId) => threadHydrator.invalidateConversation(threadId),
     synchronizeConversation: (threadId) => threadHydrator.synchronizeConversation(threadId),
     mergeCachedFileChanges: (threadId, filesChanged) =>
@@ -1857,6 +1865,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const record = getRec(event.threadId);
     const sameExecution = runtime.incomingExecutionId === undefined
       || record.turnExecutionId === runtime.incomingExecutionId;
+    if (!sameExecution) persistedExecutionByThread.delete(event.threadId);
     if (get().runningThreadIds.has(event.threadId) && sameExecution && record.fileEffectTurnId === fileEffectTurnId) return;
     clearStreamingTextUsage(event.threadId);
     useTaskStore.getState().prepareTaskBubbleForNewTurn(event.threadId);
@@ -3433,6 +3442,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (!record || !executionId || record.turnExecutionId !== executionId) return;
     if (conversationResidency.isConversationVisible(threadId)) return;
     if (!hasDurablySettledExecution(threadId, record, executionId)) return;
+    if (persistedExecutionByThread.get(threadId) !== executionId) return;
     // Background tools and a lost provider can still deliver a result after terminal progress.
     if (hasPendingConversationResults(record) || lostExecutionAwaitingEndingByThread.has(threadId)) return;
     invalidateDeferredNarrativeEvents(threadId);
@@ -4166,6 +4176,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   },
 
   clearThreadState: (threadId) => {
+    persistedExecutionByThread.delete(threadId);
     const retainedOwners = new Set([...get().records].filter(([id]) => id !== threadId)
       .flatMap(([, record]) => record.canonicalAgent.ownerThreadId ? [record.canonicalAgent.ownerThreadId] : []));
     stableAgentEventPublications.forgetThread(threadId, retainedOwners);
@@ -4594,14 +4605,27 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   },
 
   handleTurnPersisted: (payload) => {
-    if (!canReceiveCanonicalProgress(get(), payload.threadId,
-      (threadId) => conversationResidency.isDisplayConversationLeased(threadId))) return;
     flushPendingTextDeltas();
+    const resident = get().records.get(payload.threadId);
+    const cached = getCachedRecord(payload.threadId);
     conversationResidency.invalidateConversation(payload.threadId);
     const terminalPhase = persistedTerminalPhase(getRec(payload.threadId), payload);
     if (terminalPhase) lostExecutionAwaitingEndingByThread.delete(payload.threadId);
 
     set((state) => {
+      if (!resident && cached) {
+        const empty = createEmptyThreadRecord();
+        const record = {
+          ...empty,
+          ...cached,
+          fileEffectSummary: cached.settledFileEffectSummary ?? empty.fileEffectSummary,
+        };
+        cacheRecord(payload.threadId, projectConversationCacheState({
+          ...record,
+          ...projectPersistedTurn(record, payload, state.currentThreadId, undefined),
+        }));
+        return {};
+      }
       return {
         records: patchThreadRecord(
           state.records,
@@ -4617,6 +4641,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     });
 
     if (terminalPhase) cleanupTerminalRuntime(payload.threadId, terminalPhase);
+    if (resident && payload.executionId && payload.executionId === resident.turnExecutionId) {
+      persistedExecutionByThread.set(payload.threadId, payload.executionId);
+    }
     retireSettledConversation(payload.threadId, payload.executionId);
 
     if (payload.filesChanged.length > 0) {
