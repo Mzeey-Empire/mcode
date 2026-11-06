@@ -1,7 +1,7 @@
 import "reflect-metadata";
+import { createTurnWorkingDirForTest } from "./turn-working-dir-test-helper.js";
 import { startupEnvironmentFixture } from "../../../projects/environment/testing/startup-environment-fixture.js";
 import { ThreadStartupFetchDecisions } from "../../../thread-startup/thread-startup-fetch-decisions.js";
-import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -91,12 +91,7 @@ async function createAgentServiceHarness(automaticSetup?:
   const threadStartups = new ThreadStartupService(new ThreadStartupRepo(db, persistenceRuntime.writer), persistenceRuntime.writer);
   const gitService = new GitWorktreeService(workspaceRepo, new FakeGitExecutor(), hostRuntime);
   vi.spyOn(gitService, "listWorktrees").mockResolvedValue([]);
-  // The execution worker runs real git in the Turn's working directory, so it must not be the developer's checkout.
-  vi.spyOn(gitService, "resolveWorkingDir").mockImplementation(() => {
-    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
-    roots.push(root);
-    return root;
-  });
+  vi.spyOn(gitService, "resolveWorkingDir").mockImplementation(() => createTurnWorkingDirForTest(roots));
   const threadService = {
     create: vi.fn(),
   } as unknown as ThreadService;

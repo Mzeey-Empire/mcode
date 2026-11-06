@@ -1,8 +1,6 @@
 import "reflect-metadata";
-import * as NodeFS from "node:fs";
+import { createTurnWorkingDirForTest } from "./turn-working-dir-test-helper.js";
 import * as NodeFSPromises from "node:fs/promises";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
@@ -98,11 +96,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     };
 
     const gitServiceStub = {
-      resolveWorkingDir: vi.fn(() => {
-        const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
-        roots.push(root);
-        return root;
-      }),
+      resolveWorkingDir: vi.fn(() => createTurnWorkingDirForTest(roots)),
     } as unknown as GitService;
 
     const attachmentServiceStub = {
@@ -168,9 +162,15 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
   });
 
   afterEach(async () => {
-    try { await svc?.stopAll(); }
-    finally { await closeAgentStorageTestDatabases(); }
-    await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+    try {
+      await svc?.stopAll();
+    } finally {
+      try {
+        await closeAgentStorageTestDatabases();
+      } finally {
+        await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+      }
+    }
   });
 
   it("emits turnStarted through the provider before provider.sendMessage resolves", async () => {

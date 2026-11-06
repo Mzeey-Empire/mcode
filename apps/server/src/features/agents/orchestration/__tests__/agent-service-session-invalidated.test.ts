@@ -1,8 +1,6 @@
 import "reflect-metadata";
-import * as NodeFS from "node:fs";
+import { createTurnWorkingDirForTest } from "./turn-working-dir-test-helper.js";
 import * as NodeFSPromises from "node:fs/promises";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
@@ -78,11 +76,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     };
 
     const gitServiceStub = {
-      resolveWorkingDir: vi.fn(() => {
-        const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
-        roots.push(root);
-        return root;
-      }),
+      resolveWorkingDir: vi.fn(() => createTurnWorkingDirForTest(roots)),
     } as unknown as GitService;
     const attachmentServiceStub = {
       persist: vi.fn(async () => ({ stored: [], persisted: [] })),
@@ -151,9 +145,15 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
   });
 
   afterEach(async () => {
-    try { await drainAgentServicePersistenceForTest(svc); }
-    finally { await database.close(); }
-    await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+    try {
+      await drainAgentServicePersistenceForTest(svc);
+    } finally {
+      try {
+        await database.close();
+      } finally {
+        await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+      }
+    }
   });
 
   it("nulls sdk_session_id when a sdk_session_invalidated event arrives", async () => {
