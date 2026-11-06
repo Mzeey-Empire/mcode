@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentEventRoutingSchema } from "@mcode/agent-model";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
-import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { providerRuntimeEvent, ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderEventBatch, ProviderEventSinkPort, ProviderEventSubmissionReceipt } from "../../host-ports.js";
 import {
   CodexCanonicalEventPublisher,
@@ -32,6 +32,30 @@ function sink(submit: ProviderEventSinkPort["submit"]): ProviderEventSinkPort {
 }
 
 describe("CodexCanonicalEventPublisher", () => {
+  it("labels parent text, reasoning and tool input live, leaving boundaries and child text saved", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedReceipt);
+    const publisher = new CodexCanonicalEventPublisher(sink(submit));
+    const base = { threadId: routing.threadId, turnExecutionId: routing.executionId };
+    const childText = ProviderRuntimeEventSchema().parse(providerRuntimeEvent(
+      { ...base, type: AgentEventType.TextDelta, delta: "child", isFinalResponse: false },
+      { providerId: "codex", kind: "codex-collaboration", child: {
+        nativeThreadId: "child-thread", parentCollaborationItemId: "spawn-1", nativeItemId: "child-item", itemEventKey: "stream" } },
+    ));
+    const published = [
+      providerRuntimeEvent({ ...base, type: AgentEventType.TextDelta, delta: "Hello", isFinalResponse: false }),
+      providerRuntimeEvent({ ...base, type: AgentEventType.ReasoningDelta, delta: "thinking", reasoningItemId: "reason-1" }),
+      providerRuntimeEvent({ ...base, type: AgentEventType.ToolInputDelta, partialJson: "{\"cmd\":" }),
+      providerRuntimeEvent({ ...base, type: AgentEventType.Message, content: "Hello", tokens: null }),
+      providerRuntimeEvent({ ...base, type: AgentEventType.ToolUse, toolCallId: "tool-1", toolName: "shell", toolInput: {} }),
+      childText,
+    ];
+    for (const runtimeEvent of published) publisher.publish(routing, { ...runtimeEvent, deliveryAttempt: 1 });
+
+    await publisher.waitForExecution(routing);
+    const deliveries = submit.mock.calls.flatMap(([batch]) => batch.events.map((draft) => draft.delivery));
+    expect(deliveries).toEqual(["live", "live", "live", undefined, undefined, undefined]);
+  });
+
   it("submits exact ordered drafts with stable batch, item and event IDs", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedReceipt);
     const publisher = new CodexCanonicalEventPublisher(sink(submit));

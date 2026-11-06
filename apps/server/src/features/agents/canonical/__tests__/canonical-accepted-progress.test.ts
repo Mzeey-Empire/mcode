@@ -35,6 +35,8 @@ import { z } from "zod";
 import { createCopilotProvider, type CopilotProviderBoundary, type ProviderEventBatch, type ProviderHostPorts } from "@mcode/providers";
 import { providerRuntimeEvent, ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
 import { CanonicalLiveEventPublisher } from "../../../../../../../packages/providers/src/private/canonical-live-event-publisher.js";
+import { CodexCanonicalEventPublisher } from "../../../../../../../packages/providers/src/private/codex/codex-canonical-event-publisher.js";
+import { CodexEventMapper } from "../../../../../../../packages/providers/src/private/codex/codex-event-mapper.js";
 import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { SessionEvent } from "../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js";
 import { ThoughtSegmentStore } from "../../conversation/narrative/persistence/thought-segment-store.js";
@@ -258,7 +260,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     return frames().flatMap((frame) => frame.phase === "accepted" ? frame.events : []);
   }
 
-  describe("Claude live checkpoint barriers", () => {
+  describe("live checkpoint barriers", () => {
     let ordinal: number;
     async function piece(text: string, provider = "claude", live = true) {
       ordinal++;
@@ -288,6 +290,29 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     }
     function rowCount(table: string, where = "") {
       return (db.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get() as { count: number }).count;
+    }
+    /** Counts inserts by trigger from now on, because acknowledgement cleanup deletes receipt rows after a save. */
+    function countInserts() {
+      const tables = ["canonical_agent_events", "canonical_agent_items", "canonical_agent_item_content_appends",
+        "canonical_writer_operation_receipts"];
+      db.run("CREATE TABLE stream_insert_counts (table_name TEXT PRIMARY KEY, inserts INTEGER NOT NULL DEFAULT 0)");
+      for (const table of tables) {
+        db.prepare("INSERT INTO stream_insert_counts (table_name) VALUES (?)").run(table);
+        db.run(`CREATE TRIGGER count_inserts_${table} AFTER INSERT ON ${table} BEGIN UPDATE stream_insert_counts SET inserts = inserts + 1 WHERE table_name = '${table}'; END`);
+      }
+      return () => Object.fromEntries((db.prepare("SELECT table_name, inserts FROM stream_insert_counts").all() as
+        { table_name: string; inserts: number }[]).map((row) => [row.table_name, row.inserts]));
+    }
+    /** Saved events in write order: an append names its text, a publication or raw item the provider event it carries. */
+    function savedEventKinds() {
+      return (db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE thread_id = ? ORDER BY rowid").all(execution.threadId) as
+        { envelope_json: string }[]).map(({ envelope_json }) => {
+        const payload = (JSON.parse(envelope_json) as { payload: Record<string, unknown> }).payload;
+        if (payload.type === "item.content-appended") return `append:${String(payload.text)}`;
+        const item = payload.item as { payload?: { runtimeEvent?: { event?: { type?: string } } } } | undefined;
+        const event = (payload.event as { type?: string } | undefined)?.type ?? item?.payload?.runtimeEvent?.event?.type;
+        return event ? `${String(payload.type)}:${event}` : String(payload.type);
+      });
     }
 
     it("saves a stalled stream one second after its first unsaved piece", async () => {
@@ -474,6 +499,50 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(publicationRows() - before).toBe(publications);
       await progress.waitForSaved(execution.threadId);
       expect(savedText()).toBe("prefix one two");
+    });
+
+    it("saves a Codex stream per checkpoint, then its completion suffix and the next tool in order", async () => {
+      await begin("codex");
+      const routing = { ...execution, deliveryAttempt: 1 };
+      const publisher = new CodexCanonicalEventPublisher({ submit: async (batch) => {
+        const reply = await send(++ordinal, { kind: "event", phase: batch.phase, nativeCursor: null, events: batch.events });
+        if (reply.result.kind !== "accepted") throw new Error(`Codex piece was not accepted: ${JSON.stringify(reply.result)}`);
+        return { commit: { outcome: "accepted", acceptedThrough: reply.result.acceptedThrough, eventCount: batch.events.length,
+          progressPosition: reply.result.progressPosition }, delivery: { ingress: "not-required" } };
+      } });
+      const mapper = new CodexEventMapper(execution.threadId);
+      const notify = async (method: string, params: Record<string, unknown>) => {
+        for (const runtimeEvent of mapper.mapNotification({ jsonrpc: "2.0", method, params })) {
+          publisher.publish(routing, { ...runtimeEvent, event: { ...runtimeEvent.event, turnExecutionId: execution.executionId } });
+        }
+        await publisher.waitForExecution(routing);
+      };
+      const inserts = countInserts();
+      const savedBefore = savedEventKinds().length;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await notify("item/started", { item: { type: "agentMessage", id: "answer", phase: "final_answer" } });
+      // 120 pieces, one every 100 ms: the 1 s timer saves them as 12 checkpoints instead of 120 saves.
+      for (let index = 0; index < 120; index++) {
+        await notify("item/agentMessage/delta", { itemId: "answer", delta: "x" });
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      await drainSaves();
+      expect(savedText()).toBe(`prefix${"x".repeat(120)}`);
+      // Completion closes the item with text the stream never sent; the mapper emits that suffix as one more piece.
+      await notify("item/completed", { item: { type: "agentMessage", id: "answer", text: `${"x".repeat(120)} done`, phase: "final_answer" } });
+      await notify("item/started", { item: { type: "commandExecution", id: "command", command: "ls" } });
+      await progress.waitForSaved(execution.threadId);
+      expect(savedEventKinds().slice(savedBefore)).toEqual([
+        ...Array.from({ length: 12 }, () => `append:${"x".repeat(10)}`),
+        "append: done",
+        "item.recorded:assistantMessageBoundary", "item.recorded", "publication.recorded:assistantMessageBoundary",
+        "item.recorded:message", "item.recorded", "item.recorded", "publication.recorded:message",
+        "item.recorded:toolUse", "item.recorded", "publication.recorded:toolUse",
+      ]);
+      // One receipt per checkpoint and per saved event, against one per piece before; the text item is updated in place.
+      expect(inserts()).toEqual({ canonical_agent_events: 23, canonical_agent_items: 5,
+        canonical_agent_item_content_appends: 13, canonical_writer_operation_receipts: 16 });
+      expect(savedText()).toBe(`${"x".repeat(120)} done`);
     });
   });
 
