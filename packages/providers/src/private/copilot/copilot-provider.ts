@@ -7,7 +7,7 @@ import * as NodePath from "node:path";
 import { CopilotClient, approveAll } from "@github/copilot-sdk";
 import type { CopilotSession, SessionEvent, MCPServerConfig, ModelInfo, PermissionRequest as NativePermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
 import { z } from "zod";
-import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import { AgentEventDelivery, agentEventDelivery, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { ChildThreadEvidence } from "@mcode/contracts/events/provider-runtime-event";
 import type { IAgentProvider, ISessionEvictable, TurnRequest, CompletionOptions } from "@mcode/contracts/providers/interfaces";
 import type { ApprovalChoice, ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
@@ -294,7 +294,10 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       finish();
     } };
     state.turn = turn;
-    const unsubscribe = state.session.on((event) => this.acceptNativeEvent(state, turn, event));
+    // Live fragments skip the saved event-ID check, so their native IDs must outlive the evicting session window.
+    // The set belongs to this attempt and is released with the listener when the turn retires.
+    const liveNativeEventIds = new Set<string>();
+    const unsubscribe = state.session.on((event) => this.acceptNativeEvent(state, turn, liveNativeEventIds, event));
     this.publish(state, { type: "system", threadId: request.threadId, subtype: `sdk_session_id:${state.session.sessionId}` });
     try {
       const planBaseline = await this.readPlanBaseline(state);
@@ -323,12 +326,13 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     if (failure) throw failure;
   }
 
-  private acceptNativeEvent(state: CopilotSessionState, turn: CopilotTurnState, event: SessionEvent): void {
+  private acceptNativeEvent(state: CopilotSessionState, turn: CopilotTurnState, liveNativeEventIds: Set<string>, event: SessionEvent): void {
     if (state.turn !== turn || turn.outcome === "completed" || turn.outcome === "failed") return;
     try {
-      if (state.nativeEventIds.has(event.id)) return;
+      // Checked before mapping because the mapper accumulates assistant and reasoning text.
+      if (seenNativeEvent(state, liveNativeEventIds, event)) return;
       const events = mapCopilotEvent(event, state.request.threadId, turn);
-      rememberNativeEvent(state, event);
+      rememberNativeEvent(state, liveNativeEventIds, event, events);
       this.runtime.recordUsage(state.sessionId);
       if (event.type === "session.idle" && state.request.interactionMode !== "plan") this.publishCompletedAssistantMessage(state, turn);
       for (const mapped of events) this.publishMapped(state, mapped, event);
@@ -662,9 +666,14 @@ function agentNotificationEvidence(event: SessionEvent): z.infer<typeof agentNot
   return parsed.success ? parsed.data : undefined;
 }
 
-function rememberNativeEvent(state: CopilotSessionState, event: SessionEvent): void {
+function seenNativeEvent(state: CopilotSessionState, liveNativeEventIds: ReadonlySet<string>, event: SessionEvent): boolean {
+  return state.nativeEventIds.has(event.id) || liveNativeEventIds.has(event.id);
+}
+/** Every ID enters the bounded session window; IDs that produced a live fragment are also kept for the whole attempt. */
+function rememberNativeEvent(state: CopilotSessionState, liveNativeEventIds: Set<string>, event: SessionEvent, mapped: readonly CopilotMappedEvent[]): void {
   if (state.nativeEventIds.size >= 8_192) state.nativeEventIds.delete(state.nativeEventIds.values().next().value ?? "");
   state.nativeEventIds.add(event.id);
+  if (mapped.some((entry) => agentEventDelivery(entry.event) === AgentEventDelivery.Live)) liveNativeEventIds.add(event.id);
 }
 function nativeIdentities(sessionId: string, event?: SessionEvent): ProviderIdentity[] {
   const identities: ProviderIdentity[] = [{ providerId: "copilot", scope: "session", value: sessionId, provenance: "native" }];
