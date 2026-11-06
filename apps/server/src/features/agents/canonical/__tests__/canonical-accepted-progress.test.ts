@@ -417,6 +417,79 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(pushes.saving.filter((status) => status.mode === "saving-failed" || status.mode === "save-retrying")).toEqual([]);
     });
 
+    it.each([true, false].flatMap((live) => ["commentary", "reasoning"].flatMap((kind) =>
+      [153600, 307200].map((bytes) => ({ live, kind, bytes })))))
+    ("round 4 saves complete $kind ($bytes bytes, live $live)", async ({ live, kind, bytes }) => {
+      ordinal = 1;
+      await send(1, start("claude"));
+      const text = "r".repeat(bytes);
+      for (let offset = 0; offset < bytes; offset += 15360) {
+        const event = draft("claude", ordinal, kind === "reasoning" ? "reasoningDelta" : "textDelta",
+          { delta: text.slice(offset, offset + 15360), ...(kind === "reasoning"
+            ? { reasoningItemId: "round4-reasoning" } : { isFinalResponse: false }) });
+        expect((await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+          events: [{ ...event, ...(live ? { delivery: "live" as const } : {}) }] })).result.kind).toBe("accepted");
+        await progress.waitForSaved(execution.threadId);
+      }
+      await piece("Final answer");
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal, "turnComplete")], terminalInput: { ...execution,
+          providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      const thoughts = new ThoughtSegmentStore(reader).listByMessage(deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`));
+      expect(thoughts.map((thought) => thought.text.length)).toContain(bytes);
+      expect(thoughts.map((thought) => thought.text)).toEqual([text]);
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual(["Final answer"]);
+    });
+
+    it("round 4 saves a single oversized live assistant piece and signals recovery loss", async () => {
+      await begin();
+      expect((await piece("x".repeat(307200))).result.kind).toBe("accepted");
+      await progress.waitForSaved(execution.threadId);
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal, "turnComplete")], terminalInput: { ...execution,
+          providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual([`prefix${"x".repeat(307200)}`]);
+      expect(savedEventKinds()).toContain("ingest.volatile-truncated");
+    });
+
+    it("round 4 saves 700 KiB in 47 ordered live pieces", async () => {
+      await begin();
+      const pieces = Array.from({ length: 47 }, (_, index) => `${index}:`.padEnd(index === 46 ? 10240 : 15360, "x"));
+      for (const text of pieces) {
+        expect((await piece(text)).result.kind).toBe("accepted");
+        await progress.waitForSaved(execution.threadId);
+      }
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal, "turnComplete")], terminalInput: { ...execution,
+          providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual([`prefix${pieces.join("")}`]);
+      expect(pushes.saving.filter((status) => status.mode === "saving-failed" || status.mode === "save-retrying")).toEqual([]);
+    });
+
+    it.each(["reasoning", "assistant"])("round 4 signals interrupted live %s recovery overflow", async (kind) => {
+      await begin();
+      for (let index = 0; index < 20; index++) {
+        if (kind === "assistant") await piece("x".repeat(15360));
+        else {
+          const event = draft("claude", ordinal, "reasoningDelta", { delta: "r".repeat(15360), reasoningItemId: "overflow" });
+          await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null, events: [{ ...event, delivery: "live" }] });
+        }
+        await progress.waitForSaved(execution.threadId);
+      }
+      expect(savedEventKinds()).toContain("ingest.volatile-truncated");
+      await send(++ordinal, { kind: "event", phase: "interrupted", nativeCursor: null,
+        events: [draft("claude", ordinal, "ended", { outcome: "interrupted", reason: "provider_lost" })],
+        terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "interrupted", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      expect(savedEventKinds()).toContain("ingest.volatile-truncated");
+    });
+
     it("saves at 16 KiB of pending text without waiting for the timer", async () => {
       await begin();
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

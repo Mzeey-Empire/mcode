@@ -210,7 +210,9 @@ export class ParentAssistantTextCheckpointStore {
   ): ParentAssistantTextCheckpointResult | undefined {
     const retainedBytes = (checkpoint?.retainedBytes ?? 0) + prepared.byteLength;
     const retainedChunks = (checkpoint?.retainedChunks ?? 0) + 1;
-    if (retainedBytes <= this.limits.maxBytes && retainedChunks <= this.limits.maxChunks) return undefined;
+    // Oversized pieces seal recovery before any text insert; they must never reject the final save.
+    if (retainedBytes <= this.limits.maxBytes && retainedChunks <= this.limits.maxChunks
+      && prepared.byteLength <= ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes) return undefined;
     // A negative chunk count marks a sealed prefix without changing the existing database format.
     this.orm.insert(parentAssistantTextCheckpoints).values({
       executionId: prepared.executionId, threadId: prepared.threadId, turnId: prepared.turnId,
@@ -410,9 +412,6 @@ export class ParentAssistantTextCheckpointStore {
   ): PreparedParentAssistantTextCheckpointChunk {
     const text = inputs.map((input) => input.text).join("");
     const byteLength = Buffer.byteLength(text, "utf8");
-    if (byteLength > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes) {
-      throw new Error("Assistant text checkpoint chunk exceeds the active-turn byte limit");
-    }
     return {
       executionId: first.executionId,
       threadId: first.threadId,

@@ -12,11 +12,13 @@ export function prepareParentNarrativeRecoveryEvents(input: {
   readonly thread: AgentThread;
   readonly turn: AgentTurn;
   readonly findItem: (id: string) => AgentItem | null | undefined;
+  /** Terminal history comes from the full narrative state and must survive recovery overflow. */
+  readonly terminal?: true;
 }): CanonicalAgentEventDraft[] {
   const { recovery, thread, turn, findItem } = input;
   const bytes = Buffer.byteLength(JSON.stringify(recovery), "utf8");
   const records = recovery.items.length + (recovery.discardedItemIds?.length ?? 0);
-  if (recovery.droppedEventCount || !fitsActiveTurnRecoveryRetention(records, bytes)) {
+  if (!input.terminal && (recovery.droppedEventCount || !fitsActiveTurnRecoveryRetention(records, bytes))) {
     return [{ eventId: `narrative-recovery-loss:${recovery.executionId}`,
       routing: { threadId: thread.id, turnId: turn.id, executionId: recovery.executionId },
       sourceProviderId: thread.providerId, sourceIdentities: [],

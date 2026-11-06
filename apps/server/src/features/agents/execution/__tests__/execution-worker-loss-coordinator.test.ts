@@ -142,13 +142,14 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     return claim.lease;
   }
 
-  it.each(["claude", "devin", "codex", "overflow"])("recovers checkpointed %s live text after its worker dies", async (scenario) => {
+  it.each(["claude", "devin", "codex", "overflow"].flatMap((scenario) =>
+    [true, false].map((ownerAlive) => ({ scenario, ownerAlive }))))("recovers checkpointed $scenario live text after its worker dies (owner alive $ownerAlive)", async ({ scenario, ownerAlive }) => {
     const providerId = scenario === "overflow" ? "claude" : scenario;
     coordinator.scheduler.shutdown();
     const progress = new CanonicalAcceptedProgress(new CanonicalAgentBoundary(db, owner, writer, () => {}), writer);
     const port = new CanonicalExecutionWriterPort(writer, () => {}, undefined, undefined, progress);
     // Recovery after losing the progress owner must read the committed checkpoint, not its in-memory answer.
-    const recoveryPort = new CanonicalExecutionWriterPort(writer, () => {});
+    const recoveryPort = ownerAlive ? port : new CanonicalExecutionWriterPort(writer, () => {});
     coordinator = new ExecutionWorkerLossCoordinator(recoveryPort, { workerCount: 1, limits, createWorker: () => {
       const worker = new CrashingPort(port);
       workers.push(worker);
@@ -180,7 +181,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
         if (scenario === "overflow") await progress.waitForSaved(execution.threadId);
       }
       await progress.waitForSaved(execution.threadId);
-      const prefix = scenario === "overflow" ? "x".repeat(261120) : "Partial answer";
+      const prefix = scenario === "overflow" ? "x".repeat(ownerAlive ? 307200 : 261120) : "Partial answer";
       workers.at(-1)?.crash();
       expect(await coordinator.waitForRecovery(0)).toEqual({ kind: "recovered", workerIndex: 0 });
       await progress.waitForSaved(execution.threadId);
